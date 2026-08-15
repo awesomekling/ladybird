@@ -57,78 +57,19 @@
 
 namespace Web::CSS {
 
-static constexpr bool style_group_payload_is_rust_native(ComputedValuesFFI::StyleGroupLifecycle lifecycle)
-{
-    switch (lifecycle) {
-    case ComputedValuesFFI::StyleGroupLifecycle::Cpp:
-    case ComputedValuesFFI::StyleGroupLifecycle::CppWithInheritedTextFacts:
-    case ComputedValuesFFI::StyleGroupLifecycle::CppWithFontFacts:
-        return false;
-    case ComputedValuesFFI::StyleGroupLifecycle::InheritedTable:
-    case ComputedValuesFFI::StyleGroupLifecycle::InheritedBox:
-    case ComputedValuesFFI::StyleGroupLifecycle::Sizing:
-    case ComputedValuesFFI::StyleGroupLifecycle::Alignment:
-    case ComputedValuesFFI::StyleGroupLifecycle::SVGReset:
-    case ComputedValuesFFI::StyleGroupLifecycle::Surround:
-    case ComputedValuesFFI::StyleGroupLifecycle::Box:
-    case ComputedValuesFFI::StyleGroupLifecycle::Grid:
-    case ComputedValuesFFI::StyleGroupLifecycle::TextReset:
-    case ComputedValuesFFI::StyleGroupLifecycle::Transform:
-    case ComputedValuesFFI::StyleGroupLifecycle::Effects:
-    case ComputedValuesFFI::StyleGroupLifecycle::Anchor:
-    case ComputedValuesFFI::StyleGroupLifecycle::InheritedUI:
-    case ComputedValuesFFI::StyleGroupLifecycle::InheritedSVG:
-    case ComputedValuesFFI::StyleGroupLifecycle::InheritedText:
-    case ComputedValuesFFI::StyleGroupLifecycle::Animation:
-    case ComputedValuesFFI::StyleGroupLifecycle::Mask:
-    case ComputedValuesFFI::StyleGroupLifecycle::Background:
-    case ComputedValuesFFI::StyleGroupLifecycle::Border:
-    case ComputedValuesFFI::StyleGroupLifecycle::Content:
-    case ComputedValuesFFI::StyleGroupLifecycle::InheritedList:
-        return true;
-    }
-    VERIFY_NOT_REACHED();
-}
-
 template<typename T>
 static consteval ComputedValuesFFI::StyleGroupLifecycle style_group_lifecycle_of()
 {
-    if constexpr (requires { T::style_group_lifecycle; })
-        return T::style_group_lifecycle;
-    else
-        return ComputedValuesFFI::StyleGroupLifecycle::Cpp;
+    return T::style_group_lifecycle;
 }
 
 template<typename T>
 static consteval ComputedValuesFFI::StyleGroupVTable make_style_group_vtable()
 {
-    if constexpr (style_group_payload_is_rust_native(style_group_lifecycle_of<T>())) {
-        return {
-            .lifecycle = T::style_group_lifecycle,
-            .size = sizeof(T),
-            .align = alignof(T),
-            .default_construct = nullptr,
-            .copy_construct = nullptr,
-            .destruct = nullptr,
-            .equals = nullptr,
-        };
-    }
     return {
         .lifecycle = style_group_lifecycle_of<T>(),
         .size = sizeof(T),
         .align = alignof(T),
-        .default_construct = [](void* payload) {
-            if constexpr (requires { T::make_default_payload_value(); })
-                new (payload) T(T::make_default_payload_value());
-            else
-                new (payload) T(); },
-        .copy_construct = [](void* payload, void const* source) { new (payload) T(*static_cast<T const*>(source)); },
-        .destruct = [](void* payload) { static_cast<T*>(payload)->~T(); },
-        .equals = [](void const* a, void const* b) {
-            if constexpr (requires(T const& value) { value == value; })
-                return *static_cast<T const*>(a) == *static_cast<T const*>(b);
-            else
-                return false; },
     };
 }
 
@@ -240,17 +181,6 @@ static constexpr Array animation_group_properties {
 // bespoke calls or in C++ bind their properties explicitly beside the descriptors, transcribed from
 // the builder or setters that consume them. A longhand without a binding has no single known group,
 // and callers treat it conservatively.
-static void assemble_misc_reset_group_payload(void* payload_pointer, void const* data_pointer);
-
-// The C++ context the registered table-group assemblers reach through their
-// assembly structs, for the members only C++ can produce: stamped image
-// wrappers minted through property() and style-scope lookups.
-struct TableGroupAssemblerContext {
-    ComputedStyleWorkingSet const& computed_style;
-    StyleScope const& style_scope;
-    ColorResolutionContext const& color_resolution_context;
-};
-
 static Array<Optional<StyleGroupIndex>, number_of_longhand_properties>& style_group_by_property()
 {
     static Array<Optional<StyleGroupIndex>, number_of_longhand_properties> map;
@@ -304,7 +234,7 @@ static void register_style_group_field_descriptors()
     add(effects, PropertyID::BoxShadow, 0, GROUP_FIELD_REQUIRE_KEYWORD, to_underlying(Keyword::None), nullptr);
     add(effects, PropertyID::Clip, 0, GROUP_FIELD_REQUIRE_KEYWORD, to_underlying(Keyword::Auto), nullptr);
 
-    using MiscReset = ComputedValues::MiscResetValues;
+    using MiscReset = ComputedValuesFFI::MiscResetValues;
     constexpr auto misc_reset = to_underlying(StyleGroupIndex::MiscResetValues);
     for (auto property : { PropertyID::ScrollMarginTop, PropertyID::ScrollMarginRight, PropertyID::ScrollMarginBottom, PropertyID::ScrollMarginLeft })
         add(misc_reset, property, 0, GROUP_FIELD_REQUIRE_PX, 0, nullptr, 0);
@@ -533,7 +463,6 @@ static void register_style_group_field_descriptors()
         bind_property_to_group(property, to_underlying(StyleGroupIndex::FontValues));
 
     rust_style_group_register_field_descriptors(descriptors.data(), descriptors.size());
-    rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::MiscResetValues), assemble_misc_reset_group_payload);
 
     // Double-entry bookkeeping: Properties.json declares each longhand's style group, and the
     // bindings above derive it from what actually builds the groups. The two must agree exactly,
@@ -688,6 +617,8 @@ static_assert(sizeof(ComputedValues::ContentValues) == sizeof(ComputedValuesFFI:
 static_assert(alignof(ComputedValues::ContentValues) == alignof(ComputedValuesFFI::ContentValues));
 static_assert(sizeof(ComputedValues::InheritedListValues) == sizeof(ComputedValuesFFI::InheritedListValues));
 static_assert(alignof(ComputedValues::InheritedListValues) == alignof(ComputedValuesFFI::InheritedListValues));
+static_assert(sizeof(ComputedValues::MiscResetValues) == sizeof(ComputedValuesFFI::MiscResetValues));
+static_assert(alignof(ComputedValues::MiscResetValues) == alignof(ComputedValuesFFI::MiscResetValues));
 static_assert(to_underlying(ListStylePosition::Outside) == 1);
 
 static_assert(sizeof(TextIndentData) == sizeof(ComputedValuesFFI::ComputedTextIndent));
@@ -699,9 +630,8 @@ static_assert(alignof(ComputedValues::InheritedTextValues) == alignof(ComputedVa
 static_assert(sizeof(ComputedValues::AnimationValues) == sizeof(ComputedValuesFFI::AnimationValues));
 static_assert(alignof(ComputedValues::AnimationValues) == alignof(ComputedValuesFFI::AnimationValues));
 
-// The font group keeps its C++ lifecycle, but its leading members double as
-// the Rust FontLayoutFacts prefix that layout reads as typed fields.
-static_assert(sizeof(RefPtr<Gfx::FontCascadeList const>) == sizeof(void const*));
+static_assert(sizeof(ComputedValues::FontValues) == sizeof(ComputedValuesFFI::FontValues));
+static_assert(alignof(ComputedValues::FontValues) == alignof(ComputedValuesFFI::FontValues));
 static_assert(offsetof(ComputedValues::FontValues, font_size) == offsetof(ComputedValuesFFI::FontLayoutFacts, font_size));
 static_assert(offsetof(ComputedValues::FontValues, line_height_used) == offsetof(ComputedValuesFFI::FontLayoutFacts, line_height_used));
 static_assert(offsetof(ComputedValues::FontValues, font_variant_emoji) == offsetof(ComputedValuesFFI::FontLayoutFacts, font_variant_emoji));
@@ -709,8 +639,16 @@ static_assert(offsetof(ComputedValues::FontValues, font_ascent) == offsetof(Comp
 static_assert(offsetof(ComputedValues::FontValues, font_descent) == offsetof(ComputedValuesFFI::FontLayoutFacts, font_descent));
 static_assert(offsetof(ComputedValues::FontValues, font_x_height) == offsetof(ComputedValuesFFI::FontLayoutFacts, font_x_height));
 static_assert(offsetof(ComputedValues::FontValues, first_available_font) == offsetof(ComputedValuesFFI::FontLayoutFacts, first_available_font));
-static_assert(offsetof(ComputedValues::FontValues, font_list) == offsetof(ComputedValuesFFI::FontLayoutFacts, font_cascade_list));
-static_assert(sizeof(ComputedValuesFFI::FontLayoutFacts) <= offsetof(ComputedValues::FontValues, font_families));
+static_assert(offsetof(ComputedValues::FontValues, font_cascade_list) == offsetof(ComputedValuesFFI::FontLayoutFacts, font_cascade_list));
+static_assert(sizeof(ComputedValuesFFI::FontLayoutFacts) <= offsetof(ComputedValues::FontValues, font_weight));
+static_assert(to_underlying(FontVariantEmoji::Normal) == 0);
+static_assert(to_underlying(FontVariantEmoji::Text) == 1);
+static_assert(to_underlying(FontVariantEmoji::Emoji) == 2);
+static_assert(to_underlying(FontVariantEmoji::Unicode) == 3);
+static_assert(to_underlying(MathShift::Normal) == 0);
+static_assert(to_underlying(MathShift::Compact) == 1);
+static_assert(to_underlying(MathStyle::Normal) == 0);
+static_assert(to_underlying(MathStyle::Compact) == 1);
 
 void const* style_group_default_payload(size_t group_index)
 {
@@ -728,34 +666,6 @@ void const* style_group_default_payload(size_t group_index)
         return payloads;
     }();
     return default_payloads[group_index];
-}
-
-bool ComputedValues::FontValues::operator==(FontValues const& other) const
-{
-    if (font_list != other.font_list) {
-        if (!font_list || !other.font_list || !font_list->equals(*other.font_list))
-            return false;
-    }
-    if (font_variation_settings.size() != other.font_variation_settings.size())
-        return false;
-    for (auto const& entry : font_variation_settings) {
-        auto it = other.font_variation_settings.find(entry.key);
-        if (it == other.font_variation_settings.end() || it->value != entry.value)
-            return false;
-    }
-    return font_size == other.font_size
-        && font_families == other.font_families
-        && font_weight == other.font_weight
-        && font_width == other.font_width
-        && font_style == other.font_style
-        && font_optical_sizing == other.font_optical_sizing
-        && font_feature_data == other.font_feature_data
-        && font_language_override == other.font_language_override
-        && line_height == other.line_height
-        && font_variant_emoji == other.font_variant_emoji
-        && math_shift == other.math_shift
-        && math_style == other.math_style
-        && math_depth == other.math_depth;
 }
 
 bool ComputedValues::property_inheritance_is_standard() const
@@ -1062,146 +972,114 @@ static_assert(to_underlying(PaintOrder::Fill) == 0);
 static_assert(to_underlying(PaintOrder::Stroke) == 1);
 static_assert(to_underlying(PaintOrder::Markers) == 2);
 
-static RefPtr<StyleValue const> adopt_assembly_handle(void const* pointer)
-{
-    if (!pointer)
-        return nullptr;
-    return StyleValue::adopt_rust_style_value_data(static_cast<StyleValueFFI::StyleValueData const*>(pointer));
-}
-
-// Fills the misc reset group's complex members from the core's pre-lowered
-// assembly. The scroll margins and paddings, the outline offset, the shape
-// members and the object position keep their wrapper-backed slots; an
-// outline color the core could not resolve takes the C++ resolution arm, and
-// a non-initial shape-outside transcribes through its retained value.
-static void assemble_misc_reset_group_payload(void* payload_pointer, void const* data_pointer)
-{
-    auto& payload = *static_cast<ComputedValues::MiscResetValues*>(payload_pointer);
-    auto const& data = *static_cast<ComputedValuesFFI::FfiMiscResetGroupAssembly const*>(data_pointer);
-    auto const& context = *static_cast<TableGroupAssemblerContext const*>(data.cpp_context);
-
-    if (!data.outline_color_is_auto && !data.outline_color_resolved) {
-        if (auto const& outline_color = context.computed_style.property(PropertyID::OutlineColor); outline_color.has_color())
-            payload.outline_color = outline_color.to_color(context.color_resolution_context).value();
-    }
-
-    auto outline_offset_value = adopt_assembly_handle(data.outline_offset).release_nonnull();
-    auto resolved_outline_offset = outline_offset_value->is_calculated()
-        ? outline_offset_value->as_calculated().resolve_length(context.color_resolution_context.calculation_resolution_context).value()
-        : outline_offset_value->as_length().length();
-    payload.outline_offset = resolved_outline_offset.absolute_length_to_px();
-    payload.outline_offset_style_value = move(outline_offset_value);
-
-    auto length_box = [](void const* const(&handles)[4], LengthPercentageOrAuto const& default_value) {
-        auto side = [&](void const* handle) -> LengthPercentageOrAuto {
-            auto value = adopt_assembly_handle(handle).release_nonnull();
-            if (value->is_calculated() || value->is_percentage() || value->is_length() || value->has_auto())
-                return LengthPercentageOrAuto::from_style_value(value);
-            // FIXME: Handle anchor sizes
-            return default_value;
-        };
-        // Top, right, bottom, left.
-        return LengthBox { side(handles[0]), side(handles[1]), side(handles[2]), side(handles[3]) };
-    };
-    payload.scroll_margin = length_box(data.scroll_margin, Length::make_px(0));
-    payload.scroll_padding = length_box(data.scroll_padding, LengthPercentageOrAuto::make_auto());
-
-    auto overflow_clip_margin_side = [&](ComputedValuesFFI::FfiOverflowClipMarginSideAssembly const& lowered) -> OverflowClipMarginSide {
-        if (!lowered.offset)
-            return {};
-        OverflowClipMarginSide side;
-        if (lowered.has_visual_box)
-            side.visual_box = static_cast<BackgroundBox>(lowered.visual_box);
-        auto offset_value = adopt_assembly_handle(lowered.offset).release_nonnull();
-        if (offset_value->is_calculated())
-            side.offset = offset_value->as_calculated().resolve_length(context.color_resolution_context.calculation_resolution_context).value().absolute_length_to_px();
-        else if (offset_value->is_length())
-            side.offset = offset_value->as_length().length().absolute_length_to_px();
-        return side;
-    };
-    payload.overflow_clip_margin = OverflowClipMarginData {
-        .left = overflow_clip_margin_side(data.overflow_clip_margin[0]),
-        .top = overflow_clip_margin_side(data.overflow_clip_margin[1]),
-        .right = overflow_clip_margin_side(data.overflow_clip_margin[2]),
-        .bottom = overflow_clip_margin_side(data.overflow_clip_margin[3]),
-    };
-
-    payload.appearance = static_cast<Appearance>(data.appearance);
-    payload.computed_appearance = static_cast<Appearance>(data.computed_appearance);
-
-    payload.object_position = Position {
-        .offset_x = LengthPercentage::from_style_value(adopt_assembly_handle(data.object_position_x).release_nonnull()),
-        .offset_y = LengthPercentage::from_style_value(adopt_assembly_handle(data.object_position_y).release_nonnull()),
-    };
-
-    if (data.has_view_transition_name)
-        payload.view_transition_name = Utf16FlyString::from_raw(data.view_transition_name_raw);
-
-    payload.touch_action = TouchActionData {
-        .allow_left = data.touch_action_allow_left,
-        .allow_right = data.touch_action_allow_right,
-        .allow_up = data.touch_action_allow_up,
-        .allow_down = data.touch_action_allow_down,
-        .allow_pinch_zoom = data.touch_action_allow_pinch_zoom,
-        .allow_other = data.touch_action_allow_other,
-    };
-
-    payload.column_height = Size::from_style_value(*adopt_assembly_handle(data.column_height));
-    payload.shape_margin = LengthPercentage::from_style_value(adopt_assembly_handle(data.shape_margin).release_nonnull());
-
-    if (data.shape_outside_noninitial) {
-        ShapeOutsideData shape_outside;
-        auto apply_shape_outside_item = [&](StyleValue const& item) {
-            if (item.is_url())
-                shape_outside.image = item.as_url().url();
-            else if (item.is_abstract_image())
-                shape_outside.image = NonnullRefPtr<AbstractImageStyleValue const> { item.as_abstract_image() };
-            else if (item.is_basic_shape())
-                shape_outside.basic_shape = item.as_basic_shape();
-            else if (auto shape_box = keyword_to_shape_box(item.to_keyword()); shape_box.has_value())
-                shape_outside.shape_box = *shape_box;
-        };
-        auto shape_outside_value_wrapper = adopt_assembly_handle(data.shape_outside).release_nonnull();
-        auto const& shape_outside_value = *shape_outside_value_wrapper;
-        if (shape_outside_value.is_value_list()) {
-            for (auto const& item : shape_outside_value.as_value_list().values())
-                apply_shape_outside_item(item);
-        } else {
-            apply_shape_outside_item(shape_outside_value);
-        }
-        payload.shape_outside = move(shape_outside);
-    }
-
-    payload.scrollbar_gutter = static_cast<ScrollbarGutter>(data.scrollbar_gutter);
-
-    if (!data.will_change_is_auto) {
-        Vector<WillChange::WillChangeEntry> entries;
-        for (size_t i = 0; i < data.will_change_entry_count; ++i) {
-            auto const& entry = data.will_change_entries[i];
-            if (entry.is_keyword) {
-                switch (static_cast<Keyword>(entry.keyword)) {
-                case Keyword::Contents:
-                    entries.append(WillChange::Type::Contents);
-                    break;
-                case Keyword::ScrollPosition:
-                    entries.append(WillChange::Type::ScrollPosition);
-                    break;
-                default:
-                    VERIFY_NOT_REACHED();
-                }
-            } else if (auto property_id = property_id_from_string(Utf16FlyString::from_raw(entry.ident_raw)); property_id.has_value()) {
-                entries.append(property_id.release_value());
-            }
-        }
-        payload.will_change = WillChange(move(entries));
-    }
-}
-
 static NonnullRefPtr<StyleValue const> animation_style_value(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
 {
     VERIFY(handle.pointer);
     return StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
         static_cast<StyleValueFFI::StyleValueData const*>(handle.pointer)));
+}
+
+Gfx::FontCascadeList const& ComputedValues::FontValues::font_list_value() const
+{
+    VERIFY(font_cascade_list);
+    return *static_cast<Gfx::FontCascadeList const*>(font_cascade_list);
+}
+
+RefPtr<StyleValue const> ComputedValues::FontValues::font_family_style_value() const
+{
+    return animation_style_value(font_family);
+}
+
+RefPtr<StyleValue const> ComputedValues::MiscResetValues::outline_offset_style_value_value() const
+{
+    return animation_style_value(outline_offset_style_value);
+}
+
+OverflowClipMarginData ComputedValues::MiscResetValues::overflow_clip_margin_value() const
+{
+    auto side = [](ComputedValuesFFI::ComputedOverflowClipMarginSide const& value) {
+        return OverflowClipMarginSide {
+            .visual_box = value.has_visual_box ? Optional<BackgroundBox> { static_cast<BackgroundBox>(value.visual_box) } : Optional<BackgroundBox> {},
+            .offset = CSSPixels::from_raw(value.offset),
+        };
+    };
+    return {
+        .left = side(overflow_clip_margin.left),
+        .top = side(overflow_clip_margin.top),
+        .right = side(overflow_clip_margin.right),
+        .bottom = side(overflow_clip_margin.bottom),
+    };
+}
+
+Position ComputedValues::MiscResetValues::object_position_value() const
+{
+    return {
+        .offset_x = LengthPercentage::view(object_position_x),
+        .offset_y = LengthPercentage::view(object_position_y),
+    };
+}
+
+Optional<Utf16FlyString> ComputedValues::MiscResetValues::view_transition_name_value() const
+{
+    auto value = animation_style_value(view_transition_name);
+    if (!value->is_custom_ident())
+        return {};
+    return value->as_custom_ident().custom_ident();
+}
+
+TouchActionData ComputedValues::MiscResetValues::touch_action_value() const
+{
+    return {
+        .allow_left = touch_action_allow_left,
+        .allow_right = touch_action_allow_right,
+        .allow_up = touch_action_allow_up,
+        .allow_down = touch_action_allow_down,
+        .allow_pinch_zoom = touch_action_allow_pinch_zoom,
+        .allow_other = touch_action_allow_other,
+    };
+}
+
+ShapeOutsideData ComputedValues::MiscResetValues::shape_outside_value() const
+{
+    ShapeOutsideData result;
+    auto apply_item = [&](StyleValue const& item) {
+        if (item.is_url())
+            result.image = item.as_url().url();
+        else if (item.is_abstract_image())
+            result.image = NonnullRefPtr<AbstractImageStyleValue const> { item.as_abstract_image() };
+        else if (item.is_basic_shape())
+            result.basic_shape = item.as_basic_shape();
+        else if (auto shape_box = keyword_to_shape_box(item.to_keyword()); shape_box.has_value())
+            result.shape_box = *shape_box;
+    };
+    auto value = animation_style_value(shape_outside);
+    if (value->is_value_list()) {
+        for (auto const& item : value->as_value_list().values())
+            apply_item(item);
+    } else if (value->to_keyword() != Keyword::None) {
+        apply_item(value);
+    }
+    return result;
+}
+
+WillChange ComputedValues::MiscResetValues::will_change_value() const
+{
+    auto value = animation_style_value(will_change);
+    if (value->to_keyword() == Keyword::Auto)
+        return WillChange::make_auto();
+    VERIFY(value->is_value_list());
+    Vector<WillChange::WillChangeEntry> entries;
+    for (auto const& item : value->as_value_list().values()) {
+        if (item->to_keyword() == Keyword::Contents) {
+            entries.append(WillChange::Type::Contents);
+        } else if (item->to_keyword() == Keyword::ScrollPosition) {
+            entries.append(WillChange::Type::ScrollPosition);
+        } else if (item->is_custom_ident()) {
+            if (auto property_id = property_id_from_string(item->as_custom_ident().custom_ident()); property_id.has_value())
+                entries.append(property_id.release_value());
+        }
+    }
+    return WillChange(move(entries));
 }
 
 static StyleValueVector animation_items(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
@@ -1893,7 +1771,7 @@ NonnullRefPtr<ComputedValues const> ComputedValues::create_over_base(ComputedSty
     return create_internal(computed_style, document, style_scope, move(color_resolution_context), nullptr, &base, groups_to_apply);
 }
 
-NonnullRefPtr<ComputedValues const> ComputedValues::create_internal(ComputedStyleWorkingSet const& computed_style, DOM::Document const& document, StyleScope const& style_scope, ColorResolutionContext color_resolution_context, ComputedValues const* inherit_parent, ComputedValues const* base, u32 groups_to_apply)
+NonnullRefPtr<ComputedValues const> ComputedValues::create_internal(ComputedStyleWorkingSet const& computed_style, DOM::Document const& document, StyleScope const&, ColorResolutionContext color_resolution_context, ComputedValues const* inherit_parent, ComputedValues const* base, u32 groups_to_apply)
 {
     // A group outside `groups_to_apply` keeps the base's payload: its build is skipped and it counts
     // as adopted, so the guarded setters below leave it alone. The caller warrants that every
@@ -1928,11 +1806,30 @@ NonnullRefPtr<ComputedValues const> ComputedValues::create_internal(ComputedStyl
     computed_style.collect_effective_longhand_overrides(override_properties, override_values);
     Optional<ComputedValuesFFI::FfiLengthResolutionContext> length_context_storage;
     auto ffi_color_input = make_rust_color_resolution_input(color_resolution_context, length_context_storage);
-    TableGroupAssemblerContext assembler_context {
-        .computed_style = computed_style,
-        .style_scope = style_scope,
-        .color_resolution_context = color_resolution_context,
-    };
+    Optional<ComputedValuesFFI::FfiFontGroupBuildInputs> font_group_inputs;
+    if (applies(StyleGroupIndex::FontValues)) {
+        auto font_list = computed_style.computed_font_list(document.font_computer());
+        document.font_computer().pin_font_list_for_style_record(font_list);
+        auto const& first_available_font = font_list->font_for_code_point(' ');
+        auto const metrics = first_available_font.pixel_metrics();
+        auto math_shift = keyword_to_math_shift(computed_style.property(PropertyID::MathShift).to_keyword()).release_value();
+        auto math_style = keyword_to_math_style(computed_style.property(PropertyID::MathStyle).to_keyword()).release_value();
+        font_group_inputs = ComputedValuesFFI::FfiFontGroupBuildInputs {
+            .font_size_raw = computed_style.font_size().raw_value(),
+            .line_height_used_raw = computed_style.line_height(document.font_computer()).raw_value(),
+            .font_variant_emoji = to_underlying(computed_style.font_variant_emoji()),
+            .font_ascent = metrics.ascent,
+            .font_descent = metrics.descent,
+            .font_x_height = metrics.x_height,
+            .first_available_font = &first_available_font,
+            .font_cascade_list = font_list.ptr(),
+            .font_weight = computed_style.font_weight(),
+            .font_width = computed_style.font_width().value(),
+            .math_shift = to_underlying(math_shift),
+            .math_style = to_underlying(math_style),
+            .math_depth = computed_style.math_depth(),
+        };
+    }
     ComputedValuesFFI::FfiTableGroupBuildInputs table_build_inputs {
         .color_input = &ffi_color_input,
         .used_color_scheme = static_cast<u8>(to_underlying(color_scheme)),
@@ -1940,7 +1837,7 @@ NonnullRefPtr<ComputedValues const> ComputedValues::create_internal(ComputedStyl
         .override_values = override_values.data(),
         .override_count = override_properties.size(),
         .box_display_before_transformation_raw = bit_cast<u32>(computed_style.display_before_box_type_transformation()),
-        .cpp_assembler_context = &assembler_context,
+        .font = font_group_inputs.has_value() ? &font_group_inputs.value() : nullptr,
     };
     Array<void const*, to_underlying(StyleGroupIndex::Count)> parent_group_payloads {};
     if (inherit_parent) {
@@ -2011,40 +1908,10 @@ NonnullRefPtr<ComputedValues const> ComputedValues::create_internal(ComputedStyl
     if (effects_payload)
         computed_values.adopt_effects_group(const_cast<void*>(effects_payload));
 
-    // NOTE: We have to be careful that font-related properties get set in the right order.
-    //       m_font is used by Length::to_px() when resolving sizes against this layout node.
-    //       That's why it has to be set before everything else.
-    if (applies(StyleGroupIndex::FontValues)) {
-        computed_values.set_font_list(computed_style.computed_font_list(document.font_computer()));
-        Vector<ComputedFontFamily> font_families;
-        for (auto const& family : computed_style.property(PropertyID::FontFamily).as_value_list().values()) {
-            if (family->is_keyword()) {
-                font_families.append(keyword_to_generic_font_family(family->to_keyword()).value());
-            } else {
-                font_families.append(ComputedFontFamilyName {
-                    .name = string_from_style_value(family),
-                    .syntax = family->is_string() ? ComputedFontFamilySyntax::String : ComputedFontFamilySyntax::CustomIdent,
-                });
-            }
-        }
-        computed_values.set_font_families(move(font_families));
-        computed_values.set_font_size(computed_style.font_size());
-        computed_values.set_font_weight(computed_style.font_weight());
-        computed_values.set_font_width(computed_style.font_width());
-        auto const& font_style = computed_style.property(PropertyID::FontStyle).as_font_style();
-        Optional<Variant<Angle, NonnullRefPtr<CalculatedStyleValue const>>> font_style_angle;
-        if (font_style.angle()) {
-            if (font_style.angle()->is_angle())
-                font_style_angle = font_style.angle()->as_angle().angle();
-            else
-                font_style_angle = NonnullRefPtr { font_style.angle()->as_calculated() };
-        }
-        computed_values.set_font_style({ font_style.font_style(), move(font_style_angle) });
-        computed_values.set_font_optical_sizing(computed_style.font_optical_sizing());
-        computed_values.set_font_feature_data(computed_style.font_feature_data());
-        computed_values.set_line_height(computed_style.line_height_data(), computed_style.line_height(document.font_computer()));
-        computed_values.set_font_variant_emoji(computed_style.font_variant_emoji());
-    }
+    void const* font_payload = applies(StyleGroupIndex::FontValues) ? table_group_payload(StyleGroupIndex::FontValues) : nullptr;
+    VERIFY(font_payload || !applies(StyleGroupIndex::FontValues));
+    if (font_payload)
+        computed_values.adopt_font_group(const_cast<void*>(font_payload));
 
     void const* animation_payload = applies(StyleGroupIndex::AnimationValues) ? table_group_payload(StyleGroupIndex::AnimationValues) : nullptr;
     VERIFY(animation_payload || !applies(StyleGroupIndex::AnimationValues));
@@ -2121,10 +1988,6 @@ NonnullRefPtr<ComputedValues const> ComputedValues::create_internal(ComputedStyl
     if (misc_reset_payload)
         computed_values.adopt_misc_reset_group(const_cast<void*>(misc_reset_payload));
 
-    if (auto maybe_font_language_override = computed_style.font_language_override(); maybe_font_language_override.has_value())
-        computed_values.set_font_language_override(maybe_font_language_override.release_value());
-    computed_values.set_font_variation_settings(computed_style.font_variation_settings());
-
     if (!inherited_table_adopted) {
         computed_values.set_border_spacing_horizontal(computed_style.border_spacing_horizontal());
         computed_values.set_border_spacing_vertical(computed_style.border_spacing_vertical());
@@ -2144,16 +2007,6 @@ NonnullRefPtr<ComputedValues const> ComputedValues::create_internal(ComputedStyl
 
     if (!inherited_table_adopted)
         computed_values.set_empty_cells(computed_style.empty_cells());
-
-    auto const& math_shift_value = computed_style.property(CSS::PropertyID::MathShift);
-    if (auto math_shift = keyword_to_math_shift(math_shift_value.to_keyword()); math_shift.has_value())
-        computed_values.set_math_shift(math_shift.value());
-
-    auto const& math_style_value = computed_style.property(CSS::PropertyID::MathStyle);
-    if (auto math_style = keyword_to_math_style(math_style_value.to_keyword()); math_style.has_value())
-        computed_values.set_math_style(math_style.value());
-
-    computed_values.set_math_depth(computed_style.math_depth());
 
     if (!inherited_box_adopted)
         computed_values.set_direction(computed_style.direction());

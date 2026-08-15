@@ -1252,6 +1252,7 @@ pub(crate) fn serialize_style_value(sink: &mut TextSink, value: &StyleValueData,
             value,
             has_name,
             name,
+            ..
         } => {
             // GridTrackPlacement::Type: Auto is 0, Span is 1, AreaOrLine is 2.
             match kind {

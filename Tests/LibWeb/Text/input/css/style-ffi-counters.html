@@ -19,14 +19,14 @@
         const afterOneElement = internals.styleFfiCounters();
         println(`longhand driver ran: ${afterOneElement.longhandDriverEntries >= 1}`);
         println(`longhand loop called back into C++: ${afterOneElement.longhandStoreBatchCallbacks >= 1}`);
-        println(`computed build called back into C++: ${afterOneElement.computedStyleBuildCppCallbacks >= 1}`);
+        println(`computed build stayed in Rust: ${afterOneElement.computedStyleBuildCppCallbacks === 0}`);
+        println(`C++ lifecycle counter exists: ${"styleGroupLifecycleCallbacks" in afterOneElement}`);
 
         element.style.positionAnchor = "--target";
         internals.resetStyleFfiCounters();
         internals.updateStyle();
         const afterPositionAnchor = internals.styleFfiCounters();
         println(`position-anchor build retained a C++ string: ${afterPositionAnchor.stringRetainReleaseCallbacks > 0}`);
-        println(`anchor build called its C++ payload assembler: ${afterPositionAnchor.anchorGroupPayloadAssemblerCallbacks > 0}`);
 
         element.style.containerName = "--container";
         internals.resetStyleFfiCounters();
@@ -34,81 +34,42 @@
         const afterContainerName = internals.styleFfiCounters();
         println(`container-name build retained a C++ string: ${afterContainerName.stringRetainReleaseCallbacks > 0}`);
 
-        element.style.transform = "translate(10%, 20px) rotate(30deg)";
+        element.style.font = 'italic 700 20px/1.5 "Test Family"';
+        element.style.fontFeatureSettings = '"kern" 0';
+        element.style.fontVariationSettings = '"wght" 650';
         internals.resetStyleFfiCounters();
         internals.updateStyle();
-        const afterTransform = internals.styleFfiCounters();
-        println(`transform build called its C++ payload assembler: ${afterTransform.transformGroupPayloadAssemblerCallbacks > 0}`);
+        const afterFont = internals.styleFfiCounters();
+        println(`font build stayed in Rust: ${afterFont.computedStyleBuildCppCallbacks === 0}`);
 
-        element.style.filter = "blur(2px)";
-        element.style.boxShadow = "1px 2px 3px red";
+        element.style.gridTemplateAreas = '"main"';
+        element.style.gridColumnStart = "main";
         internals.resetStyleFfiCounters();
         internals.updateStyle();
-        const afterEffects = internals.styleFfiCounters();
-        println(`effects build called its C++ payload assembler: ${afterEffects.effectsGroupPayloadAssemblerCallbacks > 0}`);
+        const afterGrid = internals.styleFfiCounters();
+        println(`grid build stayed in Rust: ${afterGrid.computedStyleBuildCppCallbacks === 0}`);
+        println(`C++ fly-string operation counter exists: ${"flyStringOperationCallbacks" in afterGrid}`);
 
-        element.style.cursor = "crosshair";
+        element.style.outline = "5px dotted rgb(10, 20, 30)";
+        element.style.outlineOffset = "calc(2px + 3px)";
+        element.style.scrollMargin = "1px 2px 3px 4px";
+        element.style.scrollPadding = "5% 6px auto 8px";
+        element.style.overflowClipMargin = "content-box 9px";
+        element.style.appearance = "checkbox";
+        element.style.objectFit = "cover";
+        element.style.objectPosition = "10% 20%";
+        element.style.viewTransitionName = "--transition";
+        element.style.touchAction = "pan-left pinch-zoom";
+        element.style.scrollBehavior = "smooth";
+        element.style.scrollbarGutter = "stable both-edges";
+        element.style.scrollbarWidth = "thin";
+        element.style.shapeImageThreshold = "0.5";
+        element.style.shapeMargin = "12px";
+        element.style.shapeOutside = "circle(25%) border-box";
+        element.style.willChange = "contents, scroll-position, opacity";
         internals.resetStyleFfiCounters();
         internals.updateStyle();
-        const afterCursor = internals.styleFfiCounters();
-        println(`inherited UI build called its C++ payload assembler: ${afterCursor.inheritedUIGroupPayloadAssemblerCallbacks > 0}`);
-
-        element.style.fill = "red";
-        internals.resetStyleFfiCounters();
-        internals.updateStyle();
-        const afterFill = internals.styleFfiCounters();
-        println(`inherited SVG build called its C++ payload assembler: ${afterFill.inheritedSVGGroupPayloadAssemblerCallbacks > 0}`);
-
-        element.style.textIndent = "1em";
-        internals.resetStyleFfiCounters();
-        internals.updateStyle();
-        const afterTextIndent = internals.styleFfiCounters();
-        println(`inherited text build called its C++ payload assembler: ${afterTextIndent.inheritedTextGroupPayloadAssemblerCallbacks > 0}`);
-
-        element.style.transition = "opacity 1s ease 2s";
-        internals.resetStyleFfiCounters();
-        internals.updateStyle();
-        const afterTransition = internals.styleFfiCounters();
-        println(`animation build called its C++ payload assembler: ${afterTransition.animationGroupPayloadAssemblerCallbacks > 0}`);
-
-        element.style.maskImage = "linear-gradient(red, blue)";
-        element.style.maskPosition = "10% 20%";
-        element.style.maskRepeat = "no-repeat";
-        internals.resetStyleFfiCounters();
-        internals.updateStyle();
-        const afterMask = internals.styleFfiCounters();
-        println(`mask build called its C++ payload assembler: ${afterMask.styleGroupPayloadAssemblerCallbacks > 0}`);
-
-        element.style.background = "linear-gradient(red, blue) fixed 10% 20% / 30px 40px no-repeat border-box";
-        internals.resetStyleFfiCounters();
-        internals.updateStyle();
-        const afterBackground = internals.styleFfiCounters();
-        println(`background build called its C++ payload assembler: ${afterBackground.styleGroupPayloadAssemblerCallbacks > 0}`);
-
-        element.style.border = "7px dashed red";
-        element.style.borderRadius = "1px 2px 3px 4px";
-        element.style.borderImage = "linear-gradient(red, blue) 10% fill / 1 2 3 4 / 5px round space";
-        internals.resetStyleFfiCounters();
-        internals.updateStyle();
-        const afterBorder = internals.styleFfiCounters();
-        println(`border build called its C++ payload assembler: ${afterBorder.styleGroupPayloadAssemblerCallbacks > 0}`);
-
-        element.style.content = '"chapter " counter(chapter) / "chapter"';
-        element.style.counterReset = "chapter 2";
-        element.style.counterIncrement = "chapter 3";
-        element.style.counterSet = "chapter 4";
-        internals.resetStyleFfiCounters();
-        internals.updateStyle();
-        const afterContent = internals.styleFfiCounters();
-        println(`content build called its C++ payload assembler: ${afterContent.styleGroupPayloadAssemblerCallbacks > 0}`);
-
-        element.style.listStyleType = 'symbols(cyclic "A" "B")';
-        element.style.listStylePosition = "inside";
-        element.style.listStyleImage = "linear-gradient(red, blue)";
-        element.style.quotes = '"<" ">" "[" "]"';
-        internals.resetStyleFfiCounters();
-        internals.updateStyle();
-        const afterInheritedList = internals.styleFfiCounters();
-        println(`inherited list build called its C++ payload assembler: ${afterInheritedList.styleGroupPayloadAssemblerCallbacks > 0}`);
+        const afterMiscReset = internals.styleFfiCounters();
+        println(`payload assembler counter exists: ${"styleGroupPayloadAssemblerCallbacks" in afterMiscReset}`);
     });
 </script>

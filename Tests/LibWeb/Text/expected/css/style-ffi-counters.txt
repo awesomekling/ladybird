@@ -2,18 +2,11 @@ has counters: true
 all zero after reset: true
 longhand driver ran: true
 longhand loop called back into C++: true
-computed build called back into C++: true
+computed build stayed in Rust: true
+C++ lifecycle counter exists: false
 position-anchor build retained a C++ string: false
-anchor build called its C++ payload assembler: false
 container-name build retained a C++ string: false
-transform build called its C++ payload assembler: false
-effects build called its C++ payload assembler: false
-inherited UI build called its C++ payload assembler: false
-inherited SVG build called its C++ payload assembler: false
-inherited text build called its C++ payload assembler: false
-animation build called its C++ payload assembler: false
-mask build called its C++ payload assembler: false
-background build called its C++ payload assembler: false
-border build called its C++ payload assembler: false
-content build called its C++ payload assembler: false
-inherited list build called its C++ payload assembler: false
+font build stayed in Rust: true
+grid build stayed in Rust: true
+C++ fly-string operation counter exists: false
+payload assembler counter exists: false

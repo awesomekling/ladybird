@@ -6,12 +6,10 @@
 
 //! Rust ownership of the ComputedValues style group payloads.
 //!
-//! Rust-native style groups define their payload layout and lifecycle here.
-//! Groups that still contain C++-owned field types register their payload size,
-//! alignment and lifecycle callbacks, in the same way Stylo drives Gecko's
-//! nsStyle* structs. Rust owns allocation and reference counting for both kinds;
-//! the atomic header is placed immediately before the payload, which the C++
-//! side reads and updates inline so that sharing never crosses the FFI boundary.
+//! Every style group defines its payload layout and lifecycle here. Rust owns
+//! allocation and reference counting; the atomic header is placed immediately
+//! before the payload, which the C++ side reads and updates inline so that
+//! sharing never crosses the FFI boundary.
 //!
 //! Layout contract with the C++ side (StyleStructRef):
 //!
@@ -39,12 +37,13 @@ pub use crate::css::computed_value_types::{
     ComputedAspectRatio, ComputedClipEdge, ComputedColorOrAuto, ComputedCursor, ComputedFilter,
     ComputedFilterOperation, ComputedFlexBasis, ComputedGap, ComputedGridArea, ComputedGridPlacement,
     ComputedGridPlacementKind, ComputedGridTrackBreadth, ComputedGridTrackEntry, ComputedGridTrackEntryKind,
-    ComputedGridTrackList, ComputedLengthBox, ComputedLengthPercentageOrAuto, ComputedPositionTryFallback,
-    ComputedResolvedTransform, ComputedSize, ComputedSizeKind, ComputedStyleValueHandle, ComputedSvgDash,
-    ComputedSvgPaint, ComputedTextIndent, ComputedTextUnderlineOffset, ComputedTextUnderlinePosition,
-    ComputedVerticalAlign, ContentValues, EffectsValues, FontLayoutFacts, GRID_NO_INDEX, GridValues,
-    InheritedListValues, InheritedSVGValues, InheritedTextLayoutFacts, InheritedTextValues, InheritedUIValues,
-    MaskValues, RetainedComputedCursorList, RetainedComputedFilterOperationList, RetainedComputedResolvedTransformList,
+    ComputedGridTrackList, ComputedLengthBox, ComputedLengthPercentageOrAuto, ComputedOverflowClipMargin,
+    ComputedOverflowClipMarginSide, ComputedPositionTryFallback, ComputedResolvedTransform, ComputedSize,
+    ComputedSizeKind, ComputedStyleValueHandle, ComputedSvgDash, ComputedSvgPaint, ComputedTextIndent,
+    ComputedTextUnderlineOffset, ComputedTextUnderlinePosition, ComputedVerticalAlign, ContentValues, EffectsValues,
+    FontLayoutFacts, FontValues, GRID_NO_INDEX, GridValues, InheritedListValues, InheritedSVGValues,
+    InheritedTextLayoutFacts, InheritedTextValues, InheritedUIValues, MaskValues, MiscResetValues,
+    RetainedComputedCursorList, RetainedComputedFilterOperationList, RetainedComputedResolvedTransformList,
     RetainedComputedShadowList, RetainedComputedSvgDashList, RetainedGridAreaList, RetainedGridNameIndexList,
     RetainedGridTrackEntryList, RetainedPositionAreaList, RetainedPositionTryFallbackList,
     RetainedTextDecorationLineList, SVGResetValues, SizingValues, SurroundValues, TextResetValues, TransformValues,
@@ -550,6 +549,82 @@ impl_computed_payload_clone_and_eq!(InheritedListValues {
     list_style_image,
     quotes,
 });
+impl_computed_payload_clone_and_eq!(ComputedOverflowClipMarginSide {
+    has_visual_box,
+    visual_box,
+    offset,
+});
+impl_computed_payload_clone_and_eq!(ComputedOverflowClipMargin {
+    left,
+    top,
+    right,
+    bottom,
+});
+impl_computed_payload_clone_and_eq!(MiscResetValues {
+    outline_offset_style_value,
+    scroll_margin,
+    scroll_padding,
+    overflow_clip_margin,
+    column_span,
+    appearance,
+    computed_appearance,
+    outline_style,
+    object_fit,
+    column_height,
+    outline_color,
+    outline_width,
+    outline_offset,
+    user_select,
+    object_position_x,
+    object_position_y,
+    view_transition_name,
+    touch_action_allow_left,
+    touch_action_allow_right,
+    touch_action_allow_up,
+    touch_action_allow_down,
+    touch_action_allow_pinch_zoom,
+    touch_action_allow_other,
+    scroll_behavior,
+    scrollbar_gutter,
+    scrollbar_width,
+    shape_image_threshold,
+    shape_margin,
+    shape_outside,
+    will_change,
+});
+impl_computed_payload_clone_and_eq!(FontValues {
+    font_size,
+    line_height_used,
+    font_variant_emoji,
+    font_ascent,
+    font_descent,
+    font_x_height,
+    first_available_font,
+    font_cascade_list,
+    font_weight,
+    font_width,
+    math_shift,
+    math_style,
+    math_depth,
+    font_family,
+    font_style,
+    font_optical_sizing,
+    font_feature_settings,
+    font_kerning,
+    font_language_override,
+    font_variant_alternates,
+    font_variant_caps,
+    font_variant_east_asian,
+    font_variant_ligatures,
+    font_variant_numeric,
+    font_variant_position,
+    font_variation_settings,
+    text_rendering,
+    line_height,
+    math_shift_value,
+    math_style_value,
+    math_depth_value,
+});
 impl_computed_payload_clone_and_eq!(InheritedSVGValues {
     fill,
     stroke,
@@ -879,16 +954,11 @@ impl GridValues {
     }
 }
 
-/// Selects the language that owns a style group's payload lifecycle. The
-/// CppWith*Facts variants keep the C++ callback lifecycle but promise that
-/// the group's leading bytes match the named Rust layout-facts struct, so
-/// the layout engine can read the prefix as typed fields.
+/// Selects the Rust payload type for a computed-value style group.
 #[repr(u8)]
 #[derive(Clone, Copy)]
 pub enum StyleGroupLifecycle {
-    Cpp,
-    CppWithInheritedTextFacts,
-    CppWithFontFacts,
+    Font,
     InheritedTable,
     InheritedBox,
     Sizing,
@@ -910,57 +980,19 @@ pub enum StyleGroupLifecycle {
     Border,
     Content,
     InheritedList,
+    MiscReset,
 }
 
-impl StyleGroupLifecycle {
-    pub(crate) fn payload_is_cpp_owned(self) -> bool {
-        match self {
-            StyleGroupLifecycle::Cpp
-            | StyleGroupLifecycle::CppWithInheritedTextFacts
-            | StyleGroupLifecycle::CppWithFontFacts => true,
-            StyleGroupLifecycle::InheritedTable
-            | StyleGroupLifecycle::InheritedBox
-            | StyleGroupLifecycle::Sizing
-            | StyleGroupLifecycle::Alignment
-            | StyleGroupLifecycle::SVGReset
-            | StyleGroupLifecycle::Surround
-            | StyleGroupLifecycle::Box
-            | StyleGroupLifecycle::Grid
-            | StyleGroupLifecycle::TextReset
-            | StyleGroupLifecycle::Transform
-            | StyleGroupLifecycle::Effects
-            | StyleGroupLifecycle::Anchor
-            | StyleGroupLifecycle::InheritedUI
-            | StyleGroupLifecycle::InheritedSVG
-            | StyleGroupLifecycle::InheritedText
-            | StyleGroupLifecycle::Animation
-            | StyleGroupLifecycle::Mask
-            | StyleGroupLifecycle::Background
-            | StyleGroupLifecycle::Border
-            | StyleGroupLifecycle::Content
-            | StyleGroupLifecycle::InheritedList => false,
-        }
-    }
-}
-
-/// Size, alignment and optional C++ lifecycle callbacks for one style value
-/// group type. Rust-native groups leave the callbacks null.
+/// Size and alignment verification for one Rust-owned style group type.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct StyleGroupVTable {
     pub lifecycle: StyleGroupLifecycle,
     pub size: usize,
     pub align: usize,
-    pub default_construct: Option<unsafe extern "C" fn(payload: *mut c_void)>,
-    pub copy_construct: Option<unsafe extern "C" fn(payload: *mut c_void, source: *const c_void)>,
-    pub destruct: Option<unsafe extern "C" fn(payload: *mut c_void)>,
-    /// Field-wise payload equality; groups without a comparable layout
-    /// report false, which conservatively disables payload sharing.
-    pub equals: Option<unsafe extern "C" fn(a: *const c_void, b: *const c_void) -> bool>,
 }
 
-// SAFETY: The function pointers are stateless C++ callbacks and the plain
-// integers are immutable after registration.
+// SAFETY: The plain integers are immutable after registration.
 unsafe impl Send for StyleGroupVTable {}
 unsafe impl Sync for StyleGroupVTable {}
 
@@ -983,9 +1015,6 @@ fn vtable(group_index: usize) -> &'static StyleGroupVTable {
 }
 
 fn payload_size(table: &StyleGroupVTable) -> usize {
-    if table.lifecycle.payload_is_cpp_owned() {
-        return table.size;
-    }
     match table.lifecycle {
         StyleGroupLifecycle::InheritedTable => size_of::<InheritedTableValues>(),
         StyleGroupLifecycle::InheritedBox => size_of::<InheritedBoxValues>(),
@@ -1008,16 +1037,12 @@ fn payload_size(table: &StyleGroupVTable) -> usize {
         StyleGroupLifecycle::Border => size_of::<BorderValues>(),
         StyleGroupLifecycle::Content => size_of::<ContentValues>(),
         StyleGroupLifecycle::InheritedList => size_of::<InheritedListValues>(),
-        StyleGroupLifecycle::Cpp
-        | StyleGroupLifecycle::CppWithInheritedTextFacts
-        | StyleGroupLifecycle::CppWithFontFacts => unreachable!("C++-owned lifecycles are handled above"),
+        StyleGroupLifecycle::MiscReset => size_of::<MiscResetValues>(),
+        StyleGroupLifecycle::Font => size_of::<FontValues>(),
     }
 }
 
 fn payload_align(table: &StyleGroupVTable) -> usize {
-    if table.lifecycle.payload_is_cpp_owned() {
-        return table.align;
-    }
     match table.lifecycle {
         StyleGroupLifecycle::InheritedTable => align_of::<InheritedTableValues>(),
         StyleGroupLifecycle::InheritedBox => align_of::<InheritedBoxValues>(),
@@ -1040,20 +1065,12 @@ fn payload_align(table: &StyleGroupVTable) -> usize {
         StyleGroupLifecycle::Border => align_of::<BorderValues>(),
         StyleGroupLifecycle::Content => align_of::<ContentValues>(),
         StyleGroupLifecycle::InheritedList => align_of::<InheritedListValues>(),
-        StyleGroupLifecycle::Cpp
-        | StyleGroupLifecycle::CppWithInheritedTextFacts
-        | StyleGroupLifecycle::CppWithFontFacts => unreachable!("C++-owned lifecycles are handled above"),
+        StyleGroupLifecycle::MiscReset => align_of::<MiscResetValues>(),
+        StyleGroupLifecycle::Font => align_of::<FontValues>(),
     }
 }
 
 unsafe fn default_construct(table: &StyleGroupVTable, payload: *mut c_void) {
-    if table.lifecycle.payload_is_cpp_owned() {
-        crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::StyleGroupLifecycleCallback);
-        unsafe {
-            table.default_construct.expect("missing C++ style group constructor")(payload);
-        }
-        return;
-    }
     match table.lifecycle {
         StyleGroupLifecycle::InheritedTable => unsafe {
             (payload as *mut InheritedTableValues).write(InheritedTableValues::initial());
@@ -1118,20 +1135,16 @@ unsafe fn default_construct(table: &StyleGroupVTable, payload: *mut c_void) {
         StyleGroupLifecycle::InheritedList => unsafe {
             (payload as *mut InheritedListValues).write(InheritedListValues::initial());
         },
-        StyleGroupLifecycle::Cpp
-        | StyleGroupLifecycle::CppWithInheritedTextFacts
-        | StyleGroupLifecycle::CppWithFontFacts => unreachable!("C++-owned lifecycles are handled above"),
+        StyleGroupLifecycle::MiscReset => unsafe {
+            (payload as *mut MiscResetValues).write(MiscResetValues::initial());
+        },
+        StyleGroupLifecycle::Font => unsafe {
+            (payload as *mut FontValues).write(FontValues::initial());
+        },
     }
 }
 
 unsafe fn copy_construct(table: &StyleGroupVTable, payload: *mut c_void, source: *const c_void) {
-    if table.lifecycle.payload_is_cpp_owned() {
-        crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::StyleGroupLifecycleCallback);
-        unsafe {
-            table.copy_construct.expect("missing C++ style group copy constructor")(payload, source);
-        }
-        return;
-    }
     match table.lifecycle {
         StyleGroupLifecycle::InheritedTable => unsafe {
             (payload as *mut InheritedTableValues).write(*(source as *const InheritedTableValues));
@@ -1196,20 +1209,16 @@ unsafe fn copy_construct(table: &StyleGroupVTable, payload: *mut c_void, source:
         StyleGroupLifecycle::InheritedList => unsafe {
             (payload as *mut InheritedListValues).write((*(source as *const InheritedListValues)).clone());
         },
-        StyleGroupLifecycle::Cpp
-        | StyleGroupLifecycle::CppWithInheritedTextFacts
-        | StyleGroupLifecycle::CppWithFontFacts => unreachable!("C++-owned lifecycles are handled above"),
+        StyleGroupLifecycle::MiscReset => unsafe {
+            (payload as *mut MiscResetValues).write((*(source as *const MiscResetValues)).clone());
+        },
+        StyleGroupLifecycle::Font => unsafe {
+            (payload as *mut FontValues).write((*(source as *const FontValues)).clone());
+        },
     }
 }
 
 unsafe fn destruct(table: &StyleGroupVTable, payload: *mut c_void) {
-    if table.lifecycle.payload_is_cpp_owned() {
-        crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::StyleGroupLifecycleCallback);
-        unsafe {
-            table.destruct.expect("missing C++ style group destructor")(payload);
-        }
-        return;
-    }
     match table.lifecycle {
         StyleGroupLifecycle::InheritedTable => unsafe { std::ptr::drop_in_place(payload as *mut InheritedTableValues) },
         StyleGroupLifecycle::InheritedBox => unsafe { std::ptr::drop_in_place(payload as *mut InheritedBoxValues) },
@@ -1232,17 +1241,12 @@ unsafe fn destruct(table: &StyleGroupVTable, payload: *mut c_void) {
         StyleGroupLifecycle::Border => unsafe { std::ptr::drop_in_place(payload as *mut BorderValues) },
         StyleGroupLifecycle::Content => unsafe { std::ptr::drop_in_place(payload as *mut ContentValues) },
         StyleGroupLifecycle::InheritedList => unsafe { std::ptr::drop_in_place(payload as *mut InheritedListValues) },
-        StyleGroupLifecycle::Cpp
-        | StyleGroupLifecycle::CppWithInheritedTextFacts
-        | StyleGroupLifecycle::CppWithFontFacts => unreachable!("C++-owned lifecycles are handled above"),
+        StyleGroupLifecycle::MiscReset => unsafe { std::ptr::drop_in_place(payload as *mut MiscResetValues) },
+        StyleGroupLifecycle::Font => unsafe { std::ptr::drop_in_place(payload as *mut FontValues) },
     }
 }
 
 unsafe fn payloads_equal(table: &StyleGroupVTable, a: *const c_void, b: *const c_void) -> bool {
-    if table.lifecycle.payload_is_cpp_owned() {
-        crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::StyleGroupLifecycleCallback);
-        return unsafe { table.equals.is_some_and(|equals| equals(a, b)) };
-    }
     match table.lifecycle {
         StyleGroupLifecycle::InheritedTable => unsafe {
             *(a as *const InheritedTableValues) == *(b as *const InheritedTableValues)
@@ -1279,9 +1283,8 @@ unsafe fn payloads_equal(table: &StyleGroupVTable, a: *const c_void, b: *const c
         StyleGroupLifecycle::InheritedList => unsafe {
             *(a as *const InheritedListValues) == *(b as *const InheritedListValues)
         },
-        StyleGroupLifecycle::Cpp
-        | StyleGroupLifecycle::CppWithInheritedTextFacts
-        | StyleGroupLifecycle::CppWithFontFacts => unreachable!("C++-owned lifecycles are handled above"),
+        StyleGroupLifecycle::MiscReset => unsafe { *(a as *const MiscResetValues) == *(b as *const MiscResetValues) },
+        StyleGroupLifecycle::Font => unsafe { *(a as *const FontValues) == *(b as *const FontValues) },
     }
 }
 
@@ -1704,9 +1707,8 @@ enum GroupFieldPoke {
 
 /// Decodes one group's gathered values against its descriptors into scratch
 /// pokes. Constraint descriptors (the REQUIRE kinds) fail the decode when the
-/// value diverges and constraints are enforced; a group built through a
-/// registered payload assembler skips them, because the assembler owns those
-/// members.
+/// value diverges and constraints are enforced. A Rust group builder that
+/// completes complex members itself skips those constraints.
 fn decode_group_field_pokes(
     descriptors: &[&FfiGroupFieldDescriptor],
     values: &[FfiGroupValueEntry],
@@ -1732,8 +1734,8 @@ fn decode_group_field_pokes(
                 match code {
                     Some(code) if code != 255 => pokes.push(Poke::U8(descriptor.offset, code)),
                     // A keyword the converter rejects (the appearance compat
-                    // keywords) stays at the payload default; the group's
-                    // registered assembler owns the field.
+                    // keywords) stays at the payload default; the Rust group
+                    // builder owns the field.
                     _ => {
                         if enforce_constraints {
                             return None;
@@ -1760,8 +1762,8 @@ fn decode_group_field_pokes(
                     }
                     // A value that is not a plain pixel length (the normal
                     // keyword, a percentage against font metrics) stays at
-                    // the payload default; the group's registered assembler
-                    // resolves it through the C++ arm.
+                    // the payload default; the Rust group builder owns the
+                    // field.
                     continue;
                 };
                 if *unit != crate::css::style_compute::px_length_unit() {
@@ -1819,9 +1821,8 @@ fn decode_group_field_pokes(
                     if enforce_constraints {
                         return None;
                     }
-                    // A color the core cannot resolve stays at the payload
-                    // default; the group's registered assembler resolves it
-                    // through the C++ arm.
+                    // A color the generic decoder cannot resolve stays at the
+                    // payload default; the Rust group builder owns the field.
                     continue;
                 }
                 pokes.push(Poke::U32(descriptor.offset, value.resolved_color));
@@ -1850,8 +1851,8 @@ fn decode_group_field_pokes(
                         if enforce_constraints {
                             return None;
                         }
-                        // As for GROUP_FIELD_COLOR: the assembler's C++ arm
-                        // resolves what the core could not.
+                        // As for GROUP_FIELD_COLOR, the Rust group builder
+                        // owns colors the generic decoder cannot resolve.
                         continue;
                     }
                     pokes.push(Poke::U32(descriptor.offset, value.resolved_color));
@@ -1977,10 +1978,8 @@ pub unsafe extern "C" fn rust_build_style_group(
 
         // A group whose descriptors are all satisfied constraints would
         // scratch-build an exact copy of the default payload, so skip the
-        // allocation and share directly. Guarded on meaningful payload
-        // equality: groups without a comparable layout keep the scratch path
-        // and its fresh payload.
-        if pokes.is_empty() && (!table.lifecycle.payload_is_cpp_owned() || table.equals.is_some()) {
+        // allocation and share directly.
+        if pokes.is_empty() {
             let default_payload = default_group_payload(group_index);
             if !parent_payload.is_null() && unsafe { payloads_equal(table, parent_payload, default_payload) } {
                 retain_group_payload(group_index, parent_payload);
@@ -2012,41 +2011,6 @@ pub unsafe extern "C" fn rust_build_style_group(
     .unwrap_or(std::ptr::null())
 }
 
-/// A C++ function that fills one group's complex members - the values the
-/// pokeable descriptors cannot carry - into a default-constructed payload
-/// from pre-lowered assembly data, consuming the data's retained handles.
-pub type StyleGroupPayloadAssembler = unsafe extern "C" fn(payload: *mut c_void, data: *const c_void);
-
-const MAX_STYLE_GROUP_COUNT: usize = 32;
-
-static PAYLOAD_ASSEMBLERS: [std::sync::atomic::AtomicUsize; MAX_STYLE_GROUP_COUNT] =
-    [const { std::sync::atomic::AtomicUsize::new(0) }; MAX_STYLE_GROUP_COUNT];
-
-/// Registers the C++ assembler for one group's complex payload members.
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_style_group_register_payload_assembler(
-    group_index: usize,
-    assembler: StyleGroupPayloadAssembler,
-) {
-    abort_on_panic(|| {
-        let previous = PAYLOAD_ASSEMBLERS[group_index].swap(assembler as usize, std::sync::atomic::Ordering::Release);
-        assert!(
-            previous == 0 || previous == assembler as usize,
-            "payload assembler installed twice"
-        );
-    });
-}
-
-fn registered_payload_assembler(group_index: usize) -> Option<StyleGroupPayloadAssembler> {
-    let raw = PAYLOAD_ASSEMBLERS[group_index].load(std::sync::atomic::Ordering::Acquire);
-    if raw == 0 {
-        return None;
-    }
-    // SAFETY: Only rust_style_group_register_payload_assembler stores here,
-    // and it stores a valid assembler function.
-    Some(unsafe { std::mem::transmute::<usize, StyleGroupPayloadAssembler>(raw) })
-}
-
 /// Shares one group's immortal default payload - or the parent payload when
 /// it equals the default, keeping the identity - for a build whose inputs are
 /// all initial values.
@@ -2061,96 +2025,6 @@ pub(crate) unsafe fn share_default_group_payload(group_index: usize, parent_payl
         return parent_payload;
     }
     default_payload
-}
-
-/// Builds a C++-lifecycle group payload whose complex members come from a
-/// registered assembler: the simple fields poke from the descriptors with the
-/// constraint kinds skipped, the assembler fills the rest from `assembler_data`
-/// (consuming its retained handles), and the parent or default payload is
-/// shared when the result compares equal.
-///
-/// # Safety
-/// `values` must hold one valid data entry per registered descriptor of the
-/// group in registration order, `assembler_data` must be the registered
-/// assembler's expected data, and `parent_payload` a valid payload of the
-/// group or null.
-pub(crate) unsafe fn build_group_payload_with_assembler(
-    group_index: usize,
-    values: &[FfiGroupValueEntry],
-    assembler_data: *const c_void,
-    parent_payload: *const c_void,
-) -> *const c_void {
-    let assembler = registered_payload_assembler(group_index)
-        .expect("a group built through the assembler path must register its assembler");
-    let all = &FIELD_DESCRIPTORS
-        .get()
-        .expect("descriptors register before any build")
-        .0;
-    let descriptors: Vec<&FfiGroupFieldDescriptor> = all
-        .iter()
-        .filter(|descriptor| descriptor.group_index as usize == group_index)
-        .collect();
-    assert_eq!(descriptors.len(), values.len());
-    let pokes = decode_group_field_pokes(&descriptors, values, false)
-        .expect("computed values decode for every non-constraint descriptor");
-
-    let table = vtable(group_index);
-    let scratch = allocate_payload(table, 1);
-    // SAFETY: The scratch payload was allocated for this group's layout; the
-    // poke offsets come from offsetof on the C++ side, and the assembler is
-    // the registered filler for this group.
-    unsafe {
-        default_construct(table, scratch);
-        apply_group_field_pokes(scratch, &pokes);
-        crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::StyleGroupPayloadAssemblerCallback);
-        // Pinned to StyleGroupIndex::TransformValues by ComputedValues.cpp.
-        if group_index == 15 {
-            crate::css::ffi_stats::bump_cpp_callback(
-                crate::css::ffi_stats::FfiOp::TransformGroupPayloadAssemblerCallback,
-            );
-        }
-        if group_index == 11 {
-            crate::css::ffi_stats::bump_cpp_callback(
-                crate::css::ffi_stats::FfiOp::EffectsGroupPayloadAssemblerCallback,
-            );
-        }
-        if group_index == 10 {
-            crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::AnchorGroupPayloadAssemblerCallback);
-        }
-        if group_index == 2 {
-            crate::css::ffi_stats::bump_cpp_callback(
-                crate::css::ffi_stats::FfiOp::InheritedUIGroupPayloadAssemblerCallback,
-            );
-        }
-        if group_index == 3 {
-            crate::css::ffi_stats::bump_cpp_callback(
-                crate::css::ffi_stats::FfiOp::InheritedSVGGroupPayloadAssemblerCallback,
-            );
-        }
-        if group_index == 4 {
-            crate::css::ffi_stats::bump_cpp_callback(
-                crate::css::ffi_stats::FfiOp::InheritedTextGroupPayloadAssemblerCallback,
-            );
-        }
-        if group_index == 7 {
-            crate::css::ffi_stats::bump_cpp_callback(
-                crate::css::ffi_stats::FfiOp::AnimationGroupPayloadAssemblerCallback,
-            );
-        }
-        assembler(scratch, assembler_data);
-    }
-
-    if !parent_payload.is_null() && unsafe { payloads_equal(table, scratch, parent_payload) } {
-        unsafe { free_scratch_payload(table, scratch) };
-        retain_group_payload(group_index, parent_payload);
-        return parent_payload;
-    }
-    let default_payload = default_group_payload(group_index);
-    if unsafe { payloads_equal(table, scratch, default_payload) } {
-        unsafe { free_scratch_payload(table, scratch) };
-        return default_payload;
-    }
-    scratch as *const c_void
 }
 
 /// Builds a Rust-native group whose descriptor-backed fields are completed by
@@ -2180,7 +2054,6 @@ pub(crate) unsafe fn build_group_payload_with_rust_fill(
         .expect("computed values decode for every non-constraint descriptor");
 
     let table = vtable(group_index);
-    assert!(!table.lifecycle.payload_is_cpp_owned());
     let scratch = allocate_payload(table, 1);
     // SAFETY: The scratch payload was allocated for this group's Rust-native
     // layout, and every poke offset comes from offsetof on the C++ mirror.
@@ -2460,7 +2333,7 @@ impl ComputedLengthPercentageOrAuto {
 }
 
 impl ComputedLengthBox {
-    fn auto() -> Self {
+    pub(crate) fn auto() -> Self {
         Self {
             top: ComputedLengthPercentageOrAuto::auto(),
             right: ComputedLengthPercentageOrAuto::auto(),
@@ -2469,7 +2342,7 @@ impl ComputedLengthBox {
         }
     }
 
-    fn zero() -> Self {
+    pub(crate) fn zero() -> Self {
         let zero = ComputedStyleValueHandle::length(0.0);
         let side = || ComputedLengthPercentageOrAuto {
             is_auto: false,
@@ -2483,7 +2356,7 @@ impl ComputedLengthBox {
         }
     }
 
-    fn from_data(
+    pub(crate) fn from_data(
         top: *const c_void,
         right: *const c_void,
         bottom: *const c_void,
@@ -2989,6 +2862,112 @@ impl InheritedListValues {
             list_style_position: 1,
             list_style_image: initial(property_id::LIST_STYLE_IMAGE),
             quotes: initial(property_id::QUOTES),
+        }
+    }
+}
+
+impl ComputedOverflowClipMarginSide {
+    fn initial() -> Self {
+        Self {
+            has_visual_box: false,
+            visual_box: 0,
+            offset: crate::css::css_pixels::CssPixels::from_raw(0),
+        }
+    }
+}
+
+impl ComputedOverflowClipMargin {
+    fn initial() -> Self {
+        Self {
+            left: ComputedOverflowClipMarginSide::initial(),
+            top: ComputedOverflowClipMarginSide::initial(),
+            right: ComputedOverflowClipMarginSide::initial(),
+            bottom: ComputedOverflowClipMarginSide::initial(),
+        }
+    }
+}
+
+impl MiscResetValues {
+    fn initial() -> Self {
+        use crate::css::css_pixels::CssPixels;
+        use crate::css::property_metadata::property_id;
+
+        let initial =
+            |property| ComputedStyleValueHandle::retained(crate::css::style_compute::initial_value_data(property));
+        Self {
+            outline_offset_style_value: initial(property_id::OUTLINE_OFFSET),
+            scroll_margin: ComputedLengthBox::zero(),
+            scroll_padding: ComputedLengthBox::auto(),
+            overflow_clip_margin: ComputedOverflowClipMargin::initial(),
+            column_span: 0,
+            appearance: 0,
+            computed_appearance: 7,
+            outline_style: 1,
+            object_fit: 0,
+            column_height: ComputedSize::keyword(ComputedSizeKind::Auto),
+            outline_color: 0xff000000,
+            outline_width: CssPixels::from_integer(3),
+            outline_offset: CssPixels::from_raw(0),
+            user_select: 1,
+            object_position_x: ComputedStyleValueHandle::percentage(50.0),
+            object_position_y: ComputedStyleValueHandle::percentage(50.0),
+            view_transition_name: initial(property_id::VIEW_TRANSITION_NAME),
+            touch_action_allow_left: true,
+            touch_action_allow_right: true,
+            touch_action_allow_up: true,
+            touch_action_allow_down: true,
+            touch_action_allow_pinch_zoom: true,
+            touch_action_allow_other: true,
+            scroll_behavior: 0,
+            scrollbar_gutter: 0,
+            scrollbar_width: 0,
+            shape_image_threshold: 0.0,
+            shape_margin: initial(property_id::SHAPE_MARGIN),
+            shape_outside: initial(property_id::SHAPE_OUTSIDE),
+            will_change: initial(property_id::WILL_CHANGE),
+        }
+    }
+}
+
+impl FontValues {
+    fn initial() -> Self {
+        use crate::css::css_pixels::CssPixels;
+        use crate::css::property_metadata::property_id;
+
+        let initial =
+            |property| ComputedStyleValueHandle::retained(crate::css::style_compute::initial_value_data(property));
+        Self {
+            font_size: CssPixels::from_integer(16),
+            line_height_used: CssPixels::from_raw(0),
+            font_variant_emoji: 0,
+            font_ascent: 0.0,
+            font_descent: 0.0,
+            font_x_height: 0.0,
+            first_available_font: std::ptr::null(),
+            font_cascade_list: std::ptr::null(),
+            font_weight: 400.0,
+            font_width: 100.0,
+            math_shift: 0,
+            math_style: 0,
+            math_depth: 0,
+            font_family: initial(property_id::FONT_FAMILY),
+            font_style: initial(property_id::FONT_STYLE),
+            font_optical_sizing: initial(property_id::FONT_OPTICAL_SIZING),
+            font_feature_settings: initial(property_id::FONT_FEATURE_SETTINGS),
+            font_kerning: initial(property_id::FONT_KERNING),
+            font_language_override: initial(property_id::FONT_LANGUAGE_OVERRIDE),
+            font_variant_alternates: initial(property_id::FONT_VARIANT_ALTERNATES),
+            font_variant_caps: initial(property_id::FONT_VARIANT_CAPS),
+            font_variant_east_asian: initial(property_id::FONT_VARIANT_EAST_ASIAN),
+            font_variant_ligatures: initial(property_id::FONT_VARIANT_LIGATURES),
+            font_variant_numeric: initial(property_id::FONT_VARIANT_NUMERIC),
+            font_variant_position: initial(property_id::FONT_VARIANT_POSITION),
+            font_variation_settings: initial(property_id::FONT_VARIATION_SETTINGS),
+            text_rendering: initial(property_id::TEXT_RENDERING),
+            line_height: initial(property_id::LINE_HEIGHT),
+            math_shift_value: initial(property_id::MATH_SHIFT),
+            math_style_value: initial(property_id::MATH_STYLE),
+            math_depth_value: initial(property_id::MATH_DEPTH),
         }
     }
 }
@@ -3741,7 +3720,7 @@ pub unsafe extern "C" fn rust_style_group_as_surround(payload: *const c_void) ->
     payload as *const SurroundValues
 }
 
-/// Returns the typed prefix view of the C++-owned border group payload.
+/// Returns the typed prefix view of the Rust-owned border group payload.
 ///
 /// This anchors the prefix layout in the exported ABI so the cbindgen mirror
 /// stays in the generated header for the C++ static asserts that pin the
@@ -3754,7 +3733,7 @@ pub unsafe extern "C" fn rust_style_group_as_border_facts(payload: *const c_void
     payload as *const BorderLayoutFacts
 }
 
-/// Returns the typed prefix view of the C++-owned inherited-text group
+/// Returns the typed prefix view of the Rust-owned inherited-text group
 /// payload.
 ///
 /// This anchors the prefix layout in the exported ABI so the cbindgen mirror
@@ -3770,7 +3749,7 @@ pub unsafe extern "C" fn rust_style_group_as_inherited_text_facts(
     payload as *const InheritedTextLayoutFacts
 }
 
-/// Returns the typed prefix view of the C++-owned font group payload.
+/// Returns the typed prefix view of the Rust-owned font group payload.
 ///
 /// This anchors the prefix layout in the exported ABI so the cbindgen mirror
 /// stays in the generated header for the C++ static asserts that pin the
@@ -3786,168 +3765,97 @@ pub unsafe extern "C" fn rust_style_group_as_font_facts(payload: *const c_void) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicUsize as TestCounter;
-
-    static LIVE: TestCounter = TestCounter::new(0);
-
-    unsafe extern "C" fn test_default_construct(payload: *mut c_void) {
-        unsafe { *(payload as *mut u64) = 7 };
-        LIVE.fetch_add(1, Ordering::Relaxed);
-    }
-    unsafe extern "C" fn test_copy_construct(payload: *mut c_void, source: *const c_void) {
-        unsafe { *(payload as *mut u64) = *(source as *const u64) };
-        LIVE.fetch_add(1, Ordering::Relaxed);
-    }
-    unsafe extern "C" fn test_destruct(_payload: *mut c_void) {
-        LIVE.fetch_sub(1, Ordering::Relaxed);
-    }
-    unsafe extern "C" fn test_equals(a: *const c_void, b: *const c_void) -> bool {
-        unsafe { *(a as *const u64) == *(b as *const u64) }
-    }
 
     #[test]
     fn payload_lifecycle() {
         let vtables = [
             StyleGroupVTable {
-                lifecycle: StyleGroupLifecycle::Cpp,
-                size: size_of::<u64>(),
-                align: align_of::<u64>(),
-                default_construct: Some(test_default_construct),
-                copy_construct: Some(test_copy_construct),
-                destruct: Some(test_destruct),
-                equals: Some(test_equals),
-            },
-            StyleGroupVTable {
                 lifecycle: StyleGroupLifecycle::InheritedTable,
                 size: size_of::<InheritedTableValues>(),
                 align: align_of::<InheritedTableValues>(),
-                default_construct: None,
-                copy_construct: None,
-                destruct: None,
-                equals: None,
             },
             StyleGroupVTable {
                 lifecycle: StyleGroupLifecycle::InheritedBox,
                 size: size_of::<InheritedBoxValues>(),
                 align: align_of::<InheritedBoxValues>(),
-                default_construct: None,
-                copy_construct: None,
-                destruct: None,
-                equals: None,
             },
             StyleGroupVTable {
                 lifecycle: StyleGroupLifecycle::Sizing,
                 size: size_of::<SizingValues>(),
                 align: align_of::<SizingValues>(),
-                default_construct: None,
-                copy_construct: None,
-                destruct: None,
-                equals: None,
             },
             StyleGroupVTable {
                 lifecycle: StyleGroupLifecycle::Alignment,
                 size: size_of::<AlignmentValues>(),
                 align: align_of::<AlignmentValues>(),
-                default_construct: None,
-                copy_construct: None,
-                destruct: None,
-                equals: None,
             },
             StyleGroupVTable {
                 lifecycle: StyleGroupLifecycle::SVGReset,
                 size: size_of::<SVGResetValues>(),
                 align: align_of::<SVGResetValues>(),
-                default_construct: None,
-                copy_construct: None,
-                destruct: None,
-                equals: None,
             },
             StyleGroupVTable {
                 lifecycle: StyleGroupLifecycle::Surround,
                 size: size_of::<SurroundValues>(),
                 align: align_of::<SurroundValues>(),
-                default_construct: None,
-                copy_construct: None,
-                destruct: None,
-                equals: None,
             },
             StyleGroupVTable {
                 lifecycle: StyleGroupLifecycle::Box,
                 size: size_of::<BoxValues>(),
                 align: align_of::<BoxValues>(),
-                default_construct: None,
-                copy_construct: None,
-                destruct: None,
-                equals: None,
             },
         ];
-        let mut defaults = [std::ptr::null::<c_void>(); 8];
+        let mut defaults = [std::ptr::null::<c_void>(); 7];
         unsafe {
             rust_style_group_registry_register(vtables.as_ptr(), vtables.len(), defaults.as_mut_ptr());
-            let default_payload = defaults[0];
-            assert_eq!(*(default_payload as *const u64), 7);
-            assert_eq!(
-                refcount_of(default_payload, align_of::<u64>()).load(Ordering::Relaxed),
-                STYLE_GROUP_STATIC_REFCOUNT
-            );
-
-            let clone = rust_style_group_clone(0, default_payload);
-            assert_eq!(*(clone as *const u64), 7);
-            let refcount = refcount_of(clone, align_of::<u64>());
-            assert_eq!(refcount.load(Ordering::Relaxed), 1);
-
-            refcount.store(0, Ordering::Relaxed);
-            rust_style_group_free(0, clone);
-            assert_eq!(LIVE.load(Ordering::Relaxed), 1);
-
-            let table_default = *(defaults[1] as *const InheritedTableValues);
+            let table_default = *(defaults[0] as *const InheritedTableValues);
             assert_eq!(table_default, InheritedTableValues::initial());
-            let table_clone = rust_style_group_clone(1, defaults[1]);
+            let table_clone = rust_style_group_clone(0, defaults[0]);
             assert_eq!(*(table_clone as *const InheritedTableValues), table_default);
             refcount_of(table_clone, align_of::<InheritedTableValues>()).store(0, Ordering::Relaxed);
-            rust_style_group_free(1, table_clone);
+            rust_style_group_free(0, table_clone);
 
-            let box_default = *(defaults[2] as *const InheritedBoxValues);
+            let box_default = *(defaults[1] as *const InheritedBoxValues);
             assert_eq!(box_default, InheritedBoxValues::initial());
-            let box_clone = rust_style_group_clone(2, defaults[2]);
+            let box_clone = rust_style_group_clone(1, defaults[1]);
             assert_eq!(*(box_clone as *const InheritedBoxValues), box_default);
             refcount_of(box_clone, align_of::<InheritedBoxValues>()).store(0, Ordering::Relaxed);
-            rust_style_group_free(2, box_clone);
+            rust_style_group_free(1, box_clone);
 
-            let sizing_default = &*(defaults[3] as *const SizingValues);
+            let sizing_default = &*(defaults[2] as *const SizingValues);
             assert!(sizing_default.eq(&SizingValues::initial()));
-            let sizing_clone = rust_style_group_clone(3, defaults[3]);
+            let sizing_clone = rust_style_group_clone(2, defaults[2]);
             assert!((*(sizing_clone as *const SizingValues)).eq(sizing_default));
             refcount_of(sizing_clone, align_of::<SizingValues>()).store(0, Ordering::Relaxed);
-            rust_style_group_free(3, sizing_clone);
+            rust_style_group_free(2, sizing_clone);
 
-            let alignment_default = &*(defaults[4] as *const AlignmentValues);
+            let alignment_default = &*(defaults[3] as *const AlignmentValues);
             assert!(alignment_default.eq(&AlignmentValues::initial()));
-            let alignment_clone = rust_style_group_clone(4, defaults[4]);
+            let alignment_clone = rust_style_group_clone(3, defaults[3]);
             assert!((*(alignment_clone as *const AlignmentValues)).eq(alignment_default));
             refcount_of(alignment_clone, align_of::<AlignmentValues>()).store(0, Ordering::Relaxed);
-            rust_style_group_free(4, alignment_clone);
+            rust_style_group_free(3, alignment_clone);
 
-            let svg_reset_default = &*(defaults[5] as *const SVGResetValues);
+            let svg_reset_default = &*(defaults[4] as *const SVGResetValues);
             assert!(svg_reset_default.eq(&SVGResetValues::initial()));
-            let svg_reset_clone = rust_style_group_clone(5, defaults[5]);
+            let svg_reset_clone = rust_style_group_clone(4, defaults[4]);
             assert!((*(svg_reset_clone as *const SVGResetValues)).eq(svg_reset_default));
             refcount_of(svg_reset_clone, align_of::<SVGResetValues>()).store(0, Ordering::Relaxed);
-            rust_style_group_free(5, svg_reset_clone);
+            rust_style_group_free(4, svg_reset_clone);
 
-            let surround_default = &*(defaults[6] as *const SurroundValues);
+            let surround_default = &*(defaults[5] as *const SurroundValues);
             assert!(surround_default.eq(&SurroundValues::initial()));
-            let surround_clone = rust_style_group_clone(6, defaults[6]);
+            let surround_clone = rust_style_group_clone(5, defaults[5]);
             assert!((*(surround_clone as *const SurroundValues)).eq(surround_default));
             refcount_of(surround_clone, align_of::<SurroundValues>()).store(0, Ordering::Relaxed);
-            rust_style_group_free(6, surround_clone);
+            rust_style_group_free(5, surround_clone);
 
-            let box_default = &*(defaults[7] as *const BoxValues);
+            let box_default = &*(defaults[6] as *const BoxValues);
             assert!(box_default.eq(&BoxValues::initial()));
-            let box_clone = rust_style_group_clone(7, defaults[7]);
+            let box_clone = rust_style_group_clone(6, defaults[6]);
             assert!((*(box_clone as *const BoxValues)).eq(box_default));
             refcount_of(box_clone, align_of::<BoxValues>()).store(0, Ordering::Relaxed);
-            rust_style_group_free(7, box_clone);
+            rust_style_group_free(6, box_clone);
         }
     }
 }

@@ -497,19 +497,19 @@ public:
     ReadonlySpan<RefPtr<CSS::CursorStyleValue const>> cursor_style_values() const { return m_cursor_style_values; }
     CSS::PointerEvents pointer_events() const { return style_group<CSS::ComputedValues::InheritedUIValues>().pointer_events_value(); }
     CSS::ScrollbarColorData scrollbar_color() const { return style_group<CSS::ComputedValues::InheritedUIValues>().scrollbar_color_value(); }
-    CSS::Appearance appearance() const { return style_group<CSS::ComputedValues::MiscResetValues>().appearance; }
-    CSS::ObjectFit object_fit() const { return style_group<CSS::ComputedValues::MiscResetValues>().object_fit; }
-    CSS::Position object_position() const { return style_group<CSS::ComputedValues::MiscResetValues>().object_position; }
-    CSS::OverflowClipMarginData const& overflow_clip_margin() const { return style_group<CSS::ComputedValues::MiscResetValues>().overflow_clip_margin; }
-    CSS::LengthBox const& scroll_padding() const { return style_group<CSS::ComputedValues::MiscResetValues>().scroll_padding; }
-    CSS::ScrollbarWidth scrollbar_width() const { return style_group<CSS::ComputedValues::MiscResetValues>().scrollbar_width; }
-    CSS::UserSelect user_select() const { return style_group<CSS::ComputedValues::MiscResetValues>().user_select; }
-    CSS::WillChange const& will_change() const { return style_group<CSS::ComputedValues::MiscResetValues>().will_change; }
-    Optional<Utf16FlyString> view_transition_name() const { return style_group<CSS::ComputedValues::MiscResetValues>().view_transition_name; }
-    Color outline_color() const { return style_group<CSS::ComputedValues::MiscResetValues>().outline_color; }
-    CSSPixels outline_offset() const { return style_group<CSS::ComputedValues::MiscResetValues>().outline_offset; }
-    CSS::OutlineStyle outline_style() const { return style_group<CSS::ComputedValues::MiscResetValues>().outline_style; }
-    CSSPixels outline_width() const { return style_group<CSS::ComputedValues::MiscResetValues>().outline_width; }
+    CSS::Appearance appearance() const { return static_cast<CSS::Appearance>(style_group<CSS::ComputedValues::MiscResetValues>().appearance); }
+    CSS::ObjectFit object_fit() const { return static_cast<CSS::ObjectFit>(style_group<CSS::ComputedValues::MiscResetValues>().object_fit); }
+    CSS::Position object_position() const { return style_group<CSS::ComputedValues::MiscResetValues>().object_position_value(); }
+    CSS::OverflowClipMarginData overflow_clip_margin() const { return style_group<CSS::ComputedValues::MiscResetValues>().overflow_clip_margin_value(); }
+    CSS::LengthBox scroll_padding() const { return length_box(style_group<CSS::ComputedValues::MiscResetValues>().scroll_padding); }
+    CSS::ScrollbarWidth scrollbar_width() const { return static_cast<CSS::ScrollbarWidth>(style_group<CSS::ComputedValues::MiscResetValues>().scrollbar_width); }
+    CSS::UserSelect user_select() const { return static_cast<CSS::UserSelect>(style_group<CSS::ComputedValues::MiscResetValues>().user_select); }
+    CSS::WillChange will_change() const { return style_group<CSS::ComputedValues::MiscResetValues>().will_change_value(); }
+    Optional<Utf16FlyString> view_transition_name() const { return style_group<CSS::ComputedValues::MiscResetValues>().view_transition_name_value(); }
+    Color outline_color() const { return Color::from_bgra(style_group<CSS::ComputedValues::MiscResetValues>().outline_color); }
+    CSSPixels outline_offset() const { return CSSPixels::from_raw(style_group<CSS::ComputedValues::MiscResetValues>().outline_offset); }
+    CSS::OutlineStyle outline_style() const { return static_cast<CSS::OutlineStyle>(style_group<CSS::ComputedValues::MiscResetValues>().outline_style); }
+    CSSPixels outline_width() const { return CSSPixels::from_raw(style_group<CSS::ComputedValues::MiscResetValues>().outline_width); }
     Color background_color() const { return style_group<CSS::ComputedValues::BackgroundValues>().background_color_value(); }
     CSS::BackgroundBox background_color_clip() const { return style_group<CSS::ComputedValues::BackgroundValues>().background_color_clip_value(); }
     Vector<CSS::BackgroundLayerData> const& background_layers() const
@@ -577,9 +577,9 @@ public:
     Color text_decoration_color() const { return Color::from_bgra(style_group<CSS::ComputedValues::TextResetValues>().text_decoration_color); }
     CSS::TextDecorationStyle text_decoration_style() const { return static_cast<CSS::TextDecorationStyle>(style_group<CSS::ComputedValues::TextResetValues>().text_decoration_style); }
     Optional<CSS::ContentData> const& content() const { return m_content; }
-    CSSPixels line_height() const { return style_group<CSS::ComputedValues::FontValues>().line_height_used; }
-    CSSPixels font_size() const { return style_group<CSS::ComputedValues::FontValues>().font_size; }
-    Gfx::FontCascadeList const& font_list() const { return *style_group<CSS::ComputedValues::FontValues>().font_list; }
+    CSSPixels line_height() const { return CSSPixels::from_raw(style_group<CSS::ComputedValues::FontValues>().line_height_used); }
+    CSSPixels font_size() const { return CSSPixels::from_raw(style_group<CSS::ComputedValues::FontValues>().font_size); }
+    Gfx::FontCascadeList const& font_list() const { return style_group<CSS::ComputedValues::FontValues>().font_list_value(); }
     CSS::FlexBasis flex_basis() const
     {
         auto const& value = style_group<CSS::ComputedValues::AlignmentValues>().flex_basis;

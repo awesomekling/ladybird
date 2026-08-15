@@ -3632,7 +3632,7 @@ static CSSPixelPoint determine_the_scroll_into_view_position(Element& target, CS
 
     // AD-HOC: The spec doesn't specify when to do this, but we need to apply scroll-margin and scroll-margin to target
     //         bounding border box (https://drafts.csswg.org/cssom-view-1/#example-51af1565).
-    auto const& scroll_margin = target.style_group<CSS::ComputedValues::MiscResetValues>()->scroll_margin;
+    auto scroll_margin = target.computed_style()->scroll_margin();
     auto scroll_margin_top = scroll_margin.top().to_px_or_zero(CSSPixels { 0 });
     auto scroll_margin_right = scroll_margin.right().to_px_or_zero(CSSPixels { 0 });
     auto scroll_margin_bottom = scroll_margin.bottom().to_px_or_zero(CSSPixels { 0 });
@@ -5479,7 +5479,7 @@ Optional<Utf16FlyString> Element::document_scoped_view_transition_name()
     // 1. Let scopedViewTransitionName be the computed value of view-transition-name for element.
     auto const* values = style_group<CSS::ComputedValues::MiscResetValues>();
     VERIFY(values);
-    auto scoped_view_transition_name = values->view_transition_name;
+    auto scoped_view_transition_name = values->view_transition_name_value();
 
     // 2. If scopedViewTransitionName is associated with element’s node document, then return
     //    scopedViewTransitionName.

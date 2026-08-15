@@ -31,13 +31,15 @@ use crate::css::computed_value_types::{
     AnchorValues, AnimationValues, BackgroundValues, BorderValues, ComputedClipEdge, ComputedColorOrAuto,
     ComputedCursor, ComputedFilter, ComputedFilterOperation, ComputedGridArea, ComputedGridPlacement,
     ComputedGridPlacementKind, ComputedGridTrackBreadth, ComputedGridTrackEntry, ComputedGridTrackEntryKind,
-    ComputedGridTrackList, ComputedPositionTryFallback, ComputedResolvedTransform, ComputedScrollbarColor,
-    ComputedShadow, ComputedSize, ComputedSizeKind, ComputedStyleValueHandle, ComputedSvgDash, ComputedSvgPaint,
-    ComputedTextIndent, ComputedTextUnderlineOffset, ComputedTextUnderlinePosition, ContentValues, EffectsValues,
+    ComputedGridTrackList, ComputedLengthBox, ComputedOverflowClipMargin, ComputedOverflowClipMarginSide,
+    ComputedPositionTryFallback, ComputedResolvedTransform, ComputedScrollbarColor, ComputedShadow, ComputedSize,
+    ComputedSizeKind, ComputedStyleValueHandle, ComputedSvgDash, ComputedSvgPaint, ComputedTextIndent,
+    ComputedTextUnderlineOffset, ComputedTextUnderlinePosition, ContentValues, EffectsValues, FontValues,
     GRID_NO_INDEX, GridValues, InheritedListValues, InheritedSVGValues, InheritedTextValues, InheritedUIValues,
-    MaskValues, RetainedComputedCursorList, RetainedComputedFilterOperationList, RetainedComputedResolvedTransformList,
-    RetainedComputedShadowList, RetainedComputedSvgDashList, RetainedGridAreaList, RetainedGridNameIndexList,
-    RetainedGridTrackEntryList, RetainedPositionAreaList, RetainedPositionTryFallbackList, TransformValues,
+    MaskValues, MiscResetValues, RetainedComputedCursorList, RetainedComputedFilterOperationList,
+    RetainedComputedResolvedTransformList, RetainedComputedShadowList, RetainedComputedSvgDashList,
+    RetainedGridAreaList, RetainedGridNameIndexList, RetainedGridTrackEntryList, RetainedPositionAreaList,
+    RetainedPositionTryFallbackList, TransformValues,
 };
 use crate::css::computed_values::{
     FfiGroupValueEntry, GROUP_FIELD_COLOR, GROUP_FIELD_COLOR_OR_KEYWORD, GROUP_FIELD_RESOLVED_F32,
@@ -50,12 +52,6 @@ use crate::css::css_pixels::CssPixels;
 use crate::css::property_metadata::property_id;
 use crate::css::retained_fly_string::{RetainedUtf16FlyString, RetainedUtf16FlyStringList};
 use crate::css::style_value::{GridTrackEntryKind, RetainedGridTrackEntry, StyleValueData};
-
-unsafe extern "C" {
-    /// Interns the concatenation of a live fly string and an ASCII suffix,
-    /// returning one leaked reference to the result.
-    fn ladybird_utf16_fly_string_concat_ascii(raw: usize, suffix: *const u8, suffix_length: usize) -> usize;
-}
 
 /// Mirror of the C++ StyleGroupIndex numbering; ComputedValues.cpp
 /// static-asserts these values against the enum, and the entry point asserts
@@ -108,10 +104,27 @@ pub struct FfiTableGroupBuildInputs {
     /// The raw bits of the C++ Display value before the box type
     /// transformation, a C++-side member the table does not hold.
     pub box_display_before_transformation_raw: u32,
-    /// An opaque C++ context the registered payload assemblers receive
-    /// through their assembly structs, for the members only C++ can build:
-    /// stamped image wrapper mints and the color fallback arm.
-    pub cpp_assembler_context: *const c_void,
+    pub font: *const FfiFontGroupBuildInputs,
+}
+
+/// Platform font resources and derived facts supplied to the Rust-owned font
+/// group builder. The pointers borrow objects pinned by the document's font
+/// computer.
+#[repr(C)]
+pub struct FfiFontGroupBuildInputs {
+    pub font_size_raw: i32,
+    pub line_height_used_raw: i32,
+    pub font_variant_emoji: u8,
+    pub font_ascent: f32,
+    pub font_descent: f32,
+    pub font_x_height: f32,
+    pub first_available_font: *const c_void,
+    pub font_cascade_list: *const c_void,
+    pub font_weight: f64,
+    pub font_width: f64,
+    pub math_shift: u8,
+    pub math_style: u8,
+    pub math_depth: i32,
 }
 
 /// The longhand table joined with the effective-value overrides: exactly the
@@ -385,21 +398,6 @@ impl GridGroupArena {
     fn intern_borrowed(&mut self, name: &RetainedUtf16FlyString) -> u32 {
         self.intern_retained(name.clone())
     }
-
-    /// Interns the implicit `{base}{suffix}` grid line name.
-    fn intern_implicit(&mut self, base: &RetainedUtf16FlyString, suffix: &str) -> u32 {
-        // SAFETY: The base names a live fly string and the suffix is ASCII;
-        // the bridge returns one leaked reference the intern assumes.
-        let name = unsafe {
-            crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::FlyStringOperationCallback);
-            RetainedUtf16FlyString::from_leaked_raw(ladybird_utf16_fly_string_concat_ascii(
-                base.raw(),
-                suffix.as_ptr(),
-                suffix.len(),
-            ))
-        };
-        self.intern_retained(name)
-    }
 }
 
 fn auto_grid_track_breadth() -> ComputedGridTrackBreadth {
@@ -546,6 +544,8 @@ fn build_grid_placement(data: &StyleValueData, arena: &mut GridGroupArena) -> Op
         value,
         has_name,
         name,
+        implicit_start_name,
+        implicit_end_name,
     } = data
     else {
         return None;
@@ -579,8 +579,8 @@ fn build_grid_placement(data: &StyleValueData, arena: &mut GridGroupArena) -> Op
             if *has_name {
                 result.has_name = true;
                 result.name_index = arena.intern_borrowed(name);
-                result.implicit_start_name_index = arena.intern_implicit(name, "-start");
-                result.implicit_end_name_index = arena.intern_implicit(name, "-end");
+                result.implicit_start_name_index = arena.intern_borrowed(implicit_start_name);
+                result.implicit_end_name_index = arena.intern_borrowed(implicit_end_name);
             }
         }
     }
@@ -645,8 +645,8 @@ unsafe fn build_grid_group(values: &EffectiveValues, parent_payload: *const c_vo
     for area in grid_areas.as_slice() {
         let [row_start, row_end, column_start, column_end] = area.grid_lines();
         let name_index = arena.intern_borrowed(area.name());
-        let implicit_start_name_index = arena.intern_implicit(area.name(), "-start");
-        let implicit_end_name_index = arena.intern_implicit(area.name(), "-end");
+        let implicit_start_name_index = arena.intern_borrowed(area.implicit_start_name());
+        let implicit_end_name_index = arena.intern_borrowed(area.implicit_end_name());
         arena.areas.push(ComputedGridArea {
             name_index,
             implicit_start_name_index,
@@ -1594,15 +1594,7 @@ unsafe fn build_effects_group(
 //
 // The border walks the C++ extractors ran over minted wrappers lower here
 // from the table slots. Enum-mapped keywords become their C++ enum codes;
-// genuinely C++ members travel as retained handles.
-
-/// Retains a table or override value pointer for an assembly slot; the
-/// assembler assumes the reference.
-fn retain_for_assembly(pointer: *const c_void) -> *const c_void {
-    assert!(!pointer.is_null());
-    // SAFETY: The pointer names live style value data.
-    unsafe { crate::css::style_value::rust_style_value_retain(pointer.cast()) }.cast()
-}
+// wrapper-backed members travel as retained canonical handles.
 
 /// The comma-separated computed items of a repeatable-list property: the
 /// list's element pointers, or the single value itself.
@@ -2301,78 +2293,11 @@ unsafe fn build_inherited_text_group(
     }
 }
 
-/// One lowered overflow-clip-margin side.
-#[repr(C)]
-pub struct FfiOverflowClipMarginSideAssembly {
-    pub has_visual_box: bool,
-    pub visual_box: u8,
-    /// The retained offset value; null when the side keeps its default.
-    pub offset: *const c_void,
-}
-
-/// One lowered will-change entry: a contents/scroll-position keyword, or a
-/// custom ident naming a property (a borrowed fly-string raw).
-#[repr(C)]
-pub struct FfiWillChangeEntryAssembly {
-    pub is_keyword: bool,
-    pub keyword: u16,
-    pub ident_raw: usize,
-}
-
-/// The misc reset group's complex members, pre-lowered for the registered
-/// C++ assembler.
-#[repr(C)]
-pub struct FfiMiscResetGroupAssembly {
-    pub cpp_context: *const c_void,
-    /// Whether the core resolved (and poked) a non-auto outline-color; the
-    /// assembler's C++ arm resolves it otherwise.
-    pub outline_color_is_auto: bool,
-    pub outline_color_resolved: bool,
-    /// The retained outline-offset value: both the resolved pixel offset and
-    /// the group's style value member come from it.
-    pub outline_offset: *const c_void,
-    /// Top, right, bottom, left retained values.
-    pub scroll_margin: [*const c_void; 4],
-    pub scroll_padding: [*const c_void; 4],
-    /// Left, top, right, bottom.
-    pub overflow_clip_margin: [FfiOverflowClipMarginSideAssembly; 4],
-    /// C++ Appearance codes: the compat-normalized appearance and the raw
-    /// computed appearance.
-    pub appearance: u8,
-    pub computed_appearance: u8,
-    /// Retained offset values of the object-position edges.
-    pub object_position_x: *const c_void,
-    pub object_position_y: *const c_void,
-    pub has_view_transition_name: bool,
-    /// A borrowed fly-string raw, alive across the build.
-    pub view_transition_name_raw: usize,
-    pub touch_action_allow_left: bool,
-    pub touch_action_allow_right: bool,
-    pub touch_action_allow_up: bool,
-    pub touch_action_allow_down: bool,
-    pub touch_action_allow_pinch_zoom: bool,
-    pub touch_action_allow_other: bool,
-    /// The retained column-height value.
-    pub column_height: *const c_void,
-    /// The retained shape-margin value.
-    pub shape_margin: *const c_void,
-    /// Whether shape-outside is non-initial and its retained value.
-    pub shape_outside_noninitial: bool,
-    pub shape_outside: *const c_void,
-    /// The C++ ScrollbarGutter code.
-    pub scrollbar_gutter: u8,
-    pub will_change_is_auto: bool,
-    pub will_change_entries: *const FfiWillChangeEntryAssembly,
-    pub will_change_entry_count: usize,
-}
-
-/// Builds the misc reset group: the generic descriptor path first, then the
-/// full lowering through the registered assembler.
+/// Builds the misc reset group entirely from Rust-owned canonical values.
 unsafe fn build_misc_reset_group(
     values: &EffectiveValues,
     input: &ColorResolutionInput,
     used_color_scheme: u8,
-    cpp_assembler_context: *const c_void,
     parent_payload: *const c_void,
 ) -> *const c_void {
     let generic = unsafe {
@@ -2392,24 +2317,32 @@ unsafe fn build_misc_reset_group(
         return std::ptr::null();
     };
 
-    let retained_slot = |property: u16| retain_for_assembly(values.pointer(property));
-    let retained_sides = |properties: [u16; 4]| properties.map(retained_slot);
+    let resolve_length = |data: &StyleValueData| -> Option<CssPixels> {
+        let pixels = match data {
+            StyleValueData::Length { value, unit } => crate::css::style_compute::absolute_length_to_px(*value, *unit),
+            StyleValueData::Calculated { .. } => {
+                crate::css::calc::resolve_calculated_length_with_context(data, input.length?)
+            }
+            _ => None,
+        }?;
+        Some(CssPixels::nearest_value_for(pixels))
+    };
 
-    let overflow_clip_margin_side = |property: u16| -> FfiOverflowClipMarginSideAssembly {
+    let overflow_clip_margin_side = |property: u16| -> ComputedOverflowClipMarginSide {
         match values.value(property) {
             Some(StyleValueData::OverflowClipMargin {
                 has_visual_box,
                 visual_box,
                 offset,
-            }) => FfiOverflowClipMarginSideAssembly {
+            }) => ComputedOverflowClipMarginSide {
                 has_visual_box: *has_visual_box,
                 visual_box: *visual_box,
-                offset: retain_for_assembly(offset.pointer().cast()),
+                offset: resolve_length(offset.data()).unwrap_or(CssPixels::from_raw(0)),
             },
-            _ => FfiOverflowClipMarginSideAssembly {
+            _ => ComputedOverflowClipMarginSide {
                 has_visual_box: false,
                 visual_box: 0,
-                offset: std::ptr::null(),
+                offset: CssPixels::from_raw(0),
             },
         }
     };
@@ -2441,16 +2374,11 @@ unsafe fn build_misc_reset_group(
     let Some(StyleValueData::Position { edge_x, edge_y }) = values.value(property_id::OBJECT_POSITION) else {
         unreachable!("a computed object-position is a position value");
     };
-    let position_offset = |edge: &crate::css::style_value::RetainedStyleValueData| -> *const c_void {
+    let position_offset = |edge: &crate::css::style_value::RetainedStyleValueData| -> ComputedStyleValueHandle {
         let StyleValueData::Edge { offset, .. } = edge.data() else {
             unreachable!("a computed position component is an edge value");
         };
-        retain_for_assembly(offset.pointer().cast())
-    };
-
-    let view_transition_name = match values.value(property_id::VIEW_TRANSITION_NAME) {
-        Some(StyleValueData::CustomIdent { custom_ident }) => Some(custom_ident.raw()),
-        _ => None,
+        ComputedStyleValueHandle::retained(offset.pointer())
     };
 
     // touch-action, with the extractor's keyword fan-out.
@@ -2486,14 +2414,6 @@ unsafe fn build_misc_reset_group(
         _ => {}
     }
 
-    let shape_outside_noninitial = values.pointer(property_id::SHAPE_OUTSIDE)
-        != crate::css::style_compute::initial_value_data(property_id::SHAPE_OUTSIDE).cast();
-    let shape_outside = if shape_outside_noninitial {
-        retain_for_assembly(values.pointer(property_id::SHAPE_OUTSIDE))
-    } else {
-        std::ptr::null()
-    };
-
     let Some(StyleValueData::ScrollbarGutter {
         value: scrollbar_gutter,
     }) = values.value(property_id::SCROLLBAR_GUTTER)
@@ -2501,91 +2421,69 @@ unsafe fn build_misc_reset_group(
         unreachable!("a computed scrollbar-gutter is a scrollbar-gutter value");
     };
 
-    // will-change, with the extractor's rules: unknown property names are
-    // skipped, auto is the empty entry list.
-    let mut will_change_is_auto = false;
-    let mut will_change_entries: Vec<FfiWillChangeEntryAssembly> = Vec::new();
-    match values.value(property_id::WILL_CHANGE) {
-        Some(StyleValueData::Keyword { keyword: code }) if *code == keyword::AUTO => will_change_is_auto = true,
-        Some(StyleValueData::ValueList { values: list, .. }) => {
-            for item in list.as_slice() {
-                match item.data() {
-                    StyleValueData::Keyword { keyword: code } => will_change_entries.push(FfiWillChangeEntryAssembly {
-                        is_keyword: true,
-                        keyword: *code,
-                        ident_raw: 0,
-                    }),
-                    StyleValueData::CustomIdent { custom_ident } => {
-                        will_change_entries.push(FfiWillChangeEntryAssembly {
-                            is_keyword: false,
-                            keyword: 0,
-                            ident_raw: custom_ident.raw(),
-                        });
-                    }
-                    _ => unreachable!("a computed will-change item is a keyword or a custom ident"),
-                }
-            }
-        }
-        _ => unreachable!("a computed will-change is auto or a value list"),
-    }
-
-    let outline_color_data = values
-        .value(property_id::OUTLINE_COLOR)
-        .expect("the table holds outline-color");
-    let outline_color_is_auto =
-        matches!(outline_color_data, StyleValueData::Keyword { keyword: code } if *code == keyword::AUTO);
-
-    let assembly = FfiMiscResetGroupAssembly {
-        cpp_context: cpp_assembler_context,
-        outline_color_is_auto,
-        outline_color_resolved: to_color(outline_color_data, input).is_some(),
-        outline_offset: retained_slot(property_id::OUTLINE_OFFSET),
-        scroll_margin: retained_sides([
-            property_id::SCROLL_MARGIN_TOP,
-            property_id::SCROLL_MARGIN_RIGHT,
-            property_id::SCROLL_MARGIN_BOTTOM,
-            property_id::SCROLL_MARGIN_LEFT,
-        ]),
-        scroll_padding: retained_sides([
-            property_id::SCROLL_PADDING_TOP,
-            property_id::SCROLL_PADDING_RIGHT,
-            property_id::SCROLL_PADDING_BOTTOM,
-            property_id::SCROLL_PADDING_LEFT,
-        ]),
-        overflow_clip_margin: [
-            overflow_clip_margin_side(property_id::OVERFLOW_CLIP_MARGIN_LEFT),
-            overflow_clip_margin_side(property_id::OVERFLOW_CLIP_MARGIN_TOP),
-            overflow_clip_margin_side(property_id::OVERFLOW_CLIP_MARGIN_RIGHT),
-            overflow_clip_margin_side(property_id::OVERFLOW_CLIP_MARGIN_BOTTOM),
-        ],
-        appearance: normalized_appearance,
-        computed_appearance,
-        object_position_x: position_offset(edge_x),
-        object_position_y: position_offset(edge_y),
-        has_view_transition_name: view_transition_name.is_some(),
-        view_transition_name_raw: view_transition_name.unwrap_or(0),
-        touch_action_allow_left: allow[0],
-        touch_action_allow_right: allow[1],
-        touch_action_allow_up: allow[2],
-        touch_action_allow_down: allow[3],
-        touch_action_allow_pinch_zoom: allow[4],
-        touch_action_allow_other: allow[5],
-        column_height: retained_slot(property_id::COLUMN_HEIGHT),
-        shape_margin: retained_slot(property_id::SHAPE_MARGIN),
-        shape_outside_noninitial,
-        shape_outside,
-        scrollbar_gutter: *scrollbar_gutter,
-        will_change_is_auto,
-        will_change_entries: will_change_entries.as_ptr(),
-        will_change_entry_count: will_change_entries.len(),
+    let outline_offset_data = values
+        .value(property_id::OUTLINE_OFFSET)
+        .expect("the table holds outline-offset");
+    let Some(outline_offset) = resolve_length(outline_offset_data) else {
+        return std::ptr::null();
     };
-    // SAFETY: The entries and assembly hold live or retained value data, and
-    // the caller warrants the parent payload.
+    let outline_color = packed_color(
+        to_color(
+            values
+                .value(property_id::OUTLINE_COLOR)
+                .expect("the table holds outline-color"),
+            input,
+        )
+        .expect("a computed outline-color resolves in the Rust color context"),
+    );
+
     unsafe {
-        crate::css::computed_values::build_group_payload_with_assembler(
+        crate::css::computed_values::build_group_payload_with_rust_fill(
             group_index::MISC_RESET,
             &entries,
-            (&raw const assembly).cast(),
+            |payload| {
+                let payload = &mut *payload.cast::<MiscResetValues>();
+                let retained = |property| ComputedStyleValueHandle::retained(values.pointer(property).cast());
+                payload.outline_offset_style_value = retained(property_id::OUTLINE_OFFSET);
+                payload.outline_offset = outline_offset;
+                payload.scroll_margin = ComputedLengthBox::from_data(
+                    values.pointer(property_id::SCROLL_MARGIN_TOP),
+                    values.pointer(property_id::SCROLL_MARGIN_RIGHT),
+                    values.pointer(property_id::SCROLL_MARGIN_BOTTOM),
+                    values.pointer(property_id::SCROLL_MARGIN_LEFT),
+                    false,
+                );
+                payload.scroll_padding = ComputedLengthBox::from_data(
+                    values.pointer(property_id::SCROLL_PADDING_TOP),
+                    values.pointer(property_id::SCROLL_PADDING_RIGHT),
+                    values.pointer(property_id::SCROLL_PADDING_BOTTOM),
+                    values.pointer(property_id::SCROLL_PADDING_LEFT),
+                    true,
+                );
+                payload.overflow_clip_margin = ComputedOverflowClipMargin {
+                    left: overflow_clip_margin_side(property_id::OVERFLOW_CLIP_MARGIN_LEFT),
+                    top: overflow_clip_margin_side(property_id::OVERFLOW_CLIP_MARGIN_TOP),
+                    right: overflow_clip_margin_side(property_id::OVERFLOW_CLIP_MARGIN_RIGHT),
+                    bottom: overflow_clip_margin_side(property_id::OVERFLOW_CLIP_MARGIN_BOTTOM),
+                };
+                payload.appearance = normalized_appearance;
+                payload.computed_appearance = computed_appearance;
+                payload.column_height = ComputedSize::from_data(values.pointer(property_id::COLUMN_HEIGHT));
+                payload.outline_color = outline_color;
+                payload.object_position_x = position_offset(edge_x);
+                payload.object_position_y = position_offset(edge_y);
+                payload.view_transition_name = retained(property_id::VIEW_TRANSITION_NAME);
+                payload.touch_action_allow_left = allow[0];
+                payload.touch_action_allow_right = allow[1];
+                payload.touch_action_allow_up = allow[2];
+                payload.touch_action_allow_down = allow[3];
+                payload.touch_action_allow_pinch_zoom = allow[4];
+                payload.touch_action_allow_other = allow[5];
+                payload.scrollbar_gutter = *scrollbar_gutter;
+                payload.shape_margin = retained(property_id::SHAPE_MARGIN);
+                payload.shape_outside = retained(property_id::SHAPE_OUTSIDE);
+                payload.will_change = retained(property_id::WILL_CHANGE);
+            },
             parent_payload,
         )
     }
@@ -3129,6 +3027,61 @@ unsafe fn build_box_group(
     }
 }
 
+/// Builds the inherited font group from canonical Rust longhands and the
+/// platform font resources supplied by C++.
+unsafe fn build_font_group(
+    values: &EffectiveValues,
+    inputs: &FfiFontGroupBuildInputs,
+    parent_payload: *const c_void,
+) -> *const c_void {
+    use crate::css::css_pixels::CssPixels;
+
+    assert!(!inputs.first_available_font.is_null());
+    assert!(!inputs.font_cascade_list.is_null());
+    let retained = |property| ComputedStyleValueHandle::retained(values.pointer(property).cast());
+    let built = FontValues {
+        font_size: CssPixels::from_raw(inputs.font_size_raw),
+        line_height_used: CssPixels::from_raw(inputs.line_height_used_raw),
+        font_variant_emoji: inputs.font_variant_emoji,
+        font_ascent: inputs.font_ascent,
+        font_descent: inputs.font_descent,
+        font_x_height: inputs.font_x_height,
+        first_available_font: inputs.first_available_font,
+        font_cascade_list: inputs.font_cascade_list,
+        font_weight: inputs.font_weight,
+        font_width: inputs.font_width,
+        math_shift: inputs.math_shift,
+        math_style: inputs.math_style,
+        math_depth: inputs.math_depth,
+        font_family: retained(property_id::FONT_FAMILY),
+        font_style: retained(property_id::FONT_STYLE),
+        font_optical_sizing: retained(property_id::FONT_OPTICAL_SIZING),
+        font_feature_settings: retained(property_id::FONT_FEATURE_SETTINGS),
+        font_kerning: retained(property_id::FONT_KERNING),
+        font_language_override: retained(property_id::FONT_LANGUAGE_OVERRIDE),
+        font_variant_alternates: retained(property_id::FONT_VARIANT_ALTERNATES),
+        font_variant_caps: retained(property_id::FONT_VARIANT_CAPS),
+        font_variant_east_asian: retained(property_id::FONT_VARIANT_EAST_ASIAN),
+        font_variant_ligatures: retained(property_id::FONT_VARIANT_LIGATURES),
+        font_variant_numeric: retained(property_id::FONT_VARIANT_NUMERIC),
+        font_variant_position: retained(property_id::FONT_VARIANT_POSITION),
+        font_variation_settings: retained(property_id::FONT_VARIATION_SETTINGS),
+        text_rendering: retained(property_id::TEXT_RENDERING),
+        line_height: retained(property_id::LINE_HEIGHT),
+        math_shift_value: retained(property_id::MATH_SHIFT),
+        math_style_value: retained(property_id::MATH_STYLE),
+        math_depth_value: retained(property_id::MATH_DEPTH),
+    };
+    unsafe {
+        crate::css::computed_values::build_group_payload_with_rust_fill(
+            group_index::FONT,
+            &[],
+            |payload| *payload.cast::<FontValues>() = built,
+            parent_payload,
+        )
+    }
+}
+
 /// Builds the animation group from the canonical Rust longhand values.
 unsafe fn build_animation_group(
     values: &EffectiveValues,
@@ -3180,8 +3133,6 @@ unsafe fn build_animation_group(
 /// Non-null payloads carry one reference for the caller, with the marshalled
 /// builders' sharing rules.
 ///
-/// The font group always stays with C++ (its payload is not a Rust group).
-///
 /// # Safety
 /// `table` must be a valid frozen table holding the style's computed values;
 /// `parent_payloads` and `out_payloads` must each hold `group_count` entries,
@@ -3230,7 +3181,14 @@ pub unsafe extern "C" fn rust_build_group_payloads_from_table(
             // the caller warrants the parent payloads.
             let payload = unsafe {
                 match group {
-                    group_index::FONT => std::ptr::null(),
+                    group_index::FONT => build_font_group(
+                        &values,
+                        inputs
+                            .font
+                            .as_ref()
+                            .expect("an applied font group has platform font inputs"),
+                        parent_payload,
+                    ),
                     group_index::BOX => {
                         build_box_group(&values, inputs.box_display_before_transformation_raw, parent_payload)
                     }
@@ -3284,13 +3242,9 @@ pub unsafe extern "C" fn rust_build_group_payloads_from_table(
                     group_index::INHERITED_TEXT => {
                         build_inherited_text_group(&values, &input, inputs.used_color_scheme, parent_payload)
                     }
-                    group_index::MISC_RESET => build_misc_reset_group(
-                        &values,
-                        &input,
-                        inputs.used_color_scheme,
-                        inputs.cpp_assembler_context,
-                        parent_payload,
-                    ),
+                    group_index::MISC_RESET => {
+                        build_misc_reset_group(&values, &input, inputs.used_color_scheme, parent_payload)
+                    }
                     group_index::INHERITED_SVG => {
                         build_inherited_svg_group(&values, &input, inputs.used_color_scheme, parent_payload)
                     }

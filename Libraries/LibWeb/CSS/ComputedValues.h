@@ -1339,7 +1339,7 @@ public:
     OverflowWrap overflow_wrap() const { return m_inherited.text->overflow_wrap_value(); }
     u64 orphans() const { return m_inherited.text->orphans; }
     u64 widows() const { return m_inherited.text->widows; }
-    FontVariantEmoji font_variant_emoji() const { return m_inherited.font->font_variant_emoji; }
+    FontVariantEmoji font_variant_emoji() const { return static_cast<FontVariantEmoji>(m_inherited.font->font_variant_emoji); }
     CSSPixels word_spacing() const { return m_inherited.text->word_spacing_value(); }
     CSSPixels letter_spacing() const { return m_inherited.text->letter_spacing_value(); }
     FlexDirection flex_direction() const { return static_cast<FlexDirection>(m_noninherited.alignment->flex_direction); }
@@ -1360,8 +1360,8 @@ public:
     AlignContent align_content() const { return static_cast<AlignContent>(m_noninherited.alignment->align_content); }
     AlignItems align_items() const { return static_cast<AlignItems>(m_noninherited.alignment->align_items); }
     AlignSelf align_self() const { return static_cast<AlignSelf>(m_noninherited.alignment->align_self); }
-    Appearance appearance() const { return m_noninherited.misc->appearance; }
-    Appearance computed_appearance() const { return m_noninherited.misc->computed_appearance; }
+    Appearance appearance() const { return static_cast<Appearance>(m_noninherited.misc->appearance); }
+    Appearance computed_appearance() const { return static_cast<Appearance>(m_noninherited.misc->computed_appearance); }
     float opacity() const { return m_noninherited.effects->opacity; }
     Visibility visibility() const { return static_cast<Visibility>(m_inherited.box->visibility); }
     ImageRendering image_rendering() const { return static_cast<ImageRendering>(m_inherited.box->image_rendering); }
@@ -1396,14 +1396,14 @@ public:
         return ColumnCount::make_integer(m_noninherited.box->column_count);
     }
     Variant<LengthPercentage, NormalGap> column_gap() const { return gap(m_noninherited.alignment->column_gap); }
-    ColumnSpan const& column_span() const { return m_noninherited.misc->column_span; }
+    ColumnSpan column_span() const { return static_cast<ColumnSpan>(m_noninherited.misc->column_span); }
     Size const& column_width() const { return Size::view(m_noninherited.box->column_width); }
-    Size const& column_height() const { return m_noninherited.misc->column_height; }
+    Size const& column_height() const { return Size::view(m_noninherited.misc->column_height); }
     Variant<LengthPercentage, NormalGap> row_gap() const { return gap(m_noninherited.alignment->row_gap); }
     BorderCollapse border_collapse() const { return static_cast<BorderCollapse>(m_inherited.table->border_collapse); }
     EmptyCells empty_cells() const { return static_cast<EmptyCells>(m_inherited.table->empty_cells); }
-    ObjectFit object_fit() const { return m_noninherited.misc->object_fit; }
-    Position object_position() const { return m_noninherited.misc->object_position; }
+    ObjectFit object_fit() const { return static_cast<ObjectFit>(m_noninherited.misc->object_fit); }
+    Position object_position() const { return m_noninherited.misc->object_position_value(); }
     Direction direction() const { return static_cast<Direction>(m_inherited.box->direction); }
     Optional<BaselineMetric> dominant_baseline() const { return m_inherited.svg->dominant_baseline_value(); }
     UnicodeBidi unicode_bidi() const { return static_cast<UnicodeBidi>(m_noninherited.box->unicode_bidi); }
@@ -1437,7 +1437,7 @@ public:
         VERIFY_NOT_REACHED();
     }
 
-    UserSelect user_select() const { return m_noninherited.misc->user_select; }
+    UserSelect user_select() const { return static_cast<UserSelect>(m_noninherited.misc->user_select); }
     Isolation isolation() const { return m_noninherited.effects->isolation_value(); }
     Containment contain() const
     {
@@ -1469,8 +1469,8 @@ public:
         };
     }
     MixBlendMode mix_blend_mode() const { return m_noninherited.effects->mix_blend_mode_value(); }
-    Optional<Utf16FlyString> view_transition_name() const { return m_noninherited.misc->view_transition_name; }
-    TouchActionData touch_action() const { return m_noninherited.misc->touch_action; }
+    Optional<Utf16FlyString> view_transition_name() const { return m_noninherited.misc->view_transition_name_value(); }
+    TouchActionData touch_action() const { return m_noninherited.misc->touch_action_value(); }
     ShapeRendering shape_rendering() const { return m_inherited.svg->shape_rendering_value(); }
 
     LengthBox inset() const { return length_box(m_noninherited.surround->inset); }
@@ -1490,9 +1490,9 @@ public:
     }
     LengthBox margin() const { return length_box(m_noninherited.surround->margin); }
     LengthBox padding() const { return length_box(m_noninherited.surround->padding); }
-    LengthBox const& scroll_margin() const { return m_noninherited.misc->scroll_margin; }
-    LengthBox const& scroll_padding() const { return m_noninherited.misc->scroll_padding; }
-    OverflowClipMarginData const& overflow_clip_margin() const { return m_noninherited.misc->overflow_clip_margin; }
+    LengthBox scroll_margin() const { return length_box(m_noninherited.misc->scroll_margin); }
+    LengthBox scroll_padding() const { return length_box(m_noninherited.misc->scroll_padding); }
+    OverflowClipMarginData overflow_clip_margin() const { return m_noninherited.misc->overflow_clip_margin_value(); }
 
     BorderData const& border_left() const { return m_noninherited.border->border_left_value(); }
     BorderData const& border_top() const { return m_noninherited.border->border_top_value(); }
@@ -1597,42 +1597,35 @@ public:
     Optional<CSSPixels> perspective() const { return m_noninherited.transform->perspective_value(); }
     Position perspective_origin() const { return m_noninherited.transform->perspective_origin_value(); }
 
-    Gfx::FontCascadeList const& font_list() const { return *m_inherited.font->font_list; }
-    Vector<ComputedFontFamily> const& font_families() const { return m_inherited.font->font_families; }
-    CSSPixels font_size() const { return m_inherited.font->font_size; }
+    Gfx::FontCascadeList const& font_list() const { return m_inherited.font->font_list_value(); }
+    CSSPixels font_size() const { return CSSPixels::from_raw(m_inherited.font->font_size); }
     double font_weight() const { return m_inherited.font->font_weight; }
-    Percentage font_width() const { return m_inherited.font->font_width; }
-    ComputedFontStyle const& font_style() const { return m_inherited.font->font_style; }
-    FontOpticalSizing font_optical_sizing() const { return m_inherited.font->font_optical_sizing; }
-    FontFeatureData const& font_feature_data() const { return m_inherited.font->font_feature_data; }
-    Optional<Utf16FlyString> font_language_override() const { return m_inherited.font->font_language_override; }
-    HashMap<Utf16FlyString, double> font_variation_settings() const { return m_inherited.font->font_variation_settings; }
-    CSSPixels line_height() const { return m_inherited.font->line_height_used; }
-    LineHeightData const& line_height_data() const { return m_inherited.font->line_height; }
+    Percentage font_width() const { return Percentage { m_inherited.font->font_width }; }
+    CSSPixels line_height() const { return CSSPixels::from_raw(m_inherited.font->line_height_used); }
 
-    Color outline_color() const { return m_noninherited.misc->outline_color; }
-    CSSPixels outline_offset() const { return m_noninherited.misc->outline_offset; }
-    RefPtr<StyleValue const> outline_offset_style_value() const { return m_noninherited.misc->outline_offset_style_value; }
-    OutlineStyle outline_style() const { return m_noninherited.misc->outline_style; }
-    CSSPixels outline_width() const { return m_noninherited.misc->outline_width; }
+    Color outline_color() const { return Color::from_bgra(m_noninherited.misc->outline_color); }
+    CSSPixels outline_offset() const { return CSSPixels::from_raw(m_noninherited.misc->outline_offset); }
+    RefPtr<StyleValue const> outline_offset_style_value() const { return m_noninherited.misc->outline_offset_style_value_value(); }
+    OutlineStyle outline_style() const { return static_cast<OutlineStyle>(m_noninherited.misc->outline_style); }
+    CSSPixels outline_width() const { return CSSPixels::from_raw(m_noninherited.misc->outline_width); }
 
     TableLayout table_layout() const { return static_cast<TableLayout>(m_noninherited.box->table_layout); }
 
     QuotesData quotes() const { return m_inherited.list->quotes_value(); }
 
-    MathShift math_shift() const { return m_inherited.font->math_shift; }
-    MathStyle math_style() const { return m_inherited.font->math_style; }
+    MathShift math_shift() const { return static_cast<MathShift>(m_inherited.font->math_shift); }
+    MathStyle math_style() const { return static_cast<MathStyle>(m_inherited.font->math_style); }
     int math_depth() const { return m_inherited.font->math_depth; }
 
-    ScrollBehavior scroll_behavior() const { return m_noninherited.misc->scroll_behavior; }
+    ScrollBehavior scroll_behavior() const { return static_cast<ScrollBehavior>(m_noninherited.misc->scroll_behavior); }
     ScrollbarColorData scrollbar_color() const { return m_inherited.ui->scrollbar_color_value(); }
-    ScrollbarGutter scrollbar_gutter() const { return m_noninherited.misc->scrollbar_gutter; }
-    ScrollbarWidth scrollbar_width() const { return m_noninherited.misc->scrollbar_width; }
+    ScrollbarGutter scrollbar_gutter() const { return static_cast<ScrollbarGutter>(m_noninherited.misc->scrollbar_gutter); }
+    ScrollbarWidth scrollbar_width() const { return static_cast<ScrollbarWidth>(m_noninherited.misc->scrollbar_width); }
     Resize resize() const { return static_cast<Resize>(m_noninherited.box->resize); }
     double shape_image_threshold() const { return m_noninherited.misc->shape_image_threshold; }
-    LengthPercentage const& shape_margin() const { return m_noninherited.misc->shape_margin; }
-    ShapeOutsideData const& shape_outside() const { return m_noninherited.misc->shape_outside; }
-    WillChange const& will_change() const { return m_noninherited.misc->will_change; }
+    LengthPercentage shape_margin() const { return LengthPercentage::view(m_noninherited.misc->shape_margin); }
+    ShapeOutsideData shape_outside() const { return m_noninherited.misc->shape_outside_value(); }
+    WillChange will_change() const { return m_noninherited.misc->will_change_value(); }
 
 private:
     friend class ComputedStyleRecordView;
@@ -1888,40 +1881,19 @@ public:
         }
     };
 
-    // NB: FontValues has no defaulted equality operator because HashMap does not
-    //     support equality; the setters compare field-by-field instead.
-    //
-    // The group's payload lifecycle stays in C++, but the members up to and
-    // including font_list mirror the Rust FontLayoutFacts prefix, pinned by
-    // static asserts in ComputedValues.cpp, so layout reads them as typed
-    // fields. The metrics and first_available_font are derived copies that
-    // set_font_list keeps in sync with font_list; the derived pointers
-    // borrow objects font_list keeps alive.
-    struct FontValues {
+    // Rust owns the canonical font values and the derived layout-facing facts.
+    // The platform font pointers borrow cascades pinned by FontComputer.
+    struct FontValues : ComputedValuesFFI::FontValues {
         static constexpr size_t style_group_index = to_underlying(StyleGroupIndex::FontValues);
-        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::CppWithFontFacts;
-        CSSPixels font_size { InitialValues::font_size() };
-        CSSPixels line_height_used { InitialValues::line_height() };
-        FontVariantEmoji font_variant_emoji { InitialValues::font_variant_emoji() };
-        float font_ascent { 0 };
-        float font_descent { 0 };
-        float font_x_height { 0 };
-        Gfx::Font const* first_available_font { nullptr };
-        RefPtr<Gfx::FontCascadeList const> font_list {};
-        Vector<ComputedFontFamily> font_families { GenericFontFamily::Serif };
-        double font_weight { InitialValues::font_weight() };
-        Percentage font_width { InitialValues::font_width() };
-        ComputedFontStyle font_style { InitialValues::font_style() };
-        FontOpticalSizing font_optical_sizing { InitialValues::font_optical_sizing() };
-        FontFeatureData font_feature_data { InitialValues::font_feature_data() };
-        Optional<Utf16FlyString> font_language_override;
-        HashMap<Utf16FlyString, double> font_variation_settings;
-        LineHeightData line_height;
-        MathShift math_shift { InitialValues::math_shift() };
-        MathStyle math_style { InitialValues::math_style() };
-        int math_depth { InitialValues::math_depth() };
+        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::Font;
 
-        bool operator==(FontValues const&) const;
+        Gfx::FontCascadeList const& font_list_value() const;
+        RefPtr<StyleValue const> font_family_style_value() const;
+
+        bool operator==(FontValues const& other) const
+        {
+            return ComputedValuesFFI::rust_style_group_payloads_equal(style_group_index, this, &other);
+        }
     };
 
 private:
@@ -2342,67 +2314,21 @@ public:
         }
     };
 
-    struct MiscResetValues {
+    struct MiscResetValues : ComputedValuesFFI::MiscResetValues {
         static constexpr size_t style_group_index = to_underlying(StyleGroupIndex::MiscResetValues);
-        RefPtr<StyleValue const> outline_offset_style_value;
-        LengthBox scroll_margin { InitialValues::scroll_margin() };
-        LengthBox scroll_padding { InitialValues::scroll_padding() };
-        OverflowClipMarginData overflow_clip_margin { InitialValues::overflow_clip_margin() };
-        ColumnSpan column_span { InitialValues::column_span() };
-        Appearance appearance { InitialValues::appearance() };
-        Appearance computed_appearance { Appearance::None };
-        OutlineStyle outline_style { InitialValues::outline_style() };
-        ObjectFit object_fit { InitialValues::object_fit() };
-        Size column_height { InitialValues::column_height() };
-        Color outline_color { InitialValues::outline_color() };
-        CSSPixels outline_width { InitialValues::outline_width() };
-        CSSPixels outline_offset { InitialValues::outline_offset() };
-        UserSelect user_select { InitialValues::user_select() };
-        Position object_position { InitialValues::object_position() };
-        Optional<Utf16FlyString> view_transition_name;
-        TouchActionData touch_action;
-        ScrollBehavior scroll_behavior { InitialValues::scroll_behavior() };
-        ScrollbarGutter scrollbar_gutter { InitialValues::scrollbar_gutter() };
-        ScrollbarWidth scrollbar_width { InitialValues::scrollbar_width() };
-        double shape_image_threshold { InitialValues::shape_image_threshold() };
-        LengthPercentage shape_margin { InitialValues::shape_margin() };
-        ShapeOutsideData shape_outside { InitialValues::shape_outside() };
-        WillChange will_change { InitialValues::will_change() };
+        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::MiscReset;
+
+        RefPtr<StyleValue const> outline_offset_style_value_value() const;
+        OverflowClipMarginData overflow_clip_margin_value() const;
+        Position object_position_value() const;
+        Optional<Utf16FlyString> view_transition_name_value() const;
+        TouchActionData touch_action_value() const;
+        ShapeOutsideData shape_outside_value() const;
+        WillChange will_change_value() const;
 
         bool operator==(MiscResetValues const& other) const
         {
-            // A style value is compared by value, not by address: recomputation builds a fresh one for
-            // the same declaration, and a defaulted comparison would call the group different when
-            // nothing about it moved.
-            auto style_values_equal = [](auto const& first, auto const& second) {
-                if (!first || !second)
-                    return !first && !second;
-                return *first == *second;
-            };
-            return style_values_equal(outline_offset_style_value, other.outline_offset_style_value)
-                && scroll_margin == other.scroll_margin
-                && scroll_padding == other.scroll_padding
-                && overflow_clip_margin == other.overflow_clip_margin
-                && column_span == other.column_span
-                && appearance == other.appearance
-                && computed_appearance == other.computed_appearance
-                && outline_style == other.outline_style
-                && object_fit == other.object_fit
-                && column_height == other.column_height
-                && outline_color == other.outline_color
-                && outline_width == other.outline_width
-                && outline_offset == other.outline_offset
-                && user_select == other.user_select
-                && object_position == other.object_position
-                && view_transition_name == other.view_transition_name
-                && touch_action == other.touch_action
-                && scroll_behavior == other.scroll_behavior
-                && scrollbar_gutter == other.scrollbar_gutter
-                && scrollbar_width == other.scrollbar_width
-                && shape_image_threshold == other.shape_image_threshold
-                && shape_margin == other.shape_margin
-                && shape_outside == other.shape_outside
-                && will_change == other.will_change;
+            return ComputedValuesFFI::rust_style_group_payloads_equal(style_group_index, this, &other);
         }
     };
 
@@ -2629,96 +2555,7 @@ public:
     void adopt_surround_group(void* payload) { m_values.m_noninherited.surround.adopt(payload); }
     void adopt_border_group(void* payload) { m_values.m_noninherited.border.adopt(payload); }
     void adopt_background_group(void* payload) { m_values.m_noninherited.background.adopt(payload); }
-
-    void set_font_list(NonnullRefPtr<Gfx::FontCascadeList const> font_list)
-    {
-        // NB: Compare by value, not pointer: the font cascade list is rebuilt per element,
-        //     so pointer comparison would defeat sharing of the font group.
-        if (m_values.m_inherited.font->font_list && m_values.m_inherited.font->font_list->equals(*font_list))
-            return;
-        auto& font = m_values.m_inherited.font.access();
-        auto const& first_available_font = font_list->font_for_code_point(' ');
-        auto const metrics = first_available_font.pixel_metrics();
-        font.first_available_font = &first_available_font;
-        font.font_ascent = metrics.ascent;
-        font.font_descent = metrics.descent;
-        font.font_x_height = metrics.x_height;
-        font.font_list = move(font_list);
-    }
-    void set_font_families(Vector<ComputedFontFamily> value)
-    {
-        if (m_values.m_inherited.font->font_families == value)
-            return;
-        m_values.m_inherited.font.access().font_families = move(value);
-    }
-    void set_font_size(CSSPixels font_size)
-    {
-        if (m_values.m_inherited.font->font_size == font_size)
-            return;
-        m_values.m_inherited.font.access().font_size = font_size;
-    }
-    void set_font_weight(double font_weight)
-    {
-        if (m_values.m_inherited.font->font_weight == font_weight)
-            return;
-        m_values.m_inherited.font.access().font_weight = font_weight;
-    }
-    void set_font_width(Percentage font_width)
-    {
-        if (m_values.m_inherited.font->font_width == font_width)
-            return;
-        m_values.m_inherited.font.access().font_width = font_width;
-    }
-    void set_font_style(ComputedFontStyle font_style)
-    {
-        if (m_values.m_inherited.font->font_style == font_style)
-            return;
-        m_values.m_inherited.font.access().font_style = move(font_style);
-    }
-    void set_font_optical_sizing(FontOpticalSizing font_optical_sizing)
-    {
-        if (m_values.m_inherited.font->font_optical_sizing == font_optical_sizing)
-            return;
-        m_values.m_inherited.font.access().font_optical_sizing = font_optical_sizing;
-    }
-    void set_font_feature_data(FontFeatureData font_feature_data)
-    {
-        if (m_values.m_inherited.font->font_feature_data == font_feature_data)
-            return;
-        m_values.m_inherited.font.access().font_feature_data = move(font_feature_data);
-    }
-    void set_font_language_override(Optional<Utf16FlyString> font_language_override)
-    {
-        if (m_values.m_inherited.font->font_language_override == font_language_override)
-            return;
-        m_values.m_inherited.font.access().font_language_override = move(font_language_override);
-    }
-    void set_font_variation_settings(HashMap<Utf16FlyString, double> value)
-    {
-        auto settings_equal = [&] {
-            auto const& current = m_values.m_inherited.font->font_variation_settings;
-            if (current.size() != value.size())
-                return false;
-            for (auto const& entry : value) {
-                auto it = current.find(entry.key);
-                if (it == current.end() || it->value != entry.value)
-                    return false;
-            }
-            return true;
-        };
-        if (settings_equal())
-            return;
-        m_values.m_inherited.font.access().font_variation_settings = move(value);
-    }
-    void set_line_height(LineHeightData line_height, CSSPixels used_value)
-    {
-        auto const& font = *m_values.m_inherited.font;
-        if (font.line_height == line_height && font.line_height_used == used_value)
-            return;
-        auto& mutable_font = m_values.m_inherited.font.access();
-        mutable_font.line_height_used = used_value;
-        mutable_font.line_height = move(line_height);
-    }
+    void adopt_font_group(void* payload) { m_values.m_inherited.font.adopt(payload); }
     void set_border_spacing_horizontal(CSSPixels border_spacing_horizontal)
     {
         if (m_values.m_inherited.table->border_spacing_horizontal == border_spacing_horizontal.raw_value())
@@ -2870,12 +2707,6 @@ public:
             &anchor,
             to_underlying(value.type),
             value.name.has_value() ? value.name->to_raw_leaked() : 0);
-    }
-    void set_font_variant_emoji(FontVariantEmoji value)
-    {
-        if (m_values.m_inherited.font->font_variant_emoji == value)
-            return;
-        m_values.m_inherited.font.access().font_variant_emoji = value;
     }
     void set_letter_spacing(CSSPixels value)
     {
@@ -3061,34 +2892,15 @@ public:
     }
     void set_outline_color(Color value)
     {
-        if (m_values.m_noninherited.misc->outline_color == value)
+        if (m_values.m_noninherited.misc->outline_color == value.value())
             return;
-        m_values.m_noninherited.misc.access().outline_color = value;
+        m_values.m_noninherited.misc.access().outline_color = value.value();
     }
-    void set_math_shift(MathShift value)
-    {
-        if (m_values.m_inherited.font->math_shift == value)
-            return;
-        m_values.m_inherited.font.access().math_shift = value;
-    }
-    void set_math_style(MathStyle value)
-    {
-        if (m_values.m_inherited.font->math_style == value)
-            return;
-        m_values.m_inherited.font.access().math_style = value;
-    }
-    void set_math_depth(int value)
-    {
-        if (m_values.m_inherited.font->math_depth == value)
-            return;
-        m_values.m_inherited.font.access().math_depth = value;
-    }
-
     void set_scrollbar_width(ScrollbarWidth value)
     {
-        if (m_values.m_noninherited.misc->scrollbar_width == value)
+        if (m_values.m_noninherited.misc->scrollbar_width == to_underlying(value))
             return;
-        m_values.m_noninherited.misc.access().scrollbar_width = value;
+        m_values.m_noninherited.misc.access().scrollbar_width = to_underlying(value);
     }
 
 private:

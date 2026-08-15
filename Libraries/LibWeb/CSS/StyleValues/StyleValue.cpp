@@ -101,7 +101,6 @@
 extern "C" void ladybird_utf16_fly_string_unref(size_t);
 extern "C" void ladybird_utf16_fly_string_ref(size_t);
 extern "C" Web::CSS::StyleValueFFI::FfiFlyStringView ladybird_utf16_fly_string_view(size_t, u8*);
-extern "C" size_t ladybird_utf16_fly_string_concat_ascii(size_t, u8 const*, size_t);
 extern "C" void ladybird_string_unref(size_t);
 extern "C" void ladybird_string_ref(size_t);
 
@@ -700,18 +699,6 @@ extern "C" Web::CSS::StyleValueFFI::FfiFlyStringView ladybird_utf16_fly_string_v
 extern "C" void ladybird_utf16_fly_string_ref(size_t raw)
 {
     (void)Utf16FlyString::from_raw(raw).to_raw_leaked();
-}
-
-// Called when the Rust grid group builder interns an implicit grid line name: the concatenation
-// of a live fly string and an ASCII suffix, returned as one leaked reference.
-extern "C" size_t ladybird_utf16_fly_string_concat_ascii(size_t raw, u8 const* suffix, size_t suffix_length)
-{
-    auto base = Utf16FlyString::from_raw(raw);
-    Utf16StringBuilder builder;
-    builder.append(base.view());
-    builder.append_ascii(StringView { suffix, suffix_length });
-    auto concatenated = builder.to_string();
-    return Utf16FlyString::from_utf16(concatenated.utf16_view()).to_raw_leaked();
 }
 
 // Called when Rust-owned style value data drops a retained String.

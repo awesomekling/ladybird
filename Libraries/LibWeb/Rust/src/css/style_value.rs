@@ -739,6 +739,8 @@ impl RetainedColorStopList {
 #[derive(Clone, PartialEq)]
 pub struct RetainedGridArea {
     name: RetainedUtf16FlyString,
+    implicit_start_name: RetainedUtf16FlyString,
+    implicit_end_name: RetainedUtf16FlyString,
     row_start: usize,
     row_end: usize,
     column_start: usize,
@@ -748,6 +750,14 @@ pub struct RetainedGridArea {
 impl RetainedGridArea {
     pub(crate) fn name(&self) -> &RetainedUtf16FlyString {
         &self.name
+    }
+
+    pub(crate) fn implicit_start_name(&self) -> &RetainedUtf16FlyString {
+        &self.implicit_start_name
+    }
+
+    pub(crate) fn implicit_end_name(&self) -> &RetainedUtf16FlyString {
+        &self.implicit_end_name
     }
 
     pub(crate) fn grid_lines(&self) -> [usize; 4] {
@@ -773,6 +783,12 @@ impl RetainedGridAreaList {
                 let element = unsafe { &*elements.add(i) };
                 RetainedGridArea {
                     name: unsafe { RetainedUtf16FlyString::from_leaked_raw(element.name.raw()) },
+                    implicit_start_name: unsafe {
+                        RetainedUtf16FlyString::from_leaked_raw(element.implicit_start_name.raw())
+                    },
+                    implicit_end_name: unsafe {
+                        RetainedUtf16FlyString::from_leaked_raw(element.implicit_end_name.raw())
+                    },
                     row_start: element.row_start,
                     row_end: element.row_end,
                     column_start: element.column_start,
@@ -1473,6 +1489,8 @@ pub enum StyleValueData {
         value: RetainedStyleValueData,
         has_name: bool,
         name: RetainedUtf16FlyString,
+        implicit_start_name: RetainedUtf16FlyString,
+        implicit_end_name: RetainedUtf16FlyString,
     },
     /// counter() or counters(). The function is the C++ CounterFunction enum, opaque to Rust;
     /// the join string is empty for counter().
@@ -2084,6 +2102,8 @@ impl StyleValueData {
                 value,
                 has_name,
                 name,
+                implicit_start_name: _,
+                implicit_end_name: _,
             } => {
                 hasher.write_u8(*kind);
                 write_value(hasher, value);
@@ -3078,6 +3098,8 @@ pub unsafe extern "C" fn rust_style_value_create_grid_track_placement(
     value: *const StyleValueData,
     has_name: bool,
     name: usize,
+    implicit_start_name: usize,
+    implicit_end_name: usize,
 ) -> *const StyleValueData {
     abort_on_panic(|| {
         Arc::into_raw(Arc::new(StyleValueData::GridTrackPlacement {
@@ -3085,6 +3107,8 @@ pub unsafe extern "C" fn rust_style_value_create_grid_track_placement(
             value: unsafe { RetainedStyleValueData::from_retained_optional_pointer(value) },
             has_name,
             name: unsafe { RetainedUtf16FlyString::from_leaked_raw(name) },
+            implicit_start_name: unsafe { RetainedUtf16FlyString::from_leaked_raw(implicit_start_name) },
+            implicit_end_name: unsafe { RetainedUtf16FlyString::from_leaked_raw(implicit_end_name) },
         }))
     })
 }

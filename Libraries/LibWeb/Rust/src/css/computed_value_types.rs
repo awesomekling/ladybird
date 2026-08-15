@@ -250,6 +250,58 @@ pub struct InheritedListValues {
     pub quotes: ComputedStyleValueHandle,
 }
 
+/// One physical overflow-clip-margin side.
+#[repr(C)]
+pub struct ComputedOverflowClipMarginSide {
+    pub has_visual_box: bool,
+    pub visual_box: u8,
+    pub offset: crate::css::css_pixels::CssPixels,
+}
+
+/// Four physical overflow-clip-margin sides.
+#[repr(C)]
+pub struct ComputedOverflowClipMargin {
+    pub left: ComputedOverflowClipMarginSide,
+    pub top: ComputedOverflowClipMarginSide,
+    pub right: ComputedOverflowClipMarginSide,
+    pub bottom: ComputedOverflowClipMarginSide,
+}
+
+/// Canonical non-inherited values which do not form a more specific group.
+#[repr(C)]
+pub struct MiscResetValues {
+    pub outline_offset_style_value: ComputedStyleValueHandle,
+    pub scroll_margin: ComputedLengthBox,
+    pub scroll_padding: ComputedLengthBox,
+    pub overflow_clip_margin: ComputedOverflowClipMargin,
+    pub column_span: u8,
+    pub appearance: u8,
+    pub computed_appearance: u8,
+    pub outline_style: u8,
+    pub object_fit: u8,
+    pub column_height: ComputedSize,
+    pub outline_color: u32,
+    pub outline_width: crate::css::css_pixels::CssPixels,
+    pub outline_offset: crate::css::css_pixels::CssPixels,
+    pub user_select: u8,
+    pub object_position_x: ComputedStyleValueHandle,
+    pub object_position_y: ComputedStyleValueHandle,
+    pub view_transition_name: ComputedStyleValueHandle,
+    pub touch_action_allow_left: bool,
+    pub touch_action_allow_right: bool,
+    pub touch_action_allow_up: bool,
+    pub touch_action_allow_down: bool,
+    pub touch_action_allow_pinch_zoom: bool,
+    pub touch_action_allow_other: bool,
+    pub scroll_behavior: u8,
+    pub scrollbar_gutter: u8,
+    pub scrollbar_width: u8,
+    pub shape_image_threshold: f64,
+    pub shape_margin: ComputedStyleValueHandle,
+    pub shape_outside: ComputedStyleValueHandle,
+    pub will_change: ComputedStyleValueHandle,
+}
+
 /// A computed text-indent value, mirroring the C++ TextIndentData layout:
 /// a retained length-percentage plus the each-line and hanging flags.
 #[repr(C)]
@@ -387,11 +439,9 @@ pub struct BackgroundValues {
     pub background_size: ComputedStyleValueHandle,
 }
 
-/// The layout-facing prefix of the C++-owned font style group, pinned by
-/// static asserts beside the C++ group definition. The metric fields and the
-/// first-available-font pointer are derived from the font cascade list when
-/// it is installed on the group; the pointers borrow objects the same
-/// payload keeps alive.
+/// The layout-facing prefix of the Rust-owned font style group. The metric
+/// fields and pointers borrow a font cascade pinned by the document's font
+/// computer for the lifetime of its style records.
 #[repr(C)]
 pub struct FontLayoutFacts {
     pub font_size: crate::css::css_pixels::CssPixels,
@@ -402,6 +452,42 @@ pub struct FontLayoutFacts {
     pub font_x_height: f32,
     pub first_available_font: *const std::ffi::c_void,
     pub font_cascade_list: *const std::ffi::c_void,
+}
+
+/// Canonical inherited font values and their derived platform font facts.
+#[repr(C)]
+pub struct FontValues {
+    pub font_size: crate::css::css_pixels::CssPixels,
+    pub line_height_used: crate::css::css_pixels::CssPixels,
+    pub font_variant_emoji: u8,
+    pub font_ascent: f32,
+    pub font_descent: f32,
+    pub font_x_height: f32,
+    pub first_available_font: *const std::ffi::c_void,
+    pub font_cascade_list: *const std::ffi::c_void,
+    pub font_weight: f64,
+    pub font_width: f64,
+    pub math_shift: u8,
+    pub math_style: u8,
+    pub math_depth: i32,
+    pub font_family: ComputedStyleValueHandle,
+    pub font_style: ComputedStyleValueHandle,
+    pub font_optical_sizing: ComputedStyleValueHandle,
+    pub font_feature_settings: ComputedStyleValueHandle,
+    pub font_kerning: ComputedStyleValueHandle,
+    pub font_language_override: ComputedStyleValueHandle,
+    pub font_variant_alternates: ComputedStyleValueHandle,
+    pub font_variant_caps: ComputedStyleValueHandle,
+    pub font_variant_east_asian: ComputedStyleValueHandle,
+    pub font_variant_ligatures: ComputedStyleValueHandle,
+    pub font_variant_numeric: ComputedStyleValueHandle,
+    pub font_variant_position: ComputedStyleValueHandle,
+    pub font_variation_settings: ComputedStyleValueHandle,
+    pub text_rendering: ComputedStyleValueHandle,
+    pub line_height: ComputedStyleValueHandle,
+    pub math_shift_value: ComputedStyleValueHandle,
+    pub math_style_value: ComputedStyleValueHandle,
+    pub math_depth_value: ComputedStyleValueHandle,
 }
 
 pub const GRID_NO_INDEX: u32 = u32::MAX;
