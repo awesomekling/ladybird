@@ -265,7 +265,7 @@ class ColorInterpolationMethodStyleValue;
 class ColorMixStyleValue;
 class ColorSchemeStyleValue;
 class ColorStyleValue;
-class ComputedProperties;
+class ComputedStyleWorkingSet;
 class ComputedValues;
 class ComputedStyleRecordView;
 class LayoutStyle;
