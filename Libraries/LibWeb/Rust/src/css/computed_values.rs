@@ -35,15 +35,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::abort_on_panic;
 pub use crate::css::computed_value_types::{
-    AlignmentValues, AnchorValues, AnimationValues, BorderLayoutFacts, BoxValues, ComputedAspectRatio,
-    ComputedClipEdge, ComputedColorOrAuto, ComputedCursor, ComputedFilter, ComputedFilterOperation, ComputedFlexBasis,
-    ComputedGap, ComputedGridArea, ComputedGridPlacement, ComputedGridPlacementKind, ComputedGridTrackBreadth,
-    ComputedGridTrackEntry, ComputedGridTrackEntryKind, ComputedGridTrackList, ComputedLengthBox,
-    ComputedLengthPercentageOrAuto, ComputedPositionTryFallback, ComputedResolvedTransform, ComputedSize,
-    ComputedSizeKind, ComputedStyleValueHandle, ComputedSvgDash, ComputedSvgPaint, ComputedTextIndent,
-    ComputedTextUnderlineOffset, ComputedTextUnderlinePosition, ComputedVerticalAlign, EffectsValues, FontLayoutFacts,
-    GRID_NO_INDEX, GridValues, InheritedSVGValues, InheritedTextLayoutFacts, InheritedTextValues, InheritedUIValues,
-    RetainedComputedCursorList, RetainedComputedFilterOperationList, RetainedComputedResolvedTransformList,
+    AlignmentValues, AnchorValues, AnimationValues, BackgroundValues, BorderLayoutFacts, BorderValues, BoxValues,
+    ComputedAspectRatio, ComputedClipEdge, ComputedColorOrAuto, ComputedCursor, ComputedFilter,
+    ComputedFilterOperation, ComputedFlexBasis, ComputedGap, ComputedGridArea, ComputedGridPlacement,
+    ComputedGridPlacementKind, ComputedGridTrackBreadth, ComputedGridTrackEntry, ComputedGridTrackEntryKind,
+    ComputedGridTrackList, ComputedLengthBox, ComputedLengthPercentageOrAuto, ComputedPositionTryFallback,
+    ComputedResolvedTransform, ComputedSize, ComputedSizeKind, ComputedStyleValueHandle, ComputedSvgDash,
+    ComputedSvgPaint, ComputedTextIndent, ComputedTextUnderlineOffset, ComputedTextUnderlinePosition,
+    ComputedVerticalAlign, ContentValues, EffectsValues, FontLayoutFacts, GRID_NO_INDEX, GridValues,
+    InheritedListValues, InheritedSVGValues, InheritedTextLayoutFacts, InheritedTextValues, InheritedUIValues,
+    MaskValues, RetainedComputedCursorList, RetainedComputedFilterOperationList, RetainedComputedResolvedTransformList,
     RetainedComputedShadowList, RetainedComputedSvgDashList, RetainedGridAreaList, RetainedGridNameIndexList,
     RetainedGridTrackEntryList, RetainedPositionAreaList, RetainedPositionTryFallbackList,
     RetainedTextDecorationLineList, SVGResetValues, SizingValues, SurroundValues, TextResetValues, TransformValues,
@@ -484,6 +485,71 @@ impl_computed_payload_clone_and_eq!(AnimationValues {
     transition_delay,
     transition_behavior,
 });
+impl_computed_payload_clone_and_eq!(MaskValues {
+    mask_image,
+    mask_type,
+    clip_path,
+    mask_mode,
+    mask_repeat,
+    mask_position,
+    mask_clip,
+    mask_origin,
+    mask_size,
+    mask_composite,
+});
+impl_computed_payload_clone_and_eq!(BackgroundValues {
+    background_color,
+    background_color_style_value,
+    background_color_clip,
+    background_image,
+    background_attachment,
+    background_blend_mode,
+    background_clip,
+    background_origin,
+    background_position_x,
+    background_position_y,
+    background_repeat,
+    background_size,
+});
+impl_computed_payload_clone_and_eq!(BorderValues {
+    border_left,
+    border_top,
+    border_right,
+    border_bottom,
+    border_left_color_style_value,
+    border_top_color_style_value,
+    border_right_color_style_value,
+    border_bottom_color_style_value,
+    border_left_computed_width,
+    border_top_computed_width,
+    border_right_computed_width,
+    border_bottom_computed_width,
+    border_bottom_left_radius,
+    border_bottom_right_radius,
+    border_top_left_radius,
+    border_top_right_radius,
+    corner_bottom_left_shape,
+    corner_bottom_right_shape,
+    corner_top_left_shape,
+    corner_top_right_shape,
+    border_image_source,
+    border_image_slice,
+    border_image_width,
+    border_image_outset,
+    border_image_repeat,
+});
+impl_computed_payload_clone_and_eq!(ContentValues {
+    content,
+    counter_increment,
+    counter_reset,
+    counter_set,
+});
+impl_computed_payload_clone_and_eq!(InheritedListValues {
+    list_style_type,
+    list_style_position,
+    list_style_image,
+    quotes,
+});
 impl_computed_payload_clone_and_eq!(InheritedSVGValues {
     fill,
     stroke,
@@ -529,6 +595,13 @@ impl_computed_payload_clone_and_eq!(EffectsValues {
     box_shadows,
     clip_is_rect,
     clip_edges,
+    opacity_style_value,
+    filter_style_value,
+    backdrop_filter_style_value,
+    mix_blend_mode_style_value,
+    isolation_style_value,
+    box_shadow_style_value,
+    clip_style_value,
 });
 impl_computed_payload_clone_and_eq!(AnchorValues {
     anchor_names,
@@ -814,7 +887,6 @@ impl GridValues {
 #[derive(Clone, Copy)]
 pub enum StyleGroupLifecycle {
     Cpp,
-    CppWithBorderFacts,
     CppWithInheritedTextFacts,
     CppWithFontFacts,
     InheritedTable,
@@ -833,13 +905,17 @@ pub enum StyleGroupLifecycle {
     InheritedSVG,
     InheritedText,
     Animation,
+    Mask,
+    Background,
+    Border,
+    Content,
+    InheritedList,
 }
 
 impl StyleGroupLifecycle {
     pub(crate) fn payload_is_cpp_owned(self) -> bool {
         match self {
             StyleGroupLifecycle::Cpp
-            | StyleGroupLifecycle::CppWithBorderFacts
             | StyleGroupLifecycle::CppWithInheritedTextFacts
             | StyleGroupLifecycle::CppWithFontFacts => true,
             StyleGroupLifecycle::InheritedTable
@@ -857,7 +933,12 @@ impl StyleGroupLifecycle {
             | StyleGroupLifecycle::InheritedUI
             | StyleGroupLifecycle::InheritedSVG
             | StyleGroupLifecycle::InheritedText
-            | StyleGroupLifecycle::Animation => false,
+            | StyleGroupLifecycle::Animation
+            | StyleGroupLifecycle::Mask
+            | StyleGroupLifecycle::Background
+            | StyleGroupLifecycle::Border
+            | StyleGroupLifecycle::Content
+            | StyleGroupLifecycle::InheritedList => false,
         }
     }
 }
@@ -922,8 +1003,12 @@ fn payload_size(table: &StyleGroupVTable) -> usize {
         StyleGroupLifecycle::InheritedSVG => size_of::<InheritedSVGValues>(),
         StyleGroupLifecycle::InheritedText => size_of::<InheritedTextValues>(),
         StyleGroupLifecycle::Animation => size_of::<AnimationValues>(),
+        StyleGroupLifecycle::Mask => size_of::<MaskValues>(),
+        StyleGroupLifecycle::Background => size_of::<BackgroundValues>(),
+        StyleGroupLifecycle::Border => size_of::<BorderValues>(),
+        StyleGroupLifecycle::Content => size_of::<ContentValues>(),
+        StyleGroupLifecycle::InheritedList => size_of::<InheritedListValues>(),
         StyleGroupLifecycle::Cpp
-        | StyleGroupLifecycle::CppWithBorderFacts
         | StyleGroupLifecycle::CppWithInheritedTextFacts
         | StyleGroupLifecycle::CppWithFontFacts => unreachable!("C++-owned lifecycles are handled above"),
     }
@@ -950,8 +1035,12 @@ fn payload_align(table: &StyleGroupVTable) -> usize {
         StyleGroupLifecycle::InheritedSVG => align_of::<InheritedSVGValues>(),
         StyleGroupLifecycle::InheritedText => align_of::<InheritedTextValues>(),
         StyleGroupLifecycle::Animation => align_of::<AnimationValues>(),
+        StyleGroupLifecycle::Mask => align_of::<MaskValues>(),
+        StyleGroupLifecycle::Background => align_of::<BackgroundValues>(),
+        StyleGroupLifecycle::Border => align_of::<BorderValues>(),
+        StyleGroupLifecycle::Content => align_of::<ContentValues>(),
+        StyleGroupLifecycle::InheritedList => align_of::<InheritedListValues>(),
         StyleGroupLifecycle::Cpp
-        | StyleGroupLifecycle::CppWithBorderFacts
         | StyleGroupLifecycle::CppWithInheritedTextFacts
         | StyleGroupLifecycle::CppWithFontFacts => unreachable!("C++-owned lifecycles are handled above"),
     }
@@ -1014,8 +1103,22 @@ unsafe fn default_construct(table: &StyleGroupVTable, payload: *mut c_void) {
         StyleGroupLifecycle::Animation => unsafe {
             (payload as *mut AnimationValues).write(AnimationValues::initial());
         },
+        StyleGroupLifecycle::Mask => unsafe {
+            (payload as *mut MaskValues).write(MaskValues::initial());
+        },
+        StyleGroupLifecycle::Background => unsafe {
+            (payload as *mut BackgroundValues).write(BackgroundValues::initial());
+        },
+        StyleGroupLifecycle::Border => unsafe {
+            (payload as *mut BorderValues).write(BorderValues::initial());
+        },
+        StyleGroupLifecycle::Content => unsafe {
+            (payload as *mut ContentValues).write(ContentValues::initial());
+        },
+        StyleGroupLifecycle::InheritedList => unsafe {
+            (payload as *mut InheritedListValues).write(InheritedListValues::initial());
+        },
         StyleGroupLifecycle::Cpp
-        | StyleGroupLifecycle::CppWithBorderFacts
         | StyleGroupLifecycle::CppWithInheritedTextFacts
         | StyleGroupLifecycle::CppWithFontFacts => unreachable!("C++-owned lifecycles are handled above"),
     }
@@ -1078,8 +1181,22 @@ unsafe fn copy_construct(table: &StyleGroupVTable, payload: *mut c_void, source:
         StyleGroupLifecycle::Animation => unsafe {
             (payload as *mut AnimationValues).write((*(source as *const AnimationValues)).clone());
         },
+        StyleGroupLifecycle::Mask => unsafe {
+            (payload as *mut MaskValues).write((*(source as *const MaskValues)).clone());
+        },
+        StyleGroupLifecycle::Background => unsafe {
+            (payload as *mut BackgroundValues).write((*(source as *const BackgroundValues)).clone());
+        },
+        StyleGroupLifecycle::Border => unsafe {
+            (payload as *mut BorderValues).write((*(source as *const BorderValues)).clone());
+        },
+        StyleGroupLifecycle::Content => unsafe {
+            (payload as *mut ContentValues).write((*(source as *const ContentValues)).clone());
+        },
+        StyleGroupLifecycle::InheritedList => unsafe {
+            (payload as *mut InheritedListValues).write((*(source as *const InheritedListValues)).clone());
+        },
         StyleGroupLifecycle::Cpp
-        | StyleGroupLifecycle::CppWithBorderFacts
         | StyleGroupLifecycle::CppWithInheritedTextFacts
         | StyleGroupLifecycle::CppWithFontFacts => unreachable!("C++-owned lifecycles are handled above"),
     }
@@ -1110,8 +1227,12 @@ unsafe fn destruct(table: &StyleGroupVTable, payload: *mut c_void) {
         StyleGroupLifecycle::InheritedSVG => unsafe { std::ptr::drop_in_place(payload as *mut InheritedSVGValues) },
         StyleGroupLifecycle::InheritedText => unsafe { std::ptr::drop_in_place(payload as *mut InheritedTextValues) },
         StyleGroupLifecycle::Animation => unsafe { std::ptr::drop_in_place(payload as *mut AnimationValues) },
+        StyleGroupLifecycle::Mask => unsafe { std::ptr::drop_in_place(payload as *mut MaskValues) },
+        StyleGroupLifecycle::Background => unsafe { std::ptr::drop_in_place(payload as *mut BackgroundValues) },
+        StyleGroupLifecycle::Border => unsafe { std::ptr::drop_in_place(payload as *mut BorderValues) },
+        StyleGroupLifecycle::Content => unsafe { std::ptr::drop_in_place(payload as *mut ContentValues) },
+        StyleGroupLifecycle::InheritedList => unsafe { std::ptr::drop_in_place(payload as *mut InheritedListValues) },
         StyleGroupLifecycle::Cpp
-        | StyleGroupLifecycle::CppWithBorderFacts
         | StyleGroupLifecycle::CppWithInheritedTextFacts
         | StyleGroupLifecycle::CppWithFontFacts => unreachable!("C++-owned lifecycles are handled above"),
     }
@@ -1149,8 +1270,16 @@ unsafe fn payloads_equal(table: &StyleGroupVTable, a: *const c_void, b: *const c
             *(a as *const InheritedTextValues) == *(b as *const InheritedTextValues)
         },
         StyleGroupLifecycle::Animation => unsafe { *(a as *const AnimationValues) == *(b as *const AnimationValues) },
+        StyleGroupLifecycle::Mask => unsafe { *(a as *const MaskValues) == *(b as *const MaskValues) },
+        StyleGroupLifecycle::Background => unsafe {
+            *(a as *const BackgroundValues) == *(b as *const BackgroundValues)
+        },
+        StyleGroupLifecycle::Border => unsafe { *(a as *const BorderValues) == *(b as *const BorderValues) },
+        StyleGroupLifecycle::Content => unsafe { *(a as *const ContentValues) == *(b as *const ContentValues) },
+        StyleGroupLifecycle::InheritedList => unsafe {
+            *(a as *const InheritedListValues) == *(b as *const InheritedListValues)
+        },
         StyleGroupLifecycle::Cpp
-        | StyleGroupLifecycle::CppWithBorderFacts
         | StyleGroupLifecycle::CppWithInheritedTextFacts
         | StyleGroupLifecycle::CppWithFontFacts => unreachable!("C++-owned lifecycles are handled above"),
     }
@@ -2534,6 +2663,10 @@ impl EffectsValues {
     }
 
     fn initial() -> Self {
+        use crate::css::property_metadata::property_id;
+
+        let initial =
+            |property| ComputedStyleValueHandle::retained(crate::css::style_compute::initial_value_data(property));
         let auto_edge = ComputedClipEdge {
             is_auto: true,
             value: 0.0,
@@ -2549,6 +2682,13 @@ impl EffectsValues {
             box_shadows: RetainedComputedShadowList::from_vec(Vec::new()),
             clip_is_rect: false,
             clip_edges: [auto_edge; 4],
+            opacity_style_value: initial(property_id::OPACITY),
+            filter_style_value: initial(property_id::FILTER),
+            backdrop_filter_style_value: initial(property_id::BACKDROP_FILTER),
+            mix_blend_mode_style_value: initial(property_id::MIX_BLEND_MODE),
+            isolation_style_value: initial(property_id::ISOLATION),
+            box_shadow_style_value: initial(property_id::BOX_SHADOW),
+            clip_style_value: initial(property_id::CLIP),
         }
     }
 }
@@ -2617,6 +2757,15 @@ impl InheritedSVGValues {
     }
 
     fn initial() -> Self {
+        use crate::css::css_enums;
+        use crate::css::property_metadata::property_id;
+
+        let initial =
+            |property| ComputedStyleValueHandle::retained(crate::css::style_compute::initial_value_data(property));
+        let color_interpolation = |keyword| {
+            css_enums::keyword_to_color_interpolation(keyword)
+                .expect("an initial color-interpolation keyword maps to its enum")
+        };
         Self {
             fill: Self::initial_paint(1, 0xff00_0000),
             stroke: Self::initial_paint(0, 0),
@@ -2627,11 +2776,11 @@ impl InheritedSVGValues {
             stroke_linecap: 0,
             stroke_linejoin: 0,
             stroke_dasharray: RetainedComputedSvgDashList::from_vec(Vec::new()),
-            stroke_dashoffset: ComputedStyleValueHandle::length(0.0),
+            stroke_dashoffset: initial(property_id::STROKE_DASHOFFSET),
             stroke_miterlimit: 4.0,
-            stroke_width: ComputedStyleValueHandle::length(1.0),
-            color_interpolation: 0,
-            color_interpolation_filters: 1,
+            stroke_width: initial(property_id::STROKE_WIDTH),
+            color_interpolation: color_interpolation(css_enums::keyword::SRGB),
+            color_interpolation_filters: color_interpolation(css_enums::keyword::LINEARRGB),
             paint_order: [0, 1, 2],
             paint_order_serialization_length: 0,
             paint_order_is_normal: true,
@@ -2722,6 +2871,124 @@ impl AnimationValues {
             transition_timing_function: initial(property_id::TRANSITION_TIMING_FUNCTION),
             transition_delay: initial(property_id::TRANSITION_DELAY),
             transition_behavior: initial(property_id::TRANSITION_BEHAVIOR),
+        }
+    }
+}
+
+impl MaskValues {
+    fn initial() -> Self {
+        use crate::css::property_metadata::property_id;
+
+        let initial =
+            |property| ComputedStyleValueHandle::retained(crate::css::style_compute::initial_value_data(property));
+        Self {
+            mask_image: initial(property_id::MASK_IMAGE),
+            mask_type: initial(property_id::MASK_TYPE),
+            clip_path: initial(property_id::CLIP_PATH),
+            mask_mode: initial(property_id::MASK_MODE),
+            mask_repeat: initial(property_id::MASK_REPEAT),
+            mask_position: initial(property_id::MASK_POSITION),
+            mask_clip: initial(property_id::MASK_CLIP),
+            mask_origin: initial(property_id::MASK_ORIGIN),
+            mask_size: initial(property_id::MASK_SIZE),
+            mask_composite: initial(property_id::MASK_COMPOSITE),
+        }
+    }
+}
+
+impl BackgroundValues {
+    fn initial() -> Self {
+        use crate::css::property_metadata::property_id;
+
+        let initial =
+            |property| ComputedStyleValueHandle::retained(crate::css::style_compute::initial_value_data(property));
+        Self {
+            background_color: 0,
+            background_color_style_value: initial(property_id::BACKGROUND_COLOR),
+            // BackgroundBox::BorderBox.
+            background_color_clip: 0,
+            background_image: initial(property_id::BACKGROUND_IMAGE),
+            background_attachment: initial(property_id::BACKGROUND_ATTACHMENT),
+            background_blend_mode: initial(property_id::BACKGROUND_BLEND_MODE),
+            background_clip: initial(property_id::BACKGROUND_CLIP),
+            background_origin: initial(property_id::BACKGROUND_ORIGIN),
+            background_position_x: initial(property_id::BACKGROUND_POSITION_X),
+            background_position_y: initial(property_id::BACKGROUND_POSITION_Y),
+            background_repeat: initial(property_id::BACKGROUND_REPEAT),
+            background_size: initial(property_id::BACKGROUND_SIZE),
+        }
+    }
+}
+
+impl BorderValues {
+    fn initial() -> Self {
+        use crate::css::computed_value_types::ComputedBorderSide;
+        use crate::css::css_pixels::CssPixels;
+        use crate::css::property_metadata::property_id;
+
+        let initial =
+            |property| ComputedStyleValueHandle::retained(crate::css::style_compute::initial_value_data(property));
+        let side = || ComputedBorderSide {
+            color: 0,
+            line_style: 0,
+            width: CssPixels::default(),
+        };
+        Self {
+            border_left: side(),
+            border_top: side(),
+            border_right: side(),
+            border_bottom: side(),
+            border_left_color_style_value: initial(property_id::BORDER_LEFT_COLOR),
+            border_top_color_style_value: initial(property_id::BORDER_TOP_COLOR),
+            border_right_color_style_value: initial(property_id::BORDER_RIGHT_COLOR),
+            border_bottom_color_style_value: initial(property_id::BORDER_BOTTOM_COLOR),
+            border_left_computed_width: CssPixels::default(),
+            border_top_computed_width: CssPixels::default(),
+            border_right_computed_width: CssPixels::default(),
+            border_bottom_computed_width: CssPixels::default(),
+            border_bottom_left_radius: initial(property_id::BORDER_BOTTOM_LEFT_RADIUS),
+            border_bottom_right_radius: initial(property_id::BORDER_BOTTOM_RIGHT_RADIUS),
+            border_top_left_radius: initial(property_id::BORDER_TOP_LEFT_RADIUS),
+            border_top_right_radius: initial(property_id::BORDER_TOP_RIGHT_RADIUS),
+            corner_bottom_left_shape: 1.0,
+            corner_bottom_right_shape: 1.0,
+            corner_top_left_shape: 1.0,
+            corner_top_right_shape: 1.0,
+            border_image_source: initial(property_id::BORDER_IMAGE_SOURCE),
+            border_image_slice: initial(property_id::BORDER_IMAGE_SLICE),
+            border_image_width: initial(property_id::BORDER_IMAGE_WIDTH),
+            border_image_outset: initial(property_id::BORDER_IMAGE_OUTSET),
+            border_image_repeat: initial(property_id::BORDER_IMAGE_REPEAT),
+        }
+    }
+}
+
+impl ContentValues {
+    fn initial() -> Self {
+        use crate::css::property_metadata::property_id;
+
+        let initial =
+            |property| ComputedStyleValueHandle::retained(crate::css::style_compute::initial_value_data(property));
+        Self {
+            content: initial(property_id::CONTENT),
+            counter_increment: initial(property_id::COUNTER_INCREMENT),
+            counter_reset: initial(property_id::COUNTER_RESET),
+            counter_set: initial(property_id::COUNTER_SET),
+        }
+    }
+}
+
+impl InheritedListValues {
+    fn initial() -> Self {
+        use crate::css::property_metadata::property_id;
+
+        let initial =
+            |property| ComputedStyleValueHandle::retained(crate::css::style_compute::initial_value_data(property));
+        Self {
+            list_style_type: initial(property_id::LIST_STYLE_TYPE),
+            list_style_position: 1,
+            list_style_image: initial(property_id::LIST_STYLE_IMAGE),
+            quotes: initial(property_id::QUOTES),
         }
     }
 }

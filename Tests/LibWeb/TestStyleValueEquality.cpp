@@ -67,7 +67,9 @@ static StyleValueFFI::StyleValueData const* create_test_image(StringView url)
 {
     auto url_string = MUST(String::from_utf8(url));
     auto url_bytes = url_string.bytes();
-    return StyleValueFFI::rust_style_value_create_image(url_string.to_raw_leaked(), url_bytes.data(), url_bytes.size(), 0, nullptr, 0);
+    return StyleValueFFI::rust_style_value_create_image(
+        url_string.to_raw_leaked(), url_bytes.data(), url_bytes.size(), 0, nullptr, 0,
+        0, nullptr, 0, false, false, false, false);
 }
 
 TEST_CASE(rust_composites_scalar_style_values)

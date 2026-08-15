@@ -70,5 +70,45 @@
         internals.updateStyle();
         const afterTransition = internals.styleFfiCounters();
         println(`animation build called its C++ payload assembler: ${afterTransition.animationGroupPayloadAssemblerCallbacks > 0}`);
+
+        element.style.maskImage = "linear-gradient(red, blue)";
+        element.style.maskPosition = "10% 20%";
+        element.style.maskRepeat = "no-repeat";
+        internals.resetStyleFfiCounters();
+        internals.updateStyle();
+        const afterMask = internals.styleFfiCounters();
+        println(`mask build called its C++ payload assembler: ${afterMask.styleGroupPayloadAssemblerCallbacks > 0}`);
+
+        element.style.background = "linear-gradient(red, blue) fixed 10% 20% / 30px 40px no-repeat border-box";
+        internals.resetStyleFfiCounters();
+        internals.updateStyle();
+        const afterBackground = internals.styleFfiCounters();
+        println(`background build called its C++ payload assembler: ${afterBackground.styleGroupPayloadAssemblerCallbacks > 0}`);
+
+        element.style.border = "7px dashed red";
+        element.style.borderRadius = "1px 2px 3px 4px";
+        element.style.borderImage = "linear-gradient(red, blue) 10% fill / 1 2 3 4 / 5px round space";
+        internals.resetStyleFfiCounters();
+        internals.updateStyle();
+        const afterBorder = internals.styleFfiCounters();
+        println(`border build called its C++ payload assembler: ${afterBorder.styleGroupPayloadAssemblerCallbacks > 0}`);
+
+        element.style.content = '"chapter " counter(chapter) / "chapter"';
+        element.style.counterReset = "chapter 2";
+        element.style.counterIncrement = "chapter 3";
+        element.style.counterSet = "chapter 4";
+        internals.resetStyleFfiCounters();
+        internals.updateStyle();
+        const afterContent = internals.styleFfiCounters();
+        println(`content build called its C++ payload assembler: ${afterContent.styleGroupPayloadAssemblerCallbacks > 0}`);
+
+        element.style.listStyleType = 'symbols(cyclic "A" "B")';
+        element.style.listStylePosition = "inside";
+        element.style.listStyleImage = "linear-gradient(red, blue)";
+        element.style.quotes = '"<" ">" "[" "]"';
+        internals.resetStyleFfiCounters();
+        internals.updateStyle();
+        const afterInheritedList = internals.styleFfiCounters();
+        println(`inherited list build called its C++ payload assembler: ${afterInheritedList.styleGroupPayloadAssemblerCallbacks > 0}`);
     });
 </script>

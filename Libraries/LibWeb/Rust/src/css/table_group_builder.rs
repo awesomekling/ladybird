@@ -28,16 +28,16 @@ use crate::css::color_resolution::{
 };
 use crate::css::computed_longhand_table::ComputedLonghandTable;
 use crate::css::computed_value_types::{
-    AnchorValues, AnimationValues, ComputedClipEdge, ComputedColorOrAuto, ComputedCursor, ComputedFilter,
-    ComputedFilterOperation, ComputedGridArea, ComputedGridPlacement, ComputedGridPlacementKind,
-    ComputedGridTrackBreadth, ComputedGridTrackEntry, ComputedGridTrackEntryKind, ComputedGridTrackList,
-    ComputedPositionTryFallback, ComputedResolvedTransform, ComputedScrollbarColor, ComputedShadow, ComputedSize,
-    ComputedSizeKind, ComputedStyleValueHandle, ComputedSvgDash, ComputedSvgPaint, ComputedTextIndent,
-    ComputedTextUnderlineOffset, ComputedTextUnderlinePosition, EffectsValues, GRID_NO_INDEX, GridValues,
-    InheritedSVGValues, InheritedTextValues, InheritedUIValues, RetainedComputedCursorList,
-    RetainedComputedFilterOperationList, RetainedComputedResolvedTransformList, RetainedComputedShadowList,
-    RetainedComputedSvgDashList, RetainedGridAreaList, RetainedGridNameIndexList, RetainedGridTrackEntryList,
-    RetainedPositionAreaList, RetainedPositionTryFallbackList, TransformValues,
+    AnchorValues, AnimationValues, BackgroundValues, BorderValues, ComputedClipEdge, ComputedColorOrAuto,
+    ComputedCursor, ComputedFilter, ComputedFilterOperation, ComputedGridArea, ComputedGridPlacement,
+    ComputedGridPlacementKind, ComputedGridTrackBreadth, ComputedGridTrackEntry, ComputedGridTrackEntryKind,
+    ComputedGridTrackList, ComputedPositionTryFallback, ComputedResolvedTransform, ComputedScrollbarColor,
+    ComputedShadow, ComputedSize, ComputedSizeKind, ComputedStyleValueHandle, ComputedSvgDash, ComputedSvgPaint,
+    ComputedTextIndent, ComputedTextUnderlineOffset, ComputedTextUnderlinePosition, ContentValues, EffectsValues,
+    GRID_NO_INDEX, GridValues, InheritedListValues, InheritedSVGValues, InheritedTextValues, InheritedUIValues,
+    MaskValues, RetainedComputedCursorList, RetainedComputedFilterOperationList, RetainedComputedResolvedTransformList,
+    RetainedComputedShadowList, RetainedComputedSvgDashList, RetainedGridAreaList, RetainedGridNameIndexList,
+    RetainedGridTrackEntryList, RetainedPositionAreaList, RetainedPositionTryFallbackList, TransformValues,
 };
 use crate::css::computed_values::{
     FfiGroupValueEntry, GROUP_FIELD_COLOR, GROUP_FIELD_COLOR_OR_KEYWORD, GROUP_FIELD_RESOLVED_F32,
@@ -1571,21 +1571,30 @@ unsafe fn build_effects_group(
                 payload.box_shadows = RetainedComputedShadowList::from_vec(shadows);
                 payload.clip_is_rect = clip_is_rect;
                 payload.clip_edges = clip_edges;
+                payload.opacity_style_value =
+                    ComputedStyleValueHandle::retained(values.pointer(property_id::OPACITY).cast());
+                payload.filter_style_value =
+                    ComputedStyleValueHandle::retained(values.pointer(property_id::FILTER).cast());
+                payload.backdrop_filter_style_value =
+                    ComputedStyleValueHandle::retained(values.pointer(property_id::BACKDROP_FILTER).cast());
+                payload.mix_blend_mode_style_value =
+                    ComputedStyleValueHandle::retained(values.pointer(property_id::MIX_BLEND_MODE).cast());
+                payload.isolation_style_value =
+                    ComputedStyleValueHandle::retained(values.pointer(property_id::ISOLATION).cast());
+                payload.box_shadow_style_value =
+                    ComputedStyleValueHandle::retained(values.pointer(property_id::BOX_SHADOW).cast());
+                payload.clip_style_value = ComputedStyleValueHandle::retained(values.pointer(property_id::CLIP).cast());
             },
             parent_payload,
         )
     }
 }
 
-// --- Background, mask and border lowering ----------------------------------
+// --- Border lowering -------------------------------------------------------
 //
-// The coordinated layer walks the C++ extractors ran over minted wrappers -
-// background layers, mask layers, the border sides and border-image - lower
-// here from the table slots. Enum-mapped keywords become their C++ enum codes
-// through the generated converters; the genuinely C++ members (image wrapper
-// RefPtrs, LengthPercentage and Position slots) travel as retained handles,
-// and an image-bearing slot is flagged so the assembler mints its wrapper
-// through the stamped property() path.
+// The border walks the C++ extractors ran over minted wrappers lower here
+// from the table slots. Enum-mapped keywords become their C++ enum codes;
+// genuinely C++ members travel as retained handles.
 
 /// Retains a table or override value pointer for an assembly slot; the
 /// assembler assumes the reference.
@@ -1613,483 +1622,97 @@ fn keyword_of(data: &StyleValueData) -> Option<u16> {
     }
 }
 
-/// Whether a computed value is an image the C++ side wraps as an
-/// AbstractImageStyleValue.
-fn is_abstract_image(data: &StyleValueData) -> bool {
-    matches!(
-        data,
-        StyleValueData::Image { .. }
-            | StyleValueData::ImageSet { .. }
-            | StyleValueData::LinearGradient { .. }
-            | StyleValueData::ConicGradient { .. }
-            | StyleValueData::RadialGradient { .. }
-    )
-}
-
-/// Whether an image slot's wrapper must mint through the stamped property()
-/// path: url() images and image sets read style sheet context (base URL,
-/// origin cleanliness, pending image registration) when they load.
-fn image_needs_stamped_wrapper(data: &StyleValueData) -> bool {
-    matches!(data, StyleValueData::Image { .. } | StyleValueData::ImageSet { .. })
-}
-
-/// One lowered background or mask layer. Every enum field holds the C++ enum
-/// code; the pointers are retained style values the assembler assumes, with
-/// the image slot left null when its wrapper mints through property().
-#[repr(C)]
-pub struct FfiCoordinatedLayerAssembly {
-    /// The layer's image slot value, retained; null when the wrapper mints
-    /// through the stamped property() path instead.
-    pub image: *const c_void,
-    pub image_is_abstract_image: bool,
-    pub image_needs_stamped_wrapper: bool,
-    pub attachment: u8,
-    pub blend_mode: u8,
-    pub clip: u8,
-    pub origin: u8,
-    pub mask_clip_is_no_clip: bool,
-    pub mask_clip: u8,
-    pub mask_composite: u8,
-    pub mask_mode: u8,
-    pub mask_origin: u8,
-    /// Retained offset values of the layer position's x and y edges.
-    pub position_x: *const c_void,
-    pub position_y: *const c_void,
-    pub repeat_x: u8,
-    pub repeat_y: u8,
-    /// The C++ BackgroundSize code: contain 0, cover 1, length-percentage 2.
-    pub size_type: u8,
-    pub size_x: *const c_void,
-    pub size_y: *const c_void,
-}
-
-impl FfiCoordinatedLayerAssembly {
-    fn empty() -> Self {
-        Self {
-            image: std::ptr::null(),
-            image_is_abstract_image: false,
-            image_needs_stamped_wrapper: false,
-            attachment: 0,
-            blend_mode: 0,
-            clip: 0,
-            origin: 0,
-            mask_clip_is_no_clip: false,
-            mask_clip: 0,
-            mask_composite: 0,
-            mask_mode: 0,
-            mask_origin: 0,
-            position_x: std::ptr::null(),
-            position_y: std::ptr::null(),
-            repeat_x: 0,
-            repeat_y: 0,
-            size_type: 0,
-            size_x: std::ptr::null(),
-            size_y: std::ptr::null(),
-        }
-    }
-
-    fn set_image(&mut self, data: &StyleValueData, pointer: *const c_void) {
-        self.image_is_abstract_image = is_abstract_image(data);
-        self.image_needs_stamped_wrapper = image_needs_stamped_wrapper(data);
-        if !self.image_needs_stamped_wrapper {
-            self.image = retain_for_assembly(pointer);
-        }
-    }
-
-    fn set_position_offsets(&mut self, x_data: &StyleValueData, y_data: &StyleValueData) {
-        let offset_of = |edge: &StyleValueData| -> *const c_void {
-            let StyleValueData::Edge { offset, .. } = edge else {
-                unreachable!("a computed layer position component is an edge value");
-            };
-            retain_for_assembly(offset.pointer().cast())
-        };
-        self.position_x = offset_of(x_data);
-        self.position_y = offset_of(y_data);
-    }
-
-    fn set_repeat(&mut self, data: &StyleValueData) {
-        let StyleValueData::RepeatStyle { repeat_x, repeat_y } = data else {
-            unreachable!("a computed layer repeat is a repeat-style value");
-        };
-        self.repeat_x = *repeat_x;
-        self.repeat_y = *repeat_y;
-    }
-
-    fn set_size(&mut self, data: &StyleValueData) {
-        const BACKGROUND_SIZE_CONTAIN: u8 = 0;
-        const BACKGROUND_SIZE_COVER: u8 = 1;
-        const BACKGROUND_SIZE_LENGTH_PERCENTAGE: u8 = 2;
-        match data {
-            StyleValueData::BackgroundSize { size_x, size_y } => {
-                self.size_type = BACKGROUND_SIZE_LENGTH_PERCENTAGE;
-                self.size_x = retain_for_assembly(size_x.pointer().cast());
-                self.size_y = retain_for_assembly(size_y.pointer().cast());
-            }
-            StyleValueData::Keyword { keyword: code } if *code == keyword::CONTAIN => {
-                self.size_type = BACKGROUND_SIZE_CONTAIN;
-            }
-            StyleValueData::Keyword { keyword: code } if *code == keyword::COVER => {
-                self.size_type = BACKGROUND_SIZE_COVER;
-            }
-            _ => unreachable!("a computed layer size is contain, cover or a background-size"),
-        }
-    }
-}
-
-/// The background group's complex members, pre-lowered for the registered
-/// C++ assembler.
-#[repr(C)]
-pub struct FfiBackgroundGroupAssembly {
-    pub cpp_context: *const c_void,
-    pub layers: *const FfiCoordinatedLayerAssembly,
-    pub layer_count: usize,
-    /// Whether the core resolved background-color (and poked it); the
-    /// assembler's C++ arm resolves it otherwise.
-    pub color_resolved: bool,
-    /// The final layer's background-clip as a C++ BackgroundBox code.
-    pub color_clip: u8,
-}
-
-/// Builds the background group: the generic descriptor path first (an
-/// all-initial or color-only background shares payloads exactly as before),
-/// then the full layer lowering through the registered assembler.
+/// Builds the background group from retained canonical computed values.
 unsafe fn build_background_group(
     values: &EffectiveValues,
     input: &ColorResolutionInput,
     used_color_scheme: u8,
-    cpp_assembler_context: *const c_void,
     parent_payload: *const c_void,
 ) -> *const c_void {
-    let generic = unsafe {
-        build_generic_group(
-            group_index::BACKGROUND,
-            values,
-            input,
-            used_color_scheme,
-            parent_payload,
-        )
-    };
-    if !generic.is_null() {
-        return generic;
-    }
     let Some(entries) = (unsafe { gather_group_entries(group_index::BACKGROUND, values, input, used_color_scheme) })
     else {
         return std::ptr::null();
     };
-
-    let item = |items: &[*const c_void], index: usize| -> &StyleValueData {
-        // SAFETY: Repeatable item pointers name live table or override data.
-        unsafe { &*items[index % items.len()].cast::<StyleValueData>() }
-    };
-
+    let retained = |property| ComputedStyleValueHandle::retained(values.pointer(property).cast());
+    let background_color = resolved_color(
+        input,
+        property_id::BACKGROUND_COLOR,
+        values
+            .value(property_id::BACKGROUND_COLOR)
+            .expect("background-color has a computed value"),
+    )
+    .expect("a computed background-color resolves in Rust");
     let image_items = repeatable_item_pointers(values, property_id::BACKGROUND_IMAGE);
-    let attachment_items = repeatable_item_pointers(values, property_id::BACKGROUND_ATTACHMENT);
-    let blend_mode_items = repeatable_item_pointers(values, property_id::BACKGROUND_BLEND_MODE);
     let clip_items = repeatable_item_pointers(values, property_id::BACKGROUND_CLIP);
-    let origin_items = repeatable_item_pointers(values, property_id::BACKGROUND_ORIGIN);
-    let position_x_items = repeatable_item_pointers(values, property_id::BACKGROUND_POSITION_X);
-    let position_y_items = repeatable_item_pointers(values, property_id::BACKGROUND_POSITION_Y);
-    let repeat_items = repeatable_item_pointers(values, property_id::BACKGROUND_REPEAT);
-    let size_items = repeatable_item_pointers(values, property_id::BACKGROUND_SIZE);
+    let final_clip_pointer = clip_items[(image_items.len() - 1) % clip_items.len()];
+    let final_clip = unsafe { &*final_clip_pointer.cast::<StyleValueData>() };
+    let background_color_clip = keyword_of(final_clip)
+        .and_then(crate::css::css_enums::keyword_to_background_box)
+        .expect("a computed background-clip keyword maps to its enum");
 
-    let keyword_code = |data: &StyleValueData, map: fn(u16) -> Option<u8>, what: &str| -> u8 {
-        map(keyword_of(data).unwrap_or_else(|| unreachable!("a computed {what} is a keyword")))
-            .unwrap_or_else(|| unreachable!("a computed {what} keyword maps to its enum"))
-    };
-
-    let mut layers = Vec::with_capacity(image_items.len());
-    for index in 0..image_items.len() {
-        let mut layer = FfiCoordinatedLayerAssembly::empty();
-        layer.set_image(item(&image_items, index), image_items[index]);
-        layer.attachment = keyword_code(
-            item(&attachment_items, index),
-            crate::css::css_enums::keyword_to_background_attachment,
-            "background-attachment",
-        );
-        layer.blend_mode = keyword_code(
-            item(&blend_mode_items, index),
-            crate::css::css_enums::keyword_to_mix_blend_mode,
-            "background-blend-mode",
-        );
-        layer.clip = keyword_code(
-            item(&clip_items, index),
-            crate::css::css_enums::keyword_to_background_box,
-            "background-clip",
-        );
-        layer.origin = keyword_code(
-            item(&origin_items, index),
-            crate::css::css_enums::keyword_to_background_box,
-            "background-origin",
-        );
-        layer.set_position_offsets(item(&position_x_items, index), item(&position_y_items, index));
-        layer.set_repeat(item(&repeat_items, index));
-        layer.set_size(item(&size_items, index));
-        layers.push(layer);
-    }
-
-    // The background color is clipped by the final layer's background-clip
-    // value, coordinated against the image count.
-    let color_clip = keyword_code(
-        item(&clip_items, image_items.len() - 1),
-        crate::css::css_enums::keyword_to_background_box,
-        "background-clip",
-    );
-    let color_resolved = values
-        .value(property_id::BACKGROUND_COLOR)
-        .is_some_and(|data| resolved_color(input, property_id::BACKGROUND_COLOR, data).is_some());
-
-    let assembly = FfiBackgroundGroupAssembly {
-        cpp_context: cpp_assembler_context,
-        layers: layers.as_ptr(),
-        layer_count: layers.len(),
-        color_resolved,
-        color_clip,
-    };
-    // SAFETY: The entries and assembly hold live or retained value data, and
-    // the caller warrants the parent payload.
     unsafe {
-        crate::css::computed_values::build_group_payload_with_assembler(
+        crate::css::computed_values::build_group_payload_with_rust_fill(
             group_index::BACKGROUND,
             &entries,
-            (&raw const assembly).cast(),
+            |payload| {
+                let payload = &mut *payload.cast::<BackgroundValues>();
+                payload.background_color = background_color;
+                payload.background_color_style_value = retained(property_id::BACKGROUND_COLOR);
+                payload.background_color_clip = background_color_clip;
+                payload.background_image = retained(property_id::BACKGROUND_IMAGE);
+                payload.background_attachment = retained(property_id::BACKGROUND_ATTACHMENT);
+                payload.background_blend_mode = retained(property_id::BACKGROUND_BLEND_MODE);
+                payload.background_clip = retained(property_id::BACKGROUND_CLIP);
+                payload.background_origin = retained(property_id::BACKGROUND_ORIGIN);
+                payload.background_position_x = retained(property_id::BACKGROUND_POSITION_X);
+                payload.background_position_y = retained(property_id::BACKGROUND_POSITION_Y);
+                payload.background_repeat = retained(property_id::BACKGROUND_REPEAT);
+                payload.background_size = retained(property_id::BACKGROUND_SIZE);
+            },
             parent_payload,
         )
     }
 }
 
-/// One lowered mask position, as the retained offset values of its x and y
-/// edges.
-#[repr(C)]
-pub struct FfiPositionAssembly {
-    pub x_offset: *const c_void,
-    pub y_offset: *const c_void,
-}
-
-/// The mask group's complex members, pre-lowered for the registered C++
-/// assembler.
-#[repr(C)]
-pub struct FfiMaskGroupAssembly {
-    pub cpp_context: *const c_void,
-    pub layers: *const FfiCoordinatedLayerAssembly,
-    pub layer_count: usize,
-    pub positions: *const FfiPositionAssembly,
-    pub position_count: usize,
-    /// The first mask-image value when it is a url() reference, retained.
-    pub mask_reference_url: *const c_void,
-    /// Whether the first mask-image value is an abstract image, whose layer
-    /// wrapper doubles as the group's mask-image member.
-    pub first_image_is_abstract_image: bool,
-    /// 0 none, 1 url (retained), 2 basic shape (retained).
-    pub clip_path_kind: u8,
-    pub clip_path: *const c_void,
-}
-
-/// Builds the mask group: the generic descriptor path first, then the full
-/// layer lowering through the registered assembler.
+/// Builds the mask group from retained canonical computed values.
 unsafe fn build_mask_group(
     values: &EffectiveValues,
     input: &ColorResolutionInput,
     used_color_scheme: u8,
-    cpp_assembler_context: *const c_void,
     parent_payload: *const c_void,
 ) -> *const c_void {
-    let generic = unsafe { build_generic_group(group_index::MASK, values, input, used_color_scheme, parent_payload) };
-    if !generic.is_null() {
-        return generic;
-    }
     let Some(entries) = (unsafe { gather_group_entries(group_index::MASK, values, input, used_color_scheme) }) else {
         return std::ptr::null();
     };
-
-    let item = |items: &[*const c_void], index: usize| -> &StyleValueData {
-        // SAFETY: Repeatable item pointers name live table or override data.
-        unsafe { &*items[index % items.len()].cast::<StyleValueData>() }
-    };
-
-    let image_items = repeatable_item_pointers(values, property_id::MASK_IMAGE);
-    let clip_items = repeatable_item_pointers(values, property_id::MASK_CLIP);
-    let composite_items = repeatable_item_pointers(values, property_id::MASK_COMPOSITE);
-    let mode_items = repeatable_item_pointers(values, property_id::MASK_MODE);
-    let origin_items = repeatable_item_pointers(values, property_id::MASK_ORIGIN);
-    let position_items = repeatable_item_pointers(values, property_id::MASK_POSITION);
-    let repeat_items = repeatable_item_pointers(values, property_id::MASK_REPEAT);
-    let size_items = repeatable_item_pointers(values, property_id::MASK_SIZE);
-
-    let keyword_code = |data: &StyleValueData, map: fn(u16) -> Option<u8>, what: &str| -> u8 {
-        map(keyword_of(data).unwrap_or_else(|| unreachable!("a computed {what} is a keyword")))
-            .unwrap_or_else(|| unreachable!("a computed {what} keyword maps to its enum"))
-    };
-    // The C++ BackgroundBox::BorderBox code the extractor defaulted the
-    // layer's origin and clip to.
-    let border_box = crate::css::css_enums::keyword_to_background_box(keyword::BORDER_BOX)
-        .expect("border-box maps to a background box");
-
-    let mut layers = Vec::with_capacity(image_items.len());
-    for index in 0..image_items.len() {
-        let mut layer = FfiCoordinatedLayerAssembly::empty();
-        layer.origin = border_box;
-        layer.clip = border_box;
-        layer.set_image(item(&image_items, index), image_items[index]);
-
-        let clip_data = item(&clip_items, index);
-        let clip_keyword = keyword_of(clip_data).unwrap_or_else(|| unreachable!("a computed mask-clip is a keyword"));
-        if clip_keyword != keyword::NO_CLIP {
-            layer.mask_clip = keyword_code(clip_data, crate::css::css_enums::keyword_to_coord_box, "mask-clip");
-            if let Some(clip) = crate::css::css_enums::keyword_to_background_box(clip_keyword) {
-                layer.clip = clip;
-            }
-        } else {
-            layer.mask_clip_is_no_clip = true;
-        }
-
-        layer.mask_composite = keyword_code(
-            item(&composite_items, index),
-            crate::css::css_enums::keyword_to_compositing_operator,
-            "mask-composite",
-        );
-        layer.mask_mode = keyword_code(
-            item(&mode_items, index),
-            crate::css::css_enums::keyword_to_masking_mode,
-            "mask-mode",
-        );
-
-        let origin_data = item(&origin_items, index);
-        layer.mask_origin = keyword_code(origin_data, crate::css::css_enums::keyword_to_coord_box, "mask-origin");
-        if let Some(origin) = keyword_of(origin_data).and_then(crate::css::css_enums::keyword_to_background_box) {
-            layer.origin = origin;
-        }
-
-        let StyleValueData::Position { edge_x, edge_y } = item(&position_items, index) else {
-            unreachable!("a computed mask-position is a position value");
-        };
-        layer.set_position_offsets(edge_x.data(), edge_y.data());
-        layer.set_repeat(item(&repeat_items, index));
-        layer.set_size(item(&size_items, index));
-        layers.push(layer);
-    }
-
-    // The group's mask positions follow the mask-position list itself, not
-    // the coordinated layer count.
-    let positions: Vec<FfiPositionAssembly> = position_items
-        .iter()
-        .map(|pointer| {
-            // SAFETY: Repeatable item pointers name live data.
-            let StyleValueData::Position { edge_x, edge_y } = (unsafe { &*pointer.cast::<StyleValueData>() }) else {
-                unreachable!("a computed mask-position is a position value");
-            };
-            let offset_of = |edge: &crate::css::style_value::RetainedStyleValueData| -> *const c_void {
-                let StyleValueData::Edge { offset, .. } = edge.data() else {
-                    unreachable!("a computed position component is an edge value");
-                };
-                retain_for_assembly(offset.pointer().cast())
-            };
-            FfiPositionAssembly {
-                x_offset: offset_of(edge_x),
-                y_offset: offset_of(edge_y),
-            }
-        })
-        .collect();
-
-    let first_image = item(&image_items, 0);
-    let mask_reference_url = match first_image {
-        StyleValueData::Url { .. } => retain_for_assembly(image_items[0]),
-        _ => std::ptr::null(),
-    };
-
-    let (clip_path_kind, clip_path) = match values.value(property_id::CLIP_PATH) {
-        Some(data @ StyleValueData::Url { .. }) => (1u8, retain_for_assembly(std::ptr::from_ref(data).cast())),
-        Some(data @ StyleValueData::BasicShape { .. }) => (2u8, retain_for_assembly(std::ptr::from_ref(data).cast())),
-        _ => (0u8, std::ptr::null()),
-    };
-
-    let assembly = FfiMaskGroupAssembly {
-        cpp_context: cpp_assembler_context,
-        layers: layers.as_ptr(),
-        layer_count: layers.len(),
-        positions: positions.as_ptr(),
-        position_count: positions.len(),
-        mask_reference_url,
-        first_image_is_abstract_image: is_abstract_image(first_image),
-        clip_path_kind,
-        clip_path,
-    };
-    // SAFETY: The entries and assembly hold live or retained value data, and
-    // the caller warrants the parent payload.
+    let retained = |property| ComputedStyleValueHandle::retained(values.pointer(property).cast());
     unsafe {
-        crate::css::computed_values::build_group_payload_with_assembler(
+        crate::css::computed_values::build_group_payload_with_rust_fill(
             group_index::MASK,
             &entries,
-            (&raw const assembly).cast(),
+            |payload| {
+                let payload = &mut *payload.cast::<MaskValues>();
+                payload.mask_image = retained(property_id::MASK_IMAGE);
+                payload.mask_type = retained(property_id::MASK_TYPE);
+                payload.clip_path = retained(property_id::CLIP_PATH);
+                payload.mask_mode = retained(property_id::MASK_MODE);
+                payload.mask_repeat = retained(property_id::MASK_REPEAT);
+                payload.mask_position = retained(property_id::MASK_POSITION);
+                payload.mask_clip = retained(property_id::MASK_CLIP);
+                payload.mask_origin = retained(property_id::MASK_ORIGIN);
+                payload.mask_size = retained(property_id::MASK_SIZE);
+                payload.mask_composite = retained(property_id::MASK_COMPOSITE);
+            },
             parent_payload,
         )
     }
 }
 
-/// One lowered border side: the line style code and whether the core
-/// resolved (and poked) the side's color.
-#[repr(C)]
-pub struct FfiBorderSideAssembly {
-    pub line_style: u8,
-    pub color_resolved: bool,
-}
-
-/// One lowered border-image slice, width or outset component.
-#[repr(C)]
-pub struct FfiBorderImageSlotAssembly {
-    /// 0 number, 1 retained value (the assembler converts), 2 auto.
-    pub kind: u8,
-    pub number: f64,
-    pub value: *const c_void,
-}
-
-/// The border group's complex members, pre-lowered for the registered C++
-/// assembler. The sides' computed widths and colors poke through the field
-/// descriptors; the radii travel as retained border-radius values.
-#[repr(C)]
-pub struct FfiBorderGroupAssembly {
-    pub cpp_context: *const c_void,
-    pub left: FfiBorderSideAssembly,
-    pub top: FfiBorderSideAssembly,
-    pub right: FfiBorderSideAssembly,
-    pub bottom: FfiBorderSideAssembly,
-    /// Bottom-left, bottom-right, top-left, top-right retained border-radius
-    /// values.
-    pub radii: [*const c_void; 4],
-    /// The border-image-source value, retained; null when none or when the
-    /// wrapper mints through the stamped property() path.
-    pub border_image_source: *const c_void,
-    pub border_image_source_is_abstract_image: bool,
-    pub border_image_source_needs_stamped_wrapper: bool,
-    /// Top, right, bottom, left.
-    pub slice: [FfiBorderImageSlotAssembly; 4],
-    pub slice_fill: bool,
-    pub width: [FfiBorderImageSlotAssembly; 4],
-    pub width_value_count: u8,
-    pub outset: [FfiBorderImageSlotAssembly; 4],
-    pub outset_value_count: u8,
-    /// C++ BorderImageRepeat codes.
-    pub border_image_repeat_x: u8,
-    pub border_image_repeat_y: u8,
-}
-
-/// A number, or a calculation that resolves to one without context; the C++
-/// number_from_style_value arm the border-image lowering used.
-fn plain_number(data: &StyleValueData) -> Option<f64> {
-    match data {
-        StyleValueData::Number { value } => Some(*value),
-        StyleValueData::Calculated { .. } => crate::css::calc::resolve_calculated_number_without_context(data),
-        _ => None,
-    }
-}
-
-/// Builds the border group: the generic descriptor path first (all-none
-/// borders share payloads exactly as before), then the styled-border and
-/// border-image lowering through the registered assembler.
+/// Builds the border group from layout-facing side facts and retained
+/// canonical values for the C++ presentation views.
 unsafe fn build_border_group(
     values: &EffectiveValues,
     input: &ColorResolutionInput,
     used_color_scheme: u8,
-    cpp_assembler_context: *const c_void,
     parent_payload: *const c_void,
 ) -> *const c_void {
     let generic = unsafe { build_generic_group(group_index::BORDER, values, input, used_color_scheme, parent_payload) };
@@ -2099,153 +1722,98 @@ unsafe fn build_border_group(
     let Some(entries) = (unsafe { gather_group_entries(group_index::BORDER, values, input, used_color_scheme) }) else {
         return std::ptr::null();
     };
-
-    let side = |style_property: u16, color_property: u16| -> FfiBorderSideAssembly {
+    let retained = |property| ComputedStyleValueHandle::retained(values.pointer(property).cast());
+    let side = |style_property: u16, width_property: u16, color_property: u16| {
         let style_keyword = values
             .value(style_property)
             .and_then(keyword_of)
             .unwrap_or_else(|| unreachable!("a computed border style is a keyword"));
-        FfiBorderSideAssembly {
-            line_style: crate::css::css_enums::keyword_to_line_style(style_keyword)
-                .unwrap_or_else(|| unreachable!("a computed border style maps to a line style")),
-            color_resolved: values
-                .value(color_property)
-                .is_some_and(|data| resolved_color(input, color_property, data).is_some()),
-        }
-    };
-
-    let radius = |property: u16| -> *const c_void {
-        assert!(
-            matches!(values.value(property), Some(StyleValueData::BorderRadius { .. })),
-            "a computed border radius is a border-radius value"
+        let line_style = crate::css::css_enums::keyword_to_line_style(style_keyword)
+            .unwrap_or_else(|| unreachable!("a computed border style maps to a line style"));
+        let computed_width = length_to_css_pixels(
+            values
+                .value(width_property)
+                .expect("a computed border width has a value"),
         );
-        retain_for_assembly(values.pointer(property))
-    };
-
-    // border-image-source.
-    let source_data = values
-        .value(property_id::BORDER_IMAGE_SOURCE)
-        .expect("the table holds border-image-source");
-    let source_is_image = is_abstract_image(source_data);
-    let source_needs_stamp = source_is_image && image_needs_stamped_wrapper(source_data);
-    let border_image_source = if source_is_image && !source_needs_stamp {
-        retain_for_assembly(values.pointer(property_id::BORDER_IMAGE_SOURCE))
-    } else {
-        std::ptr::null()
-    };
-
-    // border-image-slice.
-    let Some(StyleValueData::BorderImageSlice {
-        top,
-        right,
-        bottom,
-        left,
-        fill,
-    }) = values.value(property_id::BORDER_IMAGE_SLICE)
-    else {
-        unreachable!("a computed border-image-slice is a border-image-slice value");
-    };
-    const SLOT_NUMBER: u8 = 0;
-    const SLOT_VALUE: u8 = 1;
-    const SLOT_AUTO: u8 = 2;
-    let value_slot = |data: &StyleValueData, pointer: *const c_void| -> FfiBorderImageSlotAssembly {
-        if let Some(number) = plain_number(data) {
-            return FfiBorderImageSlotAssembly {
-                kind: SLOT_NUMBER,
-                number,
-                value: std::ptr::null(),
-            };
-        }
-        if matches!(data, StyleValueData::Keyword { keyword: code } if *code == keyword::AUTO) {
-            return FfiBorderImageSlotAssembly {
-                kind: SLOT_AUTO,
-                number: 0.0,
-                value: std::ptr::null(),
-            };
-        }
-        FfiBorderImageSlotAssembly {
-            kind: SLOT_VALUE,
-            number: 0.0,
-            value: retain_for_assembly(pointer),
+        crate::css::computed_value_types::ComputedBorderSide {
+            color: resolved_color(
+                input,
+                color_property,
+                values
+                    .value(color_property)
+                    .expect("a computed border color has a value"),
+            )
+            .expect("a computed border color resolves in Rust"),
+            line_style,
+            // LineStyle::None and LineStyle::Hidden.
+            width: if line_style == 0 || line_style == 1 {
+                crate::css::css_pixels::CssPixels::default()
+            } else {
+                computed_width
+            },
         }
     };
-    // A calculated slice keeps its calculation value, matching the C++
-    // BorderImageSliceValue variant; only a plain number lowers to one.
-    let slice_slot = |slot: &crate::css::style_value::RetainedStyleValueData| -> FfiBorderImageSlotAssembly {
-        if let StyleValueData::Number { value } = slot.data() {
-            return FfiBorderImageSlotAssembly {
-                kind: SLOT_NUMBER,
-                number: *value,
-                value: std::ptr::null(),
-            };
-        }
-        FfiBorderImageSlotAssembly {
-            kind: SLOT_VALUE,
-            number: 0.0,
-            value: retain_for_assembly(slot.pointer().cast()),
-        }
-    };
-    let slice = [slice_slot(top), slice_slot(right), slice_slot(bottom), slice_slot(left)];
 
-    // border-image-width and border-image-outset expand a one-to-four item
-    // list over the four sides, top right bottom left, with wraparound.
-    let expand_sides = |property: u16| -> ([FfiBorderImageSlotAssembly; 4], u8) {
-        let items = repeatable_item_pointers(values, property);
-        let slot = |index: usize| -> FfiBorderImageSlotAssembly {
-            let pointer = items[index % items.len()];
-            // SAFETY: Repeatable item pointers name live data.
-            value_slot(unsafe { &*pointer.cast::<StyleValueData>() }, pointer)
-        };
-        let count = match values.value(property) {
-            Some(StyleValueData::ValueList { values: list, .. }) => list.as_slice().len() as u8,
-            _ => 1,
-        };
-        ([slot(0), slot(1), slot(2), slot(3)], count)
-    };
-    let (width, width_value_count) = expand_sides(property_id::BORDER_IMAGE_WIDTH);
-    let (outset, outset_value_count) = expand_sides(property_id::BORDER_IMAGE_OUTSET);
-
-    // border-image-repeat: one or two keywords, stretch when unmappable.
-    let repeat_items = repeatable_item_pointers(values, property_id::BORDER_IMAGE_REPEAT);
-    let repeat_at = |index: usize| -> u8 {
-        // SAFETY: Repeatable item pointers name live data.
-        let data = unsafe { &*repeat_items[index % repeat_items.len()].cast::<StyleValueData>() };
-        keyword_of(data)
-            .and_then(crate::css::css_enums::keyword_to_border_image_repeat)
-            .unwrap_or(crate::css::css_enums::border_image_repeat::STRETCH)
-    };
-
-    let assembly = FfiBorderGroupAssembly {
-        cpp_context: cpp_assembler_context,
-        left: side(property_id::BORDER_LEFT_STYLE, property_id::BORDER_LEFT_COLOR),
-        top: side(property_id::BORDER_TOP_STYLE, property_id::BORDER_TOP_COLOR),
-        right: side(property_id::BORDER_RIGHT_STYLE, property_id::BORDER_RIGHT_COLOR),
-        bottom: side(property_id::BORDER_BOTTOM_STYLE, property_id::BORDER_BOTTOM_COLOR),
-        radii: [
-            radius(property_id::BORDER_BOTTOM_LEFT_RADIUS),
-            radius(property_id::BORDER_BOTTOM_RIGHT_RADIUS),
-            radius(property_id::BORDER_TOP_LEFT_RADIUS),
-            radius(property_id::BORDER_TOP_RIGHT_RADIUS),
-        ],
-        border_image_source,
-        border_image_source_is_abstract_image: source_is_image,
-        border_image_source_needs_stamped_wrapper: source_needs_stamp,
-        slice,
-        slice_fill: *fill,
-        width,
-        width_value_count,
-        outset,
-        outset_value_count,
-        border_image_repeat_x: repeat_at(0),
-        border_image_repeat_y: repeat_at(1),
-    };
-    // SAFETY: The entries and assembly hold live or retained value data, and
-    // the caller warrants the parent payload.
     unsafe {
-        crate::css::computed_values::build_group_payload_with_assembler(
+        crate::css::computed_values::build_group_payload_with_rust_fill(
             group_index::BORDER,
             &entries,
-            (&raw const assembly).cast(),
+            |payload| {
+                let payload = &mut *payload.cast::<BorderValues>();
+                payload.border_left = side(
+                    property_id::BORDER_LEFT_STYLE,
+                    property_id::BORDER_LEFT_WIDTH,
+                    property_id::BORDER_LEFT_COLOR,
+                );
+                payload.border_top = side(
+                    property_id::BORDER_TOP_STYLE,
+                    property_id::BORDER_TOP_WIDTH,
+                    property_id::BORDER_TOP_COLOR,
+                );
+                payload.border_right = side(
+                    property_id::BORDER_RIGHT_STYLE,
+                    property_id::BORDER_RIGHT_WIDTH,
+                    property_id::BORDER_RIGHT_COLOR,
+                );
+                payload.border_bottom = side(
+                    property_id::BORDER_BOTTOM_STYLE,
+                    property_id::BORDER_BOTTOM_WIDTH,
+                    property_id::BORDER_BOTTOM_COLOR,
+                );
+                payload.border_left_color_style_value = retained(property_id::BORDER_LEFT_COLOR);
+                payload.border_top_color_style_value = retained(property_id::BORDER_TOP_COLOR);
+                payload.border_right_color_style_value = retained(property_id::BORDER_RIGHT_COLOR);
+                payload.border_bottom_color_style_value = retained(property_id::BORDER_BOTTOM_COLOR);
+                payload.border_left_computed_width = length_to_css_pixels(
+                    values
+                        .value(property_id::BORDER_LEFT_WIDTH)
+                        .expect("border-left-width has a computed value"),
+                );
+                payload.border_top_computed_width = length_to_css_pixels(
+                    values
+                        .value(property_id::BORDER_TOP_WIDTH)
+                        .expect("border-top-width has a computed value"),
+                );
+                payload.border_right_computed_width = length_to_css_pixels(
+                    values
+                        .value(property_id::BORDER_RIGHT_WIDTH)
+                        .expect("border-right-width has a computed value"),
+                );
+                payload.border_bottom_computed_width = length_to_css_pixels(
+                    values
+                        .value(property_id::BORDER_BOTTOM_WIDTH)
+                        .expect("border-bottom-width has a computed value"),
+                );
+                payload.border_bottom_left_radius = retained(property_id::BORDER_BOTTOM_LEFT_RADIUS);
+                payload.border_bottom_right_radius = retained(property_id::BORDER_BOTTOM_RIGHT_RADIUS);
+                payload.border_top_left_radius = retained(property_id::BORDER_TOP_LEFT_RADIUS);
+                payload.border_top_right_radius = retained(property_id::BORDER_TOP_RIGHT_RADIUS);
+                payload.border_image_source = retained(property_id::BORDER_IMAGE_SOURCE);
+                payload.border_image_slice = retained(property_id::BORDER_IMAGE_SLICE);
+                payload.border_image_width = retained(property_id::BORDER_IMAGE_WIDTH);
+                payload.border_image_outset = retained(property_id::BORDER_IMAGE_OUTSET);
+                payload.border_image_repeat = retained(property_id::BORDER_IMAGE_REPEAT);
+            },
             parent_payload,
         )
     }
@@ -2274,6 +1842,7 @@ fn lower_svg_paint(values: &EffectiveValues, property: u16, input: &ColorResolut
             paint.url = ComputedStyleValueHandle::retained(components[0].pointer());
             match components[1].data() {
                 StyleValueData::EmptyOptional => paint,
+                StyleValueData::Keyword { keyword: code } if *code == keyword::NONE => paint,
                 fallback => {
                     let color = to_color(fallback, input).expect("a computed SVG paint fallback is a color");
                     paint.has_color = true;
@@ -2419,30 +1988,12 @@ unsafe fn build_inherited_svg_group(
     }
 }
 
-/// The inherited list group's complex members, pre-lowered for the
-/// registered C++ assembler. The list-style-type stays with the assembler's
-/// C++ arm: its counter styles resolve against the style scope.
-#[repr(C)]
-pub struct FfiInheritedListGroupAssembly {
-    pub cpp_context: *const c_void,
-    /// 0 none, 1 image minted through the stamped property() path, 2 image
-    /// adopted from the retained handle.
-    pub image_kind: u8,
-    pub image: *const c_void,
-    /// 0 auto, 1 none, 2 specified pairs.
-    pub quotes_kind: u8,
-    /// Borrowed fly-string raws, in open/close pairs, alive across the build.
-    pub quote_strings: *const usize,
-    pub quote_string_count: usize,
-}
-
-/// Builds the inherited list group: the generic descriptor path first, then
-/// the image and quotes lowering through the registered assembler.
+/// Builds the inherited list group from canonical values without leaving
+/// Rust. Counter-style scope resolution remains a consumer-side operation.
 unsafe fn build_inherited_list_group(
     values: &EffectiveValues,
     input: &ColorResolutionInput,
     used_color_scheme: u8,
-    cpp_assembler_context: *const c_void,
     parent_payload: *const c_void,
 ) -> *const c_void {
     let generic = unsafe {
@@ -2463,124 +2014,32 @@ unsafe fn build_inherited_list_group(
         return std::ptr::null();
     };
 
-    const LIST_IMAGE_NONE: u8 = 0;
-    const LIST_IMAGE_STAMPED: u8 = 1;
-    const LIST_IMAGE_RETAINED: u8 = 2;
-    let image_data = values
-        .value(property_id::LIST_STYLE_IMAGE)
-        .expect("the table holds list-style-image");
-    let (image_kind, image) = if !is_abstract_image(image_data) {
-        (LIST_IMAGE_NONE, std::ptr::null())
-    } else if image_needs_stamped_wrapper(image_data) {
-        (LIST_IMAGE_STAMPED, std::ptr::null())
-    } else {
-        (
-            LIST_IMAGE_RETAINED,
-            retain_for_assembly(values.pointer(property_id::LIST_STYLE_IMAGE)),
-        )
-    };
-
-    const QUOTES_AUTO: u8 = 0;
-    const QUOTES_NONE: u8 = 1;
-    const QUOTES_SPECIFIED: u8 = 2;
-    let mut quotes_kind = QUOTES_AUTO;
-    let mut quote_strings: Vec<usize> = Vec::new();
-    match values.value(property_id::QUOTES) {
-        Some(StyleValueData::Keyword { keyword: code }) if *code == keyword::NONE => quotes_kind = QUOTES_NONE,
-        Some(StyleValueData::ValueList { values: list, .. }) => {
-            let items = list.as_slice();
-            assert!(items.len() % 2 == 0, "computed quotes come in pairs");
-            quotes_kind = QUOTES_SPECIFIED;
-            for item in items {
-                let StyleValueData::String { string } = item.data() else {
-                    unreachable!("a computed quotes item is a string");
-                };
-                quote_strings.push(string.raw());
-            }
-        }
-        // auto, and any other keyword the extractor folded to the initial value.
-        _ => {}
-    }
-
-    let assembly = FfiInheritedListGroupAssembly {
-        cpp_context: cpp_assembler_context,
-        image_kind,
-        image,
-        quotes_kind,
-        quote_strings: quote_strings.as_ptr(),
-        quote_string_count: quote_strings.len(),
-    };
-    // SAFETY: The entries and assembly hold live or retained value data, and
-    // the caller warrants the parent payload.
     unsafe {
-        crate::css::computed_values::build_group_payload_with_assembler(
+        crate::css::computed_values::build_group_payload_with_rust_fill(
             group_index::INHERITED_LIST,
             &entries,
-            (&raw const assembly).cast(),
+            |payload| {
+                let payload = &mut *payload.cast::<InheritedListValues>();
+                let retained = |property| ComputedStyleValueHandle::retained(values.pointer(property).cast());
+                payload.list_style_type = retained(property_id::LIST_STYLE_TYPE);
+                payload.list_style_position = values
+                    .value(property_id::LIST_STYLE_POSITION)
+                    .and_then(keyword_of)
+                    .and_then(crate::css::css_enums::keyword_to_list_style_position)
+                    .expect("a computed list-style-position maps to its enum");
+                payload.list_style_image = retained(property_id::LIST_STYLE_IMAGE);
+                payload.quotes = retained(property_id::QUOTES);
+            },
             parent_payload,
         )
     }
 }
 
-/// One lowered counter definition.
-#[repr(C)]
-pub struct FfiCounterDataAssembly {
-    /// A borrowed fly-string raw, alive across the build.
-    pub name_raw: usize,
-    pub is_reversed: bool,
-    pub has_value: bool,
-    pub value: i32,
-}
-
-/// The content group's complex members, pre-lowered for the registered C++
-/// assembler. A content list stays with the assembler's C++ arm: its items
-/// are wrapper-typed (strings, counters, images) and its images mint through
-/// the stamped property() path.
-#[repr(C)]
-pub struct FfiContentGroupAssembly {
-    pub cpp_context: *const c_void,
-    /// 0 normal, 1 none, 2 list (the assembler walks the stamped wrapper).
-    pub content_kind: u8,
-    pub counter_increment: *const FfiCounterDataAssembly,
-    pub counter_increment_count: usize,
-    pub counter_reset: *const FfiCounterDataAssembly,
-    pub counter_reset_count: usize,
-    pub counter_set: *const FfiCounterDataAssembly,
-    pub counter_set_count: usize,
-}
-
-fn lower_counter_data(values: &EffectiveValues, property: u16) -> Vec<FfiCounterDataAssembly> {
-    let Some(StyleValueData::CounterDefinitions { counter_definitions }) = values.value(property) else {
-        // The none keyword, and anything the extractor did not handle, is the
-        // empty list.
-        return Vec::new();
-    };
-    counter_definitions
-        .as_slice()
-        .iter()
-        .map(|definition| {
-            let value = definition
-                .value()
-                .optional_data()
-                .map(|value| grid_integer(value).expect("a computed counter value resolves without context"));
-            FfiCounterDataAssembly {
-                name_raw: definition.name().raw(),
-                is_reversed: definition.is_reversed(),
-                has_value: value.is_some(),
-                value: value.unwrap_or(0),
-            }
-        })
-        .collect()
-}
-
-/// Builds the content group: the generic descriptor path first, then the
-/// counter lowering (and the content list's C++ arm) through the registered
-/// assembler.
+/// Builds the content group from its canonical values without leaving Rust.
 unsafe fn build_content_group(
     values: &EffectiveValues,
     input: &ColorResolutionInput,
     used_color_scheme: u8,
-    cpp_assembler_context: *const c_void,
     parent_payload: *const c_void,
 ) -> *const c_void {
     let generic =
@@ -2593,36 +2052,18 @@ unsafe fn build_content_group(
         return std::ptr::null();
     };
 
-    const CONTENT_NORMAL: u8 = 0;
-    const CONTENT_NONE: u8 = 1;
-    const CONTENT_LIST: u8 = 2;
-    let content_kind = match values.value(property_id::CONTENT) {
-        Some(StyleValueData::Keyword { keyword: code }) if *code == keyword::NONE => CONTENT_NONE,
-        Some(StyleValueData::Content { .. }) => CONTENT_LIST,
-        _ => CONTENT_NORMAL,
-    };
-
-    let counter_increment = lower_counter_data(values, property_id::COUNTER_INCREMENT);
-    let counter_reset = lower_counter_data(values, property_id::COUNTER_RESET);
-    let counter_set = lower_counter_data(values, property_id::COUNTER_SET);
-
-    let assembly = FfiContentGroupAssembly {
-        cpp_context: cpp_assembler_context,
-        content_kind,
-        counter_increment: counter_increment.as_ptr(),
-        counter_increment_count: counter_increment.len(),
-        counter_reset: counter_reset.as_ptr(),
-        counter_reset_count: counter_reset.len(),
-        counter_set: counter_set.as_ptr(),
-        counter_set_count: counter_set.len(),
-    };
-    // SAFETY: The entries and assembly hold live or retained value data, and
-    // the caller warrants the parent payload.
     unsafe {
-        crate::css::computed_values::build_group_payload_with_assembler(
+        crate::css::computed_values::build_group_payload_with_rust_fill(
             group_index::CONTENT,
             &entries,
-            (&raw const assembly).cast(),
+            |payload| {
+                let payload = &mut *payload.cast::<ContentValues>();
+                let retained = |property| ComputedStyleValueHandle::retained(values.pointer(property).cast());
+                payload.content = retained(property_id::CONTENT);
+                payload.counter_increment = retained(property_id::COUNTER_INCREMENT);
+                payload.counter_reset = retained(property_id::COUNTER_RESET);
+                payload.counter_set = retained(property_id::COUNTER_SET);
+            },
             parent_payload,
         )
     }
@@ -2915,9 +2356,9 @@ pub struct FfiMiscResetGroupAssembly {
     pub column_height: *const c_void,
     /// The retained shape-margin value.
     pub shape_margin: *const c_void,
-    /// Whether shape-outside is non-initial; the assembler's C++ arm walks
-    /// the stamped wrapper, whose images read style sheet context.
+    /// Whether shape-outside is non-initial and its retained value.
     pub shape_outside_noninitial: bool,
+    pub shape_outside: *const c_void,
     /// The C++ ScrollbarGutter code.
     pub scrollbar_gutter: u8,
     pub will_change_is_auto: bool,
@@ -3047,6 +2488,11 @@ unsafe fn build_misc_reset_group(
 
     let shape_outside_noninitial = values.pointer(property_id::SHAPE_OUTSIDE)
         != crate::css::style_compute::initial_value_data(property_id::SHAPE_OUTSIDE).cast();
+    let shape_outside = if shape_outside_noninitial {
+        retain_for_assembly(values.pointer(property_id::SHAPE_OUTSIDE))
+    } else {
+        std::ptr::null()
+    };
 
     let Some(StyleValueData::ScrollbarGutter {
         value: scrollbar_gutter,
@@ -3127,6 +2573,7 @@ unsafe fn build_misc_reset_group(
         column_height: retained_slot(property_id::COLUMN_HEIGHT),
         shape_margin: retained_slot(property_id::SHAPE_MARGIN),
         shape_outside_noninitial,
+        shape_outside,
         scrollbar_gutter: *scrollbar_gutter,
         will_change_is_auto,
         will_change_entries: will_change_entries.as_ptr(),
@@ -3847,41 +3294,19 @@ pub unsafe extern "C" fn rust_build_group_payloads_from_table(
                     group_index::INHERITED_SVG => {
                         build_inherited_svg_group(&values, &input, inputs.used_color_scheme, parent_payload)
                     }
-                    group_index::INHERITED_LIST => build_inherited_list_group(
-                        &values,
-                        &input,
-                        inputs.used_color_scheme,
-                        inputs.cpp_assembler_context,
-                        parent_payload,
-                    ),
-                    group_index::CONTENT => build_content_group(
-                        &values,
-                        &input,
-                        inputs.used_color_scheme,
-                        inputs.cpp_assembler_context,
-                        parent_payload,
-                    ),
-                    group_index::BACKGROUND => build_background_group(
-                        &values,
-                        &input,
-                        inputs.used_color_scheme,
-                        inputs.cpp_assembler_context,
-                        parent_payload,
-                    ),
-                    group_index::MASK => build_mask_group(
-                        &values,
-                        &input,
-                        inputs.used_color_scheme,
-                        inputs.cpp_assembler_context,
-                        parent_payload,
-                    ),
-                    group_index::BORDER => build_border_group(
-                        &values,
-                        &input,
-                        inputs.used_color_scheme,
-                        inputs.cpp_assembler_context,
-                        parent_payload,
-                    ),
+                    group_index::INHERITED_LIST => {
+                        build_inherited_list_group(&values, &input, inputs.used_color_scheme, parent_payload)
+                    }
+                    group_index::CONTENT => {
+                        build_content_group(&values, &input, inputs.used_color_scheme, parent_payload)
+                    }
+                    group_index::BACKGROUND => {
+                        build_background_group(&values, &input, inputs.used_color_scheme, parent_payload)
+                    }
+                    group_index::MASK => build_mask_group(&values, &input, inputs.used_color_scheme, parent_payload),
+                    group_index::BORDER => {
+                        build_border_group(&values, &input, inputs.used_color_scheme, parent_payload)
+                    }
                     _ => build_generic_group(group, &values, &input, inputs.used_color_scheme, parent_payload),
                 }
             };

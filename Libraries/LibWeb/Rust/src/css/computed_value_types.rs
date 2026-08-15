@@ -181,21 +181,73 @@ pub struct BoxValues {
 /// color, line style, used width. Layout reads the line style and width
 /// everywhere, and table border conflict resolution also reads the color.
 #[repr(C)]
+#[derive(Clone, PartialEq)]
 pub struct ComputedBorderSide {
     pub color: u32,
     pub line_style: u8,
     pub width: crate::css::css_pixels::CssPixels,
 }
 
-/// The layout-facing prefix of the C++-owned border style group: its four
-/// BorderData members lead the group in this order, pinned by static
-/// asserts beside the C++ group definition.
+/// The layout-facing prefix of the Rust-owned border style group. Its four
+/// side facts lead the group in this order, pinned by static asserts beside
+/// the C++ compatibility view.
 #[repr(C)]
 pub struct BorderLayoutFacts {
     pub border_left: ComputedBorderSide,
     pub border_top: ComputedBorderSide,
     pub border_right: ComputedBorderSide,
     pub border_bottom: ComputedBorderSide,
+}
+
+/// The border computed values. C++ materializes radii and border-image views
+/// from the canonical handles only when consumers request them.
+#[repr(C)]
+pub struct BorderValues {
+    pub border_left: ComputedBorderSide,
+    pub border_top: ComputedBorderSide,
+    pub border_right: ComputedBorderSide,
+    pub border_bottom: ComputedBorderSide,
+    pub border_left_color_style_value: ComputedStyleValueHandle,
+    pub border_top_color_style_value: ComputedStyleValueHandle,
+    pub border_right_color_style_value: ComputedStyleValueHandle,
+    pub border_bottom_color_style_value: ComputedStyleValueHandle,
+    pub border_left_computed_width: crate::css::css_pixels::CssPixels,
+    pub border_top_computed_width: crate::css::css_pixels::CssPixels,
+    pub border_right_computed_width: crate::css::css_pixels::CssPixels,
+    pub border_bottom_computed_width: crate::css::css_pixels::CssPixels,
+    pub border_bottom_left_radius: ComputedStyleValueHandle,
+    pub border_bottom_right_radius: ComputedStyleValueHandle,
+    pub border_top_left_radius: ComputedStyleValueHandle,
+    pub border_top_right_radius: ComputedStyleValueHandle,
+    pub corner_bottom_left_shape: f64,
+    pub corner_bottom_right_shape: f64,
+    pub corner_top_left_shape: f64,
+    pub corner_top_right_shape: f64,
+    pub border_image_source: ComputedStyleValueHandle,
+    pub border_image_slice: ComputedStyleValueHandle,
+    pub border_image_width: ComputedStyleValueHandle,
+    pub border_image_outset: ComputedStyleValueHandle,
+    pub border_image_repeat: ComputedStyleValueHandle,
+}
+
+/// Canonical generated-content and counter values. C++ materializes its
+/// presentation structures only when a consumer requests them.
+#[repr(C)]
+pub struct ContentValues {
+    pub content: ComputedStyleValueHandle,
+    pub counter_increment: ComputedStyleValueHandle,
+    pub counter_reset: ComputedStyleValueHandle,
+    pub counter_set: ComputedStyleValueHandle,
+}
+
+/// Canonical inherited list values. Counter-style and image presentation
+/// objects are resolved lazily by consumers with their current style scope.
+#[repr(C)]
+pub struct InheritedListValues {
+    pub list_style_type: ComputedStyleValueHandle,
+    pub list_style_position: u8,
+    pub list_style_image: ComputedStyleValueHandle,
+    pub quotes: ComputedStyleValueHandle,
 }
 
 /// A computed text-indent value, mirroring the C++ TextIndentData layout:
@@ -299,6 +351,40 @@ pub struct AnimationValues {
     pub transition_timing_function: ComputedStyleValueHandle,
     pub transition_delay: ComputedStyleValueHandle,
     pub transition_behavior: ComputedStyleValueHandle,
+}
+
+/// The mask computed values. Each handle retains a canonical Rust longhand;
+/// typed C++ views coordinate repeatable lists only when consumed.
+#[repr(C)]
+pub struct MaskValues {
+    pub mask_image: ComputedStyleValueHandle,
+    pub mask_type: ComputedStyleValueHandle,
+    pub clip_path: ComputedStyleValueHandle,
+    pub mask_mode: ComputedStyleValueHandle,
+    pub mask_repeat: ComputedStyleValueHandle,
+    pub mask_position: ComputedStyleValueHandle,
+    pub mask_clip: ComputedStyleValueHandle,
+    pub mask_origin: ComputedStyleValueHandle,
+    pub mask_size: ComputedStyleValueHandle,
+    pub mask_composite: ComputedStyleValueHandle,
+}
+
+/// The background computed values. Rust keeps every canonical longhand while
+/// C++ coordinates the repeatable lists only when painting consumes them.
+#[repr(C)]
+pub struct BackgroundValues {
+    pub background_color: u32,
+    pub background_color_style_value: ComputedStyleValueHandle,
+    pub background_color_clip: u8,
+    pub background_image: ComputedStyleValueHandle,
+    pub background_attachment: ComputedStyleValueHandle,
+    pub background_blend_mode: ComputedStyleValueHandle,
+    pub background_clip: ComputedStyleValueHandle,
+    pub background_origin: ComputedStyleValueHandle,
+    pub background_position_x: ComputedStyleValueHandle,
+    pub background_position_y: ComputedStyleValueHandle,
+    pub background_repeat: ComputedStyleValueHandle,
+    pub background_size: ComputedStyleValueHandle,
 }
 
 /// The layout-facing prefix of the C++-owned font style group, pinned by
@@ -575,6 +661,15 @@ pub struct EffectsValues {
     pub box_shadows: RetainedComputedShadowList,
     pub clip_is_rect: bool,
     pub clip_edges: [ComputedClipEdge; 4],
+    /// Canonical longhands retained so payload equality implies computed-value
+    /// equality even when distinct syntax lowers to the same used facts.
+    pub opacity_style_value: ComputedStyleValueHandle,
+    pub filter_style_value: ComputedStyleValueHandle,
+    pub backdrop_filter_style_value: ComputedStyleValueHandle,
+    pub mix_blend_mode_style_value: ComputedStyleValueHandle,
+    pub isolation_style_value: ComputedStyleValueHandle,
+    pub box_shadow_style_value: ComputedStyleValueHandle,
+    pub clip_style_value: ComputedStyleValueHandle,
 }
 
 #[repr(C)]

@@ -14,10 +14,14 @@
 #include <LibWeb/CSS/StyleScope.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/AngleStyleValue.h>
+#include <LibWeb/CSS/StyleValues/BackgroundSizeStyleValue.h>
+#include <LibWeb/CSS/StyleValues/BorderImageSliceStyleValue.h>
 #include <LibWeb/CSS/StyleValues/BorderRadiusStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorSchemeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ContentStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CounterDefinitionsStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterStyleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CursorStyleValue.h>
@@ -39,6 +43,7 @@
 #include <LibWeb/CSS/StyleValues/PercentageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/PositionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RatioStyleValue.h>
+#include <LibWeb/CSS/StyleValues/RepeatStyleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ScrollbarGutterStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StringStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
@@ -56,7 +61,6 @@ static constexpr bool style_group_payload_is_rust_native(ComputedValuesFFI::Styl
 {
     switch (lifecycle) {
     case ComputedValuesFFI::StyleGroupLifecycle::Cpp:
-    case ComputedValuesFFI::StyleGroupLifecycle::CppWithBorderFacts:
     case ComputedValuesFFI::StyleGroupLifecycle::CppWithInheritedTextFacts:
     case ComputedValuesFFI::StyleGroupLifecycle::CppWithFontFacts:
         return false;
@@ -76,6 +80,11 @@ static constexpr bool style_group_payload_is_rust_native(ComputedValuesFFI::Styl
     case ComputedValuesFFI::StyleGroupLifecycle::InheritedSVG:
     case ComputedValuesFFI::StyleGroupLifecycle::InheritedText:
     case ComputedValuesFFI::StyleGroupLifecycle::Animation:
+    case ComputedValuesFFI::StyleGroupLifecycle::Mask:
+    case ComputedValuesFFI::StyleGroupLifecycle::Background:
+    case ComputedValuesFFI::StyleGroupLifecycle::Border:
+    case ComputedValuesFFI::StyleGroupLifecycle::Content:
+    case ComputedValuesFFI::StyleGroupLifecycle::InheritedList:
         return true;
     }
     VERIFY_NOT_REACHED();
@@ -231,11 +240,6 @@ static constexpr Array animation_group_properties {
 // bespoke calls or in C++ bind their properties explicitly beside the descriptors, transcribed from
 // the builder or setters that consume them. A longhand without a binding has no single known group,
 // and callers treat it conservatively.
-static void assemble_background_group_payload(void* payload_pointer, void const* data_pointer);
-static void assemble_mask_group_payload(void* payload_pointer, void const* data_pointer);
-static void assemble_border_group_payload(void* payload_pointer, void const* data_pointer);
-static void assemble_inherited_list_group_payload(void* payload_pointer, void const* data_pointer);
-static void assemble_content_group_payload(void* payload_pointer, void const* data_pointer);
 static void assemble_misc_reset_group_payload(void* payload_pointer, void const* data_pointer);
 
 // The C++ context the registered table-group assemblers reach through their
@@ -385,10 +389,9 @@ static void register_style_group_field_descriptors()
     add(transform, PropertyID::Perspective, 0, GROUP_FIELD_REQUIRE_KEYWORD, to_underlying(Keyword::None), nullptr);
     add(transform, PropertyID::PerspectiveOrigin, 0, GROUP_FIELD_REQUIRE_INITIAL_VALUE, 0, nullptr);
 
-    using Mask = ComputedValues::MaskValues;
     constexpr auto mask = to_underlying(StyleGroupIndex::MaskValues);
     add(mask, PropertyID::MaskImage, 0, GROUP_FIELD_REQUIRE_KEYWORD, to_underlying(Keyword::None), nullptr);
-    add(mask, PropertyID::MaskType, offsetof(Mask, mask_type), GROUP_FIELD_ENUM_KEYWORD, 0, &keyword_code_table<keyword_to_mask_type>());
+    add(mask, PropertyID::MaskType, 0, GROUP_FIELD_REQUIRE_INITIAL_VALUE, 0, nullptr);
     add(mask, PropertyID::ClipPath, 0, GROUP_FIELD_REQUIRE_KEYWORD, to_underlying(Keyword::None), nullptr);
     add(mask, PropertyID::MaskMode, 0, GROUP_FIELD_REQUIRE_INITIAL_VALUE, 0, nullptr);
     add(mask, PropertyID::MaskRepeat, 0, GROUP_FIELD_REQUIRE_INITIAL_VALUE, 0, nullptr);
@@ -428,7 +431,7 @@ static void register_style_group_field_descriptors()
     add(inherited_svg, PropertyID::DominantBaseline, 0, GROUP_FIELD_REQUIRE_KEYWORD, to_underlying(Keyword::Auto), nullptr);
     add(inherited_svg, PropertyID::ShapeRendering, offsetof(InheritedSVG, shape_rendering), GROUP_FIELD_ENUM_KEYWORD, 0, &keyword_code_table<keyword_to_shape_rendering>());
 
-    using InheritedList = ComputedValues::InheritedListValues;
+    using InheritedList = ComputedValuesFFI::InheritedListValues;
     constexpr auto inherited_list = to_underlying(StyleGroupIndex::InheritedListValues);
     add(inherited_list, PropertyID::ListStyleType, 0, GROUP_FIELD_REQUIRE_INITIAL_VALUE, 0, nullptr);
     add(inherited_list, PropertyID::ListStylePosition, offsetof(InheritedList, list_style_position), GROUP_FIELD_ENUM_KEYWORD, 0, &keyword_code_table<keyword_to_list_style_position>());
@@ -450,7 +453,7 @@ static void register_style_group_field_descriptors()
     add(anchor, PropertyID::PositionTryOrder, 0, GROUP_FIELD_REQUIRE_KEYWORD, to_underlying(Keyword::Normal), nullptr);
     add(anchor, PropertyID::PositionVisibility, 0, GROUP_FIELD_REQUIRE_KEYWORD, to_underlying(Keyword::Always), nullptr);
 
-    using Border = ComputedValues::BorderValues;
+    using Border = ComputedValuesFFI::BorderValues;
     constexpr auto border = to_underlying(StyleGroupIndex::BorderValues);
     struct BorderSide {
         PropertyID color;
@@ -466,10 +469,10 @@ static void register_style_group_field_descriptors()
              BorderSide { PropertyID::BorderRightColor, PropertyID::BorderRightStyle, PropertyID::BorderRightWidth, offsetof(Border, border_right), offsetof(Border, border_right_color_style_value), offsetof(Border, border_right_computed_width) },
              BorderSide { PropertyID::BorderBottomColor, PropertyID::BorderBottomStyle, PropertyID::BorderBottomWidth, offsetof(Border, border_bottom), offsetof(Border, border_bottom_color_style_value), offsetof(Border, border_bottom_computed_width) },
          }) {
-        add(border, side.color, side.data_offset + offsetof(BorderData, color), GROUP_FIELD_COLOR, 0, nullptr);
-        add(border, side.color, side.data_handle_offset, GROUP_FIELD_RETAINED_DATA, 0, nullptr);
-        // NB: A none border-style keeps BorderData's width at the constructor's zero,
-        //     matching the used-width rule; styled borders take the C++ path.
+        add(border, side.color, side.data_offset + offsetof(ComputedValuesFFI::ComputedBorderSide, color), GROUP_FIELD_COLOR, 0, nullptr);
+        add(border, side.color, 0, GROUP_FIELD_REQUIRE_INITIAL_VALUE, 0, nullptr);
+        // NB: A none border-style keeps the used width at the constructor's zero;
+        //     styled borders are completed by the Rust group builder.
         add(border, side.style, 0, GROUP_FIELD_REQUIRE_KEYWORD, to_underlying(Keyword::None), nullptr);
         add(border, side.width, side.computed_width_offset, GROUP_FIELD_CSS_PIXELS_NON_NEGATIVE, 0, nullptr);
     }
@@ -485,10 +488,9 @@ static void register_style_group_field_descriptors()
     add(border, PropertyID::BorderImageSlice, 0, GROUP_FIELD_REQUIRE_INITIAL_VALUE, 0, nullptr);
     add(border, PropertyID::BorderImageWidth, 0, GROUP_FIELD_REQUIRE_INITIAL_VALUE, 0, nullptr);
 
-    using Background = ComputedValues::BackgroundValues;
     constexpr auto background = to_underlying(StyleGroupIndex::BackgroundValues);
-    add(background, PropertyID::BackgroundColor, offsetof(Background, background_color), GROUP_FIELD_COLOR, 0, nullptr);
-    add(background, PropertyID::BackgroundColor, offsetof(Background, background_color_style_value), GROUP_FIELD_RETAINED_DATA, 0, nullptr);
+    add(background, PropertyID::BackgroundColor, 0, GROUP_FIELD_COLOR, 0, nullptr);
+    add(background, PropertyID::BackgroundColor, 0, GROUP_FIELD_REQUIRE_INITIAL_VALUE, 0, nullptr);
     for (auto property : { PropertyID::BackgroundImage, PropertyID::BackgroundClip, PropertyID::BackgroundAttachment,
              PropertyID::BackgroundOrigin, PropertyID::BackgroundPositionX, PropertyID::BackgroundPositionY,
              PropertyID::BackgroundRepeat, PropertyID::BackgroundSize, PropertyID::BackgroundBlendMode })
@@ -531,11 +533,6 @@ static void register_style_group_field_descriptors()
         bind_property_to_group(property, to_underlying(StyleGroupIndex::FontValues));
 
     rust_style_group_register_field_descriptors(descriptors.data(), descriptors.size());
-    rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::BackgroundValues), assemble_background_group_payload);
-    rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::MaskValues), assemble_mask_group_payload);
-    rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::BorderValues), assemble_border_group_payload);
-    rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::InheritedListValues), assemble_inherited_list_group_payload);
-    rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::ContentValues), assemble_content_group_payload);
     rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::MiscResetValues), assemble_misc_reset_group_payload);
 
     // Double-entry bookkeeping: Properties.json declares each longhand's style group, and the
@@ -658,9 +655,7 @@ static_assert(alignof(Size) == alignof(ComputedValuesFFI::ComputedSize));
 static_assert(sizeof(RustStyleValueHandle) == sizeof(StyleValueFFI::StyleValueData const*));
 static_assert(alignof(RustStyleValueHandle) == alignof(StyleValueFFI::StyleValueData const*));
 
-// The border group keeps its C++ lifecycle, but its four leading BorderData
-// members double as the Rust BorderLayoutFacts prefix that layout reads as
-// typed fields.
+// The Rust border group's four leading side facts share BorderData's layout.
 static_assert(sizeof(Gfx::Color) == sizeof(u32));
 static_assert(sizeof(ShadowData) == sizeof(ComputedValuesFFI::ComputedShadow));
 static_assert(alignof(ShadowData) == alignof(ComputedValuesFFI::ComputedShadow));
@@ -687,6 +682,13 @@ static_assert(offsetof(ComputedValues::BorderValues, border_top) == offsetof(Com
 static_assert(offsetof(ComputedValues::BorderValues, border_right) == offsetof(ComputedValuesFFI::BorderLayoutFacts, border_right));
 static_assert(offsetof(ComputedValues::BorderValues, border_bottom) == offsetof(ComputedValuesFFI::BorderLayoutFacts, border_bottom));
 static_assert(sizeof(ComputedValuesFFI::BorderLayoutFacts) <= offsetof(ComputedValues::BorderValues, border_left_color_style_value));
+static_assert(sizeof(ComputedValues::BorderValues) == sizeof(ComputedValuesFFI::BorderValues));
+static_assert(alignof(ComputedValues::BorderValues) == alignof(ComputedValuesFFI::BorderValues));
+static_assert(sizeof(ComputedValues::ContentValues) == sizeof(ComputedValuesFFI::ContentValues));
+static_assert(alignof(ComputedValues::ContentValues) == alignof(ComputedValuesFFI::ContentValues));
+static_assert(sizeof(ComputedValues::InheritedListValues) == sizeof(ComputedValuesFFI::InheritedListValues));
+static_assert(alignof(ComputedValues::InheritedListValues) == alignof(ComputedValuesFFI::InheritedListValues));
+static_assert(to_underlying(ListStylePosition::Outside) == 1);
 
 static_assert(sizeof(TextIndentData) == sizeof(ComputedValuesFFI::ComputedTextIndent));
 static_assert(offsetof(TextIndentData, length_percentage) == offsetof(ComputedValuesFFI::ComputedTextIndent, length_percentage));
@@ -726,32 +728,6 @@ void const* style_group_default_payload(size_t group_index)
         return payloads;
     }();
     return default_payloads[group_index];
-}
-
-// The default group payloads must match what create() produces for a completely
-// unstyled element, or every element clones these groups instead of sharing the
-// leaked default payload. Groups whose initial computed values are not simply
-// value-initialized members build their defaults from the property initial
-// values here, exactly as create() would.
-
-// create() appends the elements of comma-separated lists, so the seeded default
-// must hold the list element, not the list value itself.
-static NonnullRefPtr<StyleValue const> initial_list_element(PropertyID property_id)
-{
-    auto value = property_initial_value(property_id);
-    if (value->is_value_list())
-        return value->as_value_list().values().first();
-    return value;
-}
-
-ComputedValues::MaskValues ComputedValues::MaskValues::make_default_payload_value()
-{
-    MaskValues values;
-    VERIFY(values.mask_layers.size() == 1);
-    values.mask_layers[0].image_style_value = initial_list_element(PropertyID::MaskImage);
-    // NB: The computed initial mask-position offsets are percentages, not lengths.
-    values.mask_positions = { Position { .offset_x = Percentage(0), .offset_y = Percentage(0) } };
-    return values;
 }
 
 bool ComputedValues::FontValues::operator==(FontValues const& other) const
@@ -1093,324 +1069,11 @@ static RefPtr<StyleValue const> adopt_assembly_handle(void const* pointer)
     return StyleValue::adopt_rust_style_value_data(static_cast<StyleValueFFI::StyleValueData const*>(pointer));
 }
 
-// Fills one background or mask layer's wrapper-backed members from the
-// core's lowering: the image wrapper (minted through the stamped property()
-// path when the slot holds an actual image resource), the position offsets,
-// the repeat codes and the size.
-static void assemble_coordinated_layer(BackgroundLayerData& layer, ComputedValuesFFI::FfiCoordinatedLayerAssembly const& lowered, TableGroupAssemblerContext const& context, PropertyID image_property, size_t layer_index)
-{
-    RefPtr<StyleValue const> image_wrapper;
-    if (lowered.image_needs_stamped_wrapper) {
-        auto const& image_value = context.computed_style.property(image_property);
-        if (image_value.is_value_list())
-            image_wrapper = image_value.as_value_list().values()[layer_index];
-        else
-            image_wrapper = image_value;
-    } else {
-        image_wrapper = adopt_assembly_handle(lowered.image);
-    }
-    layer.image_style_value = image_wrapper;
-    if (lowered.image_is_abstract_image)
-        layer.background_image = image_wrapper->as_abstract_image();
-
-    layer.position_x = LengthPercentage::from_style_value(adopt_assembly_handle(lowered.position_x).release_nonnull());
-    layer.position_y = LengthPercentage::from_style_value(adopt_assembly_handle(lowered.position_y).release_nonnull());
-
-    layer.repeat_x = static_cast<Repetition>(lowered.repeat_x);
-    layer.repeat_y = static_cast<Repetition>(lowered.repeat_y);
-
-    layer.size_type = static_cast<BackgroundSize>(lowered.size_type);
-    if (layer.size_type == BackgroundSize::LengthPercentage) {
-        layer.size_x = LengthPercentageOrAuto::from_style_value(adopt_assembly_handle(lowered.size_x).release_nonnull());
-        layer.size_y = LengthPercentageOrAuto::from_style_value(adopt_assembly_handle(lowered.size_y).release_nonnull());
-    }
-}
-
-// Fills the background group's complex members from the core's pre-lowered
-// assembly: the layer list's wrapper and length-percentage members are
-// transcribed here, and a background-color the core could not resolve takes
-// the C++ resolution arm.
-static void assemble_background_group_payload(void* payload_pointer, void const* data_pointer)
-{
-    auto& payload = *static_cast<ComputedValues::BackgroundValues*>(payload_pointer);
-    auto const& data = *static_cast<ComputedValuesFFI::FfiBackgroundGroupAssembly const*>(data_pointer);
-    auto const& context = *static_cast<TableGroupAssemblerContext const*>(data.cpp_context);
-
-    if (!data.color_resolved)
-        payload.background_color = context.computed_style.color(PropertyID::BackgroundColor, context.color_resolution_context);
-    payload.background_color_clip = static_cast<BackgroundBox>(data.color_clip);
-
-    Vector<BackgroundLayerData> layers;
-    layers.ensure_capacity(data.layer_count);
-    for (size_t i = 0; i < data.layer_count; ++i) {
-        auto const& lowered = data.layers[i];
-        BackgroundLayerData layer;
-        assemble_coordinated_layer(layer, lowered, context, PropertyID::BackgroundImage, i);
-        layer.attachment = static_cast<BackgroundAttachment>(lowered.attachment);
-        layer.blend_mode = static_cast<MixBlendMode>(lowered.blend_mode);
-        layer.clip = static_cast<BackgroundBox>(lowered.clip);
-        layer.origin = static_cast<BackgroundBox>(lowered.origin);
-        layers.unchecked_append(move(layer));
-    }
-    payload.background_layers = move(layers);
-}
-
-// Fills the mask group's complex members from the core's pre-lowered
-// assembly: the mask layers, the group's mask positions, the first slot's
-// mask reference or image, and the clip path.
-static void assemble_mask_group_payload(void* payload_pointer, void const* data_pointer)
-{
-    auto& payload = *static_cast<ComputedValues::MaskValues*>(payload_pointer);
-    auto const& data = *static_cast<ComputedValuesFFI::FfiMaskGroupAssembly const*>(data_pointer);
-    auto const& context = *static_cast<TableGroupAssemblerContext const*>(data.cpp_context);
-
-    Vector<BackgroundLayerData> layers;
-    layers.ensure_capacity(data.layer_count);
-    for (size_t i = 0; i < data.layer_count; ++i) {
-        auto const& lowered = data.layers[i];
-        BackgroundLayerData layer;
-        assemble_coordinated_layer(layer, lowered, context, PropertyID::MaskImage, i);
-        layer.origin = static_cast<BackgroundBox>(lowered.origin);
-        layer.clip = static_cast<BackgroundBox>(lowered.clip);
-        layer.mask_clip_is_no_clip = lowered.mask_clip_is_no_clip;
-        if (!lowered.mask_clip_is_no_clip)
-            layer.mask_clip = static_cast<CoordBox>(lowered.mask_clip);
-        layer.mask_composite = static_cast<CompositingOperator>(lowered.mask_composite);
-        layer.mask_mode = static_cast<MaskingMode>(lowered.mask_mode);
-        layer.mask_origin = static_cast<CoordBox>(lowered.mask_origin);
-        layers.unchecked_append(move(layer));
-    }
-    payload.mask_layers = move(layers);
-
-    Vector<Position> positions;
-    positions.ensure_capacity(data.position_count);
-    for (size_t i = 0; i < data.position_count; ++i) {
-        auto const& lowered = data.positions[i];
-        positions.unchecked_append(Position {
-            .offset_x = LengthPercentage::from_style_value(adopt_assembly_handle(lowered.x_offset).release_nonnull()),
-            .offset_y = LengthPercentage::from_style_value(adopt_assembly_handle(lowered.y_offset).release_nonnull()),
-        });
-    }
-    payload.mask_positions = move(positions);
-
-    if (data.mask_reference_url) {
-        auto url_value = adopt_assembly_handle(data.mask_reference_url).release_nonnull();
-        payload.mask = MaskReference { url_value->as_url().url() };
-    }
-    if (data.first_image_is_abstract_image && !payload.mask_layers.is_empty())
-        payload.mask_image = payload.mask_layers[0].background_image;
-
-    if (data.clip_path_kind == 1) {
-        auto url_value = adopt_assembly_handle(data.clip_path).release_nonnull();
-        payload.clip_path = ClipPathReference { url_value->as_url().url() };
-    } else if (data.clip_path_kind == 2) {
-        auto shape_value = adopt_assembly_handle(data.clip_path).release_nonnull();
-        payload.clip_path = ClipPathReference { shape_value->as_basic_shape() };
-    }
-}
-
-// Fills the border group's complex members from the core's pre-lowered
-// assembly: the sides' line styles and used widths (the computed widths and
-// resolved colors arrive through the field descriptors), the corner radii,
-// and the border-image. A side color the core could not resolve takes the
-// C++ resolution arm.
-static void assemble_border_group_payload(void* payload_pointer, void const* data_pointer)
-{
-    auto& payload = *static_cast<ComputedValues::BorderValues*>(payload_pointer);
-    auto const& data = *static_cast<ComputedValuesFFI::FfiBorderGroupAssembly const*>(data_pointer);
-    auto const& context = *static_cast<TableGroupAssemblerContext const*>(data.cpp_context);
-
-    auto side = [&](BorderData& border, CSSPixels computed_width, ComputedValuesFFI::FfiBorderSideAssembly const& lowered, PropertyID color_property) {
-        border.line_style = static_cast<LineStyle>(lowered.line_style);
-        if (!lowered.color_resolved)
-            border.color = context.computed_style.color(color_property, context.color_resolution_context);
-        // If the border-style corresponding to a given border-width is none or hidden, then the used width is 0.
-        // https://drafts.csswg.org/css-backgrounds/#border-width
-        if (border.line_style != LineStyle::None && border.line_style != LineStyle::Hidden)
-            border.width = computed_width;
-    };
-    side(payload.border_left, payload.border_left_computed_width, data.left, PropertyID::BorderLeftColor);
-    side(payload.border_top, payload.border_top_computed_width, data.top, PropertyID::BorderTopColor);
-    side(payload.border_right, payload.border_right_computed_width, data.right, PropertyID::BorderRightColor);
-    side(payload.border_bottom, payload.border_bottom_computed_width, data.bottom, PropertyID::BorderBottomColor);
-
-    auto radius = [&](void const* handle) {
-        auto value = adopt_assembly_handle(handle).release_nonnull();
-        return BorderRadiusData {
-            LengthPercentage::from_style_value(value->as_border_radius().horizontal_radius()),
-            LengthPercentage::from_style_value(value->as_border_radius().vertical_radius()),
-        };
-    };
-    payload.border_bottom_left_radius = radius(data.radii[0]);
-    payload.border_bottom_right_radius = radius(data.radii[1]);
-    payload.border_top_left_radius = radius(data.radii[2]);
-    payload.border_top_right_radius = radius(data.radii[3]);
-    payload.has_noninitial_border_radii = !payload.border_bottom_left_radius.is_initial()
-        || !payload.border_bottom_right_radius.is_initial()
-        || !payload.border_top_left_radius.is_initial()
-        || !payload.border_top_right_radius.is_initial();
-
-    BorderImageData border_image;
-    if (data.border_image_source_is_abstract_image) {
-        RefPtr<StyleValue const> source_wrapper;
-        if (data.border_image_source_needs_stamped_wrapper)
-            source_wrapper = context.computed_style.property(PropertyID::BorderImageSource);
-        else
-            source_wrapper = adopt_assembly_handle(data.border_image_source);
-        border_image.source = source_wrapper->as_abstract_image();
-    }
-    auto slice_value = [&](ComputedValuesFFI::FfiBorderImageSlotAssembly const& slot) -> BorderImageSliceValue {
-        if (slot.kind == 0)
-            return slot.number;
-        auto value = adopt_assembly_handle(slot.value).release_nonnull();
-        if (value->is_percentage())
-            return value->as_percentage().percentage();
-        return NonnullRefPtr<CalculatedStyleValue const> { value->as_calculated() };
-    };
-    auto width_value = [&](ComputedValuesFFI::FfiBorderImageSlotAssembly const& slot) -> BorderImageWidthValue {
-        if (slot.kind == 0)
-            return slot.number;
-        if (slot.kind == 2)
-            return BorderImageWidthAuto {};
-        return LengthPercentage::from_style_value(adopt_assembly_handle(slot.value).release_nonnull());
-    };
-    auto outset_value = [&](ComputedValuesFFI::FfiBorderImageSlotAssembly const& slot) -> BorderImageOutsetValue {
-        if (slot.kind == 0)
-            return slot.number;
-        return Length::from_style_value(adopt_assembly_handle(slot.value).release_nonnull(), {});
-    };
-    border_image.slice = { slice_value(data.slice[0]), slice_value(data.slice[1]), slice_value(data.slice[2]), slice_value(data.slice[3]) };
-    border_image.width = { width_value(data.width[0]), width_value(data.width[1]), width_value(data.width[2]), width_value(data.width[3]) };
-    border_image.outset = { outset_value(data.outset[0]), outset_value(data.outset[1]), outset_value(data.outset[2]), outset_value(data.outset[3]) };
-    border_image.width_value_count = data.width_value_count;
-    border_image.outset_value_count = data.outset_value_count;
-    border_image.fill = data.slice_fill;
-    border_image.repeat_x = static_cast<BorderImageRepeat>(data.border_image_repeat_x);
-    border_image.repeat_y = static_cast<BorderImageRepeat>(data.border_image_repeat_y);
-    payload.border_image = move(border_image);
-}
-
-// Fills the inherited list group's complex members from the core's
-// pre-lowered assembly. The list-style-type stays with the C++ arm because
-// its counter styles resolve against the style scope, and a url() list image
-// mints its wrapper through the stamped property() path.
-static void assemble_inherited_list_group_payload(void* payload_pointer, void const* data_pointer)
-{
-    auto& payload = *static_cast<ComputedValues::InheritedListValues*>(payload_pointer);
-    auto const& data = *static_cast<ComputedValuesFFI::FfiInheritedListGroupAssembly const*>(data_pointer);
-    auto const& context = *static_cast<TableGroupAssemblerContext const*>(data.cpp_context);
-
-    auto list_style_type = context.computed_style.list_style_type(context.style_scope);
-    auto const& list_style_type_value = context.computed_style.property(PropertyID::ListStyleType);
-    if (list_style_type_value.is_counter_style() && list_style_type_value.as_counter_style().value().has<CounterStyleStyleValue::SymbolsFunction>()) {
-        auto counter_style_value = list_style_type_value.as_counter_style().value();
-        auto const& symbols = counter_style_value.get<CounterStyleStyleValue::SymbolsFunction>();
-        auto counter_style = list_style_type.get<RefPtr<CounterStyle const>>();
-        VERIFY(counter_style);
-        list_style_type = ListStyleSymbols {
-            .counter_style = counter_style.release_nonnull(),
-            .type = symbols.type,
-            .symbols = symbols.symbols,
-        };
-    }
-    payload.list_style_type = move(list_style_type);
-
-    if (data.image_kind == 1)
-        payload.list_style_image = context.computed_style.property(PropertyID::ListStyleImage).as_abstract_image();
-    else if (data.image_kind == 2)
-        payload.list_style_image = adopt_assembly_handle(data.image).release_nonnull()->as_abstract_image();
-    else
-        payload.list_style_image = nullptr;
-
-    QuotesData quotes { .type = QuotesData::Type::Auto };
-    if (data.quotes_kind == 1) {
-        quotes.type = QuotesData::Type::None;
-    } else if (data.quotes_kind == 2) {
-        quotes.type = QuotesData::Type::Specified;
-        VERIFY(data.quote_string_count % 2 == 0);
-        for (size_t i = 0; i < data.quote_string_count; i += 2) {
-            quotes.strings.empend(
-                Utf16FlyString::from_raw(data.quote_strings[i]),
-                Utf16FlyString::from_raw(data.quote_strings[i + 1]));
-        }
-    }
-    payload.quotes = move(quotes);
-}
-
-// Fills the content group's complex members from the core's pre-lowered
-// assembly: the counter definitions arrive as plain data, and a content list
-// transcribes through the C++ arm, whose items are wrapper-typed and whose
-// images mint through the stamped property() path.
-static void assemble_content_group_payload(void* payload_pointer, void const* data_pointer)
-{
-    auto& payload = *static_cast<ComputedValues::ContentValues*>(payload_pointer);
-    auto const& data = *static_cast<ComputedValuesFFI::FfiContentGroupAssembly const*>(data_pointer);
-    auto const& context = *static_cast<TableGroupAssemblerContext const*>(data.cpp_context);
-
-    if (data.content_kind == 1) {
-        payload.computed_content.type = ComputedContentData::Type::None;
-    } else if (data.content_kind == 2) {
-        ComputedContentData computed_content;
-        computed_content.type = ComputedContentData::Type::List;
-        auto append_item = [](StyleValue const& item, Vector<ComputedContentItem>& items) {
-            if (item.is_string()) {
-                items.append(item.as_string().string_value().to_utf16_string());
-            } else if (item.is_keyword()) {
-                items.append(item.to_keyword());
-            } else if (item.is_counter()) {
-                auto const& counter = item.as_counter();
-                ComputedContentCounter computed_counter {
-                    .function = counter.function_type() == CounterStyleValue::CounterFunction::Counters ? ComputedContentCounter::Function::Counters : ComputedContentCounter::Function::Counter,
-                    .name = counter.counter_name(),
-                    .join_string = counter.join_string(),
-                    .style = counter.counter_style()->as_counter_style().value().visit(
-                        [](Utf16FlyString const& name) -> Variant<Utf16FlyString, ComputedContentCounter::SymbolsFunction> { return name; },
-                        [](CounterStyleStyleValue::SymbolsFunction const& symbols) -> Variant<Utf16FlyString, ComputedContentCounter::SymbolsFunction> {
-                            return ComputedContentCounter::SymbolsFunction { .type = symbols.type, .symbols = symbols.symbols };
-                        }),
-                };
-                items.append(move(computed_counter));
-            } else {
-                VERIFY(item.is_abstract_image());
-                items.append(NonnullRefPtr<AbstractImageStyleValue const> { item.as_abstract_image() });
-            }
-        };
-        auto const& content_style_value = context.computed_style.property(PropertyID::Content).as_content();
-        for (auto const& item : content_style_value.content().values())
-            append_item(item, computed_content.items);
-        if (auto const* alt_text = content_style_value.alt_text()) {
-            for (auto const& item : alt_text->values())
-                append_item(item, computed_content.alt_text);
-        }
-        payload.computed_content = move(computed_content);
-    }
-
-    auto counter_vector = [](ComputedValuesFFI::FfiCounterDataAssembly const* lowered, size_t count) {
-        Vector<CounterData, 0> counters;
-        counters.ensure_capacity(count);
-        for (size_t i = 0; i < count; ++i) {
-            CounterData counter {
-                .name = Utf16FlyString::from_raw(lowered[i].name_raw),
-                .is_reversed = lowered[i].is_reversed,
-                .value = {},
-            };
-            if (lowered[i].has_value)
-                counter.value = lowered[i].value;
-            counters.unchecked_append(move(counter));
-        }
-        return counters;
-    };
-    payload.counter_increment = counter_vector(data.counter_increment, data.counter_increment_count);
-    payload.counter_reset = counter_vector(data.counter_reset, data.counter_reset_count);
-    payload.counter_set = counter_vector(data.counter_set, data.counter_set_count);
-}
-
 // Fills the misc reset group's complex members from the core's pre-lowered
 // assembly. The scroll margins and paddings, the outline offset, the shape
 // members and the object position keep their wrapper-backed slots; an
 // outline color the core could not resolve takes the C++ resolution arm, and
-// a non-initial shape-outside transcribes through the stamped wrapper, whose
-// images read style sheet context.
+// a non-initial shape-outside transcribes through its retained value.
 static void assemble_misc_reset_group_payload(void* payload_pointer, void const* data_pointer)
 {
     auto& payload = *static_cast<ComputedValues::MiscResetValues*>(payload_pointer);
@@ -1498,7 +1161,8 @@ static void assemble_misc_reset_group_payload(void* payload_pointer, void const*
             else if (auto shape_box = keyword_to_shape_box(item.to_keyword()); shape_box.has_value())
                 shape_outside.shape_box = *shape_box;
         };
-        auto const& shape_outside_value = context.computed_style.property(PropertyID::ShapeOutside);
+        auto shape_outside_value_wrapper = adopt_assembly_handle(data.shape_outside).release_nonnull();
+        auto const& shape_outside_value = *shape_outside_value_wrapper;
         if (shape_outside_value.is_value_list()) {
             for (auto const& item : shape_outside_value.as_value_list().values())
                 apply_shape_outside_item(item);
@@ -1546,6 +1210,434 @@ static StyleValueVector animation_items(ComputedValuesFFI::ComputedStyleValueHan
     if (value->is_value_list() && value->as_value_list().separator() == StyleValueList::Separator::Comma)
         return value->as_value_list().values();
     return { move(value) };
+}
+
+static StyleValueVector component_items(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
+{
+    auto value = animation_style_value(handle);
+    if (value->is_value_list())
+        return value->as_value_list().values();
+    return { move(value) };
+}
+
+ListStyleType ComputedValues::InheritedListValues::list_style_type_value(StyleScope const& style_scope) const
+{
+    auto value = animation_style_value(list_style_type);
+    if (value->to_keyword() == Keyword::None)
+        return Empty {};
+    if (value->is_string())
+        return value->as_string().string_value().to_utf16_string();
+
+    auto const& counter_style_value = value->as_counter_style();
+    auto counter_style_descriptor = counter_style_value.value();
+    auto counter_style = counter_style_value.resolve_counter_style(style_scope);
+    if (!counter_style) {
+        VERIFY(counter_style_descriptor.has<Utf16FlyString>());
+        return counter_style_descriptor.get<Utf16FlyString>();
+    }
+    if (!counter_style_descriptor.has<CounterStyleStyleValue::SymbolsFunction>())
+        return counter_style;
+
+    auto const& symbols = counter_style_descriptor.get<CounterStyleStyleValue::SymbolsFunction>();
+    return ListStyleSymbols {
+        .counter_style = counter_style.release_nonnull(),
+        .type = symbols.type,
+        .symbols = symbols.symbols,
+    };
+}
+
+bool ComputedValues::InheritedListValues::list_style_type_depends_on_counter_style_environment() const
+{
+    auto value = animation_style_value(list_style_type);
+    return value->is_counter_style() && value->as_counter_style().value().has<Utf16FlyString>();
+}
+
+RefPtr<AbstractImageStyleValue const> ComputedValues::InheritedListValues::list_style_image_value() const
+{
+    auto value = animation_style_value(list_style_image);
+    if (!value->is_abstract_image())
+        return nullptr;
+    return value->as_abstract_image();
+}
+
+QuotesData ComputedValues::InheritedListValues::quotes_value() const
+{
+    auto value = animation_style_value(quotes);
+    QuotesData result { .type = QuotesData::Type::Auto };
+    if (value->is_keyword()) {
+        if (value->to_keyword() == Keyword::None)
+            result.type = QuotesData::Type::None;
+        return result;
+    }
+
+    result.type = QuotesData::Type::Specified;
+    auto const& items = value->as_value_list().values();
+    VERIFY(items.size() % 2 == 0);
+    for (size_t index = 0; index < items.size(); index += 2) {
+        result.strings.empend(
+            items[index]->as_string().string_value(),
+            items[index + 1]->as_string().string_value());
+    }
+    return result;
+}
+
+ComputedContentData ComputedValues::ContentValues::computed_content_value() const
+{
+    auto value = animation_style_value(content);
+    if (value->is_keyword()) {
+        ComputedContentData result;
+        result.type = value->to_keyword() == Keyword::None ? ComputedContentData::Type::None : ComputedContentData::Type::Normal;
+        return result;
+    }
+
+    auto append_item = [](StyleValue const& item, Vector<ComputedContentItem>& items) {
+        if (item.is_string()) {
+            items.append(item.as_string().string_value().to_utf16_string());
+        } else if (item.is_keyword()) {
+            items.append(item.to_keyword());
+        } else if (item.is_counter()) {
+            auto const& counter = item.as_counter();
+            ComputedContentCounter computed_counter {
+                .function = counter.function_type() == CounterStyleValue::CounterFunction::Counters ? ComputedContentCounter::Function::Counters : ComputedContentCounter::Function::Counter,
+                .name = counter.counter_name(),
+                .join_string = counter.join_string(),
+                .style = counter.counter_style()->as_counter_style().value().visit(
+                    [](Utf16FlyString const& name) -> Variant<Utf16FlyString, ComputedContentCounter::SymbolsFunction> { return name; },
+                    [](CounterStyleStyleValue::SymbolsFunction const& symbols) -> Variant<Utf16FlyString, ComputedContentCounter::SymbolsFunction> {
+                        return ComputedContentCounter::SymbolsFunction { .type = symbols.type, .symbols = symbols.symbols };
+                    }),
+            };
+            items.append(move(computed_counter));
+        } else {
+            VERIFY(item.is_abstract_image());
+            items.append(NonnullRefPtr<AbstractImageStyleValue const> { item.as_abstract_image() });
+        }
+    };
+
+    ComputedContentData result;
+    result.type = ComputedContentData::Type::List;
+    auto const& content_value = value->as_content();
+    for (auto const& item : content_value.content().values())
+        append_item(item, result.items);
+    if (auto const* alt_text = content_value.alt_text()) {
+        for (auto const& item : alt_text->values())
+            append_item(item, result.alt_text);
+    }
+    return result;
+}
+
+static Vector<CounterData, 0> counter_data_from_handle(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
+{
+    auto value = animation_style_value(handle);
+    if (value->is_keyword()) {
+        VERIFY(value->to_keyword() == Keyword::None);
+        return {};
+    }
+
+    Vector<CounterData, 0> result;
+    auto definitions = value->as_counter_definitions().counter_definitions();
+    result.ensure_capacity(definitions.size());
+    for (auto const& definition : definitions) {
+        Optional<CounterValue> counter_value;
+        if (definition.value)
+            counter_value = int_from_style_value(NonnullRefPtr<StyleValue const> { *definition.value });
+        result.unchecked_append({ definition.name, definition.is_reversed, counter_value });
+    }
+    return result;
+}
+
+Vector<CounterData, 0> ComputedValues::ContentValues::counter_increment_value() const
+{
+    return counter_data_from_handle(counter_increment);
+}
+
+Vector<CounterData, 0> ComputedValues::ContentValues::counter_reset_value() const
+{
+    return counter_data_from_handle(counter_reset);
+}
+
+Vector<CounterData, 0> ComputedValues::ContentValues::counter_set_value() const
+{
+    return counter_data_from_handle(counter_set);
+}
+
+static BorderRadiusData border_radius_from_handle(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
+{
+    auto value = animation_style_value(handle);
+    auto const& radius = value->as_border_radius();
+    return {
+        LengthPercentage::from_style_value(radius.horizontal_radius()),
+        LengthPercentage::from_style_value(radius.vertical_radius()),
+    };
+}
+
+BorderRadiusData ComputedValues::BorderValues::border_bottom_left_radius_value() const
+{
+    return border_radius_from_handle(border_bottom_left_radius);
+}
+
+BorderRadiusData ComputedValues::BorderValues::border_bottom_right_radius_value() const
+{
+    return border_radius_from_handle(border_bottom_right_radius);
+}
+
+BorderRadiusData ComputedValues::BorderValues::border_top_left_radius_value() const
+{
+    return border_radius_from_handle(border_top_left_radius);
+}
+
+BorderRadiusData ComputedValues::BorderValues::border_top_right_radius_value() const
+{
+    return border_radius_from_handle(border_top_right_radius);
+}
+
+bool ComputedValues::BorderValues::has_noninitial_border_radii_value() const
+{
+    return !border_bottom_left_radius_value().is_initial()
+        || !border_bottom_right_radius_value().is_initial()
+        || !border_top_left_radius_value().is_initial()
+        || !border_top_right_radius_value().is_initial();
+}
+
+BorderImageData ComputedValues::BorderValues::border_image_value() const
+{
+    BorderImageData result;
+    auto source = animation_style_value(border_image_source);
+    if (source->is_abstract_image())
+        result.source = source->as_abstract_image();
+
+    auto slice_style_value = animation_style_value(border_image_slice);
+    auto const& slice = slice_style_value->as_border_image_slice();
+    auto slice_value = [](NonnullRefPtr<StyleValue const> value) -> BorderImageSliceValue {
+        if (value->is_number())
+            return value->as_number().number();
+        if (value->is_integer())
+            return static_cast<double>(value->as_integer().integer());
+        if (value->is_percentage())
+            return value->as_percentage().percentage();
+        return NonnullRefPtr<CalculatedStyleValue const> { value->as_calculated() };
+    };
+    result.slice = {
+        slice_value(slice.top()),
+        slice_value(slice.right()),
+        slice_value(slice.bottom()),
+        slice_value(slice.left()),
+    };
+    result.fill = slice.fill();
+
+    auto width_items = component_items(border_image_width);
+    auto width_value = [](NonnullRefPtr<StyleValue const> value) -> BorderImageWidthValue {
+        if (value->is_integer())
+            return static_cast<double>(value->as_integer().integer());
+        if (value->is_number() || (value->is_calculated() && value->as_calculated().resolves_to_number()))
+            return number_from_style_value(value, {});
+        if (value->is_keyword()) {
+            VERIFY(value->to_keyword() == Keyword::Auto);
+            return BorderImageWidthAuto {};
+        }
+        return LengthPercentage::from_style_value(value);
+    };
+    result.width = {
+        width_value(width_items[0]),
+        width_value(width_items[1 % width_items.size()]),
+        width_value(width_items[2 % width_items.size()]),
+        width_value(width_items[3 % width_items.size()]),
+    };
+    result.width_value_count = static_cast<u8>(width_items.size());
+
+    auto outset_items = component_items(border_image_outset);
+    auto outset_value = [](NonnullRefPtr<StyleValue const> value) -> BorderImageOutsetValue {
+        if (value->is_integer())
+            return static_cast<double>(value->as_integer().integer());
+        if (value->is_number() || (value->is_calculated() && value->as_calculated().resolves_to_number()))
+            return number_from_style_value(value, {});
+        return Length::from_style_value(value, {});
+    };
+    result.outset = {
+        outset_value(outset_items[0]),
+        outset_value(outset_items[1 % outset_items.size()]),
+        outset_value(outset_items[2 % outset_items.size()]),
+        outset_value(outset_items[3 % outset_items.size()]),
+    };
+    result.outset_value_count = static_cast<u8>(outset_items.size());
+
+    auto repeat_items = component_items(border_image_repeat);
+    result.repeat_x = keyword_to_border_image_repeat(repeat_items[0]->to_keyword()).value_or(BorderImageRepeat::Stretch);
+    result.repeat_y = keyword_to_border_image_repeat(repeat_items[1 % repeat_items.size()]->to_keyword()).value_or(BorderImageRepeat::Stretch);
+    return result;
+}
+
+Vector<BackgroundLayerData> ComputedValues::BackgroundValues::background_layers_value() const
+{
+    auto image_items = animation_items(background_image);
+    auto attachment_items = animation_items(background_attachment);
+    auto blend_mode_items = animation_items(background_blend_mode);
+    auto clip_items = animation_items(background_clip);
+    auto origin_items = animation_items(background_origin);
+    auto position_x_items = animation_items(background_position_x);
+    auto position_y_items = animation_items(background_position_y);
+    auto repeat_items = animation_items(background_repeat);
+    auto size_items = animation_items(background_size);
+
+    Vector<BackgroundLayerData> layers;
+    layers.ensure_capacity(image_items.size());
+    for (size_t index = 0; index < image_items.size(); ++index) {
+        auto const& image = image_items[index];
+        auto const& repeat = repeat_items[index % repeat_items.size()]->as_repeat_style();
+        auto const& size = size_items[index % size_items.size()];
+
+        BackgroundLayerData layer;
+        layer.image_style_value = image;
+        if (image->is_abstract_image())
+            layer.background_image = image->as_abstract_image();
+        layer.attachment = keyword_to_background_attachment(attachment_items[index % attachment_items.size()]->to_keyword()).release_value();
+        layer.blend_mode = keyword_to_mix_blend_mode(blend_mode_items[index % blend_mode_items.size()]->to_keyword()).release_value();
+        layer.clip = keyword_to_background_box(clip_items[index % clip_items.size()]->to_keyword()).release_value();
+        layer.origin = keyword_to_background_box(origin_items[index % origin_items.size()]->to_keyword()).release_value();
+        layer.position_x = LengthPercentage::from_style_value(position_x_items[index % position_x_items.size()]->as_edge().offset());
+        layer.position_y = LengthPercentage::from_style_value(position_y_items[index % position_y_items.size()]->as_edge().offset());
+        layer.repeat_x = repeat.repeat_x();
+        layer.repeat_y = repeat.repeat_y();
+
+        if (size->is_keyword()) {
+            switch (size->to_keyword()) {
+            case Keyword::Contain:
+                layer.size_type = BackgroundSize::Contain;
+                break;
+            case Keyword::Cover:
+                layer.size_type = BackgroundSize::Cover;
+                break;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        } else {
+            auto const& background_size = size->as_background_size();
+            layer.size_type = BackgroundSize::LengthPercentage;
+            layer.size_x = LengthPercentageOrAuto::from_style_value(background_size.size_x());
+            layer.size_y = LengthPercentageOrAuto::from_style_value(background_size.size_y());
+        }
+        layers.unchecked_append(move(layer));
+    }
+    return layers;
+}
+
+Optional<MaskReference> ComputedValues::MaskValues::mask_value() const
+{
+    auto image = animation_items(mask_image).first();
+    if (image->is_url())
+        return MaskReference { image->as_url().url() };
+    return {};
+}
+
+MaskType ComputedValues::MaskValues::mask_type_value() const
+{
+    return keyword_to_mask_type(animation_style_value(mask_type)->to_keyword()).release_value();
+}
+
+RefPtr<AbstractImageStyleValue const> ComputedValues::MaskValues::mask_image_value() const
+{
+    auto image = animation_items(mask_image).first();
+    if (image->is_abstract_image())
+        return image->as_abstract_image();
+    return nullptr;
+}
+
+Vector<Position> ComputedValues::MaskValues::mask_positions_value() const
+{
+    Vector<Position> positions;
+    auto items = animation_items(mask_position);
+    positions.ensure_capacity(items.size());
+    for (auto const& item : items) {
+        auto const& position = item->as_position();
+        positions.unchecked_append(Position {
+            .offset_x = LengthPercentage::from_style_value(position.edge_x()->offset()),
+            .offset_y = LengthPercentage::from_style_value(position.edge_y()->offset()),
+        });
+    }
+    return positions;
+}
+
+Optional<ClipPathReference> ComputedValues::MaskValues::clip_path_value() const
+{
+    auto value = animation_style_value(clip_path);
+    if (value->is_url())
+        return ClipPathReference { value->as_url().url() };
+    if (value->is_basic_shape())
+        return ClipPathReference { value->as_basic_shape() };
+    return {};
+}
+
+Vector<BackgroundLayerData> ComputedValues::MaskValues::mask_layers_value() const
+{
+    auto image_items = animation_items(mask_image);
+    auto clip_items = animation_items(mask_clip);
+    auto composite_items = animation_items(mask_composite);
+    auto mode_items = animation_items(mask_mode);
+    auto origin_items = animation_items(mask_origin);
+    auto position_items = animation_items(mask_position);
+    auto repeat_items = animation_items(mask_repeat);
+    auto size_items = animation_items(mask_size);
+
+    Vector<BackgroundLayerData> layers;
+    layers.ensure_capacity(image_items.size());
+    for (size_t index = 0; index < image_items.size(); ++index) {
+        auto const& image = image_items[index];
+        auto const& clip = clip_items[index % clip_items.size()];
+        auto const& composite = composite_items[index % composite_items.size()];
+        auto const& mode = mode_items[index % mode_items.size()];
+        auto const& origin = origin_items[index % origin_items.size()];
+        auto const& position = position_items[index % position_items.size()]->as_position();
+        auto const& repeat = repeat_items[index % repeat_items.size()]->as_repeat_style();
+        auto const& size = size_items[index % size_items.size()];
+
+        BackgroundLayerData layer;
+        layer.origin = BackgroundBox::BorderBox;
+        layer.clip = BackgroundBox::BorderBox;
+        layer.image_style_value = image;
+        if (image->is_abstract_image())
+            layer.background_image = image->as_abstract_image();
+
+        auto clip_keyword = clip->to_keyword();
+        if (clip_keyword == Keyword::NoClip) {
+            layer.mask_clip_is_no_clip = true;
+        } else {
+            layer.mask_clip = keyword_to_coord_box(clip_keyword).release_value();
+            if (auto background_box = keyword_to_background_box(clip_keyword); background_box.has_value())
+                layer.clip = background_box.release_value();
+        }
+        layer.mask_composite = keyword_to_compositing_operator(composite->to_keyword()).release_value();
+        layer.mask_mode = keyword_to_masking_mode(mode->to_keyword()).release_value();
+
+        auto origin_keyword = origin->to_keyword();
+        layer.mask_origin = keyword_to_coord_box(origin_keyword).release_value();
+        if (auto background_box = keyword_to_background_box(origin_keyword); background_box.has_value())
+            layer.origin = background_box.release_value();
+
+        layer.position_x = LengthPercentage::from_style_value(position.edge_x()->offset());
+        layer.position_y = LengthPercentage::from_style_value(position.edge_y()->offset());
+        layer.repeat_x = repeat.repeat_x();
+        layer.repeat_y = repeat.repeat_y();
+
+        if (size->is_keyword()) {
+            switch (size->to_keyword()) {
+            case Keyword::Contain:
+                layer.size_type = BackgroundSize::Contain;
+                break;
+            case Keyword::Cover:
+                layer.size_type = BackgroundSize::Cover;
+                break;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        } else {
+            auto const& background_size = size->as_background_size();
+            layer.size_type = BackgroundSize::LengthPercentage;
+            layer.size_x = LengthPercentageOrAuto::from_style_value(background_size.size_x());
+            layer.size_y = LengthPercentageOrAuto::from_style_value(background_size.size_y());
+        }
+        layers.unchecked_append(move(layer));
+    }
+    return layers;
 }
 
 template<typename T, typename Mapper>
@@ -2260,9 +2352,8 @@ RustStyleValueHandle const* ComputedValues::stored_style_value_handle(PropertyID
 RefPtr<StyleValue const> ComputedValues::color_style_value() const
 {
     if (m_inherited.text->color_style_value.pointer) {
-        RustStyleValueHandle handle {
-            static_cast<StyleValueFFI::StyleValueData const*>(m_inherited.text->color_style_value.pointer)
-        };
+        auto handle = RustStyleValueHandle::retained(
+            static_cast<StyleValueFFI::StyleValueData const*>(m_inherited.text->color_style_value.pointer));
         return style_value_from_handle(PropertyID::Color, handle);
     }
     return computed_style_value(PropertyID::Color);
@@ -2279,7 +2370,9 @@ RefPtr<StyleValue const> ComputedValues::raw_cascaded_font_size() const
 
 RefPtr<StyleValue const> ComputedValues::background_color_style_value() const
 {
-    return style_value_from_handle(PropertyID::BackgroundColor, m_noninherited.background->background_color_style_value);
+    auto const& handle = m_noninherited.background->background_color_style_value;
+    static_assert(sizeof(RustStyleValueHandle) == sizeof(handle));
+    return style_value_from_handle(PropertyID::BackgroundColor, reinterpret_cast<RustStyleValueHandle const&>(handle));
 }
 
 static bool style_value_contains_anchor_function(StyleValue const& value)
@@ -2508,18 +2601,19 @@ ContentDataAndQuoteNestingLevel ComputedValues::resolved_content(DOM::AbstractEl
     // The content value resolve_content() consumes is rebuilt from the content group's data
     // rather than minted from the longhand table: the group holds the live image style values
     // whose loads this style already started, and layout must receive those exact objects.
+    auto computed_content_value = computed_content();
     auto content_style_value = [&]() -> NonnullRefPtr<StyleValue const> {
-        switch (computed_content().type) {
+        switch (computed_content_value.type) {
         case ComputedContentData::Type::Normal:
             return KeywordStyleValue::create(Keyword::Normal);
         case ComputedContentData::Type::None:
             return KeywordStyleValue::create(Keyword::None);
         case ComputedContentData::Type::List: {
             StyleValueVector items;
-            for (auto const& item : computed_content().items)
+            for (auto const& item : computed_content_value.items)
                 items.append(computed_content_item_style_value(item));
             StyleValueVector alt_text;
-            for (auto const& item : computed_content().alt_text)
+            for (auto const& item : computed_content_value.alt_text)
                 alt_text.append(computed_content_item_style_value(item));
             ValueComparingRefPtr<StyleValueList const> alt_text_style_value;
             if (!alt_text.is_empty())

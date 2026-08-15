@@ -1126,6 +1126,24 @@ pub struct ColorBase {
     pub(crate) color_syntax: u8,
 }
 
+/// Fetch context carried by a computed url() image. This is not part of the CSS value's
+/// identity, so equality deliberately ignores it.
+#[repr(C)]
+#[derive(Clone)]
+pub struct ImageResourceContext {
+    pub(crate) base_url: RetainedString,
+    pub(crate) has_base_url: bool,
+    pub(crate) has_parent_style_sheet_origin_clean: bool,
+    pub(crate) parent_style_sheet_origin_clean: bool,
+    pub(crate) should_absolutize_url_for_computed_value: bool,
+}
+
+impl PartialEq for ImageResourceContext {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
 /// The data of a single immutable CSS style value.
 ///
 /// Variant payload fields are read directly by the corresponding C++ StyleValue subclass, so
@@ -1401,12 +1419,13 @@ pub enum StyleValueData {
         color_interpolation_method: RetainedStyleValueData,
         color_syntax: u8,
     },
-    /// A url() image. Only the CSS URL is immutable value data; the style sheet attachment and
-    /// loading state stay on the C++ side.
+    /// A url() image. The resource context is snapshotted into computed images so a later C++
+    /// wrapper can remain a lazy consumer adapter. Loading state stays on the C++ side.
     Image {
         url: RetainedString,
         url_type: u8,
         url_modifiers: RetainedRequestUrlModifierList,
+        resource_context: ImageResourceContext,
     },
     /// image-set() with its retained options.
     ImageSet { options: RetainedImageSetOptionList },
@@ -2014,6 +2033,7 @@ impl StyleValueData {
                 url,
                 url_type,
                 url_modifiers: _,
+                ..
             } => {
                 hasher.write(url.as_bytes());
                 hasher.write_u8(*url_type);
@@ -3413,12 +3433,28 @@ pub unsafe extern "C" fn rust_style_value_create_image(
     url_type: u8,
     url_modifiers: *const RetainedRequestUrlModifier,
     url_modifier_count: usize,
+    resource_base_url: usize,
+    resource_base_url_bytes: *const u8,
+    resource_base_url_length: usize,
+    has_resource_base_url: bool,
+    has_parent_style_sheet_origin_clean: bool,
+    parent_style_sheet_origin_clean: bool,
+    should_absolutize_url_for_computed_value: bool,
 ) -> *const StyleValueData {
     abort_on_panic(|| {
         Arc::into_raw(Arc::new(StyleValueData::Image {
             url: unsafe { RetainedString::from_raw(url, url_bytes, url_length) },
             url_type,
             url_modifiers: unsafe { RetainedRequestUrlModifierList::from_raw(url_modifiers, url_modifier_count) },
+            resource_context: ImageResourceContext {
+                base_url: unsafe {
+                    RetainedString::from_raw(resource_base_url, resource_base_url_bytes, resource_base_url_length)
+                },
+                has_base_url: has_resource_base_url,
+                has_parent_style_sheet_origin_clean,
+                parent_style_sheet_origin_clean,
+                should_absolutize_url_for_computed_value,
+            },
         }))
     })
 }

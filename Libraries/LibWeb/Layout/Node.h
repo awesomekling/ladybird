@@ -510,14 +510,35 @@ public:
     CSSPixels outline_offset() const { return style_group<CSS::ComputedValues::MiscResetValues>().outline_offset; }
     CSS::OutlineStyle outline_style() const { return style_group<CSS::ComputedValues::MiscResetValues>().outline_style; }
     CSSPixels outline_width() const { return style_group<CSS::ComputedValues::MiscResetValues>().outline_width; }
-    Color background_color() const { return style_group<CSS::ComputedValues::BackgroundValues>().background_color; }
-    CSS::BackgroundBox background_color_clip() const { return style_group<CSS::ComputedValues::BackgroundValues>().background_color_clip; }
-    Vector<CSS::BackgroundLayerData> const& background_layers() const { return style_group<CSS::ComputedValues::BackgroundValues>().background_layers; }
-    Vector<CSS::BackgroundLayerData> const& mask_layers() const { return style_group<CSS::ComputedValues::MaskValues>().mask_layers; }
-    CSS::AbstractImageStyleValue const* mask_image() const { return style_group<CSS::ComputedValues::MaskValues>().mask_image.ptr(); }
-    CSS::ListStyleType const& list_style_type() const { return style_group<CSS::ComputedValues::InheritedListValues>().list_style_type; }
-    CSS::ListStylePosition list_style_position() const { return style_group<CSS::ComputedValues::InheritedListValues>().list_style_position; }
-    CSS::AbstractImageStyleValue const* list_style_image() const { return style_group<CSS::ComputedValues::InheritedListValues>().list_style_image.ptr(); }
+    Color background_color() const { return style_group<CSS::ComputedValues::BackgroundValues>().background_color_value(); }
+    CSS::BackgroundBox background_color_clip() const { return style_group<CSS::ComputedValues::BackgroundValues>().background_color_clip_value(); }
+    Vector<CSS::BackgroundLayerData> const& background_layers() const
+    {
+        if (!m_background_layers.has_value())
+            m_background_layers = style_group<CSS::ComputedValues::BackgroundValues>().background_layers_value();
+        return *m_background_layers;
+    }
+    Vector<CSS::BackgroundLayerData> const& mask_layers() const
+    {
+        if (!m_mask_layers.has_value())
+            m_mask_layers = style_group<CSS::ComputedValues::MaskValues>().mask_layers_value();
+        return *m_mask_layers;
+    }
+    RefPtr<CSS::AbstractImageStyleValue const> mask_image() const { return mask_layers().first().background_image; }
+    CSS::ListStyleType const& list_style_type() const
+    {
+        if (!m_list_style_type.has_value()) {
+            m_list_style_type = style_group<CSS::ComputedValues::InheritedListValues>().list_style_type_value(style_scope());
+        }
+        return *m_list_style_type;
+    }
+    CSS::ListStylePosition list_style_position() const { return static_cast<CSS::ListStylePosition>(style_group<CSS::ComputedValues::InheritedListValues>().list_style_position); }
+    CSS::AbstractImageStyleValue const* list_style_image() const
+    {
+        if (!m_list_style_image.has_value())
+            m_list_style_image = style_group<CSS::ComputedValues::InheritedListValues>().list_style_image_value();
+        return m_list_style_image->ptr();
+    }
     CSS::ComputedFilterView backdrop_filter() const { return style_group<CSS::ComputedValues::EffectsValues>().backdrop_filter_value(); }
     CSS::Clip clip() const { return style_group<CSS::ComputedValues::EffectsValues>().clip_value(); }
     CSS::ComputedFilterView filter() const { return style_group<CSS::ComputedValues::EffectsValues>().filter_value(); }
@@ -525,16 +546,21 @@ public:
     CSS::MixBlendMode mix_blend_mode() const { return style_group<CSS::ComputedValues::EffectsValues>().mix_blend_mode_value(); }
     float opacity() const { return style_group<CSS::ComputedValues::EffectsValues>().opacity; }
     ReadonlySpan<CSS::ShadowData> box_shadow() const { return style_group<CSS::ComputedValues::EffectsValues>().box_shadow_span(); }
-    CSS::BorderData const& border_left() const { return style_group<CSS::ComputedValues::BorderValues>().border_left; }
-    CSS::BorderData const& border_top() const { return style_group<CSS::ComputedValues::BorderValues>().border_top; }
-    CSS::BorderData const& border_right() const { return style_group<CSS::ComputedValues::BorderValues>().border_right; }
-    CSS::BorderData const& border_bottom() const { return style_group<CSS::ComputedValues::BorderValues>().border_bottom; }
-    CSS::BorderImageData const& border_image() const { return style_group<CSS::ComputedValues::BorderValues>().border_image; }
-    bool has_noninitial_border_radii() const { return style_group<CSS::ComputedValues::BorderValues>().has_noninitial_border_radii; }
-    CSS::BorderRadiusData const& border_bottom_left_radius() const { return style_group<CSS::ComputedValues::BorderValues>().border_bottom_left_radius; }
-    CSS::BorderRadiusData const& border_bottom_right_radius() const { return style_group<CSS::ComputedValues::BorderValues>().border_bottom_right_radius; }
-    CSS::BorderRadiusData const& border_top_left_radius() const { return style_group<CSS::ComputedValues::BorderValues>().border_top_left_radius; }
-    CSS::BorderRadiusData const& border_top_right_radius() const { return style_group<CSS::ComputedValues::BorderValues>().border_top_right_radius; }
+    CSS::BorderData const& border_left() const { return style_group<CSS::ComputedValues::BorderValues>().border_left_value(); }
+    CSS::BorderData const& border_top() const { return style_group<CSS::ComputedValues::BorderValues>().border_top_value(); }
+    CSS::BorderData const& border_right() const { return style_group<CSS::ComputedValues::BorderValues>().border_right_value(); }
+    CSS::BorderData const& border_bottom() const { return style_group<CSS::ComputedValues::BorderValues>().border_bottom_value(); }
+    CSS::BorderImageData const& border_image() const
+    {
+        if (!m_border_image.has_value())
+            m_border_image = style_group<CSS::ComputedValues::BorderValues>().border_image_value();
+        return *m_border_image;
+    }
+    bool has_noninitial_border_radii() const { return style_group<CSS::ComputedValues::BorderValues>().has_noninitial_border_radii_value(); }
+    CSS::BorderRadiusData border_bottom_left_radius() const { return style_group<CSS::ComputedValues::BorderValues>().border_bottom_left_radius_value(); }
+    CSS::BorderRadiusData border_bottom_right_radius() const { return style_group<CSS::ComputedValues::BorderValues>().border_bottom_right_radius_value(); }
+    CSS::BorderRadiusData border_top_left_radius() const { return style_group<CSS::ComputedValues::BorderValues>().border_top_left_radius_value(); }
+    CSS::BorderRadiusData border_top_right_radius() const { return style_group<CSS::ComputedValues::BorderValues>().border_top_right_radius_value(); }
     CSS::BorderCollapse border_collapse() const { return static_cast<CSS::BorderCollapse>(style_group<CSS::ComputedValues::InheritedTableValues>().border_collapse); }
     CSS::EmptyCells empty_cells() const { return static_cast<CSS::EmptyCells>(style_group<CSS::ComputedValues::InheritedTableValues>().empty_cells); }
     Color color() const { return style_group<CSS::ComputedValues::InheritedTextValues>().color_value(); }
@@ -550,7 +576,7 @@ public:
     CSS::TextDecorationThickness text_decoration_thickness() const { return style_group<CSS::ComputedValues::TextResetValues>().decoration_thickness(); }
     Color text_decoration_color() const { return Color::from_bgra(style_group<CSS::ComputedValues::TextResetValues>().text_decoration_color); }
     CSS::TextDecorationStyle text_decoration_style() const { return static_cast<CSS::TextDecorationStyle>(style_group<CSS::ComputedValues::TextResetValues>().text_decoration_style); }
-    Optional<CSS::ContentData> const& content() const { return style_group<CSS::ComputedValues::ContentValues>().content; }
+    Optional<CSS::ContentData> const& content() const { return m_content; }
     CSSPixels line_height() const { return style_group<CSS::ComputedValues::FontValues>().line_height_used; }
     CSSPixels font_size() const { return style_group<CSS::ComputedValues::FontValues>().font_size; }
     Gfx::FontCascadeList const& font_list() const { return *style_group<CSS::ComputedValues::FontValues>().font_list; }
@@ -599,9 +625,9 @@ public:
     bool has_scale() const { return scale() != nullptr; }
     Optional<CSSPixels> perspective() const { return style_group<CSS::ComputedValues::TransformValues>().perspective_value(); }
     CSS::Position perspective_origin() const { return style_group<CSS::ComputedValues::TransformValues>().perspective_origin_value(); }
-    Optional<CSS::MaskReference> const& mask() const { return style_group<CSS::ComputedValues::MaskValues>().mask; }
-    CSS::MaskType mask_type() const { return style_group<CSS::ComputedValues::MaskValues>().mask_type; }
-    Optional<CSS::ClipPathReference> const& clip_path() const { return style_group<CSS::ComputedValues::MaskValues>().clip_path; }
+    Optional<CSS::MaskReference> mask() const { return style_group<CSS::ComputedValues::MaskValues>().mask_value(); }
+    CSS::MaskType mask_type() const { return style_group<CSS::ComputedValues::MaskValues>().mask_type_value(); }
+    Optional<CSS::ClipPathReference> clip_path() const { return style_group<CSS::ComputedValues::MaskValues>().clip_path_value(); }
     Optional<CSS::BaselineMetric> dominant_baseline() const { return style_group<CSS::ComputedValues::InheritedSVGValues>().dominant_baseline_value(); }
     Optional<CSS::SVGPaint> fill() const { return style_group<CSS::ComputedValues::InheritedSVGValues>().fill_value(); }
     CSS::FillRule fill_rule() const { return style_group<CSS::ComputedValues::InheritedSVGValues>().fill_rule_value(); }
@@ -715,6 +741,12 @@ private:
     GC::Root<DOM::Document> m_style_record_owner;
     Vector<NonnullOwnPtr<ImageObserver>> m_image_observers;
     Vector<RefPtr<CSS::CursorStyleValue const>> m_cursor_style_values;
+    mutable Optional<Vector<CSS::BackgroundLayerData>> m_background_layers;
+    mutable Optional<Vector<CSS::BackgroundLayerData>> m_mask_layers;
+    mutable Optional<CSS::BorderImageData> m_border_image;
+    mutable Optional<CSS::ListStyleType> m_list_style_type;
+    mutable Optional<RefPtr<CSS::AbstractImageStyleValue const>> m_list_style_image;
+    Optional<CSS::ContentData> m_content;
 };
 
 template<>

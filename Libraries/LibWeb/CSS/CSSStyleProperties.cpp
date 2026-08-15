@@ -1103,11 +1103,12 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
         auto const* background_values = element.style_group<ComputedValues::BackgroundValues>(pseudo_element);
         VERIFY(background_values);
         auto const& handle = background_values->background_color_style_value;
-        VERIFY(handle);
-        auto style_value = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(handle.data()));
+        VERIFY(handle.pointer);
+        auto style_value = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
+            static_cast<StyleValueFFI::StyleValueData const*>(handle.pointer)));
         return resolve_color_style_value(
             *style_value,
-            background_values->background_color,
+            background_values->background_color_value(),
             &color_resolution_context);
     }
     case PropertyID::BorderBottomColor:

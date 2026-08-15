@@ -1279,12 +1279,11 @@ public:
     bool color_scheme_only() const { return m_inherited.ui->color_scheme_only; }
     ContentVisibility content_visibility() const { return static_cast<ContentVisibility>(m_inherited.box->content_visibility); }
     ReadonlySpan<ComputedValuesFFI::ComputedCursor> cursor() const { return m_inherited.ui->cursor_span(); }
-    Optional<ContentData> const& content() const { return m_noninherited.content_data->content; }
-    ComputedContentData const& computed_content() const { return m_noninherited.content_data->computed_content; }
+    ComputedContentData computed_content() const { return m_noninherited.content_data->computed_content_value(); }
     ContentDataAndQuoteNestingLevel resolved_content(DOM::AbstractElement&, u32 initial_quote_nesting_level) const;
-    Vector<CounterData, 0> const& counter_increment() const { return m_noninherited.content_data->counter_increment; }
-    Vector<CounterData, 0> const& counter_reset() const { return m_noninherited.content_data->counter_reset; }
-    Vector<CounterData, 0> const& counter_set() const { return m_noninherited.content_data->counter_set; }
+    Vector<CounterData, 0> counter_increment() const { return m_noninherited.content_data->counter_increment_value(); }
+    Vector<CounterData, 0> counter_reset() const { return m_noninherited.content_data->counter_reset_value(); }
+    Vector<CounterData, 0> counter_set() const { return m_noninherited.content_data->counter_set_value(); }
     PointerEvents pointer_events() const { return m_inherited.ui->pointer_events_value(); }
     Display display() const { return display_from_ffi_display(m_noninherited.box->display); }
     Display display_before_box_type_transformation() const { return display_from_ffi_display(m_noninherited.box->display_before_box_type_transformation); }
@@ -1495,20 +1494,20 @@ public:
     LengthBox const& scroll_padding() const { return m_noninherited.misc->scroll_padding; }
     OverflowClipMarginData const& overflow_clip_margin() const { return m_noninherited.misc->overflow_clip_margin; }
 
-    BorderData const& border_left() const { return m_noninherited.border->border_left; }
-    BorderData const& border_top() const { return m_noninherited.border->border_top; }
-    BorderData const& border_right() const { return m_noninherited.border->border_right; }
-    BorderData const& border_bottom() const { return m_noninherited.border->border_bottom; }
-    CSSPixels border_left_computed_width() const { return m_noninherited.border->border_left_computed_width; }
-    CSSPixels border_top_computed_width() const { return m_noninherited.border->border_top_computed_width; }
-    CSSPixels border_right_computed_width() const { return m_noninherited.border->border_right_computed_width; }
-    CSSPixels border_bottom_computed_width() const { return m_noninherited.border->border_bottom_computed_width; }
+    BorderData const& border_left() const { return m_noninherited.border->border_left_value(); }
+    BorderData const& border_top() const { return m_noninherited.border->border_top_value(); }
+    BorderData const& border_right() const { return m_noninherited.border->border_right_value(); }
+    BorderData const& border_bottom() const { return m_noninherited.border->border_bottom_value(); }
+    CSSPixels border_left_computed_width() const { return m_noninherited.border->border_left_computed_width_value(); }
+    CSSPixels border_top_computed_width() const { return m_noninherited.border->border_top_computed_width_value(); }
+    CSSPixels border_right_computed_width() const { return m_noninherited.border->border_right_computed_width_value(); }
+    CSSPixels border_bottom_computed_width() const { return m_noninherited.border->border_bottom_computed_width_value(); }
 
-    bool has_noninitial_border_radii() const { return m_noninherited.border->has_noninitial_border_radii; }
-    BorderRadiusData const& border_bottom_left_radius() const { return m_noninherited.border->border_bottom_left_radius; }
-    BorderRadiusData const& border_bottom_right_radius() const { return m_noninherited.border->border_bottom_right_radius; }
-    BorderRadiusData const& border_top_left_radius() const { return m_noninherited.border->border_top_left_radius; }
-    BorderRadiusData const& border_top_right_radius() const { return m_noninherited.border->border_top_right_radius; }
+    bool has_noninitial_border_radii() const { return m_noninherited.border->has_noninitial_border_radii_value(); }
+    BorderRadiusData border_bottom_left_radius() const { return m_noninherited.border->border_bottom_left_radius_value(); }
+    BorderRadiusData border_bottom_right_radius() const { return m_noninherited.border->border_bottom_right_radius_value(); }
+    BorderRadiusData border_top_left_radius() const { return m_noninherited.border->border_top_left_radius_value(); }
+    BorderRadiusData border_top_right_radius() const { return m_noninherited.border->border_top_right_radius_value(); }
     double corner_bottom_left_shape() const { return m_noninherited.border->corner_bottom_left_shape; }
     double corner_bottom_right_shape() const { return m_noninherited.border->corner_bottom_right_shape; }
     double corner_top_left_shape() const { return m_noninherited.border->corner_top_left_shape; }
@@ -1518,20 +1517,20 @@ public:
     Overflow overflow_y() const { return static_cast<Overflow>(m_noninherited.box->overflow_y); }
 
     Color color() const { return m_inherited.text->color_value(); }
-    Color background_color() const { return m_noninherited.background->background_color; }
+    Color background_color() const { return m_noninherited.background->background_color_value(); }
     RefPtr<StyleValue const> background_color_style_value() const;
-    BackgroundBox background_color_clip() const { return m_noninherited.background->background_color_clip; }
-    Vector<BackgroundLayerData> const& background_layers() const { return m_noninherited.background->background_layers; }
-    Vector<BackgroundLayerData> const& mask_layers() const { return m_noninherited.mask_data->mask_layers; }
-    Vector<Position> const& mask_positions() const { return m_noninherited.mask_data->mask_positions; }
-    BorderImageData const& border_image() const { return m_noninherited.border->border_image; }
+    BackgroundBox background_color_clip() const { return m_noninherited.background->background_color_clip_value(); }
+    Vector<BackgroundLayerData> background_layers() const { return m_noninherited.background->background_layers_value(); }
+    Vector<BackgroundLayerData> mask_layers() const { return m_noninherited.mask_data->mask_layers_value(); }
+    Vector<Position> mask_positions() const { return m_noninherited.mask_data->mask_positions_value(); }
+    BorderImageData border_image() const { return m_noninherited.border->border_image_value(); }
 
     Color webkit_text_fill_color() const { return m_inherited.text->webkit_text_fill_color_value(); }
     bool webkit_text_fill_color_is_current_color() const { return m_inherited.text->webkit_text_fill_color_is_current_color; }
 
-    ListStyleType const& list_style_type() const { return m_inherited.list->list_style_type; }
-    ListStylePosition list_style_position() const { return m_inherited.list->list_style_position; }
-    AbstractImageStyleValue const* list_style_image() const { return m_inherited.list->list_style_image.ptr(); }
+    ListStyleType list_style_type(StyleScope const& style_scope) const { return m_inherited.list->list_style_type_value(style_scope); }
+    bool list_style_type_depends_on_counter_style_environment() const { return m_inherited.list->list_style_type_depends_on_counter_style_environment(); }
+    ListStylePosition list_style_position() const { return static_cast<ListStylePosition>(m_inherited.list->list_style_position); }
 
     Optional<SVGPaint> fill() const { return m_inherited.svg->fill_value(); }
     FillRule fill_rule() const { return m_inherited.svg->fill_rule_value(); }
@@ -1548,10 +1547,10 @@ public:
     Color stop_color() const { return Gfx::Color::from_bgra(m_noninherited.svg_reset->stop_color); }
     float stop_opacity() const { return m_noninherited.svg_reset->stop_opacity; }
     TextAnchor text_anchor() const { return m_inherited.svg->text_anchor_value(); }
-    RefPtr<AbstractImageStyleValue const> mask_image() const { return m_noninherited.mask_data->mask_image; }
-    Optional<MaskReference> const& mask() const { return m_noninherited.mask_data->mask; }
-    MaskType mask_type() const { return m_noninherited.mask_data->mask_type; }
-    Optional<ClipPathReference> const& clip_path() const { return m_noninherited.mask_data->clip_path; }
+    RefPtr<AbstractImageStyleValue const> mask_image() const { return m_noninherited.mask_data->mask_image_value(); }
+    Optional<MaskReference> mask() const { return m_noninherited.mask_data->mask_value(); }
+    MaskType mask_type() const { return m_noninherited.mask_data->mask_type_value(); }
+    Optional<ClipPathReference> clip_path() const { return m_noninherited.mask_data->clip_path_value(); }
     ClipRule clip_rule() const { return m_inherited.svg->clip_rule_value(); }
     Color flood_color() const { return Gfx::Color::from_bgra(m_noninherited.svg_reset->flood_color); }
     float flood_opacity() const { return m_noninherited.svg_reset->flood_opacity; }
@@ -1619,7 +1618,7 @@ public:
 
     TableLayout table_layout() const { return static_cast<TableLayout>(m_noninherited.box->table_layout); }
 
-    QuotesData quotes() const { return m_inherited.list->quotes; }
+    QuotesData quotes() const { return m_inherited.list->quotes_value(); }
 
     MathShift math_shift() const { return m_inherited.font->math_shift; }
     MathStyle math_style() const { return m_inherited.font->math_style; }
@@ -1710,26 +1709,18 @@ public:
         }
     };
 
-    struct InheritedListValues {
+    struct InheritedListValues : ComputedValuesFFI::InheritedListValues {
         static constexpr size_t style_group_index = to_underlying(StyleGroupIndex::InheritedListValues);
-        ListStyleType list_style_type { InitialValues::list_style_type() };
-        ListStylePosition list_style_position { InitialValues::list_style_position() };
-        RefPtr<AbstractImageStyleValue const> list_style_image;
-        QuotesData quotes { InitialValues::quotes() };
+        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::InheritedList;
+
+        ListStyleType list_style_type_value(StyleScope const&) const;
+        bool list_style_type_depends_on_counter_style_environment() const;
+        RefPtr<AbstractImageStyleValue const> list_style_image_value() const;
+        QuotesData quotes_value() const;
 
         bool operator==(InheritedListValues const& other) const
         {
-            // The image is compared by value: recomputation builds a fresh one for the same
-            // declaration, and comparing the addresses would call the group different for it.
-            auto images_equal = [](auto const& first, auto const& second) {
-                if (!first || !second)
-                    return !first && !second;
-                return *first == *second;
-            };
-            return list_style_type == other.list_style_type
-                && list_style_position == other.list_style_position
-                && images_equal(list_style_image, other.list_style_image)
-                && quotes == other.quotes;
+            return ComputedValuesFFI::rust_style_group_payloads_equal(style_group_index, this, &other);
         }
     };
 
@@ -2123,23 +2114,21 @@ public:
         }
     };
 
-    struct MaskValues {
+    struct MaskValues : ComputedValuesFFI::MaskValues {
         static constexpr size_t style_group_index = to_underlying(StyleGroupIndex::MaskValues);
-        Optional<MaskReference> mask;
-        MaskType mask_type { InitialValues::mask_type() };
-        RefPtr<AbstractImageStyleValue const> mask_image;
-        Vector<BackgroundLayerData> mask_layers { [] {
-            BackgroundLayerData layer;
-            layer.origin = BackgroundBox::BorderBox;
-            layer.clip = BackgroundBox::BorderBox;
-            return layer;
-        }() };
-        Vector<Position> mask_positions { Position { .offset_x = Length::make_px(0), .offset_y = Length::make_px(0) } };
-        Optional<ClipPathReference> clip_path;
+        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::Mask;
 
-        static MaskValues make_default_payload_value();
+        Optional<MaskReference> mask_value() const;
+        MaskType mask_type_value() const;
+        RefPtr<AbstractImageStyleValue const> mask_image_value() const;
+        Vector<BackgroundLayerData> mask_layers_value() const;
+        Vector<Position> mask_positions_value() const;
+        Optional<ClipPathReference> clip_path_value() const;
 
-        bool operator==(MaskValues const&) const = default;
+        bool operator==(MaskValues const& other) const
+        {
+            return ComputedValuesFFI::rust_style_group_payloads_equal(style_group_index, this, &other);
+        }
     };
 
     struct TextResetValues : ComputedValuesFFI::TextResetValues {
@@ -2176,15 +2165,19 @@ public:
         }
     };
 
-    struct ContentValues {
+    struct ContentValues : ComputedValuesFFI::ContentValues {
         static constexpr size_t style_group_index = to_underlying(StyleGroupIndex::ContentValues);
-        Optional<ContentData> content;
-        ComputedContentData computed_content;
-        Vector<CounterData, 0> counter_increment;
-        Vector<CounterData, 0> counter_reset;
-        Vector<CounterData, 0> counter_set;
+        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::Content;
 
-        bool operator==(ContentValues const&) const = default;
+        ComputedContentData computed_content_value() const;
+        Vector<CounterData, 0> counter_increment_value() const;
+        Vector<CounterData, 0> counter_reset_value() const;
+        Vector<CounterData, 0> counter_set_value() const;
+
+        bool operator==(ContentValues const& other) const
+        {
+            return ComputedValuesFFI::rust_style_group_payloads_equal(style_group_index, this, &other);
+        }
     };
 
     struct TransformValues : public ComputedValuesFFI::TransformValues {
@@ -2281,47 +2274,43 @@ public:
         }
     };
 
-    struct BackgroundValues {
+    struct BackgroundValues : ComputedValuesFFI::BackgroundValues {
         static constexpr size_t style_group_index = to_underlying(StyleGroupIndex::BackgroundValues);
-        Color background_color { InitialValues::background_color() };
-        RustStyleValueHandle background_color_style_value;
-        BackgroundBox background_color_clip { InitialValues::background_color_clip() };
-        Vector<BackgroundLayerData> background_layers { BackgroundLayerData {} };
+        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::Background;
 
-        bool operator==(BackgroundValues const&) const = default;
+        Color background_color_value() const { return Color::from_bgra(background_color); }
+        BackgroundBox background_color_clip_value() const { return static_cast<BackgroundBox>(background_color_clip); }
+        Vector<BackgroundLayerData> background_layers_value() const;
+
+        bool operator==(BackgroundValues const& other) const
+        {
+            return ComputedValuesFFI::rust_style_group_payloads_equal(style_group_index, this, &other);
+        }
     };
 
-    // The group's payload lifecycle stays in C++, but the four BorderData
-    // members lead the struct and mirror the Rust BorderLayoutFacts prefix,
-    // pinned by static asserts in ComputedValues.cpp, so layout reads border
-    // widths and line styles as typed fields.
-    struct BorderValues {
+    struct BorderValues : ComputedValuesFFI::BorderValues {
         static constexpr size_t style_group_index = to_underlying(StyleGroupIndex::BorderValues);
-        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::CppWithBorderFacts;
-        BorderData border_left;
-        BorderData border_top;
-        BorderData border_right;
-        BorderData border_bottom;
-        RustStyleValueHandle border_left_color_style_value;
-        RustStyleValueHandle border_top_color_style_value;
-        RustStyleValueHandle border_right_color_style_value;
-        RustStyleValueHandle border_bottom_color_style_value;
-        CSSPixels border_left_computed_width { 0 };
-        CSSPixels border_top_computed_width { 0 };
-        CSSPixels border_right_computed_width { 0 };
-        CSSPixels border_bottom_computed_width { 0 };
-        bool has_noninitial_border_radii { false };
-        BorderRadiusData border_bottom_left_radius;
-        BorderRadiusData border_bottom_right_radius;
-        BorderRadiusData border_top_left_radius;
-        BorderRadiusData border_top_right_radius;
-        double corner_bottom_left_shape { 1 };
-        double corner_bottom_right_shape { 1 };
-        double corner_top_left_shape { 1 };
-        double corner_top_right_shape { 1 };
-        BorderImageData border_image;
+        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::Border;
 
-        bool operator==(BorderValues const&) const = default;
+        BorderData const& border_left_value() const { return reinterpret_cast<BorderData const&>(border_left); }
+        BorderData const& border_top_value() const { return reinterpret_cast<BorderData const&>(border_top); }
+        BorderData const& border_right_value() const { return reinterpret_cast<BorderData const&>(border_right); }
+        BorderData const& border_bottom_value() const { return reinterpret_cast<BorderData const&>(border_bottom); }
+        CSSPixels border_left_computed_width_value() const { return CSSPixels::from_raw(border_left_computed_width); }
+        CSSPixels border_top_computed_width_value() const { return CSSPixels::from_raw(border_top_computed_width); }
+        CSSPixels border_right_computed_width_value() const { return CSSPixels::from_raw(border_right_computed_width); }
+        CSSPixels border_bottom_computed_width_value() const { return CSSPixels::from_raw(border_bottom_computed_width); }
+        BorderRadiusData border_bottom_left_radius_value() const;
+        BorderRadiusData border_bottom_right_radius_value() const;
+        BorderRadiusData border_top_left_radius_value() const;
+        BorderRadiusData border_top_right_radius_value() const;
+        bool has_noninitial_border_radii_value() const;
+        BorderImageData border_image_value() const;
+
+        bool operator==(BorderValues const& other) const
+        {
+            return ComputedValuesFFI::rust_style_group_payloads_equal(style_group_index, this, &other);
+        }
     };
 
     struct AlignmentValues : ComputedValuesFFI::AlignmentValues {
@@ -2779,12 +2768,6 @@ public:
         set_edge(effects.clip_edges[2], rect.bottom_edge);
         set_edge(effects.clip_edges[3], rect.left_edge);
     }
-    void set_content(ContentData const& content)
-    {
-        if (m_values.m_noninherited.content_data->content == content)
-            return;
-        m_values.m_noninherited.content_data.access().content = content;
-    }
     void set_content_visibility(ContentVisibility content_visibility)
     {
         if (m_values.m_inherited.box->content_visibility == to_underlying(content_visibility))
@@ -2799,9 +2782,9 @@ public:
     }
     void set_background_color(Color color)
     {
-        if (m_values.m_noninherited.background->background_color == color)
+        if (m_values.m_noninherited.background->background_color_value() == color)
             return;
-        m_values.m_noninherited.background.access().background_color = color;
+        m_values.m_noninherited.background.access().background_color = color.value();
     }
     void set_float(Float value)
     {
@@ -2941,27 +2924,27 @@ public:
     }
     void set_border_top_color(Color value)
     {
-        if (m_values.m_noninherited.border->border_top.color == value)
+        if (m_values.m_noninherited.border->border_top_value().color == value)
             return;
-        m_values.m_noninherited.border.access().border_top.color = value;
+        m_values.m_noninherited.border.access().border_top.color = value.value();
     }
     void set_border_right_color(Color value)
     {
-        if (m_values.m_noninherited.border->border_right.color == value)
+        if (m_values.m_noninherited.border->border_right_value().color == value)
             return;
-        m_values.m_noninherited.border.access().border_right.color = value;
+        m_values.m_noninherited.border.access().border_right.color = value.value();
     }
     void set_border_bottom_color(Color value)
     {
-        if (m_values.m_noninherited.border->border_bottom.color == value)
+        if (m_values.m_noninherited.border->border_bottom_value().color == value)
             return;
-        m_values.m_noninherited.border.access().border_bottom.color = value;
+        m_values.m_noninherited.border.access().border_bottom.color = value.value();
     }
     void set_border_left_color(Color value)
     {
-        if (m_values.m_noninherited.border->border_left.color == value)
+        if (m_values.m_noninherited.border->border_left_value().color == value)
             return;
-        m_values.m_noninherited.border.access().border_left.color = value;
+        m_values.m_noninherited.border.access().border_left.color = value.value();
     }
     void set_flex_direction(FlexDirection value)
     {
