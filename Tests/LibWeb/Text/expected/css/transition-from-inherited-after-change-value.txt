@@ -1,0 +1,5 @@
+container before: rgba(0, 0, 0, 0.1) 5px 6px 7px
+child before: rgba(0, 0, 0, 0.1) 5px 6px 7px
+container after: rgba(10, 10, 10, 0.9) 5px 6px 7px
+child after: rgba(10, 10, 10, 0.9) 5px 6px 7px
+events: child:transitionend:text-shadow,child:transitionrun:text-shadow,container:transitionend:text-shadow,container:transitionrun:text-shadow
