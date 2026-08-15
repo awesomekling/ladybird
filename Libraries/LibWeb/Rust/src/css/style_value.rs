@@ -434,7 +434,36 @@ pub struct RetainedRequestUrlModifierList {
     length: usize,
 }
 
-retained_list!(RetainedRequestUrlModifierList, RetainedRequestUrlModifier);
+impl RetainedRequestUrlModifierList {
+    /// Takes ownership of each modifier's leaked string reference. C++ leaves
+    /// the Rust storage pointer empty in this input array.
+    unsafe fn from_raw(elements: *const RetainedRequestUrlModifier, length: usize) -> Self {
+        let slice: Box<[RetainedRequestUrlModifier]> = (0..length)
+            .map(|i| {
+                let element = unsafe { &*elements.add(i) };
+                RetainedRequestUrlModifier {
+                    modifier_type: element.modifier_type,
+                    enum_value: element.enum_value,
+                    string_value: unsafe { RetainedUtf16FlyString::from_leaked_raw(element.string_value.raw()) },
+                }
+            })
+            .collect();
+        let length = slice.len();
+        let pointer = Box::into_raw(slice) as *mut RetainedRequestUrlModifier;
+        Self { pointer, length }
+    }
+}
+
+retained_list_drop!(RetainedRequestUrlModifierList);
+
+impl Clone for RetainedRequestUrlModifierList {
+    fn clone(&self) -> Self {
+        let slice = self.as_slice().to_vec().into_boxed_slice();
+        let length = slice.len();
+        let pointer = Box::into_raw(slice) as *mut RetainedRequestUrlModifier;
+        Self { pointer, length }
+    }
+}
 
 /// A Rust-owned array of bytes, used for lists of C++ u8 enum values.
 #[repr(C)]
@@ -489,7 +518,29 @@ pub struct RetainedCounterDefinitionList {
     length: usize,
 }
 
-retained_list!(RetainedCounterDefinitionList, RetainedCounterDefinition);
+impl RetainedCounterDefinitionList {
+    unsafe fn from_raw(elements: *const RetainedCounterDefinition, length: usize) -> Self {
+        let elements = (0..length)
+            .map(|i| {
+                let element = unsafe { &*elements.add(i) };
+                RetainedCounterDefinition {
+                    name: unsafe { RetainedUtf16FlyString::from_leaked_raw(element.name.raw()) },
+                    is_reversed: element.is_reversed,
+                    value: unsafe { std::ptr::read(&raw const element.value) },
+                }
+            })
+            .collect();
+        Self::from_retained_elements(elements)
+    }
+}
+
+retained_list_drop!(RetainedCounterDefinitionList);
+
+impl Clone for RetainedCounterDefinitionList {
+    fn clone(&self) -> Self {
+        Self::from_retained_elements(self.as_slice().to_vec())
+    }
+}
 
 /// A retained image-set() option: the image, its resolution and an optional type string (a
 /// retained AK::Utf16String raw, 0 when absent, released through the same bridge as fly
@@ -510,7 +561,30 @@ pub struct RetainedImageSetOptionList {
     length: usize,
 }
 
-retained_list!(RetainedImageSetOptionList, RetainedImageSetOption);
+impl RetainedImageSetOptionList {
+    unsafe fn from_raw(elements: *const RetainedImageSetOption, length: usize) -> Self {
+        let elements = (0..length)
+            .map(|i| {
+                let element = unsafe { &*elements.add(i) };
+                RetainedImageSetOption {
+                    image: unsafe { std::ptr::read(&raw const element.image) },
+                    resolution: unsafe { std::ptr::read(&raw const element.resolution) },
+                    has_type: element.has_type,
+                    type_string: unsafe { RetainedUtf16FlyString::from_leaked_raw(element.type_string.raw()) },
+                }
+            })
+            .collect();
+        Self::from_retained_elements(elements)
+    }
+}
+
+retained_list_drop!(RetainedImageSetOptionList);
+
+impl Clone for RetainedImageSetOptionList {
+    fn clone(&self) -> Self {
+        Self::from_retained_elements(self.as_slice().to_vec())
+    }
+}
 
 /// A retained gradient color stop: an optional transition hint, then an optional color,
 /// position and second position (each null when absent).
@@ -692,7 +766,40 @@ pub struct RetainedGridAreaList {
     length: usize,
 }
 
-retained_list!(RetainedGridAreaList, RetainedGridArea);
+impl RetainedGridAreaList {
+    unsafe fn from_raw(elements: *const RetainedGridArea, length: usize) -> Self {
+        let slice: Box<[RetainedGridArea]> = (0..length)
+            .map(|i| {
+                let element = unsafe { &*elements.add(i) };
+                RetainedGridArea {
+                    name: unsafe { RetainedUtf16FlyString::from_leaked_raw(element.name.raw()) },
+                    row_start: element.row_start,
+                    row_end: element.row_end,
+                    column_start: element.column_start,
+                    column_end: element.column_end,
+                }
+            })
+            .collect();
+        let length = slice.len();
+        let pointer = Box::into_raw(slice) as *mut RetainedGridArea;
+        Self { pointer, length }
+    }
+
+    fn from_retained_elements(elements: Vec<RetainedGridArea>) -> Self {
+        let slice = elements.into_boxed_slice();
+        let length = slice.len();
+        let pointer = Box::into_raw(slice) as *mut RetainedGridArea;
+        Self { pointer, length }
+    }
+}
+
+retained_list_drop!(RetainedGridAreaList);
+
+impl Clone for RetainedGridAreaList {
+    fn clone(&self) -> Self {
+        Self::from_retained_elements(self.as_slice().to_vec())
+    }
+}
 
 /// A retained linear() easing stop: the output value and an optional input (null when absent).
 #[repr(C)]

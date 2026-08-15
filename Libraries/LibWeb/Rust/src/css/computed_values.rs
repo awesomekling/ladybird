@@ -35,12 +35,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::abort_on_panic;
 pub use crate::css::computed_value_types::{
-    AlignmentValues, BorderLayoutFacts, BoxValues, ComputedAspectRatio, ComputedFlexBasis, ComputedGap,
-    ComputedGridArea, ComputedGridPlacement, ComputedGridPlacementKind, ComputedGridTrackBreadth,
+    AlignmentValues, AnchorValues, AnimationValues, BorderLayoutFacts, BoxValues, ComputedAspectRatio,
+    ComputedClipEdge, ComputedColorOrAuto, ComputedCursor, ComputedFilter, ComputedFilterOperation, ComputedFlexBasis,
+    ComputedGap, ComputedGridArea, ComputedGridPlacement, ComputedGridPlacementKind, ComputedGridTrackBreadth,
     ComputedGridTrackEntry, ComputedGridTrackEntryKind, ComputedGridTrackList, ComputedLengthBox,
-    ComputedLengthPercentageOrAuto, ComputedSize, ComputedSizeKind, ComputedStyleValueHandle, ComputedVerticalAlign,
-    FontLayoutFacts, GRID_NO_INDEX, GridValues, InheritedTextLayoutFacts, RetainedGridAreaList,
-    RetainedGridNameIndexList, RetainedGridTrackEntryList, SVGResetValues, SizingValues, SurroundValues,
+    ComputedLengthPercentageOrAuto, ComputedPositionTryFallback, ComputedResolvedTransform, ComputedSize,
+    ComputedSizeKind, ComputedStyleValueHandle, ComputedSvgDash, ComputedSvgPaint, ComputedTextIndent,
+    ComputedTextUnderlineOffset, ComputedTextUnderlinePosition, ComputedVerticalAlign, EffectsValues, FontLayoutFacts,
+    GRID_NO_INDEX, GridValues, InheritedSVGValues, InheritedTextLayoutFacts, InheritedTextValues, InheritedUIValues,
+    RetainedComputedCursorList, RetainedComputedFilterOperationList, RetainedComputedResolvedTransformList,
+    RetainedComputedShadowList, RetainedComputedSvgDashList, RetainedGridAreaList, RetainedGridNameIndexList,
+    RetainedGridTrackEntryList, RetainedPositionAreaList, RetainedPositionTryFallbackList,
+    RetainedTextDecorationLineList, SVGResetValues, SizingValues, SurroundValues, TextResetValues, TransformValues,
 };
 use crate::css::retained_fly_string::{RetainedUtf16FlyString, RetainedUtf16FlyStringList};
 use crate::css::style_value::{retained_list_drop, retained_list_partial_eq};
@@ -133,13 +139,19 @@ impl ComputedStyleValueHandle {
         }
     }
 
-    fn length(value: f64) -> Self {
+    pub(crate) fn length(value: f64) -> Self {
         Self {
             pointer: crate::css::style_value::rust_style_value_create_length(
                 value,
                 crate::css::style_compute::px_length_unit(),
             )
             .cast(),
+        }
+    }
+
+    pub(crate) fn percentage(value: f64) -> Self {
+        Self {
+            pointer: crate::css::style_value::rust_style_value_create_percentage(value).cast(),
         }
     }
 
@@ -256,7 +268,7 @@ impl Clone for SurroundValues {
             right_anchor_inset_wrapper: self.right_anchor_inset_wrapper.clone(),
             bottom_anchor_inset_wrapper: self.bottom_anchor_inset_wrapper.clone(),
             left_anchor_inset_wrapper: self.left_anchor_inset_wrapper.clone(),
-            position_anchor_name: self.position_anchor_name.clone(),
+            position_anchor: self.position_anchor.clone(),
             margin: self.margin.clone(),
             padding: self.padding.clone(),
         }
@@ -272,7 +284,7 @@ impl PartialEq for SurroundValues {
             && self.right_anchor_inset == other.right_anchor_inset
             && self.bottom_anchor_inset == other.bottom_anchor_inset
             && self.left_anchor_inset == other.left_anchor_inset
-            && self.position_anchor_name == other.position_anchor_name
+            && self.position_anchor == other.position_anchor
             && self.margin == other.margin
             && self.padding == other.padding
     }
@@ -291,6 +303,302 @@ impl_computed_payload_clone_and_eq!(SVGResetValues {
     flood_color,
     flood_opacity,
     vector_effect,
+});
+impl RetainedTextDecorationLineList {
+    fn from_vec(values: Vec<u8>) -> Self {
+        let slice = values.into_boxed_slice();
+        let length = slice.len();
+        let pointer = Box::into_raw(slice) as *mut u8;
+        Self { pointer, length }
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        if self.pointer.is_null() {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts(self.pointer, self.length) }
+    }
+}
+
+impl Clone for RetainedTextDecorationLineList {
+    fn clone(&self) -> Self {
+        Self::from_vec(self.as_slice().to_vec())
+    }
+}
+
+impl Drop for RetainedTextDecorationLineList {
+    fn drop(&mut self) {
+        if !self.pointer.is_null() {
+            drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(self.pointer, self.length)) });
+        }
+    }
+}
+
+impl PartialEq for RetainedTextDecorationLineList {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl_computed_payload_clone_and_eq!(TextResetValues {
+    text_decoration_lines,
+    text_decoration_thickness_kind,
+    text_decoration_thickness,
+    text_decoration_style,
+    text_decoration_color,
+    white_space_trim_discard_before,
+    white_space_trim_discard_after,
+    white_space_trim_discard_inner,
+});
+impl_computed_payload_clone_and_eq!(ComputedResolvedTransform {
+    is_translate,
+    matrix,
+    x_px,
+    y_px,
+    z_px,
+    x_percentage,
+    y_percentage,
+});
+impl_computed_payload_clone_and_eq!(ComputedFilterOperation {
+    kind,
+    color_operation,
+    amount,
+    shadow_offset_x,
+    shadow_offset_y,
+    shadow_radius,
+    shadow_color,
+    url_value,
+});
+
+macro_rules! impl_retained_computed_list {
+    ($list:ident, $element:ty) => {
+        impl $list {
+            pub(crate) fn from_vec(values: Vec<$element>) -> Self {
+                let slice = values.into_boxed_slice();
+                let length = slice.len();
+                let pointer = Box::into_raw(slice) as *mut $element;
+                Self { pointer, length }
+            }
+
+            fn as_slice(&self) -> &[$element] {
+                if self.pointer.is_null() {
+                    return &[];
+                }
+                unsafe { std::slice::from_raw_parts(self.pointer, self.length) }
+            }
+        }
+
+        impl Clone for $list {
+            fn clone(&self) -> Self {
+                Self::from_vec(self.as_slice().to_vec())
+            }
+        }
+
+        retained_list_drop!($list);
+        retained_list_partial_eq!($list, $element);
+    };
+}
+
+impl_retained_computed_list!(RetainedComputedFilterOperationList, ComputedFilterOperation);
+impl_retained_computed_list!(
+    RetainedComputedShadowList,
+    crate::css::computed_value_types::ComputedShadow
+);
+impl_computed_payload_clone_and_eq!(ComputedCursor {
+    is_cursor_value,
+    cursor,
+    predefined,
+});
+impl_retained_computed_list!(RetainedComputedCursorList, ComputedCursor);
+impl_computed_payload_clone_and_eq!(ComputedSvgPaint {
+    kind,
+    url,
+    has_color,
+    color,
+    color_is_currentcolor,
+});
+impl_computed_payload_clone_and_eq!(ComputedSvgDash {
+    is_number,
+    number,
+    value,
+});
+impl_retained_computed_list!(RetainedComputedSvgDashList, ComputedSvgDash);
+impl_computed_payload_clone_and_eq!(ComputedTextIndent {
+    length_percentage,
+    each_line,
+    hanging,
+});
+impl_computed_payload_clone_and_eq!(ComputedTextUnderlineOffset {
+    used_value,
+    is_auto,
+    value,
+});
+impl_computed_payload_clone_and_eq!(InheritedTextValues {
+    text_align,
+    text_justify,
+    white_space_collapse,
+    text_wrap_mode,
+    word_break,
+    tab_size_is_number,
+    letter_spacing,
+    word_spacing,
+    tab_size_length,
+    tab_size_number,
+    text_indent,
+    color,
+    color_style_value,
+    webkit_text_fill_color,
+    webkit_text_fill_color_is_current_color,
+    text_shadow,
+    text_transform,
+    text_wrap_style,
+    text_decoration_skip_ink,
+    text_underline_position,
+    text_underline_offset,
+    overflow_wrap,
+    word_spacing_style_value,
+    letter_spacing_style_value,
+    orphans,
+    widows,
+});
+impl_computed_payload_clone_and_eq!(AnimationValues {
+    animation_name,
+    animation_composition,
+    animation_delay,
+    animation_direction,
+    animation_duration,
+    animation_fill_mode,
+    animation_iteration_count,
+    animation_play_state,
+    animation_timeline,
+    animation_timing_function,
+    scroll_timeline_name,
+    scroll_timeline_axis,
+    timeline_scope,
+    view_timeline_name,
+    view_timeline_axis,
+    view_timeline_inset,
+    transition_property,
+    transition_duration,
+    transition_timing_function,
+    transition_delay,
+    transition_behavior,
+});
+impl_computed_payload_clone_and_eq!(InheritedSVGValues {
+    fill,
+    stroke,
+    fill_rule,
+    clip_rule,
+    fill_opacity,
+    stroke_opacity,
+    stroke_linecap,
+    stroke_linejoin,
+    stroke_dasharray,
+    stroke_dashoffset,
+    stroke_miterlimit,
+    stroke_width,
+    color_interpolation,
+    color_interpolation_filters,
+    paint_order,
+    paint_order_serialization_length,
+    paint_order_is_normal,
+    text_anchor,
+    has_dominant_baseline,
+    dominant_baseline,
+    shape_rendering,
+});
+impl_retained_computed_list!(RetainedPositionAreaList, u8);
+impl_computed_payload_clone_and_eq!(ComputedPositionTryFallback {
+    name,
+    tactics,
+    tactic_count,
+    has_position_area,
+    position_area,
+});
+impl_retained_computed_list!(RetainedPositionTryFallbackList, ComputedPositionTryFallback);
+impl_computed_payload_clone_and_eq!(ComputedFilter {
+    filter_list,
+    operations
+});
+impl_computed_payload_clone_and_eq!(EffectsValues {
+    opacity,
+    filter,
+    backdrop_filter,
+    mix_blend_mode,
+    isolation,
+    box_shadows,
+    clip_is_rect,
+    clip_edges,
+});
+impl_computed_payload_clone_and_eq!(AnchorValues {
+    anchor_names,
+    anchor_scope_all,
+    anchor_scope_names,
+    position_anchor_type,
+    position_anchor_name,
+    position_area,
+    position_try_fallbacks,
+    has_position_try_order,
+    position_try_order,
+    position_visibility_always,
+    position_visibility_anchors_valid,
+    position_visibility_anchors_visible,
+    position_visibility_no_overflow,
+});
+impl_computed_payload_clone_and_eq!(InheritedUIValues {
+    caret_color,
+    accent_color,
+    cursor,
+    pointer_events,
+    scrollbar_color,
+    color_scheme,
+    color_schemes,
+    color_scheme_only,
+});
+
+impl RetainedComputedResolvedTransformList {
+    pub(crate) fn from_vec(values: Vec<ComputedResolvedTransform>) -> Self {
+        let slice = values.into_boxed_slice();
+        let length = slice.len();
+        let pointer = Box::into_raw(slice) as *mut ComputedResolvedTransform;
+        Self { pointer, length }
+    }
+
+    fn as_slice(&self) -> &[ComputedResolvedTransform] {
+        if self.pointer.is_null() {
+            return &[];
+        }
+        // SAFETY: A non-null pointer/length pair always comes from
+        // from_vec's boxed slice.
+        unsafe { std::slice::from_raw_parts(self.pointer, self.length) }
+    }
+}
+
+impl Clone for RetainedComputedResolvedTransformList {
+    fn clone(&self) -> Self {
+        Self::from_vec(self.as_slice().to_vec())
+    }
+}
+
+retained_list_drop!(RetainedComputedResolvedTransformList);
+retained_list_partial_eq!(RetainedComputedResolvedTransformList, ComputedResolvedTransform);
+
+impl_computed_payload_clone_and_eq!(TransformValues {
+    transformations,
+    resolved_transforms,
+    transform_box,
+    transform_origin_x,
+    transform_origin_y,
+    transform_origin_z,
+    transform_style,
+    backface_visibility,
+    rotate,
+    translate,
+    scale,
+    has_perspective,
+    perspective_px,
+    perspective_origin_x,
+    perspective_origin_y,
 });
 impl_computed_payload_clone_and_eq!(ComputedVerticalAlign {
     is_keyword,
@@ -488,14 +796,7 @@ impl GridValues {
         if let Some(index) = self.names.as_slice().iter().position(|name| name.raw() == raw) {
             return index as u32;
         }
-        let mut names: Vec<RetainedUtf16FlyString> = self
-            .names
-            .as_slice()
-            .iter()
-            // SAFETY: Every listed raw is a live fly string retained by this
-            // group's name table.
-            .map(|name| unsafe { RetainedUtf16FlyString::from_borrowed_raw(name.raw()) })
-            .collect();
+        let mut names: Vec<RetainedUtf16FlyString> = self.names.as_slice().to_vec();
         // SAFETY: The caller passes a raw borrowed from a live source name
         // table.
         names.push(unsafe { RetainedUtf16FlyString::from_borrowed_raw(raw) });
@@ -524,6 +825,14 @@ pub enum StyleGroupLifecycle {
     Surround,
     Box,
     Grid,
+    TextReset,
+    Transform,
+    Effects,
+    Anchor,
+    InheritedUI,
+    InheritedSVG,
+    InheritedText,
+    Animation,
 }
 
 impl StyleGroupLifecycle {
@@ -540,7 +849,15 @@ impl StyleGroupLifecycle {
             | StyleGroupLifecycle::SVGReset
             | StyleGroupLifecycle::Surround
             | StyleGroupLifecycle::Box
-            | StyleGroupLifecycle::Grid => false,
+            | StyleGroupLifecycle::Grid
+            | StyleGroupLifecycle::TextReset
+            | StyleGroupLifecycle::Transform
+            | StyleGroupLifecycle::Effects
+            | StyleGroupLifecycle::Anchor
+            | StyleGroupLifecycle::InheritedUI
+            | StyleGroupLifecycle::InheritedSVG
+            | StyleGroupLifecycle::InheritedText
+            | StyleGroupLifecycle::Animation => false,
         }
     }
 }
@@ -597,6 +914,14 @@ fn payload_size(table: &StyleGroupVTable) -> usize {
         StyleGroupLifecycle::Surround => size_of::<SurroundValues>(),
         StyleGroupLifecycle::Box => size_of::<BoxValues>(),
         StyleGroupLifecycle::Grid => size_of::<GridValues>(),
+        StyleGroupLifecycle::TextReset => size_of::<TextResetValues>(),
+        StyleGroupLifecycle::Transform => size_of::<TransformValues>(),
+        StyleGroupLifecycle::Effects => size_of::<EffectsValues>(),
+        StyleGroupLifecycle::Anchor => size_of::<AnchorValues>(),
+        StyleGroupLifecycle::InheritedUI => size_of::<InheritedUIValues>(),
+        StyleGroupLifecycle::InheritedSVG => size_of::<InheritedSVGValues>(),
+        StyleGroupLifecycle::InheritedText => size_of::<InheritedTextValues>(),
+        StyleGroupLifecycle::Animation => size_of::<AnimationValues>(),
         StyleGroupLifecycle::Cpp
         | StyleGroupLifecycle::CppWithBorderFacts
         | StyleGroupLifecycle::CppWithInheritedTextFacts
@@ -617,6 +942,14 @@ fn payload_align(table: &StyleGroupVTable) -> usize {
         StyleGroupLifecycle::Surround => align_of::<SurroundValues>(),
         StyleGroupLifecycle::Box => align_of::<BoxValues>(),
         StyleGroupLifecycle::Grid => align_of::<GridValues>(),
+        StyleGroupLifecycle::TextReset => align_of::<TextResetValues>(),
+        StyleGroupLifecycle::Transform => align_of::<TransformValues>(),
+        StyleGroupLifecycle::Effects => align_of::<EffectsValues>(),
+        StyleGroupLifecycle::Anchor => align_of::<AnchorValues>(),
+        StyleGroupLifecycle::InheritedUI => align_of::<InheritedUIValues>(),
+        StyleGroupLifecycle::InheritedSVG => align_of::<InheritedSVGValues>(),
+        StyleGroupLifecycle::InheritedText => align_of::<InheritedTextValues>(),
+        StyleGroupLifecycle::Animation => align_of::<AnimationValues>(),
         StyleGroupLifecycle::Cpp
         | StyleGroupLifecycle::CppWithBorderFacts
         | StyleGroupLifecycle::CppWithInheritedTextFacts
@@ -656,6 +989,30 @@ unsafe fn default_construct(table: &StyleGroupVTable, payload: *mut c_void) {
         },
         StyleGroupLifecycle::Grid => unsafe {
             (payload as *mut GridValues).write(GridValues::initial());
+        },
+        StyleGroupLifecycle::TextReset => unsafe {
+            (payload as *mut TextResetValues).write(TextResetValues::initial());
+        },
+        StyleGroupLifecycle::Transform => unsafe {
+            (payload as *mut TransformValues).write(TransformValues::initial());
+        },
+        StyleGroupLifecycle::Effects => unsafe {
+            (payload as *mut EffectsValues).write(EffectsValues::initial());
+        },
+        StyleGroupLifecycle::Anchor => unsafe {
+            (payload as *mut AnchorValues).write(AnchorValues::initial());
+        },
+        StyleGroupLifecycle::InheritedUI => unsafe {
+            (payload as *mut InheritedUIValues).write(InheritedUIValues::initial());
+        },
+        StyleGroupLifecycle::InheritedSVG => unsafe {
+            (payload as *mut InheritedSVGValues).write(InheritedSVGValues::initial());
+        },
+        StyleGroupLifecycle::InheritedText => unsafe {
+            (payload as *mut InheritedTextValues).write(InheritedTextValues::initial());
+        },
+        StyleGroupLifecycle::Animation => unsafe {
+            (payload as *mut AnimationValues).write(AnimationValues::initial());
         },
         StyleGroupLifecycle::Cpp
         | StyleGroupLifecycle::CppWithBorderFacts
@@ -697,6 +1054,30 @@ unsafe fn copy_construct(table: &StyleGroupVTable, payload: *mut c_void, source:
         StyleGroupLifecycle::Grid => unsafe {
             (payload as *mut GridValues).write((*(source as *const GridValues)).clone());
         },
+        StyleGroupLifecycle::TextReset => unsafe {
+            (payload as *mut TextResetValues).write((*(source as *const TextResetValues)).clone());
+        },
+        StyleGroupLifecycle::Transform => unsafe {
+            (payload as *mut TransformValues).write((*(source as *const TransformValues)).clone());
+        },
+        StyleGroupLifecycle::Effects => unsafe {
+            (payload as *mut EffectsValues).write((*(source as *const EffectsValues)).clone());
+        },
+        StyleGroupLifecycle::Anchor => unsafe {
+            (payload as *mut AnchorValues).write((*(source as *const AnchorValues)).clone());
+        },
+        StyleGroupLifecycle::InheritedUI => unsafe {
+            (payload as *mut InheritedUIValues).write((*(source as *const InheritedUIValues)).clone());
+        },
+        StyleGroupLifecycle::InheritedSVG => unsafe {
+            (payload as *mut InheritedSVGValues).write((*(source as *const InheritedSVGValues)).clone());
+        },
+        StyleGroupLifecycle::InheritedText => unsafe {
+            (payload as *mut InheritedTextValues).write((*(source as *const InheritedTextValues)).clone());
+        },
+        StyleGroupLifecycle::Animation => unsafe {
+            (payload as *mut AnimationValues).write((*(source as *const AnimationValues)).clone());
+        },
         StyleGroupLifecycle::Cpp
         | StyleGroupLifecycle::CppWithBorderFacts
         | StyleGroupLifecycle::CppWithInheritedTextFacts
@@ -721,6 +1102,14 @@ unsafe fn destruct(table: &StyleGroupVTable, payload: *mut c_void) {
         StyleGroupLifecycle::Surround => unsafe { std::ptr::drop_in_place(payload as *mut SurroundValues) },
         StyleGroupLifecycle::Box => unsafe { std::ptr::drop_in_place(payload as *mut BoxValues) },
         StyleGroupLifecycle::Grid => unsafe { std::ptr::drop_in_place(payload as *mut GridValues) },
+        StyleGroupLifecycle::TextReset => unsafe { std::ptr::drop_in_place(payload as *mut TextResetValues) },
+        StyleGroupLifecycle::Transform => unsafe { std::ptr::drop_in_place(payload as *mut TransformValues) },
+        StyleGroupLifecycle::Effects => unsafe { std::ptr::drop_in_place(payload as *mut EffectsValues) },
+        StyleGroupLifecycle::Anchor => unsafe { std::ptr::drop_in_place(payload as *mut AnchorValues) },
+        StyleGroupLifecycle::InheritedUI => unsafe { std::ptr::drop_in_place(payload as *mut InheritedUIValues) },
+        StyleGroupLifecycle::InheritedSVG => unsafe { std::ptr::drop_in_place(payload as *mut InheritedSVGValues) },
+        StyleGroupLifecycle::InheritedText => unsafe { std::ptr::drop_in_place(payload as *mut InheritedTextValues) },
+        StyleGroupLifecycle::Animation => unsafe { std::ptr::drop_in_place(payload as *mut AnimationValues) },
         StyleGroupLifecycle::Cpp
         | StyleGroupLifecycle::CppWithBorderFacts
         | StyleGroupLifecycle::CppWithInheritedTextFacts
@@ -746,6 +1135,20 @@ unsafe fn payloads_equal(table: &StyleGroupVTable, a: *const c_void, b: *const c
         StyleGroupLifecycle::Surround => unsafe { *(a as *const SurroundValues) == *(b as *const SurroundValues) },
         StyleGroupLifecycle::Box => unsafe { *(a as *const BoxValues) == *(b as *const BoxValues) },
         StyleGroupLifecycle::Grid => unsafe { *(a as *const GridValues) == *(b as *const GridValues) },
+        StyleGroupLifecycle::TextReset => unsafe { *(a as *const TextResetValues) == *(b as *const TextResetValues) },
+        StyleGroupLifecycle::Transform => unsafe { *(a as *const TransformValues) == *(b as *const TransformValues) },
+        StyleGroupLifecycle::Effects => unsafe { *(a as *const EffectsValues) == *(b as *const EffectsValues) },
+        StyleGroupLifecycle::Anchor => unsafe { *(a as *const AnchorValues) == *(b as *const AnchorValues) },
+        StyleGroupLifecycle::InheritedUI => unsafe {
+            *(a as *const InheritedUIValues) == *(b as *const InheritedUIValues)
+        },
+        StyleGroupLifecycle::InheritedSVG => unsafe {
+            *(a as *const InheritedSVGValues) == *(b as *const InheritedSVGValues)
+        },
+        StyleGroupLifecycle::InheritedText => unsafe {
+            *(a as *const InheritedTextValues) == *(b as *const InheritedTextValues)
+        },
+        StyleGroupLifecycle::Animation => unsafe { *(a as *const AnimationValues) == *(b as *const AnimationValues) },
         StyleGroupLifecycle::Cpp
         | StyleGroupLifecycle::CppWithBorderFacts
         | StyleGroupLifecycle::CppWithInheritedTextFacts
@@ -1571,8 +1974,92 @@ pub(crate) unsafe fn build_group_payload_with_assembler(
         default_construct(table, scratch);
         apply_group_field_pokes(scratch, &pokes);
         crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::StyleGroupPayloadAssemblerCallback);
+        // Pinned to StyleGroupIndex::TransformValues by ComputedValues.cpp.
+        if group_index == 15 {
+            crate::css::ffi_stats::bump_cpp_callback(
+                crate::css::ffi_stats::FfiOp::TransformGroupPayloadAssemblerCallback,
+            );
+        }
+        if group_index == 11 {
+            crate::css::ffi_stats::bump_cpp_callback(
+                crate::css::ffi_stats::FfiOp::EffectsGroupPayloadAssemblerCallback,
+            );
+        }
+        if group_index == 10 {
+            crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::AnchorGroupPayloadAssemblerCallback);
+        }
+        if group_index == 2 {
+            crate::css::ffi_stats::bump_cpp_callback(
+                crate::css::ffi_stats::FfiOp::InheritedUIGroupPayloadAssemblerCallback,
+            );
+        }
+        if group_index == 3 {
+            crate::css::ffi_stats::bump_cpp_callback(
+                crate::css::ffi_stats::FfiOp::InheritedSVGGroupPayloadAssemblerCallback,
+            );
+        }
+        if group_index == 4 {
+            crate::css::ffi_stats::bump_cpp_callback(
+                crate::css::ffi_stats::FfiOp::InheritedTextGroupPayloadAssemblerCallback,
+            );
+        }
+        if group_index == 7 {
+            crate::css::ffi_stats::bump_cpp_callback(
+                crate::css::ffi_stats::FfiOp::AnimationGroupPayloadAssemblerCallback,
+            );
+        }
         assembler(scratch, assembler_data);
     }
+
+    if !parent_payload.is_null() && unsafe { payloads_equal(table, scratch, parent_payload) } {
+        unsafe { free_scratch_payload(table, scratch) };
+        retain_group_payload(group_index, parent_payload);
+        return parent_payload;
+    }
+    let default_payload = default_group_payload(group_index);
+    if unsafe { payloads_equal(table, scratch, default_payload) } {
+        unsafe { free_scratch_payload(table, scratch) };
+        return default_payload;
+    }
+    scratch as *const c_void
+}
+
+/// Builds a Rust-native group whose descriptor-backed fields are completed by
+/// a Rust closure before the normal parent/default sharing checks.
+///
+/// # Safety
+/// `values` must hold one valid data entry per registered descriptor of the
+/// group in registration order, and `parent_payload` must be a valid payload
+/// of the group or null. The closure must cast the payload to the registered
+/// Rust-native type only.
+pub(crate) unsafe fn build_group_payload_with_rust_fill(
+    group_index: usize,
+    values: &[FfiGroupValueEntry],
+    fill: impl FnOnce(*mut c_void),
+    parent_payload: *const c_void,
+) -> *const c_void {
+    let all = &FIELD_DESCRIPTORS
+        .get()
+        .expect("descriptors register before any build")
+        .0;
+    let descriptors: Vec<&FfiGroupFieldDescriptor> = all
+        .iter()
+        .filter(|descriptor| descriptor.group_index as usize == group_index)
+        .collect();
+    assert_eq!(descriptors.len(), values.len());
+    let pokes = decode_group_field_pokes(&descriptors, values, false)
+        .expect("computed values decode for every non-constraint descriptor");
+
+    let table = vtable(group_index);
+    assert!(!table.lifecycle.payload_is_cpp_owned());
+    let scratch = allocate_payload(table, 1);
+    // SAFETY: The scratch payload was allocated for this group's Rust-native
+    // layout, and every poke offset comes from offsetof on the C++ mirror.
+    unsafe {
+        default_construct(table, scratch);
+        apply_group_field_pokes(scratch, &pokes);
+    }
+    fill(scratch);
 
     if !parent_payload.is_null() && unsafe { payloads_equal(table, scratch, parent_payload) } {
         unsafe { free_scratch_payload(table, scratch) };
@@ -1895,7 +2382,7 @@ impl SurroundValues {
             right_anchor_inset_wrapper: ComputedStyleValueHandle::empty(),
             bottom_anchor_inset_wrapper: ComputedStyleValueHandle::empty(),
             left_anchor_inset_wrapper: ComputedStyleValueHandle::empty(),
-            position_anchor_name: RetainedUtf16FlyString::none(),
+            position_anchor: ComputedStyleValueHandle::empty(),
             margin: ComputedLengthBox::zero(),
             padding: ComputedLengthBox::zero(),
         }
@@ -1991,6 +2478,250 @@ impl SVGResetValues {
             flood_color: OPAQUE_BLACK_BGRA,
             flood_opacity: 1.0,
             vector_effect: vector_effect::NONE,
+        }
+    }
+}
+
+impl TextResetValues {
+    fn initial() -> Self {
+        use crate::css::css_enums::{keyword, keyword_to_text_decoration_style};
+
+        Self {
+            text_decoration_lines: RetainedTextDecorationLineList::from_vec(Vec::new()),
+            text_decoration_thickness_kind: 0,
+            text_decoration_thickness: ComputedStyleValueHandle::empty(),
+            text_decoration_style: keyword_to_text_decoration_style(keyword::SOLID)
+                .expect("solid maps to TextDecorationStyle"),
+            text_decoration_color: 0xff00_0000,
+            white_space_trim_discard_before: false,
+            white_space_trim_discard_after: false,
+            white_space_trim_discard_inner: false,
+        }
+    }
+}
+
+impl TransformValues {
+    fn initial() -> Self {
+        Self {
+            transformations: ComputedStyleValueHandle::empty(),
+            resolved_transforms: RetainedComputedResolvedTransformList::from_vec(Vec::new()),
+            // TransformBox::ViewBox, TransformStyle::Flat, and
+            // BackfaceVisibility::Visible. The generated C++ enum values are
+            // pinned by static assertions beside the payload layout checks.
+            transform_box: 4,
+            transform_origin_x: ComputedStyleValueHandle::percentage(50.0),
+            transform_origin_y: ComputedStyleValueHandle::percentage(50.0),
+            transform_origin_z: ComputedStyleValueHandle::length(0.0),
+            transform_style: 0,
+            backface_visibility: 0,
+            rotate: ComputedStyleValueHandle::empty(),
+            translate: ComputedStyleValueHandle::empty(),
+            scale: ComputedStyleValueHandle::empty(),
+            has_perspective: false,
+            perspective_px: 0,
+            perspective_origin_x: ComputedStyleValueHandle::percentage(50.0),
+            perspective_origin_y: ComputedStyleValueHandle::percentage(50.0),
+        }
+    }
+}
+
+impl EffectsValues {
+    fn initial_filter() -> ComputedFilter {
+        ComputedFilter {
+            filter_list: ComputedStyleValueHandle::empty(),
+            operations: RetainedComputedFilterOperationList::from_vec(Vec::new()),
+        }
+    }
+
+    fn initial() -> Self {
+        let auto_edge = ComputedClipEdge {
+            is_auto: true,
+            value: 0.0,
+            unit: crate::css::style_compute::px_length_unit(),
+        };
+        Self {
+            opacity: 1.0,
+            filter: Self::initial_filter(),
+            backdrop_filter: Self::initial_filter(),
+            // MixBlendMode::Normal and Isolation::Auto.
+            mix_blend_mode: 0,
+            isolation: 0,
+            box_shadows: RetainedComputedShadowList::from_vec(Vec::new()),
+            clip_is_rect: false,
+            clip_edges: [auto_edge; 4],
+        }
+    }
+}
+
+impl AnchorValues {
+    fn initial() -> Self {
+        Self {
+            anchor_names: RetainedUtf16FlyStringList::from_retained_strings(Vec::new()),
+            anchor_scope_all: false,
+            anchor_scope_names: RetainedUtf16FlyStringList::from_retained_strings(Vec::new()),
+            // PositionAnchor::Type::Normal.
+            position_anchor_type: 0,
+            position_anchor_name: RetainedUtf16FlyString::none(),
+            position_area: RetainedPositionAreaList::from_vec(Vec::new()),
+            position_try_fallbacks: RetainedPositionTryFallbackList::from_vec(Vec::new()),
+            has_position_try_order: false,
+            position_try_order: 0,
+            position_visibility_always: false,
+            position_visibility_anchors_valid: false,
+            position_visibility_anchors_visible: true,
+            position_visibility_no_overflow: false,
+        }
+    }
+}
+
+impl InheritedUIValues {
+    fn initial() -> Self {
+        Self {
+            caret_color: ComputedColorOrAuto {
+                is_auto: true,
+                computed_color: 0xff00_0000,
+                used_color: 0xff00_0000,
+            },
+            accent_color: ComputedColorOrAuto {
+                is_auto: true,
+                computed_color: 0xff00_0000,
+                used_color: 0xff00_0000,
+            },
+            cursor: RetainedComputedCursorList::from_vec(vec![ComputedCursor {
+                is_cursor_value: false,
+                cursor: ComputedStyleValueHandle::empty(),
+                predefined: crate::css::css_enums::cursor_predefined::AUTO,
+            }]),
+            pointer_events: crate::css::css_enums::pointer_events::AUTO,
+            scrollbar_color: crate::css::computed_value_types::ComputedScrollbarColor {
+                thumb_color: 0,
+                track_color: 0,
+                is_auto: true,
+            },
+            color_scheme: 0,
+            color_schemes: RetainedUtf16FlyStringList::from_retained_strings(Vec::new()),
+            color_scheme_only: false,
+        }
+    }
+}
+
+impl InheritedSVGValues {
+    fn initial_paint(kind: u8, color: u32) -> crate::css::computed_value_types::ComputedSvgPaint {
+        crate::css::computed_value_types::ComputedSvgPaint {
+            kind,
+            url: ComputedStyleValueHandle::empty(),
+            has_color: kind == 1,
+            color,
+            color_is_currentcolor: false,
+        }
+    }
+
+    fn initial() -> Self {
+        Self {
+            fill: Self::initial_paint(1, 0xff00_0000),
+            stroke: Self::initial_paint(0, 0),
+            fill_rule: 0,
+            clip_rule: 0,
+            fill_opacity: 1.0,
+            stroke_opacity: 1.0,
+            stroke_linecap: 0,
+            stroke_linejoin: 0,
+            stroke_dasharray: RetainedComputedSvgDashList::from_vec(Vec::new()),
+            stroke_dashoffset: ComputedStyleValueHandle::length(0.0),
+            stroke_miterlimit: 4.0,
+            stroke_width: ComputedStyleValueHandle::length(1.0),
+            color_interpolation: 0,
+            color_interpolation_filters: 1,
+            paint_order: [0, 1, 2],
+            paint_order_serialization_length: 0,
+            paint_order_is_normal: true,
+            text_anchor: 0,
+            has_dominant_baseline: false,
+            dominant_baseline: 0,
+            shape_rendering: 0,
+        }
+    }
+}
+
+impl InheritedTextValues {
+    fn initial() -> Self {
+        use crate::css::css_enums;
+        use crate::css::css_pixels::CssPixels;
+
+        let enum_value = |value: Option<u8>| value.expect("an initial inherited-text keyword maps to its enum");
+        Self {
+            text_align: enum_value(css_enums::keyword_to_text_align(css_enums::keyword::START)),
+            text_justify: enum_value(css_enums::keyword_to_text_justify(css_enums::keyword::AUTO)),
+            white_space_collapse: enum_value(css_enums::keyword_to_white_space_collapse(css_enums::keyword::COLLAPSE)),
+            text_wrap_mode: enum_value(css_enums::keyword_to_text_wrap_mode(css_enums::keyword::WRAP)),
+            word_break: enum_value(css_enums::keyword_to_word_break(css_enums::keyword::NORMAL)),
+            tab_size_is_number: true,
+            letter_spacing: CssPixels::default(),
+            word_spacing: CssPixels::default(),
+            tab_size_length: CssPixels::default(),
+            tab_size_number: 8.0,
+            text_indent: ComputedTextIndent {
+                length_percentage: ComputedStyleValueHandle::length(0.0),
+                each_line: false,
+                hanging: false,
+            },
+            color: 0xff00_0000,
+            color_style_value: ComputedStyleValueHandle::empty(),
+            webkit_text_fill_color: 0xff00_0000,
+            webkit_text_fill_color_is_current_color: true,
+            text_shadow: RetainedComputedShadowList::from_vec(Vec::new()),
+            text_transform: enum_value(css_enums::keyword_to_text_transform(css_enums::keyword::NONE)),
+            text_wrap_style: enum_value(css_enums::keyword_to_text_wrap_style(css_enums::keyword::AUTO)),
+            text_decoration_skip_ink: enum_value(css_enums::keyword_to_text_decoration_skip_ink(
+                css_enums::keyword::AUTO,
+            )),
+            text_underline_position: ComputedTextUnderlinePosition {
+                horizontal: 0,
+                vertical: 0,
+            },
+            text_underline_offset: ComputedTextUnderlineOffset {
+                used_value: CssPixels::from_integer(2),
+                is_auto: true,
+                value: ComputedStyleValueHandle::empty(),
+            },
+            // OverflowWrap::Normal.
+            overflow_wrap: 0,
+            word_spacing_style_value: ComputedStyleValueHandle::empty(),
+            letter_spacing_style_value: ComputedStyleValueHandle::empty(),
+            orphans: 2,
+            widows: 2,
+        }
+    }
+}
+
+impl AnimationValues {
+    fn initial() -> Self {
+        use crate::css::property_metadata::property_id;
+
+        let initial =
+            |property| ComputedStyleValueHandle::retained(crate::css::style_compute::initial_value_data(property));
+        Self {
+            animation_name: initial(property_id::ANIMATION_NAME),
+            animation_composition: initial(property_id::ANIMATION_COMPOSITION),
+            animation_delay: initial(property_id::ANIMATION_DELAY),
+            animation_direction: initial(property_id::ANIMATION_DIRECTION),
+            animation_duration: initial(property_id::ANIMATION_DURATION),
+            animation_fill_mode: initial(property_id::ANIMATION_FILL_MODE),
+            animation_iteration_count: initial(property_id::ANIMATION_ITERATION_COUNT),
+            animation_play_state: initial(property_id::ANIMATION_PLAY_STATE),
+            animation_timeline: initial(property_id::ANIMATION_TIMELINE),
+            animation_timing_function: initial(property_id::ANIMATION_TIMING_FUNCTION),
+            scroll_timeline_name: initial(property_id::SCROLL_TIMELINE_NAME),
+            scroll_timeline_axis: initial(property_id::SCROLL_TIMELINE_AXIS),
+            timeline_scope: initial(property_id::TIMELINE_SCOPE),
+            view_timeline_name: initial(property_id::VIEW_TIMELINE_NAME),
+            view_timeline_axis: initial(property_id::VIEW_TIMELINE_AXIS),
+            view_timeline_inset: initial(property_id::VIEW_TIMELINE_INSET),
+            transition_property: initial(property_id::TRANSITION_PROPERTY),
+            transition_duration: initial(property_id::TRANSITION_DURATION),
+            transition_timing_function: initial(property_id::TRANSITION_TIMING_FUNCTION),
+            transition_delay: initial(property_id::TRANSITION_DELAY),
+            transition_behavior: initial(property_id::TRANSITION_BEHAVIOR),
         }
     }
 }
@@ -2135,6 +2866,100 @@ pub unsafe extern "C" fn rust_build_svg_reset_group(
     .unwrap_or(std::ptr::null())
 }
 
+/// Builds the complete text-decoration reset group from its lowered values.
+///
+/// # Safety
+/// `text_decoration_lines` must address `text_decoration_line_count` valid
+/// enum codes, a non-null thickness must identify valid StyleValueData, and
+/// `parent_payload` must identify a text reset payload or be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_build_text_reset_group(
+    group_index: usize,
+    text_decoration_lines: *const u8,
+    text_decoration_line_count: usize,
+    text_decoration_thickness_kind: u8,
+    text_decoration_thickness: *const c_void,
+    text_decoration_style: u8,
+    text_decoration_color: u32,
+    white_space_trim_discard_before: bool,
+    white_space_trim_discard_after: bool,
+    white_space_trim_discard_inner: bool,
+    parent_payload: *const c_void,
+) -> *const c_void {
+    abort_on_panic(|| {
+        let lines = if text_decoration_line_count == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(text_decoration_lines, text_decoration_line_count) }
+        };
+        let built = TextResetValues {
+            text_decoration_lines: RetainedTextDecorationLineList::from_vec(lines.to_vec()),
+            text_decoration_thickness_kind,
+            text_decoration_thickness: if text_decoration_thickness_kind == 2 {
+                ComputedStyleValueHandle::retained(text_decoration_thickness.cast())
+            } else {
+                ComputedStyleValueHandle::empty()
+            },
+            text_decoration_style,
+            text_decoration_color,
+            white_space_trim_discard_before,
+            white_space_trim_discard_after,
+            white_space_trim_discard_inner,
+        };
+
+        if !parent_payload.is_null() && built.eq(unsafe { &*parent_payload.cast::<TextResetValues>() }) {
+            retain_group_payload(group_index, parent_payload);
+            return parent_payload;
+        }
+        let default_payload = default_group_payload(group_index);
+        if built.eq(unsafe { &*default_payload.cast::<TextResetValues>() }) {
+            return default_payload;
+        }
+
+        let payload = allocate_payload(vtable(group_index), 1);
+        unsafe { payload.cast::<TextResetValues>().write(built) };
+        payload.cast_const()
+    })
+}
+
+/// # Safety
+/// `target` must identify a uniquely owned text reset payload and `lines`
+/// must address `line_count` valid enum codes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_text_reset_set_decoration_lines(
+    target: *mut TextResetValues,
+    lines: *const u8,
+    line_count: usize,
+) {
+    abort_on_panic(|| {
+        let lines = if line_count == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(lines, line_count) }
+        };
+        unsafe { (*target).text_decoration_lines = RetainedTextDecorationLineList::from_vec(lines.to_vec()) };
+    });
+}
+
+/// # Safety
+/// `target` must identify a uniquely owned text reset payload. For kind 2,
+/// `value` must own one retained StyleValueData reference transferred here.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_text_reset_set_decoration_thickness(
+    target: *mut TextResetValues,
+    kind: u8,
+    value: *const c_void,
+) {
+    abort_on_panic(|| unsafe {
+        (*target).text_decoration_thickness_kind = kind;
+        (*target).text_decoration_thickness = if kind == 2 {
+            ComputedStyleValueHandle { pointer: value }
+        } else {
+            ComputedStyleValueHandle::empty()
+        };
+    });
+}
+
 /// Builds the complete surround group from the physical inset, margin, and
 /// padding properties. Anchor insets retain their original value separately
 /// while exposing auto through the length-box facade, matching layout's
@@ -2158,7 +2983,7 @@ pub unsafe extern "C" fn rust_build_surround_group(
     padding_right: *const c_void,
     padding_bottom: *const c_void,
     padding_left: *const c_void,
-    position_anchor_name_leaked_raw: usize,
+    position_anchor: *const c_void,
     parent_payload: *const c_void,
 ) -> *const c_void {
     use crate::css::style_value::StyleValueData;
@@ -2182,10 +3007,11 @@ pub unsafe extern "C" fn rust_build_surround_group(
             right_anchor_inset_wrapper: ComputedStyleValueHandle::empty(),
             bottom_anchor_inset_wrapper: ComputedStyleValueHandle::empty(),
             left_anchor_inset_wrapper: ComputedStyleValueHandle::empty(),
-            // SAFETY: The caller transfers one leaked reference (or zero for
-            // no name), which the payload or this local assumes in every
-            // outcome below.
-            position_anchor_name: unsafe { RetainedUtf16FlyString::from_leaked_raw(position_anchor_name_leaked_raw) },
+            position_anchor: if position_anchor.is_null() {
+                ComputedStyleValueHandle::empty()
+            } else {
+                ComputedStyleValueHandle::retained(position_anchor.cast())
+            },
             margin: ComputedLengthBox::from_data(margin_top, margin_right, margin_bottom, margin_left, false),
             padding: ComputedLengthBox::from_data(padding_top, padding_right, padding_bottom, padding_left, false),
         };
@@ -2221,6 +3047,41 @@ pub unsafe extern "C" fn rust_build_surround_group(
         Some(payload.cast_const())
     })
     .unwrap_or(std::ptr::null())
+}
+
+/// Replaces the position-anchor style value retained for Rust layout.
+///
+/// # Safety
+/// `target` must identify a uniquely owned surround payload. `name_raw` must
+/// transfer one leaked fly-string reference when nonzero.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_surround_set_position_anchor(target: *mut SurroundValues, name_raw: usize) {
+    abort_on_panic(|| unsafe {
+        (*target).position_anchor = if name_raw == 0 {
+            ComputedStyleValueHandle::empty()
+        } else {
+            ComputedStyleValueHandle {
+                pointer: crate::css::style_value::rust_style_value_create_custom_ident(name_raw).cast(),
+            }
+        };
+    });
+}
+
+/// Replaces the position-anchor value in a uniquely owned anchor payload.
+///
+/// # Safety
+/// `target` must identify a uniquely owned anchor payload. `name_raw` must
+/// transfer one leaked fly-string reference when nonzero.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_anchor_set_position_anchor(
+    target: *mut AnchorValues,
+    position_anchor_type: u8,
+    name_raw: usize,
+) {
+    abort_on_panic(|| unsafe {
+        (*target).position_anchor_type = position_anchor_type;
+        (*target).position_anchor_name = RetainedUtf16FlyString::from_leaked_raw(name_raw);
+    });
 }
 
 /// Builds the box group from a fully materialized payload value. C++ resolves

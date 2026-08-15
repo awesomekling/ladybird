@@ -20,5 +20,55 @@
         println(`longhand driver ran: ${afterOneElement.longhandDriverEntries >= 1}`);
         println(`longhand loop called back into C++: ${afterOneElement.longhandStoreBatchCallbacks >= 1}`);
         println(`computed build called back into C++: ${afterOneElement.computedStyleBuildCppCallbacks >= 1}`);
+
+        element.style.positionAnchor = "--target";
+        internals.resetStyleFfiCounters();
+        internals.updateStyle();
+        const afterPositionAnchor = internals.styleFfiCounters();
+        println(`position-anchor build retained a C++ string: ${afterPositionAnchor.stringRetainReleaseCallbacks > 0}`);
+        println(`anchor build called its C++ payload assembler: ${afterPositionAnchor.anchorGroupPayloadAssemblerCallbacks > 0}`);
+
+        element.style.containerName = "--container";
+        internals.resetStyleFfiCounters();
+        internals.updateStyle();
+        const afterContainerName = internals.styleFfiCounters();
+        println(`container-name build retained a C++ string: ${afterContainerName.stringRetainReleaseCallbacks > 0}`);
+
+        element.style.transform = "translate(10%, 20px) rotate(30deg)";
+        internals.resetStyleFfiCounters();
+        internals.updateStyle();
+        const afterTransform = internals.styleFfiCounters();
+        println(`transform build called its C++ payload assembler: ${afterTransform.transformGroupPayloadAssemblerCallbacks > 0}`);
+
+        element.style.filter = "blur(2px)";
+        element.style.boxShadow = "1px 2px 3px red";
+        internals.resetStyleFfiCounters();
+        internals.updateStyle();
+        const afterEffects = internals.styleFfiCounters();
+        println(`effects build called its C++ payload assembler: ${afterEffects.effectsGroupPayloadAssemblerCallbacks > 0}`);
+
+        element.style.cursor = "crosshair";
+        internals.resetStyleFfiCounters();
+        internals.updateStyle();
+        const afterCursor = internals.styleFfiCounters();
+        println(`inherited UI build called its C++ payload assembler: ${afterCursor.inheritedUIGroupPayloadAssemblerCallbacks > 0}`);
+
+        element.style.fill = "red";
+        internals.resetStyleFfiCounters();
+        internals.updateStyle();
+        const afterFill = internals.styleFfiCounters();
+        println(`inherited SVG build called its C++ payload assembler: ${afterFill.inheritedSVGGroupPayloadAssemblerCallbacks > 0}`);
+
+        element.style.textIndent = "1em";
+        internals.resetStyleFfiCounters();
+        internals.updateStyle();
+        const afterTextIndent = internals.styleFfiCounters();
+        println(`inherited text build called its C++ payload assembler: ${afterTextIndent.inheritedTextGroupPayloadAssemblerCallbacks > 0}`);
+
+        element.style.transition = "opacity 1s ease 2s";
+        internals.resetStyleFfiCounters();
+        internals.updateStyle();
+        const afterTransition = internals.styleFfiCounters();
+        println(`animation build called its C++ payload assembler: ${afterTransition.animationGroupPayloadAssemblerCallbacks > 0}`);
     });
 </script>

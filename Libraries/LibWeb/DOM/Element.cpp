@@ -2534,7 +2534,7 @@ void Element::removed_from(IsSubtreeRoot is_subtree_root, Node* old_ancestor, No
                 ? as<ShadowRoot>(old_root).anchor_name_map()
                 : document().anchor_name_map();
             bool element_had_registered_anchor_names = false;
-            for (auto const& name : anchor_values->anchor_names) {
+            for (auto const& name : anchor_values->anchor_names_span()) {
                 element_had_registered_anchor_names = true;
                 anchor_names.unregister_name(name, *this);
             }

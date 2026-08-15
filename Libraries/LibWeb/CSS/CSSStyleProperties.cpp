@@ -362,7 +362,7 @@ static NonnullRefPtr<StyleValue const> style_value_for_size(Size const& size)
     TODO();
 }
 
-static RefPtr<StyleValue const> style_value_for_shadow(ShadowStyleValue::ShadowType shadow_type, Vector<ShadowData> const& shadow_data)
+static RefPtr<StyleValue const> style_value_for_shadow(ShadowStyleValue::ShadowType shadow_type, ReadonlySpan<ShadowData> shadow_data)
 {
     if (shadow_data.is_empty())
         return KeywordStyleValue::create(Keyword::None);
@@ -1266,8 +1266,7 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
         // -> A resolved value special case property defined in another specification
         //    As defined in the relevant specification.
     case PropertyID::Transform: {
-        auto const& transformations = layout_node.transformations();
-        if (transformations.is_empty())
+        if (!layout_node.has_transformations())
             return KeywordStyleValue::create(Keyword::None);
 
         // https://drafts.csswg.org/css-transforms-2/#serialization-of-the-computed-value
@@ -1281,9 +1280,9 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
         auto paintable = layout_node.paintable();
         VERIFY(paintable);
         auto const& paintable_box = *paintable;
-        for (auto const& transformation : transformations) {
-            transform = transform * transformation->to_matrix(paintable_box);
-        }
+        layout_node.for_each_transformation([&](auto const& transformation) {
+            transform = transform * transformation.to_matrix(paintable_box);
+        });
 
         // https://drafts.csswg.org/css-transforms-1/#2d-matrix
         auto is_2d_matrix = [](Gfx::FloatMatrix4x4 const& matrix) -> bool {

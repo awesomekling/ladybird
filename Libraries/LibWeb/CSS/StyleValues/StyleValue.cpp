@@ -116,12 +116,13 @@ ColorResolutionContext ColorResolutionContext::for_element(DOM::AbstractElement 
 
     CalculationResolutionContext calculation_resolution_context { .length_resolution_context = Length::ResolutionContext::for_element(element) };
     RefPtr<StyleValue const> current_color_style_value;
-    if (text_values->color_style_value)
-        current_color_style_value = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(text_values->color_style_value.data()));
+    if (text_values->color_style_value.pointer)
+        current_color_style_value = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
+            static_cast<StyleValueFFI::StyleValueData const*>(text_values->color_style_value.pointer)));
 
     return {
-        .color_scheme = ui_values->color_scheme,
-        .current_color = text_values->color,
+        .color_scheme = ui_values->color_scheme_value(),
+        .current_color = text_values->color_value(),
         .current_color_style_value = move(current_color_style_value),
         .calculation_resolution_context = calculation_resolution_context
     };
@@ -132,8 +133,9 @@ ColorResolutionContext ColorResolutionContext::for_layout_node_with_style(Layout
     RefPtr<StyleValue const> current_color_style_value;
     if (auto* dom_node = layout_node.dom_node()) {
         if (auto* element = as_if<DOM::Element>(*dom_node)) {
-            if (auto const* values = element->style_group<ComputedValues::InheritedTextValues>(); values && values->color_style_value)
-                current_color_style_value = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(values->color_style_value.data()));
+            if (auto const* values = element->style_group<ComputedValues::InheritedTextValues>(); values && values->color_style_value.pointer)
+                current_color_style_value = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
+                    static_cast<StyleValueFFI::StyleValueData const*>(values->color_style_value.pointer)));
         }
     }
 

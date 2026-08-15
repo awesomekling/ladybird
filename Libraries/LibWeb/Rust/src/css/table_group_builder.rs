@@ -28,16 +28,22 @@ use crate::css::color_resolution::{
 };
 use crate::css::computed_longhand_table::ComputedLonghandTable;
 use crate::css::computed_value_types::{
-    ComputedGridArea, ComputedGridPlacement, ComputedGridPlacementKind, ComputedGridTrackBreadth,
-    ComputedGridTrackEntry, ComputedGridTrackEntryKind, ComputedGridTrackList, ComputedSize, ComputedSizeKind,
-    ComputedStyleValueHandle, GRID_NO_INDEX, GridValues, RetainedGridAreaList, RetainedGridNameIndexList,
-    RetainedGridTrackEntryList,
+    AnchorValues, AnimationValues, ComputedClipEdge, ComputedColorOrAuto, ComputedCursor, ComputedFilter,
+    ComputedFilterOperation, ComputedGridArea, ComputedGridPlacement, ComputedGridPlacementKind,
+    ComputedGridTrackBreadth, ComputedGridTrackEntry, ComputedGridTrackEntryKind, ComputedGridTrackList,
+    ComputedPositionTryFallback, ComputedResolvedTransform, ComputedScrollbarColor, ComputedShadow, ComputedSize,
+    ComputedSizeKind, ComputedStyleValueHandle, ComputedSvgDash, ComputedSvgPaint, ComputedTextIndent,
+    ComputedTextUnderlineOffset, ComputedTextUnderlinePosition, EffectsValues, GRID_NO_INDEX, GridValues,
+    InheritedSVGValues, InheritedTextValues, InheritedUIValues, RetainedComputedCursorList,
+    RetainedComputedFilterOperationList, RetainedComputedResolvedTransformList, RetainedComputedShadowList,
+    RetainedComputedSvgDashList, RetainedGridAreaList, RetainedGridNameIndexList, RetainedGridTrackEntryList,
+    RetainedPositionAreaList, RetainedPositionTryFallbackList, TransformValues,
 };
 use crate::css::computed_values::{
     FfiGroupValueEntry, GROUP_FIELD_COLOR, GROUP_FIELD_COLOR_OR_KEYWORD, GROUP_FIELD_RESOLVED_F32,
     GROUP_FIELD_RESOLVED_F64, GROUP_FIELD_RESOLVED_U8, registered_field_descriptors, rust_build_alignment_group,
     rust_build_grid_group, rust_build_inherited_box_group, rust_build_inherited_table_group, rust_build_sizing_group,
-    rust_build_style_group, rust_build_surround_group, rust_build_svg_reset_group,
+    rust_build_style_group, rust_build_surround_group, rust_build_svg_reset_group, rust_build_text_reset_group,
 };
 use crate::css::css_enums::keyword;
 use crate::css::css_pixels::CssPixels;
@@ -245,15 +251,9 @@ unsafe fn build_generic_group(
 }
 
 unsafe fn build_surround_group(values: &EffectiveValues, parent_payload: *const c_void) -> *const c_void {
-    let position_anchor_name_leaked_raw = match values.value(property_id::POSITION_ANCHOR) {
-        Some(StyleValueData::CustomIdent { custom_ident }) => {
-            let retained = custom_ident.clone();
-            let raw = retained.raw();
-            // The surround builder assumes the leaked reference.
-            std::mem::forget(retained);
-            raw
-        }
-        _ => 0,
+    let position_anchor = match values.value(property_id::POSITION_ANCHOR) {
+        Some(StyleValueData::CustomIdent { .. }) => values.pointer(property_id::POSITION_ANCHOR),
+        _ => std::ptr::null(),
     };
     // SAFETY: Every pointer names live value data from the table and the
     // caller warrants the parent payload.
@@ -272,7 +272,7 @@ unsafe fn build_surround_group(values: &EffectiveValues, parent_payload: *const 
             values.pointer(property_id::PADDING_RIGHT),
             values.pointer(property_id::PADDING_BOTTOM),
             values.pointer(property_id::PADDING_LEFT),
-            position_anchor_name_leaked_raw,
+            position_anchor,
             parent_payload,
         )
     }
@@ -727,116 +727,6 @@ const TRANSFORM_PARAMETER_LENGTH_PERCENTAGE: u8 = 3;
 const TRANSFORM_PARAMETER_NUMBER: u8 = 4;
 const TRANSFORM_PARAMETER_NUMBER_PERCENTAGE: u8 = 5;
 
-/// One pre-lowered transform function: a baked row-major matrix, or a
-/// translate whose percentage-bearing axes keep their per-axis value slots
-/// for the reference box, mirroring CSS::ResolvedTransform.
-#[repr(C)]
-pub struct FfiResolvedTransformEntry {
-    pub is_translate: bool,
-    /// Row-major FloatMatrix4x4 constructor elements.
-    pub matrix: [f32; 16],
-    pub x_px: f32,
-    pub y_px: f32,
-    pub z_px: f32,
-    /// Retained percentage-bearing axis values, null for plain axes; the
-    /// assembler assumes the references.
-    pub x_percentage: *const c_void,
-    pub y_percentage: *const c_void,
-}
-
-/// The transform group's complex members, pre-lowered for the registered C++
-/// assembler. Every pointer is a retained style value reference the
-/// assembler assumes.
-#[repr(C)]
-pub struct FfiTransformGroupAssembly {
-    /// The transform property's value list, null when the computed transform
-    /// is none.
-    pub transform_list: *const c_void,
-    pub rotate: *const c_void,
-    pub translate: *const c_void,
-    pub scale: *const c_void,
-    /// The paint-ready lowering of translate, rotate, scale, and the
-    /// transform functions, in that order.
-    pub resolved_transforms: *const FfiResolvedTransformEntry,
-    pub resolved_transform_count: usize,
-    /// The transform-origin axis values, null when the computed value is not
-    /// the three-value list form.
-    pub transform_origin_x: *const c_void,
-    pub transform_origin_y: *const c_void,
-    pub transform_origin_z: *const c_void,
-    pub has_perspective: bool,
-    /// Raw CSSPixels.
-    pub perspective_px: i32,
-    /// The perspective-origin position value.
-    pub perspective_origin: *const c_void,
-}
-
-/// One lowered filter operation, mirroring CSS::Filter's plain operations.
-/// The kind codes are the C++ FilterStyleValue::Kind values (blur 0,
-/// drop-shadow 1, hue-rotate 2, color 3) plus 4 for a url() reference.
-#[repr(C)]
-pub struct FfiLoweredFilterOperation {
-    pub kind: u8,
-    /// The Gfx::ColorFilterType code for color operations.
-    pub color_operation: u8,
-    /// Blur radius in px, color-operation amount, or hue-rotate degrees.
-    pub amount: f32,
-    /// Drop-shadow geometry as raw CSSPixels and its resolved color.
-    pub shadow_offset_x: i32,
-    pub shadow_offset_y: i32,
-    pub shadow_radius: i32,
-    pub shadow_color: u32,
-    /// The retained url style value for kind 4; the assembler assumes the
-    /// reference and extracts the fragment.
-    pub url_value: *const c_void,
-}
-
-/// One filter property's lowering: the retained value list (null for none)
-/// and the pre-lowered operations.
-#[repr(C)]
-pub struct FfiLoweredFilter {
-    pub filter_list: *const c_void,
-    pub operations: *const FfiLoweredFilterOperation,
-    pub operation_count: usize,
-}
-
-/// One lowered box-shadow layer, mirroring CSS::ShadowData.
-#[repr(C)]
-pub struct FfiLoweredShadow {
-    /// Raw CSSPixels.
-    pub offset_x: i32,
-    pub offset_y: i32,
-    pub blur_radius: i32,
-    pub spread_distance: i32,
-    pub color: u32,
-    /// The C++ ColorSyntax code: legacy 0, modern 1.
-    pub color_syntax: u8,
-    /// The C++ ShadowPlacement code.
-    pub placement: u8,
-}
-
-/// One clip rect edge: auto, or a length in its original unit (calc resolves
-/// to px).
-#[repr(C)]
-pub struct FfiLoweredClipEdge {
-    pub is_auto: bool,
-    pub value: f64,
-    pub unit: u8,
-}
-
-/// The effects group's complex members, pre-lowered for the registered C++
-/// assembler.
-#[repr(C)]
-pub struct FfiEffectsGroupAssembly {
-    pub filter: FfiLoweredFilter,
-    pub backdrop_filter: FfiLoweredFilter,
-    pub box_shadows: *const FfiLoweredShadow,
-    pub box_shadow_count: usize,
-    pub clip_is_rect: bool,
-    /// Top, right, bottom, left.
-    pub clip_edges: [FfiLoweredClipEdge; 4],
-}
-
 fn angle_unit_index(name: &str) -> usize {
     crate::css::calc::ANGLE_UNIT_NAMES
         .iter()
@@ -1195,22 +1085,22 @@ fn transformation_to_matrix(function: u8, values: &[crate::css::style_value::Ret
     matrix_identity()
 }
 
-fn baked_matrix_entry(matrix: [f32; 16]) -> FfiResolvedTransformEntry {
-    FfiResolvedTransformEntry {
+fn baked_matrix_entry(matrix: [f32; 16]) -> ComputedResolvedTransform {
+    ComputedResolvedTransform {
         is_translate: false,
         matrix,
         x_px: 0.0,
         y_px: 0.0,
         z_px: 0.0,
-        x_percentage: std::ptr::null(),
-        y_percentage: std::ptr::null(),
+        x_percentage: ComputedStyleValueHandle::empty(),
+        y_percentage: ComputedStyleValueHandle::empty(),
     }
 }
 
 /// The TransformationStyleValue::to_resolved_transform port: only the
 /// translate family takes length-percentages, so a percentage-bearing
 /// translate keeps per-axis slots and everything else bakes into a matrix.
-fn lower_transformation(data: &StyleValueData) -> FfiResolvedTransformEntry {
+fn lower_transformation(data: &StyleValueData) -> ComputedResolvedTransform {
     use crate::css::serialize::transform_function as functions;
 
     let StyleValueData::Transformation {
@@ -1230,28 +1120,29 @@ fn lower_transformation(data: &StyleValueData) -> FfiResolvedTransformEntry {
             && parameters[index] == TRANSFORM_PARAMETER_LENGTH_PERCENTAGE
             && value_contains_percentage(values[index].data())
     };
-    let lower_axis = |index: usize| -> (f32, *const c_void) {
+    let lower_axis = |index: usize| -> (f32, ComputedStyleValueHandle) {
         if index >= values.len() {
-            return (0.0, std::ptr::null());
+            return (0.0, ComputedStyleValueHandle::empty());
         }
         let value = &values[index];
         if axis_needs_reference_box(index) {
-            // SAFETY: The axis value is live table data; the assembler
-            // assumes the retained reference.
-            let retained = unsafe { crate::css::style_value::rust_style_value_retain(value.pointer()) };
-            return (0.0, retained.cast());
+            return (0.0, ComputedStyleValueHandle::retained(value.pointer()));
         }
-        (length_to_css_pixels(value.data()).to_float(), std::ptr::null())
+        (
+            length_to_css_pixels(value.data()).to_float(),
+            ComputedStyleValueHandle::empty(),
+        )
     };
-    let translate_entry = |x: (f32, *const c_void), y: (f32, *const c_void), z: f32| FfiResolvedTransformEntry {
-        is_translate: true,
-        matrix: matrix_identity(),
-        x_px: x.0,
-        y_px: y.0,
-        z_px: z,
-        x_percentage: x.1,
-        y_percentage: y.1,
-    };
+    let translate_entry =
+        |x: (f32, ComputedStyleValueHandle), y: (f32, ComputedStyleValueHandle), z: f32| ComputedResolvedTransform {
+            is_translate: true,
+            matrix: matrix_identity(),
+            x_px: x.0,
+            y_px: y.0,
+            z_px: z,
+            x_percentage: x.1,
+            y_percentage: y.1,
+        };
 
     match function {
         functions::TRANSLATE => {
@@ -1268,11 +1159,11 @@ fn lower_transformation(data: &StyleValueData) -> FfiResolvedTransformEntry {
         }
         functions::TRANSLATE_X => {
             if values.len() == 1 && axis_needs_reference_box(0) {
-                return translate_entry(lower_axis(0), (0.0, std::ptr::null()), 0.0);
+                return translate_entry(lower_axis(0), (0.0, ComputedStyleValueHandle::empty()), 0.0);
             }
         }
         functions::TRANSLATE_Y if values.len() == 1 && axis_needs_reference_box(0) => {
-            return translate_entry((0.0, std::ptr::null()), lower_axis(0), 0.0);
+            return translate_entry((0.0, ComputedStyleValueHandle::empty()), lower_axis(0), 0.0);
         }
         _ => {}
     }
@@ -1280,9 +1171,8 @@ fn lower_transformation(data: &StyleValueData) -> FfiResolvedTransformEntry {
     baked_matrix_entry(transformation_to_matrix(function, values))
 }
 
-/// Builds the transform group: matrices and resolved lengths lower natively,
-/// and the wrapper-backed members travel to the registered C++ assembler as
-/// retained handles.
+/// Builds the complete transform payload in Rust, including paint-ready
+/// matrices and retained computed-value handles.
 unsafe fn build_transform_group(
     values: &EffectiveValues,
     input: &ColorResolutionInput,
@@ -1294,22 +1184,23 @@ unsafe fn build_transform_group(
         return std::ptr::null();
     };
 
-    let retain = |pointer: *const c_void| -> *const c_void {
-        // SAFETY: The pointer names live table data; the assembler assumes
-        // the retained reference.
-        unsafe { crate::css::style_value::rust_style_value_retain(pointer.cast()) }.cast()
+    let retained = |property: u16| -> ComputedStyleValueHandle {
+        match values.value(property) {
+            Some(_) => ComputedStyleValueHandle::retained(values.pointer(property).cast()),
+            None => ComputedStyleValueHandle::empty(),
+        }
     };
 
-    let mut resolved: Vec<FfiResolvedTransformEntry> = Vec::new();
+    let mut resolved: Vec<ComputedResolvedTransform> = Vec::new();
     // Pre-lower in the order the transformation matrix accumulates them:
     // translate, rotate, scale, then the transform property's functions.
-    let mut individual = |property: u16| -> *const c_void {
+    let mut individual = |property: u16| -> ComputedStyleValueHandle {
         match values.value(property) {
             Some(data @ StyleValueData::Transformation { .. }) => {
                 resolved.push(lower_transformation(data));
-                retain(values.pointer(property))
+                retained(property)
             }
-            _ => std::ptr::null(),
+            _ => ComputedStyleValueHandle::empty(),
         }
     };
     let translate = individual(property_id::TRANSLATE);
@@ -1321,22 +1212,35 @@ unsafe fn build_transform_group(
             for value in list.as_slice() {
                 resolved.push(lower_transformation(value.data()));
             }
-            retain(values.pointer(property_id::TRANSFORM))
+            retained(property_id::TRANSFORM)
         }
-        _ => std::ptr::null(),
+        _ => ComputedStyleValueHandle::empty(),
     };
 
+    let origin_axis = |axis: &crate::css::style_value::RetainedStyleValueData| match axis.data() {
+        StyleValueData::Keyword { keyword: code } if *code == keyword::LEFT || *code == keyword::TOP => {
+            ComputedStyleValueHandle::percentage(0.0)
+        }
+        StyleValueData::Keyword { keyword: code } if *code == keyword::CENTER => {
+            ComputedStyleValueHandle::percentage(50.0)
+        }
+        StyleValueData::Keyword { keyword: code } if *code == keyword::RIGHT || *code == keyword::BOTTOM => {
+            ComputedStyleValueHandle::percentage(100.0)
+        }
+        StyleValueData::Keyword { .. } => unreachable!("computed transform-origin has a position keyword"),
+        _ => ComputedStyleValueHandle::retained(axis.pointer()),
+    };
     let (transform_origin_x, transform_origin_y, transform_origin_z) = match values.value(property_id::TRANSFORM_ORIGIN)
     {
         Some(StyleValueData::ValueList { values: list, .. }) if list.as_slice().len() == 3 => {
             let axes = list.as_slice();
             (
-                retain(axes[0].pointer().cast()),
-                retain(axes[1].pointer().cast()),
-                retain(axes[2].pointer().cast()),
+                origin_axis(&axes[0]),
+                origin_axis(&axes[1]),
+                ComputedStyleValueHandle::retained(axes[2].pointer()),
             )
         }
-        _ => (std::ptr::null(), std::ptr::null(), std::ptr::null()),
+        _ => unreachable!("computed transform-origin is a three-value list"),
     };
 
     let (has_perspective, perspective_px) = match values.value(property_id::PERSPECTIVE) {
@@ -1345,27 +1249,39 @@ unsafe fn build_transform_group(
         None => (false, 0),
     };
 
-    let assembly = FfiTransformGroupAssembly {
-        transform_list,
-        rotate,
-        translate,
-        scale,
-        resolved_transforms: resolved.as_ptr(),
-        resolved_transform_count: resolved.len(),
-        transform_origin_x,
-        transform_origin_y,
-        transform_origin_z,
-        has_perspective,
-        perspective_px,
-        perspective_origin: retain(values.pointer(property_id::PERSPECTIVE_ORIGIN)),
+    let Some(StyleValueData::Position { edge_x, edge_y }) = values.value(property_id::PERSPECTIVE_ORIGIN) else {
+        unreachable!("computed perspective-origin is a position value");
     };
-    // SAFETY: The entries and assembly hold live or retained value data, and
-    // the caller warrants the parent payload.
+    let position_offset = |edge: &crate::css::style_value::RetainedStyleValueData| {
+        let StyleValueData::Edge { offset, .. } = edge.data() else {
+            unreachable!("computed position component is an edge value");
+        };
+        ComputedStyleValueHandle::retained(offset.pointer())
+    };
+    let perspective_origin_x = position_offset(edge_x);
+    let perspective_origin_y = position_offset(edge_y);
+
+    // SAFETY: The closure casts the scratch payload to its registered
+    // Rust-native type and the caller warrants the parent payload.
     unsafe {
-        crate::css::computed_values::build_group_payload_with_assembler(
+        crate::css::computed_values::build_group_payload_with_rust_fill(
             group_index::TRANSFORM,
             &entries,
-            (&raw const assembly).cast(),
+            |payload| {
+                let payload = &mut *payload.cast::<TransformValues>();
+                payload.transformations = transform_list;
+                payload.resolved_transforms = RetainedComputedResolvedTransformList::from_vec(resolved);
+                payload.transform_origin_x = transform_origin_x;
+                payload.transform_origin_y = transform_origin_y;
+                payload.transform_origin_z = transform_origin_z;
+                payload.rotate = rotate;
+                payload.translate = translate;
+                payload.scale = scale;
+                payload.has_perspective = has_perspective;
+                payload.perspective_px = perspective_px;
+                payload.perspective_origin_x = perspective_origin_x;
+                payload.perspective_origin_y = perspective_origin_y;
+            },
             parent_payload,
         )
     }
@@ -1414,7 +1330,7 @@ fn lower_filter_operations(
     values: &EffectiveValues,
     property: u16,
     input: &ColorResolutionInput,
-) -> (Vec<FfiLoweredFilterOperation>, *const c_void) {
+) -> (Vec<ComputedFilterOperation>, ComputedStyleValueHandle) {
     const FILTER_KIND_BLUR: u8 = 0;
     const FILTER_KIND_DROP_SHADOW: u8 = 1;
     const FILTER_KIND_HUE_ROTATE: u8 = 2;
@@ -1429,7 +1345,7 @@ fn lower_filter_operations(
         ..
     }) = values.value(property)
     else {
-        return (Vec::new(), std::ptr::null());
+        return (Vec::new(), ComputedStyleValueHandle::empty());
     };
     let list = list.as_slice();
     // The C++ is_filter_style_value_list check: a non-empty space-separated
@@ -1440,10 +1356,10 @@ fn lower_filter_operations(
             .iter()
             .all(|value| matches!(value.data(), StyleValueData::Filter { .. } | StyleValueData::Url { .. }))
     {
-        return (Vec::new(), std::ptr::null());
+        return (Vec::new(), ComputedStyleValueHandle::empty());
     }
 
-    let empty_operation = || FfiLoweredFilterOperation {
+    let empty_operation = || ComputedFilterOperation {
         kind: 0,
         color_operation: 0,
         amount: 0.0,
@@ -1451,18 +1367,15 @@ fn lower_filter_operations(
         shadow_offset_y: 0,
         shadow_radius: 0,
         shadow_color: 0,
-        url_value: std::ptr::null(),
+        url_value: ComputedStyleValueHandle::empty(),
     };
     let mut operations = Vec::with_capacity(list.len());
     for value in list {
         match value.data() {
             StyleValueData::Url { .. } => {
-                // SAFETY: The list element is live table data; the assembler
-                // assumes the retained reference.
-                let retained = unsafe { crate::css::style_value::rust_style_value_retain(value.pointer()) };
-                operations.push(FfiLoweredFilterOperation {
+                operations.push(ComputedFilterOperation {
                     kind: FILTER_KIND_URL,
-                    url_value: retained.cast(),
+                    url_value: ComputedStyleValueHandle::retained(value.pointer()),
                     ..empty_operation()
                 });
             }
@@ -1472,7 +1385,7 @@ fn lower_filter_operations(
                 value: filter_value,
             } => match *kind {
                 FILTER_KIND_BLUR => {
-                    operations.push(FfiLoweredFilterOperation {
+                    operations.push(ComputedFilterOperation {
                         kind: FILTER_KIND_BLUR,
                         amount: length_to_px_unrounded(filter_value.data()) as f32,
                         ..empty_operation()
@@ -1499,7 +1412,7 @@ fn lower_filter_operations(
                         .optional_data()
                         .and_then(|color| to_color(color, input))
                         .unwrap_or(fallback);
-                    operations.push(FfiLoweredFilterOperation {
+                    operations.push(ComputedFilterOperation {
                         kind: FILTER_KIND_DROP_SHADOW,
                         shadow_offset_x: length_to_css_pixels(offset_x.data()).raw_value(),
                         shadow_offset_y: length_to_css_pixels(offset_y.data()).raw_value(),
@@ -1511,14 +1424,14 @@ fn lower_filter_operations(
                     });
                 }
                 FILTER_KIND_HUE_ROTATE => {
-                    operations.push(FfiLoweredFilterOperation {
+                    operations.push(ComputedFilterOperation {
                         kind: FILTER_KIND_HUE_ROTATE,
                         amount: angle_degrees(filter_value.data()) as f32,
                         ..empty_operation()
                     });
                 }
                 FILTER_KIND_COLOR => {
-                    operations.push(FfiLoweredFilterOperation {
+                    operations.push(ComputedFilterOperation {
                         kind: FILTER_KIND_COLOR,
                         color_operation: *color_operation,
                         amount: transform_number(filter_value.data()) as f32,
@@ -1530,13 +1443,13 @@ fn lower_filter_operations(
             _ => unreachable!("the filter list was checked above"),
         }
     }
-    // SAFETY: The list value is live table data; the assembler assumes the
-    // retained reference.
-    let retained_list = unsafe { crate::css::style_value::rust_style_value_retain(values.pointer(property).cast()) };
-    (operations, retained_list.cast())
+    (
+        operations,
+        ComputedStyleValueHandle::retained(values.pointer(property).cast()),
+    )
 }
 
-fn lower_shadow_layers(values: &EffectiveValues, property: u16, input: &ColorResolutionInput) -> Vec<FfiLoweredShadow> {
+fn lower_shadow_layers(values: &EffectiveValues, property: u16, input: &ColorResolutionInput) -> Vec<ComputedShadow> {
     let Some(StyleValueData::ValueList { values: list, .. }) = values.value(property) else {
         // A computed shadow list is the none keyword or a value list.
         return Vec::new();
@@ -1561,7 +1474,7 @@ fn lower_shadow_layers(values: &EffectiveValues, property: u16, input: &ColorRes
             Some(color) => to_color(color, input).expect("a computed shadow color resolves"),
             None => input.current_color.expect("the build input carries the element color"),
         };
-        shadows.push(FfiLoweredShadow {
+        shadows.push(ComputedShadow {
             offset_x: length_to_css_pixels(offset_x.data()).raw_value(),
             offset_y: length_to_css_pixels(offset_y.data()).raw_value(),
             blur_radius: blur_radius
@@ -1572,25 +1485,25 @@ fn lower_shadow_layers(values: &EffectiveValues, property: u16, input: &ColorRes
                 .map_or(0, |spread| length_to_css_pixels(spread).raw_value()),
             color: packed_color(resolved_color),
             color_syntax: shadow_color_syntax(color.optional_data()),
-            placement: *placement,
+            placement: u32::from(*placement),
         });
     }
     shadows
 }
 
-fn lower_clip_edge(data: &StyleValueData) -> FfiLoweredClipEdge {
+fn lower_clip_edge(data: &StyleValueData) -> ComputedClipEdge {
     match data {
-        StyleValueData::Keyword { keyword: code } if *code == keyword::AUTO => FfiLoweredClipEdge {
+        StyleValueData::Keyword { keyword: code } if *code == keyword::AUTO => ComputedClipEdge {
             is_auto: true,
             value: 0.0,
             unit: crate::css::style_compute::px_length_unit(),
         },
-        StyleValueData::Length { value, unit } => FfiLoweredClipEdge {
+        StyleValueData::Length { value, unit } => ComputedClipEdge {
             is_auto: false,
             value: *value,
             unit: *unit,
         },
-        StyleValueData::Calculated { .. } => FfiLoweredClipEdge {
+        StyleValueData::Calculated { .. } => ComputedClipEdge {
             is_auto: false,
             value: crate::css::calc::resolve_calculated_length_without_context(data, 0.0)
                 .expect("a computed clip edge resolves without context"),
@@ -1600,9 +1513,7 @@ fn lower_clip_edge(data: &StyleValueData) -> FfiLoweredClipEdge {
     }
 }
 
-/// Builds the effects group: the filter operations, shadows and clip rect
-/// lower natively, and the wrapper-backed members travel to the registered
-/// C++ assembler as retained handles.
+/// Builds the complete effects payload in Rust.
 unsafe fn build_effects_group(
     values: &EffectiveValues,
     input: &ColorResolutionInput,
@@ -1618,7 +1529,7 @@ unsafe fn build_effects_group(
     let (backdrop_operations, backdrop_list) = lower_filter_operations(values, property_id::BACKDROP_FILTER, input);
     let shadows = lower_shadow_layers(values, property_id::BOX_SHADOW, input);
 
-    let auto_edge = || FfiLoweredClipEdge {
+    let auto_edge = || ComputedClipEdge {
         is_auto: true,
         value: 0.0,
         unit: crate::css::style_compute::px_length_unit(),
@@ -1641,29 +1552,26 @@ unsafe fn build_effects_group(
         _ => (false, [auto_edge(), auto_edge(), auto_edge(), auto_edge()]),
     };
 
-    let assembly = FfiEffectsGroupAssembly {
-        filter: FfiLoweredFilter {
-            filter_list,
-            operations: filter_operations.as_ptr(),
-            operation_count: filter_operations.len(),
-        },
-        backdrop_filter: FfiLoweredFilter {
-            filter_list: backdrop_list,
-            operations: backdrop_operations.as_ptr(),
-            operation_count: backdrop_operations.len(),
-        },
-        box_shadows: shadows.as_ptr(),
-        box_shadow_count: shadows.len(),
-        clip_is_rect,
-        clip_edges,
+    let filter = ComputedFilter {
+        filter_list,
+        operations: RetainedComputedFilterOperationList::from_vec(filter_operations),
     };
-    // SAFETY: The entries and assembly hold live or retained value data, and
-    // the caller warrants the parent payload.
+    let backdrop_filter = ComputedFilter {
+        filter_list: backdrop_list,
+        operations: RetainedComputedFilterOperationList::from_vec(backdrop_operations),
+    };
     unsafe {
-        crate::css::computed_values::build_group_payload_with_assembler(
+        crate::css::computed_values::build_group_payload_with_rust_fill(
             group_index::EFFECTS,
             &entries,
-            (&raw const assembly).cast(),
+            |payload| {
+                let payload = &mut *payload.cast::<EffectsValues>();
+                payload.filter = filter;
+                payload.backdrop_filter = backdrop_filter;
+                payload.box_shadows = RetainedComputedShadowList::from_vec(shadows);
+                payload.clip_is_rect = clip_is_rect;
+                payload.clip_edges = clip_edges;
+            },
             parent_payload,
         )
     }
@@ -2345,105 +2253,50 @@ unsafe fn build_border_group(
 
 // --- SVG, list and content lowering -----------------------------------------
 
-/// One lowered SVG paint (fill or stroke).
-#[repr(C)]
-pub struct FfiSvgPaintAssembly {
-    /// 0 none, 1 lowered, 2 whole-value C++ resolution arm.
-    pub kind: u8,
-    pub is_url: bool,
-    /// The retained url value for a url paint.
-    pub url: *const c_void,
-    pub has_color: bool,
-    pub color: u32,
-    pub color_is_currentcolor: bool,
-    /// The whole property value, retained, for kind 2.
-    pub value: *const c_void,
-}
-
 const SVG_PAINT_NONE: u8 = 0;
-const SVG_PAINT_LOWERED: u8 = 1;
-const SVG_PAINT_CPP: u8 = 2;
+const SVG_PAINT_COLOR: u8 = 1;
+const SVG_PAINT_URL: u8 = 2;
 
-fn lower_svg_paint(values: &EffectiveValues, property: u16, input: &ColorResolutionInput) -> FfiSvgPaintAssembly {
-    let mut paint = FfiSvgPaintAssembly {
-        kind: SVG_PAINT_CPP,
-        is_url: false,
-        url: std::ptr::null(),
+fn lower_svg_paint(values: &EffectiveValues, property: u16, input: &ColorResolutionInput) -> ComputedSvgPaint {
+    let mut paint = ComputedSvgPaint {
+        kind: SVG_PAINT_NONE,
+        url: ComputedStyleValueHandle::empty(),
         has_color: false,
         color: 0,
         color_is_currentcolor: false,
-        value: std::ptr::null(),
     };
     let data = values.value(property).expect("the table holds the paint property");
     match data {
-        StyleValueData::Keyword { keyword: code } if *code == keyword::NONE => {
-            paint.kind = SVG_PAINT_NONE;
-            return paint;
-        }
+        StyleValueData::Keyword { keyword: code } if *code == keyword::NONE => paint,
         StyleValueData::ValueList { values: list, .. } if list.as_slice().len() == 2 => {
             let components = list.as_slice();
-            paint.is_url = true;
+            paint.kind = SVG_PAINT_URL;
+            paint.url = ComputedStyleValueHandle::retained(components[0].pointer());
             match components[1].data() {
-                StyleValueData::EmptyOptional => {
-                    paint.kind = SVG_PAINT_LOWERED;
-                    paint.url = retain_for_assembly(components[0].pointer().cast());
-                    return paint;
-                }
+                StyleValueData::EmptyOptional => paint,
                 fallback => {
-                    if let Some(color) = to_color(fallback, input) {
-                        paint.kind = SVG_PAINT_LOWERED;
-                        paint.url = retain_for_assembly(components[0].pointer().cast());
-                        paint.has_color = true;
-                        paint.color = packed_color(color);
-                        paint.color_is_currentcolor = matches!(fallback, StyleValueData::Keyword { keyword: code } if *code == keyword::CURRENTCOLOR);
-                        return paint;
-                    }
+                    let color = to_color(fallback, input).expect("a computed SVG paint fallback is a color");
+                    paint.has_color = true;
+                    paint.color = packed_color(color);
+                    paint.color_is_currentcolor =
+                        matches!(fallback, StyleValueData::Keyword { keyword: code } if *code == keyword::CURRENTCOLOR);
+                    paint
                 }
             }
         }
         _ => {
-            if let Some(color) = to_color(data, input) {
-                paint.kind = SVG_PAINT_LOWERED;
-                paint.has_color = true;
-                paint.color = packed_color(color);
-                paint.color_is_currentcolor =
-                    matches!(data, StyleValueData::Keyword { keyword: code } if *code == keyword::CURRENTCOLOR);
-                return paint;
-            }
+            let color = to_color(data, input).expect("a computed SVG paint is none, a color, or a URL paint");
+            paint.kind = SVG_PAINT_COLOR;
+            paint.has_color = true;
+            paint.color = packed_color(color);
+            paint.color_is_currentcolor =
+                matches!(data, StyleValueData::Keyword { keyword: code } if *code == keyword::CURRENTCOLOR);
+            paint
         }
     }
-    paint.value = retain_for_assembly(values.pointer(property));
-    paint
 }
 
-/// One lowered stroke-dasharray item: a plain number, or a retained
-/// length-percentage value.
-#[repr(C)]
-pub struct FfiDashItemAssembly {
-    pub is_number: bool,
-    pub number: f64,
-    pub value: *const c_void,
-}
-
-/// A lowered length-percentage-or-number slot: SVG stroke widths and dash
-/// offsets treat plain numbers as user-unit pixels.
-#[repr(C)]
-pub struct FfiLengthPercentageOrNumberAssembly {
-    pub is_number: bool,
-    pub number: f64,
-    pub value: *const c_void,
-}
-
-/// Whether a slot holds a plain pixel length, exactly the form the
-/// CSS_PIXELS descriptor pokes.
-fn is_px_length(values: &EffectiveValues, property: u16) -> bool {
-    matches!(
-        values.value(property),
-        Some(StyleValueData::Length { unit, .. }) if *unit == crate::css::style_compute::px_length_unit()
-    )
-}
-
-fn lower_length_percentage_or_number(values: &EffectiveValues, property: u16) -> FfiLengthPercentageOrNumberAssembly {
+fn lower_svg_length_percentage_or_number(values: &EffectiveValues, property: u16) -> ComputedStyleValueHandle {
     let data = values.value(property).expect("the table holds the property");
     let number = match data {
         StyleValueData::Number { value } => Some(*value),
@@ -2451,59 +2304,20 @@ fn lower_length_percentage_or_number(values: &EffectiveValues, property: u16) ->
         _ => None,
     };
     match number {
-        Some(number) => FfiLengthPercentageOrNumberAssembly {
-            is_number: true,
-            number,
-            value: std::ptr::null(),
-        },
-        None => FfiLengthPercentageOrNumberAssembly {
-            is_number: false,
-            number: 0.0,
-            value: retain_for_assembly(values.pointer(property)),
-        },
+        // FIXME: Converting to pixels isn't really correct - values should be in "user units"
+        //        https://svgwg.org/svg2-draft/coords.html#TermUserUnits
+        Some(number) => ComputedStyleValueHandle::length(number),
+        None => ComputedStyleValueHandle::retained(values.pointer(property).cast()),
     }
 }
 
-/// The inherited SVG group's complex members, pre-lowered for the registered
-/// C++ assembler.
-#[repr(C)]
-pub struct FfiInheritedSvgGroupAssembly {
-    pub cpp_context: *const c_void,
-    pub fill: FfiSvgPaintAssembly,
-    pub stroke: FfiSvgPaintAssembly,
-    pub dashes: *const FfiDashItemAssembly,
-    pub dash_count: usize,
-    pub stroke_dashoffset: FfiLengthPercentageOrNumberAssembly,
-    pub stroke_width: FfiLengthPercentageOrNumberAssembly,
-    /// C++ PaintOrder codes, first to last.
-    pub paint_order: [u8; 3],
-    pub paint_order_serialization_length: u8,
-    pub paint_order_is_normal: bool,
-    pub has_dominant_baseline: bool,
-    pub dominant_baseline: u8,
-}
-
-/// Builds the inherited SVG group: the generic descriptor path first, then
-/// the paint, dash and paint-order lowering through the registered assembler.
+/// Builds the complete inherited SVG payload in Rust.
 unsafe fn build_inherited_svg_group(
     values: &EffectiveValues,
     input: &ColorResolutionInput,
     used_color_scheme: u8,
-    cpp_assembler_context: *const c_void,
     parent_payload: *const c_void,
 ) -> *const c_void {
-    let generic = unsafe {
-        build_generic_group(
-            group_index::INHERITED_SVG,
-            values,
-            input,
-            used_color_scheme,
-            parent_payload,
-        )
-    };
-    if !generic.is_null() {
-        return generic;
-    }
     let Some(entries) = (unsafe { gather_group_entries(group_index::INHERITED_SVG, values, input, used_color_scheme) })
     else {
         return std::ptr::null();
@@ -2511,7 +2325,7 @@ unsafe fn build_inherited_svg_group(
 
     // stroke-dasharray: none is the empty list; everything else is a list of
     // lengths, percentages, numbers and calculations.
-    let mut dashes: Vec<FfiDashItemAssembly> = Vec::new();
+    let mut dashes: Vec<ComputedSvgDash> = Vec::new();
     if let Some(StyleValueData::ValueList { values: list, .. }) = values.value(property_id::STROKE_DASHARRAY) {
         for item in list.as_slice() {
             let data = item.data();
@@ -2523,15 +2337,15 @@ unsafe fn build_inherited_svg_group(
                 _ => None,
             };
             dashes.push(match number {
-                Some(number) => FfiDashItemAssembly {
+                Some(number) => ComputedSvgDash {
                     is_number: true,
                     number,
-                    value: std::ptr::null(),
+                    value: ComputedStyleValueHandle::empty(),
                 },
-                None => FfiDashItemAssembly {
+                None => ComputedSvgDash {
                     is_number: false,
                     number: 0.0,
-                    value: retain_for_assembly(item.pointer().cast()),
+                    value: ComputedStyleValueHandle::retained(item.pointer()),
                 },
             });
         }
@@ -2582,27 +2396,24 @@ unsafe fn build_inherited_svg_group(
         .and_then(keyword_of)
         .and_then(crate::css::css_enums::keyword_to_baseline_metric);
 
-    let assembly = FfiInheritedSvgGroupAssembly {
-        cpp_context: cpp_assembler_context,
-        fill: lower_svg_paint(values, property_id::FILL, input),
-        stroke: lower_svg_paint(values, property_id::STROKE, input),
-        dashes: dashes.as_ptr(),
-        dash_count: dashes.len(),
-        stroke_dashoffset: lower_length_percentage_or_number(values, property_id::STROKE_DASHOFFSET),
-        stroke_width: lower_length_percentage_or_number(values, property_id::STROKE_WIDTH),
-        paint_order: order,
-        paint_order_serialization_length: serialization_length,
-        paint_order_is_normal: is_normal,
-        has_dominant_baseline: dominant_baseline.is_some(),
-        dominant_baseline: dominant_baseline.unwrap_or(0),
-    };
-    // SAFETY: The entries and assembly hold live or retained value data, and
-    // the caller warrants the parent payload.
     unsafe {
-        crate::css::computed_values::build_group_payload_with_assembler(
+        crate::css::computed_values::build_group_payload_with_rust_fill(
             group_index::INHERITED_SVG,
             &entries,
-            (&raw const assembly).cast(),
+            |payload| {
+                let payload = &mut *payload.cast::<InheritedSVGValues>();
+                payload.fill = lower_svg_paint(values, property_id::FILL, input);
+                payload.stroke = lower_svg_paint(values, property_id::STROKE, input);
+                payload.stroke_dasharray = RetainedComputedSvgDashList::from_vec(dashes);
+                payload.stroke_dashoffset =
+                    lower_svg_length_percentage_or_number(values, property_id::STROKE_DASHOFFSET);
+                payload.stroke_width = lower_svg_length_percentage_or_number(values, property_id::STROKE_WIDTH);
+                payload.paint_order = order;
+                payload.paint_order_serialization_length = serialization_length;
+                payload.paint_order_is_normal = is_normal;
+                payload.has_dominant_baseline = dominant_baseline.is_some();
+                payload.dominant_baseline = dominant_baseline.unwrap_or(0);
+            },
             parent_payload,
         )
     }
@@ -2819,87 +2630,45 @@ unsafe fn build_content_group(
 
 // --- Inherited UI, inherited text and misc lowering -------------------------
 
-/// One lowered cursor list item: a predefined cursor code, or a retained
-/// cursor() value whose image wrapper the assembler adopts.
-#[repr(C)]
-pub struct FfiCursorItemAssembly {
-    pub is_cursor_value: bool,
-    pub cursor: *const c_void,
-    pub predefined: u8,
-}
-
-/// The inherited UI group's complex members, pre-lowered for the registered
-/// C++ assembler.
-#[repr(C)]
-pub struct FfiInheritedUiGroupAssembly {
-    pub cpp_context: *const c_void,
-    pub caret_is_auto: bool,
-    pub caret_resolved: bool,
-    pub accent_is_auto: bool,
-    pub accent_resolved: bool,
-    pub cursors: *const FfiCursorItemAssembly,
-    pub cursor_count: usize,
-    /// 0 auto, 1 lowered colors, 2 C++ resolution arm.
-    pub scrollbar_color_kind: u8,
-    pub scrollbar_thumb_color: u32,
-    pub scrollbar_track_color: u32,
-    /// Borrowed fly-string raws of the color-scheme names, alive across the
-    /// build.
-    pub color_schemes: *const usize,
-    pub color_scheme_count: usize,
-    pub color_scheme_only: bool,
-}
-
-/// Builds the inherited UI group: the generic descriptor path first, then
-/// the cursor, caret, accent and scrollbar-color lowering through the
-/// registered assembler.
+/// Builds the complete inherited UI payload in Rust.
 unsafe fn build_inherited_ui_group(
     values: &EffectiveValues,
     input: &ColorResolutionInput,
     used_color_scheme: u8,
-    cpp_assembler_context: *const c_void,
     parent_payload: *const c_void,
 ) -> *const c_void {
-    let generic = unsafe {
-        build_generic_group(
-            group_index::INHERITED_UI,
-            values,
-            input,
-            used_color_scheme,
-            parent_payload,
-        )
-    };
-    if !generic.is_null() {
-        return generic;
-    }
     let Some(entries) = (unsafe { gather_group_entries(group_index::INHERITED_UI, values, input, used_color_scheme) })
     else {
         return std::ptr::null();
     };
 
-    let color_or_auto = |property: u16| -> (bool, bool) {
+    let color_or_auto = |property: u16| -> ComputedColorOrAuto {
         let data = values.value(property).expect("the table holds the color property");
         let is_auto = matches!(data, StyleValueData::Keyword { keyword: code } if *code == keyword::AUTO);
-        let resolved = resolved_color(input, property, data).is_some();
-        (is_auto, resolved)
+        let used_color = resolved_color(input, property, data).expect("computed UI colors are resolvable in Rust");
+        ComputedColorOrAuto {
+            is_auto,
+            computed_color: used_color,
+            used_color,
+        }
     };
-    let (caret_is_auto, caret_resolved) = color_or_auto(property_id::CARET_COLOR);
-    let (accent_is_auto, accent_resolved) = color_or_auto(property_id::ACCENT_COLOR);
+    let caret_color = color_or_auto(property_id::CARET_COLOR);
+    let accent_color = color_or_auto(property_id::ACCENT_COLOR);
 
     // The cursor list, with the extractor's rules: unmappable keywords are
     // skipped, and an empty result is the predefined auto cursor.
-    let mut cursors: Vec<FfiCursorItemAssembly> = Vec::new();
+    let mut cursors: Vec<ComputedCursor> = Vec::new();
     let mut push_cursor = |data: &StyleValueData, pointer: *const c_void| match data {
-        StyleValueData::Cursor { .. } => cursors.push(FfiCursorItemAssembly {
+        StyleValueData::Cursor { .. } => cursors.push(ComputedCursor {
             is_cursor_value: true,
-            cursor: retain_for_assembly(pointer),
+            cursor: ComputedStyleValueHandle::retained(pointer.cast()),
             predefined: 0,
         }),
         _ => {
             if let Some(predefined) = keyword_of(data).and_then(crate::css::css_enums::keyword_to_cursor_predefined) {
-                cursors.push(FfiCursorItemAssembly {
+                cursors.push(ComputedCursor {
                     is_cursor_value: false,
-                    cursor: std::ptr::null(),
+                    cursor: ComputedStyleValueHandle::empty(),
                     predefined,
                 });
             }
@@ -2915,117 +2684,87 @@ unsafe fn build_inherited_ui_group(
         None => {}
     }
     if cursors.is_empty() {
-        cursors.push(FfiCursorItemAssembly {
+        cursors.push(ComputedCursor {
             is_cursor_value: false,
-            cursor: std::ptr::null(),
+            cursor: ComputedStyleValueHandle::empty(),
             predefined: crate::css::css_enums::cursor_predefined::AUTO,
         });
     }
 
-    const SCROLLBAR_COLOR_AUTO: u8 = 0;
-    const SCROLLBAR_COLOR_LOWERED: u8 = 1;
-    const SCROLLBAR_COLOR_CPP: u8 = 2;
-    let mut scrollbar_color_kind = SCROLLBAR_COLOR_AUTO;
-    let mut scrollbar_thumb_color = 0u32;
-    let mut scrollbar_track_color = 0u32;
-    if let Some(StyleValueData::ScrollbarColor {
+    let scrollbar_color = if let Some(StyleValueData::ScrollbarColor {
         thumb_color,
         track_color,
     }) = values.value(property_id::SCROLLBAR_COLOR)
     {
-        match (to_color(thumb_color.data(), input), to_color(track_color.data(), input)) {
-            (Some(thumb), Some(track)) => {
-                scrollbar_color_kind = SCROLLBAR_COLOR_LOWERED;
-                scrollbar_thumb_color = packed_color(thumb);
-                scrollbar_track_color = packed_color(track);
-            }
-            _ => scrollbar_color_kind = SCROLLBAR_COLOR_CPP,
+        ComputedScrollbarColor {
+            thumb_color: packed_color(
+                to_color(thumb_color.data(), input).expect("computed scrollbar colors are resolvable in Rust"),
+            ),
+            track_color: packed_color(
+                to_color(track_color.data(), input).expect("computed scrollbar colors are resolvable in Rust"),
+            ),
+            is_auto: false,
         }
-    }
+    } else {
+        ComputedScrollbarColor {
+            thumb_color: 0,
+            track_color: 0,
+            is_auto: true,
+        }
+    };
 
     let Some(StyleValueData::ColorScheme { schemes, only, .. }) = values.value(property_id::COLOR_SCHEME) else {
         unreachable!("a computed color-scheme is a color-scheme value");
     };
-    let scheme_raws: Vec<usize> = schemes.as_slice().iter().map(|scheme| scheme.raw()).collect();
+    let color_schemes = RetainedUtf16FlyStringList::from_retained_strings(schemes.as_slice().to_vec());
 
-    let assembly = FfiInheritedUiGroupAssembly {
-        cpp_context: cpp_assembler_context,
-        caret_is_auto,
-        caret_resolved,
-        accent_is_auto,
-        accent_resolved,
-        cursors: cursors.as_ptr(),
-        cursor_count: cursors.len(),
-        scrollbar_color_kind,
-        scrollbar_thumb_color,
-        scrollbar_track_color,
-        color_schemes: scheme_raws.as_ptr(),
-        color_scheme_count: scheme_raws.len(),
-        color_scheme_only: *only,
-    };
-    // SAFETY: The entries and assembly hold live or retained value data, and
-    // the caller warrants the parent payload.
     unsafe {
-        crate::css::computed_values::build_group_payload_with_assembler(
+        crate::css::computed_values::build_group_payload_with_rust_fill(
             group_index::INHERITED_UI,
             &entries,
-            (&raw const assembly).cast(),
+            |payload| {
+                let payload = &mut *payload.cast::<InheritedUIValues>();
+                payload.caret_color = caret_color;
+                payload.accent_color = accent_color;
+                payload.cursor = RetainedComputedCursorList::from_vec(cursors);
+                payload.scrollbar_color = scrollbar_color;
+                payload.color_schemes = color_schemes;
+                payload.color_scheme_only = *only;
+            },
             parent_payload,
         )
     }
 }
 
-/// The inherited text group's complex members, pre-lowered for the
-/// registered C++ assembler.
-#[repr(C)]
-pub struct FfiInheritedTextGroupAssembly {
-    pub cpp_context: *const c_void,
-    /// Whether the core resolved (and poked) -webkit-text-fill-color; the
-    /// assembler's C++ arm resolves it otherwise.
-    pub webkit_text_fill_color_resolved: bool,
-    /// Whether the core poked the pixel spacings; the assembler's C++ arm
-    /// resolves the normal keyword and font-relative forms otherwise.
-    pub word_spacing_resolved: bool,
-    pub letter_spacing_resolved: bool,
-    pub text_shadows: *const FfiLoweredShadow,
-    pub text_shadow_count: usize,
-    pub underline_position_horizontal: u8,
-    pub underline_position_vertical: u8,
-    pub underline_offset_is_auto: bool,
-    /// The retained text-underline-offset value when it is not auto.
-    pub underline_offset: *const c_void,
-    /// The retained text-indent length-percentage and its flags.
-    pub text_indent: *const c_void,
-    pub text_indent_each_line: bool,
-    pub text_indent_hanging: bool,
-    pub tab_size_is_number: bool,
-    pub tab_size_number: f64,
-    /// Raw CSSPixels.
-    pub tab_size_px: i32,
+/// Resolves a computed length-percentage against the element's font size.
+fn font_relative_length_to_css_pixels(data: &StyleValueData, input: &ColorResolutionInput) -> CssPixels {
+    let context = input
+        .length
+        .expect("inherited text builds with a length resolution context");
+    let font_size = context.font_metrics.font_size;
+    let pixels = match data {
+        StyleValueData::Length { value, unit } => {
+            let result = crate::css::style_compute::absolutize_length(*value, *unit as usize, context);
+            assert!(result.handled, "a computed inherited-text length is resolvable");
+            result.px
+        }
+        StyleValueData::Percentage { value } => value * font_size / 100.0,
+        StyleValueData::Calculated { .. } => {
+            crate::css::calc::resolve_calculated_length_percentage_with_context(data, font_size, context)
+                .expect("a computed inherited-text calculation resolves to a length")
+        }
+        _ => unreachable!("an inherited-text length is a length, percentage, or calculation"),
+    };
+    CssPixels::nearest_value_for(pixels)
 }
 
-/// Builds the inherited text group: the generic descriptor path first, then
-/// the shadow, indent, underline and tab-size lowering through the
-/// registered assembler.
+/// Builds the complete inherited text payload in Rust.
 unsafe fn build_inherited_text_group(
     values: &EffectiveValues,
     input: &ColorResolutionInput,
     used_color_scheme: u8,
-    cpp_assembler_context: *const c_void,
     parent_payload: *const c_void,
 ) -> *const c_void {
-    let generic = unsafe {
-        build_generic_group(
-            group_index::INHERITED_TEXT,
-            values,
-            input,
-            used_color_scheme,
-            parent_payload,
-        )
-    };
-    if !generic.is_null() {
-        return generic;
-    }
     let Some(entries) =
         (unsafe { gather_group_entries(group_index::INHERITED_TEXT, values, input, used_color_scheme) })
     else {
@@ -3069,40 +2808,53 @@ unsafe fn build_inherited_text_group(
         data => (false, 0.0, length_to_css_pixels(data).raw_value()),
     };
 
-    let webkit_data = values
-        .value(property_id::_WEBKIT_TEXT_FILL_COLOR)
-        .expect("the table holds -webkit-text-fill-color");
-
-    let assembly = FfiInheritedTextGroupAssembly {
-        cpp_context: cpp_assembler_context,
-        webkit_text_fill_color_resolved: resolved_color(input, property_id::_WEBKIT_TEXT_FILL_COLOR, webkit_data)
-            .is_some(),
-        word_spacing_resolved: is_px_length(values, property_id::WORD_SPACING),
-        letter_spacing_resolved: is_px_length(values, property_id::LETTER_SPACING),
-        text_shadows: text_shadows.as_ptr(),
-        text_shadow_count: text_shadows.len(),
-        underline_position_horizontal: *horizontal,
-        underline_position_vertical: *vertical,
-        underline_offset_is_auto,
-        underline_offset: if underline_offset_is_auto {
-            std::ptr::null()
+    let spacing = |property| {
+        let data = values.value(property).expect("the table holds the spacing property");
+        if matches!(data, StyleValueData::Keyword { keyword: code } if *code == keyword::NORMAL) {
+            CssPixels::default()
         } else {
-            retain_for_assembly(values.pointer(property_id::TEXT_UNDERLINE_OFFSET))
-        },
-        text_indent: retain_for_assembly(length_percentage.pointer().cast()),
-        text_indent_each_line: *each_line,
-        text_indent_hanging: *hanging,
-        tab_size_is_number,
-        tab_size_number,
-        tab_size_px,
+            font_relative_length_to_css_pixels(data, input)
+        }
     };
-    // SAFETY: The entries and assembly hold live or retained value data, and
-    // the caller warrants the parent payload.
+    let word_spacing = spacing(property_id::WORD_SPACING);
+    let letter_spacing = spacing(property_id::LETTER_SPACING);
+    let underline_offset_used = if underline_offset_is_auto {
+        CssPixels::from_integer(2)
+    } else {
+        font_relative_length_to_css_pixels(underline_offset_data, input)
+    };
+
     unsafe {
-        crate::css::computed_values::build_group_payload_with_assembler(
+        crate::css::computed_values::build_group_payload_with_rust_fill(
             group_index::INHERITED_TEXT,
             &entries,
-            (&raw const assembly).cast(),
+            |payload| {
+                let payload = &mut *payload.cast::<InheritedTextValues>();
+                payload.text_shadow = RetainedComputedShadowList::from_vec(text_shadows);
+                payload.text_underline_position = ComputedTextUnderlinePosition {
+                    horizontal: *horizontal,
+                    vertical: *vertical,
+                };
+                payload.text_underline_offset = ComputedTextUnderlineOffset {
+                    used_value: underline_offset_used,
+                    is_auto: underline_offset_is_auto,
+                    value: if underline_offset_is_auto {
+                        ComputedStyleValueHandle::empty()
+                    } else {
+                        ComputedStyleValueHandle::retained(values.pointer(property_id::TEXT_UNDERLINE_OFFSET).cast())
+                    },
+                };
+                payload.text_indent = ComputedTextIndent {
+                    length_percentage: ComputedStyleValueHandle::retained(length_percentage.pointer()),
+                    each_line: *each_line,
+                    hanging: *hanging,
+                };
+                payload.tab_size_is_number = tab_size_is_number;
+                payload.tab_size_number = tab_size_number;
+                payload.tab_size_length = CssPixels::from_raw(tab_size_px);
+                payload.word_spacing = word_spacing;
+                payload.letter_spacing = letter_spacing;
+            },
             parent_payload,
         )
     }
@@ -3396,51 +3148,12 @@ unsafe fn build_misc_reset_group(
 /// ComputedValues.cpp.
 const SEPARATOR_COMMA: u8 = 1;
 
-/// The text reset group's complex members, pre-lowered for the registered
-/// C++ assembler. A color the core could not resolve falls to the
-/// assembler's C++ arm.
-#[repr(C)]
-pub struct FfiTextResetGroupAssembly {
-    pub cpp_context: *const c_void,
-    pub text_decoration_color_resolved: bool,
-    /// C++ TextDecorationLine codes; none is the empty list.
-    pub text_decoration_lines: *const u8,
-    pub text_decoration_line_count: usize,
-    /// 0 = auto, 1 = from-font, 2 = a retained length-percentage value.
-    pub text_decoration_thickness_kind: u8,
-    pub text_decoration_thickness: *const c_void,
-    pub white_space_trim_discard_before: bool,
-    pub white_space_trim_discard_after: bool,
-    pub white_space_trim_discard_inner: bool,
-}
-
-/// Builds the text reset group: the generic descriptor path first, then the
-/// decoration-line, thickness and white-space-trim lowering through the
-/// registered assembler.
+/// Builds the complete text reset group in Rust.
 unsafe fn build_text_reset_group(
     values: &EffectiveValues,
     input: &ColorResolutionInput,
-    used_color_scheme: u8,
-    cpp_assembler_context: *const c_void,
     parent_payload: *const c_void,
 ) -> *const c_void {
-    let generic = unsafe {
-        build_generic_group(
-            group_index::TEXT_RESET,
-            values,
-            input,
-            used_color_scheme,
-            parent_payload,
-        )
-    };
-    if !generic.is_null() {
-        return generic;
-    }
-    let Some(entries) = (unsafe { gather_group_entries(group_index::TEXT_RESET, values, input, used_color_scheme) })
-    else {
-        return std::ptr::null();
-    };
-
     let mut text_decoration_lines: Vec<u8> = Vec::new();
     match values.value(property_id::TEXT_DECORATION_LINE) {
         Some(StyleValueData::Keyword { keyword: code }) if *code == keyword::NONE => {}
@@ -3459,10 +3172,7 @@ unsafe fn build_text_reset_group(
     let (thickness_kind, thickness_value) = match values.value(property_id::TEXT_DECORATION_THICKNESS) {
         Some(StyleValueData::Keyword { keyword: code }) if *code == keyword::AUTO => (0u8, std::ptr::null()),
         Some(StyleValueData::Keyword { keyword: code }) if *code == keyword::FROM_FONT => (1u8, std::ptr::null()),
-        Some(_) => (
-            2u8,
-            retain_for_assembly(values.pointer(property_id::TEXT_DECORATION_THICKNESS)),
-        ),
+        Some(_) => (2u8, values.pointer(property_id::TEXT_DECORATION_THICKNESS)),
         None => unreachable!("the table holds text-decoration-thickness"),
     };
 
@@ -3484,69 +3194,40 @@ unsafe fn build_text_reset_group(
         _ => unreachable!("a computed white-space-trim is none or a value list"),
     }
 
-    let color_data = values
-        .value(property_id::TEXT_DECORATION_COLOR)
-        .expect("the table holds text-decoration-color");
+    let text_decoration_style = keyword_of(
+        values
+            .value(property_id::TEXT_DECORATION_STYLE)
+            .expect("the table holds text-decoration-style"),
+    )
+    .and_then(crate::css::css_enums::keyword_to_text_decoration_style)
+    .expect("a computed text-decoration-style maps to its enum");
+    let text_decoration_color = packed_color(
+        to_color(
+            values
+                .value(property_id::TEXT_DECORATION_COLOR)
+                .expect("the table holds text-decoration-color"),
+            input,
+        )
+        .expect("a computed text-decoration-color resolves in the Rust color context"),
+    );
 
-    let assembly = FfiTextResetGroupAssembly {
-        cpp_context: cpp_assembler_context,
-        text_decoration_color_resolved: to_color(color_data, input).is_some(),
-        text_decoration_lines: text_decoration_lines.as_ptr(),
-        text_decoration_line_count: text_decoration_lines.len(),
-        text_decoration_thickness_kind: thickness_kind,
-        text_decoration_thickness: thickness_value,
-        white_space_trim_discard_before: discard_before,
-        white_space_trim_discard_after: discard_after,
-        white_space_trim_discard_inner: discard_inner,
-    };
-    // SAFETY: The entries and assembly hold live or retained value data, and
+    // SAFETY: The list and value pointers remain live through the call and
     // the caller warrants the parent payload.
     unsafe {
-        crate::css::computed_values::build_group_payload_with_assembler(
+        rust_build_text_reset_group(
             group_index::TEXT_RESET,
-            &entries,
-            (&raw const assembly).cast(),
+            text_decoration_lines.as_ptr(),
+            text_decoration_lines.len(),
+            thickness_kind,
+            thickness_value,
+            text_decoration_style,
+            text_decoration_color,
+            discard_before,
+            discard_after,
+            discard_inner,
             parent_payload,
         )
     }
-}
-
-/// One position-try-fallbacks item, mirroring PositionTryFallbackData; the
-/// name raw is borrowed and the area keywords are C++ PositionArea codes.
-#[repr(C)]
-pub struct FfiPositionTryFallbackAssembly {
-    pub has_name: bool,
-    pub name_raw: usize,
-    pub tactics: [u8; 3],
-    pub tactic_count: usize,
-    pub has_position_area: bool,
-    pub position_area_keywords: *const u8,
-    pub position_area_keyword_count: usize,
-}
-
-/// The anchor group's members, pre-lowered for the registered C++ assembler.
-/// Every fly-string raw is borrowed, alive across the build.
-#[repr(C)]
-pub struct FfiAnchorGroupAssembly {
-    pub anchor_names: *const usize,
-    pub anchor_name_count: usize,
-    pub anchor_scope_all: bool,
-    pub anchor_scope_names: *const usize,
-    pub anchor_scope_name_count: usize,
-    /// The C++ PositionAnchor::Type code.
-    pub position_anchor_type: u8,
-    pub position_anchor_name_raw: usize,
-    /// C++ PositionArea codes.
-    pub position_area_keywords: *const u8,
-    pub position_area_keyword_count: usize,
-    pub position_try_fallbacks: *const FfiPositionTryFallbackAssembly,
-    pub position_try_fallback_count: usize,
-    pub has_position_try_order: bool,
-    pub position_try_order: u8,
-    pub position_visibility_always: bool,
-    pub position_visibility_anchors_valid: bool,
-    pub position_visibility_anchors_visible: bool,
-    pub position_visibility_no_overflow: bool,
 }
 
 /// The C++ PositionArea codes a value's keywords map to, fanning out a value
@@ -3569,9 +3250,7 @@ fn position_area_codes(data: &StyleValueData) -> Vec<u8> {
     codes
 }
 
-/// Builds the anchor group: the generic descriptor path first, then the
-/// name, area, try-fallback and visibility lowering through the registered
-/// assembler.
+/// Builds the complete anchor-positioning payload in Rust.
 unsafe fn build_anchor_group(
     values: &EffectiveValues,
     input: &ColorResolutionInput,
@@ -3586,19 +3265,37 @@ unsafe fn build_anchor_group(
         return std::ptr::null();
     };
 
-    let anchor_names = lower_custom_ident_raws(values, property_id::ANCHOR_NAME);
+    let custom_idents = |property| {
+        let mut names = Vec::new();
+        let mut append = |data: &StyleValueData| {
+            if let StyleValueData::CustomIdent { custom_ident } = data {
+                names.push(custom_ident.clone());
+            }
+        };
+        match values.value(property) {
+            Some(StyleValueData::ValueList { values: list, .. }) => {
+                for item in list.as_slice() {
+                    append(item.data());
+                }
+            }
+            Some(data) => append(data),
+            None => {}
+        }
+        names
+    };
+    let anchor_names = custom_idents(property_id::ANCHOR_NAME);
     let anchor_scope_all = matches!(
         values.value(property_id::ANCHOR_SCOPE),
         Some(StyleValueData::Keyword { keyword: code }) if *code == keyword::ALL
     );
-    let anchor_scope_names = lower_custom_ident_raws(values, property_id::ANCHOR_SCOPE);
+    let anchor_scope_names = custom_idents(property_id::ANCHOR_SCOPE);
 
-    let (position_anchor_type, position_anchor_name_raw) = match values.value(property_id::POSITION_ANCHOR) {
-        Some(StyleValueData::CustomIdent { custom_ident }) => (3u8, custom_ident.raw()),
+    let (position_anchor_type, position_anchor_name) = match values.value(property_id::POSITION_ANCHOR) {
+        Some(StyleValueData::CustomIdent { custom_ident }) => (3u8, custom_ident.clone()),
         Some(StyleValueData::Keyword { keyword: code }) => match *code {
-            keyword::NORMAL => (0u8, 0),
-            keyword::NONE => (1u8, 0),
-            keyword::AUTO => (2u8, 0),
+            keyword::NORMAL => (0u8, RetainedUtf16FlyString::none()),
+            keyword::NONE => (1u8, RetainedUtf16FlyString::none()),
+            keyword::AUTO => (2u8, RetainedUtf16FlyString::none()),
             _ => unreachable!("a computed position-anchor keyword is normal, none or auto"),
         },
         _ => unreachable!("a computed position-anchor is a keyword or a custom ident"),
@@ -3613,22 +3310,18 @@ unsafe fn build_anchor_group(
     // position-try-fallbacks, with the extractor's item rules: an item whose
     // keywords form a position area keeps only the area, and everything else
     // fans out (one level deep) into a name and try tactics.
-    let mut fallback_area_holders: Vec<Vec<u8>> = Vec::new();
-    let mut position_try_fallbacks: Vec<FfiPositionTryFallbackAssembly> = Vec::new();
+    let mut position_try_fallbacks: Vec<ComputedPositionTryFallback> = Vec::new();
     let mut append_fallback = |data: &StyleValueData| {
-        let mut fallback = FfiPositionTryFallbackAssembly {
-            has_name: false,
-            name_raw: 0,
+        let mut fallback = ComputedPositionTryFallback {
+            name: RetainedUtf16FlyString::none(),
             tactics: [0; 3],
             tactic_count: 0,
             has_position_area: false,
-            position_area_keywords: std::ptr::null(),
-            position_area_keyword_count: 0,
+            position_area: RetainedPositionAreaList::from_vec(Vec::new()),
         };
-        let apply_item = |fallback: &mut FfiPositionTryFallbackAssembly, data: &StyleValueData| {
+        let apply_item = |fallback: &mut ComputedPositionTryFallback, data: &StyleValueData| {
             if let StyleValueData::CustomIdent { custom_ident } = data {
-                fallback.has_name = true;
-                fallback.name_raw = custom_ident.raw();
+                fallback.name = custom_ident.clone();
             } else if let Some(tactic) = keyword_of(data).and_then(crate::css::css_enums::keyword_to_try_tactic) {
                 assert!(
                     fallback.tactic_count < 3,
@@ -3641,9 +3334,7 @@ unsafe fn build_anchor_group(
         let area = position_area_codes(data);
         if !area.is_empty() {
             fallback.has_position_area = true;
-            fallback.position_area_keyword_count = area.len();
-            fallback_area_holders.push(area);
-            fallback.position_area_keywords = fallback_area_holders.last().expect("just pushed").as_ptr();
+            fallback.position_area = RetainedPositionAreaList::from_vec(area);
         } else if let StyleValueData::ValueList { values: list, .. } = data {
             for item in list.as_slice() {
                 if let StyleValueData::ValueList { values: children, .. } = item.data() {
@@ -3709,18 +3400,14 @@ unsafe fn build_anchor_group(
         }
     }
 
-    let assembly = FfiAnchorGroupAssembly {
-        anchor_names: anchor_names.as_ptr(),
-        anchor_name_count: anchor_names.len(),
+    let built = AnchorValues {
+        anchor_names: RetainedUtf16FlyStringList::from_retained_strings(anchor_names),
         anchor_scope_all,
-        anchor_scope_names: anchor_scope_names.as_ptr(),
-        anchor_scope_name_count: anchor_scope_names.len(),
+        anchor_scope_names: RetainedUtf16FlyStringList::from_retained_strings(anchor_scope_names),
         position_anchor_type,
-        position_anchor_name_raw,
-        position_area_keywords: position_area_keywords.as_ptr(),
-        position_area_keyword_count: position_area_keywords.len(),
-        position_try_fallbacks: position_try_fallbacks.as_ptr(),
-        position_try_fallback_count: position_try_fallbacks.len(),
+        position_anchor_name,
+        position_area: RetainedPositionAreaList::from_vec(position_area_keywords),
+        position_try_fallbacks: RetainedPositionTryFallbackList::from_vec(position_try_fallbacks),
         has_position_try_order: position_try_order.is_some(),
         position_try_order: position_try_order.unwrap_or(0),
         position_visibility_always: always,
@@ -3728,13 +3415,11 @@ unsafe fn build_anchor_group(
         position_visibility_anchors_visible: anchors_visible,
         position_visibility_no_overflow: no_overflow,
     };
-    // SAFETY: The entries and assembly hold live or retained value data, and
-    // the caller warrants the parent payload.
     unsafe {
-        crate::css::computed_values::build_group_payload_with_assembler(
+        crate::css::computed_values::build_group_payload_with_rust_fill(
             group_index::ANCHOR,
             &entries,
-            (&raw const assembly).cast(),
+            |payload| *payload.cast::<AnchorValues>() = built,
             parent_payload,
         )
     }
@@ -3997,572 +3682,46 @@ unsafe fn build_box_group(
     }
 }
 
-/// Whether a live fly string's contents equal an ASCII string.
-fn fly_string_equals_ascii(string: &RetainedUtf16FlyString, expected: &str) -> bool {
-    crate::css::serialize::with_fly_string_units(string, |units| match units {
-        crate::css::serialize::StringUnits::Ascii(bytes) => bytes == expected.as_bytes(),
-        crate::css::serialize::StringUnits::Utf16(units) => {
-            units.len() == expected.len() && units.iter().copied().eq(expected.bytes().map(u16::from))
-        }
-    })
-}
-
-/// The comma-separated computed items of a coordinated animation property:
-/// the list's element pointers when the value is a comma-separated list, or
-/// the single value itself, matching the C++ fallback's comma fan-out.
-fn comma_item_pointers(values: &EffectiveValues, property: u16) -> Vec<*const c_void> {
-    match values.value(property) {
-        Some(StyleValueData::ValueList {
-            values: list,
-            separator,
-            ..
-        }) if *separator == SEPARATOR_COMMA => list.as_slice().iter().map(|value| value.pointer().cast()).collect(),
-        _ => vec![values.pointer(property)],
-    }
-}
-
-/// One comma-list time item: the plain value and unit when the slot holds a
-/// time, or the retained calculated value for the assembler's
-/// Time::from_style_value arm.
-#[repr(C)]
-pub struct FfiTimeItemAssembly {
-    pub is_plain: bool,
-    pub value: f64,
-    /// The C++ TimeUnit code.
-    pub unit: u8,
-    /// The retained calculated value when not plain.
-    pub calculated: *const c_void,
-}
-
-fn lower_time_item(pointer: *const c_void) -> FfiTimeItemAssembly {
-    // SAFETY: The pointer names live table or override data.
-    match unsafe { pointer.cast::<StyleValueData>().as_ref() } {
-        Some(StyleValueData::Time { value, unit }) => FfiTimeItemAssembly {
-            is_plain: true,
-            value: *value,
-            unit: *unit,
-            calculated: std::ptr::null(),
-        },
-        _ => FfiTimeItemAssembly {
-            is_plain: false,
-            value: 0.0,
-            unit: 0,
-            calculated: retain_for_assembly(pointer),
-        },
-    }
-}
-
-/// One animation-name item; the name raw is borrowed, alive across the build.
-#[repr(C)]
-pub struct FfiAnimationNameAssembly {
-    pub has_name: bool,
-    pub name_raw: usize,
-    pub is_string: bool,
-}
-
-/// One animation-duration item: auto or a time.
-#[repr(C)]
-pub struct FfiDurationItemAssembly {
-    pub is_auto: bool,
-    pub time: FfiTimeItemAssembly,
-}
-
-/// One animation-iteration-count item: the plain count, or the retained
-/// calculated value for the assembler's number-resolution arm.
-#[repr(C)]
-pub struct FfiNumberItemAssembly {
-    pub is_plain: bool,
-    pub number: f64,
-    /// The retained calculated value when not plain.
-    pub value: *const c_void,
-}
-
-/// One animation-timeline item, mirroring AnimationTimelineData: the kind is
-/// the C++ Type code, the name raw is borrowed, and the inset edges are
-/// retained values for the assembler.
-#[repr(C)]
-pub struct FfiAnimationTimelineAssembly {
-    pub kind: u8,
-    pub name_raw: usize,
-    pub has_scroller: bool,
-    pub scroller: u8,
-    pub has_axis: bool,
-    pub axis: u8,
-    pub has_inset: bool,
-    pub inset_start: *const c_void,
-    pub inset_end: *const c_void,
-}
-
-/// One optional timeline or transition-property name; the raw is borrowed.
-#[repr(C)]
-pub struct FfiTimelineNameAssembly {
-    pub has_name: bool,
-    pub name_raw: usize,
-}
-
-/// One view-timeline-inset item's retained start and end values.
-#[repr(C)]
-pub struct FfiViewTimelineInsetAssembly {
-    pub start: *const c_void,
-    pub end: *const c_void,
-}
-
-/// The animation group's members, pre-lowered for the registered C++
-/// assembler. The timing-function entries are retained easing values the
-/// assembler wraps and decodes.
-#[repr(C)]
-pub struct FfiAnimationGroupAssembly {
-    pub names: *const FfiAnimationNameAssembly,
-    pub name_count: usize,
-    /// C++ AnimationComposition codes.
-    pub compositions: *const u8,
-    pub composition_count: usize,
-    pub delays: *const FfiTimeItemAssembly,
-    pub delay_count: usize,
-    /// C++ AnimationDirection codes.
-    pub directions: *const u8,
-    pub direction_count: usize,
-    pub durations: *const FfiDurationItemAssembly,
-    pub duration_count: usize,
-    /// C++ AnimationFillMode codes.
-    pub fill_modes: *const u8,
-    pub fill_mode_count: usize,
-    pub iteration_counts: *const FfiNumberItemAssembly,
-    pub iteration_count_count: usize,
-    /// C++ AnimationPlayState codes.
-    pub play_states: *const u8,
-    pub play_state_count: usize,
-    pub timelines: *const FfiAnimationTimelineAssembly,
-    pub timeline_count: usize,
-    /// Retained easing values.
-    pub timing_functions: *const *const c_void,
-    pub timing_function_count: usize,
-    pub scroll_timeline_names: *const FfiTimelineNameAssembly,
-    pub scroll_timeline_name_count: usize,
-    /// C++ Axis codes.
-    pub scroll_timeline_axes: *const u8,
-    pub scroll_timeline_axis_count: usize,
-    pub timeline_scope_all: bool,
-    /// Borrowed fly-string raws.
-    pub timeline_scope_names: *const usize,
-    pub timeline_scope_name_count: usize,
-    pub view_timeline_names: *const FfiTimelineNameAssembly,
-    pub view_timeline_name_count: usize,
-    /// C++ Axis codes.
-    pub view_timeline_axes: *const u8,
-    pub view_timeline_axis_count: usize,
-    pub view_timeline_insets: *const FfiViewTimelineInsetAssembly,
-    pub view_timeline_inset_count: usize,
-    pub transition_properties: *const FfiTimelineNameAssembly,
-    pub transition_property_count: usize,
-    pub transition_durations: *const FfiTimeItemAssembly,
-    pub transition_duration_count: usize,
-    /// Retained easing values.
-    pub transition_timing_functions: *const *const c_void,
-    pub transition_timing_function_count: usize,
-    pub transition_delays: *const FfiTimeItemAssembly,
-    pub transition_delay_count: usize,
-    /// C++ TransitionBehavior codes.
-    pub transition_behaviors: *const u8,
-    pub transition_behavior_count: usize,
-}
-
-fn lower_animation_timeline(pointer: *const c_void) -> FfiAnimationTimelineAssembly {
-    let mut assembly = FfiAnimationTimelineAssembly {
-        kind: 0,
-        name_raw: 0,
-        has_scroller: false,
-        scroller: 0,
-        has_axis: false,
-        axis: 0,
-        has_inset: false,
-        inset_start: std::ptr::null(),
-        inset_end: std::ptr::null(),
-    };
-    // SAFETY: The pointer names live table or override data.
-    let data = unsafe { pointer.cast::<StyleValueData>().as_ref() }.expect("the table holds animation-timeline");
-    match data {
-        StyleValueData::Keyword { keyword: code } if *code == keyword::AUTO => {}
-        StyleValueData::Keyword { keyword: code } if *code == keyword::NONE => assembly.kind = 1,
-        StyleValueData::CustomIdent { custom_ident } => {
-            assembly.kind = 2;
-            assembly.name_raw = custom_ident.raw();
-        }
-        StyleValueData::Function { name, value } => {
-            let StyleValueData::Tuple { values: arguments } = value.data() else {
-                unreachable!("a computed timeline function holds a tuple");
-            };
-            let arguments = arguments.as_slice();
-            let argument = |index: usize| arguments.get(index).filter(|argument| !argument.pointer().is_null());
-            let keyword_argument = |index: usize, map: fn(u16) -> Option<u8>| {
-                argument(index).map(|argument| {
-                    keyword_of(argument.data())
-                        .and_then(map)
-                        .expect("a computed timeline function argument maps to its enum")
-                })
-            };
-            if fly_string_equals_ascii(name, "scroll") {
-                assembly.kind = 3;
-                if let Some(scroller) = keyword_argument(0, crate::css::css_enums::keyword_to_scroller) {
-                    assembly.has_scroller = true;
-                    assembly.scroller = scroller;
-                }
-                if let Some(axis) = keyword_argument(1, crate::css::css_enums::keyword_to_axis) {
-                    assembly.has_axis = true;
-                    assembly.axis = axis;
-                }
-            } else {
-                assert!(
-                    fly_string_equals_ascii(name, "view"),
-                    "a computed timeline function is scroll() or view()"
-                );
-                assembly.kind = 4;
-                if let Some(axis) = keyword_argument(0, crate::css::css_enums::keyword_to_axis) {
-                    assembly.has_axis = true;
-                    assembly.axis = axis;
-                }
-                if let Some(inset) = argument(1) {
-                    let StyleValueData::ValueList { values: edges, .. } = inset.data() else {
-                        unreachable!("a computed view() inset is a value list");
-                    };
-                    let edges = edges.as_slice();
-                    assert!(edges.len() == 2, "a computed view() inset holds two edges");
-                    assembly.has_inset = true;
-                    assembly.inset_start = retain_for_assembly(edges[0].pointer().cast());
-                    assembly.inset_end = retain_for_assembly(edges[1].pointer().cast());
-                }
-            }
-        }
-        _ => unreachable!("a computed animation-timeline item is auto, none, a name or a function"),
-    }
-    assembly
-}
-
-/// Lowers a keyword-coordinated animation list into its C++ enum codes.
-fn lower_keyword_codes(values: &EffectiveValues, property: u16, map: fn(u16) -> Option<u8>) -> Vec<u8> {
-    comma_item_pointers(values, property)
-        .into_iter()
-        .map(|pointer| {
-            // SAFETY: The pointer names live table or override data.
-            let data = unsafe { pointer.cast::<StyleValueData>().as_ref() }.expect("the table holds the property");
-            keyword_of(data)
-                .and_then(map)
-                .expect("a computed coordinated keyword maps to its enum")
-        })
-        .collect()
-}
-
-/// The optional custom-ident names of a timeline-name-shaped property,
-/// fanning out any value list like the C++ fallback's helpers.
-fn lower_optional_name_list(values: &EffectiveValues, property: u16) -> Vec<FfiTimelineNameAssembly> {
-    let lower = |data: &StyleValueData| match data {
-        StyleValueData::CustomIdent { custom_ident } => FfiTimelineNameAssembly {
-            has_name: true,
-            name_raw: custom_ident.raw(),
-        },
-        _ => FfiTimelineNameAssembly {
-            has_name: false,
-            name_raw: 0,
-        },
-    };
-    match values.value(property) {
-        Some(StyleValueData::ValueList { values: list, .. }) => {
-            list.as_slice().iter().map(|item| lower(item.data())).collect()
-        }
-        Some(data) => vec![lower(data)],
-        None => unreachable!("the table holds the property"),
-    }
-}
-
-/// The custom-ident raws of a scope-shaped property, skipping non-ident items
-/// like the C++ fallback's custom_ident_list.
-fn lower_custom_ident_raws(values: &EffectiveValues, property: u16) -> Vec<usize> {
-    let mut raws = Vec::new();
-    let mut append = |data: &StyleValueData| {
-        if let StyleValueData::CustomIdent { custom_ident } = data {
-            raws.push(custom_ident.raw());
-        }
-    };
-    match values.value(property) {
-        Some(StyleValueData::ValueList { values: list, .. }) => {
-            for item in list.as_slice() {
-                append(item.data());
-            }
-        }
-        Some(data) => append(data),
-        None => unreachable!("the table holds the property"),
-    }
-    raws
-}
-
-/// Builds the animation group: the generic descriptor path first, then the
-/// full coordinated-list lowering through the registered assembler.
+/// Builds the animation group from the canonical Rust longhand values.
 unsafe fn build_animation_group(
     values: &EffectiveValues,
     input: &ColorResolutionInput,
     used_color_scheme: u8,
     parent_payload: *const c_void,
 ) -> *const c_void {
-    let generic =
-        unsafe { build_generic_group(group_index::ANIMATION, values, input, used_color_scheme, parent_payload) };
-    if !generic.is_null() {
-        return generic;
-    }
     let Some(entries) = (unsafe { gather_group_entries(group_index::ANIMATION, values, input, used_color_scheme) })
     else {
         return std::ptr::null();
     };
-
-    // animation-name computes to a list; none is the empty entry.
-    let names: Vec<FfiAnimationNameAssembly> = match values.value(property_id::ANIMATION_NAME) {
-        Some(StyleValueData::ValueList { values: list, .. }) => list
-            .as_slice()
-            .iter()
-            .map(|item| match item.data() {
-                StyleValueData::Keyword { keyword: code } if *code == keyword::NONE => FfiAnimationNameAssembly {
-                    has_name: false,
-                    name_raw: 0,
-                    is_string: false,
-                },
-                StyleValueData::String { string } => FfiAnimationNameAssembly {
-                    has_name: true,
-                    name_raw: string.raw(),
-                    is_string: true,
-                },
-                StyleValueData::CustomIdent { custom_ident } => FfiAnimationNameAssembly {
-                    has_name: true,
-                    name_raw: custom_ident.raw(),
-                    is_string: false,
-                },
-                _ => unreachable!("a computed animation-name item is none, a string or a custom ident"),
-            })
-            .collect(),
-        _ => unreachable!("a computed animation-name is a value list"),
-    };
-
-    let time_items = |property: u16| -> Vec<FfiTimeItemAssembly> {
-        comma_item_pointers(values, property)
-            .into_iter()
-            .map(lower_time_item)
-            .collect()
-    };
-    let delays = time_items(property_id::ANIMATION_DELAY);
-    let durations: Vec<FfiDurationItemAssembly> = comma_item_pointers(values, property_id::ANIMATION_DURATION)
-        .into_iter()
-        .map(|pointer| {
-            // SAFETY: The pointer names live table or override data.
-            let is_auto = matches!(
-                unsafe { pointer.cast::<StyleValueData>().as_ref() },
-                Some(StyleValueData::Keyword { keyword: code }) if *code == keyword::AUTO
-            );
-            FfiDurationItemAssembly {
-                is_auto,
-                time: if is_auto {
-                    FfiTimeItemAssembly {
-                        is_plain: true,
-                        value: 0.0,
-                        unit: 0,
-                        calculated: std::ptr::null(),
-                    }
-                } else {
-                    lower_time_item(pointer)
-                },
-            }
-        })
-        .collect();
-    let iteration_counts: Vec<FfiNumberItemAssembly> =
-        comma_item_pointers(values, property_id::ANIMATION_ITERATION_COUNT)
-            .into_iter()
-            .map(|pointer| {
-                // SAFETY: The pointer names live table or override data.
-                match unsafe { pointer.cast::<StyleValueData>().as_ref() } {
-                    Some(StyleValueData::Keyword { keyword: code }) if *code == keyword::INFINITE => {
-                        FfiNumberItemAssembly {
-                            is_plain: true,
-                            number: f64::INFINITY,
-                            value: std::ptr::null(),
-                        }
-                    }
-                    Some(StyleValueData::Number { value }) => FfiNumberItemAssembly {
-                        is_plain: true,
-                        number: *value,
-                        value: std::ptr::null(),
-                    },
-                    _ => FfiNumberItemAssembly {
-                        is_plain: false,
-                        number: 0.0,
-                        value: retain_for_assembly(pointer),
-                    },
-                }
-            })
-            .collect();
-    let timelines: Vec<FfiAnimationTimelineAssembly> = comma_item_pointers(values, property_id::ANIMATION_TIMELINE)
-        .into_iter()
-        .map(lower_animation_timeline)
-        .collect();
-    let retained_items = |property: u16| -> Vec<*const c_void> {
-        comma_item_pointers(values, property)
-            .into_iter()
-            .map(retain_for_assembly)
-            .collect()
-    };
-    let timing_functions = retained_items(property_id::ANIMATION_TIMING_FUNCTION);
-
-    let compositions = lower_keyword_codes(
-        values,
-        property_id::ANIMATION_COMPOSITION,
-        crate::css::css_enums::keyword_to_animation_composition,
-    );
-    let directions = lower_keyword_codes(
-        values,
-        property_id::ANIMATION_DIRECTION,
-        crate::css::css_enums::keyword_to_animation_direction,
-    );
-    let fill_modes = lower_keyword_codes(
-        values,
-        property_id::ANIMATION_FILL_MODE,
-        crate::css::css_enums::keyword_to_animation_fill_mode,
-    );
-    let play_states = lower_keyword_codes(
-        values,
-        property_id::ANIMATION_PLAY_STATE,
-        crate::css::css_enums::keyword_to_animation_play_state,
-    );
-
-    // The timeline-name and axis helpers fan out any value list.
-    let axis_codes = |property: u16| -> Vec<u8> {
-        let lower = |data: &StyleValueData| {
-            keyword_of(data)
-                .and_then(crate::css::css_enums::keyword_to_axis)
-                .expect("a computed timeline axis maps to its enum")
-        };
-        match values.value(property) {
-            Some(StyleValueData::ValueList { values: list, .. }) => {
-                list.as_slice().iter().map(|item| lower(item.data())).collect()
-            }
-            Some(data) => vec![lower(data)],
-            None => unreachable!("the table holds the property"),
-        }
-    };
-    let scroll_timeline_names = lower_optional_name_list(values, property_id::SCROLL_TIMELINE_NAME);
-    let scroll_timeline_axes = axis_codes(property_id::SCROLL_TIMELINE_AXIS);
-    let view_timeline_names = lower_optional_name_list(values, property_id::VIEW_TIMELINE_NAME);
-    let view_timeline_axes = axis_codes(property_id::VIEW_TIMELINE_AXIS);
-
-    let timeline_scope_all = matches!(
-        values.value(property_id::TIMELINE_SCOPE),
-        Some(StyleValueData::Keyword { keyword: code }) if *code == keyword::ALL
-    );
-    let timeline_scope_names = lower_custom_ident_raws(values, property_id::TIMELINE_SCOPE);
-
-    // view-timeline-inset computes to a value list: comma-separated inset
-    // items, or itself the single two-edge inset.
-    let lower_inset = |data: &StyleValueData| -> FfiViewTimelineInsetAssembly {
-        let StyleValueData::ValueList { values: edges, .. } = data else {
-            unreachable!("a computed view-timeline-inset item is a value list");
-        };
-        let edges = edges.as_slice();
-        assert!(edges.len() == 2, "a computed view-timeline-inset item holds two edges");
-        FfiViewTimelineInsetAssembly {
-            start: retain_for_assembly(edges[0].pointer().cast()),
-            end: retain_for_assembly(edges[1].pointer().cast()),
-        }
-    };
-    let view_timeline_insets: Vec<FfiViewTimelineInsetAssembly> = match values.value(property_id::VIEW_TIMELINE_INSET) {
-        Some(
-            list_data @ StyleValueData::ValueList {
-                values: list,
-                separator,
-                ..
-            },
-        ) => {
-            if *separator == SEPARATOR_COMMA {
-                list.as_slice().iter().map(|item| lower_inset(item.data())).collect()
-            } else {
-                vec![lower_inset(list_data)]
-            }
-        }
-        _ => unreachable!("a computed view-timeline-inset is a value list"),
-    };
-
-    let transition_properties: Vec<FfiTimelineNameAssembly> =
-        comma_item_pointers(values, property_id::TRANSITION_PROPERTY)
-            .into_iter()
-            .map(|pointer| {
-                // SAFETY: The pointer names live table or override data.
-                match unsafe { pointer.cast::<StyleValueData>().as_ref() } {
-                    Some(StyleValueData::CustomIdent { custom_ident }) => FfiTimelineNameAssembly {
-                        has_name: true,
-                        name_raw: custom_ident.raw(),
-                    },
-                    _ => FfiTimelineNameAssembly {
-                        has_name: false,
-                        name_raw: 0,
-                    },
-                }
-            })
-            .collect();
-    let transition_durations = time_items(property_id::TRANSITION_DURATION);
-    let transition_timing_functions = retained_items(property_id::TRANSITION_TIMING_FUNCTION);
-    let transition_delays = time_items(property_id::TRANSITION_DELAY);
-    let transition_behaviors = lower_keyword_codes(
-        values,
-        property_id::TRANSITION_BEHAVIOR,
-        crate::css::css_enums::keyword_to_transition_behavior,
-    );
-
-    let assembly = FfiAnimationGroupAssembly {
-        names: names.as_ptr(),
-        name_count: names.len(),
-        compositions: compositions.as_ptr(),
-        composition_count: compositions.len(),
-        delays: delays.as_ptr(),
-        delay_count: delays.len(),
-        directions: directions.as_ptr(),
-        direction_count: directions.len(),
-        durations: durations.as_ptr(),
-        duration_count: durations.len(),
-        fill_modes: fill_modes.as_ptr(),
-        fill_mode_count: fill_modes.len(),
-        iteration_counts: iteration_counts.as_ptr(),
-        iteration_count_count: iteration_counts.len(),
-        play_states: play_states.as_ptr(),
-        play_state_count: play_states.len(),
-        timelines: timelines.as_ptr(),
-        timeline_count: timelines.len(),
-        timing_functions: timing_functions.as_ptr(),
-        timing_function_count: timing_functions.len(),
-        scroll_timeline_names: scroll_timeline_names.as_ptr(),
-        scroll_timeline_name_count: scroll_timeline_names.len(),
-        scroll_timeline_axes: scroll_timeline_axes.as_ptr(),
-        scroll_timeline_axis_count: scroll_timeline_axes.len(),
-        timeline_scope_all,
-        timeline_scope_names: timeline_scope_names.as_ptr(),
-        timeline_scope_name_count: timeline_scope_names.len(),
-        view_timeline_names: view_timeline_names.as_ptr(),
-        view_timeline_name_count: view_timeline_names.len(),
-        view_timeline_axes: view_timeline_axes.as_ptr(),
-        view_timeline_axis_count: view_timeline_axes.len(),
-        view_timeline_insets: view_timeline_insets.as_ptr(),
-        view_timeline_inset_count: view_timeline_insets.len(),
-        transition_properties: transition_properties.as_ptr(),
-        transition_property_count: transition_properties.len(),
-        transition_durations: transition_durations.as_ptr(),
-        transition_duration_count: transition_durations.len(),
-        transition_timing_functions: transition_timing_functions.as_ptr(),
-        transition_timing_function_count: transition_timing_functions.len(),
-        transition_delays: transition_delays.as_ptr(),
-        transition_delay_count: transition_delays.len(),
-        transition_behaviors: transition_behaviors.as_ptr(),
-        transition_behavior_count: transition_behaviors.len(),
-    };
-    // SAFETY: The entries and assembly hold live or retained value data, and
-    // the caller warrants the parent payload.
+    let retained = |property| ComputedStyleValueHandle::retained(values.pointer(property).cast());
     unsafe {
-        crate::css::computed_values::build_group_payload_with_assembler(
+        crate::css::computed_values::build_group_payload_with_rust_fill(
             group_index::ANIMATION,
             &entries,
-            (&raw const assembly).cast(),
+            |payload| {
+                let payload = &mut *payload.cast::<AnimationValues>();
+                payload.animation_name = retained(property_id::ANIMATION_NAME);
+                payload.animation_composition = retained(property_id::ANIMATION_COMPOSITION);
+                payload.animation_delay = retained(property_id::ANIMATION_DELAY);
+                payload.animation_direction = retained(property_id::ANIMATION_DIRECTION);
+                payload.animation_duration = retained(property_id::ANIMATION_DURATION);
+                payload.animation_fill_mode = retained(property_id::ANIMATION_FILL_MODE);
+                payload.animation_iteration_count = retained(property_id::ANIMATION_ITERATION_COUNT);
+                payload.animation_play_state = retained(property_id::ANIMATION_PLAY_STATE);
+                payload.animation_timeline = retained(property_id::ANIMATION_TIMELINE);
+                payload.animation_timing_function = retained(property_id::ANIMATION_TIMING_FUNCTION);
+                payload.scroll_timeline_name = retained(property_id::SCROLL_TIMELINE_NAME);
+                payload.scroll_timeline_axis = retained(property_id::SCROLL_TIMELINE_AXIS);
+                payload.timeline_scope = retained(property_id::TIMELINE_SCOPE);
+                payload.view_timeline_name = retained(property_id::VIEW_TIMELINE_NAME);
+                payload.view_timeline_axis = retained(property_id::VIEW_TIMELINE_AXIS);
+                payload.view_timeline_inset = retained(property_id::VIEW_TIMELINE_INSET);
+                payload.transition_property = retained(property_id::TRANSITION_PROPERTY);
+                payload.transition_duration = retained(property_id::TRANSITION_DURATION);
+                payload.transition_timing_function = retained(property_id::TRANSITION_TIMING_FUNCTION);
+                payload.transition_delay = retained(property_id::TRANSITION_DELAY);
+                payload.transition_behavior = retained(property_id::TRANSITION_BEHAVIOR);
+            },
             parent_payload,
         )
     }
@@ -4662,13 +3821,7 @@ pub unsafe extern "C" fn rust_build_group_payloads_from_table(
                     group_index::ANCHOR => {
                         build_anchor_group(&values, &input, inputs.used_color_scheme, parent_payload)
                     }
-                    group_index::TEXT_RESET => build_text_reset_group(
-                        &values,
-                        &input,
-                        inputs.used_color_scheme,
-                        inputs.cpp_assembler_context,
-                        parent_payload,
-                    ),
+                    group_index::TEXT_RESET => build_text_reset_group(&values, &input, parent_payload),
                     group_index::ALIGNMENT => build_alignment_group(&values, parent_payload),
                     group_index::SVG_RESET => build_svg_reset_group(&values, &input, parent_payload),
                     group_index::GRID => build_grid_group(&values, parent_payload),
@@ -4678,20 +3831,12 @@ pub unsafe extern "C" fn rust_build_group_payloads_from_table(
                     group_index::EFFECTS => {
                         build_effects_group(&values, &input, inputs.used_color_scheme, parent_payload)
                     }
-                    group_index::INHERITED_UI => build_inherited_ui_group(
-                        &values,
-                        &input,
-                        inputs.used_color_scheme,
-                        inputs.cpp_assembler_context,
-                        parent_payload,
-                    ),
-                    group_index::INHERITED_TEXT => build_inherited_text_group(
-                        &values,
-                        &input,
-                        inputs.used_color_scheme,
-                        inputs.cpp_assembler_context,
-                        parent_payload,
-                    ),
+                    group_index::INHERITED_UI => {
+                        build_inherited_ui_group(&values, &input, inputs.used_color_scheme, parent_payload)
+                    }
+                    group_index::INHERITED_TEXT => {
+                        build_inherited_text_group(&values, &input, inputs.used_color_scheme, parent_payload)
+                    }
                     group_index::MISC_RESET => build_misc_reset_group(
                         &values,
                         &input,
@@ -4699,13 +3844,9 @@ pub unsafe extern "C" fn rust_build_group_payloads_from_table(
                         inputs.cpp_assembler_context,
                         parent_payload,
                     ),
-                    group_index::INHERITED_SVG => build_inherited_svg_group(
-                        &values,
-                        &input,
-                        inputs.used_color_scheme,
-                        inputs.cpp_assembler_context,
-                        parent_payload,
-                    ),
+                    group_index::INHERITED_SVG => {
+                        build_inherited_svg_group(&values, &input, inputs.used_color_scheme, parent_payload)
+                    }
                     group_index::INHERITED_LIST => build_inherited_list_group(
                         &values,
                         &input,

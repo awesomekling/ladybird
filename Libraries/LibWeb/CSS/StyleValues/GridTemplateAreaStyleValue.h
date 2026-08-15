@@ -56,7 +56,7 @@ private:
         Vector<StyleValueFFI::RetainedGridArea> areas;
         areas.ensure_capacity(grid_areas.size());
         for (auto const& [name, area] : grid_areas)
-            areas.unchecked_append({ { name.to_raw_leaked() }, area.row_start, area.row_end, area.column_start, area.column_end });
+            areas.unchecked_append({ { name.to_raw_leaked(), nullptr }, area.row_start, area.row_end, area.column_start, area.column_end });
         return StyleValueFFI::rust_style_value_create_grid_template_area(areas.data(), areas.size(), row_count, column_count);
     }
 };

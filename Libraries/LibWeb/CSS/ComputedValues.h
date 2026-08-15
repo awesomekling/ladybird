@@ -41,6 +41,7 @@
 #include <LibWeb/CSS/StyleValues/BasicShapeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CursorStyleValue.h>
+#include <LibWeb/CSS/StyleValues/FilterStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/RustStyleValueHandle.h>
 #include <LibWeb/CSS/StyleValues/ShadowStyleValue.h>
@@ -61,6 +62,89 @@ class Document;
 namespace Web::CSS {
 
 class AnimatedProperties;
+
+class ComputedFilterView {
+public:
+    explicit ComputedFilterView(ComputedValuesFFI::ComputedFilter const& filter)
+        : m_filter(filter)
+    {
+    }
+
+    bool has_filters() const { return m_filter.filter_list.pointer; }
+    bool is_none() const { return !has_filters(); }
+
+    template<typename Callback>
+    void for_each_operation(Callback callback) const
+    {
+        for (size_t index = 0; index < m_filter.operations.length; ++index) {
+            auto const& operation = m_filter.operations.pointer[index];
+            switch (operation.kind) {
+            case to_underlying(FilterStyleValue::Kind::Blur):
+                callback(Filter::FilterOperation { Filter::Blur { .resolved_radius = operation.amount } });
+                break;
+            case to_underlying(FilterStyleValue::Kind::DropShadow):
+                callback(Filter::FilterOperation { Filter::DropShadow {
+                    .offset_x = CSSPixels::from_raw(operation.shadow_offset_x),
+                    .offset_y = CSSPixels::from_raw(operation.shadow_offset_y),
+                    .radius = CSSPixels::from_raw(operation.shadow_radius),
+                    .color = Color::from_bgra(operation.shadow_color),
+                } });
+                break;
+            case to_underlying(FilterStyleValue::Kind::HueRotate):
+                callback(Filter::FilterOperation { Filter::HueRotate { .angle_degrees = operation.amount } });
+                break;
+            case to_underlying(FilterStyleValue::Kind::Color):
+                callback(Filter::FilterOperation { Filter::ColorOperation {
+                    .operation = static_cast<Gfx::ColorFilterType>(operation.color_operation),
+                    .resolved_amount = operation.amount,
+                } });
+                break;
+            case 4:
+                callback(Filter::FilterOperation { Filter::Url { url_fragment(operation.url_value) } });
+                break;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }
+    }
+
+    Filter materialize() const
+    {
+        if (!has_filters())
+            return Filter::make_none();
+        Vector<Filter::FilterOperation> operations;
+        operations.ensure_capacity(m_filter.operations.length);
+        for_each_operation([&](auto operation) { operations.unchecked_append(move(operation)); });
+        auto filter_list = retained_style_value(m_filter.filter_list);
+        RefPtr<StyleValueList const> list = &filter_list->as_value_list();
+        return Filter::create_lowered(move(list), move(operations));
+    }
+
+private:
+    static RefPtr<StyleValue const> retained_style_value(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
+    {
+        if (!handle.pointer)
+            return nullptr;
+        return StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
+            static_cast<StyleValueFFI::StyleValueData const*>(handle.pointer)));
+    }
+
+    static Utf16String url_fragment(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
+    {
+        auto value = retained_style_value(handle);
+        VERIFY(value);
+        auto url = value->as_url().url();
+        auto const& url_string = url.url();
+        if (url_string.is_empty() || !url_string.starts_with('#'))
+            return {};
+        auto fragment = url_string.substring_from_byte_offset(1);
+        if (fragment.is_error())
+            return {};
+        return Utf16String::from_utf8(fragment.release_value());
+    }
+
+    ComputedValuesFFI::ComputedFilter const& m_filter;
+};
 
 class ComputedStyleWorkingSet;
 class ComputedStyleRecordView;
@@ -293,8 +377,6 @@ private:
     Vector<WillChangeEntry> m_value;
 };
 
-using CursorData = Variant<NonnullRefPtr<CursorStyleValue const>, CursorPredefined>;
-
 struct OverflowClipMarginSide {
     Optional<BackgroundBox> visual_box {};
     CSSPixels offset { 0 };
@@ -357,7 +439,6 @@ public:
     static ColorInterpolation color_interpolation_filters() { return ColorInterpolation::Linearrgb; }
     static PreferredColorScheme color_scheme() { return PreferredColorScheme::Auto; }
     static ContentVisibility content_visibility() { return ContentVisibility::Visible; }
-    static CursorData cursor() { return { CursorPredefined::Auto }; }
     static WhiteSpaceCollapse white_space_collapse() { return WhiteSpaceCollapse::Collapse; }
     static WordBreak word_break() { return WordBreak::Normal; }
     static FontVariantEmoji font_variant_emoji() { return FontVariantEmoji::Normal; }
@@ -838,17 +919,6 @@ struct TextDecorationThickness {
     bool operator==(TextDecorationThickness const&) const = default;
 };
 
-struct ColorOrAuto {
-    struct Auto {
-        bool operator==(Auto const&) const = default;
-    };
-
-    Variant<Auto, Color> computed_value { Auto {} };
-    Color used_value { Color::Black };
-
-    bool operator==(ColorOrAuto const&) const = default;
-};
-
 struct TextUnderlineOffset {
     struct Auto {
         bool operator==(Auto const&) const = default;
@@ -1173,19 +1243,19 @@ public:
             value.has_computed_ratio ? Optional<Ratio> { Ratio { value.computed_ratio_numerator, value.computed_ratio_denominator } } : OptionalNone {},
         };
     }
-    Vector<Utf16FlyString> const& anchor_names() const { return m_noninherited.anchor->anchor_names; }
-    AnchorScopeData const& anchor_scope() const { return m_noninherited.anchor->anchor_scope; }
-    Vector<ComputedAnimationName> const& animation_names() const { return m_noninherited.animation->animation_names; }
-    Vector<AnimationComposition> const& animation_compositions() const { return m_noninherited.animation->animation_compositions; }
-    Vector<Time> const& animation_delays() const { return m_noninherited.animation->animation_delays; }
-    Vector<AnimationDirection> const& animation_directions() const { return m_noninherited.animation->animation_directions; }
-    Vector<Optional<Time>> const& animation_durations() const { return m_noninherited.animation->animation_durations; }
-    Vector<AnimationFillMode> const& animation_fill_modes() const { return m_noninherited.animation->animation_fill_modes; }
-    Vector<double> const& animation_iteration_counts() const { return m_noninherited.animation->animation_iteration_counts; }
-    Vector<AnimationPlayState> const& animation_play_states() const { return m_noninherited.animation->animation_play_states; }
-    Vector<AnimationTimelineData> const& animation_timelines() const { return m_noninherited.animation->animation_timelines; }
-    Vector<EasingFunction> const& animation_timing_functions() const { return m_noninherited.animation->animation_timing_functions; }
-    StyleValueVector const& animation_timing_function_style_values() const { return m_noninherited.animation->animation_timing_function_style_values; }
+    ReadonlySpan<Utf16FlyString> anchor_names() const { return m_noninherited.anchor->anchor_names_span(); }
+    AnchorScopeData anchor_scope() const { return m_noninherited.anchor->anchor_scope_value(); }
+    Vector<ComputedAnimationName> animation_names() const { return m_noninherited.animation->animation_names_value(); }
+    Vector<AnimationComposition> animation_compositions() const { return m_noninherited.animation->animation_compositions_value(); }
+    Vector<Time> animation_delays() const { return m_noninherited.animation->animation_delays_value(); }
+    Vector<AnimationDirection> animation_directions() const { return m_noninherited.animation->animation_directions_value(); }
+    Vector<Optional<Time>> animation_durations() const { return m_noninherited.animation->animation_durations_value(); }
+    Vector<AnimationFillMode> animation_fill_modes() const { return m_noninherited.animation->animation_fill_modes_value(); }
+    Vector<double> animation_iteration_counts() const { return m_noninherited.animation->animation_iteration_counts_value(); }
+    Vector<AnimationPlayState> animation_play_states() const { return m_noninherited.animation->animation_play_states_value(); }
+    Vector<AnimationTimelineData> animation_timelines() const { return m_noninherited.animation->animation_timelines_value(); }
+    Vector<EasingFunction> animation_timing_functions() const { return m_noninherited.animation->animation_timing_functions_value(); }
+    StyleValueVector animation_timing_function_style_values() const { return m_noninherited.animation->animation_timing_function_style_values_value(); }
     BoxSizing box_sizing_for_aspect_ratio() const
     {
         // https://drafts.csswg.org/css-sizing-4/#aspect-ratio
@@ -1199,23 +1269,23 @@ public:
     CSSPixels border_spacing_horizontal() const { return CSSPixels::from_raw(m_inherited.table->border_spacing_horizontal); }
     CSSPixels border_spacing_vertical() const { return CSSPixels::from_raw(m_inherited.table->border_spacing_vertical); }
     CaptionSide caption_side() const { return static_cast<CaptionSide>(m_inherited.table->caption_side); }
-    Color caret_color() const { return m_inherited.ui->caret_color.used_value; }
+    Color caret_color() const { return m_inherited.ui->caret_color_value(); }
     Clear clear() const { return static_cast<Clear>(m_noninherited.box->clear); }
-    Clip clip() const { return m_noninherited.effects->clip; }
-    ColorInterpolation color_interpolation() const { return m_inherited.svg->color_interpolation; }
-    ColorInterpolation color_interpolation_filters() const { return m_inherited.svg->color_interpolation_filters; }
-    PreferredColorScheme color_scheme() const { return m_inherited.ui->color_scheme; }
-    Vector<Utf16FlyString> const& color_schemes() const { return m_inherited.ui->color_schemes; }
+    Clip clip() const { return m_noninherited.effects->clip_value(); }
+    ColorInterpolation color_interpolation() const { return m_inherited.svg->color_interpolation_value(); }
+    ColorInterpolation color_interpolation_filters() const { return m_inherited.svg->color_interpolation_filters_value(); }
+    PreferredColorScheme color_scheme() const { return m_inherited.ui->color_scheme_value(); }
+    ReadonlySpan<Utf16FlyString> color_schemes() const { return m_inherited.ui->color_schemes_span(); }
     bool color_scheme_only() const { return m_inherited.ui->color_scheme_only; }
     ContentVisibility content_visibility() const { return static_cast<ContentVisibility>(m_inherited.box->content_visibility); }
-    Vector<CursorData> const& cursor() const { return m_inherited.ui->cursor; }
+    ReadonlySpan<ComputedValuesFFI::ComputedCursor> cursor() const { return m_inherited.ui->cursor_span(); }
     Optional<ContentData> const& content() const { return m_noninherited.content_data->content; }
     ComputedContentData const& computed_content() const { return m_noninherited.content_data->computed_content; }
     ContentDataAndQuoteNestingLevel resolved_content(DOM::AbstractElement&, u32 initial_quote_nesting_level) const;
     Vector<CounterData, 0> const& counter_increment() const { return m_noninherited.content_data->counter_increment; }
     Vector<CounterData, 0> const& counter_reset() const { return m_noninherited.content_data->counter_reset; }
     Vector<CounterData, 0> const& counter_set() const { return m_noninherited.content_data->counter_set; }
-    PointerEvents pointer_events() const { return m_inherited.ui->pointer_events; }
+    PointerEvents pointer_events() const { return m_inherited.ui->pointer_events_value(); }
     Display display() const { return display_from_ffi_display(m_noninherited.box->display); }
     Display display_before_box_type_transformation() const { return display_from_ffi_display(m_noninherited.box->display_before_box_type_transformation); }
     Optional<int> z_index() const
@@ -1228,51 +1298,51 @@ public:
     {
         if (m_inherited.text->tab_size_is_number)
             return m_inherited.text->tab_size_number;
-        return m_inherited.text->tab_size_length;
+        return m_inherited.text->tab_size_length_value();
     }
-    TextAlign text_align() const { return m_inherited.text->text_align; }
-    TextJustify text_justify() const { return m_inherited.text->text_justify; }
-    TextIndentData const& text_indent() const { return m_inherited.text->text_indent; }
-    TextWrapMode text_wrap_mode() const { return m_inherited.text->text_wrap_mode; }
-    TextWrapStyle text_wrap_style() const { return m_inherited.text->text_wrap_style; }
-    CSSPixels text_underline_offset() const { return m_inherited.text->text_underline_offset.used_value; }
-    TextUnderlinePosition text_underline_position() const { return m_inherited.text->text_underline_position; }
-    Vector<TextDecorationLine> const& text_decoration_line() const { return m_noninherited.text_reset->text_decoration_line; }
-    TextDecorationThickness const& text_decoration_thickness() const { return m_noninherited.text_reset->text_decoration_thickness; }
-    TextDecorationSkipInk text_decoration_skip_ink() const { return m_inherited.text->text_decoration_skip_ink; }
-    TextDecorationStyle text_decoration_style() const { return m_noninherited.text_reset->text_decoration_style; }
-    Color text_decoration_color() const { return m_noninherited.text_reset->text_decoration_color; }
-    TextTransform text_transform() const { return m_inherited.text->text_transform; }
+    TextAlign text_align() const { return m_inherited.text->text_align_value(); }
+    TextJustify text_justify() const { return m_inherited.text->text_justify_value(); }
+    TextIndentData text_indent() const { return m_inherited.text->text_indent_value(); }
+    TextWrapMode text_wrap_mode() const { return m_inherited.text->text_wrap_mode_value(); }
+    TextWrapStyle text_wrap_style() const { return m_inherited.text->text_wrap_style_value(); }
+    CSSPixels text_underline_offset() const { return m_inherited.text->text_underline_offset_value(); }
+    TextUnderlinePosition text_underline_position() const { return m_inherited.text->text_underline_position_value(); }
+    ReadonlySpan<TextDecorationLine> text_decoration_line() const { return m_noninherited.text_reset->decoration_lines(); }
+    TextDecorationThickness text_decoration_thickness() const { return m_noninherited.text_reset->decoration_thickness(); }
+    TextDecorationSkipInk text_decoration_skip_ink() const { return m_inherited.text->text_decoration_skip_ink_value(); }
+    TextDecorationStyle text_decoration_style() const { return static_cast<TextDecorationStyle>(m_noninherited.text_reset->text_decoration_style); }
+    Color text_decoration_color() const { return Color::from_bgra(m_noninherited.text_reset->text_decoration_color); }
+    TextTransform text_transform() const { return m_inherited.text->text_transform_value(); }
     TextOverflow text_overflow() const { return static_cast<TextOverflow>(m_noninherited.box->text_overflow); }
-    Vector<ShadowData> const& text_shadow() const { return m_inherited.text->text_shadow; }
+    ReadonlySpan<ShadowData> text_shadow() const { return m_inherited.text->text_shadow_span(); }
     Positioning position() const { return static_cast<Positioning>(m_noninherited.box->position); }
-    PositionAnchor const& position_anchor_value() const { return m_noninherited.anchor->position_anchor; }
-    Optional<Utf16FlyString> const& position_anchor() const { return m_noninherited.anchor->position_anchor.name; }
-    PositionAreaData const& position_area() const { return m_noninherited.anchor->position_area; }
-    Vector<PositionTryFallbackData> const& position_try_fallbacks() const { return m_noninherited.anchor->position_try_fallbacks; }
-    Optional<TryOrder> position_try_order() const { return m_noninherited.anchor->position_try_order; }
-    PositionVisibilityData const& position_visibility() const { return m_noninherited.anchor->position_visibility; }
-    Vector<Optional<Utf16FlyString>> const& scroll_timeline_names() const { return m_noninherited.animation->scroll_timeline_names; }
-    Vector<Axis> const& scroll_timeline_axes() const { return m_noninherited.animation->scroll_timeline_axes; }
-    TimelineScopeData const& timeline_scope() const { return m_noninherited.animation->timeline_scope; }
-    Vector<Optional<Utf16FlyString>> const& view_timeline_names() const { return m_noninherited.animation->view_timeline_names; }
-    Vector<Axis> const& view_timeline_axes() const { return m_noninherited.animation->view_timeline_axes; }
-    Vector<ViewTimelineInsetData> const& view_timeline_insets() const { return m_noninherited.animation->view_timeline_insets; }
-    Vector<Optional<Utf16FlyString>> const& transition_properties() const { return m_noninherited.animation->transition_properties; }
-    Vector<Time> const& transition_durations() const { return m_noninherited.animation->transition_durations; }
-    Vector<EasingFunction> const& transition_timing_functions() const { return m_noninherited.animation->transition_timing_functions; }
-    StyleValueVector const& transition_timing_function_style_values() const { return m_noninherited.animation->transition_timing_function_style_values; }
-    Vector<Time> const& transition_delays() const { return m_noninherited.animation->transition_delays; }
-    Vector<TransitionBehavior> const& transition_behaviors() const { return m_noninherited.animation->transition_behaviors; }
-    WhiteSpaceCollapse white_space_collapse() const { return m_inherited.text->white_space_collapse; }
-    WhiteSpaceTrimData white_space_trim() const { return m_noninherited.text_reset->white_space_trim; }
-    WordBreak word_break() const { return m_inherited.text->word_break; }
-    OverflowWrap overflow_wrap() const { return m_inherited.text->overflow_wrap; }
+    PositionAnchor position_anchor_value() const { return m_noninherited.anchor->position_anchor_value(); }
+    Optional<Utf16FlyString> position_anchor() const { return m_noninherited.anchor->position_anchor_value().name; }
+    PositionAreaData position_area() const { return m_noninherited.anchor->position_area_value(); }
+    Vector<PositionTryFallbackData> position_try_fallbacks() const { return m_noninherited.anchor->position_try_fallbacks_value(); }
+    Optional<TryOrder> position_try_order() const { return m_noninherited.anchor->position_try_order_value(); }
+    PositionVisibilityData position_visibility() const { return m_noninherited.anchor->position_visibility_value(); }
+    Vector<Optional<Utf16FlyString>> scroll_timeline_names() const { return m_noninherited.animation->scroll_timeline_names_value(); }
+    Vector<Axis> scroll_timeline_axes() const { return m_noninherited.animation->scroll_timeline_axes_value(); }
+    TimelineScopeData timeline_scope() const { return m_noninherited.animation->timeline_scope_value(); }
+    Vector<Optional<Utf16FlyString>> view_timeline_names() const { return m_noninherited.animation->view_timeline_names_value(); }
+    Vector<Axis> view_timeline_axes() const { return m_noninherited.animation->view_timeline_axes_value(); }
+    Vector<ViewTimelineInsetData> view_timeline_insets() const { return m_noninherited.animation->view_timeline_insets_value(); }
+    Vector<Optional<Utf16FlyString>> transition_properties() const { return m_noninherited.animation->transition_properties_value(); }
+    Vector<Time> transition_durations() const { return m_noninherited.animation->transition_durations_value(); }
+    Vector<EasingFunction> transition_timing_functions() const { return m_noninherited.animation->transition_timing_functions_value(); }
+    StyleValueVector transition_timing_function_style_values() const { return m_noninherited.animation->transition_timing_function_style_values_value(); }
+    Vector<Time> transition_delays() const { return m_noninherited.animation->transition_delays_value(); }
+    Vector<TransitionBehavior> transition_behaviors() const { return m_noninherited.animation->transition_behaviors_value(); }
+    WhiteSpaceCollapse white_space_collapse() const { return m_inherited.text->white_space_collapse_value(); }
+    WhiteSpaceTrimData white_space_trim() const { return m_noninherited.text_reset->white_space_trim(); }
+    WordBreak word_break() const { return m_inherited.text->word_break_value(); }
+    OverflowWrap overflow_wrap() const { return m_inherited.text->overflow_wrap_value(); }
     u64 orphans() const { return m_inherited.text->orphans; }
     u64 widows() const { return m_inherited.text->widows; }
     FontVariantEmoji font_variant_emoji() const { return m_inherited.font->font_variant_emoji; }
-    CSSPixels const& word_spacing() const { return m_inherited.text->word_spacing; }
-    CSSPixels letter_spacing() const { return m_inherited.text->letter_spacing; }
+    CSSPixels word_spacing() const { return m_inherited.text->word_spacing_value(); }
+    CSSPixels letter_spacing() const { return m_inherited.text->letter_spacing_value(); }
     FlexDirection flex_direction() const { return static_cast<FlexDirection>(m_noninherited.alignment->flex_direction); }
     FlexWrap flex_wrap() const { return static_cast<FlexWrap>(m_noninherited.alignment->flex_wrap); }
     FlexBasis flex_basis() const
@@ -1286,9 +1356,7 @@ public:
     i32 order() const { return m_noninherited.alignment->order; }
     Optional<Color> accent_color() const
     {
-        if (m_inherited.ui->accent_color.computed_value.has<ColorOrAuto::Auto>())
-            return {};
-        return m_inherited.ui->accent_color.used_value;
+        return m_inherited.ui->accent_color_value();
     }
     AlignContent align_content() const { return static_cast<AlignContent>(m_noninherited.alignment->align_content); }
     AlignItems align_items() const { return static_cast<AlignItems>(m_noninherited.alignment->align_items); }
@@ -1301,9 +1369,9 @@ public:
     JustifyContent justify_content() const { return static_cast<JustifyContent>(m_noninherited.alignment->justify_content); }
     JustifySelf justify_self() const { return static_cast<JustifySelf>(m_noninherited.alignment->justify_self); }
     JustifyItems justify_items() const { return static_cast<JustifyItems>(m_noninherited.alignment->justify_items); }
-    Filter const& backdrop_filter() const { return m_noninherited.effects->backdrop_filter; }
-    Filter const& filter() const { return m_noninherited.effects->filter; }
-    Vector<ShadowData> const& box_shadow() const { return m_noninherited.effects->box_shadow; }
+    ComputedFilterView backdrop_filter() const { return m_noninherited.effects->backdrop_filter_value(); }
+    ComputedFilterView filter() const { return m_noninherited.effects->filter_value(); }
+    ReadonlySpan<ShadowData> box_shadow() const { return m_noninherited.effects->box_shadow_span(); }
     BoxSizing box_sizing() const { return static_cast<BoxSizing>(m_noninherited.box->box_sizing); }
     Size const& width() const { return Size::view(m_noninherited.sizing->width); }
     Size const& min_width() const { return Size::view(m_noninherited.sizing->min_width); }
@@ -1338,7 +1406,7 @@ public:
     ObjectFit object_fit() const { return m_noninherited.misc->object_fit; }
     Position object_position() const { return m_noninherited.misc->object_position; }
     Direction direction() const { return static_cast<Direction>(m_inherited.box->direction); }
-    Optional<BaselineMetric> dominant_baseline() const { return m_inherited.svg->dominant_baseline; }
+    Optional<BaselineMetric> dominant_baseline() const { return m_inherited.svg->dominant_baseline_value(); }
     UnicodeBidi unicode_bidi() const { return static_cast<UnicodeBidi>(m_noninherited.box->unicode_bidi); }
     WritingMode writing_mode() const { return static_cast<WritingMode>(m_inherited.box->writing_mode); }
 
@@ -1371,7 +1439,7 @@ public:
     }
 
     UserSelect user_select() const { return m_noninherited.misc->user_select; }
-    Isolation isolation() const { return m_noninherited.effects->isolation; }
+    Isolation isolation() const { return m_noninherited.effects->isolation_value(); }
     Containment contain() const
     {
         auto const& box = *m_noninherited.box;
@@ -1401,10 +1469,10 @@ public:
             .is_scroll_state_container = box.is_scroll_state_container,
         };
     }
-    MixBlendMode mix_blend_mode() const { return m_noninherited.effects->mix_blend_mode; }
+    MixBlendMode mix_blend_mode() const { return m_noninherited.effects->mix_blend_mode_value(); }
     Optional<Utf16FlyString> view_transition_name() const { return m_noninherited.misc->view_transition_name; }
     TouchActionData touch_action() const { return m_noninherited.misc->touch_action; }
-    ShapeRendering shape_rendering() const { return m_inherited.svg->shape_rendering; }
+    ShapeRendering shape_rendering() const { return m_inherited.svg->shape_rendering_value(); }
 
     LengthBox inset() const { return length_box(m_noninherited.surround->inset); }
     bool has_anchor_inset(PropertyID property_id) const
@@ -1449,7 +1517,7 @@ public:
     Overflow overflow_x() const { return static_cast<Overflow>(m_noninherited.box->overflow_x); }
     Overflow overflow_y() const { return static_cast<Overflow>(m_noninherited.box->overflow_y); }
 
-    Color color() const { return m_inherited.text->color; }
+    Color color() const { return m_inherited.text->color_value(); }
     Color background_color() const { return m_noninherited.background->background_color; }
     RefPtr<StyleValue const> background_color_style_value() const;
     BackgroundBox background_color_clip() const { return m_noninherited.background->background_color_clip; }
@@ -1458,36 +1526,36 @@ public:
     Vector<Position> const& mask_positions() const { return m_noninherited.mask_data->mask_positions; }
     BorderImageData const& border_image() const { return m_noninherited.border->border_image; }
 
-    Color webkit_text_fill_color() const { return m_inherited.text->webkit_text_fill_color; }
+    Color webkit_text_fill_color() const { return m_inherited.text->webkit_text_fill_color_value(); }
     bool webkit_text_fill_color_is_current_color() const { return m_inherited.text->webkit_text_fill_color_is_current_color; }
 
     ListStyleType const& list_style_type() const { return m_inherited.list->list_style_type; }
     ListStylePosition list_style_position() const { return m_inherited.list->list_style_position; }
     AbstractImageStyleValue const* list_style_image() const { return m_inherited.list->list_style_image.ptr(); }
 
-    Optional<SVGPaint> const& fill() const { return m_inherited.svg->fill; }
-    FillRule fill_rule() const { return m_inherited.svg->fill_rule; }
-    Optional<SVGPaint> const& stroke() const { return m_inherited.svg->stroke; }
+    Optional<SVGPaint> fill() const { return m_inherited.svg->fill_value(); }
+    FillRule fill_rule() const { return m_inherited.svg->fill_rule_value(); }
+    Optional<SVGPaint> stroke() const { return m_inherited.svg->stroke_value(); }
     float fill_opacity() const { return m_inherited.svg->fill_opacity; }
-    Vector<Variant<LengthPercentage, float>> const& stroke_dasharray() const { return m_inherited.svg->stroke_dasharray; }
-    LengthPercentage const& stroke_dashoffset() const { return m_inherited.svg->stroke_dashoffset; }
-    StrokeLinecap stroke_linecap() const { return m_inherited.svg->stroke_linecap; }
-    StrokeLinejoin stroke_linejoin() const { return m_inherited.svg->stroke_linejoin; }
+    ReadonlySpan<ComputedValuesFFI::ComputedSvgDash> stroke_dasharray() const { return m_inherited.svg->stroke_dasharray_span(); }
+    LengthPercentage const& stroke_dashoffset() const { return m_inherited.svg->stroke_dashoffset_value(); }
+    StrokeLinecap stroke_linecap() const { return m_inherited.svg->stroke_linecap_value(); }
+    StrokeLinejoin stroke_linejoin() const { return m_inherited.svg->stroke_linejoin_value(); }
     VectorEffect vector_effect() const { return static_cast<VectorEffect>(m_noninherited.svg_reset->vector_effect); }
     double stroke_miterlimit() const { return m_inherited.svg->stroke_miterlimit; }
     float stroke_opacity() const { return m_inherited.svg->stroke_opacity; }
-    LengthPercentage const& stroke_width() const { return m_inherited.svg->stroke_width; }
+    LengthPercentage const& stroke_width() const { return m_inherited.svg->stroke_width_value(); }
     Color stop_color() const { return Gfx::Color::from_bgra(m_noninherited.svg_reset->stop_color); }
     float stop_opacity() const { return m_noninherited.svg_reset->stop_opacity; }
-    TextAnchor text_anchor() const { return m_inherited.svg->text_anchor; }
+    TextAnchor text_anchor() const { return m_inherited.svg->text_anchor_value(); }
     RefPtr<AbstractImageStyleValue const> mask_image() const { return m_noninherited.mask_data->mask_image; }
     Optional<MaskReference> const& mask() const { return m_noninherited.mask_data->mask; }
     MaskType mask_type() const { return m_noninherited.mask_data->mask_type; }
     Optional<ClipPathReference> const& clip_path() const { return m_noninherited.mask_data->clip_path; }
-    ClipRule clip_rule() const { return m_inherited.svg->clip_rule; }
+    ClipRule clip_rule() const { return m_inherited.svg->clip_rule_value(); }
     Color flood_color() const { return Gfx::Color::from_bgra(m_noninherited.svg_reset->flood_color); }
     float flood_opacity() const { return m_noninherited.svg_reset->flood_opacity; }
-    PaintOrderList paint_order() const { return m_inherited.svg->paint_order; }
+    PaintOrderList paint_order() const { return m_inherited.svg->paint_order_value(); }
     u8 paint_order_serialization_length() const { return m_inherited.svg->paint_order_serialization_length; }
     bool paint_order_is_normal() const { return m_inherited.svg->paint_order_is_normal; }
 
@@ -1505,17 +1573,30 @@ public:
     LengthPercentage const& x() const { return LengthPercentage::view(m_noninherited.svg_reset->x); }
     LengthPercentage const& y() const { return LengthPercentage::view(m_noninherited.svg_reset->y); }
 
-    Vector<NonnullRefPtr<TransformationStyleValue const>> const& transformations() const { return m_noninherited.transform->transformations; }
-    Vector<ResolvedTransform> const& resolved_transform_list() const { return m_noninherited.transform->resolved_transform_list; }
-    TransformBox const& transform_box() const { return m_noninherited.transform->transform_box; }
-    TransformOrigin const& transform_origin() const { return m_noninherited.transform->transform_origin; }
-    TransformStyle const& transform_style() const { return m_noninherited.transform->transform_style; }
-    BackfaceVisibility const& backface_visibility() const { return m_noninherited.transform->backface_visibility; }
-    RefPtr<TransformationStyleValue const> const& rotate() const { return m_noninherited.transform->rotate; }
-    RefPtr<TransformationStyleValue const> const& translate() const { return m_noninherited.transform->translate; }
-    RefPtr<TransformationStyleValue const> const& scale() const { return m_noninherited.transform->scale; }
-    Optional<CSSPixels> const& perspective() const { return m_noninherited.transform->perspective; }
-    Position const& perspective_origin() const { return m_noninherited.transform->perspective_origin; }
+    bool has_transformations() const { return m_noninherited.transform->has_transformations(); }
+    template<typename Callback>
+    void for_each_transformation(Callback callback) const
+    {
+        m_noninherited.transform->for_each_transformation(callback);
+    }
+    bool has_resolved_transforms() const { return m_noninherited.transform->has_resolved_transforms(); }
+    template<typename Callback>
+    void for_each_resolved_transform(Callback callback) const
+    {
+        m_noninherited.transform->for_each_resolved_transform(callback);
+    }
+    TransformBox transform_box() const { return m_noninherited.transform->transform_box_value(); }
+    TransformOrigin transform_origin() const { return m_noninherited.transform->transform_origin_value(); }
+    TransformStyle transform_style() const { return m_noninherited.transform->transform_style_value(); }
+    BackfaceVisibility backface_visibility() const { return m_noninherited.transform->backface_visibility_value(); }
+    RefPtr<TransformationStyleValue const> rotate() const { return m_noninherited.transform->rotate_value(); }
+    RefPtr<TransformationStyleValue const> translate() const { return m_noninherited.transform->translate_value(); }
+    RefPtr<TransformationStyleValue const> scale() const { return m_noninherited.transform->scale_value(); }
+    bool has_rotate() const { return rotate() != nullptr; }
+    bool has_translate() const { return translate() != nullptr; }
+    bool has_scale() const { return scale() != nullptr; }
+    Optional<CSSPixels> perspective() const { return m_noninherited.transform->perspective_value(); }
+    Position perspective_origin() const { return m_noninherited.transform->perspective_origin_value(); }
 
     Gfx::FontCascadeList const& font_list() const { return *m_inherited.font->font_list; }
     Vector<ComputedFontFamily> const& font_families() const { return m_inherited.font->font_families; }
@@ -1545,7 +1626,7 @@ public:
     int math_depth() const { return m_inherited.font->math_depth; }
 
     ScrollBehavior scroll_behavior() const { return m_noninherited.misc->scroll_behavior; }
-    ScrollbarColorData scrollbar_color() const { return m_inherited.ui->scrollbar_color; }
+    ScrollbarColorData scrollbar_color() const { return m_inherited.ui->scrollbar_color_value(); }
     ScrollbarGutter scrollbar_gutter() const { return m_noninherited.misc->scrollbar_gutter; }
     ScrollbarWidth scrollbar_width() const { return m_noninherited.misc->scrollbar_width; }
     Resize resize() const { return static_cast<Resize>(m_noninherited.box->resize); }
@@ -1652,84 +1733,151 @@ public:
         }
     };
 
-    struct InheritedUIValues {
+    struct InheritedUIValues : ComputedValuesFFI::InheritedUIValues {
         static constexpr size_t style_group_index = to_underlying(StyleGroupIndex::InheritedUIValues);
-        ColorOrAuto caret_color;
-        ColorOrAuto accent_color;
-        Vector<CursorData> cursor { InitialValues::cursor() };
-        PointerEvents pointer_events { InitialValues::pointer_events() };
-        ScrollbarColorData scrollbar_color { InitialValues::scrollbar_color() };
-        PreferredColorScheme color_scheme { InitialValues::color_scheme() };
-        Vector<Utf16FlyString> color_schemes;
-        bool color_scheme_only { false };
+        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::InheritedUI;
 
-        bool operator==(InheritedUIValues const&) const = default;
+        Color caret_color_value() const { return Color::from_bgra(caret_color.used_color); }
+        Optional<Color> accent_color_value() const
+        {
+            if (accent_color.is_auto)
+                return {};
+            return Color::from_bgra(accent_color.used_color);
+        }
+        ReadonlySpan<ComputedValuesFFI::ComputedCursor> cursor_span() const { return { cursor.pointer, cursor.length }; }
+        static RefPtr<CursorStyleValue const> cursor_style_value(ComputedValuesFFI::ComputedCursor const& value)
+        {
+            if (!value.is_cursor_value)
+                return nullptr;
+            auto style_value = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
+                static_cast<StyleValueFFI::StyleValueData const*>(value.cursor.pointer)));
+            return style_value->as_cursor();
+        }
+        PointerEvents pointer_events_value() const { return static_cast<PointerEvents>(pointer_events); }
+        ScrollbarColorData scrollbar_color_value() const
+        {
+            return {
+                .thumb_color = Color::from_bgra(scrollbar_color.thumb_color),
+                .track_color = Color::from_bgra(scrollbar_color.track_color),
+                .is_auto = scrollbar_color.is_auto,
+            };
+        }
+        PreferredColorScheme color_scheme_value() const { return static_cast<PreferredColorScheme>(color_scheme); }
+        ReadonlySpan<Utf16FlyString> color_schemes_span() const
+        {
+            static_assert(sizeof(Utf16FlyString) == sizeof(size_t));
+            static_assert(alignof(Utf16FlyString) == alignof(size_t));
+            return { reinterpret_cast<Utf16FlyString const*>(color_schemes.raw_pointer), color_schemes.length };
+        }
+
+        bool operator==(InheritedUIValues const& other) const
+        {
+            return ComputedValuesFFI::rust_style_group_payloads_equal(style_group_index, this, &other);
+        }
     };
 
-    struct InheritedSVGValues {
+    struct InheritedSVGValues : ComputedValuesFFI::InheritedSVGValues {
         static constexpr size_t style_group_index = to_underlying(StyleGroupIndex::InheritedSVGValues);
-        Optional<SVGPaint> fill;
-        Optional<SVGPaint> stroke;
-        FillRule fill_rule { InitialValues::fill_rule() };
-        ClipRule clip_rule { InitialValues::clip_rule() };
-        float fill_opacity { InitialValues::fill_opacity() };
-        float stroke_opacity { InitialValues::stroke_opacity() };
-        StrokeLinecap stroke_linecap { InitialValues::stroke_linecap() };
-        StrokeLinejoin stroke_linejoin { InitialValues::stroke_linejoin() };
-        Vector<Variant<LengthPercentage, float>> stroke_dasharray;
-        LengthPercentage stroke_dashoffset { InitialValues::stroke_dashoffset() };
-        double stroke_miterlimit { InitialValues::stroke_miterlimit() };
-        LengthPercentage stroke_width { InitialValues::stroke_width() };
-        ColorInterpolation color_interpolation { InitialValues::color_interpolation() };
-        ColorInterpolation color_interpolation_filters { InitialValues::color_interpolation_filters() };
-        PaintOrderList paint_order { InitialValues::paint_order() };
-        u8 paint_order_serialization_length { 0 };
-        bool paint_order_is_normal { true };
-        TextAnchor text_anchor { InitialValues::text_anchor() };
-        Optional<BaselineMetric> dominant_baseline { InitialValues::dominant_baseline() };
-        ShapeRendering shape_rendering { InitialValues::shape_rendering() };
+        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::InheritedSVG;
 
-        static InheritedSVGValues make_default_payload_value();
+        static Optional<SVGPaint> paint_value(ComputedValuesFFI::ComputedSvgPaint const& paint)
+        {
+            switch (paint.kind) {
+            case 0:
+                return {};
+            case 1:
+                return SVGPaint { Color::from_bgra(paint.color), paint.color_is_currentcolor };
+            case 2: {
+                auto style_value = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
+                    static_cast<StyleValueFFI::StyleValueData const*>(paint.url.pointer)));
+                Optional<Color> fallback_color;
+                if (paint.has_color)
+                    fallback_color = Color::from_bgra(paint.color);
+                return SVGPaint { style_value->as_url().url(), fallback_color, paint.color_is_currentcolor };
+            }
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }
 
-        bool operator==(InheritedSVGValues const&) const = default;
+        Optional<SVGPaint> fill_value() const { return paint_value(fill); }
+        Optional<SVGPaint> stroke_value() const { return paint_value(stroke); }
+        FillRule fill_rule_value() const { return static_cast<FillRule>(fill_rule); }
+        ClipRule clip_rule_value() const { return static_cast<ClipRule>(clip_rule); }
+        StrokeLinecap stroke_linecap_value() const { return static_cast<StrokeLinecap>(stroke_linecap); }
+        StrokeLinejoin stroke_linejoin_value() const { return static_cast<StrokeLinejoin>(stroke_linejoin); }
+        ColorInterpolation color_interpolation_value() const { return static_cast<ColorInterpolation>(color_interpolation); }
+        ColorInterpolation color_interpolation_filters_value() const { return static_cast<ColorInterpolation>(color_interpolation_filters); }
+        TextAnchor text_anchor_value() const { return static_cast<TextAnchor>(text_anchor); }
+        ShapeRendering shape_rendering_value() const { return static_cast<ShapeRendering>(shape_rendering); }
+        ReadonlySpan<ComputedValuesFFI::ComputedSvgDash> stroke_dasharray_span() const { return { stroke_dasharray.pointer, stroke_dasharray.length }; }
+        LengthPercentage const& stroke_dashoffset_value() const { return LengthPercentage::view(stroke_dashoffset); }
+        LengthPercentage const& stroke_width_value() const { return LengthPercentage::view(stroke_width); }
+        PaintOrderList paint_order_value() const
+        {
+            return {
+                static_cast<PaintOrder>(paint_order[0]),
+                static_cast<PaintOrder>(paint_order[1]),
+                static_cast<PaintOrder>(paint_order[2]),
+            };
+        }
+        Optional<BaselineMetric> dominant_baseline_value() const
+        {
+            if (!has_dominant_baseline)
+                return {};
+            return static_cast<BaselineMetric>(dominant_baseline);
+        }
+
+        bool operator==(InheritedSVGValues const& other) const
+        {
+            return ComputedValuesFFI::rust_style_group_payloads_equal(style_group_index, this, &other);
+        }
     };
 
-    // The group's payload lifecycle stays in C++, but the members up to and
-    // including text_indent mirror the Rust InheritedTextLayoutFacts prefix,
-    // pinned by static asserts in ComputedValues.cpp, so layout reads them as
-    // typed fields. The computed tab-size is stored as an explicit
-    // length-or-number triple because a Variant has no FFI-stable layout.
-    struct InheritedTextValues {
+    struct InheritedTextValues : ComputedValuesFFI::InheritedTextValues {
         static constexpr size_t style_group_index = to_underlying(StyleGroupIndex::InheritedTextValues);
-        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::CppWithInheritedTextFacts;
-        TextAlign text_align { InitialValues::text_align() };
-        TextJustify text_justify { InitialValues::text_justify() };
-        WhiteSpaceCollapse white_space_collapse { InitialValues::white_space_collapse() };
-        TextWrapMode text_wrap_mode { InitialValues::text_wrap_mode() };
-        WordBreak word_break { InitialValues::word_break() };
-        bool tab_size_is_number { true };
-        CSSPixels letter_spacing { InitialValues::letter_spacing() };
-        CSSPixels word_spacing { InitialValues::word_spacing() };
-        CSSPixels tab_size_length { 0 };
-        double tab_size_number { 8 };
-        TextIndentData text_indent { InitialValues::text_indent() };
-        Color color { InitialValues::color() };
-        RustStyleValueHandle color_style_value;
-        Color webkit_text_fill_color { InitialValues::color() };
-        bool webkit_text_fill_color_is_current_color { true };
-        Vector<ShadowData> text_shadow;
-        TextTransform text_transform { InitialValues::text_transform() };
-        TextWrapStyle text_wrap_style { InitialValues::text_wrap_style() };
-        TextDecorationSkipInk text_decoration_skip_ink { InitialValues::text_decoration_skip_ink() };
-        TextUnderlinePosition text_underline_position { InitialValues::text_underline_position() };
-        TextUnderlineOffset text_underline_offset;
-        OverflowWrap overflow_wrap { InitialValues::overflow_wrap() };
-        RustStyleValueHandle word_spacing_style_value;
-        RustStyleValueHandle letter_spacing_style_value;
-        u64 orphans { InitialValues::orphans() };
-        u64 widows { InitialValues::widows() };
+        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::InheritedText;
 
-        bool operator==(InheritedTextValues const&) const = default;
+        TextAlign text_align_value() const { return static_cast<TextAlign>(text_align); }
+        TextJustify text_justify_value() const { return static_cast<TextJustify>(text_justify); }
+        WhiteSpaceCollapse white_space_collapse_value() const { return static_cast<WhiteSpaceCollapse>(white_space_collapse); }
+        TextWrapMode text_wrap_mode_value() const { return static_cast<TextWrapMode>(text_wrap_mode); }
+        WordBreak word_break_value() const { return static_cast<WordBreak>(word_break); }
+        CSSPixels letter_spacing_value() const { return CSSPixels::from_raw(letter_spacing); }
+        CSSPixels word_spacing_value() const { return CSSPixels::from_raw(word_spacing); }
+        CSSPixels tab_size_length_value() const { return CSSPixels::from_raw(tab_size_length); }
+        TextIndentData text_indent_value() const
+        {
+            return {
+                .length_percentage = LengthPercentage::view(text_indent.length_percentage),
+                .each_line = text_indent.each_line,
+                .hanging = text_indent.hanging,
+            };
+        }
+        Color color_value() const { return Color::from_bgra(color); }
+        Color webkit_text_fill_color_value() const { return Color::from_bgra(webkit_text_fill_color); }
+        ReadonlySpan<ShadowData> text_shadow_span() const
+        {
+            static_assert(sizeof(ShadowData) == sizeof(ComputedValuesFFI::ComputedShadow));
+            return { reinterpret_cast<ShadowData const*>(text_shadow.pointer), text_shadow.length };
+        }
+        TextTransform text_transform_value() const { return static_cast<TextTransform>(text_transform); }
+        TextWrapStyle text_wrap_style_value() const { return static_cast<TextWrapStyle>(text_wrap_style); }
+        TextDecorationSkipInk text_decoration_skip_ink_value() const { return static_cast<TextDecorationSkipInk>(text_decoration_skip_ink); }
+        TextUnderlinePosition text_underline_position_value() const
+        {
+            return {
+                .horizontal = static_cast<TextUnderlinePositionHorizontal>(text_underline_position.horizontal),
+                .vertical = static_cast<TextUnderlinePositionVertical>(text_underline_position.vertical),
+            };
+        }
+        CSSPixels text_underline_offset_value() const { return CSSPixels::from_raw(text_underline_offset.used_value); }
+        OverflowWrap overflow_wrap_value() const { return static_cast<OverflowWrap>(overflow_wrap); }
+
+        bool operator==(InheritedTextValues const& other) const
+        {
+            return ComputedValuesFFI::rust_style_group_payloads_equal(style_group_index, this, &other);
+        }
     };
 
     // The layout and lifecycle of this group are defined in Rust (computed_values.rs). The
@@ -1799,35 +1947,38 @@ private:
     InheritedValues m_inherited;
 
 public:
-    struct AnimationValues {
+    struct AnimationValues : ComputedValuesFFI::AnimationValues {
         static constexpr size_t style_group_index = to_underlying(StyleGroupIndex::AnimationValues);
-        Vector<ComputedAnimationName> animation_names { ComputedAnimationName {} };
-        Vector<AnimationComposition> animation_compositions { AnimationComposition::Replace };
-        Vector<Time> animation_delays { Time::make_seconds(0) };
-        Vector<AnimationDirection> animation_directions { AnimationDirection::Normal };
-        Vector<Optional<Time>> animation_durations { Optional<Time> {} };
-        Vector<AnimationFillMode> animation_fill_modes { AnimationFillMode::None };
-        Vector<double> animation_iteration_counts { 1 };
-        Vector<AnimationPlayState> animation_play_states { AnimationPlayState::Running };
-        Vector<AnimationTimelineData> animation_timelines { AnimationTimelineData {} };
-        Vector<EasingFunction> animation_timing_functions { EasingFunction::ease() };
-        StyleValueVector animation_timing_function_style_values;
-        Vector<Optional<Utf16FlyString>> scroll_timeline_names { Optional<Utf16FlyString> {} };
-        Vector<Axis> scroll_timeline_axes { Axis::Block };
-        TimelineScopeData timeline_scope { InitialValues::timeline_scope() };
-        Vector<Optional<Utf16FlyString>> view_timeline_names { Optional<Utf16FlyString> {} };
-        Vector<Axis> view_timeline_axes { Axis::Block };
-        Vector<ViewTimelineInsetData> view_timeline_insets { ViewTimelineInsetData {} };
-        Vector<Optional<Utf16FlyString>> transition_properties { Optional<Utf16FlyString> { "all"_utf16_fly_string } };
-        Vector<Time> transition_durations { Time::make_seconds(0) };
-        Vector<EasingFunction> transition_timing_functions { EasingFunction::ease() };
-        StyleValueVector transition_timing_function_style_values;
-        Vector<Time> transition_delays { Time::make_seconds(0) };
-        Vector<TransitionBehavior> transition_behaviors { TransitionBehavior::Normal };
+        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::Animation;
 
-        static AnimationValues make_default_payload_value();
+        Vector<ComputedAnimationName> animation_names_value() const;
+        Vector<AnimationComposition> animation_compositions_value() const;
+        Vector<Time> animation_delays_value() const;
+        Vector<AnimationDirection> animation_directions_value() const;
+        Vector<Optional<Time>> animation_durations_value() const;
+        Vector<AnimationFillMode> animation_fill_modes_value() const;
+        Vector<double> animation_iteration_counts_value() const;
+        Vector<AnimationPlayState> animation_play_states_value() const;
+        Vector<AnimationTimelineData> animation_timelines_value() const;
+        Vector<EasingFunction> animation_timing_functions_value() const;
+        StyleValueVector animation_timing_function_style_values_value() const;
+        Vector<Optional<Utf16FlyString>> scroll_timeline_names_value() const;
+        Vector<Axis> scroll_timeline_axes_value() const;
+        TimelineScopeData timeline_scope_value() const;
+        Vector<Optional<Utf16FlyString>> view_timeline_names_value() const;
+        Vector<Axis> view_timeline_axes_value() const;
+        Vector<ViewTimelineInsetData> view_timeline_insets_value() const;
+        Vector<Optional<Utf16FlyString>> transition_properties_value() const;
+        Vector<Time> transition_durations_value() const;
+        Vector<EasingFunction> transition_timing_functions_value() const;
+        StyleValueVector transition_timing_function_style_values_value() const;
+        Vector<Time> transition_delays_value() const;
+        Vector<TransitionBehavior> transition_behaviors_value() const;
 
-        bool operator==(AnimationValues const&) const = default;
+        bool operator==(AnimationValues const& other) const
+        {
+            return ComputedValuesFFI::rust_style_group_payloads_equal(style_group_index, this, &other);
+        }
     };
 
     // The layout and lifecycle of this group are defined in Rust (computed_values.rs).
@@ -1851,30 +2002,125 @@ public:
         }
     };
 
-    struct AnchorValues {
+    struct AnchorValues : ComputedValuesFFI::AnchorValues {
         static constexpr size_t style_group_index = to_underlying(StyleGroupIndex::AnchorValues);
-        Vector<Utf16FlyString> anchor_names;
-        AnchorScopeData anchor_scope;
-        PositionAnchor position_anchor { InitialValues::position_anchor() };
-        PositionAreaData position_area { InitialValues::position_area() };
-        Vector<PositionTryFallbackData> position_try_fallbacks { InitialValues::position_try_fallbacks() };
-        Optional<TryOrder> position_try_order { InitialValues::position_try_order() };
-        PositionVisibilityData position_visibility { InitialValues::position_visibility() };
+        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::Anchor;
 
-        bool operator==(AnchorValues const&) const = default;
+        ReadonlySpan<Utf16FlyString> anchor_names_span() const { return fly_strings(anchor_names); }
+        AnchorScopeData anchor_scope_value() const
+        {
+            return { .all = anchor_scope_all, .names = materialize_fly_strings(anchor_scope_names) };
+        }
+        PositionAnchor position_anchor_value() const
+        {
+            PositionAnchor value {
+                .type = static_cast<PositionAnchor::Type>(position_anchor_type),
+                .name = {},
+            };
+            if (value.type == PositionAnchor::Type::Name)
+                value.name = Utf16FlyString::from_raw(position_anchor_name.raw);
+            return value;
+        }
+        PositionAreaData position_area_value() const { return materialize_position_area(position_area); }
+        Vector<PositionTryFallbackData> position_try_fallbacks_value() const
+        {
+            Vector<PositionTryFallbackData> values;
+            values.ensure_capacity(position_try_fallbacks.length);
+            for (size_t index = 0; index < position_try_fallbacks.length; ++index) {
+                auto const& source = position_try_fallbacks.pointer[index];
+                PositionTryFallbackData value;
+                if (source.name.raw)
+                    value.name = Utf16FlyString::from_raw(source.name.raw);
+                value.tactics.ensure_capacity(source.tactic_count);
+                for (size_t tactic = 0; tactic < source.tactic_count; ++tactic)
+                    value.tactics.unchecked_append(static_cast<TryTactic>(source.tactics[tactic]));
+                if (source.has_position_area)
+                    value.position_area = materialize_position_area(source.position_area);
+                values.unchecked_append(move(value));
+            }
+            return values;
+        }
+        Optional<TryOrder> position_try_order_value() const
+        {
+            if (!has_position_try_order)
+                return {};
+            return static_cast<TryOrder>(position_try_order);
+        }
+        PositionVisibilityData position_visibility_value() const
+        {
+            return {
+                .always = position_visibility_always,
+                .anchors_valid = position_visibility_anchors_valid,
+                .anchors_visible = position_visibility_anchors_visible,
+                .no_overflow = position_visibility_no_overflow,
+            };
+        }
+
+        bool operator==(AnchorValues const& other) const
+        {
+            return ComputedValuesFFI::rust_style_group_payloads_equal(style_group_index, this, &other);
+        }
+
+    private:
+        static ReadonlySpan<Utf16FlyString> fly_strings(ComputedValuesFFI::RetainedUtf16FlyStringList const& values)
+        {
+            static_assert(sizeof(Utf16FlyString) == sizeof(size_t));
+            static_assert(alignof(Utf16FlyString) == alignof(size_t));
+            return { reinterpret_cast<Utf16FlyString const*>(values.raw_pointer), values.length };
+        }
+        static Vector<Utf16FlyString> materialize_fly_strings(ComputedValuesFFI::RetainedUtf16FlyStringList const& values)
+        {
+            Vector<Utf16FlyString> result;
+            result.ensure_capacity(values.length);
+            for (auto const& value : fly_strings(values))
+                result.unchecked_append(value);
+            return result;
+        }
+        static PositionAreaData materialize_position_area(ComputedValuesFFI::RetainedPositionAreaList const& values)
+        {
+            PositionAreaData result;
+            result.keywords.ensure_capacity(values.length);
+            for (size_t index = 0; index < values.length; ++index)
+                result.keywords.unchecked_append(static_cast<PositionArea>(values.pointer[index]));
+            return result;
+        }
     };
 
-    struct EffectsValues {
+    struct EffectsValues : ComputedValuesFFI::EffectsValues {
         static constexpr size_t style_group_index = to_underlying(StyleGroupIndex::EffectsValues);
-        float opacity { InitialValues::opacity() };
-        Filter filter { InitialValues::filter() };
-        Filter backdrop_filter { InitialValues::backdrop_filter() };
-        MixBlendMode mix_blend_mode { InitialValues::mix_blend_mode() };
-        Isolation isolation { InitialValues::isolation() };
-        Vector<ShadowData> box_shadow {};
-        Clip clip { InitialValues::clip() };
+        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::Effects;
 
-        bool operator==(EffectsValues const&) const = default;
+        ComputedFilterView filter_value() const { return ComputedFilterView { filter }; }
+        ComputedFilterView backdrop_filter_value() const { return ComputedFilterView { backdrop_filter }; }
+        MixBlendMode mix_blend_mode_value() const { return static_cast<MixBlendMode>(mix_blend_mode); }
+        Isolation isolation_value() const { return static_cast<Isolation>(isolation); }
+        ReadonlySpan<ShadowData> box_shadow_span() const
+        {
+            static_assert(sizeof(ShadowData) == sizeof(ComputedValuesFFI::ComputedShadow));
+            static_assert(alignof(ShadowData) == alignof(ComputedValuesFFI::ComputedShadow));
+            return { reinterpret_cast<ShadowData const*>(box_shadows.pointer), box_shadows.length };
+        }
+        Clip clip_value() const
+        {
+            if (!clip_is_rect)
+                return Clip::make_auto();
+            auto edge = [](ComputedValuesFFI::ComputedClipEdge const& value) {
+                if (value.is_auto)
+                    return LengthOrAuto::make_auto();
+                return LengthOrAuto { Length { value.value, static_cast<LengthUnit>(value.unit) } };
+            };
+            return Clip { EdgeRect {
+                edge(clip_edges[0]),
+                edge(clip_edges[1]),
+                edge(clip_edges[2]),
+                edge(clip_edges[3]),
+            } };
+        }
+
+        bool operator==(EffectsValues const& other) const
+        {
+            return ComputedValuesFFI::rust_style_group_payloads_equal(style_group_index, this, &other);
+        }
     };
 
     struct MaskValues {
@@ -1896,16 +2142,38 @@ public:
         bool operator==(MaskValues const&) const = default;
     };
 
-    struct TextResetValues {
+    struct TextResetValues : ComputedValuesFFI::TextResetValues {
         static constexpr size_t style_group_index = to_underlying(StyleGroupIndex::TextResetValues);
-        // NB: A computed text-decoration-line of none is the empty list.
-        Vector<TextDecorationLine> text_decoration_line {};
-        TextDecorationThickness text_decoration_thickness { TextDecorationThickness::Auto {} };
-        TextDecorationStyle text_decoration_style { InitialValues::text_decoration_style() };
-        Color text_decoration_color { InitialValues::color() };
-        WhiteSpaceTrimData white_space_trim;
+        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::TextReset;
 
-        bool operator==(TextResetValues const&) const = default;
+        ReadonlySpan<TextDecorationLine> decoration_lines() const
+        {
+            static_assert(sizeof(TextDecorationLine) == sizeof(u8));
+            return { reinterpret_cast<TextDecorationLine const*>(text_decoration_lines.pointer), text_decoration_lines.length };
+        }
+
+        TextDecorationThickness decoration_thickness() const
+        {
+            if (text_decoration_thickness_kind == 0)
+                return TextDecorationThickness { TextDecorationThickness::Auto {} };
+            if (text_decoration_thickness_kind == 1)
+                return TextDecorationThickness { TextDecorationThickness::FromFont {} };
+            return TextDecorationThickness { LengthPercentage::view(text_decoration_thickness) };
+        }
+
+        WhiteSpaceTrimData white_space_trim() const
+        {
+            return {
+                .discard_before = white_space_trim_discard_before,
+                .discard_after = white_space_trim_discard_after,
+                .discard_inner = white_space_trim_discard_inner,
+            };
+        }
+
+        bool operator==(TextResetValues const& other) const
+        {
+            return ComputedValuesFFI::rust_style_group_payloads_equal(style_group_index, this, &other);
+        }
     };
 
     struct ContentValues {
@@ -1919,25 +2187,98 @@ public:
         bool operator==(ContentValues const&) const = default;
     };
 
-    struct TransformValues {
+    struct TransformValues : public ComputedValuesFFI::TransformValues {
         static constexpr size_t style_group_index = to_underlying(StyleGroupIndex::TransformValues);
-        Vector<NonnullRefPtr<TransformationStyleValue const>> transformations {};
-        // The paint-ready lowering of translate, rotate, scale, and transformations,
-        // in that order; see ResolvedTransform.
-        Vector<ResolvedTransform> resolved_transform_list {};
-        TransformBox transform_box { InitialValues::transform_box() };
-        TransformOrigin transform_origin {};
-        TransformStyle transform_style { InitialValues::transform_style() };
-        BackfaceVisibility backface_visibility { InitialValues::backface_visibility() };
-        RefPtr<TransformationStyleValue const> rotate;
-        RefPtr<TransformationStyleValue const> translate;
-        RefPtr<TransformationStyleValue const> scale;
-        Optional<CSSPixels> perspective;
-        Position perspective_origin;
+        static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::Transform;
 
-        static TransformValues make_default_payload_value();
+        static RefPtr<StyleValue const> style_value(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
+        {
+            if (!handle.pointer)
+                return nullptr;
+            return StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
+                static_cast<StyleValueFFI::StyleValueData const*>(handle.pointer)));
+        }
 
-        bool operator==(TransformValues const&) const = default;
+        bool has_transformations() const { return transformations.pointer; }
+        template<typename Callback>
+        void for_each_transformation(Callback callback) const
+        {
+            auto value = style_value(transformations);
+            if (!value)
+                return;
+            for (auto const& transformation : transformations_for_style_value(*value))
+                callback(*transformation);
+        }
+
+        bool has_resolved_transforms() const { return resolved_transforms.length != 0; }
+        template<typename Callback>
+        void for_each_resolved_transform(Callback callback) const
+        {
+            for (size_t index = 0; index < resolved_transforms.length; ++index) {
+                auto const& entry = resolved_transforms.pointer[index];
+                if (entry.is_translate) {
+                    callback(ResolvedTransform { ResolvedTransform::Translate {
+                        .x = { .px = entry.x_px, .percentage_value = style_value(entry.x_percentage) },
+                        .y = { .px = entry.y_px, .percentage_value = style_value(entry.y_percentage) },
+                        .z = entry.z_px,
+                    } });
+                    continue;
+                }
+                auto const& matrix = entry.matrix;
+                callback(ResolvedTransform { FloatMatrix4x4(
+                    matrix[0], matrix[1], matrix[2], matrix[3],
+                    matrix[4], matrix[5], matrix[6], matrix[7],
+                    matrix[8], matrix[9], matrix[10], matrix[11],
+                    matrix[12], matrix[13], matrix[14], matrix[15]) });
+            }
+        }
+
+        TransformBox transform_box_value() const { return static_cast<TransformBox>(transform_box); }
+        TransformOrigin transform_origin_value() const
+        {
+            return {
+                LengthPercentage::view(transform_origin_x),
+                LengthPercentage::view(transform_origin_y),
+                LengthPercentage::view(transform_origin_z),
+            };
+        }
+        TransformStyle transform_style_value() const { return static_cast<TransformStyle>(transform_style); }
+        BackfaceVisibility backface_visibility_value() const { return static_cast<BackfaceVisibility>(backface_visibility); }
+        RefPtr<TransformationStyleValue const> rotate_value() const { return transformation_value(rotate); }
+        RefPtr<TransformationStyleValue const> translate_value() const { return transformation_value(translate); }
+        RefPtr<TransformationStyleValue const> scale_value() const { return transformation_value(scale); }
+        static void set_transformation(ComputedValuesFFI::ComputedStyleValueHandle& handle, TransformationStyleValue const* value)
+        {
+            StyleValueFFI::rust_style_value_release(static_cast<StyleValueFFI::StyleValueData const*>(handle.pointer));
+            handle.pointer = value ? StyleValueFFI::rust_style_value_retain(value->rust_style_value_data()) : nullptr;
+        }
+        Optional<CSSPixels> perspective_value() const
+        {
+            if (!has_perspective)
+                return {};
+            return CSSPixels::from_raw(perspective_px);
+        }
+        Position perspective_origin_value() const
+        {
+            return {
+                .offset_x = LengthPercentage::view(perspective_origin_x),
+                .offset_y = LengthPercentage::view(perspective_origin_y),
+            };
+        }
+
+        bool operator==(TransformValues const& other) const
+        {
+            return ComputedValuesFFI::rust_style_group_payloads_equal(style_group_index, this, &other);
+        }
+
+    private:
+        static RefPtr<TransformationStyleValue const> transformation_value(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
+        {
+            auto value = style_value(handle);
+            if (!value)
+                return nullptr;
+            return value->as_transformation();
+        }
     };
 
     struct BackgroundValues {
@@ -2097,25 +2438,7 @@ public:
 
         bool operator==(SurroundValues const& other) const
         {
-            auto side_equal = [](auto const& first, auto const& second) {
-                if (first.is_auto || second.is_auto)
-                    return first.is_auto == second.is_auto;
-                return LengthPercentage::view(first.value) == LengthPercentage::view(second.value);
-            };
-            auto box_equal = [&](auto const& first, auto const& second) {
-                return side_equal(first.top, second.top)
-                    && side_equal(first.right, second.right)
-                    && side_equal(first.bottom, second.bottom)
-                    && side_equal(first.left, second.left);
-            };
-            return box_equal(inset, other.inset)
-                && top_anchor_inset.pointer == other.top_anchor_inset.pointer
-                && right_anchor_inset.pointer == other.right_anchor_inset.pointer
-                && bottom_anchor_inset.pointer == other.bottom_anchor_inset.pointer
-                && left_anchor_inset.pointer == other.left_anchor_inset.pointer
-                && position_anchor_name.raw == other.position_anchor_name.raw
-                && box_equal(margin, other.margin)
-                && box_equal(padding, other.padding);
+            return ComputedValuesFFI::rust_style_group_payloads_equal(style_group_index, this, &other);
         }
     };
 
@@ -2427,21 +2750,34 @@ public:
     }
     void set_color(Color color)
     {
-        if (m_values.m_inherited.text->color == color)
+        if (m_values.m_inherited.text->color_value() == color)
             return;
-        m_values.m_inherited.text.access().color = color;
+        m_values.m_inherited.text.access().color = color.value();
     }
     void set_color_scheme(PreferredColorScheme color_scheme)
     {
-        if (m_values.m_inherited.ui->color_scheme == color_scheme)
+        if (m_values.m_inherited.ui->color_scheme_value() == color_scheme)
             return;
-        m_values.m_inherited.ui.access().color_scheme = color_scheme;
+        m_values.m_inherited.ui.access().color_scheme = to_underlying(color_scheme);
     }
     void set_clip(Clip const& clip)
     {
-        if (m_values.m_noninherited.effects->clip == clip)
+        if (m_values.clip() == clip)
             return;
-        m_values.m_noninherited.effects.access().clip = clip;
+        auto& effects = m_values.m_noninherited.effects.access();
+        effects.clip_is_rect = clip.is_rect();
+        if (!clip.is_rect())
+            return;
+        auto rect = clip.to_rect();
+        auto set_edge = [](auto& output, LengthOrAuto const& input) {
+            output.is_auto = input.is_auto();
+            output.value = input.is_auto() ? 0 : input.length().raw_value();
+            output.unit = input.is_auto() ? to_underlying(LengthUnit::Px) : to_underlying(input.length().unit());
+        };
+        set_edge(effects.clip_edges[0], rect.top_edge);
+        set_edge(effects.clip_edges[1], rect.right_edge);
+        set_edge(effects.clip_edges[2], rect.bottom_edge);
+        set_edge(effects.clip_edges[3], rect.left_edge);
     }
     void set_content(ContentData const& content)
     {
@@ -2489,33 +2825,48 @@ public:
     }
     void set_text_align(TextAlign text_align)
     {
-        if (m_values.m_inherited.text->text_align == text_align)
+        if (m_values.m_inherited.text->text_align_value() == text_align)
             return;
-        m_values.m_inherited.text.access().text_align = text_align;
+        m_values.m_inherited.text.access().text_align = to_underlying(text_align);
     }
     void set_text_decoration_line(Vector<TextDecorationLine> value)
     {
-        if (m_values.m_noninherited.text_reset->text_decoration_line == value)
+        if (m_values.text_decoration_line() == value.span())
             return;
-        m_values.m_noninherited.text_reset.access().text_decoration_line = move(value);
+        Vector<u8> lines;
+        lines.ensure_capacity(value.size());
+        for (auto line : value)
+            lines.unchecked_append(to_underlying(line));
+        auto& text_reset = m_values.m_noninherited.text_reset.access();
+        ComputedValuesFFI::rust_text_reset_set_decoration_lines(&text_reset, lines.data(), lines.size());
     }
     void set_text_decoration_thickness(TextDecorationThickness value)
     {
-        if (m_values.m_noninherited.text_reset->text_decoration_thickness == value)
+        if (m_values.text_decoration_thickness() == value)
             return;
-        m_values.m_noninherited.text_reset.access().text_decoration_thickness = move(value);
+        auto& text_reset = m_values.m_noninherited.text_reset.access();
+        value.value.visit(
+            [&](TextDecorationThickness::Auto const&) {
+                ComputedValuesFFI::rust_text_reset_set_decoration_thickness(&text_reset, 0, nullptr);
+            },
+            [&](TextDecorationThickness::FromFont const&) {
+                ComputedValuesFFI::rust_text_reset_set_decoration_thickness(&text_reset, 1, nullptr);
+            },
+            [&](LengthPercentage& length_percentage) {
+                ComputedValuesFFI::rust_text_reset_set_decoration_thickness(&text_reset, 2, length_percentage.leak_data());
+            });
     }
     void set_text_decoration_style(TextDecorationStyle value)
     {
-        if (m_values.m_noninherited.text_reset->text_decoration_style == value)
+        if (m_values.text_decoration_style() == value)
             return;
-        m_values.m_noninherited.text_reset.access().text_decoration_style = value;
+        m_values.m_noninherited.text_reset.access().text_decoration_style = to_underlying(value);
     }
     void set_text_decoration_color(Color value)
     {
-        if (m_values.m_noninherited.text_reset->text_decoration_color == value)
+        if (m_values.text_decoration_color() == value)
             return;
-        m_values.m_noninherited.text_reset.access().text_decoration_color = value;
+        m_values.m_noninherited.text_reset.access().text_decoration_color = value.value();
     }
     void set_position(Positioning position)
     {
@@ -2523,24 +2874,19 @@ public:
             return;
         m_values.m_noninherited.box.access().position = to_underlying(position);
     }
-    // The surround payload carries a synchronized copy of the position-anchor
-    // name for the layout engine's anchor lookup; the zero raw means no name.
+    // The surround payload retains the position-anchor style value for the
+    // layout engine's anchor lookup; an empty handle means no name.
     void set_position_anchor(PositionAnchor value)
     {
-        if (m_values.m_noninherited.anchor->position_anchor == value)
+        if (m_values.m_noninherited.anchor->position_anchor_value() == value)
             return;
-        auto const current_name_raw = m_values.m_noninherited.surround->position_anchor_name.raw;
-        bool const surround_name_already_matches = value.name.has_value()
-            ? current_name_raw != 0 && Utf16FlyString::from_raw(current_name_raw) == *value.name
-            : current_name_raw == 0;
-        if (!surround_name_already_matches) {
-            auto& position_anchor_name = m_values.m_noninherited.surround.access().position_anchor_name;
-            if (position_anchor_name.raw)
-                Utf16FlyString::unref_raw(exchange(position_anchor_name.raw, 0));
-            if (value.name.has_value())
-                position_anchor_name.raw = value.name->to_raw_leaked();
-        }
-        m_values.m_noninherited.anchor.access().position_anchor = move(value);
+        auto& surround = m_values.m_noninherited.surround.access();
+        ComputedValuesFFI::rust_surround_set_position_anchor(&surround, value.name.has_value() ? value.name->to_raw_leaked() : 0);
+        auto& anchor = m_values.m_noninherited.anchor.access();
+        ComputedValuesFFI::rust_anchor_set_position_anchor(
+            &anchor,
+            to_underlying(value.type),
+            value.name.has_value() ? value.name->to_raw_leaked() : 0);
     }
     void set_font_variant_emoji(FontVariantEmoji value)
     {
@@ -2550,9 +2896,9 @@ public:
     }
     void set_letter_spacing(CSSPixels value)
     {
-        if (m_values.m_inherited.text->letter_spacing == value)
+        if (m_values.m_inherited.text->letter_spacing_value() == value)
             return;
-        m_values.m_inherited.text.access().letter_spacing = value;
+        m_values.m_inherited.text.access().letter_spacing = value.raw_value();
     }
     void set_width(Size value) { set_size(&ComputedValuesFFI::SizingValues::width, move(value)); }
     void set_height(Size value) { set_size(&ComputedValuesFFI::SizingValues::height, move(value)); }
@@ -2592,12 +2938,6 @@ public:
         if (m_values.display_before_box_type_transformation() == value)
             return;
         m_values.m_noninherited.box.access().display_before_box_type_transformation = to_ffi_display(value);
-    }
-    void set_filter(Filter const& filter)
-    {
-        if (m_values.m_noninherited.effects->filter == filter)
-            return;
-        m_values.m_noninherited.effects.access().filter = filter;
     }
     void set_border_top_color(Color value)
     {
@@ -2655,21 +2995,21 @@ public:
     }
     void set_rotate(RefPtr<TransformationStyleValue const> value)
     {
-        if (m_values.m_noninherited.transform->rotate == value)
+        if (m_values.rotate() == value)
             return;
-        m_values.m_noninherited.transform.access().rotate = move(value);
+        TransformValues::set_transformation(m_values.m_noninherited.transform.access().rotate, value.ptr());
     }
     void set_scale(RefPtr<TransformationStyleValue const> value)
     {
-        if (m_values.m_noninherited.transform->scale == value)
+        if (m_values.scale() == value)
             return;
-        m_values.m_noninherited.transform.access().scale = move(value);
+        TransformValues::set_transformation(m_values.m_noninherited.transform.access().scale, value.ptr());
     }
     void set_translate(RefPtr<TransformationStyleValue const> value)
     {
-        if (m_values.m_noninherited.transform->translate == value)
+        if (m_values.translate() == value)
             return;
-        m_values.m_noninherited.transform.access().translate = move(value);
+        TransformValues::set_transformation(m_values.m_noninherited.transform.access().translate, value.ptr());
     }
     void set_vertical_align(Variant<VerticalAlign, LengthPercentage> value)
     {

@@ -68,6 +68,14 @@ static constexpr bool style_group_payload_is_rust_native(ComputedValuesFFI::Styl
     case ComputedValuesFFI::StyleGroupLifecycle::Surround:
     case ComputedValuesFFI::StyleGroupLifecycle::Box:
     case ComputedValuesFFI::StyleGroupLifecycle::Grid:
+    case ComputedValuesFFI::StyleGroupLifecycle::TextReset:
+    case ComputedValuesFFI::StyleGroupLifecycle::Transform:
+    case ComputedValuesFFI::StyleGroupLifecycle::Effects:
+    case ComputedValuesFFI::StyleGroupLifecycle::Anchor:
+    case ComputedValuesFFI::StyleGroupLifecycle::InheritedUI:
+    case ComputedValuesFFI::StyleGroupLifecycle::InheritedSVG:
+    case ComputedValuesFFI::StyleGroupLifecycle::InheritedText:
+    case ComputedValuesFFI::StyleGroupLifecycle::Animation:
         return true;
     }
     VERIFY_NOT_REACHED();
@@ -223,25 +231,16 @@ static constexpr Array animation_group_properties {
 // bespoke calls or in C++ bind their properties explicitly beside the descriptors, transcribed from
 // the builder or setters that consume them. A longhand without a binding has no single known group,
 // and callers treat it conservatively.
-static void assemble_transform_group_payload(void* payload_pointer, void const* data_pointer);
-static void assemble_effects_group_payload(void* payload_pointer, void const* data_pointer);
 static void assemble_background_group_payload(void* payload_pointer, void const* data_pointer);
 static void assemble_mask_group_payload(void* payload_pointer, void const* data_pointer);
 static void assemble_border_group_payload(void* payload_pointer, void const* data_pointer);
-static void assemble_inherited_svg_group_payload(void* payload_pointer, void const* data_pointer);
 static void assemble_inherited_list_group_payload(void* payload_pointer, void const* data_pointer);
 static void assemble_content_group_payload(void* payload_pointer, void const* data_pointer);
-static void assemble_inherited_ui_group_payload(void* payload_pointer, void const* data_pointer);
-static void assemble_inherited_text_group_payload(void* payload_pointer, void const* data_pointer);
 static void assemble_misc_reset_group_payload(void* payload_pointer, void const* data_pointer);
-static void assemble_animation_group_payload(void* payload_pointer, void const* data_pointer);
-static void assemble_text_reset_group_payload(void* payload_pointer, void const* data_pointer);
-static void assemble_anchor_group_payload(void* payload_pointer, void const* data_pointer);
 
 // The C++ context the registered table-group assemblers reach through their
 // assembly structs, for the members only C++ can produce: stamped image
-// wrapper mints through property(), the color fallback arm for values the
-// core could not resolve, and style-scope lookups.
+// wrappers minted through property() and style-scope lookups.
 struct TableGroupAssemblerContext {
     ComputedStyleWorkingSet const& computed_style;
     StyleScope const& style_scope;
@@ -363,9 +362,9 @@ static void register_style_group_field_descriptors()
 
     using InheritedUI = ComputedValues::InheritedUIValues;
     constexpr auto inherited_ui = to_underlying(StyleGroupIndex::InheritedUIValues);
-    add(inherited_ui, PropertyID::CaretColor, offsetof(InheritedUI, caret_color) + offsetof(ColorOrAuto, used_value), GROUP_FIELD_COLOR, 0, nullptr);
+    add(inherited_ui, PropertyID::CaretColor, offsetof(InheritedUI, caret_color) + offsetof(ComputedValuesFFI::ComputedColorOrAuto, used_color), GROUP_FIELD_COLOR, 0, nullptr);
     add(inherited_ui, PropertyID::CaretColor, 0, GROUP_FIELD_REQUIRE_KEYWORD, to_underlying(Keyword::Auto), nullptr);
-    add(inherited_ui, PropertyID::AccentColor, offsetof(InheritedUI, accent_color) + offsetof(ColorOrAuto, used_value), GROUP_FIELD_COLOR, 0, nullptr);
+    add(inherited_ui, PropertyID::AccentColor, offsetof(InheritedUI, accent_color) + offsetof(ComputedValuesFFI::ComputedColorOrAuto, used_color), GROUP_FIELD_COLOR, 0, nullptr);
     add(inherited_ui, PropertyID::AccentColor, 0, GROUP_FIELD_REQUIRE_KEYWORD, to_underlying(Keyword::Auto), nullptr);
     add(inherited_ui, PropertyID::Cursor, 0, GROUP_FIELD_REQUIRE_KEYWORD, to_underlying(Keyword::Auto), nullptr);
     add(inherited_ui, PropertyID::PointerEvents, offsetof(InheritedUI, pointer_events), GROUP_FIELD_ENUM_KEYWORD, 0, &keyword_code_table<keyword_to_pointer_events>());
@@ -532,20 +531,12 @@ static void register_style_group_field_descriptors()
         bind_property_to_group(property, to_underlying(StyleGroupIndex::FontValues));
 
     rust_style_group_register_field_descriptors(descriptors.data(), descriptors.size());
-    rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::TransformValues), assemble_transform_group_payload);
-    rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::EffectsValues), assemble_effects_group_payload);
     rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::BackgroundValues), assemble_background_group_payload);
     rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::MaskValues), assemble_mask_group_payload);
     rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::BorderValues), assemble_border_group_payload);
-    rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::InheritedSVGValues), assemble_inherited_svg_group_payload);
     rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::InheritedListValues), assemble_inherited_list_group_payload);
     rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::ContentValues), assemble_content_group_payload);
-    rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::InheritedUIValues), assemble_inherited_ui_group_payload);
-    rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::InheritedTextValues), assemble_inherited_text_group_payload);
     rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::MiscResetValues), assemble_misc_reset_group_payload);
-    rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::AnimationValues), assemble_animation_group_payload);
-    rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::TextResetValues), assemble_text_reset_group_payload);
-    rust_style_group_register_payload_assembler(to_underlying(StyleGroupIndex::AnchorValues), assemble_anchor_group_payload);
 
     // Double-entry bookkeeping: Properties.json declares each longhand's style group, and the
     // bindings above derive it from what actually builds the groups. The two must agree exactly,
@@ -642,6 +633,26 @@ static_assert(sizeof(ComputedValues::SurroundValues) == sizeof(ComputedValuesFFI
 static_assert(alignof(ComputedValues::SurroundValues) == alignof(ComputedValuesFFI::SurroundValues));
 static_assert(sizeof(ComputedValues::BoxValues) == sizeof(ComputedValuesFFI::BoxValues));
 static_assert(alignof(ComputedValues::BoxValues) == alignof(ComputedValuesFFI::BoxValues));
+static_assert(sizeof(ComputedValues::TransformValues) == sizeof(ComputedValuesFFI::TransformValues));
+static_assert(alignof(ComputedValues::TransformValues) == alignof(ComputedValuesFFI::TransformValues));
+static_assert(sizeof(ComputedValues::EffectsValues) == sizeof(ComputedValuesFFI::EffectsValues));
+static_assert(alignof(ComputedValues::EffectsValues) == alignof(ComputedValuesFFI::EffectsValues));
+static_assert(sizeof(ComputedValues::AnchorValues) == sizeof(ComputedValuesFFI::AnchorValues));
+static_assert(alignof(ComputedValues::AnchorValues) == alignof(ComputedValuesFFI::AnchorValues));
+static_assert(sizeof(ComputedValues::InheritedUIValues) == sizeof(ComputedValuesFFI::InheritedUIValues));
+static_assert(alignof(ComputedValues::InheritedUIValues) == alignof(ComputedValuesFFI::InheritedUIValues));
+static_assert(sizeof(ComputedValues::InheritedSVGValues) == sizeof(ComputedValuesFFI::InheritedSVGValues));
+static_assert(alignof(ComputedValues::InheritedSVGValues) == alignof(ComputedValuesFFI::InheritedSVGValues));
+static_assert(to_underlying(FillRule::Nonzero) == 0);
+static_assert(to_underlying(StrokeLinecap::Butt) == 0);
+static_assert(to_underlying(StrokeLinejoin::Miter) == 0);
+static_assert(to_underlying(ColorInterpolation::Auto) == 0);
+static_assert(to_underlying(ColorInterpolation::Linearrgb) == 1);
+static_assert(to_underlying(PaintOrder::Fill) == 0);
+static_assert(to_underlying(PaintOrder::Stroke) == 1);
+static_assert(to_underlying(PaintOrder::Markers) == 2);
+static_assert(to_underlying(TextAnchor::Start) == 0);
+static_assert(to_underlying(ShapeRendering::Auto) == 0);
 static_assert(sizeof(Size) == sizeof(ComputedValuesFFI::ComputedSize));
 static_assert(alignof(Size) == alignof(ComputedValuesFFI::ComputedSize));
 static_assert(sizeof(RustStyleValueHandle) == sizeof(StyleValueFFI::StyleValueData const*));
@@ -651,6 +662,21 @@ static_assert(alignof(RustStyleValueHandle) == alignof(StyleValueFFI::StyleValue
 // members double as the Rust BorderLayoutFacts prefix that layout reads as
 // typed fields.
 static_assert(sizeof(Gfx::Color) == sizeof(u32));
+static_assert(sizeof(ShadowData) == sizeof(ComputedValuesFFI::ComputedShadow));
+static_assert(alignof(ShadowData) == alignof(ComputedValuesFFI::ComputedShadow));
+static_assert(offsetof(ShadowData, offset_x) == offsetof(ComputedValuesFFI::ComputedShadow, offset_x));
+static_assert(offsetof(ShadowData, offset_y) == offsetof(ComputedValuesFFI::ComputedShadow, offset_y));
+static_assert(offsetof(ShadowData, blur_radius) == offsetof(ComputedValuesFFI::ComputedShadow, blur_radius));
+static_assert(offsetof(ShadowData, spread_distance) == offsetof(ComputedValuesFFI::ComputedShadow, spread_distance));
+static_assert(offsetof(ShadowData, color) == offsetof(ComputedValuesFFI::ComputedShadow, color));
+static_assert(offsetof(ShadowData, color_syntax) == offsetof(ComputedValuesFFI::ComputedShadow, color_syntax));
+static_assert(offsetof(ShadowData, placement) == offsetof(ComputedValuesFFI::ComputedShadow, placement));
+static_assert(to_underlying(ColorSyntax::Legacy) == 0);
+static_assert(to_underlying(ColorSyntax::Modern) == 1);
+static_assert(to_underlying(ShadowPlacement::Outer) == 0);
+static_assert(to_underlying(ShadowPlacement::Inner) == 1);
+static_assert(to_underlying(MixBlendMode::Normal) == 0);
+static_assert(to_underlying(Isolation::Auto) == 0);
 static_assert(sizeof(LineStyle) == sizeof(u8));
 static_assert(sizeof(BorderData) == sizeof(ComputedValuesFFI::ComputedBorderSide));
 static_assert(offsetof(BorderData, color) == offsetof(ComputedValuesFFI::ComputedBorderSide, color));
@@ -662,25 +688,14 @@ static_assert(offsetof(ComputedValues::BorderValues, border_right) == offsetof(C
 static_assert(offsetof(ComputedValues::BorderValues, border_bottom) == offsetof(ComputedValuesFFI::BorderLayoutFacts, border_bottom));
 static_assert(sizeof(ComputedValuesFFI::BorderLayoutFacts) <= offsetof(ComputedValues::BorderValues, border_left_color_style_value));
 
-// The inherited-text group keeps its C++ lifecycle, but its leading members
-// double as the Rust InheritedTextLayoutFacts prefix that layout reads as
-// typed fields.
 static_assert(sizeof(TextIndentData) == sizeof(ComputedValuesFFI::ComputedTextIndent));
 static_assert(offsetof(TextIndentData, length_percentage) == offsetof(ComputedValuesFFI::ComputedTextIndent, length_percentage));
 static_assert(offsetof(TextIndentData, each_line) == offsetof(ComputedValuesFFI::ComputedTextIndent, each_line));
 static_assert(offsetof(TextIndentData, hanging) == offsetof(ComputedValuesFFI::ComputedTextIndent, hanging));
-static_assert(offsetof(ComputedValues::InheritedTextValues, text_align) == offsetof(ComputedValuesFFI::InheritedTextLayoutFacts, text_align));
-static_assert(offsetof(ComputedValues::InheritedTextValues, text_justify) == offsetof(ComputedValuesFFI::InheritedTextLayoutFacts, text_justify));
-static_assert(offsetof(ComputedValues::InheritedTextValues, white_space_collapse) == offsetof(ComputedValuesFFI::InheritedTextLayoutFacts, white_space_collapse));
-static_assert(offsetof(ComputedValues::InheritedTextValues, text_wrap_mode) == offsetof(ComputedValuesFFI::InheritedTextLayoutFacts, text_wrap_mode));
-static_assert(offsetof(ComputedValues::InheritedTextValues, word_break) == offsetof(ComputedValuesFFI::InheritedTextLayoutFacts, word_break));
-static_assert(offsetof(ComputedValues::InheritedTextValues, tab_size_is_number) == offsetof(ComputedValuesFFI::InheritedTextLayoutFacts, tab_size_is_number));
-static_assert(offsetof(ComputedValues::InheritedTextValues, letter_spacing) == offsetof(ComputedValuesFFI::InheritedTextLayoutFacts, letter_spacing));
-static_assert(offsetof(ComputedValues::InheritedTextValues, word_spacing) == offsetof(ComputedValuesFFI::InheritedTextLayoutFacts, word_spacing));
-static_assert(offsetof(ComputedValues::InheritedTextValues, tab_size_length) == offsetof(ComputedValuesFFI::InheritedTextLayoutFacts, tab_size_length));
-static_assert(offsetof(ComputedValues::InheritedTextValues, tab_size_number) == offsetof(ComputedValuesFFI::InheritedTextLayoutFacts, tab_size_number));
-static_assert(offsetof(ComputedValues::InheritedTextValues, text_indent) == offsetof(ComputedValuesFFI::InheritedTextLayoutFacts, text_indent));
-static_assert(sizeof(ComputedValuesFFI::InheritedTextLayoutFacts) <= offsetof(ComputedValues::InheritedTextValues, color));
+static_assert(sizeof(ComputedValues::InheritedTextValues) == sizeof(ComputedValuesFFI::InheritedTextValues));
+static_assert(alignof(ComputedValues::InheritedTextValues) == alignof(ComputedValuesFFI::InheritedTextValues));
+static_assert(sizeof(ComputedValues::AnimationValues) == sizeof(ComputedValuesFFI::AnimationValues));
+static_assert(alignof(ComputedValues::AnimationValues) == alignof(ComputedValuesFFI::AnimationValues));
 
 // The font group keeps its C++ lifecycle, but its leading members double as
 // the Rust FontLayoutFacts prefix that layout reads as typed fields.
@@ -697,6 +712,7 @@ static_assert(sizeof(ComputedValuesFFI::FontLayoutFacts) <= offsetof(ComputedVal
 
 void const* style_group_default_payload(size_t group_index)
 {
+    StyleComputer::ensure_style_metadata_tables_installed();
     static auto const default_payloads = [] {
         constexpr auto group_count = to_underlying(StyleGroupIndex::Count);
         Array<ComputedValuesFFI::StyleGroupVTable, group_count> vtables;
@@ -728,14 +744,6 @@ static NonnullRefPtr<StyleValue const> initial_list_element(PropertyID property_
     return value;
 }
 
-ComputedValues::AnimationValues ComputedValues::AnimationValues::make_default_payload_value()
-{
-    AnimationValues values;
-    values.animation_timing_function_style_values = { initial_list_element(PropertyID::AnimationTimingFunction) };
-    values.transition_timing_function_style_values = { initial_list_element(PropertyID::TransitionTimingFunction) };
-    return values;
-}
-
 ComputedValues::MaskValues ComputedValues::MaskValues::make_default_payload_value()
 {
     MaskValues values;
@@ -743,22 +751,6 @@ ComputedValues::MaskValues ComputedValues::MaskValues::make_default_payload_valu
     values.mask_layers[0].image_style_value = initial_list_element(PropertyID::MaskImage);
     // NB: The computed initial mask-position offsets are percentages, not lengths.
     values.mask_positions = { Position { .offset_x = Percentage(0), .offset_y = Percentage(0) } };
-    return values;
-}
-
-ComputedValues::InheritedSVGValues ComputedValues::InheritedSVGValues::make_default_payload_value()
-{
-    InheritedSVGValues values;
-    // NB: The initial fill is black, which create() materializes as an SVGPaint.
-    values.fill = SVGPaint { Color::Black };
-    return values;
-}
-
-ComputedValues::TransformValues ComputedValues::TransformValues::make_default_payload_value()
-{
-    TransformValues values;
-    // NB: The computed transform-origin z component is a length, not a percentage.
-    values.transform_origin.z = Length::make_px(0);
     return values;
 }
 
@@ -1056,6 +1048,9 @@ static_assert(to_underlying(StyleGroupIndex::BoxValues) == 22);
 static_assert(to_underlying(StyleGroupIndex::Count) == 23);
 
 // The enum codes the core's transform and effects lowering mirrors.
+static_assert(to_underlying(TransformBox::ViewBox) == 4);
+static_assert(to_underlying(TransformStyle::Flat) == 0);
+static_assert(to_underlying(BackfaceVisibility::Visible) == 0);
 static_assert(to_underlying(TransformFunctionParameterType::Angle) == 0);
 static_assert(to_underlying(TransformFunctionParameterType::Length) == 1);
 static_assert(to_underlying(TransformFunctionParameterType::LengthNone) == 2);
@@ -1096,175 +1091,6 @@ static RefPtr<StyleValue const> adopt_assembly_handle(void const* pointer)
     if (!pointer)
         return nullptr;
     return StyleValue::adopt_rust_style_value_data(static_cast<StyleValueFFI::StyleValueData const*>(pointer));
-}
-
-// Fills the transform group's wrapper-backed members from the core's
-// pre-lowered assembly: the matrices arrive baked, and only the values that
-// genuinely need C++ - the style value wrappers and the per-axis
-// length-percentage slots - are wrapped here from the retained handles the
-// assembly carries.
-static void assemble_transform_group_payload(void* payload_pointer, void const* data_pointer)
-{
-    auto& payload = *static_cast<ComputedValues::TransformValues*>(payload_pointer);
-    auto const& data = *static_cast<ComputedValuesFFI::FfiTransformGroupAssembly const*>(data_pointer);
-
-    if (auto transform_list = adopt_assembly_handle(data.transform_list))
-        payload.transformations = transformations_for_style_value(*transform_list);
-    auto adopt_transformation = [](void const* pointer) -> RefPtr<TransformationStyleValue const> {
-        auto value = adopt_assembly_handle(pointer);
-        if (!value)
-            return nullptr;
-        return value->as_transformation();
-    };
-    payload.rotate = adopt_transformation(data.rotate);
-    payload.translate = adopt_transformation(data.translate);
-    payload.scale = adopt_transformation(data.scale);
-
-    payload.resolved_transform_list.ensure_capacity(data.resolved_transform_count);
-    for (size_t i = 0; i < data.resolved_transform_count; ++i) {
-        auto const& entry = data.resolved_transforms[i];
-        if (entry.is_translate) {
-            payload.resolved_transform_list.unchecked_append(ResolvedTransform { ResolvedTransform::Translate {
-                .x = { .px = entry.x_px, .percentage_value = adopt_assembly_handle(entry.x_percentage) },
-                .y = { .px = entry.y_px, .percentage_value = adopt_assembly_handle(entry.y_percentage) },
-                .z = entry.z_px,
-            } });
-        } else {
-            auto const& m = entry.matrix;
-            payload.resolved_transform_list.unchecked_append(ResolvedTransform { FloatMatrix4x4(
-                m[0], m[1], m[2], m[3],
-                m[4], m[5], m[6], m[7],
-                m[8], m[9], m[10], m[11],
-                m[12], m[13], m[14], m[15]) });
-        }
-    }
-
-    if (auto origin_x = adopt_assembly_handle(data.transform_origin_x)) {
-        auto origin_y = adopt_assembly_handle(data.transform_origin_y);
-        auto origin_z = adopt_assembly_handle(data.transform_origin_z);
-        auto length_percentage_with_keywords_resolved = [](StyleValue const& value) -> LengthPercentage {
-            if (value.is_keyword()) {
-                auto keyword = value.to_keyword();
-                if (keyword == Keyword::Left || keyword == Keyword::Top)
-                    return Percentage(0);
-                if (keyword == Keyword::Center)
-                    return Percentage(50);
-                if (keyword == Keyword::Right || keyword == Keyword::Bottom)
-                    return Percentage(100);
-
-                VERIFY_NOT_REACHED();
-            }
-            return LengthPercentage::from_style_value(value);
-        };
-        payload.transform_origin = {
-            length_percentage_with_keywords_resolved(*origin_x),
-            length_percentage_with_keywords_resolved(*origin_y),
-            LengthPercentage::from_style_value(*origin_z),
-        };
-    }
-
-    if (data.has_perspective)
-        payload.perspective = CSSPixels::from_raw(data.perspective_px);
-
-    if (auto perspective_origin = adopt_assembly_handle(data.perspective_origin)) {
-        auto const& position = perspective_origin->as_position();
-        auto edge_x = position.edge_x();
-        auto edge_y = position.edge_y();
-        payload.perspective_origin = {
-            .offset_x = LengthPercentage::from_style_value(edge_x->offset()),
-            .offset_y = LengthPercentage::from_style_value(edge_y->offset()),
-        };
-    }
-}
-
-static Filter filter_from_assembly(ComputedValuesFFI::FfiLoweredFilter const& lowered)
-{
-    auto filter_list = adopt_assembly_handle(lowered.filter_list);
-    if (!filter_list)
-        return Filter::make_none();
-
-    Vector<Filter::FilterOperation> operations;
-    operations.ensure_capacity(lowered.operation_count);
-    for (size_t i = 0; i < lowered.operation_count; ++i) {
-        auto const& operation = lowered.operations[i];
-        switch (operation.kind) {
-        case to_underlying(FilterStyleValue::Kind::Blur):
-            operations.unchecked_append(Filter::Blur { .resolved_radius = operation.amount });
-            break;
-        case to_underlying(FilterStyleValue::Kind::DropShadow):
-            operations.unchecked_append(Filter::DropShadow {
-                .offset_x = CSSPixels::from_raw(operation.shadow_offset_x),
-                .offset_y = CSSPixels::from_raw(operation.shadow_offset_y),
-                .radius = CSSPixels::from_raw(operation.shadow_radius),
-                .color = Color::from_bgra(operation.shadow_color),
-            });
-            break;
-        case to_underlying(FilterStyleValue::Kind::HueRotate):
-            operations.unchecked_append(Filter::HueRotate { .angle_degrees = operation.amount });
-            break;
-        case to_underlying(FilterStyleValue::Kind::Color):
-            operations.unchecked_append(Filter::ColorOperation {
-                .operation = static_cast<Gfx::ColorFilterType>(operation.color_operation),
-                .resolved_amount = operation.amount,
-            });
-            break;
-        default: {
-            // A url(#fragment) filter reference; the fragment extraction stays
-            // here with the URL type.
-            auto url_value = adopt_assembly_handle(operation.url_value);
-            auto url = url_value->as_url().url();
-            auto const& url_string = url.url();
-            Utf16String fragment;
-            if (!url_string.is_empty() && url_string.starts_with('#')) {
-                if (auto fragment_or_error = url_string.substring_from_byte_offset(1); !fragment_or_error.is_error())
-                    fragment = Utf16String::from_utf8(fragment_or_error.value());
-            }
-            operations.unchecked_append(Filter::Url { move(fragment) });
-            break;
-        }
-        }
-    }
-    return Filter::create_lowered(filter_list->as_value_list(), move(operations));
-}
-
-// Fills the effects group's complex members from the core's pre-lowered
-// assembly: filter operations, shadow data and the clip rect arrive as plain
-// data.
-static void assemble_effects_group_payload(void* payload_pointer, void const* data_pointer)
-{
-    auto& payload = *static_cast<ComputedValues::EffectsValues*>(payload_pointer);
-    auto const& data = *static_cast<ComputedValuesFFI::FfiEffectsGroupAssembly const*>(data_pointer);
-
-    payload.filter = filter_from_assembly(data.filter);
-    payload.backdrop_filter = filter_from_assembly(data.backdrop_filter);
-
-    payload.box_shadow.ensure_capacity(data.box_shadow_count);
-    for (size_t i = 0; i < data.box_shadow_count; ++i) {
-        auto const& shadow = data.box_shadows[i];
-        payload.box_shadow.unchecked_append(ShadowData {
-            CSSPixels::from_raw(shadow.offset_x),
-            CSSPixels::from_raw(shadow.offset_y),
-            CSSPixels::from_raw(shadow.blur_radius),
-            CSSPixels::from_raw(shadow.spread_distance),
-            Color::from_bgra(shadow.color),
-            static_cast<ColorSyntax>(shadow.color_syntax),
-            static_cast<ShadowPlacement>(shadow.placement),
-        });
-    }
-
-    if (data.clip_is_rect) {
-        auto edge = [](ComputedValuesFFI::FfiLoweredClipEdge const& lowered) {
-            if (lowered.is_auto)
-                return LengthOrAuto::make_auto();
-            return LengthOrAuto { Length { lowered.value, static_cast<LengthUnit>(lowered.unit) } };
-        };
-        payload.clip = Clip(EdgeRect {
-            edge(data.clip_edges[0]),
-            edge(data.clip_edges[1]),
-            edge(data.clip_edges[2]),
-            edge(data.clip_edges[3]),
-        });
-    }
 }
 
 // Fills one background or mask layer's wrapper-backed members from the
@@ -1464,71 +1290,6 @@ static void assemble_border_group_payload(void* payload_pointer, void const* dat
     payload.border_image = move(border_image);
 }
 
-// Fills the inherited SVG group's complex members from the core's
-// pre-lowered assembly: the fill and stroke paints, the dash array, the
-// stroke width and offset, the paint order and the dominant baseline. A
-// paint the core could not resolve takes the C++ resolution arm.
-static void assemble_inherited_svg_group_payload(void* payload_pointer, void const* data_pointer)
-{
-    auto& payload = *static_cast<ComputedValues::InheritedSVGValues*>(payload_pointer);
-    auto const& data = *static_cast<ComputedValuesFFI::FfiInheritedSvgGroupAssembly const*>(data_pointer);
-    auto const& context = *static_cast<TableGroupAssemblerContext const*>(data.cpp_context);
-
-    auto paint = [&](ComputedValuesFFI::FfiSvgPaintAssembly const& lowered) -> Optional<SVGPaint> {
-        switch (lowered.kind) {
-        case 0:
-            return {};
-        case 1:
-            if (lowered.is_url) {
-                auto url_value = adopt_assembly_handle(lowered.url).release_nonnull();
-                Optional<Color> fallback_color;
-                if (lowered.has_color)
-                    fallback_color = Color::from_bgra(lowered.color);
-                return SVGPaint { url_value->as_url().url(), fallback_color, lowered.color_is_currentcolor };
-            }
-            return SVGPaint { Color::from_bgra(lowered.color), lowered.color_is_currentcolor };
-        default:
-            return SVGPaint::from_style_value(adopt_assembly_handle(lowered.value).release_nonnull(), context.color_resolution_context);
-        }
-    };
-    payload.fill = paint(data.fill);
-    payload.stroke = paint(data.stroke);
-
-    Vector<Variant<LengthPercentage, float>> dashes;
-    dashes.ensure_capacity(data.dash_count);
-    for (size_t i = 0; i < data.dash_count; ++i) {
-        auto const& item = data.dashes[i];
-        if (item.is_number)
-            dashes.unchecked_append(static_cast<float>(item.number));
-        else
-            dashes.unchecked_append(LengthPercentage::from_style_value(adopt_assembly_handle(item.value).release_nonnull()));
-    }
-    payload.stroke_dasharray = move(dashes);
-
-    auto length_percentage_or_number = [](ComputedValuesFFI::FfiLengthPercentageOrNumberAssembly const& lowered) -> LengthPercentage {
-        // FIXME: Converting to pixels isn't really correct - values should be in "user units"
-        //        https://svgwg.org/svg2-draft/coords.html#TermUserUnits
-        if (lowered.is_number)
-            return Length::make_px(CSSPixels::nearest_value_for(lowered.number));
-        return LengthPercentage::from_style_value(adopt_assembly_handle(lowered.value).release_nonnull());
-    };
-    payload.stroke_dashoffset = length_percentage_or_number(data.stroke_dashoffset);
-    payload.stroke_width = length_percentage_or_number(data.stroke_width);
-
-    payload.paint_order = PaintOrderList {
-        static_cast<PaintOrder>(data.paint_order[0]),
-        static_cast<PaintOrder>(data.paint_order[1]),
-        static_cast<PaintOrder>(data.paint_order[2]),
-    };
-    payload.paint_order_serialization_length = data.paint_order_serialization_length;
-    payload.paint_order_is_normal = data.paint_order_is_normal;
-
-    if (data.has_dominant_baseline)
-        payload.dominant_baseline = static_cast<BaselineMetric>(data.dominant_baseline);
-    else
-        payload.dominant_baseline = {};
-}
-
 // Fills the inherited list group's complex members from the core's
 // pre-lowered assembly. The list-style-type stays with the C++ arm because
 // its counter styles resolve against the style scope, and a url() list image
@@ -1642,112 +1403,6 @@ static void assemble_content_group_payload(void* payload_pointer, void const* da
     payload.counter_increment = counter_vector(data.counter_increment, data.counter_increment_count);
     payload.counter_reset = counter_vector(data.counter_reset, data.counter_reset_count);
     payload.counter_set = counter_vector(data.counter_set, data.counter_set_count);
-}
-
-// Fills the inherited UI group's complex members from the core's pre-lowered
-// assembly: the cursor list, the caret and accent computed halves (the used
-// values arrive through the field descriptors), the scrollbar colors and the
-// color-scheme names. Colors the core could not resolve take the C++
-// resolution arm.
-static void assemble_inherited_ui_group_payload(void* payload_pointer, void const* data_pointer)
-{
-    auto& payload = *static_cast<ComputedValues::InheritedUIValues*>(payload_pointer);
-    auto const& data = *static_cast<ComputedValuesFFI::FfiInheritedUiGroupAssembly const*>(data_pointer);
-    auto const& context = *static_cast<TableGroupAssemblerContext const*>(data.cpp_context);
-
-    auto color_or_auto = [](ColorOrAuto& slot, bool is_auto, bool resolved, auto resolve) {
-        if (!resolved)
-            slot.used_value = resolve();
-        if (!is_auto)
-            slot.computed_value = slot.used_value;
-    };
-    color_or_auto(payload.caret_color, data.caret_is_auto, data.caret_resolved,
-        [&] { return context.computed_style.caret_color(context.color_resolution_context); });
-    color_or_auto(payload.accent_color, data.accent_is_auto, data.accent_resolved,
-        [&] { return context.computed_style.accent_color(context.color_resolution_context); });
-
-    Vector<CursorData> cursors;
-    cursors.ensure_capacity(data.cursor_count);
-    for (size_t i = 0; i < data.cursor_count; ++i) {
-        auto const& item = data.cursors[i];
-        if (item.is_cursor_value)
-            cursors.unchecked_append(CursorData { NonnullRefPtr<CursorStyleValue const> { adopt_assembly_handle(item.cursor).release_nonnull()->as_cursor() } });
-        else
-            cursors.unchecked_append(static_cast<CursorPredefined>(item.predefined));
-    }
-    payload.cursor = move(cursors);
-
-    if (data.scrollbar_color_kind == 1) {
-        payload.scrollbar_color = ScrollbarColorData {
-            .thumb_color = Color::from_bgra(data.scrollbar_thumb_color),
-            .track_color = Color::from_bgra(data.scrollbar_track_color),
-            .is_auto = false,
-        };
-    } else if (data.scrollbar_color_kind == 2) {
-        payload.scrollbar_color = context.computed_style.scrollbar_color(context.color_resolution_context);
-    }
-
-    Vector<Utf16FlyString> schemes;
-    schemes.ensure_capacity(data.color_scheme_count);
-    for (size_t i = 0; i < data.color_scheme_count; ++i)
-        schemes.unchecked_append(Utf16FlyString::from_raw(data.color_schemes[i]));
-    payload.color_schemes = move(schemes);
-    payload.color_scheme_only = data.color_scheme_only;
-}
-
-// Fills the inherited text group's complex members from the core's
-// pre-lowered assembly: the text shadows arrive as plain data, the indent
-// and underline offset keep their length-percentage slots, and a fill color
-// the core could not resolve takes the C++ resolution arm.
-static void assemble_inherited_text_group_payload(void* payload_pointer, void const* data_pointer)
-{
-    auto& payload = *static_cast<ComputedValues::InheritedTextValues*>(payload_pointer);
-    auto const& data = *static_cast<ComputedValuesFFI::FfiInheritedTextGroupAssembly const*>(data_pointer);
-    auto const& context = *static_cast<TableGroupAssemblerContext const*>(data.cpp_context);
-
-    if (!data.webkit_text_fill_color_resolved)
-        payload.webkit_text_fill_color = context.computed_style.property(PropertyID::WebkitTextFillColor).to_color(context.color_resolution_context).value();
-    if (!data.word_spacing_resolved)
-        payload.word_spacing = context.computed_style.word_spacing();
-    if (!data.letter_spacing_resolved)
-        payload.letter_spacing = context.computed_style.letter_spacing();
-
-    Vector<ShadowData> shadows;
-    shadows.ensure_capacity(data.text_shadow_count);
-    for (size_t i = 0; i < data.text_shadow_count; ++i) {
-        auto const& shadow = data.text_shadows[i];
-        shadows.unchecked_append(ShadowData {
-            CSSPixels::from_raw(shadow.offset_x),
-            CSSPixels::from_raw(shadow.offset_y),
-            CSSPixels::from_raw(shadow.blur_radius),
-            CSSPixels::from_raw(shadow.spread_distance),
-            Color::from_bgra(shadow.color),
-            static_cast<ColorSyntax>(shadow.color_syntax),
-            static_cast<ShadowPlacement>(shadow.placement),
-        });
-    }
-    payload.text_shadow = move(shadows);
-
-    payload.text_underline_position = TextUnderlinePosition {
-        .horizontal = static_cast<TextUnderlinePositionHorizontal>(data.underline_position_horizontal),
-        .vertical = static_cast<TextUnderlinePositionVertical>(data.underline_position_vertical),
-    };
-
-    TextUnderlineOffset underline_offset;
-    underline_offset.used_value = context.computed_style.text_underline_offset();
-    if (!data.underline_offset_is_auto)
-        underline_offset.computed_value = LengthPercentage::from_style_value(adopt_assembly_handle(data.underline_offset).release_nonnull());
-    payload.text_underline_offset = move(underline_offset);
-
-    payload.text_indent = TextIndentData {
-        .length_percentage = LengthPercentage::from_style_value(adopt_assembly_handle(data.text_indent).release_nonnull()),
-        .each_line = data.text_indent_each_line,
-        .hanging = data.text_indent_hanging,
-    };
-
-    payload.tab_size_is_number = data.tab_size_is_number;
-    payload.tab_size_length = data.tab_size_is_number ? CSSPixels(0) : CSSPixels::from_raw(data.tab_size_px);
-    payload.tab_size_number = data.tab_size_is_number ? data.tab_size_number : 0;
 }
 
 // Fills the misc reset group's complex members from the core's pre-lowered
@@ -1878,263 +1533,262 @@ static void assemble_misc_reset_group_payload(void* payload_pointer, void const*
     }
 }
 
-// Fills the animation group's coordinated vectors from the core's pre-lowered
-// assembly. Only the values that genuinely need C++ decode here: calc times
-// and counts resolve through their style value wrappers, easing entries
-// through EasingFunction, and inset edges through LengthPercentageOrAuto.
-static void assemble_animation_group_payload(void* payload_pointer, void const* data_pointer)
+static NonnullRefPtr<StyleValue const> animation_style_value(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
 {
-    auto& payload = *static_cast<ComputedValues::AnimationValues*>(payload_pointer);
-    auto const& data = *static_cast<ComputedValuesFFI::FfiAnimationGroupAssembly const*>(data_pointer);
+    VERIFY(handle.pointer);
+    return StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
+        static_cast<StyleValueFFI::StyleValueData const*>(handle.pointer)));
+}
 
-    auto time_from_item = [](ComputedValuesFFI::FfiTimeItemAssembly const& item) {
-        if (item.is_plain)
-            return Time { item.value, static_cast<TimeUnit>(item.unit) };
-        return Time::from_style_value(adopt_assembly_handle(item.calculated).release_nonnull(), {});
-    };
-    auto times = [&](ComputedValuesFFI::FfiTimeItemAssembly const* items, size_t count) {
-        Vector<Time> result;
-        result.ensure_capacity(count);
-        for (size_t i = 0; i < count; ++i)
-            result.append(time_from_item(items[i]));
-        return result;
-    };
-    auto codes = [](u8 const* items, size_t count, auto convert) {
-        Vector<decltype(convert(0))> result;
-        result.ensure_capacity(count);
-        for (size_t i = 0; i < count; ++i)
-            result.append(convert(items[i]));
-        return result;
-    };
-    auto optional_names = [](ComputedValuesFFI::FfiTimelineNameAssembly const* items, size_t count) {
-        Vector<Optional<Utf16FlyString>> result;
-        result.ensure_capacity(count);
-        for (size_t i = 0; i < count; ++i)
-            result.append(items[i].has_name ? Optional<Utf16FlyString> { Utf16FlyString::from_raw(items[i].name_raw) } : Optional<Utf16FlyString> {});
-        return result;
-    };
-    auto easing_functions = [](void const* const* items, size_t count, Vector<EasingFunction>& functions, StyleValueVector& style_values) {
-        functions.ensure_capacity(count);
-        style_values.ensure_capacity(count);
-        for (size_t i = 0; i < count; ++i) {
-            auto value = adopt_assembly_handle(items[i]).release_nonnull();
-            functions.append(EasingFunction::from_style_value(value));
-            style_values.append(move(value));
-        }
-    };
+static StyleValueVector animation_items(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
+{
+    auto value = animation_style_value(handle);
+    if (value->is_value_list() && value->as_value_list().separator() == StyleValueList::Separator::Comma)
+        return value->as_value_list().values();
+    return { move(value) };
+}
 
-    Vector<ComputedAnimationName> animation_names;
-    animation_names.ensure_capacity(data.name_count);
-    for (size_t i = 0; i < data.name_count; ++i) {
-        auto const& name = data.names[i];
-        if (!name.has_name) {
-            animation_names.empend();
+template<typename T, typename Mapper>
+static Vector<T> animation_keyword_items(ComputedValuesFFI::ComputedStyleValueHandle const& handle, Mapper mapper)
+{
+    Vector<T> result;
+    for (auto const& item : animation_items(handle))
+        result.append(mapper(item->to_keyword()).release_value());
+    return result;
+}
+
+static Vector<Time> animation_time_items(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
+{
+    Vector<Time> result;
+    for (auto const& item : animation_items(handle))
+        result.append(Time::from_style_value(item, {}));
+    return result;
+}
+
+static Vector<Optional<Utf16FlyString>> animation_optional_name_items(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
+{
+    Vector<Optional<Utf16FlyString>> result;
+    for (auto const& item : animation_items(handle)) {
+        if (item->is_custom_ident())
+            result.append(item->as_custom_ident().custom_ident());
+        else
+            result.empend();
+    }
+    return result;
+}
+
+Vector<ComputedAnimationName> ComputedValues::AnimationValues::animation_names_value() const
+{
+    Vector<ComputedAnimationName> result;
+    auto value = animation_style_value(animation_name);
+    auto const& items = value->as_value_list().values();
+    result.ensure_capacity(items.size());
+    for (auto const& item : items) {
+        if (item->is_keyword()) {
+            VERIFY(item->to_keyword() == Keyword::None);
+            result.empend();
         } else {
-            animation_names.append(ComputedAnimationName {
-                .name = Utf16FlyString::from_raw(name.name_raw),
-                .syntax = name.is_string ? ComputedAnimationNameSyntax::String : ComputedAnimationNameSyntax::CustomIdent,
+            result.append({
+                .name = string_from_style_value(item),
+                .syntax = item->is_string() ? ComputedAnimationNameSyntax::String : ComputedAnimationNameSyntax::CustomIdent,
             });
         }
     }
-    payload.animation_names = move(animation_names);
+    return result;
+}
 
-    payload.animation_compositions = codes(data.compositions, data.composition_count, [](u8 code) { return static_cast<AnimationComposition>(code); });
-    payload.animation_delays = times(data.delays, data.delay_count);
-    payload.animation_directions = codes(data.directions, data.direction_count, [](u8 code) { return static_cast<AnimationDirection>(code); });
+Vector<AnimationComposition> ComputedValues::AnimationValues::animation_compositions_value() const
+{
+    return animation_keyword_items<AnimationComposition>(animation_composition, keyword_to_animation_composition);
+}
 
-    Vector<Optional<Time>> animation_durations;
-    animation_durations.ensure_capacity(data.duration_count);
-    for (size_t i = 0; i < data.duration_count; ++i) {
-        auto const& duration = data.durations[i];
-        animation_durations.append(duration.is_auto ? Optional<Time> {} : Optional<Time> { time_from_item(duration.time) });
-    }
-    payload.animation_durations = move(animation_durations);
+Vector<Time> ComputedValues::AnimationValues::animation_delays_value() const
+{
+    return animation_time_items(animation_delay);
+}
 
-    payload.animation_fill_modes = codes(data.fill_modes, data.fill_mode_count, [](u8 code) { return static_cast<AnimationFillMode>(code); });
+Vector<AnimationDirection> ComputedValues::AnimationValues::animation_directions_value() const
+{
+    return animation_keyword_items<AnimationDirection>(animation_direction, keyword_to_animation_direction);
+}
 
-    Vector<double> animation_iteration_counts;
-    animation_iteration_counts.ensure_capacity(data.iteration_count_count);
-    for (size_t i = 0; i < data.iteration_count_count; ++i) {
-        auto const& count = data.iteration_counts[i];
-        if (count.is_plain)
-            animation_iteration_counts.append(count.number);
+Vector<Optional<Time>> ComputedValues::AnimationValues::animation_durations_value() const
+{
+    Vector<Optional<Time>> result;
+    for (auto const& item : animation_items(animation_duration)) {
+        if (item->is_keyword())
+            result.empend();
         else
-            animation_iteration_counts.append(number_from_style_value(adopt_assembly_handle(count.value).release_nonnull(), {}));
+            result.append(Time::from_style_value(item, {}));
     }
-    payload.animation_iteration_counts = move(animation_iteration_counts);
+    return result;
+}
 
-    payload.animation_play_states = codes(data.play_states, data.play_state_count, [](u8 code) { return static_cast<AnimationPlayState>(code); });
+Vector<AnimationFillMode> ComputedValues::AnimationValues::animation_fill_modes_value() const
+{
+    return animation_keyword_items<AnimationFillMode>(animation_fill_mode, keyword_to_animation_fill_mode);
+}
 
-    Vector<AnimationTimelineData> animation_timelines;
-    animation_timelines.ensure_capacity(data.timeline_count);
-    for (size_t i = 0; i < data.timeline_count; ++i) {
-        auto const& lowered = data.timelines[i];
+Vector<double> ComputedValues::AnimationValues::animation_iteration_counts_value() const
+{
+    Vector<double> result;
+    for (auto const& item : animation_items(animation_iteration_count)) {
+        if (item->is_keyword())
+            result.append(AK::Infinity<double>);
+        else
+            result.append(number_from_style_value(item, {}));
+    }
+    return result;
+}
+
+Vector<AnimationPlayState> ComputedValues::AnimationValues::animation_play_states_value() const
+{
+    return animation_keyword_items<AnimationPlayState>(animation_play_state, keyword_to_animation_play_state);
+}
+
+Vector<AnimationTimelineData> ComputedValues::AnimationValues::animation_timelines_value() const
+{
+    Vector<AnimationTimelineData> result;
+    for (auto const& item : animation_items(animation_timeline)) {
         AnimationTimelineData timeline;
-        timeline.type = static_cast<AnimationTimelineData::Type>(lowered.kind);
-        if (timeline.type == AnimationTimelineData::Type::Name)
-            timeline.name = Utf16FlyString::from_raw(lowered.name_raw);
-        if (lowered.has_scroller)
-            timeline.scroller = static_cast<Scroller>(lowered.scroller);
-        if (lowered.has_axis)
-            timeline.axis = static_cast<Axis>(lowered.axis);
-        if (lowered.has_inset) {
-            timeline.inset = {
-                .start = LengthPercentageOrAuto::from_style_value(adopt_assembly_handle(lowered.inset_start).release_nonnull()),
-                .end = LengthPercentageOrAuto::from_style_value(adopt_assembly_handle(lowered.inset_end).release_nonnull()),
-            };
+        if (item->is_keyword()) {
+            timeline.type = item->to_keyword() == Keyword::Auto ? AnimationTimelineData::Type::Auto : AnimationTimelineData::Type::None;
+        } else if (item->is_custom_ident()) {
+            timeline.type = AnimationTimelineData::Type::Name;
+            timeline.name = item->as_custom_ident().custom_ident();
+        } else {
+            auto const& function = item->as_function();
+            auto const& arguments = function.value()->as_tuple().tuple();
+            if (function.name() == "scroll"_utf16_fly_string) {
+                timeline.type = AnimationTimelineData::Type::Scroll;
+                if (arguments[0])
+                    timeline.scroller = keyword_to_scroller(arguments[0]->to_keyword()).release_value();
+                if (arguments[1])
+                    timeline.axis = keyword_to_axis(arguments[1]->to_keyword()).release_value();
+            } else {
+                timeline.type = AnimationTimelineData::Type::View;
+                if (arguments[0])
+                    timeline.axis = keyword_to_axis(arguments[0]->to_keyword()).release_value();
+                if (arguments[1]) {
+                    auto const& edges = arguments[1]->as_value_list().values();
+                    timeline.inset = {
+                        .start = LengthPercentageOrAuto::from_style_value(edges[0]),
+                        .end = LengthPercentageOrAuto::from_style_value(edges[1]),
+                    };
+                }
+            }
         }
-        animation_timelines.append(move(timeline));
+        result.append(move(timeline));
     }
-    payload.animation_timelines = move(animation_timelines);
+    return result;
+}
 
-    Vector<EasingFunction> animation_timing_functions;
-    StyleValueVector animation_timing_function_style_values;
-    easing_functions(data.timing_functions, data.timing_function_count, animation_timing_functions, animation_timing_function_style_values);
-    payload.animation_timing_functions = move(animation_timing_functions);
-    payload.animation_timing_function_style_values = move(animation_timing_function_style_values);
+Vector<EasingFunction> ComputedValues::AnimationValues::animation_timing_functions_value() const
+{
+    Vector<EasingFunction> result;
+    for (auto const& item : animation_items(animation_timing_function))
+        result.append(EasingFunction::from_style_value(item));
+    return result;
+}
 
-    payload.scroll_timeline_names = optional_names(data.scroll_timeline_names, data.scroll_timeline_name_count);
-    payload.scroll_timeline_axes = codes(data.scroll_timeline_axes, data.scroll_timeline_axis_count, [](u8 code) { return static_cast<Axis>(code); });
+StyleValueVector ComputedValues::AnimationValues::animation_timing_function_style_values_value() const
+{
+    return animation_items(animation_timing_function);
+}
 
-    Vector<Utf16FlyString> timeline_scope_names;
-    timeline_scope_names.ensure_capacity(data.timeline_scope_name_count);
-    for (size_t i = 0; i < data.timeline_scope_name_count; ++i)
-        timeline_scope_names.append(Utf16FlyString::from_raw(data.timeline_scope_names[i]));
-    payload.timeline_scope = TimelineScopeData {
-        .all = data.timeline_scope_all,
-        .names = move(timeline_scope_names),
+Vector<Optional<Utf16FlyString>> ComputedValues::AnimationValues::scroll_timeline_names_value() const
+{
+    return animation_optional_name_items(scroll_timeline_name);
+}
+
+Vector<Axis> ComputedValues::AnimationValues::scroll_timeline_axes_value() const
+{
+    return animation_keyword_items<Axis>(scroll_timeline_axis, keyword_to_axis);
+}
+
+TimelineScopeData ComputedValues::AnimationValues::timeline_scope_value() const
+{
+    TimelineScopeData result;
+    auto value = animation_style_value(timeline_scope);
+    if (value->is_keyword()) {
+        result.all = value->to_keyword() == Keyword::All;
+        return result;
+    }
+    auto append_name = [&](StyleValue const& item) {
+        if (item.is_custom_ident())
+            result.names.append(item.as_custom_ident().custom_ident());
     };
+    if (value->is_value_list()) {
+        for (auto const& item : value->as_value_list().values())
+            append_name(*item);
+    } else {
+        append_name(*value);
+    }
+    return result;
+}
 
-    payload.view_timeline_names = optional_names(data.view_timeline_names, data.view_timeline_name_count);
-    payload.view_timeline_axes = codes(data.view_timeline_axes, data.view_timeline_axis_count, [](u8 code) { return static_cast<Axis>(code); });
+Vector<Optional<Utf16FlyString>> ComputedValues::AnimationValues::view_timeline_names_value() const
+{
+    return animation_optional_name_items(view_timeline_name);
+}
 
-    Vector<ViewTimelineInsetData> view_timeline_insets;
-    view_timeline_insets.ensure_capacity(data.view_timeline_inset_count);
-    for (size_t i = 0; i < data.view_timeline_inset_count; ++i) {
-        auto const& inset = data.view_timeline_insets[i];
-        view_timeline_insets.append({
-            .start = LengthPercentageOrAuto::from_style_value(adopt_assembly_handle(inset.start).release_nonnull()),
-            .end = LengthPercentageOrAuto::from_style_value(adopt_assembly_handle(inset.end).release_nonnull()),
+Vector<Axis> ComputedValues::AnimationValues::view_timeline_axes_value() const
+{
+    return animation_keyword_items<Axis>(view_timeline_axis, keyword_to_axis);
+}
+
+Vector<ViewTimelineInsetData> ComputedValues::AnimationValues::view_timeline_insets_value() const
+{
+    Vector<ViewTimelineInsetData> result;
+    auto append_inset = [&](StyleValue const& item) {
+        auto const& edges = item.as_value_list().values();
+        VERIFY(edges.size() == 2);
+        result.append({
+            .start = LengthPercentageOrAuto::from_style_value(edges[0]),
+            .end = LengthPercentageOrAuto::from_style_value(edges[1]),
         });
+    };
+    auto value = animation_style_value(view_timeline_inset);
+    if (value->as_value_list().separator() == StyleValueList::Separator::Comma) {
+        for (auto const& item : value->as_value_list().values())
+            append_inset(*item);
+    } else {
+        append_inset(*value);
     }
-    payload.view_timeline_insets = move(view_timeline_insets);
-
-    payload.transition_properties = optional_names(data.transition_properties, data.transition_property_count);
-    payload.transition_durations = times(data.transition_durations, data.transition_duration_count);
-
-    Vector<EasingFunction> transition_timing_functions;
-    StyleValueVector transition_timing_function_style_values;
-    easing_functions(data.transition_timing_functions, data.transition_timing_function_count, transition_timing_functions, transition_timing_function_style_values);
-    payload.transition_timing_functions = move(transition_timing_functions);
-    payload.transition_timing_function_style_values = move(transition_timing_function_style_values);
-
-    payload.transition_delays = times(data.transition_delays, data.transition_delay_count);
-    payload.transition_behaviors = codes(data.transition_behaviors, data.transition_behavior_count, [](u8 code) { return static_cast<TransitionBehavior>(code); });
+    return result;
 }
 
-// Fills the text reset group's members the pokes cannot carry from the core's
-// pre-lowered assembly; a color the core could not resolve decodes here
-// through the wrapper path.
-static void assemble_text_reset_group_payload(void* payload_pointer, void const* data_pointer)
+Vector<Optional<Utf16FlyString>> ComputedValues::AnimationValues::transition_properties_value() const
 {
-    auto& payload = *static_cast<ComputedValues::TextResetValues*>(payload_pointer);
-    auto const& data = *static_cast<ComputedValuesFFI::FfiTextResetGroupAssembly const*>(data_pointer);
-    auto const& context = *static_cast<TableGroupAssemblerContext const*>(data.cpp_context);
-
-    Vector<TextDecorationLine> lines;
-    lines.ensure_capacity(data.text_decoration_line_count);
-    for (size_t i = 0; i < data.text_decoration_line_count; ++i)
-        lines.append(static_cast<TextDecorationLine>(data.text_decoration_lines[i]));
-    payload.text_decoration_line = move(lines);
-
-    switch (data.text_decoration_thickness_kind) {
-    case 0:
-        payload.text_decoration_thickness = TextDecorationThickness { TextDecorationThickness::Auto {} };
-        break;
-    case 1:
-        payload.text_decoration_thickness = TextDecorationThickness { TextDecorationThickness::FromFont {} };
-        break;
-    default:
-        payload.text_decoration_thickness = TextDecorationThickness { LengthPercentage::from_style_value(adopt_assembly_handle(data.text_decoration_thickness).release_nonnull()) };
-        break;
-    }
-
-    if (!data.text_decoration_color_resolved)
-        payload.text_decoration_color = context.computed_style.color(PropertyID::TextDecorationColor, context.color_resolution_context);
-
-    payload.white_space_trim = WhiteSpaceTrimData {
-        .discard_before = data.white_space_trim_discard_before,
-        .discard_after = data.white_space_trim_discard_after,
-        .discard_inner = data.white_space_trim_discard_inner,
-    };
+    return animation_optional_name_items(transition_property);
 }
 
-// Fills the anchor group's members from the core's pre-lowered assembly; the
-// name raws are borrowed and intern fresh references here.
-static void assemble_anchor_group_payload(void* payload_pointer, void const* data_pointer)
+Vector<Time> ComputedValues::AnimationValues::transition_durations_value() const
 {
-    auto& payload = *static_cast<ComputedValues::AnchorValues*>(payload_pointer);
-    auto const& data = *static_cast<ComputedValuesFFI::FfiAnchorGroupAssembly const*>(data_pointer);
+    return animation_time_items(transition_duration);
+}
 
-    auto fly_strings = [](size_t const* raws, size_t count) {
-        Vector<Utf16FlyString> names;
-        names.ensure_capacity(count);
-        for (size_t i = 0; i < count; ++i)
-            names.append(Utf16FlyString::from_raw(raws[i]));
-        return names;
-    };
-    auto position_area_keywords = [](u8 const* codes, size_t count) {
-        Vector<PositionArea> keywords;
-        keywords.ensure_capacity(count);
-        for (size_t i = 0; i < count; ++i)
-            keywords.append(static_cast<PositionArea>(codes[i]));
-        return keywords;
-    };
+Vector<EasingFunction> ComputedValues::AnimationValues::transition_timing_functions_value() const
+{
+    Vector<EasingFunction> result;
+    for (auto const& item : animation_items(transition_timing_function))
+        result.append(EasingFunction::from_style_value(item));
+    return result;
+}
 
-    payload.anchor_names = fly_strings(data.anchor_names, data.anchor_name_count);
-    payload.anchor_scope = AnchorScopeData {
-        .all = data.anchor_scope_all,
-        .names = fly_strings(data.anchor_scope_names, data.anchor_scope_name_count),
-    };
+StyleValueVector ComputedValues::AnimationValues::transition_timing_function_style_values_value() const
+{
+    return animation_items(transition_timing_function);
+}
 
-    PositionAnchor position_anchor;
-    position_anchor.type = static_cast<PositionAnchor::Type>(data.position_anchor_type);
-    if (position_anchor.type == PositionAnchor::Type::Name)
-        position_anchor.name = Utf16FlyString::from_raw(data.position_anchor_name_raw);
-    payload.position_anchor = move(position_anchor);
+Vector<Time> ComputedValues::AnimationValues::transition_delays_value() const
+{
+    return animation_time_items(transition_delay);
+}
 
-    payload.position_area = PositionAreaData {
-        .keywords = position_area_keywords(data.position_area_keywords, data.position_area_keyword_count),
-    };
-
-    Vector<PositionTryFallbackData> fallbacks;
-    fallbacks.ensure_capacity(data.position_try_fallback_count);
-    for (size_t i = 0; i < data.position_try_fallback_count; ++i) {
-        auto const& lowered = data.position_try_fallbacks[i];
-        PositionTryFallbackData fallback;
-        if (lowered.has_name)
-            fallback.name = Utf16FlyString::from_raw(lowered.name_raw);
-        for (size_t tactic = 0; tactic < lowered.tactic_count; ++tactic)
-            fallback.tactics.append(static_cast<TryTactic>(lowered.tactics[tactic]));
-        if (lowered.has_position_area) {
-            fallback.position_area = PositionAreaData {
-                .keywords = position_area_keywords(lowered.position_area_keywords, lowered.position_area_keyword_count),
-            };
-        }
-        fallbacks.append(move(fallback));
-    }
-    payload.position_try_fallbacks = move(fallbacks);
-
-    payload.position_try_order = data.has_position_try_order
-        ? Optional<TryOrder> { static_cast<TryOrder>(data.position_try_order) }
-        : Optional<TryOrder> {};
-
-    payload.position_visibility = PositionVisibilityData {
-        .always = data.position_visibility_always,
-        .anchors_valid = data.position_visibility_anchors_valid,
-        .anchors_visible = data.position_visibility_anchors_visible,
-        .no_overflow = data.position_visibility_no_overflow,
-    };
+Vector<TransitionBehavior> ComputedValues::AnimationValues::transition_behaviors_value() const
+{
+    return animation_keyword_items<TransitionBehavior>(transition_behavior, keyword_to_transition_behavior);
 }
 
 NonnullRefPtr<ComputedValues const> ComputedValues::create(ComputedStyleWorkingSet const& computed_style, DOM::Document const& document, StyleScope const& style_scope, ColorResolutionContext color_resolution_context, ComputedValues const* inherit_parent)
@@ -2581,7 +2235,7 @@ RustStyleValueHandle const* ComputedValues::stored_style_value_handle(PropertyID
     case PropertyID::GridTemplateRows:
         return non_empty(from_ffi_handle(m_noninherited.grid->grid_template_rows_style_value));
     case PropertyID::LetterSpacing:
-        return non_empty(&m_inherited.text->letter_spacing_style_value);
+        return non_empty(from_ffi_handle(m_inherited.text->letter_spacing_style_value));
     case PropertyID::R:
         return non_empty(from_ffi_handle(m_noninherited.svg_reset->r));
     case PropertyID::Rx:
@@ -2593,7 +2247,7 @@ RustStyleValueHandle const* ComputedValues::stored_style_value_handle(PropertyID
             return nullptr;
         return non_empty(from_ffi_handle(m_noninherited.svg_reset->ry.value));
     case PropertyID::WordSpacing:
-        return non_empty(&m_inherited.text->word_spacing_style_value);
+        return non_empty(from_ffi_handle(m_inherited.text->word_spacing_style_value));
     case PropertyID::X:
         return non_empty(from_ffi_handle(m_noninherited.svg_reset->x));
     case PropertyID::Y:
@@ -2605,8 +2259,12 @@ RustStyleValueHandle const* ComputedValues::stored_style_value_handle(PropertyID
 
 RefPtr<StyleValue const> ComputedValues::color_style_value() const
 {
-    if (m_inherited.text->color_style_value)
-        return style_value_from_handle(PropertyID::Color, m_inherited.text->color_style_value);
+    if (m_inherited.text->color_style_value.pointer) {
+        RustStyleValueHandle handle {
+            static_cast<StyleValueFFI::StyleValueData const*>(m_inherited.text->color_style_value.pointer)
+        };
+        return style_value_from_handle(PropertyID::Color, handle);
+    }
     return computed_style_value(PropertyID::Color);
 }
 
