@@ -85,6 +85,10 @@ pub(crate) fn record_display_list(
         .filter(|source| source.compatible_visual_context_tree_version == visual_context_tree_version);
     let item_cache_source =
         item_cache_source.filter(|source| source.visual_context_tree_version == visual_context_tree_version);
+    let display_list_capacity = command_cache_source
+        .as_ref()
+        .map_or(0, |source| source.display_list_bytes.len());
+    let hit_test_list_capacity = item_cache_source.as_ref().map_or(0, |source| source.items.len());
     let mut recorder = PaintRecorder {
         layout_arena,
         paintables,
@@ -92,7 +96,7 @@ pub(crate) fn record_display_list(
         host,
         paint_host,
         inputs,
-        recorder: DisplayListRecorder::new(empty_effective_clips),
+        recorder: DisplayListRecorder::with_capacity(empty_effective_clips, display_list_capacity),
         converter: DevicePixelConverter::new(inputs.device_pixels_per_css_pixel),
         draw_svg_geometry_for_clip_path: false,
         visual_context_host,
@@ -110,7 +114,7 @@ pub(crate) fn record_display_list(
         has_blocking_wheel_event_listeners: false,
         spliced_capture_count: 0,
         uncacheable_paint_generation: 0,
-        list: HitTestList::default(),
+        list: HitTestList::with_capacity(hit_test_list_capacity),
         base_paint_facts_cache: vec![None; paintables.slot_count()],
         paintable_facts_cache: vec![None; paintables.slot_count()],
         text_node_facts_cache: HashMap::new(),

@@ -242,8 +242,12 @@ pub struct DisplayListRecorder {
 
 impl DisplayListRecorder {
     pub fn new(empty_effective_clips: Vec<bool>) -> Self {
+        Self::with_capacity(empty_effective_clips, 0)
+    }
+
+    pub fn with_capacity(empty_effective_clips: Vec<bool>, capacity: usize) -> Self {
         Self {
-            builder: DisplayListBuilder::new(),
+            builder: DisplayListBuilder::with_capacity(capacity),
             empty_effective_clips,
             context_index: VisualContextIndex(0),
             context_geometry_only: false,

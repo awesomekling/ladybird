@@ -123,6 +123,13 @@ pub struct HitTestList {
 }
 
 impl HitTestList {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            items: std::rc::Rc::new(Vec::with_capacity(capacity)),
+            ..Default::default()
+        }
+    }
+
     pub fn append(&mut self, item: HitTestItem) {
         assert!(
             !self.derived_structures_built,
