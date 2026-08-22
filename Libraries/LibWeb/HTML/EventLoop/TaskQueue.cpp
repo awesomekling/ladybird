@@ -67,10 +67,29 @@ GC::Ptr<Task> TaskQueue::take_first_runnable()
     if (m_event_loop->execution_paused())
         return nullptr;
 
+    // INTEROP: Rendering work is coalescible. Give ready non-rendering work a bounded interval to
+    //          run before promoting rendering, as the major browser schedulers do, instead of
+    //          letting an expired frame timer jump ahead of every task already ready to run.
+    bool should_defer_rendering_tasks = m_event_loop->should_defer_rendering_tasks();
+    if (should_defer_rendering_tasks) {
+        bool has_runnable_non_rendering_task = false;
+        for (auto& task : m_tasks) {
+            if (task.source() != Task::Source::Rendering && task.is_runnable()) {
+                has_runnable_non_rendering_task = true;
+                break;
+            }
+        }
+        should_defer_rendering_tasks = has_runnable_non_rendering_task;
+    }
+
     for (auto it = m_tasks.begin(); it != m_tasks.end();) {
         auto& task = *it;
 
         if (m_event_loop->running_rendering_task() && task.source() == Task::Source::Rendering) {
+            ++it;
+            continue;
+        }
+        if (should_defer_rendering_tasks && task.source() == Task::Source::Rendering) {
             ++it;
             continue;
         }
