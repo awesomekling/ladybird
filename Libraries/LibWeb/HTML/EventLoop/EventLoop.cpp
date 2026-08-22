@@ -38,6 +38,8 @@ namespace Web::HTML {
 
 GC_DEFINE_ALLOCATOR(EventLoop);
 
+static constexpr double rendering_starvation_threshold_ms = 100;
+
 EventLoop::EventLoop(Type type)
     : m_type(type)
 {
@@ -317,6 +319,7 @@ void EventLoop::update_the_rendering()
     m_running_rendering_task = true;
     ScopeGuard const guard = [this] {
         m_running_rendering_task = false;
+        m_last_rendering_update_time = HighResolutionTime::unsafe_shared_current_time();
     };
 
     process_input_events();
@@ -586,6 +589,13 @@ void EventLoop::update_the_rendering()
             || document->has_pending_style_sheet_requests()
             || !document->layout_is_up_to_date());
     }
+}
+
+bool EventLoop::should_defer_rendering_tasks() const
+{
+    if (m_last_rendering_update_time == 0)
+        return false;
+    return HighResolutionTime::unsafe_shared_current_time() - m_last_rendering_update_time < rendering_starvation_threshold_ms;
 }
 
 void run_when_event_loop_reaches_step_1(GC::Ref<GC::Function<void()>> steps)

@@ -98,6 +98,7 @@ public:
     bool execution_paused() const { return m_execution_paused; }
 
     bool running_rendering_task() const { return m_running_rendering_task; }
+    bool should_defer_rendering_tasks() const;
 
 private:
     explicit EventLoop(Type);
@@ -121,6 +122,7 @@ private:
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#last-render-opportunity-time
     double m_last_render_opportunity_time { 0 };
+    double m_last_rendering_update_time { 0 };
     // https://html.spec.whatwg.org/multipage/webappapis.html#last-idle-period-start-time
     double m_last_idle_period_start_time { 0 };
 
