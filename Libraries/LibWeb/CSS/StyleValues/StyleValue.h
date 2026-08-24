@@ -197,6 +197,7 @@ public:
 
     bool is_abstract_image() const
     {
+        // Keep this tag set in sync with animation_items_contain_abstract_image().
         return AK::first_is_one_of(type(), Type::Image, Type::ImageSet, Type::LinearGradient, Type::ConicGradient, Type::RadialGradient);
     }
     AbstractImageStyleValue const& as_abstract_image() const;

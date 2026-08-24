@@ -654,11 +654,15 @@ void NodeWithStyle::rebuild_image_observers()
     };
 
     Vector<NonnullOwnPtr<ImageObserver>> new_observers;
-    for (auto const& layer : background_layers())
-        add_observer_for(layer.background_image.ptr(), new_observers);
+    if (style_group<CSS::ComputedValues::BackgroundValues>().background_contains_image()) {
+        for (auto const& layer : background_layers())
+            add_observer_for(layer.background_image.ptr(), new_observers);
+    }
     add_observer_for(list_style_image(), new_observers);
-    for (auto const& layer : mask_layers())
-        add_observer_for(layer.background_image.ptr(), new_observers);
+    if (style_group<CSS::ComputedValues::MaskValues>().mask_contains_image()) {
+        for (auto const& layer : mask_layers())
+            add_observer_for(layer.background_image.ptr(), new_observers);
+    }
     for (auto const& cursor_style_value : m_cursor_style_values) {
         if (cursor_style_value)
             add_observer_for(&cursor_style_value->image(), new_observers);
@@ -708,10 +712,14 @@ void NodeWithStyle::attach_style_resources()
             const_cast<CSS::AbstractImageStyleValue&>(*image).load_any_resources(*this);
     };
 
-    for (auto const& layer : background_layers())
-        load_image(layer.background_image.ptr());
-    for (auto const& layer : mask_layers())
-        load_image(layer.background_image.ptr());
+    if (style_group<CSS::ComputedValues::BackgroundValues>().background_contains_image()) {
+        for (auto const& layer : background_layers())
+            load_image(layer.background_image.ptr());
+    }
+    if (style_group<CSS::ComputedValues::MaskValues>().mask_contains_image()) {
+        for (auto const& layer : mask_layers())
+            load_image(layer.background_image.ptr());
+    }
     load_image(border_image_source());
     m_cursor_style_values.clear();
     m_cursor_style_values.ensure_capacity(cursor().size());
@@ -915,7 +923,7 @@ CSS::TransformStyle NodeWithStyle::used_transform_style() const
         return CSS::TransformStyle::Flat;
 
     // Keep this in sync with ComputedValues::has_transform_style_grouping_property().
-    auto has_mask_layer_image = any_of(mask_layers(), [](auto const& layer) { return layer.background_image != nullptr; });
+    auto has_mask_layer_image = style_group<CSS::ComputedValues::MaskValues>().mask_contains_image();
     bool has_transform_style_grouping_property = (overflow_x() != CSS::Overflow::Visible && overflow_x() != CSS::Overflow::Clip)
         || (overflow_y() != CSS::Overflow::Visible && overflow_y() != CSS::Overflow::Clip)
         || opacity() < 1

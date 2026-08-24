@@ -1767,6 +1767,7 @@ public:
         Optional<MaskReference> mask_value() const;
         MaskType mask_type_value() const;
         RefPtr<AbstractImageStyleValue const> mask_image_value() const;
+        bool mask_contains_image() const;
         Vector<BackgroundLayerData> mask_layers_value() const;
         Optional<ClipPathReference> clip_path_value() const;
 
@@ -1906,6 +1907,7 @@ public:
         static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::Background;
 
         Color background_color_value() const { return Color::from_bgra(background_color); }
+        bool background_contains_image() const;
         Vector<BackgroundLayerData> background_layers_value() const;
 
         bool operator==(BackgroundValues const& other) const

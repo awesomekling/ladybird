@@ -828,7 +828,7 @@ bool ComputedValues::has_transform_style_grouping_property() const
         return true;
 
     // mask-image: any value other than none.
-    if (mask().has_value() || any_of(mask_layers(), [](auto const& layer) { return layer.background_image != nullptr; }))
+    if (mask().has_value() || m_noninherited.mask_data->mask_contains_image())
         return true;
 
     // FIXME: mask-border-source: any value other than none.
@@ -1113,6 +1113,35 @@ static StyleValueFFI::StyleValueData const* first_animation_item_data(ComputedVa
     return value;
 }
 
+static bool animation_items_contain_abstract_image(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
+{
+    auto const* value = static_cast<StyleValueFFI::StyleValueData const*>(handle.pointer);
+    VERIFY(value);
+
+    auto is_abstract_image = [](StyleValueFFI::StyleValueData const* item) {
+        // Keep this tag set in sync with StyleValue::is_abstract_image().
+        return AK::first_is_one_of(item->tag,
+            StyleValueFFI::StyleValueData::Tag::Image,
+            StyleValueFFI::StyleValueData::Tag::ImageSet,
+            StyleValueFFI::StyleValueData::Tag::LinearGradient,
+            StyleValueFFI::StyleValueData::Tag::ConicGradient,
+            StyleValueFFI::StyleValueData::Tag::RadialGradient);
+    };
+
+    if (value->tag == StyleValueFFI::StyleValueData::Tag::ValueList
+        && value->value_list.separator == to_underlying(StyleValueList::Separator::Comma)) {
+        VERIFY(value->value_list.values.length > 0);
+        for (size_t index = 0; index < value->value_list.values.length; ++index) {
+            auto const* item = static_cast<StyleValueFFI::StyleValueData const*>(value->value_list.values.pointer[index].pointer);
+            if (is_abstract_image(item))
+                return true;
+        }
+        return false;
+    }
+
+    return is_abstract_image(value);
+}
+
 static RefPtr<AbstractImageStyleValue const> first_abstract_image_value(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
 {
     auto const* image_data = first_animation_item_data(handle);
@@ -1346,6 +1375,11 @@ RefPtr<AbstractImageStyleValue const> ComputedValues::BorderValues::border_image
     return first_abstract_image_value(border_image_source);
 }
 
+bool ComputedValues::BackgroundValues::background_contains_image() const
+{
+    return animation_items_contain_abstract_image(background_image);
+}
+
 Vector<BackgroundLayerData> ComputedValues::BackgroundValues::background_layers_value() const
 {
     auto image_items = animation_items(background_image);
@@ -1416,6 +1450,11 @@ MaskType ComputedValues::MaskValues::mask_type_value() const
 RefPtr<AbstractImageStyleValue const> ComputedValues::MaskValues::mask_image_value() const
 {
     return first_abstract_image_value(mask_image);
+}
+
+bool ComputedValues::MaskValues::mask_contains_image() const
+{
+    return animation_items_contain_abstract_image(mask_image);
 }
 
 Optional<ClipPathReference> ComputedValues::MaskValues::clip_path_value() const

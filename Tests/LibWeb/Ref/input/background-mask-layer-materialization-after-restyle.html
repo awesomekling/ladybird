@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html class="reftest-wait">
+<link rel="match" href="../expected/background-mask-layer-materialization-after-restyle-ref.html">
+<style>
+    body { margin: 0; }
+
+    .box {
+        width: 120px;
+        height: 60px;
+        margin-bottom: 10px;
+    }
+
+    #background { background-color: red; }
+    #background.with-image { background-image: linear-gradient(lime, lime); }
+
+    #mask { background-color: blue; }
+    #mask.with-image { mask-image: linear-gradient(to right, black 0 50%, transparent 50% 100%); }
+
+    #multiple-layers { background-color: red; }
+    #multiple-layers.with-image { background-image: none, linear-gradient(lime, lime); }
+</style>
+<div id="background" class="box"></div>
+<div id="mask" class="box"></div>
+<div id="multiple-layers" class="box"></div>
+<script>
+    document.body.offsetWidth;
+    for (const element of document.querySelectorAll(".box"))
+        element.classList.add("with-image");
+    requestAnimationFrame(() => {
+        if (window.internals)
+            internals.signalTestIsDone("PASS");
+        else
+            document.documentElement.classList.remove("reftest-wait");
+    });
+</script>
+</html>

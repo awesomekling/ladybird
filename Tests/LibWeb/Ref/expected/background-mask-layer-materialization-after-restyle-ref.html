@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<style>
+    body { margin: 0; }
+
+    .box {
+        width: 120px;
+        height: 60px;
+        margin-bottom: 10px;
+    }
+
+    #background {
+        background-color: red;
+        background-image: linear-gradient(lime, lime);
+    }
+
+    #mask {
+        background-color: blue;
+        mask-image: linear-gradient(to right, black 0 50%, transparent 50% 100%);
+    }
+
+    #multiple-layers {
+        background-color: red;
+        background-image: none, linear-gradient(lime, lime);
+    }
+</style>
+<div id="background" class="box"></div>
+<div id="mask" class="box"></div>
+<div id="multiple-layers" class="box"></div>
