@@ -649,7 +649,11 @@ void DisplayListPlayerSkia::play_command(PaintTextShadow const& command)
     // blend to force a flat silhouette in the shadow color. The glyphs are drawn opaquely below so the shadow color's
     // alpha is applied exactly once.
     blur_paint.setColorFilter(SkColorFilters::Blend(to_skia_color(command.color), SkBlendMode::kSrcIn));
-    canvas.saveLayer(SkCanvas::SaveLayerRec(nullptr, &blur_paint, nullptr, 0));
+    // Bound the layer to the shadow's bounding rect. Without explicit bounds, the layer covers the entire
+    // current clip, and blurring that much surface is prohibitively expensive on large canvases.
+    auto layer_bounds = SkRect::MakeXYWH(command.draw_location.x(), command.draw_location.y(),
+        command.shadow_bounding_rect.width(), command.shadow_bounding_rect.height());
+    canvas.saveLayer(SkCanvas::SaveLayerRec(&layer_bounds, &blur_paint, nullptr, 0));
     play_command(DrawGlyphRun { .font_id = command.font_id,
         .glyphs = command.glyphs,
         .rect = command.text_rect,
