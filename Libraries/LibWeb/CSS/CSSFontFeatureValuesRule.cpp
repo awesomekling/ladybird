@@ -151,8 +151,8 @@ void CSSFontFeatureValuesRule::clear_caches()
         return;
 
     for (auto const& family : m_font_families) {
-        document->font_computer().clear_computed_font_cache(family);
         document->font_computer().clear_font_feature_values_cache(family);
+        document->font_computer().clear_computed_font_cache(family);
     }
 }
 

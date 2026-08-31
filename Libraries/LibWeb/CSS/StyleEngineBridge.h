@@ -202,6 +202,7 @@ public:
     void record_element_style_input_change(StyleNodeID, u8, u8, ElementStyleInputProducer);
     void record_flat_tree_descendant_style_input_changes(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups = 0);
     [[nodiscard]] Vector<StyleNodeID> viewport_dependent_style_nodes();
+    [[nodiscard]] Vector<StyleNodeID> font_metric_dependent_style_nodes();
     void consume_recorded_element_style_input_change(StyleNodeID style_node);
     [[nodiscard]] bool has_recorded_element_style_input_change(StyleNodeID style_node) const;
     void record_benchmark_marker(Utf16View);

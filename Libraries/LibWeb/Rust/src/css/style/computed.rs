@@ -731,6 +731,35 @@ impl ComputedGroupSets {
         nodes
     }
 
+    pub(super) fn font_metric_dependent_nodes(&self) -> Vec<u32> {
+        let depends_on_font_metrics = |target| {
+            self.font_dependency_mask(target)
+                .is_none_or(|dependency_mask| dependency_mask != 0)
+        };
+        let mut nodes = Vec::new();
+        for index in 1..self.columns.flags.len() {
+            if self.style_record_column.get(index).is_some_and(Option::is_some)
+                && depends_on_font_metrics(ComputedStyleTarget::new(
+                    StyleNodeID::element(u32::try_from(index).expect("computed style node identity exceeds u32")),
+                    u8::MAX,
+                ))
+            {
+                nodes.push(u32::try_from(index).expect("computed style node identity exceeds u32"));
+            }
+        }
+        for (&node, rows) in &self.pseudo_rows_by_node {
+            if rows
+                .iter()
+                .any(|row| row.is_published() && depends_on_font_metrics(ComputedStyleTarget::new(node, row.kind)))
+            {
+                nodes.push(node.raw());
+            }
+        }
+        nodes.sort_unstable();
+        nodes.dedup();
+        nodes
+    }
+
     fn intern_group_set(&mut self, groups: &[ComputedGroupID]) -> (ComputedGroupSetID, bool) {
         let hash = content_hash(groups);
         if let Some(identity) = self.sets.find(hash, |_identity, set| {

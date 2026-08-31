@@ -1096,6 +1096,9 @@ public:
         u64 element_style_inputs_from_tree_mutation_feedback { 0 };
         u64 element_style_inputs_from_container_queries { 0 };
         u64 element_style_inputs_from_other_producers { 0 };
+        u64 font_environment_events { 0 };
+        u64 font_cascade_updates { 0 };
+        u64 font_layout_invalidations { 0 };
         u64 element_style_recomputations { 0 };
         u64 element_style_noop_recomputations { 0 };
         u64 unchanged_style_record_deltas { 0 };

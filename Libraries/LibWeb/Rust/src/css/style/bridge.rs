@@ -1080,6 +1080,33 @@ pub unsafe extern "C" fn style_engine_discard_viewport_dependent_nodes(engine: *
     });
 }
 
+/// Returns the owner nodes whose element or pseudo specified values may depend on font metrics.
+///
+/// # Safety
+/// `engine` must be live. The returned slice remains valid until the next mutable engine call or an
+/// explicit discard.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_font_metric_dependent_nodes(engine: *mut c_void) -> FfiStyleNodeSlice {
+    abort_on_panic(|| {
+        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+        engine.clear_ffi_style_node_query();
+        let nodes = engine.computed_group_sets.font_metric_dependent_nodes();
+        engine.install_ffi_style_node_query(nodes)
+    })
+}
+
+/// Discards the borrowed font-metric-dependent node slice.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_discard_font_metric_dependent_nodes(engine: *mut c_void) {
+    abort_on_panic(|| {
+        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+        engine.clear_ffi_style_node_query();
+    });
+}
+
 /// Applies one flat style input transaction.
 ///
 /// # Safety

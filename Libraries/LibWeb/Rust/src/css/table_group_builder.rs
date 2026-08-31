@@ -109,11 +109,14 @@ pub struct FfiFontGroupBuildInputs {
     pub font_size_raw: i32,
     pub line_height_used_raw: i32,
     pub font_variant_emoji: u8,
+    pub line_height_is_normal: bool,
     pub font_ascent: f32,
     pub font_descent: f32,
     pub font_x_height: f32,
     pub first_available_font: *const c_void,
     pub font_cascade_list: *const c_void,
+    pub font_cascade_metrics: *const c_void,
+    pub font_cascade_generation: u64,
     pub font_weight: f64,
     pub font_width: f64,
     pub math_shift: u8,
@@ -3125,16 +3128,20 @@ unsafe fn build_font_group(
 
     assert!(!inputs.first_available_font.is_null());
     assert!(!inputs.font_cascade_list.is_null());
+    assert!(!inputs.font_cascade_metrics.is_null());
     let retained = |property| ComputedStyleValueHandle::retained(values.pointer(property).cast());
     let built = FontValues {
         font_size: CssPixels::from_raw(inputs.font_size_raw),
         line_height_used: CssPixels::from_raw(inputs.line_height_used_raw),
         font_variant_emoji: inputs.font_variant_emoji,
+        line_height_is_normal: inputs.line_height_is_normal,
         font_ascent: inputs.font_ascent,
         font_descent: inputs.font_descent,
         font_x_height: inputs.font_x_height,
         first_available_font: inputs.first_available_font,
         font_cascade_list: inputs.font_cascade_list,
+        font_cascade_metrics: inputs.font_cascade_metrics,
+        font_cascade_generation: inputs.font_cascade_generation,
         font_weight: inputs.font_weight,
         font_width: inputs.font_width,
         math_shift: inputs.math_shift,

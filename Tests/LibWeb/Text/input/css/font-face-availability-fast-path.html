@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    #text, #pseudo {
+        display: inline-block;
+        font-size: 40px;
+    }
+
+    #text {
+        font-family: "AvailabilityFastPath", serif;
+    }
+
+    #pseudo::before {
+        content: "X";
+        font-family: "AvailabilityFastPath", serif;
+    }
+
+    #metric {
+        font-family: "AvailabilityFastPath", serif;
+        font-size: 40px;
+        width: 10ch;
+    }
+</style>
+<div id="text">X</div>
+<div id="pseudo"></div>
+<div id="metric"></div>
+<script>
+    promiseTest(async () => {
+        const textWidthBeforeLoad = text.getBoundingClientRect().width;
+        const pseudoWidthBeforeLoad = pseudo.getBoundingClientRect().width;
+        const metricWidthBeforeLoad = metric.getBoundingClientRect().width;
+
+        internals.resetStyleInvalidationCounters();
+        const face = new FontFace("AvailabilityFastPath", 'url("../wpt-import/fonts/Ahem.ttf")');
+        document.fonts.add(face);
+        await face.load();
+        internals.updateStyle();
+
+        println(`text remeasured: ${textWidthBeforeLoad !== text.getBoundingClientRect().width}`);
+        println(`pseudo remeasured: ${pseudoWidthBeforeLoad !== pseudo.getBoundingClientRect().width}`);
+        println(`font metric value changed: ${metricWidthBeforeLoad !== metric.getBoundingClientRect().width}`);
+        const counters = internals.getStyleInvalidationCounters();
+        println(`font completion inputs bounded: ${counters.elementStyleInputsFromFontCompletion < 10}`);
+        println(`font cascades updated: ${counters.fontCascadeUpdates > 0}`);
+        println(`font layouts invalidated: ${counters.fontLayoutInvalidations > 0}`);
+
+        document.fonts.delete(face);
+        internals.updateStyle();
+        println(`text remeasured after removal: ${textWidthBeforeLoad === text.getBoundingClientRect().width}`);
+        println(`pseudo remeasured after removal: ${pseudoWidthBeforeLoad === pseudo.getBoundingClientRect().width}`);
+        println(`font metric value restored: ${metricWidthBeforeLoad === metric.getBoundingClientRect().width}`);
+    });
+</script>

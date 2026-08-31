@@ -1,2 +1,5 @@
 rch changed: true
 rex changed: true
+font metric inputs published: true
+font cascades updated: true
+font layouts invalidated: true

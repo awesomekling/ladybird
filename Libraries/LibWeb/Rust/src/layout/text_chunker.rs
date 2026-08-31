@@ -596,6 +596,7 @@ pub(crate) fn text_chunks(
         word_break: parent_style.word_break(),
         font_variant_emoji: parent_style.font_variant_emoji(),
         font_cascade_list: parent_style.font_cascade_list(),
+        font_cascade_generation: parent_style.font_cascade_generation(),
     };
     let text = &callbacks.text_content(node).text;
     callbacks.arena().text_chunks(node, key, || {

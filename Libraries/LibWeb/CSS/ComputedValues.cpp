@@ -624,11 +624,14 @@ static_assert(alignof(ComputedValues::FontValues) == alignof(ComputedValuesFFI::
 static_assert(offsetof(ComputedValues::FontValues, font_size) == offsetof(ComputedValuesFFI::FontLayoutFacts, font_size));
 static_assert(offsetof(ComputedValues::FontValues, line_height_used) == offsetof(ComputedValuesFFI::FontLayoutFacts, line_height_used));
 static_assert(offsetof(ComputedValues::FontValues, font_variant_emoji) == offsetof(ComputedValuesFFI::FontLayoutFacts, font_variant_emoji));
+static_assert(offsetof(ComputedValues::FontValues, line_height_is_normal) == offsetof(ComputedValuesFFI::FontLayoutFacts, line_height_is_normal));
 static_assert(offsetof(ComputedValues::FontValues, font_ascent) == offsetof(ComputedValuesFFI::FontLayoutFacts, font_ascent));
 static_assert(offsetof(ComputedValues::FontValues, font_descent) == offsetof(ComputedValuesFFI::FontLayoutFacts, font_descent));
 static_assert(offsetof(ComputedValues::FontValues, font_x_height) == offsetof(ComputedValuesFFI::FontLayoutFacts, font_x_height));
 static_assert(offsetof(ComputedValues::FontValues, first_available_font) == offsetof(ComputedValuesFFI::FontLayoutFacts, first_available_font));
 static_assert(offsetof(ComputedValues::FontValues, font_cascade_list) == offsetof(ComputedValuesFFI::FontLayoutFacts, font_cascade_list));
+static_assert(offsetof(ComputedValues::FontValues, font_cascade_metrics) == offsetof(ComputedValuesFFI::FontLayoutFacts, font_cascade_metrics));
+static_assert(offsetof(ComputedValues::FontValues, font_cascade_generation) == offsetof(ComputedValuesFFI::FontLayoutFacts, font_cascade_generation));
 static_assert(sizeof(ComputedValuesFFI::FontLayoutFacts) <= offsetof(ComputedValues::FontValues, font_weight));
 static_assert(to_underlying(FontVariantEmoji::Normal) == 0);
 static_assert(to_underlying(FontVariantEmoji::Text) == 1);
@@ -1640,6 +1643,7 @@ NonnullRefPtr<ComputedValues const> ComputedValues::create_internal(ComputedStyl
         auto font_list = computed_style.computed_font_list(document.font_computer());
         document.font_computer().pin_font_list_for_style_record(font_list);
         auto const& first_available_font = font_list->first_available_font();
+        auto const& font_cascade_metrics = font_list->metrics();
         auto const metrics = first_available_font.pixel_metrics();
         auto math_shift = keyword_to_math_shift(computed_style.property(PropertyID::MathShift).to_keyword()).release_value();
         auto math_style = keyword_to_math_style(computed_style.property(PropertyID::MathStyle).to_keyword()).release_value();
@@ -1647,11 +1651,14 @@ NonnullRefPtr<ComputedValues const> ComputedValues::create_internal(ComputedStyl
             .font_size_raw = computed_style.font_size().raw_value(),
             .line_height_used_raw = computed_style.line_height(document.font_computer()).raw_value(),
             .font_variant_emoji = to_underlying(computed_style.font_variant_emoji()),
+            .line_height_is_normal = computed_style.line_height_data().computed_value.has<LineHeightData::Normal>(),
             .font_ascent = metrics.ascent,
             .font_descent = metrics.descent,
             .font_x_height = metrics.x_height,
             .first_available_font = &first_available_font,
             .font_cascade_list = font_list.ptr(),
+            .font_cascade_metrics = &font_cascade_metrics,
+            .font_cascade_generation = font_list->generation(),
             .font_weight = computed_style.font_weight(),
             .font_width = computed_style.font_width().value(),
             .math_shift = to_underlying(math_shift),

@@ -360,6 +360,7 @@ pub(crate) struct TextChunkCacheKey {
     pub(crate) word_break: u8,
     pub(crate) font_variant_emoji: u8,
     pub(crate) font_cascade_list: *const c_void,
+    pub(crate) font_cascade_generation: u64,
 }
 
 struct TextChunkCacheEntry {

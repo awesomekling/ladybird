@@ -26,12 +26,14 @@ EmojiPresentationResult emoji_presentation_for_code_point(u32 code_point, Option
 void FontCascadeList::add(NonnullRefPtr<Font const> font)
 {
     m_first_available_font_cache = nullptr;
+    m_metrics.generation = 0;
     m_fonts.append({ move(font), {} });
 }
 
 void FontCascadeList::add(NonnullRefPtr<Font const> font, Vector<UnicodeRange> unicode_ranges)
 {
     m_first_available_font_cache = nullptr;
+    m_metrics.generation = 0;
     if (unicode_ranges.is_empty()) {
         m_fonts.append({ move(font), {} });
         return;
@@ -72,6 +74,7 @@ void FontCascadeList::add_pending_face(Vector<UnicodeRange> unicode_ranges, Func
 void FontCascadeList::extend(FontCascadeList const& other)
 {
     m_first_available_font_cache = nullptr;
+    m_metrics.generation = 0;
     m_fonts.extend(other.m_fonts);
     m_pending_faces.extend(other.m_pending_faces);
 }
@@ -79,6 +82,27 @@ void FontCascadeList::extend(FontCascadeList const& other)
 void FontCascadeList::extend_fallback(FontCascadeList const& other)
 {
     m_fallback_fonts.extend(other.m_fonts);
+}
+
+void FontCascadeList::update_from(FontCascadeList&& other) const
+{
+    for (auto const& entry : m_fonts)
+        m_retired_fonts.append(entry.font);
+    for (auto const& entry : m_fallback_fonts)
+        m_retired_fonts.append(entry.font);
+    if (m_last_resort_font)
+        m_retired_fonts.append(m_last_resort_font.release_nonnull());
+
+    m_fonts = move(other.m_fonts);
+    m_fallback_fonts = move(other.m_fallback_fonts);
+    m_pending_faces = move(other.m_pending_faces);
+    m_last_resort_font = move(other.m_last_resort_font);
+    m_system_font_fallback_callback = move(other.m_system_font_fallback_callback);
+    m_ascii_cache = {};
+    m_first_available_font_cache = nullptr;
+    ++m_generation;
+    m_metrics.generation = 0;
+    metrics();
 }
 
 // https://drafts.csswg.org/css-fonts/#first-available-font
@@ -111,6 +135,22 @@ Gfx::Font const& FontCascadeList::first_available_font() const
 
     m_first_available_font_cache = m_last_resort_font.ptr();
     return *m_first_available_font_cache;
+}
+
+FontCascadeMetrics const& FontCascadeList::metrics() const
+{
+    if (m_metrics.generation != m_generation) {
+        auto const& font = first_available_font();
+        auto const& pixel_metrics = font.pixel_metrics();
+        m_metrics = {
+            .generation = m_generation,
+            .first_available_font = &font,
+            .ascent = pixel_metrics.ascent,
+            .descent = pixel_metrics.descent,
+            .x_height = pixel_metrics.x_height,
+        };
+    }
+    return m_metrics;
 }
 
 Gfx::Font const& FontCascadeList::font_for_code_point(u32 code_point, EmojiPresentationResult emoji_presentation) const
@@ -208,6 +248,8 @@ bool FontCascadeList::equals(FontCascadeList const& other) const
 extern "C" {
 void const* ladybird_gfx_font_cascade_list_font_for_code_point(void const*, u32, bool, bool);
 void const* ladybird_gfx_font_cascade_list_first(void const*);
+void const* ladybird_gfx_font_cascade_list_first_available_font(void const*);
+u64 ladybird_gfx_font_cascade_list_generation(void const*);
 void ladybird_gfx_font_cascade_list_ref(void const*);
 void ladybird_gfx_font_cascade_list_unref(void const*);
 u8 ladybird_gfx_emoji_presentation_for_code_point(u32, u32, bool);
@@ -227,6 +269,18 @@ extern "C" void const* ladybird_gfx_font_cascade_list_first(void const* list)
 {
     VERIFY(list);
     return &static_cast<Gfx::FontCascadeList const*>(list)->first();
+}
+
+extern "C" void const* ladybird_gfx_font_cascade_list_first_available_font(void const* list)
+{
+    VERIFY(list);
+    return &static_cast<Gfx::FontCascadeList const*>(list)->first_available_font();
+}
+
+extern "C" u64 ladybird_gfx_font_cascade_list_generation(void const* list)
+{
+    VERIFY(list);
+    return static_cast<Gfx::FontCascadeList const*>(list)->generation();
 }
 
 extern "C" void ladybird_gfx_font_cascade_list_ref(void const* list)

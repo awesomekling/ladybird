@@ -33,8 +33,10 @@
         internals.updateStyle();
 
         const counters = internals.getStyleInvalidationCounters();
-        println(`affected weight recomputed: ${counters.elementStyleRecomputations > 0}`);
+        println(`font completion inputs bounded: ${counters.elementStyleInputsFromFontCompletion < 10}`);
         println(`unaffected weights skipped: ${counters.elementStyleRecomputations < 10}`);
+        println(`font cascades updated: ${counters.fontCascadeUpdates > 0}`);
+        println(`font layouts invalidated: ${counters.fontLayoutInvalidations > 0}`);
         println(`regular face loaded: ${regularFace.status}`);
     });
 </script>

@@ -1778,6 +1778,9 @@ GC::Ref<JS::Object> Internals::style_invalidation_counters_object() const
     object->define_direct_property("elementStyleInputsFromTreeMutationFeedback"_utf16_fly_string, JS::Value(counters.element_style_inputs_from_tree_mutation_feedback), JS::default_attributes);
     object->define_direct_property("elementStyleInputsFromContainerQueries"_utf16_fly_string, JS::Value(counters.element_style_inputs_from_container_queries), JS::default_attributes);
     object->define_direct_property("elementStyleInputsFromOtherProducers"_utf16_fly_string, JS::Value(counters.element_style_inputs_from_other_producers), JS::default_attributes);
+    object->define_direct_property("fontEnvironmentEvents"_utf16_fly_string, JS::Value(counters.font_environment_events), JS::default_attributes);
+    object->define_direct_property("fontCascadeUpdates"_utf16_fly_string, JS::Value(counters.font_cascade_updates), JS::default_attributes);
+    object->define_direct_property("fontLayoutInvalidations"_utf16_fly_string, JS::Value(counters.font_layout_invalidations), JS::default_attributes);
     object->define_direct_property("elementStyleRecomputations"_utf16_fly_string, JS::Value(counters.element_style_recomputations), JS::default_attributes);
     object->define_direct_property("elementStyleNoopRecomputations"_utf16_fly_string, JS::Value(counters.element_style_noop_recomputations), JS::default_attributes);
     object->define_direct_property("styleRecordPropertyDamageCacheHits"_utf16_fly_string, JS::Value(counters.style_record_property_damage_cache_hits), JS::default_attributes);

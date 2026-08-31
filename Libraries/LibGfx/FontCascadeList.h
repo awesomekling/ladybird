@@ -29,6 +29,14 @@ struct EmojiPresentationResult {
     ForcedPresentation forced { ForcedPresentation::No };
 };
 
+struct FontCascadeMetrics {
+    u64 generation { 0 };
+    Font const* first_available_font { nullptr };
+    float ascent { 0 };
+    float descent { 0 };
+    float x_height { 0 };
+};
+
 EmojiPresentationResult emoji_presentation_for_code_point(u32 code_point, Optional<u32> next_code_point);
 
 class FontCascadeList : public RefCounted<FontCascadeList> {
@@ -62,7 +70,13 @@ public:
 
     void extend_fallback(FontCascadeList const& other);
 
+    // Replace the resolved environment while preserving this cascade's identity for computed styles.
+    void update_from(FontCascadeList&&) const;
+    void release_retired_fonts() const { m_retired_fonts.clear(); }
+    u64 generation() const { return m_generation; }
+
     Gfx::Font const& first_available_font() const;
+    FontCascadeMetrics const& metrics() const;
     Gfx::Font const& font_for_code_point(u32 code_point, EmojiPresentationResult = {}) const;
 
     bool equals(FontCascadeList const& other) const;
@@ -109,16 +123,21 @@ public:
     void set_last_resort_font(NonnullRefPtr<Font> font)
     {
         m_first_available_font_cache = nullptr;
+        m_metrics.generation = 0;
         m_last_resort_font = move(font);
     }
     void set_system_font_fallback_callback(SystemFontFallbackCallback callback) { m_system_font_fallback_callback = move(callback); }
 
 private:
-    RefPtr<Font const> m_last_resort_font;
+    mutable RefPtr<Font const> m_last_resort_font;
     mutable Vector<Entry> m_fonts;
     mutable Vector<Entry> m_fallback_fonts;
     mutable Vector<NonnullRefPtr<PendingFace>> m_pending_faces;
-    SystemFontFallbackCallback m_system_font_fallback_callback;
+    mutable SystemFontFallbackCallback m_system_font_fallback_callback;
+
+    // Layout snapshots may still hold raw pointers from an earlier generation until the next relayout.
+    mutable Vector<NonnullRefPtr<Font const>> m_retired_fonts;
+    mutable u64 m_generation { 1 };
 
     // OPTIMIZATION: Cache of resolved fonts for ASCII code points. Since m_fonts only grows and the cascade returns
     //               the first matching font, a cached hit can never become stale.
@@ -126,6 +145,7 @@ private:
 
     // This cannot share m_ascii_cache because the first available font does not need to contain a space glyph.
     mutable Font const* m_first_available_font_cache { nullptr };
+    mutable FontCascadeMetrics m_metrics;
 };
 
 }

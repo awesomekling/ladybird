@@ -27,10 +27,15 @@
         const targets = [rch, rex];
         const widthsBeforeLoad = targets.map(target => getComputedStyle(target).width);
 
+        internals.resetStyleInvalidationCounters();
         await document.fonts.ready;
         internals.updateStyle();
 
         for (let index = 0; index < targets.length; ++index)
             println(`${targets[index].id} changed: ${widthsBeforeLoad[index] !== getComputedStyle(targets[index]).width}`);
+        const counters = internals.getStyleInvalidationCounters();
+        println(`font metric inputs published: ${counters.elementStyleInputsFromFontCompletion > 0}`);
+        println(`font cascades updated: ${counters.fontCascadeUpdates > 0}`);
+        println(`font layouts invalidated: ${counters.fontLayoutInvalidations > 0}`);
     });
 </script>

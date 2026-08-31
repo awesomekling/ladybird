@@ -414,11 +414,7 @@ scalar_accessors! {
     }
     font_facts: {
         font_variant_emoji: u8 => font_variant_emoji,
-        line_height: CssPixels => line_height_used,
         font_size: CssPixels => font_size,
-        font_ascent: f32 => font_ascent,
-        font_descent: f32 => font_descent,
-        font_x_height: f32 => font_x_height,
     }
     alignment: {
         flex_direction: u8 => flex_direction,
@@ -782,12 +778,15 @@ impl<'a> ComputedValuesView<'a> {
     }
 
     pub(crate) fn first_available_font(self) -> *const c_void {
-        let font = self.font_facts().first_available_font;
-        debug_assert!(
-            !font.is_null(),
-            "layout read a font group that never received a font list"
-        );
-        font
+        self.current_font_cascade_metrics().first_available_font
+    }
+
+    pub(crate) fn line_height(self) -> CssPixels {
+        if !self.font_facts().line_height_is_normal {
+            return self.font_facts().line_height_used;
+        }
+        let metrics = self.current_font_cascade_metrics();
+        CssPixels::from_integer(metrics.ascent.round() as i64 + metrics.descent.round() as i64)
     }
 
     pub(crate) fn font_cascade_list(self) -> *const c_void {
@@ -797,6 +796,34 @@ impl<'a> ComputedValuesView<'a> {
             "layout read a font group that never received a font list"
         );
         list
+    }
+
+    pub(crate) fn font_cascade_generation(self) -> u64 {
+        self.current_font_cascade_metrics().generation
+    }
+
+    pub(crate) fn font_ascent(self) -> f32 {
+        self.current_font_cascade_metrics().ascent
+    }
+
+    pub(crate) fn font_descent(self) -> f32 {
+        self.current_font_cascade_metrics().descent
+    }
+
+    pub(crate) fn font_x_height(self) -> f32 {
+        self.current_font_cascade_metrics().x_height
+    }
+
+    fn current_font_cascade_metrics(self) -> &'a libgfx_rust::font::FontCascadeMetrics {
+        // SAFETY: The style payload borrows metrics embedded in a cascade retained by the
+        // document font computer.
+        unsafe {
+            self.font_facts()
+                .font_cascade_metrics
+                .cast::<libgfx_rust::font::FontCascadeMetrics>()
+                .as_ref()
+                .expect("layout read a font group that never received cascade metrics")
+        }
     }
 
     pub(crate) fn box_sizing_for_aspect_ratio(self) -> u8 {

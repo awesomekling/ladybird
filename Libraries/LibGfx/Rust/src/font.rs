@@ -8,6 +8,15 @@ use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
+#[repr(C)]
+pub struct FontCascadeMetrics {
+    pub generation: u64,
+    pub first_available_font: *const c_void,
+    pub ascent: f32,
+    pub descent: f32,
+    pub x_height: f32,
+}
+
 unsafe extern "C" {
     fn ladybird_gfx_font_glyph_width(font: *const c_void, code_point: u32) -> f32;
     fn ladybird_gfx_font_glyph_id(font: *const c_void, code_point: u32) -> u32;
@@ -23,6 +32,8 @@ unsafe extern "C" {
         forced_presentation: bool,
     ) -> *const c_void;
     fn ladybird_gfx_font_cascade_list_first(list: *const c_void) -> *const c_void;
+    fn ladybird_gfx_font_cascade_list_first_available_font(list: *const c_void) -> *const c_void;
+    fn ladybird_gfx_font_cascade_list_generation(list: *const c_void) -> u64;
     fn ladybird_gfx_font_ref(font: *const c_void);
     fn ladybird_gfx_font_unref(font: *const c_void);
     fn ladybird_gfx_font_cascade_list_ref(list: *const c_void);
@@ -181,6 +192,18 @@ impl<'a> FontCascadeListRef<'a> {
         // SAFETY: The constructor requires the Gfx::FontCascadeList to remain
         // live for this reference's lifetime.
         unsafe { FontRef::from_raw(ladybird_gfx_font_cascade_list_first(self.raw.as_ptr())) }
+    }
+
+    pub fn first_available_font(self) -> FontRef<'a> {
+        // SAFETY: The constructor requires the Gfx::FontCascadeList to remain live for this
+        // reference's lifetime.
+        unsafe { FontRef::from_raw(ladybird_gfx_font_cascade_list_first_available_font(self.raw.as_ptr())) }
+    }
+
+    pub fn generation(self) -> u64 {
+        // SAFETY: The constructor requires the Gfx::FontCascadeList to remain live for this
+        // reference's lifetime.
+        unsafe { ladybird_gfx_font_cascade_list_generation(self.raw.as_ptr()) }
     }
 }
 

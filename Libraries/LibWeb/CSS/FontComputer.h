@@ -11,6 +11,7 @@
 #pragma once
 
 #include <AK/ByteString.h>
+#include <AK/HashTable.h>
 #include <AK/Utf16FlyString.h>
 #include <LibGC/CellAllocator.h>
 #include <LibGfx/FontCascadeList.h>
@@ -149,6 +150,7 @@ public:
     NonnullRefPtr<Gfx::FontCascadeList const> compute_font_for_style_values(StyleValue const& font_family, CSSPixels const& font_size, int font_slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<Utf16FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data) const;
     void pin_font_list_for_style_record(NonnullRefPtr<Gfx::FontCascadeList const>) const;
     u64 environment_generation() const { return m_environment_generation; }
+    void did_complete_layout();
 
 private:
     virtual void visit_edges(Visitor&) override;
@@ -156,11 +158,12 @@ private:
     void begin_font_face_change_batch();
     void end_font_face_change_batch();
     void clear_computed_font_cache_for_families(Vector<Utf16FlyString> const& family_names);
+    void apply_font_environment_change(HashTable<Gfx::FontCascadeList const*> const&);
 
     struct MatchingFontCandidate;
     RefPtr<Gfx::FontCascadeList const> find_matching_font_weight_ascending(Vector<MatchingFontCandidate> const& candidates, int target_weight, float font_size_in_pt, Gfx::FontVariationSettings const& variations, FontFeatureData const& font_feature_data, HashMap<FontFeatureValueKey, Vector<u32>> const& font_feature_values, bool inclusive) const;
     RefPtr<Gfx::FontCascadeList const> find_matching_font_weight_descending(Vector<MatchingFontCandidate> const& candidates, int target_weight, float font_size_in_pt, Gfx::FontVariationSettings const& variations, FontFeatureData const& font_feature_data, HashMap<FontFeatureValueKey, Vector<u32>> const& font_feature_values, bool inclusive) const;
-    NonnullRefPtr<Gfx::FontCascadeList const> compute_font_for_style_values_impl(ReadonlySpan<ComputedFontFamily const> font_families, CSSPixels const& font_size, int font_slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<Utf16FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data) const;
+    NonnullRefPtr<Gfx::FontCascadeList> compute_font_for_style_values_impl(ReadonlySpan<ComputedFontFamily const> font_families, CSSPixels const& font_size, int font_slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<Utf16FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data) const;
     RefPtr<Gfx::FontCascadeList const> font_matching_algorithm(Utf16FlyString const& family_name, int weight, Percentage const& font_width, int slope, float font_size_in_pt, Gfx::FontVariationSettings const& variations, FontFeatureData const& font_feature_data, HashMap<FontFeatureValueKey, Vector<u32>> const& font_feature_values) const;
 
     HashMap<FontFeatureValueKey, Vector<u32>> const& font_feature_values_for_family(Utf16FlyString const& family_name) const;
@@ -180,6 +183,7 @@ private:
     u32 m_font_face_change_batch_depth { 0 };
     u64 m_environment_generation { 1 };
     Vector<Utf16FlyString> m_batched_font_face_change_families;
+    HashTable<Gfx::FontCascadeList const*> m_font_lists_awaiting_layout;
 };
 
 }

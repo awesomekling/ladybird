@@ -2380,6 +2380,9 @@ void Document::update_layout(UpdateLayoutReason reason, ThrottledAnimationSampli
     ScopeGuard guard = [&] {
         m_is_running_update_layout = false;
 
+        if (layout_is_up_to_date())
+            font_computer().did_complete_layout();
+
         if (m_needs_scroll_container_resnap) {
             if (auto navigable = this->navigable(); navigable && navigable->active_document().ptr() == this)
                 navigable->re_snap_scroll_containers_after_layout_change();

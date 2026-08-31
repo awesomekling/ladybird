@@ -547,6 +547,17 @@ Vector<StyleNodeID> StyleEngine::viewport_dependent_style_nodes()
     return nodes;
 }
 
+Vector<StyleNodeID> StyleEngine::font_metric_dependent_style_nodes()
+{
+    auto view = StyleEngineFFI::style_engine_font_metric_dependent_nodes(m_impl);
+    Vector<StyleNodeID> nodes;
+    nodes.ensure_capacity(view.count);
+    for (auto node : ReadonlySpan<u32> { view.nodes, view.count })
+        nodes.unchecked_append(StyleNodeID { node });
+    StyleEngineFFI::style_engine_discard_font_metric_dependent_nodes(m_impl);
+    return nodes;
+}
+
 void StyleEngine::consume_recorded_element_style_input_change(StyleNodeID style_node)
 {
     auto existing = m_element_style_input_indices.find(style_node);

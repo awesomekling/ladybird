@@ -1,0 +1,9 @@
+text remeasured: true
+pseudo remeasured: true
+font metric value changed: true
+font completion inputs bounded: true
+font cascades updated: true
+font layouts invalidated: true
+text remeasured after removal: true
+pseudo remeasured after removal: true
+font metric value restored: true

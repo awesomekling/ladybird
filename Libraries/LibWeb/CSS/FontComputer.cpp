@@ -33,6 +33,7 @@
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/MIME.h>
 #include <LibWeb/Fetch/Response.h>
+#include <LibWeb/Layout/Node.h>
 #include <LibWeb/MimeSniff/Resource.h>
 #include <LibWeb/Platform/FontPlugin.h>
 
@@ -567,7 +568,7 @@ void FontComputer::pin_font_list_for_style_record(NonnullRefPtr<Gfx::FontCascade
         m_style_record_font_list_pins.append(move(font_list));
 }
 
-NonnullRefPtr<Gfx::FontCascadeList const> FontComputer::compute_font_for_style_values_impl(ReadonlySpan<ComputedFontFamily const> font_families, CSSPixels const& font_size, int slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<Utf16FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data) const
+NonnullRefPtr<Gfx::FontCascadeList> FontComputer::compute_font_for_style_values_impl(ReadonlySpan<ComputedFontFamily const> font_families, CSSPixels const& font_size, int slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<Utf16FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data) const
 {
     // FIXME: We round to int here as that is what is expected by our font infrastructure below
     auto weight = round_to<int>(font_weight);
@@ -750,35 +751,12 @@ Gfx::Font const& FontComputer::initial_font() const
     return font;
 }
 
-static bool style_value_references_any_font_family(StyleValue const& font_family_value, Vector<Utf16FlyString> const& family_names)
-{
-    if (!font_family_value.is_value_list())
-        return false;
-
-    for (auto const& item : font_family_value.as_value_list().values()) {
-        if (item->is_keyword())
-            continue; // Skip generic keywords (monospace, serif, etc.)
-
-        auto item_family_name = string_from_style_value(*item);
-
-        if (any_of(family_names, [&](auto const& family_name) { return item_family_name.equals_ignoring_ascii_case(family_name); }))
-            return true;
-    }
-    return false;
-}
-
 static bool computed_font_families_reference_any_family(ReadonlySpan<ComputedFontFamily const> font_families, Vector<Utf16FlyString> const& family_names)
 {
     return any_of(font_families, [&](ComputedFontFamily const& family) {
         return family.has<ComputedFontFamilyName>()
             && any_of(family_names, [&](auto const& family_name) { return family.get<ComputedFontFamilyName>().name.equals_ignoring_ascii_case(family_name); });
     });
-}
-
-static bool font_values_reference_any_font_family(ComputedValues::FontValues const& font_values, Vector<Utf16FlyString> const& family_names)
-{
-    auto font_family = font_values.font_family_style_value();
-    return font_family && style_value_references_any_font_family(*font_family, family_names);
 }
 
 void FontComputer::clear_computed_font_cache(Utf16FlyString const& family_name)
@@ -793,46 +771,69 @@ void FontComputer::clear_computed_font_cache_for_families(Vector<Utf16FlyString>
     VERIFY(!family_names.is_empty());
     ++m_environment_generation;
 
-    // Only clear cache entries that reference the loaded font family.
-    m_computed_font_cache.remove_all_matching([&](auto const& key, auto const&) {
-        return computed_font_families_reference_any_family(key.font_families, family_names);
-    });
+    HashTable<Gfx::FontCascadeList const*> affected_font_lists;
+    for (auto& entry : m_computed_font_cache) {
+        if (!computed_font_families_reference_any_family(entry.key.font_families, family_names))
+            continue;
+        auto updated_font_list = compute_font_for_style_values_impl(entry.key.font_families, entry.key.font_size, entry.key.font_slope, entry.key.font_weight, entry.key.font_width, entry.key.font_optical_sizing, entry.key.font_variation_settings, entry.key.font_feature_data);
+        if (!entry.value->has_pending_faces() && !updated_font_list->has_pending_faces() && entry.value->equals(*updated_font_list))
+            continue;
+        affected_font_lists.set(entry.value.ptr());
+        entry.value->update_from(move(*updated_font_list));
+    }
+    apply_font_environment_change(affected_font_lists);
+}
 
-    auto element_uses_font_family = [&](DOM::Element const& element) {
-        // Check the element's own font-family.
-        if (auto const* values = element.style_group<ComputedValues::FontValues>()) {
-            if (font_values_reference_any_font_family(*values, family_names))
-                return true;
-        }
+void FontComputer::apply_font_environment_change(HashTable<Gfx::FontCascadeList const*> const& affected_font_lists)
+{
+    auto& counters = document().style_invalidation_counters();
+    ++counters.font_environment_events;
+    counters.font_cascade_updates += affected_font_lists.size();
+    if (affected_font_lists.is_empty())
+        return;
 
-        // Check pseudo-elements, which may use a different font-family than the element itself.
-        bool synthetic_pseudo_element_uses_font_family = false;
-        element.for_each_synthetic_pseudo_element([&](Web::CSS::PseudoElement pseudo_element, Web::DOM::SyntheticPseudoElement const&) {
-            if (auto const* values = element.style_group<ComputedValues::FontValues>(pseudo_element)) {
-                if (font_values_reference_any_font_family(*values, family_names)) {
-                    synthetic_pseudo_element_uses_font_family = true;
-                    return IterationDecision::Break;
-                }
-            }
-            return IterationDecision::Continue;
-        });
+    for (auto const* font_list : affected_font_lists)
+        m_font_lists_awaiting_layout.set(font_list);
 
-        return synthetic_pseudo_element_uses_font_family;
-    };
+    auto& style_engine = document().style_computer().style_engine();
+    HashTable<StyleNodeID> font_metric_dependent_nodes;
+    for (auto style_node : style_engine.font_metric_dependent_style_nodes())
+        font_metric_dependent_nodes.set(style_node);
 
-    // Walk the DOM tree (including shadow trees) and publish inputs for elements that use this font family.
+    // The number of affected cascade identities is small. Keep the shadow-including walk until
+    // maintaining a reverse index is justified independently of font completion.
     document().for_each_shadow_including_inclusive_descendant([&](DOM::Node& node) {
         auto* element = as_if<DOM::Element>(node);
         if (!element)
             return TraversalDecision::Continue;
 
-        if (element_uses_font_family(*element)) {
-            element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle, 0, StyleEngine::ElementStyleInputProducer::FontCompletion);
-            return TraversalDecision::Continue;
+        bool invalidated_layout = false;
+        if (auto const* values = element->style_group<ComputedValues::FontValues>(); values && affected_font_lists.contains(&values->font_list_value())) {
+            element->set_needs_layout_update(DOM::SetNeedsLayoutReason::StyleChange);
+            invalidated_layout = true;
         }
+        element->for_each_synthetic_pseudo_element([&](CSS::PseudoElement pseudo_element, DOM::SyntheticPseudoElement const& synthetic_pseudo_element) {
+            auto const* values = element->style_group<ComputedValues::FontValues>(pseudo_element);
+            if (!values || !affected_font_lists.contains(&values->font_list_value()))
+                return;
+            if (auto* layout_node = synthetic_pseudo_element.unsafe_layout_node())
+                layout_node->set_needs_layout_update(DOM::SetNeedsLayoutReason::StyleChange);
+            invalidated_layout = true;
+        });
+        if (invalidated_layout)
+            ++counters.font_layout_invalidations;
 
+        if (font_metric_dependent_nodes.contains(element->style_node_id()))
+            style_engine.record_element_style_input_change(element->style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle, 0, StyleEngine::ElementStyleInputProducer::FontCompletion);
         return TraversalDecision::Continue;
     });
+}
+
+void FontComputer::did_complete_layout()
+{
+    for (auto const* font_list : m_font_lists_awaiting_layout)
+        font_list->release_retired_fonts();
+    m_font_lists_awaiting_layout.clear();
 }
 
 void FontComputer::clear_font_feature_values_cache(Utf16FlyString const& family_name)
@@ -862,45 +863,25 @@ void FontComputer::did_load_font(FontFaceKey const& changed_face)
     }
 
     m_document->bump_style_environment_version();
+    ++m_environment_generation;
     // A family can contain many faces, but one face becoming available changes only the cached
-    // selections which now resolve to it. Compare those selections before discarding their cache
-    // entries, then find the elements holding the discarded cascade identities.
-    HashTable<Gfx::FontCascadeList const*> invalidated_font_lists;
-    m_computed_font_cache.remove_all_matching([&](auto const& key, auto const& font_list) {
+    // selections which now resolve to it.
+    HashTable<Gfx::FontCascadeList const*> affected_font_lists;
+    for (auto& entry : m_computed_font_cache) {
+        auto const& key = entry.key;
+        auto const& font_list = entry.value;
         if (!any_of(key.font_families, [&](ComputedFontFamily const& family) {
                 return family.has<ComputedFontFamilyName>()
                     && family.get<ComputedFontFamilyName>().name.equals_ignoring_ascii_case(changed_face.family_name);
             }))
-            return false;
+            continue;
         auto updated_font_list = compute_font_for_style_values_impl(key.font_families, key.font_size, key.font_slope, key.font_weight, key.font_width, key.font_optical_sizing, key.font_variation_settings, key.font_feature_data);
-        if (!font_list->has_pending_faces() && font_list->equals(*updated_font_list))
-            return false;
-        invalidated_font_lists.set(font_list.ptr());
-        return true;
-    });
-    if (invalidated_font_lists.is_empty())
-        return;
-
-    document().for_each_shadow_including_inclusive_descendant([&](DOM::Node& node) {
-        auto* element = as_if<DOM::Element>(node);
-        if (!element)
-            return TraversalDecision::Continue;
-        auto uses_invalidated_font_list = [&](Optional<CSS::PseudoElement> pseudo_element = {}) {
-            auto const* values = element->style_group<ComputedValues::FontValues>(pseudo_element);
-            return values && invalidated_font_lists.contains(&values->font_list_value());
-        };
-        bool should_recompute = uses_invalidated_font_list();
-        element->for_each_synthetic_pseudo_element([&](CSS::PseudoElement pseudo_element, DOM::SyntheticPseudoElement const&) {
-            if (uses_invalidated_font_list(pseudo_element)) {
-                should_recompute = true;
-                return IterationDecision::Break;
-            }
-            return IterationDecision::Continue;
-        });
-        if (should_recompute)
-            element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle, 0, StyleEngine::ElementStyleInputProducer::FontCompletion);
-        return TraversalDecision::Continue;
-    });
+        if (!font_list->has_pending_faces() && !updated_font_list->has_pending_faces() && font_list->equals(*updated_font_list))
+            continue;
+        affected_font_lists.set(font_list.ptr());
+        font_list->update_from(move(*updated_font_list));
+    }
+    apply_font_environment_change(affected_font_lists);
 }
 
 void FontComputer::begin_font_face_change_batch()

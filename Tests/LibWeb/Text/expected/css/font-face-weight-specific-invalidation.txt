@@ -1,3 +1,5 @@
-affected weight recomputed: true
+font completion inputs bounded: true
 unaffected weights skipped: true
+font cascades updated: true
+font layouts invalidated: true
 regular face loaded: loaded
