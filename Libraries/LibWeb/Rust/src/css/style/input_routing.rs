@@ -91,7 +91,7 @@ fn for_each_feature_routing_key(
             }
         }
         LocalFeatureKey::HeadingLevel => publish(RoutingKey::Structural),
-        LocalFeatureKey::Emptiness => publish(RoutingKey::Structural),
+        LocalFeatureKey::Emptiness => publish(RoutingKey::Emptiness),
         // The facts an arrival folded onto one key are read back off the element by the engine,
         // which has the fact store this function does not.
         LocalFeatureKey::ArrivingFacts => {}

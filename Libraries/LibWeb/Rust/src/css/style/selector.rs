@@ -3411,13 +3411,10 @@ impl SelectorProgram {
                 self.walk_step(host, enclosing, InverseStep::HostedTrees, anchor, walk, visit);
                 self.walk_transpose(parts, enclosing, anchor, walk, visit);
             }
-            // Root, emptiness, scope membership and the place of a named element all change with
-            // the shape of the tree.
-            SelectorOp::Root
-            | SelectorOp::Empty
-            | SelectorOp::Scope
-            | SelectorOp::IsNode(_)
-            | SelectorOp::ScopeRootInstance => {
+            SelectorOp::Empty => emit(walk, RoutingKey::Emptiness, visit),
+            // Root, scope membership and the place of a named element all change with the shape of
+            // the tree.
+            SelectorOp::Root | SelectorOp::Scope | SelectorOp::IsNode(_) | SelectorOp::ScopeRootInstance => {
                 emit(walk, RoutingKey::Structural, visit);
             }
             // Which element is the anchor is not a fact anything publishes, and the relation the
@@ -3855,7 +3852,11 @@ impl RoutingRegistry {
         *self.live_sibling_workspace.borrow_mut() = SiblingCandidateWorkspace::new(&live_sibling_entries);
         let mut live_sequence_entries = self.live_sequence_entries.borrow_mut();
         live_sequence_entries.clear();
-        for &route in self.routes_for(RoutingKey::Structural) {
+        for &route in self
+            .routes_for(RoutingKey::Structural)
+            .iter()
+            .chain(self.routes_for(RoutingKey::Emptiness))
+        {
             if !liveness.contains(route.index()) {
                 continue;
             }
@@ -4140,7 +4141,7 @@ impl RoutingRegistry {
                                 Some(site.node)
                             }
                             SelectorOp::Feature(FeatureTest::Attribute(_)) => Some(site.origin),
-                            _ if site.key == RoutingKey::Structural => Some(site.node),
+                            _ if matches!(site.key, RoutingKey::Structural | RoutingKey::Emptiness) => Some(site.node),
                             _ => None,
                         },
                         origin_dispatch: site.origin_dispatch,
@@ -7731,11 +7732,13 @@ mod tests {
         let structural = programs.add(structural);
         registry.add_rule(RuleID(1), structural, &programs);
 
-        let routes = registry.routes_for(RoutingKey::Structural);
-        assert_eq!(routes.len(), 2);
+        let empty_routes = registry.routes_for(RoutingKey::Emptiness);
+        let structural_routes = registry.routes_for(RoutingKey::Structural);
+        assert_eq!(empty_routes.len(), 1);
+        assert_eq!(structural_routes.len(), 1);
         assert_ne!(
-            registry.route(routes[0]).selector_node,
-            registry.route(routes[1]).selector_node
+            registry.route(empty_routes[0]).selector_node,
+            registry.route(structural_routes[0]).selector_node
         );
     }
 

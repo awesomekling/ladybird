@@ -2169,7 +2169,8 @@ impl StyleEngine {
                             .sibling_first_routes()
                             .iter()
                             .chain(self.routing.relational_routes())
-                            .chain(self.routing.routes_for(RoutingKey::Structural));
+                            .chain(self.routing.routes_for(RoutingKey::Structural))
+                            .chain(self.routing.routes_for(RoutingKey::Emptiness));
                         for &route in tree_mutation_routes {
                             let rule = self.routing.rule_of(route);
                             let point = self.routing.route(route);

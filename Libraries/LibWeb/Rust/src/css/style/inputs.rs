@@ -1174,9 +1174,11 @@ impl StyleEngine {
         for fact in self.facts.states_of_node(node).facts() {
             keys.push(RoutingKey::State(fact));
         }
-        // An element arrives empty or not, and either way that is a positional truth about it that
-        // nothing else in this transaction says.
+        // An element arrives empty or not, and either way that is a local structural truth about it
+        // that nothing else in this transaction says. The general structural key still reaches
+        // positional and scope-sensitive selectors affected by the arrival.
         keys.push(RoutingKey::Structural);
+        keys.push(RoutingKey::Emptiness);
 
         keys
     }

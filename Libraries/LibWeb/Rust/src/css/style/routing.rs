@@ -8,6 +8,67 @@ use super::column::advance_epoch;
 use super::*;
 
 impl StyleEngine {
+    fn resident_input_routing_counters(input: &NormalizedInput) -> Option<(Counter, Counter, Counter)> {
+        Some(match input.key {
+            InputKey::LocalFeature(_, LocalFeatureKey::TagName | LocalFeatureKey::FoldedTagName) => (
+                Counter::ResidentTagInputRoutedEntryPoints,
+                Counter::ResidentTagInputLocalFeatureTests,
+                Counter::ResidentTagInputRoutesPassingOrigin,
+            ),
+            InputKey::LocalFeature(_, LocalFeatureKey::Id) => (
+                Counter::ResidentIdInputRoutedEntryPoints,
+                Counter::ResidentIdInputLocalFeatureTests,
+                Counter::ResidentIdInputRoutesPassingOrigin,
+            ),
+            InputKey::LocalFeature(_, LocalFeatureKey::Class(_)) => (
+                Counter::ResidentClassInputRoutedEntryPoints,
+                Counter::ResidentClassInputLocalFeatureTests,
+                Counter::ResidentClassInputRoutesPassingOrigin,
+            ),
+            InputKey::LocalFeature(_, LocalFeatureKey::Part(_)) => (
+                Counter::ResidentPartInputRoutedEntryPoints,
+                Counter::ResidentPartInputLocalFeatureTests,
+                Counter::ResidentPartInputRoutesPassingOrigin,
+            ),
+            InputKey::LocalFeature(_, LocalFeatureKey::CustomState(_)) => (
+                Counter::ResidentCustomStateInputRoutedEntryPoints,
+                Counter::ResidentCustomStateInputLocalFeatureTests,
+                Counter::ResidentCustomStateInputRoutesPassingOrigin,
+            ),
+            InputKey::LocalFeature(_, LocalFeatureKey::Emptiness) => (
+                Counter::ResidentEmptinessInputRoutedEntryPoints,
+                Counter::ResidentEmptinessInputLocalFeatureTests,
+                Counter::ResidentEmptinessInputRoutesPassingOrigin,
+            ),
+            InputKey::LocalFeature(_, LocalFeatureKey::Attribute(_)) => (
+                Counter::ResidentAttributeInputRoutedEntryPoints,
+                Counter::ResidentAttributeInputLocalFeatureTests,
+                Counter::ResidentAttributeInputRoutesPassingOrigin,
+            ),
+            InputKey::LocalFeature(_, LocalFeatureKey::Language) => (
+                Counter::ResidentLanguageInputRoutedEntryPoints,
+                Counter::ResidentLanguageInputLocalFeatureTests,
+                Counter::ResidentLanguageInputRoutesPassingOrigin,
+            ),
+            InputKey::LocalFeature(_, LocalFeatureKey::Directionality) => (
+                Counter::ResidentDirectionalityInputRoutedEntryPoints,
+                Counter::ResidentDirectionalityInputLocalFeatureTests,
+                Counter::ResidentDirectionalityInputRoutesPassingOrigin,
+            ),
+            InputKey::LocalFeature(_, LocalFeatureKey::HeadingLevel) => (
+                Counter::ResidentHeadingInputRoutedEntryPoints,
+                Counter::ResidentHeadingInputLocalFeatureTests,
+                Counter::ResidentHeadingInputRoutesPassingOrigin,
+            ),
+            InputKey::State(..) => (
+                Counter::ResidentStateInputRoutedEntryPoints,
+                Counter::ResidentStateInputLocalFeatureTests,
+                Counter::ResidentStateInputRoutesPassingOrigin,
+            ),
+            _ => return None,
+        })
+    }
+
     /// Whether a packed fact on a newly connected node can affect a node outside that connection.
     fn connected_subtree_route_escapes(
         &self,
@@ -187,6 +248,10 @@ impl StyleEngine {
 
         let in_flux = Self::feature_in_flux(input);
         let is_arrival = matches!(input.key, InputKey::LocalFeature(_, LocalFeatureKey::ArrivingFacts));
+        let resident_counters = Self::resident_input_routing_counters(input);
+        let local_feature_tests_before = self.counters.get(Counter::LocalFeatureTests);
+        let mut routed_entry_points = 0;
+        let mut routes_passing_origin = 0;
         let keys = match input.key {
             InputKey::LocalFeature(node, LocalFeatureKey::ArrivingFacts) => self.routing_keys_of_arriving_facts(node),
             // A `[*|x]` rule registers under the any-namespace form of the name, which the pure
@@ -238,6 +303,7 @@ impl StyleEngine {
             // selectors whose subjects follow it. A route registered under several packed facts
             // is followed once because all of those facts have their final truth already.
             self.counters.add(Counter::RoutedEntryPoints, routes.len() as u64);
+            routed_entry_points += routes.len() as u64;
             if is_arrival {
                 self.counters
                     .add(Counter::ArrivalRoutedEntryPoints, routes.len() as u64);
@@ -256,6 +322,7 @@ impl StyleEngine {
                     && !self.program.rule_can_decide(rule)
                     && !changed_sheets.contains(&self.program.rule_sheet(rule))
                 {
+                    self.counters.bump(Counter::InactiveRoutedEntryPoints);
                     continue;
                 }
                 let point = routing.route(route);
@@ -268,6 +335,7 @@ impl StyleEngine {
                     && self.program.rule_version(rule).selector_program != Some(selector_program)
                     && !changed_programs.contains(&selector_program)
                 {
+                    self.counters.bump(Counter::InactiveRoutedEntryPoints);
                     continue;
                 }
                 let path = routing.path_of(route);
@@ -296,6 +364,7 @@ impl StyleEngine {
                 if !self.node_carries_all(routing.origin_required_of(route), node, in_flux) {
                     continue;
                 }
+                routes_passing_origin += 1;
                 let exact_tree_evaluation = if is_arrival && tree_routing.use_exact {
                     if tree_routing.has_before_sibling_relations
                         && self.entry_can_use_before_sibling_relations(selector_program, selector_entry)
@@ -392,6 +461,14 @@ impl StyleEngine {
                     }
                 }
             }
+        }
+        if let Some((entry_counter, test_counter, passing_counter)) = resident_counters {
+            self.counters.add(entry_counter, routed_entry_points);
+            self.counters.add(
+                test_counter,
+                self.counters.get(Counter::LocalFeatureTests) - local_feature_tests_before,
+            );
+            self.counters.add(passing_counter, routes_passing_origin);
         }
     }
 
@@ -1265,7 +1342,11 @@ impl StyleEngine {
             // current-program cache intentionally contains only the final side, so build this rare
             // union directly.
             let mut entries = Vec::new();
-            for &route in routing.routes_for(RoutingKey::Structural) {
+            for &route in routing
+                .routes_for(RoutingKey::Structural)
+                .iter()
+                .chain(routing.routes_for(RoutingKey::Emptiness))
+            {
                 let route_is_live = route_liveness.contains(route.index());
                 let rule = routing.rule_of(route);
                 if !route_is_live

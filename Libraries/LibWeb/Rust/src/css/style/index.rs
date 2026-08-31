@@ -1582,6 +1582,9 @@ pub enum FeatureKey {
     /// rather than anything its position in the cascade implies, and without this the elements
     /// running an animation whose keyframes changed are unreachable.
     AnimationName(StyleAtomID),
+    /// Whether an element has no element or significant text children. This is a routing key, not
+    /// a dispatch key: it separates `:empty` changes from unrelated structural selector routes.
+    Emptiness,
 }
 
 impl FeatureKey {
@@ -1619,7 +1622,8 @@ impl FeatureKey {
             | Self::Language
             | Self::AnyCustomFunction
             | Self::AnyCustomProperty
-            | Self::CustomPropertySet(_) => None,
+            | Self::CustomPropertySet(_)
+            | Self::Emptiness => None,
         }
     }
 }
