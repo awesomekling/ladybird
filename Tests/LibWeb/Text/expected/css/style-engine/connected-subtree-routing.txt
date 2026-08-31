@@ -1,0 +1,4 @@
+new sibling target cold-matches: rgb(0, 128, 0)
+new siblings do not route to each other: true
+resident sibling is invalidated: rgb(0, 128, 0)
+resident sibling keeps an escape route: true

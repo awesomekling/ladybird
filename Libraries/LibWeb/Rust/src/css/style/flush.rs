@@ -394,6 +394,7 @@ impl StyleEngine {
                 use_exact: use_exact_tree_routing,
                 has_before_sibling_relations,
                 transaction_inputs: &transaction.inputs,
+                connected_subtree_arrivals: &transaction.connected_subtree_arrivals,
             };
             let routing_for_siblings = Rc::clone(&self.routing);
             let sibling_entries = routing_for_siblings.live_sibling_entries(&self.program, &self.programs);

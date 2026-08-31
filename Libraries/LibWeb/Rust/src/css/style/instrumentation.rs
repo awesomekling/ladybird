@@ -228,6 +228,7 @@ define_counters! {
     ExactRegionBatchIntervals => "exactRegionBatchIntervals",
     ExactRegionBatchNodes => "exactRegionBatchNodes",
     RoutedEntryPoints => "routedEntryPoints",
+    ArrivalRoutedEntryPoints => "arrivalRoutedEntryPoints",
     OriginTruthRoutesFired => "originTruthRoutesFired",
     OriginTruthRoutesSkipped => "originTruthRoutesSkipped",
     ArrivingNodeFactsFolded => "arrivingNodeFactsFolded",

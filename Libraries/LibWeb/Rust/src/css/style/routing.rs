@@ -8,6 +8,51 @@ use super::column::advance_epoch;
 use super::*;
 
 impl StyleEngine {
+    /// Whether a packed fact on a newly connected node can affect a node outside that connection.
+    fn connected_subtree_route_escapes(
+        &self,
+        routing: &RoutingRegistry,
+        route: RouteID,
+        node: StyleNodeID,
+        connected_subtree_arrivals: &[StyleNodeID],
+    ) -> bool {
+        let point = routing.route(route);
+        if let Some(anchor) = point.anchor {
+            let path = routing.path_of(route);
+            if anchor.input_is_on_the_anchor {
+                return !path.is_empty();
+            }
+            if !anchor.input_is_on_the_witness {
+                return true;
+            }
+            let mut has_resident_anchor = false;
+            let mut consider = |candidate| {
+                has_resident_anchor |= connected_subtree_arrivals.binary_search(&candidate).is_err();
+            };
+            match anchor.match_in_shadow_tree {
+                true => possible_hosting_anchors(anchor.axis, node, &self.tree, &mut consider),
+                false => possible_anchors(anchor.axis, node, &self.tree, None, &mut consider),
+            }
+            return has_resident_anchor || !path.is_empty();
+        }
+
+        let sibling_is_resident = |sibling| connected_subtree_arrivals.binary_search(&sibling).is_err();
+        match routing.path_of(route).first() {
+            Some(InverseStep::NextSibling) => self.tree.next_element_sibling(node).is_some_and(sibling_is_resident),
+            Some(InverseStep::FollowingSiblings) => {
+                let mut sibling = self.tree.next_element_sibling(node);
+                while let Some(candidate) = sibling {
+                    if sibling_is_resident(candidate) {
+                        return true;
+                    }
+                    sibling = self.tree.next_element_sibling(candidate);
+                }
+                false
+            }
+            _ => true,
+        }
+    }
+
     /// Whether the locally evaluable compound containing an input changed truth on that element.
     fn route_origin_truth_flipped(
         &mut self,
@@ -159,16 +204,44 @@ impl StyleEngine {
             _ => routing_keys_for_input(input),
         };
         let route_liveness = routing.route_liveness(&self.program, &self.programs);
-        for key in keys {
+        let connected_subtree_arrival = is_arrival
+            && input
+                .key
+                .style_node()
+                .is_some_and(|node| tree_routing.connected_subtree_arrivals.binary_search(&node).is_ok());
+        let arrival_routes = is_arrival.then(|| {
+            let mut routes = routing.arrival_routes_for_keys(&keys);
+            if connected_subtree_arrival {
+                let node = input.key.style_node().expect("an arrival has no style node");
+                routes.retain(|&route| {
+                    self.connected_subtree_route_escapes(&routing, route, node, tree_routing.connected_subtree_arrivals)
+                });
+            }
+            routes
+        });
+        let mut route_set_index = 0;
+        loop {
+            let routes = match arrival_routes.as_deref() {
+                Some(routes) if route_set_index == 0 => routes,
+                Some(_) => break,
+                None => {
+                    let Some(&key) = keys.get(route_set_index) else {
+                        break;
+                    };
+                    routing.routes_for(key)
+                }
+            };
+            route_set_index += 1;
             // The tree delta already puts an arriving element and its subtree in the plan. Its
             // individual facts only have work left to do as possible witnesses of relational
             // selectors whose anchors live outside that subtree, or on the left side of sibling
-            // selectors whose subjects follow it.
-            let routes = match is_arrival {
-                true => routing.arrival_routes_for(key),
-                false => routing.routes_for(key),
-            };
+            // selectors whose subjects follow it. A route registered under several packed facts
+            // is followed once because all of those facts have their final truth already.
             self.counters.add(Counter::RoutedEntryPoints, routes.len() as u64);
+            if is_arrival {
+                self.counters
+                    .add(Counter::ArrivalRoutedEntryPoints, routes.len() as u64);
+            }
 
             let Some(node) = input.key.style_node() else {
                 continue;

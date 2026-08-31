@@ -1428,6 +1428,7 @@ pub(super) struct TreeRoutingMode<'a> {
     pub(super) use_exact: bool,
     pub(super) has_before_sibling_relations: bool,
     pub(super) transaction_inputs: &'a [NormalizedInput],
+    pub(super) connected_subtree_arrivals: &'a [StyleNodeID],
 }
 
 impl TreeRoutingMode<'_> {

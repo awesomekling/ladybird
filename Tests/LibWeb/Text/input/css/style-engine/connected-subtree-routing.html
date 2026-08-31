@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    .trigger + .target { color: green }
+</style>
+<div id="resident"><span class="target"></span></div>
+<script>
+    test(() => {
+        internals.updateStyle();
+
+        const subtree = document.createElement("div");
+        const internalTrigger = document.createElement("span");
+        internalTrigger.className = "trigger";
+        const internalTarget = document.createElement("span");
+        internalTarget.className = "target";
+        subtree.append(internalTrigger, internalTarget);
+        const beforeInternal = internals.styleEngineCounters();
+        document.body.appendChild(subtree);
+        internals.updateStyle();
+        const afterInternal = internals.styleEngineCounters();
+        println(`new sibling target cold-matches: ${getComputedStyle(internalTarget).color}`);
+        println(`new siblings do not route to each other: ${afterInternal.arrivalRoutedEntryPoints === beforeInternal.arrivalRoutedEntryPoints}`);
+
+        const externalTrigger = document.createElement("span");
+        externalTrigger.className = "trigger";
+        const beforeExternal = internals.styleEngineCounters();
+        resident.insertBefore(externalTrigger, resident.firstChild);
+        internals.updateStyle();
+        const afterExternal = internals.styleEngineCounters();
+        println(`resident sibling is invalidated: ${getComputedStyle(resident.lastChild).color}`);
+        println(`resident sibling keeps an escape route: ${afterExternal.arrivalRoutedEntryPoints > beforeExternal.arrivalRoutedEntryPoints}`);
+    });
+</script>

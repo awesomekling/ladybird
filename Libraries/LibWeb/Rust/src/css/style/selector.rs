@@ -3783,6 +3783,20 @@ impl RoutingRegistry {
         self.arrival_by_input.get(key)
     }
 
+    /// The distinct candidate routes through which facts on one arriving element can affect nodes
+    /// beyond it. One compound can register the same route under several of its facts, but the
+    /// fully populated arriving element proves that compound only once.
+    #[must_use]
+    pub fn arrival_routes_for_keys(&self, keys: &[RoutingKey]) -> Vec<RouteID> {
+        let mut routes = Vec::new();
+        for &key in keys {
+            routes.extend_from_slice(self.arrival_routes_for(key));
+        }
+        routes.sort_unstable();
+        routes.dedup();
+        routes
+    }
+
     #[must_use]
     pub fn route(&self, route: RouteID) -> TransposeRoute {
         let index = route.index();
@@ -7651,6 +7665,10 @@ mod tests {
         assert_eq!(theme_routes, item_routes);
         assert_eq!(registry.arrival_routes_for(RoutingKey::Class(CLASS_ITEM)), item_routes);
         assert_eq!(registry.arrival_routes_for(RoutingKey::Class(CLASS_THEME)), item_routes);
+        assert_eq!(
+            registry.arrival_routes_for_keys(&[RoutingKey::Class(CLASS_ITEM), RoutingKey::Class(CLASS_THEME),]),
+            item_routes
+        );
     }
 
     #[test]

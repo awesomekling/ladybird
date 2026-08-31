@@ -1778,6 +1778,7 @@ fn a_departed_following_sibling_anchor_widens_when_its_old_next_sibling_relocate
         use_exact: false,
         has_before_sibling_relations: false,
         transaction_inputs: &transaction_inputs,
+        connected_subtree_arrivals: &[],
     };
     let old_next_relocated = tree_routing.tree_position_changed(nodes[3]);
     assert!(old_next_relocated);
