@@ -22,7 +22,7 @@
         function difference(after, before, names) {
             // Residency gauges publish absolute pool state rather than work, so they
             // legitimately scale with the document and are not held to invariance.
-            const measured = names.filter(name => !name.startsWith("tier3Resident"));
+            const measured = names.filter(name => !name.startsWith("tier3Resident") && !name.endsWith("Microseconds"));
             return Object.fromEntries(measured.map(name => [name, after[name] - before[name]]));
         }
 

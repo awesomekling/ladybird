@@ -14,6 +14,7 @@ impl StyleEngine {
         root: StyleNodeID,
         mut emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
     ) -> bool {
+        let normalization_started_at = Instant::now();
         self.reclaim_computed_memory_if_needed();
         self.sync_tier3_benefit_observations();
         let tier3_evictions = self.memory.finish_tier3_quota_period();
@@ -64,6 +65,10 @@ impl StyleEngine {
         if transaction.is_empty() {
             self.counters.bump(Counter::EmptyStyleTransactions);
             self.release_transaction_and_sweep_atoms(transaction);
+            self.counters.add(
+                Counter::FlushTransactionNormalizationMicroseconds,
+                elapsed_microseconds(normalization_started_at),
+            );
             return true;
         }
         let mut published_output = false;
@@ -208,8 +213,18 @@ impl StyleEngine {
             self.retained_match_answers.evict(&mut self.match_answers);
             self.release_transaction_and_sweep_atoms(transaction);
             self.counters.bump(Counter::ZeroOutputStyleTransactions);
+            self.counters.add(
+                Counter::FlushTransactionNormalizationMicroseconds,
+                elapsed_microseconds(normalization_started_at),
+            );
             return false;
         }
+
+        self.counters.add(
+            Counter::FlushTransactionNormalizationMicroseconds,
+            elapsed_microseconds(normalization_started_at),
+        );
+        let input_routing_started_at = Instant::now();
 
         // A normalized transaction this wide will ask enough tree-shaped questions to amortize one
         // preorder pass. Keep the coordinates in Tier-4 scratch and let smaller updates continue to
@@ -755,6 +770,11 @@ impl StyleEngine {
             .map_or(0, RetainedAnswerPatch::capacity_bytes);
         self.memory
             .reserve_required(MemoryCategory::BatchScratch, retained_answer_patch_scratch_bytes);
+        self.counters.add(
+            Counter::FlushInputRoutingMicroseconds,
+            elapsed_microseconds(input_routing_started_at),
+        );
+        let retained_cascade_update_started_at = Instant::now();
         let published_retained_answer_dispatch = if retained_answer_patch.is_none() && reuse_retained_match_answers {
             self.retained_answer_dispatch_for_traversal(true)
         } else {
@@ -1001,6 +1021,11 @@ impl StyleEngine {
             MemoryCategory::BatchScratch,
             exact_cascade_stop_node_bytes + exact_cascade_confirmation_node_bytes,
         );
+        self.counters.add(
+            Counter::FlushRetainedCascadeUpdateMicroseconds,
+            elapsed_microseconds(retained_cascade_update_started_at),
+        );
+        let matching_started_at = Instant::now();
         #[cfg(test)]
         if self.diagnostic_plan_capture.is_some() {
             // Plan-only fixtures deliberately omit unrelated fact rows. Complete those fixtures
@@ -1242,6 +1267,11 @@ impl StyleEngine {
             self.memory
                 .release(MemoryCategory::BatchScratch, previous_cascade_input_bytes);
         }
+        self.counters.add(
+            Counter::FlushMatchingMicroseconds,
+            elapsed_microseconds(matching_started_at),
+        );
+        let publication_bridge_started_at = Instant::now();
         self.memory.release(
             MemoryCategory::BatchScratch,
             exact_cascade_stop_node_bytes + exact_cascade_confirmation_node_bytes,
@@ -1280,6 +1310,8 @@ impl StyleEngine {
         self.memory
             .release(MemoryCategory::BatchScratch, direct_action_node_bytes);
         published_match_answers.sort();
+        let mut publication_bridge_microseconds = elapsed_microseconds(publication_bridge_started_at);
+        let computed_group_construction_started_at = Instant::now();
         {
             let mut style_deltas = Vec::with_capacity(published_nodes.len());
             let style_delta_bytes = (style_deltas.capacity() * size_of::<PublishedStyleDeltaRecord>()) as u64;
@@ -1371,6 +1403,11 @@ impl StyleEngine {
                 };
                 style_deltas.push(style_delta);
             }
+            self.counters.add(
+                Counter::FlushComputedGroupConstructionMicroseconds,
+                elapsed_microseconds(computed_group_construction_started_at),
+            );
+            let publication_bridge_started_at = Instant::now();
             if !style_deltas.is_empty() {
                 published_output = true;
                 self.settle_computed_memory();
@@ -1385,6 +1422,7 @@ impl StyleEngine {
             );
             self.memory
                 .release(MemoryCategory::BatchScratch, unresolved_inheritance_source_bytes);
+            publication_bridge_microseconds += elapsed_microseconds(publication_bridge_started_at);
         }
         if !published_output {
             self.counters.bump(Counter::ZeroOutputStyleTransactions);
@@ -1421,6 +1459,10 @@ impl StyleEngine {
                 self.memory.release(MemoryCategory::BatchScratch, topology_bytes);
             }
         }
+        self.counters.add(
+            Counter::FlushPublicationBridgeMicroseconds,
+            publication_bridge_microseconds,
+        );
         !publish_document_root_arrival && !plan_is_broad
     }
 

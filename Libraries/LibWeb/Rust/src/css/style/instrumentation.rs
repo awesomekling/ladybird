@@ -245,6 +245,17 @@ define_counters! {
     PublishedExactRecordDeltas => "publishedExactRecordDeltas",
     PublishedSuppressedNoops => "publishedSuppressedNoops",
 
+    // Flush stages. These accumulate wall-clock microseconds around the coarse stage boundaries,
+    // keeping timing overhead independent of the number of inputs, routes, or published nodes.
+    FlushTransactionNormalizationMicroseconds => "flushTransactionNormalizationMicroseconds",
+    FlushInputRoutingMicroseconds => "flushInputRoutingMicroseconds",
+    FlushMatchingMicroseconds => "flushMatchingMicroseconds",
+    FlushColdMatchingMicroseconds => "flushColdMatchingMicroseconds",
+    FlushRetainedMatchingMicroseconds => "flushRetainedMatchingMicroseconds",
+    FlushRetainedCascadeUpdateMicroseconds => "flushRetainedCascadeUpdateMicroseconds",
+    FlushComputedGroupConstructionMicroseconds => "flushComputedGroupConstructionMicroseconds",
+    FlushPublicationBridgeMicroseconds => "flushPublicationBridgeMicroseconds",
+
     // Style node identity lifecycle.
     StyleNodesAllocated => "styleNodesAllocated",
     DocumentWidenings => "documentWidenings",

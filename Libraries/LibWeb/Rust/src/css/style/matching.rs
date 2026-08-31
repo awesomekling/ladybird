@@ -3139,6 +3139,7 @@ impl StyleEngine {
         node: StyleNodeID,
         retained_answer_dispatch: Option<&RuleDispatch>,
     ) -> Result<PublishedMatchAnswer, Incomplete> {
+        let retained_matching_started_at = Instant::now();
         if !self.match_answer_is_retainable(node) {
             self.retained_match_answers.forget_answer(&mut self.match_answers, node);
         }
@@ -3159,12 +3160,17 @@ impl StyleEngine {
             let answer = self.matches_for_cascade(exact_answer, false, Some(node));
             Some((answer, cascade_winners_are_complete))
         });
+        self.counters.add(
+            Counter::FlushRetainedMatchingMicroseconds,
+            elapsed_microseconds(retained_matching_started_at),
+        );
         let (matches, cascade_winners_are_complete, compact_answer) =
             if let Some((answer, cascade_winners_are_complete)) = retained_answer {
                 self.remember_cascade_input(node, &answer);
                 self.counters.bump(Counter::RetainedMatchAnswerReuses);
                 (answer, cascade_winners_are_complete, None)
             } else {
+                let cold_matching_started_at = Instant::now();
                 // Ask for an exact, retainable answer rather than a winner-pruned one: pruning is
                 // cheaper once, but the pruned answer cannot enter the retained relation, and this
                 // node will then cold-match again on every flush that plans it. Once retained-answer
@@ -3180,6 +3186,10 @@ impl StyleEngine {
                     Some(&mut cascade_winners_are_complete),
                 );
                 self.complete_answers_exactly = false;
+                self.counters.add(
+                    Counter::FlushColdMatchingMicroseconds,
+                    elapsed_microseconds(cold_matching_started_at),
+                );
                 let answer = answer?;
                 (answer, cascade_winners_are_complete, compact_answer)
             };
@@ -3207,6 +3217,7 @@ impl StyleEngine {
         dispatch: &RuleDispatch,
         cascade_winners_are_complete: bool,
     ) -> Option<PublishedMatchAnswer> {
+        let retained_matching_started_at = Instant::now();
         let compact = Rc::clone(self.match_answers.answer(cascade_input)?);
         let mut matches = compact
             .iter()
@@ -3224,6 +3235,10 @@ impl StyleEngine {
         self.counters
             .add(Counter::CascadeNodeHandlesPublished, published_rows as u64);
         self.publish_cascade_input(node, cascade_input);
+        self.counters.add(
+            Counter::FlushRetainedMatchingMicroseconds,
+            elapsed_microseconds(retained_matching_started_at),
+        );
         Some(PublishedMatchAnswer {
             node,
             cascade_input: Some(cascade_input),

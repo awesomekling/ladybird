@@ -155,6 +155,11 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
+use std::time::Instant;
+
+fn elapsed_microseconds(started_at: Instant) -> u64 {
+    started_at.elapsed().as_micros().try_into().unwrap_or(u64::MAX)
+}
 
 use crate::css::cascaded_properties::CascadeOrigin;
 use crate::css::cascaded_properties::CascadedPropertyStore;
