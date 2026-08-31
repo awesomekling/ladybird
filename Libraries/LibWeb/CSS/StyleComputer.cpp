@@ -3463,6 +3463,7 @@ StyleEngine::StyleRecordDelta StyleComputer::record_computed_style_inputs(Option
         payloads[index] = payload_source.style_group_payload(static_cast<StyleGroupIndex>(index));
     auto custom_property_environment = abstract_element.has_value() ? abstract_element->custom_property_data() : nullptr;
     bool inherited_group_swap_candidate = false;
+    bool exact_record_reuse_candidate = false;
     if (abstract_element.has_value() && !abstract_element->pseudo_element().has_value()) {
         auto& element = abstract_element->element();
         inherited_group_swap_candidate = element.style_input_record()
@@ -3470,6 +3471,22 @@ StyleEngine::StyleRecordDelta StyleComputer::record_computed_style_inputs(Option
             && !element.has_relevant_animations() && !element.has_css_defined_animations()
             && element.property_ids_with_existing_transitions({}).is_empty()
             && element.property_ids_with_matching_transition_property_entry({}).is_empty();
+        auto const* record = element.style_input_record();
+        exact_record_reuse_candidate = record
+            && !record->read_beyond_the_record
+            && !record->style_uses_attr_css_function
+            && !record->style_uses_var_css_function
+            && !record->style_uses_if_css_function
+            && !record->style_uses_custom_function
+            && !record->style_uses_inherit_css_function
+            && !record->style_uses_tree_counting_function
+            && !record->style_depends_on_viewport_metrics
+            && !record->style_depends_on_size_container_query
+            && !record->style_depends_on_style_container_query
+            && record->explicitly_inherited_non_inherited_style_groups == 0
+            && !record->cascade_reads_custom_properties
+            && !record->cascade_declares_custom_properties
+            && inherited_group_swap_candidate;
     }
     u64 counter_style_environment_identity = 0;
     bool const is_pseudo = abstract_element.has_value() && abstract_element->pseudo_element().has_value();
@@ -3487,7 +3504,7 @@ StyleEngine::StyleRecordDelta StyleComputer::record_computed_style_inputs(Option
             animation_overlay_payloads[index] = values.style_group_payload(static_cast<StyleGroupIndex>(index));
     }
     auto pseudo_kind = pseudo_element_to_ffi(abstract_element.has_value() ? abstract_element->pseudo_element() : Optional<CSS::PseudoElement> {});
-    auto publication = const_cast<StyleComputer&>(*this).style_engine().publish_computed_groups(style_node_id, pseudo_kind, payloads, ComputedValues::inherited_style_group_count, custom_property_environment ? custom_property_environment->identity() : 0, inherited_group_swap_candidate, counter_style_environment_identity, animation_overlay_identity, animated_properties ? animated_properties->overlay() : nullptr, animated_properties ? animation_overlay_payloads.span() : ReadonlySpan<void const*> {}, base.computed_longhand_table());
+    auto publication = const_cast<StyleComputer&>(*this).style_engine().publish_computed_groups(style_node_id, pseudo_kind, payloads, ComputedValues::inherited_style_group_count, custom_property_environment ? custom_property_environment->identity() : 0, inherited_group_swap_candidate, exact_record_reuse_candidate, counter_style_environment_identity, animation_overlay_identity, animated_properties ? animated_properties->overlay() : nullptr, animated_properties ? animation_overlay_payloads.span() : ReadonlySpan<void const*> {}, base.computed_longhand_table());
     return publication;
 }
 

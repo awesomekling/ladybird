@@ -338,6 +338,7 @@ public:
         PseudoInputsUnchanged,
     };
     CSS::RequiredInvalidationAfterStyleChange apply_style_engine_reaction(bool& did_change_custom_properties, StyleEngineRecomputeReason = StyleEngineRecomputeReason::General, u8 inherited_style_groups = 0);
+    CSS::RequiredInvalidationAfterStyleChange apply_exact_effects_style_record_delta(CSS::StyleRecordID);
     CSS::RequiredInvalidationAfterStyleChange recompute_pseudo_element_styles_after_animation_update(Badge<Web::Animations::AnimationUpdateContext>);
 
     void set_needs_layout_tree_rebuild(SetNeedsLayoutTreeUpdateReason, CSS::LayoutTreeRebuildRoot);

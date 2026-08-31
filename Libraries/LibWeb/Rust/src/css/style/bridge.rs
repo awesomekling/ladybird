@@ -104,6 +104,7 @@ pub enum FfiStyleDeltaGap {
 pub enum FfiStyleDeltaDamage {
     None,
     Full,
+    Record,
 }
 
 /// One final style assignment or a typed request to materialize it in C++.
@@ -2232,6 +2233,7 @@ pub unsafe extern "C" fn style_engine_publish_computed_groups(
     inherited_group_count: usize,
     custom_property_environment: u64,
     inherited_group_swap_candidate: bool,
+    exact_record_reuse_candidate: bool,
     counter_style_environment_identity: u64,
     animation_overlay_identity: u64,
     animated_overlay: *const c_void,
@@ -2276,6 +2278,7 @@ pub unsafe extern "C" fn style_engine_publish_computed_groups(
             dependency_flags,
             counter_style_environment_identity,
             animation_overlay_identity,
+            exact_record_reuse_candidate,
             animated_overlay: animated_overlay.cast(),
             animation_overlay_payloads,
             longhand_table: longhand_table.map_or(std::ptr::null(), std::ptr::from_ref),
@@ -2327,6 +2330,7 @@ pub unsafe extern "C" fn style_engine_publish_computed_groups(
             payload.write_u64(custom_property_environment);
             payload.write_u64(pseudo_element_styles);
             payload.write_u8(dependency_flags);
+            payload.write_bool(exact_record_reuse_candidate);
             payload.write_u64(counter_style_environment_identity);
             payload.write_u64(animation_overlay_identity);
             payload.write_u64(u64::from(!animated_overlay.is_null()));

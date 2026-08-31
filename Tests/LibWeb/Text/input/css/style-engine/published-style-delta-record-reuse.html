@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    .target {
+        width: 100px;
+        height: 100px;
+        filter: blur(1px);
+        opacity: 0.25;
+    }
+    .target:hover {
+        filter: none;
+        opacity: 1;
+    }
+    #inheritance-parent {
+        color: rgb(1, 2, 3);
+    }
+    #inheritance-parent.changed {
+        color: rgb(4, 5, 6);
+    }
+</style>
+<div id="inheritance-parent"><div id="first" class="target"></div></div>
+<div id="second" class="target"></div>
+<script>
+    test(() => {
+        internals.updateStyle();
+        internals.resetStyleInvalidationCounters();
+
+        internals.mouseMove(50, 50);
+        internals.updateStyle();
+        internals.mouseMove(50, 150);
+        internals.updateStyle();
+        internals.mouseMove(150, 250);
+        internals.updateStyle();
+        internals.mouseMove(50, 50);
+        internals.updateStyle();
+        internals.mouseMove(150, 250);
+        internals.updateStyle();
+        internals.mouseMove(50, 50);
+        internals.updateStyle();
+        document.getElementById("inheritance-parent").classList.add("changed");
+        internals.updateStyle();
+
+        const counters = internals.getStyleInvalidationCounters();
+        println(`materialized gaps: ${counters.styleEngineMaterializedGaps}`);
+        println(`record deltas applied: ${counters.styleEngineRecordDeltasApplied}`);
+        println(`inherited group swaps: ${counters.elementInheritedStyleGroupSwaps}`);
+        println(`first filter: ${getComputedStyle(first).filter}`);
+        println(`first opacity: ${getComputedStyle(first).opacity}`);
+        println(`first color: ${getComputedStyle(first).color}`);
+        println(`second filter: ${getComputedStyle(second).filter}`);
+        println(`second opacity: ${getComputedStyle(second).opacity}`);
+    });
+</script>

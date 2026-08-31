@@ -1993,6 +1993,49 @@ static bool unregister_current_anchor_names(Element& element, Node& tree_root)
     return true;
 }
 
+CSS::RequiredInvalidationAfterStyleChange Element::apply_exact_effects_style_record_delta(CSS::StyleRecordID new_style_record)
+{
+    auto& style_computer = document().style_computer();
+    auto old_style_record = style_record_identity();
+    auto old_computed_values = computed_style();
+    auto new_computed_values = style_computer.computed_style_record_view(new_style_record);
+    VERIFY(old_style_record);
+    VERIFY(old_computed_values);
+    VERIFY(new_computed_values);
+
+    for (size_t index = 0; index < to_underlying(CSS::StyleGroupIndex::Count); ++index) {
+        if (index == to_underlying(CSS::StyleGroupIndex::EffectsValues))
+            continue;
+        VERIFY(old_computed_values->style_group_payload(static_cast<CSS::StyleGroupIndex>(index))
+            == new_computed_values->style_group_payload(static_cast<CSS::StyleGroupIndex>(index)));
+    }
+
+    ElementDependentInvalidationState old_state {
+        .layout_node = unsafe_layout_node(),
+        .content_counter_style_dependencies = {},
+        .list_counter_style = {},
+        .has_snapshot = false,
+    };
+    DOM::AbstractElement abstract_element { *this };
+    auto result = compute_required_invalidation_with_cache(
+        style_computer,
+        *old_computed_values,
+        *new_computed_values,
+        old_state,
+        abstract_element,
+        { old_style_record, new_style_record });
+
+    set_computed_style({}, new_style_record);
+    retire_style_input_record();
+    if (result.any_computed_value_changed)
+        ++document().style_invalidation_counters().element_computed_style_changes;
+    if (result.invalidation.is_none())
+        return {};
+    ++document().style_invalidation_counters().committed_style_observer_consequences;
+    apply_computed_style_to_layout_node_if_needed(result.invalidation);
+    return result.invalidation;
+}
+
 CSS::RequiredInvalidationAfterStyleChange Element::apply_style_engine_reaction(bool& did_change_custom_properties, StyleEngineRecomputeReason recompute_reason, u8 inherited_style_groups)
 {
     VERIFY(parent());

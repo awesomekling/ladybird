@@ -1329,6 +1329,8 @@ impl StyleEngine {
                 let answer = published_match_answers
                     .lookup(node)
                     .expect("each accepted style reaction has a published match answer");
+                let match_answer = answer.cascade_input.map_or(0, |cascade_input| cascade_input.0);
+                let cascade_winners_are_complete = answer.cascade_winners_are_complete;
                 let style_input_reaction_index = style_input_reactions
                     .binary_search_by_key(&node, |&(style_node, _, _)| style_node)
                     .ok();
@@ -1342,7 +1344,20 @@ impl StyleEngine {
                     .computed_group_sets
                     .assigned_style_record(node)
                     .map_or(0, |style_record| style_record.raw());
-                let direct_inherited_delta = (reaction == transaction::STYLE_REACTION_INHERITED_STYLE)
+                let exact_effects_delta = (reaction == transaction::STYLE_REACTION_PUBLISHED_STYLE
+                    && cascade_winners_are_complete
+                    && self.pseudo_cascade_states_are_unchanged(node))
+                .then(|| self.reuse_exact_effects_style_record(node))
+                .flatten();
+                if exact_effects_delta
+                    .is_some_and(|(old_style_record, new_style_record)| old_style_record == new_style_record)
+                {
+                    self.counters.bump(Counter::PublishedSuppressedNoops);
+                    node_count -= 1;
+                    continue;
+                }
+                let direct_inherited_delta = (exact_effects_delta.is_none()
+                    && reaction == transaction::STYLE_REACTION_INHERITED_STYLE)
                     .then(|| self.tree.flat_tree_parent(node))
                     .flatten()
                     .filter(|parent| {
@@ -1365,7 +1380,8 @@ impl StyleEngine {
                     self.memory.reserve_required(MemoryCategory::BatchScratch, growth);
                     unresolved_inheritance_source_bytes += growth;
                 }
-                let (old_style_record, new_style_record, damage, gap) = direct_inherited_delta.map_or(
+                let exact_delta = exact_effects_delta.or(direct_inherited_delta);
+                let (old_style_record, new_style_record, damage, gap) = exact_delta.map_or(
                     (
                         old_style_record,
                         0,
@@ -1376,7 +1392,11 @@ impl StyleEngine {
                         (
                             old_style_record.raw(),
                             new_style_record.raw(),
-                            FfiStyleDeltaDamage::Full,
+                            if reaction == transaction::STYLE_REACTION_INHERITED_STYLE {
+                                FfiStyleDeltaDamage::Full
+                            } else {
+                                FfiStyleDeltaDamage::Record
+                            },
                             FfiStyleDeltaGap::None,
                         )
                     },
@@ -1387,7 +1407,7 @@ impl StyleEngine {
                 }
                 let style_delta = PublishedStyleDeltaRecord {
                     style_node: node.raw(),
-                    match_answer: answer.cascade_input.map_or(0, |cascade_input| cascade_input.0),
+                    match_answer,
                     old_style_record,
                     new_style_record,
                     damage,

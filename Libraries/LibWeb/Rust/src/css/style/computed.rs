@@ -185,6 +185,7 @@ pub struct ComputedMetadataInput<'a> {
     pub dependency_flags: u8,
     pub counter_style_environment_identity: u64,
     pub animation_overlay_identity: u64,
+    pub exact_record_reuse_candidate: bool,
     pub animated_overlay: *const crate::css::animated_overlay::AnimatedOverlay,
     pub animation_overlay_payloads: &'a [*const c_void],
     /// The drive's frozen computed longhand table, or null when the publisher
@@ -706,6 +707,91 @@ impl ComputedGroupSets {
         let index = node.element_index()? as usize;
         let style_record = *self.style_record_column.get(index)?.as_ref()?;
         Some(self.final_style_record(style_record, self.columns.animation_overlay_slot(index)))
+    }
+
+    pub(super) fn exact_style_record_parent_context(&self, parent: StyleNodeID) -> Option<(InheritedGroupSetID, u64)> {
+        let index = parent.element_index()? as usize;
+        let inherited_groups = self.columns.inherited_groups(index)?;
+        let custom_properties = self.columns.custom_properties(index)?;
+        Some((
+            inherited_groups,
+            *self.custom_property_environments.get(custom_properties),
+        ))
+    }
+
+    pub(super) fn final_style_record_is_live(&self, style_record: FinalStyleRecordID) -> bool {
+        let Some(base_record) = style_record.base_record() else {
+            return false;
+        };
+        self.style_record_generation_is_live(base_record, style_record.base_generation())
+    }
+
+    pub(super) fn style_record_pseudo_element_styles(&self, style_record: FinalStyleRecordID) -> Option<u64> {
+        let style_record = *self.style_records.get_index(style_record.base_record()?.index())?;
+        Some(
+            self.computed_fixed_metadata
+                .get(style_record.fixed_metadata)
+                .pseudo_element_styles,
+        )
+    }
+
+    pub(super) fn style_record_counter_style_environment_identity(
+        &self,
+        style_record: FinalStyleRecordID,
+    ) -> Option<u64> {
+        let style_record = *self.style_records.get_index(style_record.base_record()?.index())?;
+        Some(
+            self.computed_fixed_metadata
+                .get(style_record.fixed_metadata)
+                .counter_style_environment_identity,
+        )
+    }
+
+    pub(super) fn style_record_custom_property_environment(&self, style_record: FinalStyleRecordID) -> Option<u64> {
+        let style_record = *self.style_records.get_index(style_record.base_record()?.index())?;
+        Some(*self.custom_property_environments.get(style_record.custom_properties))
+    }
+
+    pub(super) fn style_records_differ_only_in_group(
+        &self,
+        first: FinalStyleRecordID,
+        second: FinalStyleRecordID,
+        changed_group: usize,
+    ) -> bool {
+        let Some(first) = first
+            .base_record()
+            .and_then(|identity| self.style_records.get_index(identity.index()))
+        else {
+            return false;
+        };
+        let Some(second) = second
+            .base_record()
+            .and_then(|identity| self.style_records.get_index(identity.index()))
+        else {
+            return false;
+        };
+        if first.custom_properties != second.custom_properties || first.fixed_metadata != second.fixed_metadata {
+            return false;
+        }
+        let Some(first_groups) = self.sets.get_index(first.groups.0 as usize) else {
+            return false;
+        };
+        let Some(second_groups) = self.sets.get_index(second.groups.0 as usize) else {
+            return false;
+        };
+        first_groups.payloads.len() == second_groups.payloads.len()
+            && first_groups
+                .payloads
+                .iter()
+                .zip(&second_groups.payloads)
+                .enumerate()
+                .all(|(index, (first, second))| index == changed_group || first == second)
+    }
+
+    pub(super) fn has_animation_overlay(&self, node: StyleNodeID) -> bool {
+        node.element_index()
+            .and_then(|index| self.columns.animation_overlay_slot(index as usize))
+            .is_some()
     }
 
     pub(super) fn viewport_dependent_nodes(&self) -> Vec<u32> {
@@ -1315,6 +1401,7 @@ impl ComputedGroupSets {
             dependency_flags,
             counter_style_environment_identity,
             animation_overlay_identity,
+            exact_record_reuse_candidate: _,
             animated_overlay,
             animation_overlay_payloads,
             longhand_table,
@@ -2670,6 +2757,7 @@ mod tests {
             dependency_flags,
             counter_style_environment_identity,
             animation_overlay_identity: 0,
+            exact_record_reuse_candidate: false,
             animated_overlay: std::ptr::null(),
             animation_overlay_payloads: &[],
             longhand_table: std::ptr::null(),

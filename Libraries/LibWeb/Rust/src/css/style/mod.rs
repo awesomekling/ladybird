@@ -209,6 +209,8 @@ use compiler::NamespaceScope;
 use compiler::ScopeChain;
 use compiler::SelectorCompiler;
 use computed::ComputedGroupSets;
+use computed::FinalStyleRecordID;
+use computed::InheritedGroupSetID;
 use impact::AttributionSweep;
 use impact::ImpactRegion;
 use impact::ImpactRegionBatch;
@@ -332,6 +334,10 @@ const RETAINED_WITNESS_SIBLING_STEPS: usize = 64;
 /// How much of a sibling sequence the first fact batch asks for. A scan that stops early wastes at
 /// most this many rows, which is cheaper than the restart a smaller window would cost.
 const INITIAL_SIBLING_FACT_WINDOW: usize = 8;
+
+/// Bounds retained exact records independently of document lifetime. Entries are only an
+/// acceleration: clearing the table makes the next instance materialize and mint again.
+const MAX_EXACT_STYLE_RECORDS: usize = 4096;
 
 mod verification {
     use super::MatchAnswerID;
@@ -837,6 +843,7 @@ pub struct StyleEngine {
     animation_overlay_memory: MemoryLease,
     computed_pseudo_assignment_memory: MemoryLease,
     style_invalidation_cache: HashMap<(u64, u64, bool, bool), u32>,
+    exact_style_records: HashMap<ExactStyleRecordKey, FinalStyleRecordID>,
 
     /// One identity per distinct match-answer factor, retained exact factor, or cascade input.
     /// The catalog lives with the document rather than with a traversal, because a per-element ask -
@@ -965,6 +972,16 @@ pub struct StyleEngine {
     fold_id_and_class_name_case: bool,
     #[cfg(test)]
     diagnostic_plan_capture: Option<DiagnosticPlanCapture>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct ExactStyleRecordKey {
+    cascade_generation: u64,
+    cascade_state: CascadeStateID,
+    parent_inherited_groups: InheritedGroupSetID,
+    custom_property_environment: u64,
+    counter_style_environment_identity: u64,
+    pseudo_element_styles: u64,
 }
 
 #[derive(Clone, Copy)]

@@ -284,10 +284,12 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 continue;
 
             bool const has_published_style_reaction = reaction.reaction & StyleEngine::PublishedStyle;
+            bool const record_delta_matches_current_style = reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize
+                || reaction.old_style_record == element->style_record_identity().value();
             if (has_published_style_reaction) {
                 ++document.style_invalidation_counters().style_engine_published_reactions;
             }
-            if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize) {
+            if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize || !record_delta_matches_current_style) {
                 if (has_published_style_reaction)
                     ++document.style_invalidation_counters().style_engine_materialized_gaps;
             } else {
@@ -298,9 +300,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 VERIFY(reaction.new_style_record == 0);
                 VERIFY(reaction.damage == StyleEngineFFI::FfiStyleDeltaDamage::None);
             } else {
-                VERIFY(reaction.old_style_record == element->style_record_identity().value());
                 VERIFY(reaction.new_style_record != 0);
-                VERIFY(reaction.damage == StyleEngineFFI::FfiStyleDeltaDamage::Full);
+                VERIFY(reaction.damage != StyleEngineFFI::FfiStyleDeltaDamage::None);
             }
 
             auto previous_style_record = element->style_record_identity();
@@ -323,32 +324,48 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             bool const needs_full_custom_property_recompute = needs_custom_property_recompute && (element->style_uses_var_css_function() || element->style_uses_inherit_css_function() || cascade_reads_custom_properties);
             bool const materializes_inherited_style_reaction = needs_inherited_style_recompute && !needs_regular_style_recompute && !needs_full_custom_property_recompute;
             bool const can_use_inherited_style_group_swap = materializes_inherited_style_reaction && !needs_custom_property_recompute;
-            if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::None) {
-                VERIFY(!needs_regular_style_recompute);
-                VERIFY(needs_inherited_style_recompute);
-                VERIFY(!needs_custom_property_recompute);
-                VERIFY(reaction.pseudo_kind == NumericLimits<u8>::max());
-                if (element_style_depends_on_more_than_the_inherited_groups(*element)) {
-                    invalidation = element->apply_style_engine_reaction(
-                        did_change_custom_properties,
-                        DOM::Element::StyleEngineRecomputeReason::General,
-                        0);
+            // An animation overlay can advance C++ beyond the base record Rust observed while
+            // planning. Recompute through the element whenever that makes an exact delta stale.
+            if (!record_delta_matches_current_style) {
+                invalidation = element->apply_style_engine_reaction(
+                    did_change_custom_properties,
+                    DOM::Element::StyleEngineRecomputeReason::General,
+                    0);
+            } else if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::None) {
+                if (reaction.damage == StyleEngineFFI::FfiStyleDeltaDamage::Record) {
+                    VERIFY(needs_regular_style_recompute);
+                    VERIFY(!needs_inherited_style_recompute);
+                    VERIFY(!needs_custom_property_recompute);
+                    VERIFY(reaction.pseudo_kind == NumericLimits<u8>::max());
+                    invalidation = element->apply_exact_effects_style_record_delta(StyleRecordID { reaction.new_style_record });
+                    document.style_computer().style_engine().consume_recorded_element_style_input_change(reaction.style_node);
                 } else {
-                    auto* input_record = element->style_input_record();
-                    VERIFY(input_record);
-                    auto const* payloads = static_cast<void const* const*>(document.style_computer().style_record_payloads(StyleRecordID { reaction.new_style_record }));
-                    VERIFY(payloads);
-                    constexpr size_t inherited_group_count = ComputedValues::inherited_style_group_count;
-                    VERIFY(input_record->words.size() >= inherited_group_count);
-                    input_record->pinned_parent_groups.set({ payloads, inherited_group_count });
-                    for (size_t index = 0; index < inherited_group_count; ++index)
-                        input_record->words[index] = bit_cast<FlatPtr>(payloads[index]);
-                    element->set_computed_style({}, StyleRecordID { reaction.new_style_record });
-                    ++document.style_invalidation_counters().element_inherited_style_group_swaps;
-                    invalidation = RequiredInvalidationAfterStyleChange::full();
-                    for (size_t index = 0; index < inherited_group_count; ++index) {
-                        if (reaction.inherited_style_groups & (1 << index))
-                            invalidation.mark_inherited_style_group_changed(index);
+                    VERIFY(!needs_regular_style_recompute);
+                    VERIFY(needs_inherited_style_recompute);
+                    VERIFY(!needs_custom_property_recompute);
+                    VERIFY(reaction.pseudo_kind == NumericLimits<u8>::max());
+                    if (element_style_depends_on_more_than_the_inherited_groups(*element)) {
+                        invalidation = element->apply_style_engine_reaction(
+                            did_change_custom_properties,
+                            DOM::Element::StyleEngineRecomputeReason::General,
+                            0);
+                    } else {
+                        auto* input_record = element->style_input_record();
+                        VERIFY(input_record);
+                        auto const* payloads = static_cast<void const* const*>(document.style_computer().style_record_payloads(StyleRecordID { reaction.new_style_record }));
+                        VERIFY(payloads);
+                        constexpr size_t inherited_group_count = ComputedValues::inherited_style_group_count;
+                        VERIFY(input_record->words.size() >= inherited_group_count);
+                        input_record->pinned_parent_groups.set({ payloads, inherited_group_count });
+                        for (size_t index = 0; index < inherited_group_count; ++index)
+                            input_record->words[index] = bit_cast<FlatPtr>(payloads[index]);
+                        element->set_computed_style({}, StyleRecordID { reaction.new_style_record });
+                        ++document.style_invalidation_counters().element_inherited_style_group_swaps;
+                        invalidation = RequiredInvalidationAfterStyleChange::full();
+                        for (size_t index = 0; index < inherited_group_count; ++index) {
+                            if (reaction.inherited_style_groups & (1 << index))
+                                invalidation.mark_inherited_style_group_changed(index);
+                        }
                     }
                 }
             } else if (needs_regular_style_recompute || needs_inherited_style_recompute || needs_full_custom_property_recompute) {

@@ -831,6 +831,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let custom_property_environment = event.payload.read_u64()?;
                     let pseudo_element_styles = event.payload.read_u64()?;
                     let dependency_flags = event.payload.read_u8()?;
+                    let exact_record_reuse_candidate = event.payload.read_bool()?;
                     let counter_style_environment_identity = event.payload.read_u64()?;
                     let animation_overlay_identity = event.payload.read_u64()?;
                     let animated_overlay = match event.payload.read_u64()? {
@@ -964,6 +965,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             inherited_group_count,
                             custom_property_environment,
                             dependency_flags & (1 << 3) != 0,
+                            exact_record_reuse_candidate,
                             counter_style_environment_identity,
                             animation_overlay_identity,
                             animated_overlay.cast(),
@@ -2032,6 +2034,7 @@ fn read_style_transaction_outputs(
                 damage: match payload.read_u16()? {
                     0 => FfiStyleDeltaDamage::None,
                     1 => FfiStyleDeltaDamage::Full,
+                    2 => FfiStyleDeltaDamage::Record,
                     tag => return Err(format!("unknown style delta damage tag {tag}").into()),
                 },
                 reaction: payload.read_u8()?,

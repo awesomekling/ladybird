@@ -1,0 +1,8 @@
+materialized gaps: 3
+record deltas applied: 5
+inherited group swaps: 0
+first filter: none
+first opacity: 1
+first color: rgb(4, 5, 6)
+second filter: blur(1px)
+second opacity: 0.25

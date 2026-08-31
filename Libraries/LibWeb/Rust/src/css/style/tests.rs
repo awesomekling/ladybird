@@ -673,6 +673,7 @@ fn publish_current_cascade_as_computed(engine: &mut StyleEngine, node: StyleNode
             dependency_flags: 0,
             counter_style_environment_identity: 0,
             animation_overlay_identity: 0,
+            exact_record_reuse_candidate: false,
             animated_overlay: std::ptr::null(),
             animation_overlay_payloads: &[],
             longhand_table: std::ptr::null(),

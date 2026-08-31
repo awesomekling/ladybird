@@ -295,6 +295,10 @@ impl StyleEngine {
         custom_property_environment: u64,
         metadata_input: computed::ComputedMetadataInput<'_>,
     ) -> computed::ComputedGroupPublication {
+        let exact_record_reuse_candidate =
+            metadata_input.exact_record_reuse_candidate && metadata_input.animation_overlay_identity == 0;
+        let counter_style_environment_identity = metadata_input.counter_style_environment_identity;
+        let pseudo_element_styles = metadata_input.pseudo_element_styles;
         let current_cascade_state =
             target.and_then(|target| self.computed_group_sets.take_pending_cascade_state(target));
         let publication = self.computed_group_sets.publish(
@@ -330,6 +334,26 @@ impl StyleEngine {
             }
         } else if let Some(target) = target {
             self.computed_group_sets.clear_cascade_state(target);
+        }
+        if exact_record_reuse_candidate
+            && let Some(target) = target
+            && !target.is_pseudo()
+            && let Some((cascade_generation, cascade_state)) = current_cascade_state
+            && let Some(key) = self.exact_style_record_key(
+                target.node(),
+                cascade_generation,
+                cascade_state,
+                custom_property_environment,
+                counter_style_environment_identity,
+                pseudo_element_styles,
+            )
+        {
+            if self.exact_style_records.len() >= MAX_EXACT_STYLE_RECORDS && !self.exact_style_records.contains_key(&key)
+            {
+                self.exact_style_records.clear();
+                self.exact_style_records.shrink_to_fit();
+            }
+            self.exact_style_records.insert(key, publication.style_record_identity);
         }
         self.settle_computed_memory();
         self.counters.add(
@@ -390,6 +414,92 @@ impl StyleEngine {
             self.counters.bump(Counter::ComputedPseudoAssignmentsPublished);
         }
         publication
+    }
+
+    fn exact_style_record_key(
+        &self,
+        node: StyleNodeID,
+        cascade_generation: u64,
+        cascade_state: CascadeStateID,
+        custom_property_environment: u64,
+        counter_style_environment_identity: u64,
+        pseudo_element_styles: u64,
+    ) -> Option<ExactStyleRecordKey> {
+        let parent = self.tree.flat_tree_parent(node)?;
+        let (parent_inherited_groups, _) = self.computed_group_sets.exact_style_record_parent_context(parent)?;
+        Some(ExactStyleRecordKey {
+            cascade_generation,
+            cascade_state,
+            parent_inherited_groups,
+            custom_property_environment,
+            counter_style_environment_identity,
+            pseudo_element_styles,
+        })
+    }
+
+    pub(super) fn reuse_exact_effects_style_record(
+        &mut self,
+        node: StyleNodeID,
+    ) -> Option<(computed::FinalStyleRecordID, computed::FinalStyleRecordID)> {
+        let target = computed::ComputedStyleTarget::new(node, u8::MAX);
+        if self.computed_group_sets.has_animation_overlay(node) {
+            return None;
+        }
+        let (cascade_generation, cascade_state) = match self
+            .winner_groups
+            .token_for(WinnerGroupKey::current(node, self.program.version()))
+        {
+            Lookup::Known(state) => state,
+            Lookup::KnownAbsent | Lookup::Missing(_) => return None,
+        };
+        let (previous_generation, previous_state) = self.computed_group_sets.cascade_state(target)?;
+        if previous_generation != cascade_generation {
+            return None;
+        }
+        let delta = self.winner_groups.semantic_delta(Some(previous_state), cascade_state);
+        if delta.is_empty() {
+            return None;
+        }
+        let assigned_style_record = self.computed_group_sets.assigned_style_record(node)?;
+        let custom_property_environment = self
+            .computed_group_sets
+            .style_record_custom_property_environment(assigned_style_record)?;
+        let pseudo_element_styles = self
+            .computed_group_sets
+            .style_record_pseudo_element_styles(assigned_style_record)?;
+        let counter_style_environment_identity = self
+            .computed_group_sets
+            .style_record_counter_style_environment_identity(assigned_style_record)?;
+        let key = self.exact_style_record_key(
+            node,
+            cascade_generation,
+            cascade_state,
+            custom_property_environment,
+            counter_style_environment_identity,
+            pseudo_element_styles,
+        )?;
+        let style_record = *self.exact_style_records.get(&key)?;
+        if !self.computed_group_sets.final_style_record_is_live(style_record) {
+            self.exact_style_records.remove(&key);
+            return None;
+        }
+        let old_style_record = self.computed_group_sets.assigned_style_record(node)?;
+        if !self.computed_group_sets.style_records_differ_only_in_group(
+            old_style_record,
+            style_record,
+            crate::css::computed_value_types::STYLE_GROUP_INDEX_EFFECTS,
+        ) {
+            return None;
+        }
+        self.computed_group_sets
+            .set_pending_cascade_state(target, (cascade_generation, cascade_state));
+        // C++ retires the input record that described the materialized answer. Keep direct inherited
+        // swaps disabled until another materialization publishes a replacement input record.
+        let publication = self.assign_shared_style_record(target, style_record.raw(), 7, false);
+        Some((
+            publication.previous_style_record_identity?,
+            publication.style_record_identity,
+        ))
     }
 
     pub(crate) fn publish_exact_cascade_state(
