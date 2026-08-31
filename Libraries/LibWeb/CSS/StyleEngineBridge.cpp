@@ -437,14 +437,16 @@ static void flush_deferred_geometry_transaction_before_non_replayable_input(Styl
 
 void StyleEngine::record_tree_delta(StyleEngineFFI::FfiTreeDelta const& delta)
 {
-    flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
+    if (!m_recording_connected_subtree_input)
+        flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
     request_frame_for_first_recorded_input(*this, m_style_computer);
     m_tree_deltas.append(delta);
 }
 
 void StyleEngine::record_element_arrival(StyleEngineFFI::FfiElementArrival arrival, ReadonlySpan<StyleAtomID> custom_states)
 {
-    flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
+    if (!m_recording_connected_subtree_input)
+        flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
     request_frame_for_first_recorded_input(*this, m_style_computer);
     VERIFY(m_arrival_custom_state_atoms.size() <= NumericLimits<u32>::max());
     VERIFY(custom_states.size() <= NumericLimits<u32>::max());
@@ -454,6 +456,21 @@ void StyleEngine::record_element_arrival(StyleEngineFFI::FfiElementArrival arriv
     for (auto state : custom_states)
         m_arrival_custom_state_atoms.append(state.value());
     m_element_arrivals.append(arrival);
+}
+
+void StyleEngine::begin_connected_subtree_input()
+{
+    VERIFY(!m_recording_connected_subtree_input);
+    flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
+    request_frame_for_first_recorded_input(*this, m_style_computer);
+    m_recording_connected_subtree_input = true;
+}
+
+void StyleEngine::end_connected_subtree_input()
+{
+    VERIFY(m_recording_connected_subtree_input);
+    m_recording_connected_subtree_input = false;
+    submit_recorded_input(true);
 }
 
 void StyleEngine::record_local_feature_delta(StyleEngineFFI::FfiLocalFeatureDelta const& delta)
@@ -470,7 +487,8 @@ void StyleEngine::record_state_delta(StyleEngineFFI::FfiStateDelta const& delta)
 
 void StyleEngine::record_element_declaration_delta(StyleEngineFFI::FfiElementDeclarationDelta const& delta)
 {
-    flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
+    if (!m_recording_connected_subtree_input)
+        flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
     request_frame_for_first_recorded_input(*this, m_style_computer);
     m_element_declaration_deltas.append(delta);
 }
@@ -671,7 +689,7 @@ bool StyleEngine::has_recorded_input() const
         || !m_element_style_inputs.is_empty();
 }
 
-void StyleEngine::submit_recorded_input()
+void StyleEngine::submit_recorded_input(bool connected_subtree_input)
 {
     if (m_style_computer)
         publish_pending_element_features(*this, *m_style_computer);
@@ -696,6 +714,7 @@ void StyleEngine::submit_recorded_input()
         .element_declaration_delta_count = m_element_declaration_deltas.size(),
         .element_style_inputs = m_element_style_inputs.data(),
         .element_style_input_count = m_element_style_inputs.size(),
+        .connected_subtree_input = connected_subtree_input,
     };
     apply_transaction(transaction);
 

@@ -1,4 +1,6 @@
 temporary element facts omitted: true
+geometry-boundary arrival facts folded: true
+geometry-boundary arrival facts dominate local inputs: true
 selector query sees final facts: true
 final selector facts style the element: rgb(0, 128, 0)
 final inline declarations style the element: 7px

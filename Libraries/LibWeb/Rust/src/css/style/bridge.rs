@@ -566,6 +566,7 @@ pub struct FfiStyleInputTransaction {
     pub element_declaration_delta_count: usize,
     pub element_style_inputs: *const FfiElementStyleInput,
     pub element_style_input_count: usize,
+    pub connected_subtree_input: bool,
 }
 
 /// Device class selecting the document's memory budget coefficients.
@@ -747,6 +748,7 @@ impl StyleEngine {
 
     /// Apply one flat transaction. Tree deltas are staged in arrival order so derived neighbour
     /// rows follow the live tree step by step, while the journal normalizes for discovery.
+    #[allow(clippy::too_many_arguments)]
     pub fn apply_transaction_batch(
         &mut self,
         tree_deltas: &[FfiTreeDelta],
@@ -755,6 +757,7 @@ impl StyleEngine {
         state_deltas: &[FfiStateDelta],
         element_declaration_deltas: &[FfiElementDeclarationDelta],
         element_style_inputs: &[FfiElementStyleInput],
+        connected_subtree_input: bool,
     ) {
         let (element_arrivals, arrival_custom_state_atoms) = arrival_columns;
         let largest_element_index = tree_deltas
@@ -844,7 +847,13 @@ impl StyleEngine {
                     continue;
                 };
                 let custom_states = custom_states.iter().copied().map(StyleAtomID).collect::<Vec<_>>();
-                self.record_element_arrival(node, arrival, &custom_states, node_is_arriving(node));
+                self.record_element_arrival(
+                    node,
+                    arrival,
+                    &custom_states,
+                    node_is_arriving(node),
+                    connected_subtree_input,
+                );
             }
             self.settle_batched_inputs();
         }
@@ -858,6 +867,7 @@ impl StyleEngine {
                 InputValue::Feature(decode_feature_value(delta.old_kind, delta.old_atom)),
                 InputValue::Feature(decode_feature_value(delta.new_kind, delta.new_atom)),
                 node_is_arriving(node),
+                connected_subtree_input,
             );
         }
         self.settle_batched_inputs();
@@ -871,6 +881,7 @@ impl StyleEngine {
                 decode_state_fact(delta.fact),
                 delta.new_value,
                 node_is_arriving(node),
+                connected_subtree_input,
             );
         }
         self.settle_batched_inputs();
@@ -1142,6 +1153,7 @@ pub unsafe extern "C" fn style_engine_apply_transaction(engine: *mut c_void, tra
             states,
             declarations,
             element_style_inputs,
+            transaction.connected_subtree_input,
         );
         engine.record_boundary_call(EventKind::ApplyTransaction, |payload| {
             write_recording_tree_deltas(tree, payload);
@@ -1151,6 +1163,7 @@ pub unsafe extern "C" fn style_engine_apply_transaction(engine: *mut c_void, tra
             write_recording_state_deltas(states, payload);
             payload.write_raw_slice(declarations);
             write_recording_element_style_inputs(element_style_inputs, payload);
+            payload.write_bool(transaction.connected_subtree_input);
         });
     });
 }
@@ -3038,7 +3051,7 @@ mod tests {
                 },
             },
         ];
-        engine.apply_transaction_batch(&initial_tree, (&[], &[]), &[], &[], &[], &[]);
+        engine.apply_transaction_batch(&initial_tree, (&[], &[]), &[], &[], &[], &[], false);
 
         let root = StyleNodeID::from_raw(nodes[0]).unwrap();
         let child = StyleNodeID::from_raw(nodes[1]).unwrap();
@@ -3072,7 +3085,7 @@ mod tests {
                 ..no_relations()
             },
         }];
-        engine.apply_transaction_batch(&later_arrival, (&[], &[]), &[], &[], &[], &[]);
+        engine.apply_transaction_batch(&later_arrival, (&[], &[]), &[], &[], &[], &[], false);
         let transaction = engine.take_transaction();
         assert_eq!(transaction.inputs.len(), 3);
         let later = StyleNodeID::from_raw(nodes[3]).unwrap();
@@ -3145,7 +3158,7 @@ mod tests {
                 reserved: 0,
             },
         ];
-        engine.apply_transaction_batch(&tree, (&arrivals, &[31, 32, 33]), &[], &[], &[], &[]);
+        engine.apply_transaction_batch(&tree, (&arrivals, &[31, 32, 33]), &[], &[], &[], &[], false);
         let transaction = engine.take_transaction();
 
         let root = StyleNodeID::from_raw(nodes[0]).unwrap();
@@ -3179,7 +3192,7 @@ mod tests {
     #[should_panic(expected = "an element arrival named an invalid style node")]
     fn malformed_element_arrival_rejects_an_invalid_node() {
         let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
-        engine.apply_transaction_batch(&[], (&[arrival_for(0, 0, 0)], &[]), &[], &[], &[], &[]);
+        engine.apply_transaction_batch(&[], (&[arrival_for(0, 0, 0)], &[]), &[], &[], &[], &[], false);
     }
 
     #[test]
@@ -3188,7 +3201,15 @@ mod tests {
         let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
         let mut nodes = [0];
         engine.allocate_style_nodes(&mut nodes);
-        engine.apply_transaction_batch(&[], (&[arrival_for(nodes[0], u32::MAX, 1)], &[]), &[], &[], &[], &[]);
+        engine.apply_transaction_batch(
+            &[],
+            (&[arrival_for(nodes[0], u32::MAX, 1)], &[]),
+            &[],
+            &[],
+            &[],
+            &[],
+            false,
+        );
     }
 
     #[test]
@@ -3197,7 +3218,7 @@ mod tests {
         let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
         let mut nodes = [0];
         engine.allocate_style_nodes(&mut nodes);
-        engine.apply_transaction_batch(&[], (&[arrival_for(nodes[0], 0, 2)], &[1]), &[], &[], &[], &[]);
+        engine.apply_transaction_batch(&[], (&[arrival_for(nodes[0], 0, 2)], &[1]), &[], &[], &[], &[], false);
     }
 
     #[test]
@@ -3243,7 +3264,7 @@ mod tests {
             new_kind: FfiFeatureValueKind::Atom,
             new_atom: 1,
         });
-        engine.apply_transaction_batch(&initial_tree, (&[], &[]), &initial_features, &[], &[], &[]);
+        engine.apply_transaction_batch(&initial_tree, (&[], &[]), &initial_features, &[], &[], &[], false);
 
         let root = StyleNodeID::from_raw(nodes[0]).unwrap();
         let mut published = Vec::new();
@@ -3321,7 +3342,7 @@ mod tests {
                 },
             },
         ];
-        engine.apply_transaction_batch(&arrival, (&[], &[]), &[], &[], &[], &[]);
+        engine.apply_transaction_batch(&arrival, (&[], &[]), &[], &[], &[], &[], false);
         let settled = engine.take_transaction();
         engine.release_transaction(settled);
 
@@ -3362,7 +3383,15 @@ mod tests {
             reaction: crate::css::style::transaction::STYLE_REACTION_RECOMPUTE_STYLE,
             inherited_style_groups: 0,
         }];
-        engine.apply_transaction_batch(&tree, (&[], &[]), &features, &states, &declarations, &style_inputs);
+        engine.apply_transaction_batch(
+            &tree,
+            (&[], &[]),
+            &features,
+            &states,
+            &declarations,
+            &style_inputs,
+            false,
+        );
 
         let transaction = engine.take_transaction();
         let node0 = StyleNodeID::from_raw(nodes[0]).unwrap();
@@ -3386,7 +3415,7 @@ mod tests {
     #[test]
     fn a_batch_of_no_deltas_costs_nothing() {
         let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
-        engine.apply_transaction_batch(&[], (&[], &[]), &[], &[], &[], &[]);
+        engine.apply_transaction_batch(&[], (&[], &[]), &[], &[], &[], &[], false);
         let transaction = engine.take_transaction();
         assert!(transaction.is_empty());
         engine.release_transaction(transaction);

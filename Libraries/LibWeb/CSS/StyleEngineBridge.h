@@ -69,6 +69,7 @@ public:
         m_nodes_awaiting_first_style_computation.remove(style_node);
     }
     [[nodiscard]] bool has_deferred_element_initial_features(StyleNodeID style_node) const { return m_nodes_with_pending_initial_features.contains(style_node); }
+    void note_element_awaiting_first_style_computation(StyleNodeID style_node) { m_nodes_awaiting_first_style_computation.set(style_node); }
     HashTable<StyleNodeID> take_deferred_element_initial_features();
     HashTable<StyleNodeID> take_elements_awaiting_first_style_computation();
     void mark_style_node_preallocated(StyleNodeID style_node, TreeScopeID tree_scope) { m_preallocated_style_nodes.set(style_node, tree_scope); }
@@ -180,6 +181,8 @@ public:
     // element.
     void record_tree_delta(StyleEngineFFI::FfiTreeDelta const&);
     void record_element_arrival(StyleEngineFFI::FfiElementArrival, ReadonlySpan<StyleAtomID> custom_states);
+    void begin_connected_subtree_input();
+    void end_connected_subtree_input();
     void record_local_feature_delta(StyleEngineFFI::FfiLocalFeatureDelta const&);
     void record_state_delta(StyleEngineFFI::FfiStateDelta const&);
     void record_element_declaration_delta(StyleEngineFFI::FfiElementDeclarationDelta const&);
@@ -301,7 +304,7 @@ private:
     bool read_matches(StyleNodeID, Vector<RuleMatch>&, Optional<MatchPurpose>);
     void append_or_merge_element_style_input(StyleNodeID, u8 reaction, u8 inherited_style_groups);
     void apply_transaction(InputTransaction const&);
-    void submit_recorded_input();
+    void submit_recorded_input(bool connected_subtree_input = false);
     bool refresh_attribute_value_text_requirements();
     [[nodiscard]] bool attribute_name_requires_value_text(StyleAtomID);
     void publish_attribute_value_text(StyleAtomID, Utf16View);
@@ -329,6 +332,7 @@ private:
     Vector<StyleEngineFFI::FfiStateDelta> m_state_deltas;
     Vector<StyleEngineFFI::FfiElementDeclarationDelta> m_element_declaration_deltas;
     Vector<StyleEngineFFI::FfiElementStyleInput> m_element_style_inputs;
+    bool m_recording_connected_subtree_input { false };
     bool m_css_transitions_may_observe_style_changes { false };
 };
 

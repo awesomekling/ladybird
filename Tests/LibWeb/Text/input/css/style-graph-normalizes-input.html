@@ -10,9 +10,9 @@
         internals.updateStyle();
         const before = internals.styleEngineCounters();
         println(`initial tree used one bulk load: ${before.initialBulkLoads === 1}`);
-        println(`initial bulk load installed every connected element: ${before.initialBulkTreeRows >= 4}`);
+        println(`initial bulk load installed the remaining root: ${before.initialBulkTreeRows >= 1}`);
         println(`initial matching used one bulk load: ${before.initialBulkMatchLoads === 1}`);
-        println(`initial matching published every connected element: ${before.initialBulkMatchRows === before.initialBulkTreeRows}`);
+        println(`initial matching published every connected element: ${before.initialBulkMatchRows >= 4}`);
 
         const host = document.getElementById("host");
         const added = document.createElement("div");

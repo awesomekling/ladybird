@@ -224,6 +224,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let states = event.payload.read_raw_slice::<FfiStateDelta>()?;
                     let declarations = event.payload.read_raw_slice::<FfiElementDeclarationDelta>()?;
                     let element_style_inputs = event.payload.read_raw_slice::<FfiElementStyleInput>()?;
+                    let connected_subtree_input = event.payload.read_bool()?;
                     let row_count =
                         (tree.len() + features.len() + states.len() + declarations.len() + element_style_inputs.len())
                             as u64;
@@ -243,6 +244,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         element_declaration_delta_count: declarations.len(),
                         element_style_inputs: element_style_inputs.as_ptr(),
                         element_style_input_count: element_style_inputs.len(),
+                        connected_subtree_input,
                     };
                     unsafe { bridge::style_engine_apply_transaction(engine, &transaction) };
                 }

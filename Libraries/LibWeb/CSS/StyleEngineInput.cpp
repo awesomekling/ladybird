@@ -44,6 +44,9 @@ namespace Web::CSS {
 static void record_element_heading_level(DOM::Element&);
 static void record_element_initial_features(DOM::Element&);
 static void record_element_inline_style_properties(DOM::Element&);
+static void publish_element_inline_style_properties(StyleEngine&, DOM::Element&);
+static void publish_element_parts(StyleEngine&, DOM::Element&);
+static void publish_connected_element_initial_features(StyleEngine&, DOM::Element&);
 static void record_heading_levels_in_subtree(DOM::Element&);
 static Optional<StyleEngineFFI::FfiStateFact> state_fact_for(PseudoClass);
 static StyleAtomID intern_id_or_class_atom(StyleEngine&, DOM::Element const&, Utf16FlyString const&);
@@ -285,6 +288,42 @@ void prepare_style_nodes_for_subtree(DOM::Node& root)
         auto identity = identities[elements.size() + index];
         shadow_root.set_style_node_id(identity);
         style_engine.set_tree_scope_root(shadow_root_tree_scopes[index], identity);
+        if (shadow_root.uses_document_style_sheets())
+            style_engine.set_tree_scope_uses_document_sheets(shadow_root_tree_scopes[index]);
+        if (auto host = shadow_root.host(); host && host->style_node_id() != no_style_node)
+            style_engine.set_shadow_root(host->style_node_id(), identity);
+    }
+
+    if (elements.is_empty())
+        return;
+
+    style_engine.begin_connected_subtree_input();
+    ScopeGuard end_connected_subtree_input = [&] {
+        style_engine.end_connected_subtree_input();
+    };
+    for (size_t index = 0; index < elements.size(); ++index) {
+        auto& element = *elements[index];
+        auto tree_scope = style_engine.consume_preallocated_style_node(element.style_node_id());
+        VERIFY(tree_scope.has_value());
+
+        if (auto shadow_root = element.shadow_root(); shadow_root && shadow_root->style_node_id() != no_style_node)
+            style_engine.set_shadow_root(element.style_node_id(), shadow_root->style_node_id());
+        style_engine.record_tree_delta({
+            .node = element.style_node_id().value(),
+            .old_connected = false,
+            .new_connected = true,
+            .old_relations = detached_relations(),
+            .new_relations = relations_of(element, style_engine, *tree_scope),
+        });
+        publish_connected_element_initial_features(style_engine, element);
+        style_engine.note_element_awaiting_first_style_computation(element.style_node_id());
+
+        if (auto* slot = as_if<HTML::HTMLSlotElement>(element)) {
+            for (auto const& slottable : slot->assigned_nodes_internal()) {
+                if (auto const* assigned = slottable.get_pointer<GC::Ref<DOM::Element>>())
+                    record_element_assigned_slot_changed(**assigned, nullptr);
+            }
+        }
     }
 }
 
@@ -360,6 +399,44 @@ static void publish_element_selector_features(StyleEngine& style_engine, DOM::El
                                             .reserved = 0,
                                         },
         custom_states);
+}
+
+static void publish_connected_element_initial_features(StyleEngine& style_engine, DOM::Element& element)
+{
+    auto node = element.style_node_id();
+    publish_element_selector_features(
+        style_engine,
+        element,
+        node,
+        [&](auto kind, auto name_atom, auto value_kind, auto value_atom) {
+            style_engine.record_local_feature_delta({
+                .node = node.value(),
+                .feature_kind = kind,
+                .name_atom = name_atom.value(),
+                .old_kind = StyleEngineFFI::FfiFeatureValueKind::Absent,
+                .old_atom = 0,
+                .new_kind = value_kind,
+                .new_atom = value_atom.value(),
+            });
+        },
+        [&](bool has_nonempty_text_child) {
+            style_engine.record_local_feature_delta({
+                .node = node.value(),
+                .feature_kind = StyleEngineFFI::FfiFeatureKind::Emptiness,
+                .name_atom = 0,
+                .old_kind = has_nonempty_text_child ? StyleEngineFFI::FfiFeatureValueKind::Present : StyleEngineFFI::FfiFeatureValueKind::Absent,
+                .old_atom = 0,
+                .new_kind = has_nonempty_text_child ? StyleEngineFFI::FfiFeatureValueKind::Absent : StyleEngineFFI::FfiFeatureValueKind::Present,
+                .new_atom = 0,
+            });
+        },
+        InvalidateLanguageCache::Yes);
+
+    if (!element.part_names().is_empty())
+        publish_element_parts(style_engine, element);
+    auto const inline_style = element.inline_style();
+    if (inline_style && (!inline_style->properties().is_empty() || !inline_style->custom_properties().is_empty()))
+        publish_element_inline_style_properties(style_engine, element);
 }
 
 void publish_required_attribute_value_texts(StyleEngine& style_engine, StyleComputer& style_computer)
@@ -840,6 +917,11 @@ void record_element_parts_changed(DOM::Element& element)
     if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
         return;
 
+    publish_element_parts(*style_engine, element);
+}
+
+static void publish_element_parts(StyleEngine& style_engine, DOM::Element& element)
+{
     // A rule naming a forwarded part names the element under the forwarded name, so the names it
     // is exposed under are what it is published as - and the reach alongside them, because a host
     // usually forwards a name under the one it already had, which moves no name at all.
@@ -850,10 +932,10 @@ void record_element_parts_changed(DOM::Element& element)
     Vector<StyleAtomID> pair_atoms;
     pair_atoms.ensure_capacity(pair_names.size());
     for (auto const& name : pair_names)
-        pair_atoms.unchecked_append(style_engine->intern_atom(name));
-    style_engine->set_element_parts(element.style_node_id(), pair_atoms, pair_hosts);
+        pair_atoms.unchecked_append(style_engine.intern_atom(name));
+    style_engine.set_element_parts(element.style_node_id(), pair_atoms, pair_hosts);
 
-    style_engine->set_element_part_exposure(element.style_node_id(), exposing_host);
+    style_engine.set_element_part_exposure(element.style_node_id(), exposing_host);
 }
 
 void record_element_emptiness_changed(DOM::Element& element, DOM::Node const& changing_child, bool counted_before, bool counts_after)
@@ -978,22 +1060,27 @@ bool property_defines_a_css_transition(PropertyID property_id)
         || property_id == PropertyID::TransitionTimingFunction;
 }
 
+static void publish_element_declared_properties(StyleEngine& style_engine, DOM::Element& element, StyleEngineFFI::FfiElementDeclarationKind kind, ReadonlySpan<StyleProperty> style_properties, bool declarations_are_complete)
+{
+    DeclaredPropertyColumns columns(style_properties.size(), declarations_are_complete);
+    for (auto const& property : style_properties) {
+        if (property_defines_a_css_transition(property.property_id))
+            style_engine.note_css_transitions_may_observe_style_changes();
+        columns.append(property, ExpandShorthands::Yes);
+    }
+    style_engine.set_element_declared_properties(element.style_node_id(), kind, columns.properties, columns.important, columns.operators, columns.values, columns.original_values, columns.declarations_are_complete);
+}
+
 static bool publish_element_declared_properties(DOM::Element& element, StyleEngineFFI::FfiElementDeclarationKind kind, ReadonlySpan<StyleProperty> style_properties, bool declarations_are_complete = true)
 {
     auto* style_engine = style_engine_for(element);
     if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
         return false;
 
-    DeclaredPropertyColumns columns(style_properties.size(), declarations_are_complete);
-    for (auto const& property : style_properties) {
-        if (property_defines_a_css_transition(property.property_id))
-            style_engine->note_css_transitions_may_observe_style_changes();
-        // What a declaration decides is a set of longhands. An attribute maps to whichever property
-        // names it, `overflow` included, and the cascade expands that before anything is decided, so
-        // a shorthand left whole here would name a property nothing ever wins.
-        columns.append(property, ExpandShorthands::Yes);
-    }
-    style_engine->set_element_declared_properties(element.style_node_id(), kind, columns.properties, columns.important, columns.operators, columns.values, columns.original_values, columns.declarations_are_complete);
+    // What a declaration decides is a set of longhands. An attribute maps to whichever property
+    // names it, `overflow` included, and the cascade expands that before anything is decided, so
+    // a shorthand left whole here would name a property nothing ever wins.
+    publish_element_declared_properties(*style_engine, element, kind, style_properties, declarations_are_complete);
     return true;
 }
 
@@ -1001,8 +1088,17 @@ static bool publish_element_declared_properties(DOM::Element& element, StyleEngi
 // well as when the block is edited.
 static void record_element_inline_style_properties(DOM::Element& element)
 {
+    auto* style_engine = style_engine_for(element);
+    if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
+        return;
+    publish_element_inline_style_properties(*style_engine, element);
+}
+
+static void publish_element_inline_style_properties(StyleEngine& style_engine, DOM::Element& element)
+{
     auto const inline_style = element.inline_style();
     publish_element_declared_properties(
+        style_engine,
         element,
         StyleEngineFFI::FfiElementDeclarationKind::InlineStyle,
         inline_style ? inline_style->properties().span() : ReadonlySpan<StyleProperty> {},

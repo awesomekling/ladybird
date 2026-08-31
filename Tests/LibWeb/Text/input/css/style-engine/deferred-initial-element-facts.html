@@ -5,6 +5,12 @@
 </style>
 <div id="settled"><span></span></div>
 <script>
+    customElements.define("geometry-reader", class extends HTMLElement {
+        connectedCallback() {
+            getComputedStyle(this).color;
+        }
+    });
+
     test(() => {
         internals.updateStyle();
 
@@ -18,6 +24,19 @@
         internals.updateStyle();
         const afterTemporary = internals.styleEngineCounters();
         println(`temporary element facts omitted: ${afterTemporary.localFeatureDeltas === beforeTemporary.localFeatureDeltas}`);
+
+        const beforeAtomicArrival = internals.styleEngineCounters();
+        const atomicArrival = document.createElement("geometry-reader");
+        atomicArrival.id = "atomic";
+        atomicArrival.className = "item selected";
+        atomicArrival.setAttribute("data-stage", "ready");
+        settled.appendChild(atomicArrival);
+        internals.updateStyle();
+        const afterAtomicArrival = internals.styleEngineCounters();
+        const foldedArrivalFacts = afterAtomicArrival.arrivingNodeFactsFolded - beforeAtomicArrival.arrivingNodeFactsFolded;
+        const localInputs = afterAtomicArrival.transactionLocalFeatureInputs - beforeAtomicArrival.transactionLocalFeatureInputs;
+        println(`geometry-boundary arrival facts folded: ${foldedArrivalFacts > 0}`);
+        println(`geometry-boundary arrival facts dominate local inputs: ${foldedArrivalFacts > localInputs}`);
 
         const pending = document.createElement("input");
         settled.appendChild(pending);

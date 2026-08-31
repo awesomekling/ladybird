@@ -898,12 +898,15 @@ impl StyleEngine {
         old: InputValue,
         new: InputValue,
         arriving_node: bool,
+        connected_subtree_input: bool,
     ) {
         if arriving_node {
             debug_assert!(matches!(key, InputKey::LocalFeature(..) | InputKey::State(..)));
             self.counters.bump(Counter::ArrivingNodeFactsFolded);
-            self.counters.bump(Counter::RawMutationRecords);
-            self.counters.bump(Counter::LocalFeatureDeltas);
+            if !connected_subtree_input {
+                self.counters.bump(Counter::RawMutationRecords);
+                self.counters.bump(Counter::LocalFeatureDeltas);
+            }
             self.apply_to_facts_without_settling(key, new);
         } else if self.record(key, old, new) {
             self.apply_to_facts_without_settling(key, new);
@@ -921,6 +924,7 @@ impl StyleEngine {
         fact: StateFact,
         new_value: bool,
         arriving_node: bool,
+        connected_subtree_input: bool,
     ) {
         let old_value = self.facts.states_of_node(node).contains(fact);
         self.record_batched_input(
@@ -928,6 +932,7 @@ impl StyleEngine {
             InputValue::State(old_value),
             InputValue::State(new_value),
             arriving_node,
+            connected_subtree_input,
         );
     }
 
@@ -940,6 +945,7 @@ impl StyleEngine {
         arrival: &super::bridge::FfiElementArrival,
         custom_states: &[StyleAtomID],
         arriving_node: bool,
+        connected_subtree_input: bool,
     ) {
         debug_assert!(arriving_node);
         self.facts.set_namespace(node, StyleAtomID(arrival.namespace_atom));
@@ -950,6 +956,7 @@ impl StyleEngine {
                 InputValue::Feature(FeatureValue::Absent),
                 InputValue::Feature(value),
                 arriving_node,
+                connected_subtree_input,
             );
         };
         if arrival.language_atom != 0 {
@@ -976,6 +983,7 @@ impl StyleEngine {
                 InputValue::Feature(FeatureValue::Absent),
                 InputValue::Feature(FeatureValue::Present),
                 arriving_node,
+                connected_subtree_input,
             );
         }
         self.facts.set_custom_states(node, custom_states, &mut self.memory);
