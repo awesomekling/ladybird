@@ -2270,7 +2270,7 @@ void Element::invalidate_descendant_styles_depending_on_style_container_query()
         auto* element = as_if<Element>(node);
         if (!element || !element->style_depends_on_style_container_query())
             return TraversalDecision::Continue;
-        element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle, 0, CSS::StyleEngine::ElementStyleInputProducer::ContainerQuery);
+        element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle, 0, CSS::StyleEngine::ElementStyleInputProducer::StyleContainerQuery);
         return TraversalDecision::Continue;
     });
 }
@@ -3030,7 +3030,7 @@ void Element::children_changed(ChildrenChangedMetadata const& metadata)
             if (!element.style_uses_tree_counting_function())
                 return IterationDecision::Continue;
 
-            document().style_computer().style_engine().record_element_style_input_change(element.style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle, 0, CSS::StyleEngine::ElementStyleInputProducer::TreeMutationFeedback);
+            document().style_computer().style_engine().record_element_style_input_change(element.style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle, 0, CSS::StyleEngine::ElementStyleInputProducer::TreeCountingFunction);
 
             return IterationDecision::Continue;
         });

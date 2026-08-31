@@ -488,38 +488,111 @@ void StyleEngine::append_or_merge_element_style_input(StyleNodeID style_node, u8
     m_element_style_inputs.append({ style_node.value(), reaction, inherited_style_groups });
 }
 
-void StyleEngine::record_element_style_input_change(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups)
+static void count_element_style_inputs(DOM::Document::StyleInvalidationCounters& counters, StyleEngine::ElementStyleInputProducer producer, u64 count)
 {
-    record_element_style_input_change(style_node, reaction, inherited_style_groups, ElementStyleInputProducer::Other);
+    auto count_other = [&](u64& counter) {
+        counter += count;
+        counters.element_style_inputs_from_other_producers += count;
+    };
+    switch (producer) {
+    case StyleEngine::ElementStyleInputProducer::FontCompletion:
+        counters.element_style_inputs_from_font_completion += count;
+        break;
+    case StyleEngine::ElementStyleInputProducer::TreeCountingFunction:
+        counters.element_style_inputs_from_tree_counting_functions += count;
+        counters.element_style_inputs_from_tree_mutation_feedback += count;
+        break;
+    case StyleEngine::ElementStyleInputProducer::SlotAssignment:
+        counters.element_style_inputs_from_slot_assignment += count;
+        counters.element_style_inputs_from_tree_mutation_feedback += count;
+        break;
+    case StyleEngine::ElementStyleInputProducer::TreeMove:
+        counters.element_style_inputs_from_tree_moves += count;
+        counters.element_style_inputs_from_tree_mutation_feedback += count;
+        break;
+    case StyleEngine::ElementStyleInputProducer::StyleContainerQuery:
+        counters.element_style_inputs_from_style_container_queries += count;
+        counters.element_style_inputs_from_container_queries += count;
+        break;
+    case StyleEngine::ElementStyleInputProducer::SizeContainerQuery:
+        counters.element_style_inputs_from_size_container_queries += count;
+        counters.element_style_inputs_from_container_queries += count;
+        break;
+    case StyleEngine::ElementStyleInputProducer::AnimationBaseStyle:
+        count_other(counters.element_style_inputs_from_animation_base_style);
+        break;
+    case StyleEngine::ElementStyleInputProducer::AnimationInheritedDescendants:
+        count_other(counters.element_style_inputs_from_animation_inherited_descendants);
+        break;
+    case StyleEngine::ElementStyleInputProducer::ViewportDependentNode:
+        count_other(counters.element_style_inputs_from_viewport_dependent_nodes);
+        break;
+    case StyleEngine::ElementStyleInputProducer::ViewportDependentElement:
+        count_other(counters.element_style_inputs_from_viewport_dependent_elements);
+        break;
+    case StyleEngine::ElementStyleInputProducer::ElementStyleEnvironment:
+        count_other(counters.element_style_inputs_from_element_style_environment);
+        break;
+    case StyleEngine::ElementStyleInputProducer::DescendantStyleEnvironment:
+        count_other(counters.element_style_inputs_from_descendant_style_environment);
+        break;
+    case StyleEngine::ElementStyleInputProducer::LinkState:
+        count_other(counters.element_style_inputs_from_link_state);
+        break;
+    case StyleEngine::ElementStyleInputProducer::SVGFilterImageResource:
+        count_other(counters.element_style_inputs_from_svg_filter_image_resources);
+        break;
+    case StyleEngine::ElementStyleInputProducer::SVGImageResource:
+        count_other(counters.element_style_inputs_from_svg_image_resources);
+        break;
+    case StyleEngine::ElementStyleInputProducer::DirectChildReaction:
+        count_other(counters.element_style_inputs_from_direct_child_reactions);
+        break;
+    case StyleEngine::ElementStyleInputProducer::UnabsorbedReaction:
+        count_other(counters.element_style_inputs_from_unabsorbed_reactions);
+        break;
+    case StyleEngine::ElementStyleInputProducer::RepeatedReaction:
+        count_other(counters.element_style_inputs_from_repeated_reactions);
+        break;
+    case StyleEngine::ElementStyleInputProducer::InheritedReaction:
+        count_other(counters.element_style_inputs_from_inherited_reactions);
+        break;
+    case StyleEngine::ElementStyleInputProducer::TableCellPadding:
+        count_other(counters.element_style_inputs_from_table_cell_padding);
+        break;
+    case StyleEngine::ElementStyleInputProducer::ImageDimensionSource:
+        count_other(counters.element_style_inputs_from_image_dimension_sources);
+        break;
+    case StyleEngine::ElementStyleInputProducer::ImageDataCacheHit:
+        count_other(counters.element_style_inputs_from_image_data_cache_hits);
+        break;
+    case StyleEngine::ElementStyleInputProducer::ResponsiveImageDataCacheHit:
+        count_other(counters.element_style_inputs_from_responsive_image_data_cache_hits);
+        break;
+    case StyleEngine::ElementStyleInputProducer::ImageDataLoad:
+        count_other(counters.element_style_inputs_from_image_data_loads);
+        break;
+    case StyleEngine::ElementStyleInputProducer::ImageEnvironmentChange:
+        count_other(counters.element_style_inputs_from_image_environment_changes);
+        break;
+    case StyleEngine::ElementStyleInputProducer::IFrameMargin:
+        count_other(counters.element_style_inputs_from_iframe_margins);
+        break;
+    }
 }
 
 void StyleEngine::record_element_style_input_change(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups, ElementStyleInputProducer producer)
 {
     if (style_node != 0 && reaction != 0) {
-        if (m_style_computer) {
-            auto& counters = m_style_computer->document().style_invalidation_counters();
-            switch (producer) {
-            case ElementStyleInputProducer::FontCompletion:
-                ++counters.element_style_inputs_from_font_completion;
-                break;
-            case ElementStyleInputProducer::TreeMutationFeedback:
-                ++counters.element_style_inputs_from_tree_mutation_feedback;
-                break;
-            case ElementStyleInputProducer::ContainerQuery:
-                ++counters.element_style_inputs_from_container_queries;
-                break;
-            case ElementStyleInputProducer::Other:
-                ++counters.element_style_inputs_from_other_producers;
-                break;
-            }
-        }
+        if (m_style_computer)
+            count_element_style_inputs(m_style_computer->document().style_invalidation_counters(), producer, 1);
         flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
         request_frame_for_first_recorded_input(*this, m_style_computer);
         append_or_merge_element_style_input(style_node, reaction, inherited_style_groups);
     }
 }
 
-void StyleEngine::record_flat_tree_descendant_style_input_changes(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups)
+void StyleEngine::record_flat_tree_descendant_style_input_changes(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups, ElementStyleInputProducer producer)
 {
     if (style_node == 0 || reaction == 0)
         return;
@@ -531,6 +604,8 @@ void StyleEngine::record_flat_tree_descendant_style_input_changes(StyleNodeID st
     submit_recorded_input();
     request_frame_for_first_recorded_input(*this, m_style_computer);
     auto descendants = StyleEngineFFI::style_engine_flat_tree_descendants(m_impl, style_node.value());
+    if (m_style_computer)
+        count_element_style_inputs(m_style_computer->document().style_invalidation_counters(), producer, descendants.count);
     for (auto descendant : ReadonlySpan<u32> { descendants.nodes, descendants.count })
         append_or_merge_element_style_input(StyleNodeID { descendant }, reaction, inherited_style_groups);
     StyleEngineFFI::style_engine_discard_flat_tree_descendants(m_impl);

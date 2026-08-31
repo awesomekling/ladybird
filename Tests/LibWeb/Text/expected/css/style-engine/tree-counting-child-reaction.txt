@@ -4,5 +4,6 @@ reaction batch runs: 1
 reaction elements: 1
 published reactions: 1
 tree mutation inputs: 1
+tree counting inputs: 1
 update recomputations: 1
 read recomputations: 0

@@ -971,7 +971,7 @@ AnimationUpdateContext::~AnimationUpdateContext()
         // exact feedback action so the ordinary reaction path re-cascades that base before the
         // frame becomes observable.
         if (animated_property_invalidation.requires_base_style_recomputation)
-            target->document().style_computer().style_engine().record_element_style_input_change(target->style_node_id());
+            target->document().style_computer().style_engine().record_element_style_input_change(target->style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle, 0, CSS::StyleEngine::ElementStyleInputProducer::AnimationBaseStyle);
 
         if (!element.pseudo_element().has_value() && invalidation.inherited_style_changed())
             invalidation |= target->recompute_pseudo_element_styles_after_animation_update({});
@@ -997,7 +997,8 @@ AnimationUpdateContext::~AnimationUpdateContext()
                 target->document().style_computer().style_engine().record_flat_tree_descendant_style_input_changes(
                     target->style_node_id(),
                     CSS::StyleEngine::InheritedStyle,
-                    inherited_style_groups);
+                    inherited_style_groups,
+                    CSS::StyleEngine::ElementStyleInputProducer::AnimationInheritedDescendants);
         }
 
         // NB: Called from animation update context destructor during style recalculation.

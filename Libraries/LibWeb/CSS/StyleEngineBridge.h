@@ -194,13 +194,34 @@ public:
     };
     enum class ElementStyleInputProducer : u8 {
         FontCompletion,
-        TreeMutationFeedback,
-        ContainerQuery,
-        Other,
+        AnimationBaseStyle,
+        AnimationInheritedDescendants,
+        ViewportDependentNode,
+        ViewportDependentElement,
+        StyleContainerQuery,
+        TreeCountingFunction,
+        ElementStyleEnvironment,
+        DescendantStyleEnvironment,
+        SlotAssignment,
+        SizeContainerQuery,
+        LinkState,
+        TreeMove,
+        SVGFilterImageResource,
+        SVGImageResource,
+        DirectChildReaction,
+        UnabsorbedReaction,
+        RepeatedReaction,
+        InheritedReaction,
+        TableCellPadding,
+        ImageDimensionSource,
+        ImageDataCacheHit,
+        ResponsiveImageDataCacheHit,
+        ImageDataLoad,
+        ImageEnvironmentChange,
+        IFrameMargin,
     };
-    void record_element_style_input_change(StyleNodeID style_node, u8 reaction = PublishedStyle | RecomputeStyle, u8 inherited_style_groups = 0);
-    void record_element_style_input_change(StyleNodeID, u8, u8, ElementStyleInputProducer);
-    void record_flat_tree_descendant_style_input_changes(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups = 0);
+    void record_element_style_input_change(StyleNodeID, u8 reaction, u8 inherited_style_groups, ElementStyleInputProducer);
+    void record_flat_tree_descendant_style_input_changes(StyleNodeID, u8 reaction, u8 inherited_style_groups, ElementStyleInputProducer);
     [[nodiscard]] Vector<StyleNodeID> viewport_dependent_style_nodes();
     [[nodiscard]] Vector<StyleNodeID> font_metric_dependent_style_nodes();
     void consume_recorded_element_style_input_change(StyleNodeID style_node);

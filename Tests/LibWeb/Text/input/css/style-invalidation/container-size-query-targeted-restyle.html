@@ -16,6 +16,7 @@
             elementStyleRecomputations: counters.elementStyleRecomputations,
             elementStyleNoopRecomputations: counters.elementStyleNoopRecomputations,
             containerQueryInputs: counters.elementStyleInputsFromContainerQueries,
+            sizeContainerQueryInputs: counters.elementStyleInputsFromSizeContainerQueries,
         };
     }
 
@@ -72,5 +73,6 @@
         println(`dynamic recomputations bounded: ${dynamicCounters.elementStyleRecomputations <= 4}`);
         println(`dynamic noop recomputations bounded: ${dynamicCounters.elementStyleNoopRecomputations <= 2}`);
         println(`dynamic container query inputs: ${dynamicCounters.containerQueryInputs > 0}`);
+        println(`dynamic size container query inputs: ${dynamicCounters.sizeContainerQueryInputs > 0}`);
     });
 </script>

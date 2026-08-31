@@ -36,7 +36,7 @@ void invalidate_style_after_legacy_link_color_change(DOM::Document& document)
         if (!element || (!element->matches_link_pseudo_class() && !element->matches_visited_pseudo_class()))
             return TraversalDecision::Continue;
 
-        document.style_computer().style_engine().record_element_style_input_change(element->style_node_id());
+        document.style_computer().style_engine().record_element_style_input_change(element->style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle, 0, StyleEngine::ElementStyleInputProducer::LinkState);
         return TraversalDecision::Continue;
     });
 }

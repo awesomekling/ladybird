@@ -2643,7 +2643,7 @@ void Document::invalidate_style_for_viewport_change()
         auto element = style_computer().element_for_style_node(style_node.value());
         if (!element || !element->is_connected() || &element->document() != this)
             continue;
-        style_engine.record_element_style_input_change(style_node);
+        style_engine.record_element_style_input_change(style_node, CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle, 0, CSS::StyleEngine::ElementStyleInputProducer::ViewportDependentNode);
     }
 
     for_each_shadow_including_inclusive_descendant([](Node& node) {
@@ -2655,7 +2655,7 @@ void Document::invalidate_style_for_viewport_change()
         // Container query conditions that resolved a container unit against the viewport have no
         // computed-value dependency for the retained style engine to discover.
         if (element->style_uses_if_css_function() || element->style_depends_on_viewport_metrics())
-            element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id());
+            element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle, 0, CSS::StyleEngine::ElementStyleInputProducer::ViewportDependentElement);
 
         return TraversalDecision::Continue;
     });

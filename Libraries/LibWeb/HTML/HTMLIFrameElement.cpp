@@ -87,7 +87,7 @@ void HTMLIFrameElement::attribute_changed(Utf16FlyString const& name, Optional<U
         if (auto* document = this->content_document_without_origin_check()) {
             if (auto* body_element = document->body()) {
                 auto& mutable_body_element = const_cast<HTMLElement&>(*body_element);
-                mutable_body_element.document().style_computer().style_engine().record_element_style_input_change(mutable_body_element.style_node_id());
+                mutable_body_element.document().style_computer().style_engine().record_element_style_input_change(mutable_body_element.style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle, 0, CSS::StyleEngine::ElementStyleInputProducer::IFrameMargin);
             }
         }
     }

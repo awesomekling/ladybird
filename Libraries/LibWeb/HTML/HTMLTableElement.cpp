@@ -149,7 +149,7 @@ void HTMLTableElement::attribute_changed(Utf16FlyString const& name, Optional<Ut
         //       When it changes, we need new style for the cells.
         if (old_cellpadding != m_cellpadding) {
             for_each_in_subtree_of_type<HTMLTableCellElement>([&](auto& cell) {
-                cell.document().style_computer().style_engine().record_element_style_input_change(cell.style_node_id());
+                cell.document().style_computer().style_engine().record_element_style_input_change(cell.style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle, 0, CSS::StyleEngine::ElementStyleInputProducer::TableCellPadding);
                 return TraversalDecision::Continue;
             });
         }

@@ -588,7 +588,7 @@ void Node::record_style_environment_change()
     // facts separately.
     if (is_element()) {
         auto& element = static_cast<Element&>(*this);
-        document().style_computer().style_engine().record_element_style_input_change(element.style_node_id());
+        document().style_computer().style_engine().record_element_style_input_change(element.style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle, 0, CSS::StyleEngine::ElementStyleInputProducer::ElementStyleEnvironment);
         return;
     }
 
@@ -596,7 +596,7 @@ void Node::record_style_environment_change()
         auto* element = as_if<Element>(descendant);
         if (!element)
             return TraversalDecision::Continue;
-        element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id());
+        element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle, 0, CSS::StyleEngine::ElementStyleInputProducer::DescendantStyleEnvironment);
         return TraversalDecision::Continue;
     });
 }

@@ -146,7 +146,7 @@ static void record_direct_child_style_engine_inputs(DOM::ParentNode& parent, Opt
         auto* element = as_if<DOM::Element>(child);
         if (element && element->style_node_id() != 0
             && (!excluded_style_node.has_value() || element->style_node_id() != *excluded_style_node))
-            element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id());
+            element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle, 0, StyleEngine::ElementStyleInputProducer::DirectChildReaction);
         return IterationDecision::Continue;
     });
 }
@@ -189,7 +189,7 @@ static void record_style_engine_reaction(StyleEngineReactionRecording& recording
     if (auto pending_reaction = recording.pending_batch.find(element.style_node_id().value()); pending_reaction != recording.pending_batch.end()) {
         auto& pending = *pending_reaction->value;
         if (!StyleEngine::published_style_delta_can_absorb_reaction(pending, reaction, inherited_style_groups)) {
-            element.document().style_computer().style_engine().record_element_style_input_change(element.style_node_id(), reaction, inherited_style_groups);
+            element.document().style_computer().style_engine().record_element_style_input_change(element.style_node_id(), reaction, inherited_style_groups, StyleEngine::ElementStyleInputProducer::UnabsorbedReaction);
             return;
         }
         pending.reaction |= reaction;
@@ -203,7 +203,7 @@ static void record_style_engine_reaction(StyleEngineReactionRecording& recording
         return;
     }
     if (recording.consumed.contains(element.style_node_id().value())) {
-        element.document().style_computer().style_engine().record_element_style_input_change(element.style_node_id(), reaction, inherited_style_groups);
+        element.document().style_computer().style_engine().record_element_style_input_change(element.style_node_id(), reaction, inherited_style_groups, StyleEngine::ElementStyleInputProducer::RepeatedReaction);
         return;
     }
     // A reaction carrying only inherited style is the engine's to answer: it owns the dependency
@@ -212,7 +212,7 @@ static void record_style_engine_reaction(StyleEngineReactionRecording& recording
     // would miss non-inherited properties that read the changed inherited values. Reactions with
     // any other bit recompute fully anyway, so only the pure inherited reaction takes the journal.
     if (reaction == StyleEngine::InheritedStyle) {
-        element.document().style_computer().style_engine().record_element_style_input_change(element.style_node_id(), reaction, inherited_style_groups);
+        element.document().style_computer().style_engine().record_element_style_input_change(element.style_node_id(), reaction, inherited_style_groups, StyleEngine::ElementStyleInputProducer::InheritedReaction);
         return;
     }
     recording.next_generation.set(element.style_node_id().value(), make_materialize_gap_delta(element.style_node_id(), reaction, inherited_style_groups));

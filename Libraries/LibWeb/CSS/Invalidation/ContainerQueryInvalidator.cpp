@@ -54,7 +54,7 @@ void invalidate_descendant_styles_depending_on_size_container_query(DOM::Element
         if (auto* element = as_if<DOM::Element>(*node)) {
             ++counters.size_query_container_scan_visits;
             if (element->style_depends_on_size_container_query())
-                element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle, 0, StyleEngine::ElementStyleInputProducer::ContainerQuery);
+                element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle, 0, StyleEngine::ElementStyleInputProducer::SizeContainerQuery);
         }
         append_flat_tree_children(*node, stack);
     }

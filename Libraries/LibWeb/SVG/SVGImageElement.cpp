@@ -128,7 +128,7 @@ void SVGImageElement::fetch_the_document(URL::URL const& url)
         [this, resource_request = GC::Root { m_resource_request }] {
             m_load_event_delayer.clear();
             register_with_decoded_image_data_if_needed();
-            document().style_computer().style_engine().record_element_style_input_change(style_node_id());
+            document().style_computer().style_engine().record_element_style_input_change(style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle, 0, CSS::StyleEngine::ElementStyleInputProducer::SVGImageResource);
             set_needs_layout_update(DOM::SetNeedsLayoutReason::SVGImageElementFetchTheDocument);
 
             dispatch_event(DOM::Event::create(HTML::EventNames::load,
