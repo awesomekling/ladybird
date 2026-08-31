@@ -1,3 +1,7 @@
 attaching records program deltas: true
+attachment phase counted: true
+rule replacement phase counted: true
+layer phase counted: true
 detaching records more: true
+detachment phase counted: true
 no scope markers: true

@@ -1774,6 +1774,10 @@ GC::Ref<JS::Object> Internals::style_invalidation_counters_object() const
     object->define_direct_property("styleEnginePublishedReactions"_utf16_fly_string, JS::Value(counters.style_engine_published_reactions), JS::default_attributes);
     object->define_direct_property("styleEngineRecordDeltasApplied"_utf16_fly_string, JS::Value(counters.style_engine_record_deltas_applied), JS::default_attributes);
     object->define_direct_property("styleEngineMaterializedGaps"_utf16_fly_string, JS::Value(counters.style_engine_materialized_gaps), JS::default_attributes);
+    object->define_direct_property("elementStyleInputsFromFontCompletion"_utf16_fly_string, JS::Value(counters.element_style_inputs_from_font_completion), JS::default_attributes);
+    object->define_direct_property("elementStyleInputsFromTreeMutationFeedback"_utf16_fly_string, JS::Value(counters.element_style_inputs_from_tree_mutation_feedback), JS::default_attributes);
+    object->define_direct_property("elementStyleInputsFromContainerQueries"_utf16_fly_string, JS::Value(counters.element_style_inputs_from_container_queries), JS::default_attributes);
+    object->define_direct_property("elementStyleInputsFromOtherProducers"_utf16_fly_string, JS::Value(counters.element_style_inputs_from_other_producers), JS::default_attributes);
     object->define_direct_property("elementStyleRecomputations"_utf16_fly_string, JS::Value(counters.element_style_recomputations), JS::default_attributes);
     object->define_direct_property("elementStyleNoopRecomputations"_utf16_fly_string, JS::Value(counters.element_style_noop_recomputations), JS::default_attributes);
     object->define_direct_property("styleRecordPropertyDamageCacheHits"_utf16_fly_string, JS::Value(counters.style_record_property_damage_cache_hits), JS::default_attributes);
@@ -1828,6 +1832,7 @@ GC::Ref<JS::Object> Internals::style_invalidation_counters_object() const
     object->define_direct_property("styleEngineTransactionSetupMicroseconds"_utf16_fly_string, JS::Value(counters.style_engine_transaction_setup_microseconds), JS::default_attributes);
     object->define_direct_property("styleEnginePlanningMicroseconds"_utf16_fly_string, JS::Value(counters.style_engine_planning_microseconds), JS::default_attributes);
     object->define_direct_property("relayoutsPerformed"_utf16_fly_string, JS::Value(counters.relayouts_performed), JS::default_attributes);
+    object->define_direct_property("layoutComputationMicroseconds"_utf16_fly_string, JS::Value(counters.layout_computation_microseconds), JS::default_attributes);
     object->define_direct_property("styleUpdateMicroseconds"_utf16_fly_string, JS::Value(counters.style_update_microseconds), JS::default_attributes);
     object->define_direct_property("styleRecomputeMicroseconds"_utf16_fly_string, JS::Value(counters.style_recompute_microseconds), JS::default_attributes);
     object->define_direct_property("customPropertyResolutions"_utf16_fly_string, JS::Value(counters.custom_property_resolutions), JS::default_attributes);
@@ -1839,6 +1844,15 @@ GC::Ref<JS::Object> Internals::style_invalidation_counters_object() const
     object->define_direct_property("styleCascadeMicroseconds"_utf16_fly_string, JS::Value(counters.style_cascade_microseconds), JS::default_attributes);
     object->define_direct_property("styleValuesMicroseconds"_utf16_fly_string, JS::Value(counters.style_values_microseconds), JS::default_attributes);
     object->define_direct_property("scrollableOverflowRecalculations"_utf16_fly_string, JS::Value(counters.scrollable_overflow_recalculations), JS::default_attributes);
+    auto& style_engine = document.style_computer().style_engine();
+    StringView name;
+    u64 value = 0;
+    for (size_t index = 0; style_engine.counter(index, name, value); ++index) {
+        object->define_direct_property(
+            Utf16FlyString::from_utf8(name),
+            JS::Value(static_cast<double>(value)),
+            JS::default_attributes);
+    }
     return object;
 }
 

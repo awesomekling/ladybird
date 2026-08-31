@@ -14,11 +14,15 @@
 
         let counters = internals.getStyleInvalidationCounters();
         println(`idle transaction setups: ${counters.styleEngineTransactionSetups}`);
+        println(`idle style transactions: ${counters.styleTransactions}`);
 
         target.className = "changed";
         internals.updateStyle();
         counters = internals.getStyleInvalidationCounters();
         println(`changed transaction setups: ${counters.styleEngineTransactionSetups}`);
+        println(`changed style transactions: ${counters.styleTransactions}`);
+        println(`changed local-feature inputs: ${counters.transactionLocalFeatureInputs > 0}`);
+        println(`changed published outputs: ${counters.publishedMaterializeGaps + counters.publishedExactRecordDeltas > 0}`);
         println(`changed color: ${getComputedStyle(target).color}`);
 
         const animation = target.animate({ opacity: [0, 1] }, 1000);

@@ -490,7 +490,29 @@ void StyleEngine::append_or_merge_element_style_input(StyleNodeID style_node, u8
 
 void StyleEngine::record_element_style_input_change(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups)
 {
+    record_element_style_input_change(style_node, reaction, inherited_style_groups, ElementStyleInputProducer::Other);
+}
+
+void StyleEngine::record_element_style_input_change(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups, ElementStyleInputProducer producer)
+{
     if (style_node != 0 && reaction != 0) {
+        if (m_style_computer) {
+            auto& counters = m_style_computer->document().style_invalidation_counters();
+            switch (producer) {
+            case ElementStyleInputProducer::FontCompletion:
+                ++counters.element_style_inputs_from_font_completion;
+                break;
+            case ElementStyleInputProducer::TreeMutationFeedback:
+                ++counters.element_style_inputs_from_tree_mutation_feedback;
+                break;
+            case ElementStyleInputProducer::ContainerQuery:
+                ++counters.element_style_inputs_from_container_queries;
+                break;
+            case ElementStyleInputProducer::Other:
+                ++counters.element_style_inputs_from_other_producers;
+                break;
+            }
+        }
         flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
         request_frame_for_first_recorded_input(*this, m_style_computer);
         append_or_merge_element_style_input(style_node, reaction, inherited_style_groups);
@@ -866,6 +888,11 @@ bool StyleEngine::counter(size_t index, StringView& out_name, u64& out_value) co
         return false;
     out_name = StringView { name, name_length };
     return true;
+}
+
+void StyleEngine::reset_counters()
+{
+    StyleEngineFFI::style_engine_reset_counters(m_impl);
 }
 
 }

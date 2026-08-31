@@ -573,7 +573,7 @@ void record_element_moved(DOM::Element& element, DOM::Node* old_parent, DOM::Ele
         // Moving to a different parent changes the inherited input even if the moved element
         // matches exactly the same rules. Recomputing its style lets ordinary inherited-style
         // propagation carry any change through its light and shadow subtrees.
-        style_engine->record_element_style_input_change(element.style_node_id(), StyleEngine::RecomputeStyle);
+        style_engine->record_element_style_input_change(element.style_node_id(), StyleEngine::RecomputeStyle, 0, StyleEngine::ElementStyleInputProducer::TreeMutationFeedback);
     }
 
     // The relinking path rather than the neighbour one. A move rewrites the DOM's own links without

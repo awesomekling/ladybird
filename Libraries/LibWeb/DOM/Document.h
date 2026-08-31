@@ -1092,6 +1092,10 @@ public:
         u64 style_engine_published_reactions { 0 };
         u64 style_engine_record_deltas_applied { 0 };
         u64 style_engine_materialized_gaps { 0 };
+        u64 element_style_inputs_from_font_completion { 0 };
+        u64 element_style_inputs_from_tree_mutation_feedback { 0 };
+        u64 element_style_inputs_from_container_queries { 0 };
+        u64 element_style_inputs_from_other_producers { 0 };
         u64 element_style_recomputations { 0 };
         u64 element_style_noop_recomputations { 0 };
         u64 unchanged_style_record_deltas { 0 };
@@ -1147,6 +1151,7 @@ public:
         u64 style_engine_transaction_setup_microseconds { 0 };
         u64 style_engine_planning_microseconds { 0 };
         u64 relayouts_performed { 0 };
+        u64 layout_computation_microseconds { 0 };
         u64 style_update_microseconds { 0 };
         u64 style_recompute_microseconds { 0 };
         u64 custom_property_resolutions { 0 };
@@ -1164,7 +1169,7 @@ public:
         u64 scrollable_overflow_recalculations { 0 };
     };
     StyleInvalidationCounters& style_invalidation_counters() const { return m_style_invalidation_counters; }
-    void reset_style_invalidation_counters() const;
+    void reset_style_invalidation_counters();
 
     // Confinement report of the most recent layout tree build, for tests observing whether a
     // partial rebuild stayed inside its rebuilt subtrees.

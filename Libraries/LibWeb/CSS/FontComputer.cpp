@@ -827,7 +827,7 @@ void FontComputer::clear_computed_font_cache_for_families(Vector<Utf16FlyString>
             return TraversalDecision::Continue;
 
         if (element_uses_font_family(*element)) {
-            element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id());
+            element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle, 0, StyleEngine::ElementStyleInputProducer::FontCompletion);
             return TraversalDecision::Continue;
         }
 
@@ -898,7 +898,7 @@ void FontComputer::did_load_font(FontFaceKey const& changed_face)
             return IterationDecision::Continue;
         });
         if (should_recompute)
-            element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id());
+            element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle, 0, StyleEngine::ElementStyleInputProducer::FontCompletion);
         return TraversalDecision::Continue;
     });
 }

@@ -2835,6 +2835,18 @@ pub unsafe extern "C" fn style_engine_counter(
     })
 }
 
+/// Resets the document's permanent style-engine counters.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_reset_counters(engine: *mut c_void) {
+    abort_on_panic(|| {
+        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+        engine.counters.reset();
+    });
+}
+
 /// Records a benchmark phase marker when capture is enabled.
 ///
 /// # Safety

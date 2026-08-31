@@ -17,6 +17,7 @@ impl StyleEngine {
         ) {
             return;
         }
+        self.counters.bump(Counter::CascadeLayerUpdates);
         let initialized = pending_order.is_some() || self.program.layer_order_is_initialized(scope);
         self.program_staging.base_version.get_or_insert(self.program.version());
         self.invalidate_scope_program(scope);
@@ -345,6 +346,7 @@ impl StyleEngine {
             self.sheet_rule_replacement.is_none(),
             "stylesheet replacements do not nest"
         );
+        self.counters.bump(Counter::SheetRuleReplacements);
         if let Some(slot) = self.program_staging.sheet_rule_replacements.get_mut(sheet.0 as usize)
             && let Some(mut replacement) = slot.take()
         {

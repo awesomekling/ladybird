@@ -45,10 +45,28 @@ impl StyleEngine {
 
         let mut transaction = self.drain_transaction();
         self.apply_staged_transaction(&mut transaction);
+        self.counters.bump(Counter::StyleTransactions);
+        for input in &transaction.inputs {
+            self.counters.bump(input.key.kind().transaction_counter());
+            match (input.key, input.old, input.new) {
+                (InputKey::SheetAttachment(..), InputValue::Flag(false), InputValue::Flag(true)) => {
+                    self.counters.bump(Counter::SheetAttachments);
+                }
+                (InputKey::SheetAttachment(..), InputValue::Flag(true), InputValue::Flag(false)) => {
+                    self.counters.bump(Counter::SheetDetachments);
+                }
+                _ => {}
+            }
+        }
+        for marker in &transaction.markers {
+            self.counters.bump(marker.kind.transaction_counter());
+        }
         if transaction.is_empty() {
+            self.counters.bump(Counter::EmptyStyleTransactions);
             self.release_transaction_and_sweep_atoms(transaction);
             return true;
         }
+        let mut published_output = false;
         let preserves_selector_incidence = !transaction.has_coarsened_markers()
             && transaction.inputs.iter().all(|input| {
                 matches!(
@@ -189,6 +207,7 @@ impl StyleEngine {
             self.discard_retained_prefix_caches();
             self.retained_match_answers.evict(&mut self.match_answers);
             self.release_transaction_and_sweep_atoms(transaction);
+            self.counters.bump(Counter::ZeroOutputStyleTransactions);
             return false;
         }
 
@@ -933,6 +952,7 @@ impl StyleEngine {
                 }
             };
             if !emit_node {
+                self.counters.bump(Counter::PublishedSuppressedNoops);
                 return;
             }
             // A departure can remain in a conservative region while its routing facts survive,
@@ -1178,10 +1198,12 @@ impl StyleEngine {
                         {
                             self.counters.bump(Counter::PublishedMatchAnswerIdentityRepairs);
                             self.counters.bump(Counter::PublishedMatchAnswerIdentityRepairStops);
+                            self.counters.bump(Counter::PublishedSuppressedNoops);
                             node_count -= 1;
                         }
                         _ if confirmed_exact_cascade => {
                             self.counters.bump(Counter::PublishedExactCascadeStops);
+                            self.counters.bump(Counter::PublishedSuppressedNoops);
                             node_count -= 1;
                         }
                         _ if exact_cascade_stop_nodes.as_slice().binary_search(&node).is_ok()
@@ -1190,6 +1212,7 @@ impl StyleEngine {
                             && self.pseudo_cascade_states_are_unchanged(node) =>
                         {
                             self.counters.bump(Counter::PublishedExactCascadeStops);
+                            self.counters.bump(Counter::PublishedSuppressedNoops);
                             node_count -= 1;
                         }
                         published_answer => {
@@ -1325,6 +1348,10 @@ impl StyleEngine {
                         )
                     },
                 );
+                match gap {
+                    FfiStyleDeltaGap::Materialize => self.counters.bump(Counter::PublishedMaterializeGaps),
+                    FfiStyleDeltaGap::None => self.counters.bump(Counter::PublishedExactRecordDeltas),
+                }
                 let style_delta = PublishedStyleDeltaRecord {
                     style_node: node.raw(),
                     match_answer: answer.cascade_input.map_or(0, |cascade_input| cascade_input.0),
@@ -1344,6 +1371,7 @@ impl StyleEngine {
                 style_deltas.push(style_delta);
             }
             if !style_deltas.is_empty() {
+                published_output = true;
                 self.settle_computed_memory();
                 self.counters
                     .add(Counter::PublishedMatchAnswerRecords, style_deltas.len() as u64);
@@ -1356,6 +1384,9 @@ impl StyleEngine {
             );
             self.memory
                 .release(MemoryCategory::BatchScratch, unresolved_inheritance_source_bytes);
+        }
+        if !published_output {
+            self.counters.bump(Counter::ZeroOutputStyleTransactions);
         }
         self.memory
             .release(MemoryCategory::BatchScratch, style_input_reaction_bytes);

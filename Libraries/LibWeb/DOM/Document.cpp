@@ -697,9 +697,10 @@ Layout::NodeArena& Document::layout_node_arena()
     return *m_layout_node_arena;
 }
 
-void Document::reset_style_invalidation_counters() const
+void Document::reset_style_invalidation_counters()
 {
     m_style_invalidation_counters = {};
+    style_computer().style_engine().reset_counters();
     CSS::reset_longhand_wrappers_minted();
 }
 
@@ -2342,6 +2343,7 @@ Document::PartialRelayoutResult Document::try_partial_relayout(HashTable<WeakPtr
     for (auto* root : partial_relayout_roots)
         recompute_containing_blocks_in_inclusive_subtree(layout_node_arena(), *root);
 
+    auto layout_computation_started_at = MonotonicTime::now();
     layout_node_arena().sync_enrolled_content_for_layout();
     for (auto* root : partial_relayout_roots) {
         relayout_subtree(*root);
@@ -2349,6 +2351,7 @@ Document::PartialRelayoutResult Document::try_partial_relayout(HashTable<WeakPtr
         //     new size may change ancestor scrollable overflow; scheduling the root covers both.
         schedule_scrollable_overflow_recalculation(*root);
     }
+    style_invalidation_counters().layout_computation_microseconds += (MonotonicTime::now() - layout_computation_started_at).to_microseconds();
 
     ++m_partial_layout_count;
 
@@ -2470,11 +2473,13 @@ void Document::update_layout(UpdateLayoutReason reason, ThrottledAnimationSampli
         layout_node_arena().sync_enrolled_content_for_layout();
         Layout::LayoutRustBridge bridge;
         Vector<Layout::Box const*> boxes_needing_eager_overflow_measurement;
+        auto layout_computation_started_at = MonotonicTime::now();
         bridge.run_root_layout(
             *m_layout_root,
             viewport_rect.width(),
             viewport_rect.height(),
             should_collect_devtools_layout_data);
+        style_invalidation_counters().layout_computation_microseconds += (MonotonicTime::now() - layout_computation_started_at).to_microseconds();
         m_layout_root->for_each_in_inclusive_subtree_of_type<Layout::Box>([&](auto& box) {
             if ((&box == m_layout_root.ptr() || box.is_scroll_container() || !Painting::scroll_offset(box).is_zero()) && Painting::has_committed_box(box))
                 boxes_needing_eager_overflow_measurement.append(&box);

@@ -1,5 +1,9 @@
 idle transaction setups: 0
+idle style transactions: 0
 changed transaction setups: 1
+changed style transactions: 1
+changed local-feature inputs: true
+changed published outputs: true
 changed color: rgb(0, 128, 0)
 animation transaction setups: 0
 animated opacity: 0.5

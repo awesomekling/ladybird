@@ -30,6 +30,8 @@
         const unchanged = internals.styleEngineCounters();
 
         println(`exact cascade stopped: ${unchanged.publishedExactCascadeStops - before.publishedExactCascadeStops}`);
+        println(`suppressed no-op counted: ${unchanged.publishedSuppressedNoops - before.publishedSuppressedNoops}`);
+        println(`zero-output transaction counted: ${unchanged.zeroOutputStyleTransactions - before.zeroOutputStyleTransactions}`);
         println(`unchanged style reactions: ${unchanged.invalidatedStyleNodes - before.invalidatedStyleNodes}`);
         println(`unchanged color: ${getComputedStyle(target).color}`);
 

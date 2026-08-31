@@ -62,6 +62,27 @@ define_counters! {
     StyleAtomsReclaimed => "styleAtomsReclaimed",
     LanguageTextsPublished => "languageTextsPublished",
 
+    // Normalized transaction shape. Input totals are recorded after cancellation and coarsening,
+    // so dividing them by StyleTransactions describes the work each boundary actually received.
+    StyleTransactions => "styleTransactions",
+    EmptyStyleTransactions => "emptyStyleTransactions",
+    ZeroOutputStyleTransactions => "zeroOutputStyleTransactions",
+    TransactionTreeInputs => "transactionTreeInputs",
+    TransactionLocalFeatureInputs => "transactionLocalFeatureInputs",
+    TransactionStateInputs => "transactionStateInputs",
+    TransactionElementDeclarationInputs => "transactionElementDeclarationInputs",
+    TransactionElementStyleInputs => "transactionElementStyleInputs",
+    TransactionProgramInputs => "transactionProgramInputs",
+    TransactionCascadeTopologyInputs => "transactionCascadeTopologyInputs",
+    TransactionEnvironmentInputs => "transactionEnvironmentInputs",
+
+    // Program update producers. These count semantic operations rather than selector compilation
+    // details, making stylesheet attachment, replacement, and layer work visible per transaction.
+    SheetAttachments => "sheetAttachments",
+    SheetDetachments => "sheetDetachments",
+    SheetRuleReplacements => "sheetRuleReplacements",
+    CascadeLayerUpdates => "cascadeLayerUpdates",
+
     // Stylesheet program.
     StyleRulesCompiled => "styleRulesCompiled",
     ExactSelectorEntries => "exactSelectorEntries",
@@ -219,6 +240,9 @@ define_counters! {
     PlannedNodesWithOutputChange => "plannedNodesWithOutputChange",
     PlannedNodesWithUpquery => "plannedNodesWithUpquery",
     PlannedNodesUnattributed => "plannedNodesUnattributed",
+    PublishedMaterializeGaps => "publishedMaterializeGaps",
+    PublishedExactRecordDeltas => "publishedExactRecordDeltas",
+    PublishedSuppressedNoops => "publishedSuppressedNoops",
 
     // Style node identity lifecycle.
     StyleNodesAllocated => "styleNodesAllocated",
@@ -267,6 +291,10 @@ impl Counters {
 
     pub fn set(&mut self, counter: Counter, value: u64) {
         self.values[counter as usize] = value;
+    }
+
+    pub fn reset(&mut self) {
+        self.values.fill(0);
     }
 
     #[must_use]

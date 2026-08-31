@@ -1,4 +1,6 @@
 exact cascade stopped: 1
+suppressed no-op counted: 1
+zero-output transaction counted: 1
 unchanged style reactions: 0
 unchanged color: rgb(255, 0, 0)
 changed style reactions: 1

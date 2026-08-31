@@ -192,7 +192,14 @@ public:
         AncestorBecameVisible = 1 << 5,
         PseudoInputsMayHaveChanged = 1 << 6,
     };
+    enum class ElementStyleInputProducer : u8 {
+        FontCompletion,
+        TreeMutationFeedback,
+        ContainerQuery,
+        Other,
+    };
     void record_element_style_input_change(StyleNodeID style_node, u8 reaction = PublishedStyle | RecomputeStyle, u8 inherited_style_groups = 0);
+    void record_element_style_input_change(StyleNodeID, u8, u8, ElementStyleInputProducer);
     void record_flat_tree_descendant_style_input_changes(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups = 0);
     [[nodiscard]] Vector<StyleNodeID> viewport_dependent_style_nodes();
     void consume_recorded_element_style_input_change(StyleNodeID style_node);
@@ -262,6 +269,7 @@ public:
 
     // Enumerates the engine's counters. Returns false once index is past the last counter.
     bool counter(size_t index, StringView& out_name, u64& out_value) const;
+    void reset_counters();
 
     [[nodiscard]] void const* rust_handle() const { return m_impl; }
 

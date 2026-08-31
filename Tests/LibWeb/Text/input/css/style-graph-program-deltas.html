@@ -8,7 +8,7 @@
         // Inserting a sheet between two existing ones names its successor; the engine writes one
         // order token and renumbers nothing.
         const middle = document.createElement("style");
-        middle.textContent = ".b { color: green }";
+        middle.textContent = "@layer measured { .b { color: green } }";
         document.head.insertBefore(middle, null);
 
         const last = document.createElement("style");
@@ -18,12 +18,20 @@
         document.body.offsetWidth;
         const afterAdd = internals.styleEngineCounters();
 
+        middle.textContent = "@layer measured { .b { color: yellow } }";
+        document.body.offsetWidth;
+        const afterReplace = internals.styleEngineCounters();
+
         middle.remove();
         document.body.offsetWidth;
         const afterRemove = internals.styleEngineCounters();
 
         println(`attaching records program deltas: ${afterAdd.programDeltas > before.programDeltas}`);
-        println(`detaching records more: ${afterRemove.programDeltas > afterAdd.programDeltas}`);
+        println(`attachment phase counted: ${afterAdd.sheetAttachments > before.sheetAttachments}`);
+        println(`rule replacement phase counted: ${afterReplace.sheetRuleReplacements > afterAdd.sheetRuleReplacements}`);
+        println(`layer phase counted: ${afterAdd.cascadeLayerUpdates > before.cascadeLayerUpdates}`);
+        println(`detaching records more: ${afterRemove.programDeltas > afterReplace.programDeltas}`);
+        println(`detachment phase counted: ${afterRemove.sheetDetachments > afterReplace.sheetDetachments}`);
         println(`no scope markers: ${afterRemove.coarsenedScopeMarkers === 0}`);
     });
 </script>

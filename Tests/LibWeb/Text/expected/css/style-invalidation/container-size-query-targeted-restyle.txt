@@ -3,3 +3,4 @@ initial recomputations bounded: true
 dynamic target color: rgb(0, 128, 0)
 dynamic recomputations bounded: true
 dynamic noop recomputations bounded: true
+dynamic container query inputs: true

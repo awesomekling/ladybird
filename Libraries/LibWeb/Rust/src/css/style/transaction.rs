@@ -162,6 +162,20 @@ macro_rules! define_input_kinds {
                     $(Self::$variant => $counter,)+
                 }
             }
+
+            #[must_use]
+            pub fn transaction_counter(self) -> Counter {
+                match self {
+                    Self::TreeRelations => Counter::TransactionTreeInputs,
+                    Self::LocalFeature => Counter::TransactionLocalFeatureInputs,
+                    Self::State => Counter::TransactionStateInputs,
+                    Self::ElementDeclaration => Counter::TransactionElementDeclarationInputs,
+                    Self::ElementStyleInput => Counter::TransactionElementStyleInputs,
+                    Self::Program => Counter::TransactionProgramInputs,
+                    Self::CascadeTopology => Counter::TransactionCascadeTopologyInputs,
+                    Self::Environment => Counter::TransactionEnvironmentInputs,
+                }
+            }
         }
     };
 }
