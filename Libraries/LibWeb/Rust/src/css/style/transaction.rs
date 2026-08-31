@@ -352,6 +352,7 @@ pub struct RuleDeclarationChange {
 pub struct StyleTransaction {
     pub inputs: Vec<NormalizedInput>,
     pub markers: Vec<CompleteScopeMarker>,
+    pub connected_subtree_arrivals: Vec<StyleNodeID>,
     pub program_joins: Vec<ProgramJoinDelta>,
     pub rule_declaration_changes: Vec<RuleDeclarationChange>,
     pub program_base_version: Option<ProgramVersion>,
@@ -449,6 +450,7 @@ impl StyleTransaction {
 pub struct NormalizationJournal {
     entries: HashMap<InputKey, (InputValue, InputValue)>,
     markers: Vec<CompleteScopeMarker>,
+    connected_subtree_arrivals: Vec<StyleNodeID>,
     covered: [bool; INPUT_KIND_COUNT],
     charged_bytes: u32,
     document_capacity_limit: u32,
@@ -475,12 +477,22 @@ impl NormalizationJournal {
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty() && self.markers.is_empty()
+        self.entries.is_empty() && self.markers.is_empty() && self.connected_subtree_arrivals.is_empty()
     }
 
     #[must_use]
     pub fn markers(&self) -> &[CompleteScopeMarker] {
         &self.markers
+    }
+
+    pub(super) fn mark_connected_subtree_arrival(
+        &mut self,
+        node: StyleNodeID,
+        memory: &mut MemoryController,
+        counters: &mut Counters,
+    ) {
+        self.connected_subtree_arrivals.push(node);
+        self.settle(memory, counters);
     }
 
     /// The normalized view of the fine-grained inputs which are still pending.
@@ -496,6 +508,9 @@ impl NormalizationJournal {
         debug_assert!(self.markers.is_empty());
         debug_assert!(newer.markers.is_empty());
         let newer_entries = std::mem::take(&mut newer.entries);
+        self.connected_subtree_arrivals
+            .append(&mut newer.connected_subtree_arrivals);
+        newer.connected_subtree_arrivals.shrink_to_fit();
         memory.release(MemoryCategory::NormalizationJournal, u64::from(newer.charged_bytes));
         newer.charged_bytes = 0;
         newer.covered = [false; INPUT_KIND_COUNT];
@@ -525,6 +540,7 @@ impl NormalizationJournal {
     #[must_use]
     pub fn contains_only_element_style_inputs(&self) -> bool {
         self.markers.is_empty()
+            && self.connected_subtree_arrivals.is_empty()
             && !self.entries.is_empty()
             && self
                 .entries
@@ -570,6 +586,8 @@ impl NormalizationJournal {
         self.entries.shrink_to_fit();
         self.markers.clear();
         self.markers.shrink_to_fit();
+        self.connected_subtree_arrivals.clear();
+        self.connected_subtree_arrivals.shrink_to_fit();
         self.covered = [false; INPUT_KIND_COUNT];
         memory.release(MemoryCategory::NormalizationJournal, u64::from(self.charged_bytes));
         self.charged_bytes = 0;
@@ -702,13 +720,18 @@ impl NormalizationJournal {
                     _ => true,
                 }
             });
-            inputs.extend(arriving_nodes.into_iter().map(|node| NormalizedInput {
+            inputs.extend(arriving_nodes.iter().copied().map(|node| NormalizedInput {
                 key: InputKey::LocalFeature(node, LocalFeatureKey::ArrivingFacts),
                 old: InputValue::Feature(FeatureValue::Absent),
                 new: InputValue::Feature(FeatureValue::Present),
             }));
             inputs.sort_unstable_by_key(|input| input.key);
         }
+
+        let mut connected_subtree_arrivals = std::mem::take(&mut self.connected_subtree_arrivals);
+        connected_subtree_arrivals.sort_unstable();
+        connected_subtree_arrivals.dedup();
+        connected_subtree_arrivals.retain(|node| arriving_nodes.binary_search(node).is_ok());
 
         counters.add(Counter::NormalizedUniqueKeys, inputs.len() as u64);
 
@@ -721,13 +744,15 @@ impl NormalizationJournal {
         memory.release(MemoryCategory::NormalizationJournal, u64::from(self.charged_bytes));
         self.charged_bytes = 0;
         let charged_bytes = (inputs.capacity() * size_of::<NormalizedInput>()
-            + markers.capacity() * size_of::<CompleteScopeMarker>()) as u64;
+            + markers.capacity() * size_of::<CompleteScopeMarker>()
+            + connected_subtree_arrivals.capacity() * size_of::<StyleNodeID>()) as u64;
         memory.reserve_required(MemoryCategory::NormalizationJournal, charged_bytes);
         self.settle(memory, counters);
 
         StyleTransaction {
             inputs,
             markers,
+            connected_subtree_arrivals,
             program_joins: Vec::new(),
             rule_declaration_changes: Vec::new(),
             program_base_version: None,
@@ -738,7 +763,7 @@ impl NormalizationJournal {
 
     fn capacity_bytes(&self) -> u64 {
         capacity_bytes! {
-            shallow [self.entries, self.markers];
+            shallow [self.entries, self.markers, self.connected_subtree_arrivals];
             cached [];
             nested [];
             skip [self.covered, self.charged_bytes, self.document_capacity_limit];

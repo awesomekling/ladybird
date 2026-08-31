@@ -847,6 +847,10 @@ impl StyleEngine {
                     continue;
                 };
                 let custom_states = custom_states.iter().copied().map(StyleAtomID).collect::<Vec<_>>();
+                if connected_subtree_input && node_is_arriving(node) {
+                    self.journal
+                        .mark_connected_subtree_arrival(node, &mut self.memory, &mut self.counters);
+                }
                 self.record_element_arrival(
                     node,
                     arrival,
@@ -3158,11 +3162,12 @@ mod tests {
                 reserved: 0,
             },
         ];
-        engine.apply_transaction_batch(&tree, (&arrivals, &[31, 32, 33]), &[], &[], &[], &[], false);
+        engine.apply_transaction_batch(&tree, (&arrivals, &[31, 32, 33]), &[], &[], &[], &[], true);
         let transaction = engine.take_transaction();
 
         let root = StyleNodeID::from_raw(nodes[0]).unwrap();
         let child = StyleNodeID::from_raw(nodes[1]).unwrap();
+        assert_eq!(transaction.connected_subtree_arrivals, [root, child]);
         assert_eq!(engine.facts.namespace_of(root), StyleAtomID(11));
         assert_eq!(engine.facts.language_of(root), StyleAtomID(12));
         assert_eq!(engine.facts.directionality_of(root), StyleAtomID(13));
