@@ -136,7 +136,12 @@ impl Input for &[u8] {
         if byte > 0x7F {
             return None;
         }
-        let offset = memchr::memchr(byte, self.get(start..end)?)?;
+        let input = self.get(start..end)?;
+        let offset = if input.len() < 16 {
+            input.iter().position(|value| *value == byte)
+        } else {
+            memchr::memchr(byte, input)
+        }?;
         Some(start + offset)
     }
 
@@ -3623,6 +3628,25 @@ mod tests {
             assert_eq!(input.find_code_unit(0, 129, b'a' as u16), None);
             assert_eq!(input.find_code_unit(0, 128, 0x80), None);
             assert_eq!(input.find_code_unit(0, 128, 0x100), None);
+        }
+    }
+
+    #[test]
+    fn ascii_code_unit_search_across_short_and_long_ranges() {
+        for offset in 0..32 {
+            for length in 0..64 {
+                let mut storage = [b'a'; 96];
+                let input = &storage[offset..offset + length];
+                assert_eq!(input.find_code_unit(0, length, b'q' as u16), None);
+                for position in 0..length {
+                    storage[offset + position] = b'q';
+                    let input = &storage[offset..offset + length];
+                    assert_eq!(input.find_code_unit(0, length, b'q' as u16), Some(position));
+                    assert_eq!(input.find_code_unit(position, length, b'q' as u16), Some(position));
+                    assert_eq!(input.find_code_unit(position + 1, length, b'q' as u16), None);
+                    storage[offset + position] = b'a';
+                }
+            }
         }
     }
 }
