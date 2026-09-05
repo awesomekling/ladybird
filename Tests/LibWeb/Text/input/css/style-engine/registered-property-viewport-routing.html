@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script>
+    promiseTest(async () => {
+        const frame = document.createElement("iframe");
+        frame.style.cssText = "width: 300px; height: 200px; border: 0";
+        frame.srcdoc = `<!DOCTYPE html>
+            <style>
+                @property --sheet-metric { syntax: "<length>"; inherits: false; initial-value: 10vw; }
+                #sheet { width: var(--sheet-metric); }
+                #script { width: var(--script-metric); }
+                #alias { --copy: var(--sheet-metric); width: var(--copy); }
+                #pseudo::before { content: ""; display: block; width: var(--sheet-metric); }
+                #viewport { width: 5vw; }
+                #override { --script-metric: 7px; width: var(--script-metric); }
+                #query { width: 3px; }
+                @container style(--sheet-metric: 50px) { #query { width: 9px; } }
+            </style>
+            <div id="sheet"></div><div id="script"></div><div id="alias"></div>
+            <div id="pseudo"></div><div id="viewport"></div><div id="override"></div>
+            <div id="host"></div><div><div id="query"></div></div>`;
+        const loaded = new Promise(resolve => frame.addEventListener("load", resolve, { once: true }));
+        document.body.appendChild(frame);
+        await loaded;
+        const child = frame.contentWindow;
+        child.CSS.registerProperty({ name: "--script-metric", syntax: "<length>", inherits: true, initialValue: "20vw" });
+        const shadow = child.document.getElementById("host").attachShadow({ mode: "open" });
+        shadow.innerHTML = '<style>div { width: var(--script-metric); }</style><div></div>';
+        for (let index = 0; index < 64; ++index)
+            child.document.body.appendChild(child.document.createElement("div"));
+        const width = identifier => child.getComputedStyle(child.document.getElementById(identifier)).width;
+        function widths() {
+            return [width("sheet"), width("script"), width("alias"),
+                child.getComputedStyle(child.document.getElementById("pseudo"), "::before").width,
+                child.getComputedStyle(shadow.lastElementChild).width, width("viewport"), width("override"),
+                child.getComputedStyle(child.document.body).getPropertyValue("--sheet-metric"),
+                child.getComputedStyle(child.document.body).getPropertyValue("--script-metric"), width("query")].join(", ");
+        }
+        child.document.body.offsetWidth;
+        println(`initial widths: ${widths()}`);
+        for (const size of [500, 300]) {
+            const before = child.internals.styleEngineCounters();
+            child.internals.resetStyleInvalidationCounters();
+            frame.style.width = `${size}px`;
+            document.body.offsetWidth;
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            child.document.body.offsetWidth;
+            child.internals.updateStyle();
+            const after = child.internals.styleEngineCounters();
+            const invalidation = child.internals.getStyleInvalidationCounters();
+            println(`${size} avoids an environment marker: ${after.environmentDeltas === before.environmentDeltas}`);
+            println(`${size} stays selective: ${invalidation.elementStyleRecomputations < 24}`);
+            println(`${size} widths: ${widths()}`);
+        }
+    });
+</script>

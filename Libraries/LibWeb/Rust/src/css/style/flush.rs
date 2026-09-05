@@ -1110,8 +1110,8 @@ impl StyleEngine {
                     }
                     if !transaction_reaches_no_selector {
                         self.retained_match_answers.forget_answer(&mut self.match_answers, node);
-                        has_upquery = true;
                     }
+                    has_upquery = !transaction_reaches_no_selector || !has_direct_action;
                     true
                 }
             };

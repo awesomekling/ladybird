@@ -1,0 +1,7 @@
+initial widths: 30px, 60px, 30px, 30px, 60px, 15px, 7px, 30px, 60px, 3px
+500 avoids an environment marker: true
+500 stays selective: true
+500 widths: 50px, 100px, 50px, 50px, 100px, 25px, 7px, 50px, 100px, 9px
+300 avoids an environment marker: true
+300 stays selective: true
+300 widths: 30px, 60px, 30px, 30px, 60px, 15px, 7px, 30px, 60px, 3px

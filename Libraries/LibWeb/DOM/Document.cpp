@@ -2587,27 +2587,19 @@ void Document::set_needs_mathml_and_svg_user_agent_style_sheets()
 
 void Document::invalidate_style_for_viewport_change()
 {
-    bool registered_initial_value_depends_on_viewport_metrics = false;
+    auto& style_engine = style_computer().style_engine();
     auto invalidate_registered_initial_values = [&](auto& registrations) {
-        for (auto& [_, registration] : registrations) {
+        for (auto& [name, registration] : registrations) {
             if (!registration.computed_initial_value_depends_on_viewport_metrics)
                 continue;
             registration.computed_initial_value = nullptr;
             registration.computed_initial_value_depends_on_viewport_metrics = false;
-            registered_initial_value_depends_on_viewport_metrics = true;
+            style_engine.record_custom_property_registration_change(style_engine.intern_atom(name));
         }
     };
     invalidate_registered_initial_values(m_registered_property_set);
     invalidate_registered_initial_values(m_cached_registered_properties_from_css_property_rules);
 
-    if (registered_initial_value_depends_on_viewport_metrics) {
-        // A registered initial value is shared by every element that does not specify the custom
-        // property, so its consumers cannot be identified from their computed styles.
-        record_style_environment_change();
-        return;
-    }
-
-    auto& style_engine = style_computer().style_engine();
     for (auto style_node : style_engine.viewport_dependent_style_nodes()) {
         auto element = style_computer().element_for_style_node(style_node.value());
         if (!element || !element->is_connected() || &element->document() != this)
