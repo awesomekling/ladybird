@@ -5415,7 +5415,10 @@ impl ElementFactStore {
 
     pub fn release_staging(&mut self, memory: &mut MemoryController) {
         self.staging.clear();
-        if self.primary_stale_payload_bytes > self.primary_live_payload_bytes {
+        let primary_row_scan_bytes = (self.rows.row_count() as u64)
+            .checked_mul(2 * size_of::<PayloadHandle>() as u64)
+            .expect("primary fact row scan byte count overflow");
+        if self.primary_stale_payload_bytes > self.primary_live_payload_bytes.max(primary_row_scan_bytes) {
             Rc::get_mut(&mut self.rows)
                 .expect("compacting fact payloads requires unique primary rows")
                 .compact_primary_payloads();
@@ -5683,6 +5686,61 @@ mod tests {
         assert_eq!(facts.primary().stale_rows(), 0);
         assert_eq!(facts.classes_of_node(node), &[second_class]);
         assert!(facts.states_of_node(node).contains(StateFact::Hover));
+    }
+
+    #[test]
+    fn sparse_payload_updates_amortize_compaction_over_the_row_directory() {
+        let mut memory = MemoryController::new(DeviceClass::ForegroundDesktop);
+        let mut facts = ElementFactStore::new();
+        let node = StyleNodeID::element(1);
+        facts.ensure_row(node);
+        facts.ensure_row(StyleNodeID::element(5000));
+        facts.apply_staged(&mut memory);
+        facts.release_staging(&mut memory);
+
+        for index in 0..1000 {
+            facts.set_attribute(node, StyleAtomID(10), StyleAtomID(20 + index % 2), true, &mut memory);
+            facts.apply_staged(&mut memory);
+            let stale_bytes = facts.primary_stale_payload_bytes;
+            facts.release_staging(&mut memory);
+            assert_eq!(facts.primary_stale_payload_bytes, stale_bytes);
+        }
+        assert!(facts.primary_stale_payload_bytes > facts.primary_live_payload_bytes);
+
+        let mut compacted = false;
+        for index in 0..10000 {
+            facts.set_attribute(node, StyleAtomID(10), StyleAtomID(20 + index % 2), true, &mut memory);
+            facts.apply_staged(&mut memory);
+            facts.release_staging(&mut memory);
+            assert_eq!(facts.memory.bytes(), facts.capacity_bytes());
+            if facts.primary_stale_payload_bytes == 0 {
+                compacted = true;
+                let row = facts.rows.row_of(node).unwrap();
+                assert_eq!(facts.rows.attributes_of(row)[0].value, StyleAtomID(20 + index % 2));
+                assert_eq!(facts.rows.attributes.len(), 1);
+                break;
+            }
+        }
+        assert!(compacted);
+    }
+
+    #[test]
+    fn large_primary_payloads_still_compact_at_the_live_payload_limit() {
+        let mut memory = MemoryController::new(DeviceClass::ForegroundDesktop);
+        let mut facts = ElementFactStore::new();
+        let node = StyleNodeID::element(1);
+
+        for index in 0..3 {
+            let parts: Vec<_> = (1..=4096).map(|part| StyleAtomID(part + index)).collect();
+            facts.set_parts(node, &parts, &mut memory);
+            facts.apply_staged(&mut memory);
+            facts.release_staging(&mut memory);
+            let row = facts.rows.row_of(node).unwrap();
+            assert_eq!(facts.rows.parts_of(row), parts);
+        }
+        assert_eq!(facts.primary_stale_payload_bytes, 0);
+        assert_eq!(facts.rows.parts.len(), 4096);
+        assert_eq!(facts.memory.bytes(), facts.capacity_bytes());
     }
 
     #[test]
