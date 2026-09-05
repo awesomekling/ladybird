@@ -9,6 +9,40 @@ use super::*;
 const MIN_SHARED_CASCADE_COMPLETION_BATCH: usize = 16;
 
 impl StyleEngine {
+    fn transaction_only_changes_deferred_pseudo_element(&self, transaction: &StyleTransaction) -> bool {
+        let Some(deferred) = self.deferred_pseudo_element else {
+            return false;
+        };
+        if !transaction.markers.is_empty()
+            || transaction.program_joins.is_empty()
+            || !transaction.inputs.iter().all(|input| {
+                matches!(
+                    input.key,
+                    InputKey::SheetAttachment(..)
+                        | InputKey::SheetActivation(..)
+                        | InputKey::RuleField(..)
+                        | InputKey::CascadeTopology(..)
+                )
+            })
+        {
+            return false;
+        }
+        transaction.program_joins.iter().all(|delta| {
+            self.program.rule_version(delta.rule).kind.matches_elements()
+                && (delta.before_program.is_some() || delta.after_program.is_some())
+                && [delta.before_program, delta.after_program]
+                    .into_iter()
+                    .flatten()
+                    .all(|program| {
+                        self.programs
+                            .get(program)
+                            .entries()
+                            .iter()
+                            .all(|entry| entry.pseudo_element.is_some_and(|target| target.kind == deferred))
+                    })
+        })
+    }
+
     pub fn take_style_transaction(
         &mut self,
         root: StyleNodeID,
@@ -778,6 +812,7 @@ impl StyleEngine {
         let style_input_reaction_bytes = (style_input_reactions.capacity() * size_of::<(StyleNodeID, u8, u8)>()) as u64;
         self.memory
             .reserve_required(MemoryCategory::BatchScratch, style_input_reaction_bytes);
+        let only_deferred_pseudo_element_changed = self.transaction_only_changes_deferred_pseudo_element(&transaction);
         self.release_transaction_and_sweep_atoms(transaction);
         // Releasing staging can compact primary payloads. Take the shared view afterwards so that
         // compaction does not need to copy the complete primary arrangement away from its view.
@@ -1024,6 +1059,10 @@ impl StyleEngine {
                         }
                         None => {
                             self.counters.bump(Counter::RetainedMatchAnswerPatchMisses);
+                            if only_deferred_pseudo_element_changed && !has_direct_action {
+                                self.retained_match_answers.forget(&mut self.match_answers, node);
+                                return;
+                            }
                             repair_match_identity = match_identity_is_complete_output
                                 && !patch.always_emit_for(node)
                                 && !patch.orders_shifted
@@ -1035,6 +1074,10 @@ impl StyleEngine {
                     }
                 }
                 None => {
+                    if only_deferred_pseudo_element_changed && !has_direct_action {
+                        self.retained_match_answers.forget(&mut self.match_answers, node);
+                        return;
+                    }
                     if !transaction_reaches_no_selector {
                         self.retained_match_answers.forget_answer(&mut self.match_answers, node);
                         has_upquery = true;

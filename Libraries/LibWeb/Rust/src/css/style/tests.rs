@@ -3000,6 +3000,67 @@ fn an_unused_layer_priority_shift_stops_before_recomputation() {
 }
 
 #[test]
+fn deferred_pseudo_program_changes_do_not_need_retained_answers() {
+    for evict in [false, true] {
+        let (mut engine, nodes) = linear_document();
+        let target = StyleAtomID(200);
+        let pseudo = PseudoElementTarget::new(PseudoElementKind(0));
+        let first = add_pseudo_target_rule(&mut engine, StyleSheetObjectID(1), target, pseudo);
+        engine.set_rule_declared_properties(first, &[(1, false)], true);
+        add_feature(&mut engine, nodes[1], LocalFeatureKey::Class(target));
+        discard_transaction(&mut engine);
+        let answer = engine.match_element(nodes[1]).unwrap();
+        let compact = engine.matches_for_cascade(answer.clone(), false, None);
+        engine.remember_retained_match_answer(nodes[1], &answer);
+        engine.remember_cascade_input(nodes[1], &compact);
+        if evict {
+            engine.retained_match_answers.evict(&mut engine.match_answers);
+        }
+        engine.deferred_pseudo_element = Some(pseudo.kind);
+
+        let second = add_pseudo_target_rule(&mut engine, StyleSheetObjectID(2), target, pseudo);
+        engine.set_rule_declared_properties(second, &[(2, false)], true);
+        let mut published = Vec::new();
+        assert!(engine.take_style_transaction(nodes[0], |_, _, reactions| {
+            published.extend(reactions.iter().map(|reaction| reaction.style_node));
+        }));
+        assert!(published.is_empty());
+        if evict {
+            assert!(matches!(
+                engine.retained_match_answers.lookup(nodes[1]),
+                Lookup::Missing(_)
+            ));
+            assert!(matches!(
+                engine.retained_match_answers.cascade_input_lookup(nodes[1]),
+                Lookup::Missing(_)
+            ));
+        }
+
+        engine.begin_adaptive_cold_matching_batch(nodes[0]);
+        let current = engine.match_element_for_cascade(nodes[1]).unwrap();
+        engine.end_cold_matching_batch();
+        assert!(current.iter().any(|matched| matched.rule == second));
+
+        engine.deferred_pseudo_element = None;
+        engine.record_rule_declarations_changed(second, 2);
+        assert!(engine.take_style_transaction(nodes[0], |_, _, reactions| {
+            published.extend(reactions.iter().map(|reaction| reaction.style_node));
+        }));
+        assert!(published.contains(&nodes[1].raw()));
+
+        engine.deferred_pseudo_element = Some(pseudo.kind);
+        let ordinary = add_target_rule(&mut engine, StyleSheetObjectID(3), target);
+        engine.set_rule_declared_properties(ordinary, &[(3, false)], true);
+        engine.record_rule_declarations_changed(first, 3);
+        published.clear();
+        assert!(engine.take_style_transaction(nodes[0], |_, _, reactions| {
+            published.extend(reactions.iter().map(|reaction| reaction.style_node));
+        }));
+        assert!(published.contains(&nodes[1].raw()));
+    }
+}
+
+#[test]
 fn an_evicted_retained_match_answer_falls_back_to_cold_matching() {
     let (mut engine, nodes) = linear_document();
     let target = StyleAtomID(200);

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<div id="host"></div>
+<script>
+    test(() => {
+        const shadow = host.attachShadow({ mode: "open" });
+        for (let index = 0; index < 64; ++index) {
+            const child = shadow.appendChild(document.createElement("div"));
+            child.textContent = "selectable text";
+            child.className = "target";
+        }
+        const target = shadow.firstElementChild;
+        const first = new CSSStyleSheet();
+        const second = new CSSStyleSheet();
+        first.replaceSync("::selection { color: red; }");
+        second.replaceSync("::selection { color: blue; }");
+        internals.updateStyle();
+        const results = [];
+        function change(label, callback) {
+            const before = internals.getStyleInvalidationCounters().elementStyleRecomputations;
+            callback();
+            internals.updateStyle();
+            const after = internals.getStyleInvalidationCounters().elementStyleRecomputations;
+            results.push(`${label} emits no element reactions: ${before === after}`);
+            results.push(`${label} selection: ${getComputedStyle(target, "::selection").color}`);
+        }
+        change("attach", () => shadow.adoptedStyleSheets = [first]);
+        change("second attachment", () => shadow.adoptedStyleSheets = [first, second]);
+        change("reorder", () => shadow.adoptedStyleSheets = [second, first]);
+        change("declarations", () => first.cssRules[0].style.color = "orange");
+        change("replacement", () => first.replaceSync(".target::selection { color: purple; }"));
+        change("detach", () => shadow.adoptedStyleSheets = [second]);
+        const range = document.createRange();
+        range.selectNodeContents(shadow.lastElementChild);
+        document.getSelection().addRange(range);
+        internals.updateStyle();
+        results.push(`activated selection: ${getComputedStyle(shadow.lastElementChild, "::selection").color}`);
+        document.getSelection().removeAllRanges();
+        results.forEach(println);
+    });
+</script>

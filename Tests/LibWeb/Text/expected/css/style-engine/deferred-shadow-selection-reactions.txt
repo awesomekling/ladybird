@@ -1,0 +1,13 @@
+attach emits no element reactions: true
+attach selection: rgb(255, 0, 0)
+second attachment emits no element reactions: true
+second attachment selection: rgb(0, 0, 255)
+reorder emits no element reactions: true
+reorder selection: rgb(255, 0, 0)
+declarations emits no element reactions: true
+declarations selection: rgb(255, 165, 0)
+replacement emits no element reactions: true
+replacement selection: rgb(128, 0, 128)
+detach emits no element reactions: true
+detach selection: rgb(0, 0, 255)
+activated selection: rgb(0, 0, 255)
