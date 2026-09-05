@@ -1,0 +1,12 @@
+missing ID: ""
+missing attribute: null
+missing namespaced attribute: null
+ID with pending style: ""
+uppercase style: color: red;
+removed style: null
+wrong style namespace: null
+empty style namespace: color: blue;
+namespaced ID: namespaced
+unqualified ID: ""
+SVG uppercase style: null
+SVG lowercase style: color: green;

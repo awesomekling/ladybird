@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    test(() => {
+        const element = document.createElement("div");
+        println(`missing ID: ${JSON.stringify(element.id)}`);
+        println(`missing attribute: ${element.getAttribute("ID")}`);
+        println(`missing namespaced attribute: ${element.getAttributeNS("example", "id")}`);
+
+        element.style.color = "red";
+        println(`ID with pending style: ${JSON.stringify(element.id)}`);
+        println(`uppercase style: ${element.getAttribute("STYLE")}`);
+        element.removeAttribute("style");
+        println(`removed style: ${element.getAttribute("style")}`);
+
+        const namespacedElement = document.createElement("div");
+        namespacedElement.style.color = "blue";
+        println(`wrong style namespace: ${namespacedElement.getAttributeNS("example", "style")}`);
+        println(`empty style namespace: ${namespacedElement.getAttributeNS("", "style")}`);
+        namespacedElement.setAttributeNS("example", "prefix:id", "namespaced");
+        println(`namespaced ID: ${namespacedElement.getAttributeNS("example", "id")}`);
+        println(`unqualified ID: ${JSON.stringify(namespacedElement.id)}`);
+
+        const svgElement = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        svgElement.style.color = "green";
+        println(`SVG uppercase style: ${svgElement.getAttribute("STYLE")}`);
+        println(`SVG lowercase style: ${svgElement.getAttribute("style")}`);
+    });
+</script>

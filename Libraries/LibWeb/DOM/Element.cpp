@@ -340,6 +340,9 @@ void Element::synchronize_all_attributes() const
 
 Optional<size_t> Element::find_attribute_index(Utf16FlyString const& qualified_name) const
 {
+    if (!m_attributes && !m_style_attribute_is_dirty)
+        return {};
+
     Utf16FlyString const* effective_name = &qualified_name;
     Utf16FlyString lowercase_name;
     if (namespace_uri() == Namespace::HTML && document().is_html_document()) {
@@ -361,6 +364,9 @@ Optional<size_t> Element::find_attribute_index(Utf16FlyString const& qualified_n
 
 Optional<size_t> Element::find_attribute_index_ns(Optional<Utf16FlyString> const& namespace_, Utf16FlyString const& local_name) const
 {
+    if (!m_attributes && !m_style_attribute_is_dirty)
+        return {};
+
     Optional<Utf16FlyString> normalized_namespace;
     if (namespace_ != Utf16FlyString {})
         normalized_namespace = namespace_;
