@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+test(() => {
+    const reads = [];
+    let enabled = true;
+    const dictionary = {
+        get bubbles() {
+            reads.push("bubbles");
+            return enabled;
+        },
+        get cancelable() {
+            reads.push("cancelable");
+            return !enabled;
+        },
+        get composed() {
+            reads.push("composed");
+            return enabled;
+        },
+    };
+    const first = new Event("first", dictionary);
+    enabled = false;
+    const second = new Event("second", dictionary);
+    println(`first: ${first.bubbles}, ${first.cancelable}, ${first.composed}`);
+    println(`second: ${second.bubbles}, ${second.cancelable}, ${second.composed}`);
+    println(`reads: ${reads.join(", ")}`);
+    let nested;
+    const outer = new Event("outer", {
+        get cancelable() {
+            nested = new Event("nested", { cancelable: true, composed: true });
+            return false;
+        },
+    });
+    println(`nested: ${nested.cancelable}, ${nested.composed}`);
+    println(`outer: ${outer.cancelable}, ${outer.composed}`);
+});
+</script>

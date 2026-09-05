@@ -239,6 +239,7 @@ def write_dictionary_conversion(
     includes: GeneratedIncludes,
     context: GenerationContext,
 ) -> None:
+    includes.add("AK/NeverDestroyed.h")
     includes.add("LibJS/Runtime/Error.h")
     includes.add("LibJS/Runtime/VM.h")
     includes.add("LibJS/Runtime/Value.h")
@@ -278,8 +279,17 @@ JS::ThrowCompletionOr<{dictionary.name}> {converter_function_name(dictionary)}(J
             // 3. Otherwise,
             //     1. Let jsMemberValue be ? Get(jsDict, key).
             auto js_member_value = JS::js_undefined();
-            if (js_dict.is_object())
-                js_member_value = TRY(js_dict.as_object().get("{member.name}"_utf16_fly_string));
+            if (js_dict.is_object()) {{
+                auto const& key = []() -> decltype(auto) {{
+                    if constexpr (sizeof("{member.name}") - 1 <= AK::Detail::MAX_SHORT_STRING_BYTE_COUNT) {{
+                        return "{member.name}"_utf16_fly_string;
+                    }} else {{
+                        static NeverDestroyed<Utf16FlyString> name {{ "{member.name}"_utf16_fly_string }};
+                        return *name;
+                    }}
+                }}();
+                js_member_value = TRY(js_dict.as_object().get(key));
+            }}
 
             // 4. If jsMemberValue is not undefined, then:
             if (!js_member_value.is_undefined()) {{

@@ -1,0 +1,5 @@
+first: true, false, true
+second: false, true, false
+reads: bubbles, cancelable, composed, bubbles, cancelable, composed
+nested: true, true
+outer: false, false
