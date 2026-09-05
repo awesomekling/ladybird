@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>#target { color: black; }</style>
+<style id="definitions"></style>
+<div id="target"></div>
+<script>
+    test(() => {
+        internals.updateStyle();
+        const sheet = definitions.sheet;
+        const results = [];
+        function change(label, callback) {
+            const before = internals.getStyleInvalidationCounters().styleEnvironmentVersion;
+            callback();
+            internals.updateStyle();
+            results.push(`${label} environment unchanged: ${internals.getStyleInvalidationCounters().styleEnvironmentVersion === before}`);
+            results.push(`${label} color: ${getComputedStyle(target).color}`);
+        }
+        change("namespace insertion", () => sheet.insertRule('@namespace html "http://www.w3.org/1999/xhtml";'));
+        change("namespaced rule insertion", () => sheet.insertRule("html|div#target { color: green; }", 1));
+        change("namespaced rule removal", () => sheet.deleteRule(1));
+        change("namespace removal", () => sheet.deleteRule(0));
+        change("page insertion", () => sheet.insertRule('@page { margin: 1px; @top-left { content: "first"; } }'));
+        const page = sheet.cssRules[0];
+        change("margin insertion", () => page.insertRule('@bottom-left { content: "second"; }', 1));
+        change("margin declaration", () => page.cssRules[0].style.content = '"changed"');
+        change("margin removal", () => page.deleteRule(1));
+        change("page removal", () => sheet.deleteRule(0));
+        change("group insertion", () => sheet.insertRule("@media all { @page { margin: 2px; } #target { color: blue; } }"));
+        change("group removal", () => sheet.deleteRule(0));
+        results.forEach(println);
+    });
+</script>

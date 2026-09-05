@@ -1919,40 +1919,6 @@ static void collect_enclosing_group_context(GC::RootVector<GC::Ref<CSSRule>> con
     context.in_a_layer = in_a_layer;
 }
 
-static bool rule_change_needs_style_environment_bump(CSSRule const& rule)
-{
-    switch (rule.type()) {
-    case CSSRule::Type::Import:
-        if (auto const* imported = as<CSSImportRule>(rule).loaded_style_sheet()) {
-            return any_of(imported->rules(), [](auto& child) {
-                return rule_change_needs_style_environment_bump(child);
-            });
-        }
-        return false;
-    case CSSRule::Type::Style:
-    case CSSRule::Type::Media:
-    case CSSRule::Type::Supports:
-    case CSSRule::Type::Container:
-    case CSSRule::Type::Scope:
-    case CSSRule::Type::LayerBlock:
-        return any_of(as<CSSGroupingRule>(rule).css_rules(), [](auto& child) {
-            return rule_change_needs_style_environment_bump(child);
-        });
-    case CSSRule::Type::NestedDeclarations:
-    case CSSRule::Type::Property:
-    case CSSRule::Type::LayerStatement:
-    case CSSRule::Type::Keyframes:
-    case CSSRule::Type::FontFace:
-    case CSSRule::Type::Function:
-    case CSSRule::Type::FunctionDeclarations:
-    case CSSRule::Type::CounterStyle:
-    case CSSRule::Type::FontFeatureValues:
-        return false;
-    default:
-        return true;
-    }
-}
-
 // A rule arrived in one document's engine. Compile it, and everything it brings with it, into the
 // position it holds there.
 static void record_style_rule_inserted_in(CSSRule& rule, CSSStyleSheet& sheet, DOM::Document& document)
@@ -1962,9 +1928,6 @@ static void record_style_rule_inserted_in(CSSRule& rule, CSSStyleSheet& sheet, D
     auto sheet_id = style_computer.style_engine_sheet_id_for(sheet);
     if (sheet_id == 0)
         return;
-
-    if (rule_change_needs_style_environment_bump(rule))
-        document.bump_style_environment_version();
 
     Vector<void const*> scope_roots;
     Vector<void const*> scope_limits;
@@ -2026,9 +1989,6 @@ void record_style_rule_removed(CSSStyleSheet& sheet_it_left, CSSRule& rule)
     for_each_document_with_engine_copy(sheet_it_left, [&](DOM::Document& document) {
         any_engine_heard = true;
         document.flush_deferred_style_change_event();
-        if (rule_change_needs_style_environment_bump(rule))
-            document.bump_style_environment_version();
-
         auto& style_computer = document.style_computer();
         auto& style_engine = style_computer.style_engine();
         for (auto& entry : removed) {
@@ -2150,9 +2110,6 @@ void record_style_rule_declarations_changed(CSSRule& rule)
         auto rule_id = style_computer.style_engine_rule_id_for(rule_to_report);
         if (rule_id == 0)
             return;
-
-        if (rule_change_needs_style_environment_bump(rule_to_report))
-            document.bump_style_environment_version();
 
         auto& style_engine = style_computer.style_engine();
         style_engine.record_rule_declarations_changed(rule_id, style_engine.next_declaration_block_version());

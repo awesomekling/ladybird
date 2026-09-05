@@ -1,0 +1,22 @@
+namespace insertion environment unchanged: true
+namespace insertion color: rgb(0, 0, 0)
+namespaced rule insertion environment unchanged: true
+namespaced rule insertion color: rgb(0, 128, 0)
+namespaced rule removal environment unchanged: true
+namespaced rule removal color: rgb(0, 0, 0)
+namespace removal environment unchanged: true
+namespace removal color: rgb(0, 0, 0)
+page insertion environment unchanged: true
+page insertion color: rgb(0, 0, 0)
+margin insertion environment unchanged: true
+margin insertion color: rgb(0, 0, 0)
+margin declaration environment unchanged: true
+margin declaration color: rgb(0, 0, 0)
+margin removal environment unchanged: true
+margin removal color: rgb(0, 0, 0)
+page removal environment unchanged: true
+page removal color: rgb(0, 0, 0)
+group insertion environment unchanged: true
+group insertion color: rgb(0, 0, 255)
+group removal environment unchanged: true
+group removal color: rgb(0, 0, 0)
