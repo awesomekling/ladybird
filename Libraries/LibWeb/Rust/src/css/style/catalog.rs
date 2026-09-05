@@ -902,6 +902,7 @@ pub(super) struct RetainedAnswerPatch {
     pub(super) prefix_caches: Rc<RefCell<PrefixCaches>>,
     pub(super) dispatch_workspace: DispatchCandidateWorkspace,
     pub(super) always_emit: bool,
+    pub(super) has_non_selector_inputs: bool,
     pub(super) always_emit_nodes: Vec<StyleNodeID>,
     /// A program join can make a rule contribute without producing a signed selector-truth delta
     /// for every node the join reaches. Those nodes must evaluate the affected rule set instead of
@@ -1016,6 +1017,7 @@ impl RetainedAnswerPatch {
 pub(super) struct RetainedAnswerPatchSelection {
     pub(super) affected: Vec<RetainedAnswerPatchSelectionRule>,
     pub(super) always_emit: bool,
+    pub(super) has_non_selector_inputs: bool,
     pub(super) always_emit_nodes: Vec<StyleNodeID>,
     pub(super) orders_shifted: bool,
     pub(super) requires_full_match: bool,
