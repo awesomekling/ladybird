@@ -136,7 +136,7 @@ impl Input for &[u8] {
         if byte > 0x7F {
             return None;
         }
-        let offset = self.get(start..end)?.iter().position(|&c| c == byte)?;
+        let offset = memchr::memchr(byte, self.get(start..end)?)?;
         Some(start + offset)
     }
 
@@ -3602,4 +3602,27 @@ pub(crate) fn match_unicode_property_resolved(
         return libunicode_rust::character_types::resolved_property_matches(cp, *r);
     }
     match_unicode_property(cp, name, value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Input;
+
+    #[test]
+    fn ascii_code_unit_search_respects_range_and_alignment() {
+        for offset in 0..64 {
+            let mut storage = [b'a'; 192];
+            storage[offset + 63] = b'q';
+            let input = &storage[offset..offset + 128];
+            assert_eq!(input.find_code_unit(0, 128, b'q' as u16), Some(63));
+            assert_eq!(input.find_code_unit(63, 64, b'q' as u16), Some(63));
+            assert_eq!(input.find_code_unit(0, 63, b'q' as u16), None);
+            assert_eq!(input.find_code_unit(64, 128, b'q' as u16), None);
+            assert_eq!(input.find_code_unit(128, 128, b'a' as u16), None);
+            assert_eq!(input.find_code_unit(129, 128, b'a' as u16), None);
+            assert_eq!(input.find_code_unit(0, 129, b'a' as u16), None);
+            assert_eq!(input.find_code_unit(0, 128, 0x80), None);
+            assert_eq!(input.find_code_unit(0, 128, 0x100), None);
+        }
+    }
 }

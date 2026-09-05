@@ -10,6 +10,7 @@ crate-type = ["staticlib", "rlib"]
 #   python3 Meta/CMake/flatpak/generate-cargo-sources.py
 [dependencies]
 libunicode_rust = { path = "../../LibUnicode/Rust", default-features = false }
+memchr = "2.8"
 
 [features]
 default = []

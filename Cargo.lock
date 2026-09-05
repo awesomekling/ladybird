@@ -830,6 +830,7 @@ version = "0.1.0"
 dependencies = [
  "cbindgen",
  "libunicode_rust",
+ "memchr",
 ]
 
 [[package]]
