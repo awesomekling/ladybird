@@ -5356,7 +5356,13 @@ impl<'a> MatchEvaluator<'a> {
                 skipped = true;
                 continue;
             }
-            if !self.matches_node(program, operand, node, counters)? {
+            let matches = match program.node(operand) {
+                SelectorOp::Ancestor(inner) if Some(node) != self.scope_shadow_root => {
+                    self.matches_ancestor_node(program, operand, inner, node, counters)?
+                }
+                _ => self.matches_node(program, operand, node, counters)?,
+            };
+            if !matches {
                 return Ok(false);
             }
         }
@@ -5463,6 +5469,11 @@ impl<'a> MatchEvaluator<'a> {
         for &operand in program.operands(first, count) {
             let matches = match program.node(operand) {
                 SelectorOp::Feature(test) => self.matches_feature_node(program, test, node, counters)?,
+                SelectorOp::NthPosition(position)
+                    if self.positional_index_policy == PositionalIndexPolicy::SteppedOnly =>
+                {
+                    self.matches_nth_node(program, position, node, counters)?
+                }
                 _ => self.matches_node(program, operand, node, counters)?,
             };
             if !matches {
@@ -5819,27 +5830,7 @@ impl<'a> MatchEvaluator<'a> {
                     None => Ok(false),
                 }
             }
-            SelectorOp::Ancestor(inner) => {
-                if self.match_workspace.is_some()
-                    && self.transitive_relation_program.get().is_some()
-                    && self.scope_root_instance.get().is_none()
-                    && self.relative_anchor.get().is_none()
-                    && self.scope_shadow_root.is_none()
-                {
-                    return self.matches_transitive_relation(program, id, inner, node, false, counters);
-                }
-                let mut ancestor = self.parent_of(node);
-                while let Some(current) = ancestor {
-                    counters.bump(Counter::CombinatorSteps);
-                    if self.relation_target_may_match(program, inner, current)
-                        && self.matches_relation_target(program, inner, current, counters)?
-                    {
-                        return Ok(true);
-                    }
-                    ancestor = self.parent_of(current);
-                }
-                Ok(false)
-            }
+            SelectorOp::Ancestor(inner) => self.matches_ancestor_node(program, id, inner, node, counters),
             SelectorOp::PreviousSibling(inner) => {
                 counters.bump(Counter::CombinatorSteps);
                 match self.previous_sibling_of(node) {
@@ -5878,26 +5869,7 @@ impl<'a> MatchEvaluator<'a> {
                 }
                 Ok(false)
             }
-            SelectorOp::NthPosition(position) => {
-                let memoizes_answers = self.positional_index_policy == PositionalIndexPolicy::All;
-                if memoizes_answers
-                    && position.of_selector.is_none()
-                    && let Some((workspace, side)) = self.match_workspace
-                    && let Some(answer) = workspace.positional_answer(position, node, side)
-                {
-                    return Ok(answer);
-                }
-                counters.bump(Counter::StructuralTests);
-                let result = self.matches_nth(program, position, node, counters);
-                if memoizes_answers
-                    && position.of_selector.is_none()
-                    && let Some((workspace, side)) = self.match_workspace
-                    && let Ok(answer) = result
-                {
-                    workspace.insert_positional_answer(position, node, side, answer);
-                }
-                result
-            }
+            SelectorOp::NthPosition(position) => self.matches_nth_node(program, position, node, counters),
             // Each shadow operator consumes the relation it names. A generic descendant walk does
             // not pierce a shadow root, and a slot's assignment is not its DOM parent, so these
             // cannot be expressed as ordinary combinators.
@@ -6292,6 +6264,64 @@ impl<'a> MatchEvaluator<'a> {
                         .any(|start| equals(&value[start..start + literal.len()], literal, insensitive))
             }
         }
+    }
+
+    #[inline]
+    fn matches_ancestor_node(
+        &self,
+        program: &SelectorProgram,
+        id: SelectorNodeID,
+        inner: SelectorNodeID,
+        node: StyleNodeID,
+        counters: &mut Counters,
+    ) -> Result<bool, Incomplete> {
+        if self.match_workspace.is_some()
+            && self.transitive_relation_program.get().is_some()
+            && self.scope_root_instance.get().is_none()
+            && self.relative_anchor.get().is_none()
+            && self.scope_shadow_root.is_none()
+        {
+            return self.matches_transitive_relation(program, id, inner, node, false, counters);
+        }
+        let mut ancestor = self.parent_of(node);
+        while let Some(current) = ancestor {
+            counters.bump(Counter::CombinatorSteps);
+            if self.relation_target_may_match(program, inner, current)
+                && self.matches_relation_target(program, inner, current, counters)?
+            {
+                return Ok(true);
+            }
+            ancestor = self.parent_of(current);
+        }
+        Ok(false)
+    }
+
+    #[inline]
+    fn matches_nth_node(
+        &self,
+        program: &SelectorProgram,
+        position: NthPosition,
+        node: StyleNodeID,
+        counters: &mut Counters,
+    ) -> Result<bool, Incomplete> {
+        let memoizes_answers = self.positional_index_policy == PositionalIndexPolicy::All;
+        if memoizes_answers
+            && position.of_selector.is_none()
+            && let Some((workspace, side)) = self.match_workspace
+            && let Some(answer) = workspace.positional_answer(position, node, side)
+        {
+            return Ok(answer);
+        }
+        counters.bump(Counter::StructuralTests);
+        let result = self.matches_nth(program, position, node, counters);
+        if memoizes_answers
+            && position.of_selector.is_none()
+            && let Some((workspace, side)) = self.match_workspace
+            && let Ok(answer) = result
+        {
+            workspace.insert_positional_answer(position, node, side, answer);
+        }
+        result
     }
 
     pub(super) fn matches_nth(
