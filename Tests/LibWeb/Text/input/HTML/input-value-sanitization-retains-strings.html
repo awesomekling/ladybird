@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    test(() => {
+        const input = document.createElement("input");
+        document.body.appendChild(input);
+        const original = "Long input value \uD800 with text";
+        input.value = original;
+        const retained = input.value;
+        input.value = input.value;
+        println(`same value: ${input.value === original}`);
+        input.value = "replacement\r\ntext";
+        println(`newlines removed: ${input.value}`);
+        println(`retained value unchanged: ${retained === original}`);
+
+        for (const [type, value] of [
+            ["text", "\nUnicode \u2603\r\n"],
+            ["password", "\rsecret\nvalue"],
+            ["url", " \nhttps://example.com/\r "],
+            ["email", " \nuser@example.com\r "],
+            ["number", "123.5"],
+            ["number", "not a number"],
+            ["date", "2026-09-06"],
+            ["date", "invalid"],
+        ]) {
+            input.type = type;
+            input.value = value;
+            println(`${type}: ${JSON.stringify(input.value)}`);
+        }
+        input.type = "text";
+        input.value = null;
+        println(`null value: ${JSON.stringify(input.value)}`);
+    });
+</script>

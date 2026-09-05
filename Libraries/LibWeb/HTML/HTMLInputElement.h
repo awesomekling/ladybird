@@ -91,7 +91,7 @@ public:
     Utf16String value() const;
     virtual Utf16String form_value() const override { return value(); }
     virtual Optional<Utf16String> optional_value() const override;
-    WebIDL::ExceptionOr<void> set_value(Utf16View);
+    WebIDL::ExceptionOr<void> set_value(Utf16String const&);
 
     // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#concept-textarea/input-relevant-value
     virtual Utf16String relevant_value() const override;
@@ -355,7 +355,7 @@ private:
     void user_interaction_did_change_input_value(Utf16FlyString const& input_type = {}, Optional<Utf16String> const& data = {});
 
     // https://html.spec.whatwg.org/multipage/input.html#value-sanitization-algorithm
-    Utf16String value_sanitization_algorithm(Utf16View) const;
+    Utf16String value_sanitization_algorithm(Utf16String const&) const;
 
     enum class ValueAttributeMode {
         Value,

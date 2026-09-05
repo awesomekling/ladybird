@@ -763,14 +763,14 @@ WebIDL::ExceptionOr<void> HTMLInputElement::set_relevant_value(Utf16View value)
         if (auto parsed = parse_floating_point_number(value); parsed.has_value() && isfinite(*parsed))
             m_value = convert_number_to_string(*parsed);
     } else {
-        m_value = value_sanitization_algorithm(value);
+        m_value = value_sanitization_algorithm(Utf16String::from_utf16(value));
     }
 
     update_placeholder_visibility();
     return {};
 }
 
-WebIDL::ExceptionOr<void> HTMLInputElement::set_value(Utf16View value)
+WebIDL::ExceptionOr<void> HTMLInputElement::set_value(Utf16String const& value)
 {
     switch (value_attribute_mode()) {
     // https://html.spec.whatwg.org/multipage/input.html#dom-input-value-value
@@ -1942,11 +1942,12 @@ static bool is_valid_simple_color(Utf16View const& value)
 }
 
 // https://html.spec.whatwg.org/multipage/input.html#value-sanitization-algorithm
-Utf16String HTMLInputElement::value_sanitization_algorithm(Utf16View value) const
+Utf16String HTMLInputElement::value_sanitization_algorithm(Utf16String const& string) const
 {
+    auto value = string.utf16_view();
     auto strip_newlines = [&]() {
         if (!value.contains('\r') && !value.contains('\n'))
-            return Utf16String::from_utf16(value);
+            return string;
 
         Utf16StringBuilder builder;
 
@@ -2107,7 +2108,7 @@ Utf16String HTMLInputElement::value_sanitization_algorithm(Utf16View value) cons
         return "#000000"_utf16;
     }
 
-    return Utf16String::from_utf16(value);
+    return string;
 }
 
 // https://html.spec.whatwg.org/multipage/input.html#the-input-element:concept-form-reset-control

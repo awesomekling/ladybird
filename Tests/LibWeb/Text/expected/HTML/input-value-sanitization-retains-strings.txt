@@ -1,0 +1,12 @@
+same value: true
+newlines removed: replacementtext
+retained value unchanged: true
+text: "Unicode ☃"
+password: "secretvalue"
+url: "https://example.com/"
+email: "user@example.com"
+number: "123.5"
+number: ""
+date: "2026-09-06"
+date: ""
+null value: ""
