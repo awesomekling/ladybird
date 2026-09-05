@@ -1663,6 +1663,21 @@ pub(crate) fn value_needs_style_sheet_resource_context(value: &StyleValueData) -
     collect_external_value_dependencies(value).may_need_style_sheet_resource_context
 }
 
+/// # Safety
+/// `values` must have `count` readable entries, each pointing at live Rust-owned style value data.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_style_values_need_style_sheet_resource_context(
+    values: *const *const c_void,
+    count: usize,
+) -> bool {
+    if count == 0 {
+        return false;
+    }
+    unsafe { std::slice::from_raw_parts(values, count) }
+        .iter()
+        .any(|value| value_needs_style_sheet_resource_context(unsafe { &*value.cast::<StyleValueData>() }))
+}
+
 pub(crate) fn external_value_dependencies(value: &StyleValueData) -> ExternalValueDependencies {
     let mut dependencies = collect_external_value_dependencies(value);
     dependencies.inheritance_dependent = crate::css::style_value::value_depends_on_current_color(value)
@@ -6782,6 +6797,33 @@ mod tests {
         };
 
         assert!(external_value_dependencies(&value).uses_random_function);
+    }
+
+    #[test]
+    fn declaration_resource_context_is_only_needed_for_resource_values() {
+        use crate::css::style_value::{ImageResourceContext, RetainedRequestUrlModifierList, RetainedString};
+
+        let number = StyleValueData::Number { value: 500.0 };
+        let image = StyleValueData::Image {
+            url: RetainedString::from_utf8("image.png".to_owned()),
+            url_type: 0,
+            url_modifiers: RetainedRequestUrlModifierList::from_retained_modifiers(Vec::new()),
+            resource_context: ImageResourceContext {
+                base_url: RetainedString::from_utf8(String::new()),
+                has_base_url: false,
+                has_parent_style_sheet_origin_clean: false,
+                parent_style_sheet_origin_clean: false,
+                should_absolutize_url_for_computed_value: false,
+            },
+        };
+        let values = [
+            (&raw const number).cast::<c_void>(),
+            (&raw const image).cast::<c_void>(),
+        ];
+        assert!(!unsafe { rust_style_values_need_style_sheet_resource_context(std::ptr::null(), 0) });
+        assert!(!unsafe { rust_style_values_need_style_sheet_resource_context(values.as_ptr(), 1) });
+        assert!(unsafe { rust_style_values_need_style_sheet_resource_context(values.as_ptr(), values.len()) });
+        assert!(unsafe { rust_style_values_need_style_sheet_resource_context(values[1..].as_ptr(), 1) });
     }
 
     #[test]

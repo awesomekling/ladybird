@@ -211,14 +211,15 @@ void StyleEngine::set_rule_declared_properties(StyleEngineRuleID rule, ReadonlyS
     VERIFY(custom_names.size() == custom_operators.size());
     VERIFY(custom_names.size() == custom_values.size());
     VERIFY(custom_names.size() == custom_original_values.size());
-    auto base_url = style_sheet ? style_sheet_resource_base_url(*style_sheet) : String {};
+    auto needs_resource_context = style_sheet && ComputedValuesFFI::rust_style_values_need_style_sheet_resource_context(values.data(), values.size());
+    auto base_url = needs_resource_context ? style_sheet_resource_base_url(*style_sheet) : String {};
     ComputedValuesFFI::FfiStyleSheetResourceContext resource_context {
         .base_url = base_url.bytes().data(),
         .base_url_length = base_url.bytes().size(),
-        .has_value = style_sheet != nullptr,
-        .origin_clean = style_sheet && style_sheet->is_origin_clean(),
+        .has_value = needs_resource_context,
+        .origin_clean = needs_resource_context && style_sheet->is_origin_clean(),
     };
-    StyleEngineFFI::style_engine_set_rule_declared_properties(m_impl, rule.value(), properties.data(), important.data(), operators.data(), values.data(), original_values.data(), properties.size(), reinterpret_cast<u32 const*>(custom_names.data()), custom_important.data(), custom_operators.data(), custom_values.data(), custom_original_values.data(), custom_names.size(), declarations_are_complete, &resource_context);
+    StyleEngineFFI::style_engine_set_rule_declared_properties(m_impl, rule.value(), properties.data(), important.data(), operators.data(), values.data(), original_values.data(), properties.size(), reinterpret_cast<u32 const*>(custom_names.data()), custom_important.data(), custom_operators.data(), custom_values.data(), custom_original_values.data(), custom_names.size(), declarations_are_complete, needs_resource_context ? &resource_context : nullptr);
 }
 
 void StyleEngine::set_element_declared_properties(StyleNodeID node, StyleEngineFFI::FfiElementDeclarationKind kind, ReadonlySpan<u16> properties, ReadonlySpan<bool> important, ReadonlySpan<StyleEngineFFI::FfiCascadeOperator> operators, ReadonlySpan<void const*> values, ReadonlySpan<void const*> original_values, ReadonlySpan<StyleAtomID> custom_names, ReadonlySpan<bool> custom_important, ReadonlySpan<StyleEngineFFI::FfiCascadeOperator> custom_operators, ReadonlySpan<void const*> custom_values, ReadonlySpan<void const*> custom_original_values, bool declarations_are_complete)
