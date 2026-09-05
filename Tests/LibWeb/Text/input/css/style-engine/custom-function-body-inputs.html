@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style id="definitions">
+    @function --size() {
+        result: 10px;
+        @media all { result: 20px; }
+        @supports (width: 1px) { @media all { result: 30px; } }
+    }
+</style>
+<style>#target { width: --size(); }</style>
+<div id="container" style="width: 100px"><div id="target"></div></div>
+<script>
+    test(() => {
+        for (let index = 0; index < 64; ++index)
+            container.appendChild(document.createElement("div"));
+        internals.updateStyle();
+        const definition = definitions.sheet.cssRules[0];
+        const results = [];
+        function change(label, callback) {
+            const before = internals.getStyleInvalidationCounters();
+            callback();
+            internals.updateStyle();
+            const after = internals.getStyleInvalidationCounters();
+            results.push(`${label}: ${getComputedStyle(target).width}`);
+            results.push(`${label} environment unchanged: ${after.styleEnvironmentVersion === before.styleEnvironmentVersion}`);
+            results.push(`${label} selective: ${after.elementStyleRecomputations - before.elementStyleRecomputations < 16}`);
+        }
+        results.push(`initial: ${getComputedStyle(target).width}`);
+        change("nested result setter", () => definition.cssRules[2].cssRules[0].cssRules[0].style.result = "31px");
+        change("remove nested body", () => definition.cssRules[2].deleteRule(0));
+        change("remove group", () => definition.deleteRule(1));
+        change("insert empty body", () => definition.insertRule("@media all {}", 1));
+        change("remove inserted body", () => definition.deleteRule(1));
+        const descriptors = definition.cssRules[0].style;
+        change("result setter", () => descriptors.result = "40px");
+        change("setProperty", () => descriptors.setProperty("result", "50px"));
+        change("cssText", () => descriptors.cssText = "result: 60px;");
+        change("removeProperty", () => descriptors.removeProperty("result"));
+        change("restore result", () => descriptors.result = "70px");
+        change("remove declaration block", () => definition.deleteRule(0));
+        change("detached result setter", () => descriptors.result = "90px");
+        results.forEach(println);
+    });
+</script>

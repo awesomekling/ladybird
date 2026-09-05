@@ -13,6 +13,15 @@
 
 namespace Web::CSS {
 
+static CSSRule* containing_custom_function(CSSRule& rule)
+{
+    for (auto* ancestor = &rule; ancestor; ancestor = ancestor->parent_rule()) {
+        if (ancestor->type() == CSSRule::Type::Function)
+            return ancestor;
+    }
+    return nullptr;
+}
+
 CSSGroupingRule::CSSGroupingRule(CSSRuleList& rules, Type type)
     : CSSRule(type)
     , m_rules(rules)
@@ -38,6 +47,9 @@ void CSSGroupingRule::clear_caches()
 // https://drafts.csswg.org/cssom/#dom-cssgroupingrule-insertrule
 WebIDL::ExceptionOr<u32> CSSGroupingRule::insert_rule(Utf16View rule, u32 index)
 {
+    if (auto* function_rule = containing_custom_function(*this))
+        flush_deferred_style_change_events_for_rule(*function_rule);
+
     // The insertRule(rule, index) method must return the result of invoking insert a CSS rule rule into the child CSS
     // rules at index, with the nested flag set.
     HashTable<Utf16FlyString> declared_namespaces;
@@ -48,7 +60,10 @@ WebIDL::ExceptionOr<u32> CSSGroupingRule::insert_rule(Utf16View rule, u32 index)
     // AD-HOC: The spec doesn't say where to set the parent rule, so we'll do it here.
     m_rules->item(index)->set_parent_rule(this);
     if (auto* sheet = parent_style_sheet()) {
-        record_style_rule_inserted(*m_rules->item(index));
+        if (auto* function_rule = containing_custom_function(*this))
+            record_style_rule_declarations_changed(*function_rule);
+        else
+            record_style_rule_inserted(*m_rules->item(index));
         sheet->invalidate_owners();
         sheet->synchronize_fonts_after_rule_change();
     }
@@ -57,10 +72,15 @@ WebIDL::ExceptionOr<u32> CSSGroupingRule::insert_rule(Utf16View rule, u32 index)
 
 WebIDL::ExceptionOr<void> CSSGroupingRule::delete_rule(u32 index)
 {
+    if (auto* function_rule = containing_custom_function(*this))
+        flush_deferred_style_change_events_for_rule(*function_rule);
+
     auto removed_rule = m_rules->item(index);
     TRY(m_rules->remove_a_css_rule(index));
     if (auto* sheet = parent_style_sheet()) {
-        if (removed_rule)
+        if (auto* function_rule = containing_custom_function(*this))
+            record_style_rule_declarations_changed(*function_rule);
+        else if (removed_rule)
             record_style_rule_removed(*sheet, *removed_rule);
         sheet->invalidate_owners();
         sheet->synchronize_fonts_after_rule_change();

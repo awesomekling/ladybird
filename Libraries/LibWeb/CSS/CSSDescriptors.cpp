@@ -6,14 +6,27 @@
 
 #include <AK/Utf16StringBuilder.h>
 #include <LibWeb/CSS/CSSDescriptors.h>
+#include <LibWeb/CSS/CSSRule.h>
+#include <LibWeb/CSS/CSSStyleSheet.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/Serialize.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleValues/ShorthandStyleValue.h>
 #include <LibWeb/Infra/Strings.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 
 namespace Web::CSS {
+
+static void invalidate_function_descriptor_owners(CSSDescriptors& descriptors)
+{
+    auto rule = descriptors.parent_rule();
+    if (!rule || rule->type() != CSSRule::Type::FunctionDeclarations)
+        return;
+    record_style_rule_declarations_changed(*rule);
+    if (auto* sheet = rule->parent_style_sheet())
+        sheet->invalidate_owners();
+}
 
 CSSDescriptors::CSSDescriptors(AtRuleID at_rule_id, Vector<Descriptor> descriptors)
     : CSSStyleDeclaration(Computed::No, Readonly::No)
@@ -104,6 +117,8 @@ WebIDL::ExceptionOr<void> CSSDescriptors::set_property_internal(Utf16FlyString c
     if (!component_value_list)
         return {};
 
+    prepare_to_update_style_attribute();
+
     // 7. Let updated be false.
     auto updated = false;
 
@@ -130,8 +145,10 @@ WebIDL::ExceptionOr<void> CSSDescriptors::set_property_internal(Utf16FlyString c
     }
 
     // 10. If updated is true, update style attribute for the CSS declaration block.
-    if (updated)
+    if (updated) {
         update_style_attribute();
+        invalidate_function_descriptor_owners(*this);
+    }
 
     return {};
 }
@@ -151,6 +168,8 @@ WebIDL::ExceptionOr<Utf16String> CSSDescriptors::remove_property(Utf16FlyString 
 
     // 3. Let value be the return value of invoking getPropertyValue() with property as argument.
     auto value = get_property_value(property);
+
+    prepare_to_update_style_attribute();
 
     // 4. Let removed be false.
     bool removed = false;
@@ -173,8 +192,10 @@ WebIDL::ExceptionOr<Utf16String> CSSDescriptors::remove_property(Utf16FlyString 
     }
 
     // 7. If removed is true, Update style attribute for the CSS declaration block.
-    if (removed)
+    if (removed) {
         update_style_attribute();
+        invalidate_function_descriptor_owners(*this);
+    }
 
     // 8. Return value.
     return value;
@@ -258,6 +279,8 @@ WebIDL::ExceptionOr<void> CSSDescriptors::set_css_text(Utf16View value)
     if (is_readonly())
         return WebIDL::NoModificationAllowedError::create("Cannot modify properties of readonly CSSStyleDeclaration"_utf16);
 
+    prepare_to_update_style_attribute();
+
     // 2. Empty the declarations.
     m_descriptors.clear();
 
@@ -269,6 +292,7 @@ WebIDL::ExceptionOr<void> CSSDescriptors::set_css_text(Utf16View value)
 
     // 4. Update style attribute for the CSS declaration block.
     update_style_attribute();
+    invalidate_function_descriptor_owners(*this);
 
     return {};
 }

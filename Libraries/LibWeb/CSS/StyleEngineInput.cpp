@@ -1944,6 +1944,7 @@ static bool rule_change_needs_style_environment_bump(CSSRule const& rule)
     case CSSRule::Type::Keyframes:
     case CSSRule::Type::FontFace:
     case CSSRule::Type::Function:
+    case CSSRule::Type::FunctionDeclarations:
     case CSSRule::Type::CounterStyle:
     case CSSRule::Type::FontFeatureValues:
         return false;
@@ -2127,6 +2128,13 @@ void record_style_rule_declarations_changed(CSSRule& rule)
     auto* changed_rule = &rule;
     if (is<CSSKeyframeRule>(rule)) {
         changed_rule = rule.parent_rule();
+        if (!changed_rule)
+            return;
+    }
+    if (rule.type() == CSSRule::Type::FunctionDeclarations) {
+        changed_rule = rule.parent_rule();
+        while (changed_rule && !is<CSSFunctionRule>(*changed_rule))
+            changed_rule = changed_rule->parent_rule();
         if (!changed_rule)
             return;
     }

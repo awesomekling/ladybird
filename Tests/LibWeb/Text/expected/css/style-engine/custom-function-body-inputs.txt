@@ -1,0 +1,37 @@
+initial: 30px
+nested result setter: 31px
+nested result setter environment unchanged: true
+nested result setter selective: true
+remove nested body: 20px
+remove nested body environment unchanged: true
+remove nested body selective: true
+remove group: 10px
+remove group environment unchanged: true
+remove group selective: true
+insert empty body: 10px
+insert empty body environment unchanged: true
+insert empty body selective: true
+remove inserted body: 10px
+remove inserted body environment unchanged: true
+remove inserted body selective: true
+result setter: 40px
+result setter environment unchanged: true
+result setter selective: true
+setProperty: 50px
+setProperty environment unchanged: true
+setProperty selective: true
+cssText: 60px
+cssText environment unchanged: true
+cssText selective: true
+removeProperty: 100px
+removeProperty environment unchanged: true
+removeProperty selective: true
+restore result: 70px
+restore result environment unchanged: true
+restore result selective: true
+remove declaration block: 100px
+remove declaration block environment unchanged: true
+remove declaration block selective: true
+detached result setter: 100px
+detached result setter environment unchanged: true
+detached result setter selective: true

@@ -22,6 +22,7 @@ CSSFunctionDeclarations::CSSFunctionDeclarations(GC::Ref<CSSFunctionDescriptors>
     : CSSRule(Type::FunctionDeclarations)
     , m_style(style)
 {
+    m_style->set_parent_rule(*this);
 }
 
 void CSSFunctionDeclarations::visit_edges(GC::Cell::Visitor& visitor)
