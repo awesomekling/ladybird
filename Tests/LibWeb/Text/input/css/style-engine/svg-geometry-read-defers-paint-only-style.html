@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    #target.paint-only { background-color: red; }
+    #target.geometry { d: path("M0,0 L30,20"); }
+</style>
+<svg id="container" width="100" height="100">
+    <path id="target" d="M0,0 L10,10" />
+</svg>
+<script>
+    test(() => {
+        const results = [];
+        target.getBBox();
+        internals.resetStyleInvalidationCounters();
+        for (let index = 0; index < 100; ++index)
+            target.getBBox();
+        results.push(`clean reads skip style updates: ${internals.getStyleInvalidationCounters().styleStabilizationEpochs === 0}`);
+
+        target.classList.add("paint-only");
+        results.push(`paint-only geometry: ${target.getBBox().width}`);
+        results.push(`paint-only style deferred: ${internals.getStyleInvalidationCounters().styleStabilizationEpochs === 0}`);
+        results.push(`deferred background is observable: ${getComputedStyle(target).backgroundColor}`);
+
+        target.setAttribute("d", "M0,0 L20,15");
+        let bounds = target.getBBox();
+        results.push(`attribute geometry: ${bounds.width}x${bounds.height}`);
+        target.classList.add("geometry");
+        bounds = target.getBBox();
+        results.push(`CSS geometry: ${bounds.width}x${bounds.height}`);
+        container.style.display = "none";
+        results.push(`hidden geometry: ${target.getBBox().width}`);
+        container.style.removeProperty("display");
+        results.push(`restored geometry: ${target.getBBox().width}`);
+        results.forEach(println);
+    });
+</script>

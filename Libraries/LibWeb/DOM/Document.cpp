@@ -2089,7 +2089,8 @@ void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutRe
         || reason == UpdateLayoutReason::ElementClientWidth
         || reason == UpdateLayoutReason::ElementClientHeight
         || reason == UpdateLayoutReason::HTMLElementOffsetWidth
-        || reason == UpdateLayoutReason::HTMLElementOffsetHeight;
+        || reason == UpdateLayoutReason::HTMLElementOffsetHeight
+        || reason == UpdateLayoutReason::SVGGraphicsElementGetBBox;
     if (reads_layout_geometry
         && m_has_completed_style_update
         && layout_is_up_to_date()
