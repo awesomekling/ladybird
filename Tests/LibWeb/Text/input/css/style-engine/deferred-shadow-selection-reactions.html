@@ -1,15 +1,17 @@
 <!DOCTYPE html>
 <script src="../../include.js"></script>
 <div id="host"></div>
+<div id="control"></div>
 <script>
     test(() => {
         const shadow = host.attachShadow({ mode: "open" });
+        const container = shadow.appendChild(document.createElement("div"));
         for (let index = 0; index < 64; ++index) {
-            const child = shadow.appendChild(document.createElement("div"));
+            const child = container.appendChild(document.createElement("div"));
             child.textContent = "selectable text";
             child.className = "target";
         }
-        const target = shadow.firstElementChild;
+        const target = container.firstElementChild;
         const first = new CSSStyleSheet();
         const second = new CSSStyleSheet();
         first.replaceSync("::selection { color: red; }");
@@ -30,11 +32,39 @@
         change("declarations", () => first.cssRules[0].style.color = "orange");
         change("replacement", () => first.replaceSync(".target::selection { color: purple; }"));
         change("detach", () => shadow.adoptedStyleSheets = [second]);
+        function mixedChange(label, callback, opacity, element = control) {
+            const before = internals.getStyleInvalidationCounters().elementStyleRecomputations;
+            callback();
+            element.style.opacity = opacity;
+            internals.updateStyle();
+            const after = internals.getStyleInvalidationCounters().elementStyleRecomputations;
+            results.push(`${label} only recomputes the inline-style target: ${after - before === 1}`);
+            results.push(`${label} opacity: ${getComputedStyle(element).opacity}`);
+            results.push(`${label} selection: ${getComputedStyle(target, "::selection").color}`);
+        }
+        mixedChange("mixed attachment", () => shadow.adoptedStyleSheets = [second, first], "0.5");
+        mixedChange("mixed declarations", () => first.cssRules[0].style.color = "orange", "0.25");
+        mixedChange("mixed detach", () => shadow.adoptedStyleSheets = [second], "0.75");
+        mixedChange("mixed same target", () => second.cssRules[0].style.color = "purple", "0.5", target);
+        change("ancestor selector", () => second.replaceSync(".active .target::selection { color: green; }"));
+        change("ancestor class", () => container.className = "active");
+        change("ancestor class removal", () => container.className = "");
+        change("ancestor attribute selector", () => second.replaceSync("[data-active] .target::selection { color: green; }"));
+        change("ancestor attribute", () => container.setAttribute("data-active", ""));
+        change("ancestor attribute removal", () => container.removeAttribute("data-active"));
+        second.replaceSync(".active .target { color: green; } .active .target::selection { color: red; }");
+        internals.updateStyle();
+        container.className = "active";
+        internals.updateStyle();
+        results.push(`ordinary class dependency: ${getComputedStyle(target).color}`);
+        results.push(`ordinary class dependency selection: ${getComputedStyle(target, "::selection").color}`);
+        second.replaceSync("::selection { color: blue; }");
+        internals.updateStyle();
         const range = document.createRange();
-        range.selectNodeContents(shadow.lastElementChild);
+        range.selectNodeContents(container.lastElementChild);
         document.getSelection().addRange(range);
         internals.updateStyle();
-        results.push(`activated selection: ${getComputedStyle(shadow.lastElementChild, "::selection").color}`);
+        results.push(`activated selection: ${getComputedStyle(container.lastElementChild, "::selection").color}`);
         document.getSelection().removeAllRanges();
         results.forEach(println);
     });

@@ -9,20 +9,55 @@ use super::*;
 const MIN_SHARED_CASCADE_COMPLETION_BATCH: usize = 16;
 
 impl StyleEngine {
-    fn transaction_only_changes_deferred_pseudo_element(&self, transaction: &StyleTransaction) -> bool {
+    fn transaction_only_changes_deferred_pseudo_element_or_direct_inputs(
+        &self,
+        transaction: &StyleTransaction,
+    ) -> bool {
         let Some(deferred) = self.deferred_pseudo_element else {
             return false;
         };
+        let program_is_deferred = |program| {
+            self.programs
+                .get(program)
+                .entries()
+                .iter()
+                .all(|entry| entry.pseudo_element.is_some_and(|target| target.kind == deferred))
+        };
         if !transaction.markers.is_empty()
-            || transaction.program_joins.is_empty()
-            || !transaction.inputs.iter().all(|input| {
-                matches!(
-                    input.key,
-                    InputKey::SheetAttachment(..)
-                        | InputKey::SheetActivation(..)
-                        | InputKey::RuleField(..)
-                        | InputKey::CascadeTopology(..)
+            || !transaction.inputs.iter().all(|input| match input.key {
+                InputKey::SheetAttachment(..)
+                | InputKey::SheetActivation(..)
+                | InputKey::RuleField(..)
+                | InputKey::CascadeTopology(..)
+                | InputKey::ElementDeclaration(..)
+                | InputKey::ElementStyleInput(..) => true,
+                InputKey::LocalFeature(
+                    _,
+                    LocalFeatureKey::Id
+                    | LocalFeatureKey::Class(_)
+                    | LocalFeatureKey::CustomState(_)
+                    | LocalFeatureKey::Attribute(_),
                 )
+                | InputKey::State(..) => {
+                    let mut keys = routing_keys_for_input(input);
+                    if let InputKey::LocalFeature(_, LocalFeatureKey::Attribute(name)) = input.key {
+                        for other in self.facts.attribute_name_keys(name) {
+                            if other != name {
+                                keys.push(RoutingKey::AttributeName(other));
+                            }
+                        }
+                    }
+                    keys.into_iter().all(|key| {
+                        self.routing.routes_for(key).iter().all(|&route| {
+                            let rule = self.routing.rule_of(route);
+                            let (program, _) = self.programs.entry_location(self.routing.route(route).entry);
+                            !self.program.rule_can_decide(rule)
+                                || self.program.rule_version(rule).selector_program != Some(program)
+                                || program_is_deferred(program)
+                        })
+                    })
+                }
+                _ => false,
             })
         {
             return false;
@@ -33,13 +68,7 @@ impl StyleEngine {
                 && [delta.before_program, delta.after_program]
                     .into_iter()
                     .flatten()
-                    .all(|program| {
-                        self.programs
-                            .get(program)
-                            .entries()
-                            .iter()
-                            .all(|entry| entry.pseudo_element.is_some_and(|target| target.kind == deferred))
-                    })
+                    .all(program_is_deferred)
         })
     }
 
@@ -812,7 +841,8 @@ impl StyleEngine {
         let style_input_reaction_bytes = (style_input_reactions.capacity() * size_of::<(StyleNodeID, u8, u8)>()) as u64;
         self.memory
             .reserve_required(MemoryCategory::BatchScratch, style_input_reaction_bytes);
-        let only_deferred_pseudo_element_changed = self.transaction_only_changes_deferred_pseudo_element(&transaction);
+        let only_deferred_pseudo_element_changed =
+            self.transaction_only_changes_deferred_pseudo_element_or_direct_inputs(&transaction);
         self.release_transaction_and_sweep_atoms(transaction);
         // Releasing staging can compact primary payloads. Take the shared view afterwards so that
         // compaction does not need to copy the complete primary arrangement away from its view.

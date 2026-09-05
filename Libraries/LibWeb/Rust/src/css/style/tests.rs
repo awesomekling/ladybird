@@ -3061,6 +3061,89 @@ fn deferred_pseudo_program_changes_do_not_need_retained_answers() {
 }
 
 #[test]
+fn deferred_pseudo_state_changes_preserve_direct_element_inputs() {
+    for direct_input in 0..3 {
+        let (mut engine, nodes) = nested_document();
+        let target = StyleAtomID(200);
+        let pseudo = PseudoElementTarget::new(PseudoElementKind(0));
+        let mut builder = selector::SelectorProgramBuilder::new();
+        let hover = builder.push(selector::SelectorOp::State(StateFact::Hover));
+        let ancestor = builder.push_ancestor(hover);
+        let subject = builder.push_feature(selector::FeatureTest::Class(target));
+        let selector = builder.push_compound(&[subject, ancestor]);
+        builder.push_entry_for_pseudo(selector, Some(pseudo));
+        let program = engine.programs.add(builder.finish());
+        let sheet = engine.add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
+        engine.attach_sheet(sheet, TreeScopeID::DOCUMENT);
+        let rule = engine.append_rule(sheet, None, RuleKind::Style);
+        engine.add_routing_rule(rule, program);
+        let mut version = engine.program.rule_version(rule);
+        version.selector_program = Some(program);
+        version.declaration_block = Some(DeclarationBlockID(1));
+        engine.replace_rule_version(rule, version);
+        engine.set_rule_declared_properties(rule, &[(1, false)], true);
+        add_feature(&mut engine, nodes[2], LocalFeatureKey::Class(target));
+        add_feature(&mut engine, nodes[3], LocalFeatureKey::Class(target));
+        discard_transaction(&mut engine);
+        engine.deferred_pseudo_element = Some(pseudo.kind);
+        engine.record_input(
+            InputKey::State(nodes[1], StateFact::Hover),
+            InputValue::State(false),
+            InputValue::State(true),
+        );
+        match direct_input {
+            1 => engine.record_input(
+                InputKey::ElementDeclaration(nodes[2], ElementDeclarationKind::InlineStyle),
+                InputValue::ElementDeclaration(None),
+                InputValue::ElementDeclaration(Some(DeclarationBlockID(2))),
+            ),
+            2 => engine.record_input(
+                InputKey::ElementStyleInput(nodes[2]),
+                InputValue::ElementStyleInput {
+                    reaction: 0,
+                    inherited_style_groups: 0,
+                },
+                InputValue::ElementStyleInput {
+                    reaction: transaction::STYLE_REACTION_RECOMPUTE_STYLE,
+                    inherited_style_groups: 0,
+                },
+            ),
+            _ => {}
+        }
+        let mut published = Vec::new();
+        assert!(engine.take_style_transaction(nodes[0], |_, _, reactions| {
+            published.extend(reactions.iter().map(|reaction| reaction.style_node));
+        }));
+        if direct_input == 0 {
+            assert!(published.is_empty());
+        } else {
+            assert_eq!(published, vec![nodes[2].raw()]);
+        }
+        engine.begin_adaptive_cold_matching_batch(nodes[0]);
+        assert!(
+            engine
+                .match_element_for_cascade(nodes[3])
+                .unwrap()
+                .iter()
+                .any(|matched| matched.rule == rule)
+        );
+        engine.end_cold_matching_batch();
+        engine.deferred_pseudo_element = None;
+        engine.record_input(
+            InputKey::State(nodes[1], StateFact::Hover),
+            InputValue::State(true),
+            InputValue::State(false),
+        );
+        published.clear();
+        assert!(engine.take_style_transaction(nodes[0], |_, _, reactions| {
+            published.extend(reactions.iter().map(|reaction| reaction.style_node));
+        }));
+        assert!(published.contains(&nodes[2].raw()));
+        assert!(published.contains(&nodes[3].raw()));
+    }
+}
+
+#[test]
 fn an_evicted_retained_match_answer_falls_back_to_cold_matching() {
     let (mut engine, nodes) = linear_document();
     let target = StyleAtomID(200);

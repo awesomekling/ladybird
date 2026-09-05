@@ -10,4 +10,30 @@ replacement emits no element reactions: true
 replacement selection: rgb(128, 0, 128)
 detach emits no element reactions: true
 detach selection: rgb(0, 0, 255)
+mixed attachment only recomputes the inline-style target: true
+mixed attachment opacity: 0.5
+mixed attachment selection: rgb(128, 0, 128)
+mixed declarations only recomputes the inline-style target: true
+mixed declarations opacity: 0.25
+mixed declarations selection: rgb(255, 165, 0)
+mixed detach only recomputes the inline-style target: true
+mixed detach opacity: 0.75
+mixed detach selection: rgb(0, 0, 255)
+mixed same target only recomputes the inline-style target: true
+mixed same target opacity: 0.5
+mixed same target selection: rgb(128, 0, 128)
+ancestor selector emits no element reactions: true
+ancestor selector selection: rgb(0, 0, 0)
+ancestor class emits no element reactions: true
+ancestor class selection: rgb(0, 128, 0)
+ancestor class removal emits no element reactions: true
+ancestor class removal selection: rgb(0, 0, 0)
+ancestor attribute selector emits no element reactions: true
+ancestor attribute selector selection: rgb(0, 0, 0)
+ancestor attribute emits no element reactions: true
+ancestor attribute selection: rgb(0, 128, 0)
+ancestor attribute removal emits no element reactions: true
+ancestor attribute removal selection: rgb(0, 0, 0)
+ordinary class dependency: rgb(0, 128, 0)
+ordinary class dependency selection: rgb(255, 0, 0)
 activated selection: rgb(0, 0, 255)
