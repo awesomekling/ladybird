@@ -4974,43 +4974,6 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
         sharing ? &sharing->computation_reads_element_context : nullptr);
     if (new_style_input_record)
         new_style_input_record->bind_next_published_style = true;
-    static bool const verify_computed_closure = getenv("LIBWEB_VERIFY_COMPUTED_CLOSURE") != nullptr;
-    if (verify_computed_closure && computed_group_mask != ComputedValues::all_style_groups) {
-        auto custom_property_data = abstract_element.custom_property_data();
-        auto counters = document().style_invalidation_counters();
-        auto fully_computed_properties = compute_properties(
-            abstract_element, cascaded_properties, cascade_input.matching_pseudo_element_styles,
-            nullptr, {}, ComputedValues::all_style_groups, false, true);
-        auto partially_computed_values = build_computed_values(*computed_properties, abstract_element, style_scope);
-        auto fully_computed_values = build_computed_values(*fully_computed_properties, abstract_element, style_scope);
-        document().style_invalidation_counters() = counters;
-        abstract_element.set_custom_property_data(move(custom_property_data));
-        auto partially_computed_longhands = partially_computed_values->computed_longhand_values();
-        auto fully_computed_longhands = fully_computed_values->computed_longhand_values();
-        VERIFY(partially_computed_longhands.size() == number_of_longhand_properties);
-        VERIFY(fully_computed_longhands.size() == number_of_longhand_properties);
-        for (auto i = to_underlying(first_longhand_property_id); i <= to_underlying(last_longhand_property_id); ++i) {
-            auto property_id = static_cast<PropertyID>(i);
-            auto index = i - to_underlying(first_longhand_property_id);
-            auto const* partial_value = static_cast<StyleValueFFI::StyleValueData const*>(partially_computed_longhands[index]);
-            auto const* full_value = static_cast<StyleValueFFI::StyleValueData const*>(fully_computed_longhands[index]);
-            VERIFY(partial_value);
-            VERIFY(full_value);
-            bool values_are_equal = partial_value == full_value || StyleValueFFI::rust_style_value_equals(partial_value, full_value);
-            if (!values_are_equal) {
-                auto partial_wrapper = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(partial_value));
-                auto full_wrapper = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(full_value));
-                dbgln("computed closure differs on {}: partial {}, full {} (element {} id={})", string_from_property_id(property_id), partial_wrapper->to_string(SerializationMode::Normal), full_wrapper->to_string(SerializationMode::Normal), abstract_element.element().tag_name(), abstract_element.element().id().value_or(Utf16FlyString {}));
-            }
-            VERIFY(values_are_equal);
-            if (partially_computed_values->is_property_important(property_id) != fully_computed_values->is_property_important(property_id))
-                dbgln("computed closure importance differs on {}: partial {}, full {}", string_from_property_id(property_id), partially_computed_values->is_property_important(property_id), fully_computed_values->is_property_important(property_id));
-            VERIFY(partially_computed_values->is_property_important(property_id) == fully_computed_values->is_property_important(property_id));
-            if (partially_computed_values->is_property_inherited(property_id) != fully_computed_values->is_property_inherited(property_id))
-                dbgln("computed closure inheritance differs on {}: partial {}, full {}", string_from_property_id(property_id), partially_computed_values->is_property_inherited(property_id), fully_computed_values->is_property_inherited(property_id));
-            VERIFY(partially_computed_values->is_property_inherited(property_id) == fully_computed_values->is_property_inherited(property_id));
-        }
-    }
     // The environment is compared against the one this computation replaced, which is the resolved
     // one: the cascade's own comparison sees the values before substitution, so a computation whose
     // `var()`s resolve to what they resolved to last time is only recognisable here.
@@ -5193,6 +5156,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         Vector<TransitionProperties> transitions;
         bool transition_delay_and_duration_are_single_zero { false };
         u64 container_relative_length_unit_mask { 0 };
+        u32 computed_group_mask { ComputedValues::all_style_groups };
 
         explicit NativeLonghandState(NonnullRefPtr<ComputedStyleWorkingSet> working_set)
             : working_set(move(working_set))
@@ -5319,6 +5283,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             auto working_set = CSS::ComputedStyleWorkingSet::create_with_longhand_table(longhand_table);
             context.state = make<NativeLonghandState>(move(working_set));
             auto& state = *context.state;
+            state.computed_group_mask = computed_group_mask;
             auto& computed_style = *state.working_set;
             computed_style.set_has_pseudo_element_styles(context.matching_pseudo_element_styles);
 
@@ -5595,7 +5560,47 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 style_computer.m_root_element_font_metrics = style_computer.calculate_root_element_font_metrics(computed_style);
                 style_computer.m_root_element_font_metrics_depend_on_viewport_metrics = computed_style.font_metrics_depend_on_viewport_metrics();
             }
-            style_computer.clear_computation_context_caches(); },
+            style_computer.clear_computation_context_caches();
+            static bool const verify_computed_closure = getenv("LIBWEB_VERIFY_COMPUTED_CLOSURE") != nullptr;
+            if (verify_computed_closure && !context.stop_after_longhand_drive && state.computed_group_mask != ComputedValues::all_style_groups) {
+                auto abstract_element = context.abstract_element;
+                auto& style_scope = abstract_element.style_scope();
+                auto custom_property_data = abstract_element.custom_property_data();
+                auto counters = style_computer.document().style_invalidation_counters();
+                auto fully_computed_properties = style_computer.compute_properties(
+                    abstract_element, context.cascaded_properties, context.matching_pseudo_element_styles,
+                    nullptr, {}, ComputedValues::all_style_groups, false, true);
+                auto partial_snapshot = ComputedStyleWorkingSet::create_with_base_values_from(computed_style);
+                auto partially_computed_values = style_computer.build_computed_values(*partial_snapshot, abstract_element, style_scope);
+                auto fully_computed_values = style_computer.build_computed_values(*fully_computed_properties, abstract_element, style_scope);
+                style_computer.document().style_invalidation_counters() = counters;
+                abstract_element.set_custom_property_data(move(custom_property_data));
+                auto partially_computed_longhands = partially_computed_values->computed_longhand_values();
+                auto fully_computed_longhands = fully_computed_values->computed_longhand_values();
+                VERIFY(partially_computed_longhands.size() == number_of_longhand_properties);
+                VERIFY(fully_computed_longhands.size() == number_of_longhand_properties);
+                for (auto property_index = to_underlying(first_longhand_property_id); property_index <= to_underlying(last_longhand_property_id); ++property_index) {
+                    auto property_id = static_cast<PropertyID>(property_index);
+                    auto index = property_index - to_underlying(first_longhand_property_id);
+                    auto const* partial_value = static_cast<StyleValueFFI::StyleValueData const*>(partially_computed_longhands[index]);
+                    auto const* full_value = static_cast<StyleValueFFI::StyleValueData const*>(fully_computed_longhands[index]);
+                    VERIFY(partial_value);
+                    VERIFY(full_value);
+                    bool values_are_equal = partial_value == full_value || StyleValueFFI::rust_style_value_equals(partial_value, full_value);
+                    if (!values_are_equal) {
+                        auto partial_wrapper = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(partial_value));
+                        auto full_wrapper = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(full_value));
+                        dbgln("computed closure differs on {}: partial {}, full {} (element {} id={})", string_from_property_id(property_id), partial_wrapper->to_string(SerializationMode::Normal), full_wrapper->to_string(SerializationMode::Normal), abstract_element.element().tag_name(), abstract_element.element().id().value_or(Utf16FlyString {}));
+                    }
+                    VERIFY(values_are_equal);
+                    if (partially_computed_values->is_property_important(property_id) != fully_computed_values->is_property_important(property_id))
+                        dbgln("computed closure importance differs on {}: partial {}, full {}", string_from_property_id(property_id), partially_computed_values->is_property_important(property_id), fully_computed_values->is_property_important(property_id));
+                    VERIFY(partially_computed_values->is_property_important(property_id) == fully_computed_values->is_property_important(property_id));
+                    if (partially_computed_values->is_property_inherited(property_id) != fully_computed_values->is_property_inherited(property_id))
+                        dbgln("computed closure inheritance differs on {}: partial {}, full {}", string_from_property_id(property_id), partially_computed_values->is_property_inherited(property_id), fully_computed_values->is_property_inherited(property_id));
+                    VERIFY(partially_computed_values->is_property_inherited(property_id) == fully_computed_values->is_property_inherited(property_id));
+                }
+            } },
         .process_animation_definitions = [](void* context_pointer) {
             auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
             context.style_computer->process_animation_definitions(*context.state->working_set, context.cascaded_properties, context.abstract_element, context.state->animation_definitions.span());
