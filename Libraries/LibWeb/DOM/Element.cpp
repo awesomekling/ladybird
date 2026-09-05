@@ -292,7 +292,8 @@ static void invalidate_content_blocker_style_if_needed(Element& element)
     element.document().page().invalidate_user_style();
 }
 
-static void for_each_ascii_whitespace_separated_token(Utf16View input, Function<IterationDecision(Utf16View)> const& callback)
+template<typename Callback>
+static void for_each_ascii_whitespace_separated_token(Utf16View input, Callback callback)
 {
     size_t start = 0;
     for (size_t i = 0; i <= input.length_in_code_units(); ++i) {
