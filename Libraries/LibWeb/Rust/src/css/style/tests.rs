@@ -8309,6 +8309,81 @@ fn a_rootless_flush_preserves_element_style_inputs() {
 }
 
 #[test]
+fn unobserved_broad_answers_keep_exact_matches_without_confirming_output() {
+    let (mut engine, nodes) = nested_document();
+    let target = StyleAtomID(201);
+    let rule = add_target_rule(&mut engine, StyleSheetObjectID(1), target);
+    engine.set_rule_declared_properties(rule, &[(1, false)], true);
+    for &node in &nodes[1..] {
+        add_feature(&mut engine, node, LocalFeatureKey::Class(target));
+    }
+    assert!(!engine.take_style_transaction(nodes[0], |_, _, _| {}));
+    assert!(engine.published_match_answers.discard_unobserved_cascade_inputs);
+    let observed = nodes[1];
+    let unobserved = nodes[2];
+    let observed_identity = *engine.retained_match_answers.lookup(observed).sparse().unwrap();
+    let unobserved_identity = *engine.retained_match_answers.lookup(unobserved).sparse().unwrap();
+    let observed_cascade_input = *engine
+        .retained_match_answers
+        .cascade_input_lookup(observed)
+        .sparse()
+        .unwrap();
+    engine.published_match_answers.mark_observed(observed);
+    engine.discard_published_match_answers();
+    assert_eq!(
+        engine.retained_match_answers.lookup(observed),
+        Lookup::Known(&observed_identity)
+    );
+    assert_eq!(
+        engine.retained_match_answers.lookup(unobserved),
+        Lookup::Known(&unobserved_identity)
+    );
+    assert_eq!(
+        engine.retained_match_answers.cascade_input_lookup(observed),
+        Lookup::Known(&observed_cascade_input)
+    );
+    assert!(matches!(
+        engine.retained_match_answers.cascade_input_lookup(unobserved),
+        Lookup::Missing(_)
+    ));
+
+    let dispatch = engine.retained_answer_dispatch_for_traversal(true).unwrap();
+    let reuses_before = engine.counters().get(Counter::RetainedMatchAnswerReuses);
+    let answer = engine
+        .complete_published_match_answer(nodes[3], Some(&dispatch))
+        .unwrap();
+    assert!(
+        answer
+            .matches
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|matched| matched.rule == rule)
+    );
+    assert_eq!(
+        engine.counters().get(Counter::RetainedMatchAnswerReuses),
+        reuses_before + 1
+    );
+
+    engine.record_input(
+        InputKey::ElementStyleInput(unobserved),
+        InputValue::ElementStyleInput {
+            reaction: 0,
+            inherited_style_groups: 0,
+        },
+        InputValue::ElementStyleInput {
+            reaction: transaction::STYLE_REACTION_RECOMPUTE_STYLE,
+            inherited_style_groups: 0,
+        },
+    );
+    let mut published = Vec::new();
+    assert!(engine.take_style_transaction(nodes[0], |_, _, reactions| {
+        published.extend(reactions.iter().map(|reaction| reaction.style_node));
+    }));
+    assert_eq!(published, vec![unobserved.raw()]);
+}
+
+#[test]
 fn published_match_answers_name_transaction_program_and_identity() {
     let (mut engine, nodes) = linear_document();
     let target = StyleAtomID(201);

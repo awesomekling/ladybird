@@ -1783,7 +1783,7 @@ impl StyleEngine {
         published_match_answers.match_element_calls_at_publication = self
             .counters
             .get(Counter::MatchElementCallsDuringPublishedStyleTransaction);
-        published_match_answers.discard_unobserved_retained_answers = publish_document_root_arrival || plan_is_broad;
+        published_match_answers.discard_unobserved_cascade_inputs = publish_document_root_arrival || plan_is_broad;
         self.published_match_answers = published_match_answers;
         if initial_tree_was_bulk_loaded {
             self.counters.bump(Counter::InitialBulkMatchLoads);

@@ -3936,6 +3936,12 @@ mod tests {
         ));
         assert!(matches!(
             engine.retained_match_answer(StyleNodeID::from_raw(nodes[2]).unwrap()),
+            Lookup::Known(_)
+        ));
+        assert!(matches!(
+            engine
+                .retained_match_answers
+                .cascade_input_lookup(StyleNodeID::from_raw(nodes[2]).unwrap()),
             Lookup::Missing(_)
         ));
         assert_eq!(engine.counters().get(Counter::MatchAnswerUpqueries), upqueries);

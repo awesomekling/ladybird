@@ -1342,7 +1342,7 @@ pub(super) struct PublishedMatchAnswers {
     pub(super) shared_payloads: HashMap<MatchAnswerID, Box<[RuleMatch]>>,
     pub(super) memory: MemoryLease,
     pub(super) match_element_calls_at_publication: u64,
-    pub(super) discard_unobserved_retained_answers: bool,
+    pub(super) discard_unobserved_cascade_inputs: bool,
 }
 
 impl Default for PublishedMatchAnswers {
@@ -1352,7 +1352,7 @@ impl Default for PublishedMatchAnswers {
             shared_payloads: HashMap::default(),
             memory: MemoryLease::new(MemoryCategory::BatchScratch),
             match_element_calls_at_publication: 0,
-            discard_unobserved_retained_answers: false,
+            discard_unobserved_cascade_inputs: false,
         }
     }
 }
@@ -1383,7 +1383,7 @@ impl PublishedMatchAnswers {
             skip [
                 self.memory,
                 self.match_element_calls_at_publication,
-                self.discard_unobserved_retained_answers,
+                self.discard_unobserved_cascade_inputs,
             ];
         }
     }

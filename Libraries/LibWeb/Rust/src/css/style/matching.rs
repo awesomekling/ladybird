@@ -540,9 +540,10 @@ impl StyleEngine {
                 "a style transaction called match_element() after publishing complete match answers"
             );
         });
-        if published.discard_unobserved_retained_answers {
+        if published.discard_unobserved_cascade_inputs {
             for answer in published.entries.iter().filter(|answer| !answer.observed) {
-                self.retained_match_answers.forget(&mut self.match_answers, answer.node);
+                self.retained_match_answers
+                    .forget_cascade_input(&mut self.match_answers, answer.node);
             }
         }
         published.release();
