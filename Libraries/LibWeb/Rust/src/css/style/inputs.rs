@@ -7,6 +7,27 @@
 use super::*;
 
 impl StyleEngine {
+    pub(crate) fn has_pseudo_element_style_rules(&mut self, kind: tree::PseudoElementKind) -> bool {
+        let version = self.program.version();
+        if let Some((cached_kind, cached_version, result)) = self.pseudo_element_style_rule_presence
+            && cached_kind == kind
+            && cached_version == version
+        {
+            return result;
+        }
+        let result = self.program.live_selector_programs().any(|(rule, program)| {
+            self.program.rule_can_decide(rule)
+                && self
+                    .programs
+                    .get(program)
+                    .entries()
+                    .iter()
+                    .any(|entry| entry.pseudo_element.is_some_and(|target| target.kind == kind))
+        });
+        self.pseudo_element_style_rule_presence = Some((kind, version, result));
+        result
+    }
+
     pub(super) fn push_pending_region(&mut self, regions: &mut Vec<ImpactRegion>, region: ImpactRegion) {
         let before = regions.capacity();
         regions.push(region);
@@ -45,6 +66,7 @@ impl StyleEngine {
             computed_record_verification_counters: None,
             computed_record_verification_pins: Vec::new(),
             deferred_pseudo_element: None,
+            pseudo_element_style_rule_presence: None,
             tree,
             program: StyleSheetProgram::new(),
             journal: NormalizationJournal::new(),

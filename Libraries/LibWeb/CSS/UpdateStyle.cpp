@@ -1042,14 +1042,28 @@ void Document::update_selection_style_observability()
     style_computer().style_engine().set_pseudo_element_style_deferred(to_underlying(CSS::PseudoElement::Selection), !observable);
     if (!observable)
         return;
+    auto has_selection_rules = style_computer().style_engine().has_pseudo_element_style_rules(to_underlying(CSS::PseudoElement::Selection));
+    bool began_stabilization_epoch = false;
+    ScopeGuard end_stabilization_epoch = [&] {
+        if (began_stabilization_epoch)
+            end_style_stabilization_epoch();
+    };
     for_each_shadow_including_inclusive_descendant([&](Node& node) {
         auto* element = as_if<Element>(node);
         if (!element)
             return TraversalDecision::Continue;
+        if (!has_selection_rules && !element->style_record_identity(CSS::PseudoElement::Selection))
+            return TraversalDecision::Continue;
         auto style = element->computed_style();
         if (style) {
-            style_computer().style_engine().record_element_style_input_change(element->style_node_id(),
-                CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle | CSS::StyleEngine::PseudoInputsMayHaveChanged);
+            if (!began_stabilization_epoch) {
+                begin_style_stabilization_epoch();
+                began_stabilization_epoch = true;
+            }
+            CSS::StyleEngine::StyleRecordDelta style_record_delta {};
+            auto selection_style = style_computer().compute_pseudo_element_style_if_needed(
+                { *element, CSS::PseudoElement::Selection }, {}, nullptr, style_record_delta);
+            element->set_computed_style(CSS::PseudoElement::Selection, selection_style ? style_record_delta.new_style_record : CSS::StyleRecordID {});
         }
         return TraversalDecision::Continue;
     });

@@ -1,0 +1,7 @@
+inserted text: xxxxxxxxxxxxxxxxxxxx
+selection is collapsed: true
+avoids base restyles: true
+styled selection avoids base restyles: true
+selection color: rgb(10, 20, 30)
+editor color: rgb(0, 0, 0)
+removed selection rule: rgb(0, 0, 0)

@@ -758,6 +758,7 @@ pub struct StyleEngine {
     computed_record_verification_counters: Option<Box<Counters>>,
     computed_record_verification_pins: Vec<u64>,
     deferred_pseudo_element: Option<tree::PseudoElementKind>,
+    pseudo_element_style_rule_presence: Option<(tree::PseudoElementKind, ProgramVersion, bool)>,
     tree: StyleNodeTree,
     program: StyleSheetProgram,
     journal: NormalizationJournal,

@@ -4745,6 +4745,39 @@ fn cascade_matching_preserves_empty_pseudo_element_presence() {
 }
 
 #[test]
+fn pseudo_element_rule_presence_tracks_program_changes() {
+    let (mut engine, _) = linear_document();
+    let kind = PseudoElementKind(0);
+    assert!(!engine.has_pseudo_element_style_rules(kind));
+    let rule = add_pseudo_target_rule(
+        &mut engine,
+        StyleSheetObjectID(1),
+        StyleAtomID(200),
+        PseudoElementTarget::new(kind),
+    );
+    commit_test_setup(&mut engine);
+    assert!(engine.has_pseudo_element_style_rules(kind));
+    assert!(!engine.has_pseudo_element_style_rules(PseudoElementKind(1)));
+    assert!(engine.has_pseudo_element_style_rules(kind));
+    engine.set_rule_conditions_hold(rule, false);
+    commit_test_setup(&mut engine);
+    assert!(!engine.has_pseudo_element_style_rules(kind));
+    engine.set_rule_conditions_hold(rule, true);
+    commit_test_setup(&mut engine);
+    assert!(engine.has_pseudo_element_style_rules(kind));
+    let sheet = engine.program.rule_sheet(rule);
+    engine.detach_sheet(sheet, TreeScopeID::DOCUMENT);
+    commit_test_setup(&mut engine);
+    assert!(!engine.has_pseudo_element_style_rules(kind));
+    engine.attach_sheet(sheet, TreeScopeID::DOCUMENT);
+    commit_test_setup(&mut engine);
+    assert!(engine.has_pseudo_element_style_rules(kind));
+    engine.remove_rule(rule);
+    commit_test_setup(&mut engine);
+    assert!(!engine.has_pseudo_element_style_rules(kind));
+}
+
+#[test]
 fn pseudo_winner_deltas_update_only_their_sparse_cascade_row() {
     let (mut engine, nodes) = linear_document();
     let pseudo = PseudoElementTarget::new(PseudoElementKind(0));

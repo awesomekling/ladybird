@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<div id="editor" contenteditable="true"></div>
+<script>
+    test(() => {
+        editor.focus();
+        internals.updateStyle();
+        internals.resetStyleInvalidationCounters();
+        for (let index = 0; index < 20; ++index)
+            document.execCommand("insertText", false, "x");
+        println(`inserted text: ${editor.textContent}`);
+        println(`selection is collapsed: ${getSelection().isCollapsed}`);
+        println(`avoids base restyles: ${internals.getStyleInvalidationCounters().elementStyleRecomputations === 0}`);
+        const sheet = document.head.appendChild(document.createElement("style"));
+        sheet.textContent = "::selection { color: rgb(10, 20, 30); }";
+        internals.updateStyle();
+        internals.resetStyleInvalidationCounters();
+        for (let index = 0; index < 20; ++index)
+            document.execCommand("insertText", false, "x");
+        println(`styled selection avoids base restyles: ${internals.getStyleInvalidationCounters().elementStyleRecomputations === 0}`);
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        getSelection().removeAllRanges();
+        getSelection().addRange(range);
+        internals.updateStyle();
+        println(`selection color: ${getComputedStyle(editor, "::selection").color}`);
+        println(`editor color: ${getComputedStyle(editor).color}`);
+        getSelection().collapseToEnd();
+        internals.updateStyle();
+        sheet.remove();
+        internals.updateStyle();
+        getSelection().removeAllRanges();
+        getSelection().addRange(range);
+        internals.updateStyle();
+        println(`removed selection rule: ${getComputedStyle(editor, "::selection").color}`);
+    });
+</script>
