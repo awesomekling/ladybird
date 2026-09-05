@@ -4208,7 +4208,7 @@ StyleRecordID StyleComputer::try_share_computed_style_record(DOM::Element& eleme
             document().style_invalidation_counters() = counters;
         }
         // The engine retains the fixed computation context for a later partial drive.
-        element.retire_style_input_record();
+        element.set_style_input_record(nullptr);
         ++document().style_invalidation_counters().element_style_shared_computations;
     }
     return record;
