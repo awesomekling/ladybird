@@ -1,0 +1,8 @@
+arrival environment changed: false
+arrival: 0.5
+edit imported rule environment changed: false
+edit imported rule: rgb(255, 0, 0), 0.5
+remove nested import environment changed: false
+remove nested import: rgb(0, 128, 0), 0.5
+remove import environment changed: false
+remove import: rgb(0, 128, 0), 1

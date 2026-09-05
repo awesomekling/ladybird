@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>#target { color: green; }</style>
+<div id="target"></div>
+<script>
+    asyncTest(async done => {
+        internals.updateStyle();
+        const before = internals.getStyleInvalidationCounters().styleEnvironmentVersion;
+        const cssURL = text => `data:text/css,${encodeURIComponent(text)}`;
+        const nestedURL = cssURL("@layer theme { #target { color: blue; } }");
+        const importedURL = cssURL(`@import url("${nestedURL}"); @layer theme { #target { opacity: 0.5; } }`);
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href = cssURL(`@import url("${importedURL}");`);
+        const loaded = new Promise(resolve => link.onload = resolve);
+        document.head.appendChild(link);
+        await loaded;
+        if (!await waitForCondition(() => link.sheet.cssRules[0].styleSheet?.cssRules[0].styleSheet))
+            throw new Error("Nested imports did not load");
+        internals.updateStyle();
+        println(`arrival environment changed: ${internals.getStyleInvalidationCounters().styleEnvironmentVersion !== before}`);
+        println(`arrival: ${getComputedStyle(target).opacity}`);
+
+        function mutate(label, mutation) {
+            const version = internals.getStyleInvalidationCounters().styleEnvironmentVersion;
+            mutation();
+            internals.updateStyle();
+            println(`${label} environment changed: ${internals.getStyleInvalidationCounters().styleEnvironmentVersion !== version}`);
+            println(`${label}: ${getComputedStyle(target).color}, ${getComputedStyle(target).opacity}`);
+        }
+
+        const imported = link.sheet.cssRules[0].styleSheet;
+        const nested = imported.cssRules[0].styleSheet;
+        mutate("edit imported rule", () => nested.cssRules[0].cssRules[0].style.setProperty("color", "red", "important"));
+        mutate("remove nested import", () => imported.deleteRule(0));
+        mutate("remove import", () => link.sheet.deleteRule(0));
+        done();
+    });
+</script>

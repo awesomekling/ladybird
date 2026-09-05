@@ -1922,6 +1922,13 @@ static void collect_enclosing_group_context(GC::RootVector<GC::Ref<CSSRule>> con
 static bool rule_change_needs_style_environment_bump(CSSRule const& rule)
 {
     switch (rule.type()) {
+    case CSSRule::Type::Import:
+        if (auto const* imported = as<CSSImportRule>(rule).loaded_style_sheet()) {
+            return any_of(imported->rules(), [](auto& child) {
+                return rule_change_needs_style_environment_bump(child);
+            });
+        }
+        return false;
     case CSSRule::Type::Style:
     case CSSRule::Type::Media:
     case CSSRule::Type::Supports:
