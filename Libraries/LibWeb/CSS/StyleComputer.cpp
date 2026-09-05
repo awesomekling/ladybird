@@ -4658,9 +4658,9 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
                 && abstract_element.custom_property_data().ptr() == entry.custom_property_data.ptr()) {
                 auto shared_record = style_engine().style_record_view(*entry.style_record_identity);
                 if (shared_record.present
-                    && (shared_record.counter_style_environment_identity == style_scope.counter_style_environment_identity()
-                        || (shared_record.counter_style_environment_identity == 0
-                            && !computed_style_depends_on_counter_style_environment(*entry.values, abstract_element.pseudo_element().has_value()))))
+                    && ((shared_record.counter_style_environment_identity == 0
+                            && !computed_style_depends_on_counter_style_environment(*entry.values, abstract_element.pseudo_element().has_value()))
+                        || shared_record.counter_style_environment_identity == style_scope.counter_style_environment_identity()))
                     sharing->shared_style_record_identity = entry.style_record_identity;
             }
             if (entry.style_uses_var_css_function)
