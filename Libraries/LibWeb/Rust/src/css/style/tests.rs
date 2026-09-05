@@ -1383,6 +1383,93 @@ fn failed_posting_rebuild_does_not_condemn_resident_postings() {
 }
 
 #[test]
+fn program_subject_unions_preserve_ancestor_bounds() {
+    let (mut engine, nodes) = nested_document();
+    let guard = StyleAtomID(200);
+    let first = StyleAtomID(201);
+    let second = StyleAtomID(202);
+    let mut builder = selector::SelectorProgramBuilder::new();
+    let first_selector = builder.push_feature(selector::FeatureTest::Class(first));
+    let second_selector = builder.push_feature(selector::FeatureTest::Class(second));
+    let subject = builder.push_any_of(&[first_selector, second_selector]);
+    let guard_selector = builder.push_feature(selector::FeatureTest::Class(guard));
+    let ancestor = builder.push_ancestor(guard_selector);
+    let root = builder.push_compound(&[subject, ancestor]);
+    builder.push_entry(root);
+    let program = engine.programs.add(builder.finish());
+    let sheet = engine.add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
+    engine.attach_sheet(sheet, TreeScopeID::DOCUMENT);
+    let rule = engine.append_rule(sheet, None, RuleKind::Style);
+    engine.add_routing_rule(rule, program);
+    let mut version = engine.program.rule_version(rule);
+    version.selector_program = Some(program);
+    engine.replace_rule_version(rule, version);
+    add_feature(&mut engine, nodes[1], LocalFeatureKey::Class(guard));
+    add_feature(&mut engine, nodes[0], LocalFeatureKey::Class(first));
+    add_feature(&mut engine, nodes[3], LocalFeatureKey::Class(second));
+    discard_transaction(&mut engine);
+    assert_eq!(
+        engine.regions_from_subject_position(engine.programs.get(program), 0, nodes[0], None),
+        Some(vec![ImpactRegion::StrictSubtree(nodes[1])])
+    );
+}
+
+#[test]
+fn program_subject_unions_distinguish_absent_and_evicted_postings() {
+    let (mut engine, nodes) = nested_document();
+    let first = StyleAtomID(200);
+    let second = StyleAtomID(201);
+    let mut builder = selector::SelectorProgramBuilder::new();
+    let first_selector = builder.push_feature(selector::FeatureTest::Class(first));
+    let second_selector = builder.push_feature(selector::FeatureTest::Class(second));
+    let root = builder.push_any_of(&[first_selector, second_selector]);
+    builder.push_entry(root);
+    let program = engine.programs.add(builder.finish());
+    let sheet = engine.add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
+    engine.attach_sheet(sheet, TreeScopeID::DOCUMENT);
+    let rule = engine.append_rule(sheet, None, RuleKind::Style);
+    engine.add_routing_rule(rule, program);
+    let mut version = engine.program.rule_version(rule);
+    version.selector_program = Some(program);
+    engine.replace_rule_version(rule, version);
+    add_feature(&mut engine, nodes[1], LocalFeatureKey::Class(first));
+    discard_transaction(&mut engine);
+    let compiled = engine.programs.get(program);
+    assert_eq!(
+        engine.regions_from_subject_position(compiled, 0, nodes[0], None),
+        Some(vec![ImpactRegion::Node(nodes[1])])
+    );
+    assert_eq!(
+        engine.regions_from_subject_position(compiled, 0, nodes[0], Some(&[TreeScopeID(1)])),
+        Some(Vec::new())
+    );
+
+    add_feature(&mut engine, nodes[2], LocalFeatureKey::Class(second));
+    add_feature(&mut engine, nodes[3], LocalFeatureKey::Class(first));
+    add_feature(&mut engine, nodes[3], LocalFeatureKey::Class(second));
+    discard_transaction(&mut engine);
+    let regions = engine
+        .regions_from_subject_position(engine.programs.get(program), 0, nodes[0], None)
+        .unwrap();
+    let mut candidates: Vec<_> = regions
+        .into_iter()
+        .map(|region| match region {
+            ImpactRegion::Node(node) => node,
+            _ => panic!("a subject posting must produce node regions"),
+        })
+        .collect();
+    candidates.sort_unstable();
+    candidates.dedup();
+    assert_eq!(candidates, nodes[1..]);
+
+    engine.facts.postings_mut().evict(SelectorPostingKey::Class(second));
+    assert_eq!(
+        engine.regions_from_subject_position(engine.programs.get(program), 0, nodes[0], None),
+        None
+    );
+}
+
+#[test]
 fn an_evicted_feature_posting_is_missing_instead_of_empty() {
     let (mut engine, nodes) = nested_document();
     let guard = StyleAtomID(200);

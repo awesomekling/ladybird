@@ -1957,7 +1957,10 @@ impl StyleEngine {
                 keys if !keys.is_empty() => (keys, ImpactRegion::StrictSubtree),
                 _ => match compiled.subject_relative_anchor(entry) {
                     Some((axis, keys)) if !keys.is_empty() => (keys, anchor_region_for(axis)?),
-                    _ => return None,
+                    _ => match compiled.subject_dispatch_keys(entry) {
+                        keys if keys.len() > 1 => (keys.to_vec(), ImpactRegion::Node),
+                        _ => return None,
+                    },
                 },
             },
         };

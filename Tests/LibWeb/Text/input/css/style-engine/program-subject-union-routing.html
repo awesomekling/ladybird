@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<div id="container"></div>
+<script>
+    test(() => {
+        for (let index = 0; index < 64; ++index)
+            container.appendChild(document.createElement("div"));
+        const first = container.children[0];
+        const second = container.children[1];
+        const overlap = container.children[2];
+        const unrelated = container.lastElementChild;
+        first.className = "first";
+        second.className = "second";
+        overlap.className = "first second";
+        internals.updateStyle();
+
+        function change(label, callback) {
+            const before = internals.styleEngineCounters();
+            callback();
+            internals.updateStyle();
+            const after = internals.styleEngineCounters();
+            println(`${label} avoids document widening: ${after.documentWidenings === before.documentWidenings}`);
+            println(`${label} opacity: ${[first, second, overlap, unrelated].map(element => getComputedStyle(element).opacity).join(", ")}`);
+        }
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(":is(.first, .second) { opacity: 0.5; }");
+        change("attach is", () => document.adoptedStyleSheets = [sheet]);
+        change("edit where", () => sheet.cssRules[0].selectorText = ":where(.first, .second)");
+        change("declarations", () => sheet.cssRules[0].style.opacity = "0.25");
+        change("missing arm", () => sheet.cssRules[0].selectorText = ":is(.first, .absent)");
+        change("inline mixture", () => {
+            sheet.cssRules[0].selectorText = ":where(.second, .absent)";
+            unrelated.style.opacity = "0.75";
+        });
+        change("detach", () => document.adoptedStyleSheets = []);
+
+        sheet.replaceSync(":is(.first, *) { opacity: 0.125; }");
+        document.adoptedStyleSheets = [sheet];
+        internals.updateStyle();
+        println(`unindexed arm reaches other elements: ${getComputedStyle(container.children[3]).opacity}`);
+        document.adoptedStyleSheets = [];
+        const host = document.body.appendChild(document.createElement("div"));
+        const shadow = host.attachShadow({ mode: "open" });
+        for (let index = 0; index < 64; ++index)
+            shadow.appendChild(document.createElement("div"));
+        shadow.children[0].className = "first";
+        shadow.children[1].className = "second";
+        const scoped = new CSSStyleSheet();
+        scoped.replaceSync(":where(.first, .second) { opacity: 0.4; }");
+        internals.updateStyle();
+        const before = internals.styleEngineCounters();
+        shadow.adoptedStyleSheets = [scoped];
+        internals.updateStyle();
+        const after = internals.styleEngineCounters();
+        println(`shadow union avoids a scope-wide rematch: ${after.coldNodesEvaluated - before.coldNodesEvaluated < 8}`);
+        println(`shadow opacity: ${[shadow.children[0], shadow.children[1], shadow.children[2]].map(element => getComputedStyle(element).opacity).join(", ")}`);
+        println(`document opacity: ${getComputedStyle(first).opacity}`);
+        host.className = "first";
+        internals.updateStyle();
+        scoped.insertRule(":host(:is(.first, .second)) { color: red; }");
+        internals.updateStyle();
+        println(`host union inheritance: ${[host, shadow.children[0], shadow.children[2]].map(element => getComputedStyle(element).color).join(", ")}`);
+        println(`document color: ${getComputedStyle(first).color}`);
+    });
+</script>

@@ -1,0 +1,18 @@
+attach is avoids document widening: true
+attach is opacity: 0.5, 0.5, 0.5, 1
+edit where avoids document widening: true
+edit where opacity: 0.5, 0.5, 0.5, 1
+declarations avoids document widening: true
+declarations opacity: 0.25, 0.25, 0.25, 1
+missing arm avoids document widening: true
+missing arm opacity: 0.25, 1, 0.25, 1
+inline mixture avoids document widening: true
+inline mixture opacity: 1, 0.25, 0.25, 0.75
+detach avoids document widening: true
+detach opacity: 1, 1, 1, 0.75
+unindexed arm reaches other elements: 0.125
+shadow union avoids a scope-wide rematch: true
+shadow opacity: 0.4, 0.4, 1
+document opacity: 1
+host union inheritance: rgb(255, 0, 0), rgb(255, 0, 0), rgb(255, 0, 0)
+document color: rgb(0, 0, 0)
