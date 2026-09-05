@@ -2077,10 +2077,17 @@ static void propagate_overflow_to_viewport(Element& root_element, Layout::Viewpo
 
 void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutReason reason)
 {
-    if (!node.is_connected())
+    auto const reads_scroll_offset = reason == UpdateLayoutReason::ElementScrollTop
+        || reason == UpdateLayoutReason::ElementScrollLeft;
+    if (!node.is_connected()) {
+        if (reads_scroll_offset)
+            update_layout(reason);
         return;
+    }
 
-    if (reason != UpdateLayoutReason::HTMLEventLoopRenderingUpdate)
+    if (reads_scroll_offset)
+        flush_throttled_animation_style_update();
+    else if (reason != UpdateLayoutReason::HTMLEventLoopRenderingUpdate)
         flush_throttled_animation_style_update_for_node(node);
 
     auto* document_element = this->document_element();
@@ -2093,7 +2100,8 @@ void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutRe
         || reason == UpdateLayoutReason::HTMLElementOffsetTop
         || reason == UpdateLayoutReason::HTMLElementOffsetLeft
         || reason == UpdateLayoutReason::HTMLElementOffsetParent
-        || reason == UpdateLayoutReason::SVGGraphicsElementGetBBox;
+        || reason == UpdateLayoutReason::SVGGraphicsElementGetBBox
+        || reads_scroll_offset;
     if (reads_layout_geometry
         && m_has_completed_style_update
         && layout_is_up_to_date()
@@ -2102,6 +2110,7 @@ void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutRe
         && m_query_containers_needing_container_query_evaluation_after_layout.is_empty()
         && m_elements_with_pending_top_layer_membership_change.is_empty()
         && !m_top_layer_needs_layout_zone_rebuild
+        && (!reads_scroll_offset || !m_needs_scroll_container_resnap)
         && !style_computer().style_engine().css_transitions_may_observe_style_changes()
         && !may_have_style_query_dependencies) {
         auto document_is_clean_for_layout_geometry_read = [](Document const& document) {
@@ -2129,11 +2138,16 @@ void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutRe
         };
         if (embedding_document_chain_is_clean()) {
             synchronize_dirty_style_attributes();
-            if (!style_computer().style_engine().pending_transaction_may_affect_layout_geometry()) {
+            if ((!reads_scroll_offset || !style_computer().style_engine().has_pending_transaction())
+                && !style_computer().style_engine().pending_transaction_may_affect_layout_geometry()) {
                 // A later inline transition declaration still needs the pending style as its
                 // before-change style, even though this geometry read can reuse the current layout.
                 if (!style_computer().style_engine().has_pending_transaction()
                     || style_computer().style_engine().defer_pending_transaction_for_geometry_read()) {
+                    if (reads_scroll_offset) {
+                        update_scrollable_overflow(ScrollableOverflowDerivedStructureUpdates::UpdateAfterMeasure);
+                        page().client().flush_pending_dom_mutations();
+                    }
                     return;
                 }
             }

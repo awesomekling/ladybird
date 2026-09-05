@@ -1,0 +1,12 @@
+clean reads skip style updates: true
+paint-only offsets: 50,40
+pending style settled: true
+background is observable: rgb(255, 0, 0)
+not scrollable: 0,0
+scrollable again: 50,40
+transformed overflow: 700
+overflow-only clamp: 350
+layout clamp: 0,0
+hidden offsets: 0,0
+restored offsets: 0,0
+detached offsets: 0,0
