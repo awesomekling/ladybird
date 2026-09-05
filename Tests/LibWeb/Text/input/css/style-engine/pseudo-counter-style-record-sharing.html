@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    .target::before { content: "text"; }
+</style>
+<div class="target"></div>
+<script>
+    test(() => {
+        internals.updateStyle();
+        internals.resetStyleFfiCounters();
+        for (let index = 0; index < 100; ++index) {
+            const element = document.createElement("div");
+            element.className = "target";
+            document.body.appendChild(element);
+        }
+        internals.updateStyle();
+        const after = internals.styleFfiCounters();
+        println(`avoids republishing shared style values: ${after.styleValueCreateEntries < 500}`);
+        println(`pseudo content: ${getComputedStyle(document.body.lastElementChild, "::before").content}`);
+        const documentSheet = document.styleSheets[0];
+        documentSheet.cssRules[0].style.content = "counter(item, registered-later)";
+        internals.updateStyle();
+        const target = document.body.lastElementChild;
+        const oldRecord = internals.beforeStyleRecordIdentity(target);
+        documentSheet.insertRule('@counter-style registered-later { system: cyclic; symbols: "W"; }', 0);
+        internals.updateStyle();
+        println(`first counter registration changes the record: ${internals.beforeStyleRecordIdentity(target) !== oldRecord}`);
+        const makeScope = symbols => {
+            const host = document.body.appendChild(document.createElement("div"));
+            const shadow = host.attachShadow({ mode: "open" });
+            shadow.innerHTML = `<style>
+                @counter-style local { system: cyclic; symbols: "${symbols}"; }
+                .item { width: min-content; }
+                .item::before { content: counter(item, local); }
+            </style><div class="item"></div>`;
+            return shadow;
+        };
+        const firstScope = makeScope("W");
+        const secondScope = makeScope("WWWW");
+        const first = firstScope.lastElementChild;
+        const second = secondScope.lastElementChild;
+        document.body.offsetWidth;
+        println(`counter scopes remain distinct: ${first.offsetWidth < second.offsetWidth}`);
+        println(`counter records remain distinct: ${internals.beforeStyleRecordIdentity(first) !== internals.beforeStyleRecordIdentity(second)}`);
+        const sheet = firstScope.firstElementChild.sheet;
+        sheet.deleteRule(0);
+        sheet.insertRule('@counter-style local { system: cyclic; symbols: "WWWWWW"; }', 0);
+        document.body.offsetWidth;
+        println(`counter changes remain observable: ${first.offsetWidth > second.offsetWidth}`);
+    });
+</script>

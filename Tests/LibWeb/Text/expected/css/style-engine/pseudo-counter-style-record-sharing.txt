@@ -1,0 +1,6 @@
+avoids republishing shared style values: true
+pseudo content: "text"
+first counter registration changes the record: true
+counter scopes remain distinct: true
+counter records remain distinct: true
+counter changes remain observable: true
