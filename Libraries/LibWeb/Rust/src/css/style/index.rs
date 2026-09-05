@@ -3438,6 +3438,7 @@ pub struct ElementFactStore {
     attribute_catalog_copies: u64,
     staging: FactStaging,
     metadata: Column<Option<ElementFactMetadata>>,
+    metadata_payload_capacity_bytes: u64,
     /// Logical bytes reachable through live primary handles.
     primary_live_bytes: u64,
     primary_live_payload_bytes: u64,
@@ -3832,6 +3833,7 @@ impl Default for ElementFactStore {
             attribute_catalog_copies: 0,
             staging: FactStaging::default(),
             metadata: Column::default(),
+            metadata_payload_capacity_bytes: 0,
             primary_live_bytes: 0,
             primary_live_payload_bytes: 0,
             primary_stale_payload_bytes: 0,
@@ -4565,7 +4567,14 @@ impl ElementFactStore {
                 Self::increment_atom_count(&mut self.atom_live_counts, *name);
             }
         }
+        let previous_capacity = self.metadata_of(node).map_or(0, ElementFactMetadata::capacity_bytes);
         self.metadata_mut(node).animation_names = sorted;
+        let current_capacity = self.metadata_of(node).unwrap().capacity_bytes();
+        self.metadata_payload_capacity_bytes = self
+            .metadata_payload_capacity_bytes
+            .checked_sub(previous_capacity)
+            .and_then(|bytes| bytes.checked_add(current_capacity))
+            .expect("element fact metadata byte count overflow");
     }
 
     /// Whether this element's style resolution called a custom function.
@@ -5066,6 +5075,10 @@ impl ElementFactStore {
             .and_then(|index| self.metadata.get_mut(index as usize))
             .and_then(Option::take)
         {
+            self.metadata_payload_capacity_bytes = self
+                .metadata_payload_capacity_bytes
+                .checked_sub(metadata.capacity_bytes())
+                .expect("element fact metadata byte count underflow");
             if metadata.custom_property_set != 0 {
                 self.custom_property_set_live_counts[metadata.custom_property_set as usize] = self
                     .custom_property_set_live_counts[metadata.custom_property_set as usize]
@@ -5225,12 +5238,6 @@ impl ElementFactStore {
     }
 
     fn auxiliary_capacity_bytes(&self) -> u64 {
-        let metadata_payloads = self
-            .metadata
-            .iter()
-            .flatten()
-            .map(ElementFactMetadata::capacity_bytes)
-            .sum::<u64>();
         let custom_property_name_payloads = self
             .custom_property_name_sets
             .iter()
@@ -5273,7 +5280,7 @@ impl ElementFactStore {
             cached [];
             nested [
                 self.staging.capacity_bytes(),
-                metadata_payloads,
+                self.metadata_payload_capacity_bytes,
                 custom_property_name_payloads,
                 custom_property_name_index_payloads,
                 language_payloads,
@@ -5707,6 +5714,108 @@ mod tests {
         assert!(facts.is_slot(node));
         facts.set_is_slot(node, false);
         assert!(!facts.is_slot(node));
+    }
+
+    #[test]
+    fn metadata_payload_accounting_tracks_animation_name_replacement_and_removal() {
+        let mut memory = MemoryController::new(DeviceClass::ForegroundDesktop);
+        let mut facts = ElementFactStore::new();
+        let first = StyleNodeID::element(1);
+        let second = StyleNodeID::element(5000);
+        facts.ensure_row(first);
+        facts.ensure_row(second);
+        facts.apply_staged(&mut memory);
+
+        for names in [vec![StyleAtomID(1)], vec![StyleAtomID(2); 100], vec![]] {
+            facts.set_animation_names(first, &names, &mut memory);
+            facts.set_animation_names(second, &[StyleAtomID(3)], &mut memory);
+            assert_eq!(
+                facts.metadata_payload_capacity_bytes,
+                facts
+                    .metadata
+                    .iter()
+                    .flatten()
+                    .map(ElementFactMetadata::capacity_bytes)
+                    .sum::<u64>()
+            );
+        }
+        facts.forget(first);
+        assert_eq!(
+            facts.metadata_payload_capacity_bytes,
+            facts.metadata_of(second).unwrap().capacity_bytes()
+        );
+        facts.forget(second);
+        assert_eq!(facts.metadata_payload_capacity_bytes, 0);
+    }
+
+    #[test]
+    fn declaration_only_transactions_retain_auxiliary_capacity_accounting() {
+        let mut memory = MemoryController::new(DeviceClass::ForegroundDesktop);
+        let mut facts = ElementFactStore::new();
+        let node = StyleNodeID::element(64);
+        facts.set_class(node, StyleAtomID(1), true, &mut memory);
+        facts.set_animation_names(node, &[StyleAtomID(2)], &mut memory);
+        facts.set_custom_property_names(node, &[StyleAtomID(3)], &mut memory);
+        facts.apply_staged(&mut memory);
+        facts.release_staging(&mut memory);
+        let settled = facts.settled_non_apply_capacity_bytes;
+        assert_eq!(facts.memory.bytes(), facts.capacity_bytes());
+
+        for _ in 0..3 {
+            facts.set_element_declared_properties(
+                node,
+                ElementDeclarationKind::InlineStyle,
+                Vec::new(),
+                Vec::new(),
+                true,
+            );
+            facts.set_animation_names(node, &[StyleAtomID(2)], &mut memory);
+            facts.set_custom_property_names(node, &[StyleAtomID(3)], &mut memory);
+            facts.apply_staged(&mut memory);
+            facts.release_staging(&mut memory);
+            assert_eq!(facts.settled_non_apply_capacity_bytes, settled);
+            assert_eq!(facts.memory.bytes(), facts.capacity_bytes());
+        }
+    }
+
+    #[test]
+    fn auxiliary_capacity_changes_survive_staging_application() {
+        let mut memory = MemoryController::new(DeviceClass::ForegroundDesktop);
+        let mut facts = ElementFactStore::new();
+        let node = StyleNodeID::element(64);
+        facts.ensure_row(node);
+        facts.apply_staged(&mut memory);
+        facts.release_staging(&mut memory);
+
+        facts.set_animation_names(node, &[StyleAtomID(1), StyleAtomID(2)], &mut memory);
+        facts.set_custom_property_names(node, &[StyleAtomID(3)], &mut memory);
+        facts.set_language_text(StyleAtomID(4), &[1, 2, 3]);
+        facts.set_attribute_value_text(StyleAtomID(5), &[4, 5, 6]);
+        facts.note_attribute_name_forms(StyleAtomID(6), AttributeNameForms::default());
+        facts.apply_staged(&mut memory);
+        assert!(!facts.memory_dirty);
+        facts.release_staging(&mut memory);
+        assert_eq!(facts.memory.bytes(), facts.capacity_bytes());
+
+        facts.set_class(node, StyleAtomID(4096), true, &mut memory);
+        facts.apply_staged(&mut memory);
+        facts.release_staging(&mut memory);
+        assert_eq!(facts.memory.bytes(), facts.capacity_bytes());
+
+        facts.forget(node);
+        facts.apply_staged(&mut memory);
+        facts.release_staging(&mut memory);
+        assert_eq!(facts.memory.bytes(), facts.capacity_bytes());
+
+        facts.sweep_auxiliary_catalogs();
+        facts.apply_staged(&mut memory);
+        facts.release_staging(&mut memory);
+        assert_eq!(facts.memory.bytes(), facts.capacity_bytes());
+
+        facts.forget_atoms(&[StyleAtomID(4), StyleAtomID(5), StyleAtomID(6)]);
+        facts.apply_staged(&mut memory);
+        facts.release_staging(&mut memory);
+        assert_eq!(facts.memory.bytes(), facts.capacity_bytes());
     }
 
     #[test]
