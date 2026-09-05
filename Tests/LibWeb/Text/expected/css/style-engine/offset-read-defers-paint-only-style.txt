@@ -1,0 +1,14 @@
+clean reads skip style updates: true
+paint-only offsets: 30,40
+paint-only parent: container
+paint-only style deferred: true
+deferred background is observable: rgb(255, 0, 0)
+moved offsets: 50,60
+fixed parent: null
+static ancestor parent: true
+transformed parent: container
+transformed offsets: 50,60
+hidden offsets: 0,0
+hidden parent: null
+restored offsets: 50,60
+restored parent: container

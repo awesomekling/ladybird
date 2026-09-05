@@ -2090,6 +2090,9 @@ void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutRe
         || reason == UpdateLayoutReason::ElementClientHeight
         || reason == UpdateLayoutReason::HTMLElementOffsetWidth
         || reason == UpdateLayoutReason::HTMLElementOffsetHeight
+        || reason == UpdateLayoutReason::HTMLElementOffsetTop
+        || reason == UpdateLayoutReason::HTMLElementOffsetLeft
+        || reason == UpdateLayoutReason::HTMLElementOffsetParent
         || reason == UpdateLayoutReason::SVGGraphicsElementGetBBox;
     if (reads_layout_geometry
         && m_has_completed_style_update

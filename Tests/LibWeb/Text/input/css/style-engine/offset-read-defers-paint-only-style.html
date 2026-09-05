@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    body { margin: 0; }
+    #container { position: relative; margin: 20px; }
+    #target { position: absolute; top: 30px; left: 40px; width: 10px; height: 10px; }
+    #target.paint-only { background-color: red; }
+    #target.moved { top: 50px; left: 60px; }
+    #target.fixed { position: fixed; }
+    #container.transformed { transform: translateX(10px); }
+</style>
+<div id="container"><div id="target"></div></div>
+<script>
+    test(() => {
+        const results = [];
+        target.getBoundingClientRect();
+        internals.resetStyleInvalidationCounters();
+        for (let index = 0; index < 100; ++index) {
+            target.offsetTop;
+            target.offsetLeft;
+            target.offsetParent;
+        }
+        results.push(`clean reads skip style updates: ${internals.getStyleInvalidationCounters().styleStabilizationEpochs === 0}`);
+
+        target.classList.add("paint-only");
+        results.push(`paint-only offsets: ${target.offsetTop},${target.offsetLeft}`);
+        results.push(`paint-only parent: ${target.offsetParent.id}`);
+        results.push(`paint-only style deferred: ${internals.getStyleInvalidationCounters().styleStabilizationEpochs === 0}`);
+        results.push(`deferred background is observable: ${getComputedStyle(target).backgroundColor}`);
+
+        target.classList.add("moved");
+        results.push(`moved offsets: ${target.offsetTop},${target.offsetLeft}`);
+        target.classList.add("fixed");
+        results.push(`fixed parent: ${target.offsetParent}`);
+        target.classList.remove("fixed");
+        container.style.position = "static";
+        results.push(`static ancestor parent: ${target.offsetParent === document.body}`);
+        container.style.removeProperty("position");
+        container.classList.add("transformed");
+        results.push(`transformed parent: ${target.offsetParent.id}`);
+        results.push(`transformed offsets: ${target.offsetTop},${target.offsetLeft}`);
+        container.style.display = "none";
+        results.push(`hidden offsets: ${target.offsetTop},${target.offsetLeft}`);
+        results.push(`hidden parent: ${target.offsetParent}`);
+        container.style.removeProperty("display");
+        results.push(`restored offsets: ${target.offsetTop},${target.offsetLeft}`);
+        results.push(`restored parent: ${target.offsetParent.id}`);
+        results.forEach(println);
+    });
+</script>
