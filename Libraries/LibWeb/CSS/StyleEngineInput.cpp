@@ -1421,7 +1421,7 @@ static void record_rule_declared_properties(StyleEngine& style_engine, StyleEngi
     for (auto const& [name, property] : declaration->custom_properties())
         columns.append_custom(style_engine, name, property);
     columns.finalize_completeness();
-    style_engine.set_rule_declared_properties(rule_id, columns.properties, columns.important, columns.operators, columns.values, columns.original_values, columns.custom_names, columns.custom_important, columns.custom_operators, columns.custom_values, columns.custom_original_values, columns.declarations_are_complete);
+    style_engine.set_rule_declared_properties(rule_id, columns.properties, columns.important, columns.operators, columns.values, columns.original_values, columns.custom_names, columns.custom_important, columns.custom_operators, columns.custom_values, columns.custom_original_values, columns.declarations_are_complete, rule.parent_style_sheet());
 }
 
 // Where a compiled rule's identity is written. Author rules carry theirs on the rule object; the

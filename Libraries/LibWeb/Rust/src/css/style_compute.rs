@@ -1659,7 +1659,7 @@ fn collect_external_value_dependencies(value: &StyleValueData) -> ExternalValueD
     dependencies
 }
 
-pub(crate) fn value_may_need_style_sheet_resource_context(value: &StyleValueData) -> bool {
+pub(crate) fn value_needs_style_sheet_resource_context(value: &StyleValueData) -> bool {
     collect_external_value_dependencies(value).may_need_style_sheet_resource_context
 }
 

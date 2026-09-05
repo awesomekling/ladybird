@@ -1,0 +1,6 @@
+first context: true
+different context: true
+restored context: true
+equivalent context: true
+image-set value: image-set(url("missing-image.png") 1dppx)
+removed context: true

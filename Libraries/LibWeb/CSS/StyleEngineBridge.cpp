@@ -5,10 +5,15 @@
  */
 
 #include <AK/StdLibExtras.h>
+#include <LibWeb/CSS/CSSRule.h>
+#include <LibWeb/CSS/CSSStyleDeclaration.h>
+#include <LibWeb/CSS/CSSStyleSheet.h>
+#include <LibWeb/CSS/CascadedProperties.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineBridge.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/StyleValueRustFFI.h>
 
@@ -184,7 +189,19 @@ void StyleEngine::finish_sheet_rules_replacement(SheetID sheet)
     StyleEngineFFI::style_engine_finish_sheet_rules_replacement(m_impl, sheet.value(), next_declaration_block_version());
 }
 
-void StyleEngine::set_rule_declared_properties(StyleEngineRuleID rule, ReadonlySpan<u16> properties, ReadonlySpan<bool> important, ReadonlySpan<StyleEngineFFI::FfiCascadeOperator> operators, ReadonlySpan<void const*> values, ReadonlySpan<void const*> original_values, ReadonlySpan<StyleAtomID> custom_names, ReadonlySpan<bool> custom_important, ReadonlySpan<StyleEngineFFI::FfiCascadeOperator> custom_operators, ReadonlySpan<void const*> custom_values, ReadonlySpan<void const*> custom_original_values, bool declarations_are_complete)
+static String style_sheet_resource_base_url(CSSStyleSheet const& style_sheet)
+{
+    auto base_url = style_sheet.base_url()
+                        .value_or_lazy_evaluated_optional([&]() { return style_sheet.location(); })
+                        .value_or_lazy_evaluated_optional([&]() -> Optional<::URL::URL> {
+                            if (auto document = style_sheet.owning_document())
+                                return HTML::relevant_settings_object(*document).api_base_url();
+                            return {};
+                        });
+    return base_url.has_value() ? base_url->to_string() : String {};
+}
+
+void StyleEngine::set_rule_declared_properties(StyleEngineRuleID rule, ReadonlySpan<u16> properties, ReadonlySpan<bool> important, ReadonlySpan<StyleEngineFFI::FfiCascadeOperator> operators, ReadonlySpan<void const*> values, ReadonlySpan<void const*> original_values, ReadonlySpan<StyleAtomID> custom_names, ReadonlySpan<bool> custom_important, ReadonlySpan<StyleEngineFFI::FfiCascadeOperator> custom_operators, ReadonlySpan<void const*> custom_values, ReadonlySpan<void const*> custom_original_values, bool declarations_are_complete, CSSStyleSheet const* style_sheet)
 {
     VERIFY(properties.size() == important.size());
     VERIFY(properties.size() == operators.size());
@@ -194,7 +211,14 @@ void StyleEngine::set_rule_declared_properties(StyleEngineRuleID rule, ReadonlyS
     VERIFY(custom_names.size() == custom_operators.size());
     VERIFY(custom_names.size() == custom_values.size());
     VERIFY(custom_names.size() == custom_original_values.size());
-    StyleEngineFFI::style_engine_set_rule_declared_properties(m_impl, rule.value(), properties.data(), important.data(), operators.data(), values.data(), original_values.data(), properties.size(), reinterpret_cast<u32 const*>(custom_names.data()), custom_important.data(), custom_operators.data(), custom_values.data(), custom_original_values.data(), custom_names.size(), declarations_are_complete);
+    auto base_url = style_sheet ? style_sheet_resource_base_url(*style_sheet) : String {};
+    ComputedValuesFFI::FfiStyleSheetResourceContext resource_context {
+        .base_url = base_url.bytes().data(),
+        .base_url_length = base_url.bytes().size(),
+        .has_value = style_sheet != nullptr,
+        .origin_clean = style_sheet && style_sheet->is_origin_clean(),
+    };
+    StyleEngineFFI::style_engine_set_rule_declared_properties(m_impl, rule.value(), properties.data(), important.data(), operators.data(), values.data(), original_values.data(), properties.size(), reinterpret_cast<u32 const*>(custom_names.data()), custom_important.data(), custom_operators.data(), custom_values.data(), custom_original_values.data(), custom_names.size(), declarations_are_complete, &resource_context);
 }
 
 void StyleEngine::set_element_declared_properties(StyleNodeID node, StyleEngineFFI::FfiElementDeclarationKind kind, ReadonlySpan<u16> properties, ReadonlySpan<bool> important, ReadonlySpan<StyleEngineFFI::FfiCascadeOperator> operators, ReadonlySpan<void const*> values, ReadonlySpan<void const*> original_values, ReadonlySpan<StyleAtomID> custom_names, ReadonlySpan<bool> custom_important, ReadonlySpan<StyleEngineFFI::FfiCascadeOperator> custom_operators, ReadonlySpan<void const*> custom_values, ReadonlySpan<void const*> custom_original_values, bool declarations_are_complete)
@@ -210,9 +234,33 @@ void StyleEngine::set_element_declared_properties(StyleNodeID node, StyleEngineF
     StyleEngineFFI::style_engine_set_element_declared_properties(m_impl, node.value(), kind, properties.data(), important.data(), operators.data(), values.data(), original_values.data(), properties.size(), reinterpret_cast<u32 const*>(custom_names.data()), custom_important.data(), custom_operators.data(), custom_values.data(), custom_original_values.data(), custom_names.size(), declarations_are_complete);
 }
 
-StyleEngine::ExactCascadePublication StyleEngine::publish_exact_cascade_state(StyleNodeID node, u8 pseudo_kind, ComputedValuesFFI::CascadedPropertyStore const* store, u8 inherited_style_groups, StyleNodeID donor_node, StyleRecordID donor_style_record)
+StyleEngine::ExactCascadePublication StyleEngine::publish_exact_cascade_state(StyleNodeID node, u8 pseudo_kind, CascadedProperties& properties, u8 inherited_style_groups, StyleNodeID donor_node, StyleRecordID donor_style_record)
 {
-    return StyleEngineFFI::style_engine_publish_exact_cascade_state(m_impl, node.value(), pseudo_kind, store, inherited_style_groups, donor_node.value(), donor_style_record.value());
+    struct ResourceContexts {
+        CascadedProperties& properties;
+        Vector<String> base_urls;
+        Vector<ComputedValuesFFI::FfiStyleSheetResourceContext> contexts;
+    } resource_contexts { properties, {}, {} };
+    ComputedValuesFFI::rust_cascaded_properties_visit_resource_context_sources(properties.rust_store(), &resource_contexts, [](void* opaque_context, u32 slot) {
+        auto& context = *static_cast<ResourceContexts*>(opaque_context);
+        auto source = context.properties.source_for_slot(slot);
+        auto rule = source ? source->parent_rule() : nullptr;
+        auto sheet = rule ? rule->parent_style_sheet() : nullptr;
+        if (!sheet)
+            return;
+        if (context.contexts.is_empty()) {
+            context.base_urls.resize(context.properties.source_slot_count());
+            context.contexts.resize(context.properties.source_slot_count());
+        }
+        context.base_urls[slot] = style_sheet_resource_base_url(*sheet);
+        context.contexts[slot] = {
+            .base_url = context.base_urls[slot].bytes().data(),
+            .base_url_length = context.base_urls[slot].bytes().size(),
+            .has_value = true,
+            .origin_clean = sheet->is_origin_clean(),
+        };
+    });
+    return StyleEngineFFI::style_engine_publish_exact_cascade_state(m_impl, node.value(), pseudo_kind, properties.rust_store(), inherited_style_groups, donor_node.value(), donor_style_record.value(), resource_contexts.contexts.data(), resource_contexts.contexts.size());
 }
 
 ReadonlySpan<ComputedValuesFFI::FfiSourceSlotAssignment> StyleEngine::materialize_retained_cascade_state(StyleNodeID node, u8 pseudo_kind, ComputedValuesFFI::CascadedPropertyStore* store, ReadonlySpan<ComputedValuesFFI::FfiCascadeBlock> blocks)

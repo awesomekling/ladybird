@@ -255,18 +255,27 @@ impl StyleEngine {
     /// # Safety
     /// `value` must point at live `StyleValueData`.
     pub unsafe fn intern_specified_value(&mut self, value: *const StyleValueData) -> SpecifiedValueID {
+        unsafe { self.intern_specified_value_with_resource_context(value, None) }
+    }
+
+    pub(super) unsafe fn intern_specified_value_with_resource_context(
+        &mut self,
+        value: *const StyleValueData,
+        resource_context: Option<&specified_value::ResourceContext>,
+    ) -> SpecifiedValueID {
         debug_assert!(!value.is_null());
-        let (id, lookup) = unsafe { self.specified_values.intern(value, &mut self.memory) };
+        let (id, lookup) = match resource_context {
+            Some(context) => unsafe {
+                self.specified_values
+                    .intern_with_resource_context(value, Some(context), &mut self.memory)
+            },
+            None => unsafe { self.specified_values.intern(value, &mut self.memory) },
+        };
         match lookup {
             Lookup::Known(()) => self.counters.bump(Counter::SpecifiedValuesReused),
             Lookup::KnownAbsent | Lookup::Missing(_) => {}
         }
         id
-    }
-
-    pub(super) unsafe fn intern_exact_specified_value(&mut self, value: *const StyleValueData) -> SpecifiedValueID {
-        debug_assert!(!value.is_null());
-        unsafe { self.specified_values.intern(value, &mut self.memory).0 }
     }
 
     /// Register an authored spelling as an alias of its context-free canonical value.

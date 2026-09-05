@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>#target { background-image: url(missing-image.png); }</style>
+<div id="target"></div>
+<script>
+    test(() => {
+        internals.updateStyle();
+        target.style.backgroundImage = "url(missing-image.png)";
+        internals.updateStyle();
+        target.style.removeProperty("background-image");
+        internals.updateStyle();
+
+        function sheetAt(directory) {
+            const sheet = new CSSStyleSheet({ baseURL: new URL(`${directory}/`, location.href).href });
+            sheet.replaceSync("#target { background-image: url(missing-image.png); }");
+            return sheet;
+        }
+        const first = sheetAt("first");
+        const equivalent = sheetAt("first");
+        const second = sheetAt("second");
+        const results = [];
+        for (const [label, sheet, directory] of [
+            ["first context", first, "first"],
+            ["different context", second, "second"],
+            ["restored context", first, "first"],
+            ["equivalent context", equivalent, "first"],
+        ]) {
+            document.adoptedStyleSheets = [sheet];
+            internals.updateStyle();
+            results.push(`${label}: ${getComputedStyle(target).backgroundImage.includes(`${directory}/missing-image.png`)}`);
+        }
+        equivalent.cssRules[0].style.backgroundImage = "image-set(url(missing-image.png) 1x)";
+        internals.updateStyle();
+        target.style.backgroundImage = "image-set(url(missing-image.png) 1x)";
+        internals.updateStyle();
+        target.style.removeProperty("background-image");
+        internals.updateStyle();
+        results.push(`image-set value: ${getComputedStyle(target).backgroundImage}`);
+        document.adoptedStyleSheets = [];
+        internals.updateStyle();
+        results.push(`removed context: ${!getComputedStyle(target).backgroundImage.includes("first/missing-image.png")}`);
+        results.forEach(println);
+    });
+</script>

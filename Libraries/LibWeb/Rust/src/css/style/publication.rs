@@ -2435,13 +2435,28 @@ impl StyleEngine {
         store: &CascadedPropertyStore,
         inherited_style_groups: u8,
         donor: Option<ExactCascadeDonor>,
+        resource_contexts: &[crate::css::style_compute::FfiStyleSheetResourceContext],
     ) -> (bridge::FfiExactCascadePublication, Vec<(u16, SpecifiedWinnerKey)>, bool) {
         let context = self.prepare_exact_cascade_publication(target, donor);
         let had_previous = context.previous.is_some();
         let exact_winners = store
             .winning_declarations()
             .map(|(property, value_pointer, origin, important)| {
-                let value = unsafe { self.intern_exact_specified_value(value_pointer) };
+                let context = if crate::css::style_compute::value_needs_style_sheet_resource_context(unsafe {
+                    &*value_pointer
+                }) {
+                    store
+                        .winning_style_sheet_source_slot(property)
+                        .and_then(|slot| resource_contexts.get(slot as usize))
+                        .and_then(|context| unsafe { specified_value::ResourceContext::from_ffi(context) })
+                } else {
+                    None
+                };
+                let value = unsafe {
+                    self.specified_values
+                        .intern_with_resource_context(value_pointer, context.as_ref(), &mut self.memory)
+                        .0
+                };
                 (
                     property,
                     SpecifiedWinnerKey {
@@ -2524,15 +2539,21 @@ impl StyleEngine {
             let Some(declaration) = source_declarations.next() else {
                 continue;
             };
-            if source_declarations.next().is_some()
-                || !unsafe {
+            if source_declarations.next().is_some() {
+                continue;
+            }
+            let value = unsafe { &*declaration.data.cast::<StyleValueData>() };
+            let identity_is_available = if crate::css::style_compute::value_needs_style_sheet_resource_context(value) {
+                matches!(self.specified_values.value(winner.key.value), Lookup::Known(retained) if retained == value)
+            } else {
+                unsafe {
                     self.specified_values
                         .ensure_identity(declaration.data.cast(), winner.key.value, &mut self.memory)
                 }
-            {
+            };
+            if !identity_is_available {
                 continue;
             }
-            let value = unsafe { &*(declaration.data as *const StyleValueData) };
             if matches!(
                 value,
                 StyleValueData::Shorthand { .. }

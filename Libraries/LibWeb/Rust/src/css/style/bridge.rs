@@ -2183,6 +2183,8 @@ pub unsafe extern "C" fn style_engine_publish_exact_cascade_state(
     inherited_style_groups: u8,
     donor_node: u32,
     donor_style_record: u64,
+    resource_contexts: *const c_void,
+    resource_context_count: usize,
 ) -> FfiExactCascadePublication {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return FfiExactCascadePublication::missing();
@@ -2194,11 +2196,22 @@ pub unsafe extern "C" fn style_engine_publish_exact_cascade_state(
     let generation_snapshot =
         engine.exact_cascade_generation_snapshot(super::computed::ComputedStyleTarget::new(node, pseudo_kind));
     let donor = exact_cascade_donor(donor_node, donor_style_record);
+    let resource_contexts = if resource_context_count == 0 {
+        &[]
+    } else {
+        unsafe {
+            std::slice::from_raw_parts(
+                resource_contexts.cast::<crate::css::style_compute::FfiStyleSheetResourceContext>(),
+                resource_context_count,
+            )
+        }
+    };
     let (publication, winners, had_previous) = engine.publish_exact_cascade_state(
         super::computed::ComputedStyleTarget::new(node, pseudo_kind),
         unsafe { &*store.cast::<crate::css::cascaded_properties::CascadedPropertyStore>() },
         inherited_style_groups,
         donor,
+        resource_contexts,
     );
     engine.record_boundary_call(EventKind::PublishExactCascadeState, |payload| {
         payload.write_u32(node.raw());
@@ -3011,12 +3024,19 @@ pub unsafe extern "C" fn style_engine_set_rule_declared_properties(
     custom_original_values: *const *const c_void,
     custom_count: usize,
     declarations_are_complete: bool,
+    resource_context: *const c_void,
 ) {
     if rule == 0 {
         return;
     }
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     let mut written_values = Vec::with_capacity(count);
+    let resource_context = unsafe {
+        resource_context
+            .cast::<crate::css::style_compute::FfiStyleSheetResourceContext>()
+            .as_ref()
+    }
+    .and_then(|context| unsafe { super::specified_value::ResourceContext::from_ffi(context) });
     let declared: Vec<DeclaredProperty> = match count == 0 {
         true => Vec::new(),
         false => {
@@ -3040,8 +3060,21 @@ pub unsafe extern "C" fn style_engine_set_rule_declared_properties(
                 .zip(operators.iter().copied())
                 .zip(values.iter().copied().zip(original_values.iter().copied()))
                 .map(|(((property, important), operator), (value, original_value))| {
-                    let value = unsafe { engine.intern_specified_value(value.cast()) };
-                    unsafe { engine.alias_specified_value(original_value.cast(), value) };
+                    let resource_context = resource_context.as_ref().filter(|_| {
+                        crate::css::style_compute::value_needs_style_sheet_resource_context(unsafe {
+                            &*value.cast::<crate::css::style_value::StyleValueData>()
+                        })
+                    });
+                    let value =
+                        unsafe { engine.intern_specified_value_with_resource_context(value.cast(), resource_context) };
+                    unsafe {
+                        engine.specified_values.alias_with_resource_context(
+                            original_value.cast(),
+                            value,
+                            resource_context,
+                            &mut engine.memory,
+                        );
+                    };
                     written_values.push(unsafe {
                         RetainedStyleValueData::from_retained_pointer(retain_style_value(original_value.cast()))
                     });

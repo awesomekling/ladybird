@@ -33,6 +33,8 @@ struct FfiTransitionInput;
 
 namespace Web::CSS {
 
+class CSSStyleSheet;
+class CascadedProperties;
 class StyleComputer;
 
 // Owns one document's StyleEngine. The engine itself lives entirely on the Rust side: selector
@@ -81,7 +83,7 @@ public:
     // specified values and their authored aliases, and whether that inventory describes everything
     // the block can contribute.
     // Only a property some rule declares can be a candidate for a winner change.
-    void set_rule_declared_properties(StyleEngineRuleID rule, ReadonlySpan<u16> properties, ReadonlySpan<bool> important, ReadonlySpan<StyleEngineFFI::FfiCascadeOperator> operators, ReadonlySpan<void const*> values, ReadonlySpan<void const*> original_values, ReadonlySpan<StyleAtomID> custom_names, ReadonlySpan<bool> custom_important, ReadonlySpan<StyleEngineFFI::FfiCascadeOperator> custom_operators, ReadonlySpan<void const*> custom_values, ReadonlySpan<void const*> custom_original_values, bool declarations_are_complete);
+    void set_rule_declared_properties(StyleEngineRuleID rule, ReadonlySpan<u16> properties, ReadonlySpan<bool> important, ReadonlySpan<StyleEngineFFI::FfiCascadeOperator> operators, ReadonlySpan<void const*> values, ReadonlySpan<void const*> original_values, ReadonlySpan<StyleAtomID> custom_names, ReadonlySpan<bool> custom_important, ReadonlySpan<StyleEngineFFI::FfiCascadeOperator> custom_operators, ReadonlySpan<void const*> custom_values, ReadonlySpan<void const*> custom_original_values, bool declarations_are_complete, CSSStyleSheet const* = nullptr);
     // Which longhand properties one of an element's own declarations covers, their canonical
     // specified values and their authored aliases, and whether the inventory has complete
     // continuation semantics.
@@ -96,7 +98,7 @@ public:
     // explicit discard. Consume them synchronously before asking the engine anything else.
     [[nodiscard]] ReadonlySpan<ComputedValuesFFI::FfiSourceSlotAssignment> materialize_retained_cascade_state(StyleNodeID node, u8 pseudo_kind, ComputedValuesFFI::CascadedPropertyStore*, ReadonlySpan<ComputedValuesFFI::FfiCascadeBlock>);
     void discard_retained_cascade_assignments();
-    [[nodiscard]] ExactCascadePublication publish_exact_cascade_state(StyleNodeID node, u8 pseudo_kind, ComputedValuesFFI::CascadedPropertyStore const*, u8 inherited_style_groups = 0, StyleNodeID donor_node = {}, StyleRecordID donor_style_record = {});
+    [[nodiscard]] ExactCascadePublication publish_exact_cascade_state(StyleNodeID node, u8 pseudo_kind, CascadedProperties&, u8 inherited_style_groups = 0, StyleNodeID donor_node = {}, StyleRecordID donor_style_record = {});
     // Publish the immutable input identities of an element or pseudo-element's base style and
     // return its previous and current StyleRecordID assignments. A zero node interns an unassigned
     // record for a style target which is not registered in the engine.

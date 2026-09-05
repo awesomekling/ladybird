@@ -353,6 +353,12 @@ impl CascadedPropertyStore {
             .map(|(property, entry)| (property, entry.value.pointer(), entry.origin, entry.important))
     }
 
+    pub(crate) fn winning_style_sheet_source_slot(&self, property: u16) -> Option<u32> {
+        self.last_entry(property)
+            .filter(|entry| entry.has_style_sheet_context)
+            .map(|entry| entry.source_slot)
+    }
+
     /// Returns whichever of the two properties has the higher-priority winning
     /// declaration. A property with no cascaded value loses to one with any.
     pub(crate) fn property_with_higher_priority(&self, first_property_id: u16, second_property_id: u16) -> u16 {
@@ -478,6 +484,23 @@ pub unsafe extern "C" fn rust_cascaded_properties_destroy(store: *mut CascadedPr
         store.reset();
         pool.push(*store);
     });
+}
+
+#[unsafe(no_mangle)]
+#[doc = "# Safety\n`store` must be live. `visit` must accept `context` and must not mutate or destroy the store."]
+pub unsafe extern "C" fn rust_cascaded_properties_visit_resource_context_sources(
+    store: *const CascadedPropertyStore,
+    context: *mut c_void,
+    visit: unsafe extern "C" fn(*mut c_void, u32),
+) {
+    crate::css::ffi_stats::bump(crate::css::ffi_stats::FfiOp::CascadedStoreQueryEntry);
+    for (_, entry) in unsafe { &*store }.winning_entries() {
+        if entry.has_style_sheet_context
+            && crate::css::style_compute::value_needs_style_sheet_resource_context(entry.value.data())
+        {
+            unsafe { visit(context, entry.source_slot) };
+        }
+    }
 }
 
 /// Returns a borrowed pointer to the winning declaration's Rust-owned style value data, or null.

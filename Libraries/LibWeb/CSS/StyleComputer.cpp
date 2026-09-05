@@ -4846,7 +4846,7 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
         auto publication = const_cast<StyleComputer&>(*this).style_engine().publish_exact_cascade_state(
             node,
             pseudo_element_to_ffi(abstract_element.pseudo_element()),
-            cascaded_properties->rust_store(),
+            *cascaded_properties,
             font_input_style_groups,
             donor ? donor->style_node_id : StyleNodeID {},
             donor ? *donor->style_record_identity : StyleRecordID {});
