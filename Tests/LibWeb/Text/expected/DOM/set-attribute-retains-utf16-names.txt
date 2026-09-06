@@ -1,0 +1,10 @@
+data-☃: second
+data-😀: second
+HTML name folded: true
+qualified attribute updated: after
+no unqualified duplicate: null
+SVG name preserved: DATA-☃
+data-☃: null -> first
+data-☃: first -> second
+data-😀: null -> first
+data-😀: first -> second

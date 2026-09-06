@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    test(() => {
+        const reactions = [];
+        customElements.define("x-utf16-attributes", class extends HTMLElement {
+            static get observedAttributes() { return ["data-\u2603", "data-\u{1F600}"]; }
+            attributeChangedCallback(name, oldValue, newValue) {
+                reactions.push(`${name}: ${oldValue} -> ${newValue}`);
+            }
+        });
+        const element = document.createElement("x-utf16-attributes");
+        for (const name of ["data-\u2603", "data-\u{1F600}"]) {
+            element.setAttribute(name, "first");
+            element.setAttribute(name, "second");
+            println(`${name}: ${element.getAttribute(name)}`);
+        }
+        element.setAttribute("DATA-CASE", "lowercase");
+        println(`HTML name folded: ${element.getAttributeNames().includes("data-case")}`);
+        element.setAttributeNS("example", "prefix:name", "before");
+        element.setAttribute("prefix:name", "after");
+        println(`qualified attribute updated: ${element.getAttributeNS("example", "name")}`);
+        println(`no unqualified duplicate: ${element.getAttributeNS(null, "prefix:name")}`);
+
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        svg.setAttribute("DATA-\u2603", "uppercase");
+        println(`SVG name preserved: ${svg.getAttributeNames()[0]}`);
+        reactions.forEach(println);
+    });
+</script>

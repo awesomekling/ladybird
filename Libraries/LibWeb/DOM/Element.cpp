@@ -791,11 +791,10 @@ GC::Ptr<Attr> Element::get_attribute_node_ns(Optional<Utf16FlyString> const& nam
     return const_cast<Element&>(*this).attributes()->get_attribute_ns(namespace_, name);
 }
 
-void Element::set_attribute(FlyString qualified_name, Utf16String const& verified_value)
+void Element::set_attribute(Utf16FlyString qualified_name, Utf16String const& verified_value)
 {
-    auto utf16_qualified_name = Utf16FlyString::from_fly_string(qualified_name);
     // Let attribute be the first attribute in this’s attribute list whose qualified name is qualifiedName, and null otherwise.
-    auto index = find_attribute_index(utf16_qualified_name);
+    auto index = find_attribute_index(qualified_name);
 
     // If attribute is non-null, then change attribute to verifiedValue and return.
     if (index.has_value()) {
@@ -810,7 +809,7 @@ void Element::set_attribute(FlyString qualified_name, Utf16String const& verifie
 
     // Set attribute to a new attribute whose local name is qualifiedName, value is verifiedValue,
     // and node document is this’s node document.
-    append_attribute(QualifiedName { utf16_qualified_name, {}, {} }, verified_value);
+    append_attribute(QualifiedName { qualified_name, {}, {} }, verified_value);
 }
 
 // https://dom.spec.whatwg.org/#valid-namespace-prefix
@@ -6942,7 +6941,7 @@ WebIDL::ExceptionOr<void> set_attribute(DOM::Element& element, Utf16String const
         utf16_qualified_name = utf16_qualified_name.to_ascii_lowercase();
 
     auto const verified_value = TRY(TrustedTypes::get_trusted_types_compliant_attribute_value(utf16_qualified_name, {}, element, value));
-    element.set_attribute(FlyString { utf16_qualified_name.to_utf16_string().to_utf8() }, verified_value);
+    element.set_attribute(utf16_qualified_name, verified_value);
     return {};
 }
 

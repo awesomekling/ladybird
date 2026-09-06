@@ -225,7 +225,7 @@ public:
     Optional<Utf16View> lang_view() const;
     void invalidate_lang_value();
 
-    void set_attribute(FlyString qualified_name, Utf16String const& verified_value);
+    void set_attribute(Utf16FlyString qualified_name, Utf16String const& verified_value);
     void set_attribute_ns(QualifiedName const&, Utf16String const& verified_value);
     void set_attribute_value(FlyString const& local_name, String const& value, Optional<FlyString> const& prefix = {}, Optional<FlyString> const& namespace_ = {});
     void set_attribute_value(Utf16FlyString const& local_name, Utf16View value, Optional<Utf16FlyString> const& prefix = {}, Optional<Utf16FlyString> const& namespace_ = {});
