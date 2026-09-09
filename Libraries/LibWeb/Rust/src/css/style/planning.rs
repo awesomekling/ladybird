@@ -185,6 +185,9 @@ impl<T: Ord> DeltaBatch<T> {
 pub(super) struct SelectorTruthChanges {
     pub(super) deltas: DeltaBatch<SelectorTruthDelta>,
     pub(super) refreshes: DeltaBatch<SelectorTruthRefresh>,
+    // Full matches need no signed patch, but publication still consumes these effects.
+    pub(super) full_match_pseudo_changes: BitColumn,
+    pub(super) full_match_incomplete_declaration_changes: BitColumn,
 }
 
 #[derive(Clone, Copy)]
@@ -555,7 +558,12 @@ impl SelectorTruthChanges {
         capacity_bytes! {
             shallow [];
             cached [];
-            nested [self.deltas.capacity_bytes(), self.refreshes.capacity_bytes()];
+            nested [
+                self.deltas.capacity_bytes(),
+                self.refreshes.capacity_bytes(),
+                self.full_match_pseudo_changes.capacity_bytes(),
+                self.full_match_incomplete_declaration_changes.capacity_bytes(),
+            ];
             skip [];
         }
     }

@@ -1422,8 +1422,6 @@ impl StyleEngine {
         self.memory
             .release(MemoryCategory::BatchScratch, final_retained_answer_patch_scratch_bytes);
         self.memory
-            .release(MemoryCategory::BatchScratch, selector_truth_change_bytes);
-        self.memory
             .release(MemoryCategory::BatchScratch, direct_action_node_bytes);
         published_match_answers.sort();
         {
@@ -1440,7 +1438,9 @@ impl StyleEngine {
             // anything the descendant inherits.
             let mut confined_ancestors: HashMap<StyleNodeID, bool> = HashMap::default();
             for (published_index, node) in published_nodes.iter().copied().enumerate() {
+                let element_index = node.element_index().expect("style reactions belong to elements") as usize;
                 let pseudo_inputs_may_have_changed = pseudo_inputs_may_have_changed
+                    || selector_truth_changes.full_match_pseudo_changes.contains(element_index)
                     || !selector_truth_changes.refreshes_for(node).is_empty()
                     || selector_truth_changes
                         .deltas_for(node)
@@ -1565,6 +1565,9 @@ impl StyleEngine {
                     self.counters.bump(Counter::EngineComputedRecordBailSubstitution);
                     false
                 } else if previous_answer_was_incomplete
+                    || selector_truth_changes
+                        .full_match_incomplete_declaration_changes
+                        .contains(element_index)
                     || selector_truth_changes.deltas_for(node).iter().any(|delta| {
                         !self
                             .program
@@ -1755,6 +1758,9 @@ impl StyleEngine {
             self.memory
                 .release(MemoryCategory::BatchScratch, unresolved_inheritance_source_bytes);
         }
+        drop(selector_truth_changes);
+        self.memory
+            .release(MemoryCategory::BatchScratch, selector_truth_change_bytes);
         self.memory
             .release(MemoryCategory::BatchScratch, style_input_reaction_bytes);
         drop(impact_region_scratch);

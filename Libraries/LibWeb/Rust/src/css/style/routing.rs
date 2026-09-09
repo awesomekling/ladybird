@@ -2754,6 +2754,37 @@ impl StyleEngine {
                 .reserve_required(MemoryCategory::BatchScratch, scratch_bytes);
             let mut cascade_stops = 0;
             for (node, old, new) in &relation.changed_answers {
+                // A full subtree already requires complete matching for each of its nodes.
+                // Keep the relation's updated answers, including their effects outside the
+                // subtree, without expanding that coverage into unused per-node truth deltas.
+                if regions.is_covered_by_full_subtree(ImpactRegion::Node(*node), &self.tree) {
+                    if self.selector_truth_changes_active {
+                        let index = node.element_index().expect("prefix answers belong to elements") as usize;
+                        for difference in merge_sorted_by(old, new, Ord::cmp) {
+                            let entry = match difference {
+                                SortedMergeEntry::Left(&entry) | SortedMergeEntry::Right(&entry) => entry,
+                                SortedMergeEntry::Both(_, _) => continue,
+                            };
+                            for candidate in dispatch.entries_for_identity(entry) {
+                                if !self.program.rule_can_decide(candidate.rule) {
+                                    continue;
+                                }
+                                if self.programs.entry(entry).1.pseudo_element.is_some() {
+                                    self.selector_truth_changes.full_match_pseudo_changes.set(index, true);
+                                }
+                                if !self
+                                    .program
+                                    .declarations_are_complete_but_for_custom_properties(candidate.rule)
+                                {
+                                    self.selector_truth_changes
+                                        .full_match_incomplete_declaration_changes
+                                        .set(index, true);
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
                 let mut has_active_change = false;
                 let mut may_change_cascade = false;
                 for difference in merge_sorted_by(old, new, Ord::cmp) {

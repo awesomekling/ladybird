@@ -7227,6 +7227,95 @@ fn prefix_convergence_skips_an_already_dirty_arrival() {
 }
 
 #[test]
+fn maintained_prefix_arrivals_do_not_expand_full_coverage_into_signed_deltas() {
+    for (arrival_count, has_pseudo) in [(1, false), (64, false), (1, true), (64, true)] {
+        let (mut engine, nodes) = nested_document();
+        let guard = StyleAtomID(200);
+        let target = StyleAtomID(201);
+        add_guard_target_rule(&mut engine, guard, target);
+        if has_pseudo {
+            add_pseudo_target_rule(
+                &mut engine,
+                StyleSheetObjectID(2),
+                target,
+                PseudoElementTarget::new(PseudoElementKind(0)),
+            );
+        }
+        let match_count = 1 + usize::from(has_pseudo);
+        add_feature(&mut engine, nodes[1], LocalFeatureKey::Class(guard));
+        add_feature(&mut engine, nodes[3], LocalFeatureKey::Class(target));
+        discard_transaction(&mut engine);
+
+        engine.begin_published_match_answer_completion_batch(nodes[0], true);
+        assert_eq!(engine.match_element(nodes[3]).unwrap().len(), match_count);
+        engine.end_published_match_answer_completion_batch();
+        assert_eq!(engine.counters().get(Counter::PrefixRelationBuilds), 1);
+
+        let mut arrivals = vec![0; arrival_count];
+        engine.allocate_style_nodes(&mut arrivals);
+        let arrivals: Vec<_> = arrivals
+            .into_iter()
+            .map(|raw| StyleNodeID::from_raw(raw).unwrap())
+            .collect();
+        for (index, &node) in arrivals.iter().enumerate() {
+            let parent = if index == 0 { nodes[1] } else { arrivals[index - 1] };
+            engine.record_tree_delta(
+                node,
+                None,
+                Some(relations(
+                    Some(parent.raw()),
+                    (index == 0).then_some(nodes[2].raw()),
+                    None,
+                )),
+            );
+            add_feature(&mut engine, node, LocalFeatureKey::ArrivingFacts);
+            add_feature(&mut engine, node, LocalFeatureKey::Class(target));
+        }
+        // An existing subject outside the arrival still needs its exact removal.
+        remove_feature(&mut engine, nodes[3], LocalFeatureKey::Class(target));
+        let additions_before = engine.counters().get(Counter::SelectorTruthAdditions);
+        let removals_before = engine.counters().get(Counter::SelectorTruthRemovals);
+        let incomplete_before = engine.counters().get(Counter::EngineComputedRecordGateIncompleteAnswer);
+        let mut planned = Vec::new();
+        assert!(engine.take_style_transaction(nodes[0], |_, _, answers| {
+            for answer in answers {
+                assert_eq!(
+                    answer.reaction & transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED != 0,
+                    has_pseudo
+                );
+                planned.push(answer.style_node);
+            }
+        }));
+        engine.discard_style_transaction_outputs();
+        let expected: Vec<_> = std::iter::once(nodes[3].raw())
+            .chain(arrivals.iter().map(|node| node.raw()))
+            .collect();
+        assert_eq!(planned, expected);
+        assert_eq!(
+            engine.counters().get(Counter::EngineComputedRecordGateIncompleteAnswer) - incomplete_before,
+            expected.len() as u64
+        );
+        assert_eq!(engine.counters().get(Counter::PrefixRelationUpdates), 1);
+        assert_eq!(
+            engine.counters().get(Counter::SelectorTruthAdditions) - additions_before,
+            0
+        );
+        assert_eq!(
+            engine.counters().get(Counter::SelectorTruthRemovals) - removals_before,
+            match_count as u64
+        );
+        assert_eq!(engine.memory().bytes_in_category(MemoryCategory::BatchScratch), 0);
+
+        engine.begin_published_match_answer_completion_batch(nodes[0], true);
+        assert!(engine.match_element(nodes[3]).unwrap().is_empty());
+        for node in arrivals {
+            assert_eq!(engine.match_element(node).unwrap().len(), match_count);
+        }
+        engine.end_published_match_answer_completion_batch();
+    }
+}
+
+#[test]
 fn a_parent_change_has_no_prefix_fact_transition() {
     let (mut engine, nodes) = nested_document();
     discard_transaction(&mut engine);
