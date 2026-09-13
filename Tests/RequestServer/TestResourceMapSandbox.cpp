@@ -15,7 +15,10 @@
 #include <fcntl.h>
 #include <linux/landlock.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/uio.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -65,6 +68,49 @@ TEST_CASE(resource_map_files_are_readable_without_granting_access_to_neighbors)
         VERIFY(errno == EACCES);
         VERIFY(open(mapped_path.characters(), O_WRONLY) == -1);
         VERIFY(errno == EACCES || errno == EPERM);
+        _exit(0);
+    }
+
+    int status = 0;
+    VERIFY(waitpid(child, &status, 0) == child);
+    EXPECT(WIFEXITED(status));
+    if (WIFEXITED(status))
+        EXPECT_EQ(WEXITSTATUS(status), 0);
+}
+
+TEST_CASE(vectored_io_and_permission_changes_work_in_the_sandbox)
+{
+    char directory_template[] = "/tmp/ladybird-sandbox-io-XXXXXX";
+    auto* directory = mkdtemp(directory_template);
+    VERIFY(directory);
+    ScopeGuard cleanup = [&] {
+        MUST(FileSystem::remove(ByteString { directory }, FileSystem::RecursionMode::Allowed));
+    };
+    auto file_path = ByteString::formatted("{}/cache-entry", directory);
+
+    auto child = fork();
+    VERIFY(child >= 0);
+    if (child == 0) {
+        MUST(RequestServer::apply_sandbox({}, StringView { directory, strlen(directory) }));
+
+        auto fd = open(file_path.characters(), O_CREAT | O_RDWR | O_EXCL, 0600);
+        VERIFY(fd >= 0);
+        char first[] = "hello";
+        char second[] = " world";
+        iovec output[] = { { first, 5 }, { second, 6 } };
+        VERIFY(writev(fd, output, 2) == 11);
+        VERIFY(lseek(fd, 0, SEEK_SET) == 0);
+
+        char buffer[11] {};
+        iovec input[] = { { buffer, 3 }, { buffer + 3, 8 } };
+        VERIFY(readv(fd, input, 2) == 11);
+        VERIFY(StringView(buffer, sizeof(buffer)) == "hello world"sv);
+
+        VERIFY(fchmod(fd, 0400) == 0);
+        struct stat metadata {};
+        VERIFY(fstat(fd, &metadata) == 0);
+        VERIFY((metadata.st_mode & 0777) == 0400);
+        VERIFY(close(fd) == 0);
         _exit(0);
     }
 

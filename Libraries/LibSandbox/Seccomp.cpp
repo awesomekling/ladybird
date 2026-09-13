@@ -93,6 +93,7 @@ static constexpr unsigned read_only_open_flags = O_CLOEXEC;
 #define IF_DEFINED_exit(if_defined, if_not_defined) if_defined
 #define IF_DEFINED_exit_group(if_defined, if_not_defined) if_defined
 #define IF_DEFINED_fallocate(if_defined, if_not_defined) if_defined
+#define IF_DEFINED_fchmod(if_defined, if_not_defined) if_defined
 #define IF_DEFINED_fcntl(if_defined, if_not_defined) if_defined
 #define IF_DEFINED_fcntl64(if_defined, if_not_defined) if_defined
 #define IF_DEFINED_fdatasync(if_defined, if_not_defined) if_defined
@@ -150,6 +151,7 @@ static constexpr unsigned read_only_open_flags = O_CLOEXEC;
 #define IF_DEFINED_read(if_defined, if_not_defined) if_defined
 #define IF_DEFINED_readlink(if_defined, if_not_defined) if_defined
 #define IF_DEFINED_readlinkat(if_defined, if_not_defined) if_defined
+#define IF_DEFINED_readv(if_defined, if_not_defined) if_defined
 #define IF_DEFINED_rename(if_defined, if_not_defined) if_defined
 #define IF_DEFINED_renameat(if_defined, if_not_defined) if_defined
 #define IF_DEFINED_renameat2(if_defined, if_not_defined) if_defined
@@ -188,6 +190,7 @@ static constexpr unsigned read_only_open_flags = O_CLOEXEC;
 #define IF_DEFINED_wait4(if_defined, if_not_defined) if_defined
 #define IF_DEFINED_waitid(if_defined, if_not_defined) if_defined
 #define IF_DEFINED_write(if_defined, if_not_defined) if_defined
+#define IF_DEFINED_writev(if_defined, if_not_defined) if_defined
 
 #ifndef __NR_accept
 #    undef IF_DEFINED_accept
@@ -880,6 +883,7 @@ void SeccompPolicy::allow_filesystem_writes()
     SECCOMP_APPEND_ALLOW_SYSCALL_IF_DEFINED(*this, fsync);
     SECCOMP_APPEND_ALLOW_SYSCALL_IF_DEFINED(*this, fdatasync);
     SECCOMP_APPEND_ALLOW_SYSCALL_IF_DEFINED(*this, fallocate);
+    SECCOMP_APPEND_ALLOW_SYSCALL_IF_DEFINED(*this, fchmod);
     SECCOMP_APPEND_ALLOW_SYSCALL_IF_DEFINED(*this, flock);
     // NB: Mesa's shader disk cache updates entry mtimes for LRU eviction, and glibc routes the
     //     whole utime() family through utimensat() on modern kernels.
@@ -910,7 +914,9 @@ void SeccompPolicy::allow_filesystem_writes()
 void SeccompPolicy::allow_file_descriptor_operations()
 {
     SECCOMP_APPEND_ALLOW_SYSCALL_IF_DEFINED(*this, read);
+    SECCOMP_APPEND_ALLOW_SYSCALL_IF_DEFINED(*this, readv);
     SECCOMP_APPEND_ALLOW_SYSCALL_IF_DEFINED(*this, write);
+    SECCOMP_APPEND_ALLOW_SYSCALL_IF_DEFINED(*this, writev);
     SECCOMP_APPEND_ALLOW_SYSCALL_IF_DEFINED(*this, close);
     SECCOMP_APPEND_ALLOW_SYSCALL_IF_DEFINED(*this, fstat);
     SECCOMP_APPEND_ALLOW_SYSCALL_IF_DEFINED(*this, dup);
