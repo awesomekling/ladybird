@@ -15,9 +15,7 @@ from typing import List
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from Utils.utils import string_hash
-
-ENDPOINT_PREFIX = "endpoint "
+from Generators.generate_ipc_definitions import parse
 
 
 def main() -> int:
@@ -34,30 +32,25 @@ def main() -> int:
         error_count += 1
 
     for path in args.ipc_files:
-        endpoint_name = ""
-
         try:
             with open(path, "r", encoding="utf-8") as ipc_file:
-                for line in ipc_file:
-                    line = line.strip()
-                    if not line.startswith(ENDPOINT_PREFIX):
-                        continue
-
-                    remaining = line[len(ENDPOINT_PREFIX) :]
-                    if endpoint_name:
-                        report_error(f"Multiple endpoints in file '{path}': Found {endpoint_name} and {remaining}")
-                        continue
-
-                    endpoint_name = remaining
+                endpoints = parse(ipc_file.read())
         except OSError as error:
             report_error(f"Cannot open '{path}': {error}")
             continue
-
-        if not endpoint_name:
-            report_error(f"Could not detect endpoint name in file '{path}'")
+        except RuntimeError as error:
+            report_error(f"Cannot parse '{path}': {error}")
             continue
 
-        files_by_magic[string_hash(endpoint_name)].append(path)
+        if not endpoints:
+            report_error(f"Could not detect endpoint name in file '{path}'")
+            continue
+        if len(endpoints) > 1:
+            endpoint_names = ", ".join(endpoint.name for endpoint in endpoints)
+            report_error(f"Multiple endpoints in file '{path}': Found {endpoint_names}")
+
+        for endpoint in endpoints:
+            files_by_magic[endpoint.magic].append(path)
 
     for magic, files in files_by_magic.items():
         if len(files) <= 1:

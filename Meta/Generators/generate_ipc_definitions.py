@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
 from typing import List
+from typing import Optional
 from typing import TextIO
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -74,12 +75,19 @@ class Parameter:
 @dataclass
 class Message:
     name: str = ""
+    attributes: List["MessageAttribute"] = field(default_factory=list)
     is_synchronous: bool = False
     inputs: List[Parameter] = field(default_factory=list)
     outputs: List[Parameter] = field(default_factory=list)
 
     def response_name(self) -> str:
         return f"{pascal_case(self.name)}Response"
+
+
+@dataclass
+class MessageAttribute:
+    name: str
+    argument: Optional[str] = None
 
 
 @dataclass
@@ -162,6 +170,87 @@ def parse(contents: str) -> List[Endpoint]:
 
         return parameter_type
 
+    def parse_identifier(description: str) -> str:
+        identifier = lexer.consume_while(lambda c: c.isalnum() or c == "_")
+        if not identifier:
+            raise RuntimeError(f"Expected {description} at position {lexer.position}")
+        return identifier
+
+    def parse_quoted_string() -> str:
+        assert_specific('"')
+        characters: List[str] = []
+        while not lexer.is_eof() and lexer.peek() != '"':
+            character = lexer.consume()
+            if character == "\\":
+                if lexer.is_eof():
+                    raise RuntimeError("Unexpected EOF in quoted attribute argument")
+                escaped_character = lexer.consume()
+                if escaped_character not in ('"', "\\"):
+                    raise RuntimeError(f"Unsupported escape sequence '\\{escaped_character}' in attribute argument")
+                character = escaped_character
+            characters.append(character)
+        if lexer.is_eof():
+            raise RuntimeError("Unexpected EOF in quoted attribute argument")
+        assert_specific('"')
+        return "".join(characters)
+
+    def parse_message_attributes(message: Message) -> None:
+        while lexer.consume_specific("["):
+            consume_whitespace()
+            while True:
+                attribute_name = parse_identifier("message attribute")
+                consume_whitespace()
+                argument: Optional[str] = None
+                if lexer.consume_specific("("):
+                    consume_whitespace()
+                    if lexer.peek() == '"':
+                        argument = parse_quoted_string()
+                    else:
+                        argument = parse_identifier("message attribute argument")
+                    consume_whitespace()
+                    assert_specific(")")
+                    consume_whitespace()
+
+                message.attributes.append(MessageAttribute(attribute_name, argument))
+                if lexer.consume_specific("]"):
+                    consume_whitespace()
+                    break
+                assert_specific(",")
+                consume_whitespace()
+
+    def validate_message_attributes(message: Message) -> None:
+        attributes_by_name = {attribute.name: attribute for attribute in message.attributes}
+        if len(attributes_by_name) != len(message.attributes):
+            raise RuntimeError(f"Message {message.name} has duplicate attributes")
+
+        parameters_by_name = {parameter.name: parameter for parameter in message.inputs}
+        for attribute in message.attributes:
+            if attribute.name in ("PrimaryOnly", "TestOnly"):
+                if attribute.argument is not None:
+                    raise RuntimeError(f"{attribute.name} does not accept an argument")
+                continue
+            if attribute.name == "Contextual":
+                if not attribute.argument:
+                    raise RuntimeError("Contextual requires a non-empty reason")
+                continue
+
+            if attribute.name not in ("Principal", "Site", "PageOwned", "RequiresActivation"):
+                raise RuntimeError(f"Unknown message attribute: {attribute.name}")
+            if attribute.argument is None:
+                raise RuntimeError(f"{attribute.name} requires a parameter name")
+            parameter = parameters_by_name.get(attribute.argument)
+            if parameter is None:
+                raise RuntimeError(
+                    f"{attribute.name} attribute on message {message.name} names unknown parameter {attribute.argument}"
+                )
+
+            if attribute.name == "Principal" and parameter.type not in ("URL::URL", "URL::Origin", "String"):
+                raise RuntimeError(f"Principal parameter {parameter.name} has unsupported type {parameter.type}")
+            if attribute.name == "Site" and parameter.type != "String":
+                raise RuntimeError(f"Site parameter {parameter.name} must have type String")
+            if attribute.name in ("PageOwned", "RequiresActivation") and parameter.type != "u64":
+                raise RuntimeError(f"{attribute.name} parameter {parameter.name} must have type u64")
+
     def parse_parameter(storage: List[Parameter], message_name: str) -> None:
         if lexer.is_eof():
             raise RuntimeError("EOF when parsing parameter")
@@ -224,6 +313,7 @@ def parse(contents: str) -> List[Endpoint]:
         message = Message()
 
         consume_whitespace()
+        parse_message_attributes(message)
         message.name = lexer.consume_until(lambda c: c.isspace() or c == "(")
 
         consume_whitespace()
@@ -250,6 +340,7 @@ def parse(contents: str) -> List[Endpoint]:
             assert_specific(")")
 
         consume_whitespace()
+        validate_message_attributes(message)
         endpoints[-1].messages.append(message)
 
     def parse_messages() -> None:
@@ -621,6 +712,8 @@ public:
     virtual u32 magic() const override {{ return {endpoint.magic}; }}
     virtual ByteString name() const override {{ return "{endpoint.name}"; }}
 
+    virtual IPC::MessagePolicy* message_policy() {{ return nullptr; }}
+
     virtual ErrorOr<OwnPtr<IPC::MessageBuffer>> handle(NonnullOwnPtr<IPC::Message> message) override
     {{
         switch (message->message_id()) {{""")
@@ -657,6 +750,49 @@ public:
             out.write(f"        auto& request = static_cast<Messages::{endpoint.name}::{pascal_name}&>(message);\n")
         else:
             out.write(")\n    {\n")
+
+        def write_policy_refusal(current_message: Message) -> None:
+            if not current_message.is_synchronous:
+                out.write("            return nullptr;\n")
+                return
+
+            response_pascal_name = pascal_case(current_message.response_name())
+            output_arguments = ", ".join("{}" for _ in current_message.outputs)
+            out.write(
+                f"            auto response = Messages::{endpoint.name}::{response_pascal_name} {{ {output_arguments} }};\n"
+            )
+            out.write("            return make<IPC::MessageBuffer>(TRY(response.encode()));\n")
+
+        for attribute in message.attributes:
+            if attribute.name == "Contextual":
+                continue
+
+            if attribute.name == "PrimaryOnly":
+                condition = "!policy->is_primary_connection()"
+                reason = "not the primary connection"
+            elif attribute.name == "TestOnly":
+                condition = "!policy->is_test_mode()"
+                reason = "message is only available in test mode"
+            elif attribute.name == "Principal":
+                condition = f"!policy->allows_principal(request.{attribute.argument}())"
+                reason = "principal is not allowed"
+            elif attribute.name == "Site":
+                condition = f"!policy->allows_site(request.{attribute.argument}())"
+                reason = "site is not allowed"
+            elif attribute.name == "PageOwned":
+                condition = f"!policy->owns_page(request.{attribute.argument}())"
+                reason = "page is not owned by this connection"
+            elif attribute.name == "RequiresActivation":
+                condition = f"!policy->has_transient_activation(request.{attribute.argument}())"
+                reason = None
+            else:
+                raise RuntimeError(f"Cannot generate policy check for attribute {attribute.name}")
+
+            out.write(f"        if (auto* policy = message_policy(); policy && {condition}) {{\n")
+            if reason is not None:
+                out.write(f'            policy->did_misbehave("{message.name}"sv, "{reason}"sv);\n')
+            write_policy_refusal(message)
+            out.write("        }\n")
 
         if not message.is_synchronous:
             out.write(f"        {message.name}({arguments});\n")
@@ -732,6 +868,7 @@ def build(out: TextIO, endpoints: List[Endpoint]) -> None:
 #include <LibIPC/Encoder.h>
 #include <LibIPC/File.h>
 #include <LibIPC/Message.h>
+#include <LibIPC/MessagePolicy.h>
 #include <LibIPC/Stub.h>
 
 #if defined(AK_COMPILER_CLANG)
