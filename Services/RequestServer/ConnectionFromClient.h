@@ -19,6 +19,7 @@
 #include <LibHTTP/Cache/Utilities.h>
 #include <LibHTTP/Forward.h>
 #include <LibIPC/ConnectionFromClient.h>
+#include <LibIPC/MessagePolicy.h>
 #include <LibRequests/RequestTransferLease.h>
 #include <LibRequests/WebSocket.h>
 #include <LibWebSocket/WebSocket.h>
@@ -40,7 +41,8 @@ struct AIAFetch {
 };
 
 class ConnectionFromClient final
-    : public IPC::ConnectionFromClient<RequestClientEndpoint, RequestServerEndpoint> {
+    : public IPC::ConnectionFromClient<RequestClientEndpoint, RequestServerEndpoint>
+    , public IPC::MessagePolicy {
     C_OBJECT(ConnectionFromClient);
 
 public:
@@ -72,6 +74,25 @@ public:
 
 private:
     ConnectionFromClient(NonnullOwnPtr<IPC::Transport>, IsPrimaryConnection, IsPrivate, ConnectionMap&, RequestTransferLeaseMap&, Optional<HTTP::DiskCache&>, ByteString alt_svc_cache_path);
+
+    using IPC::ConnectionFromClient<RequestClientEndpoint, RequestServerEndpoint>::did_misbehave;
+
+    virtual IPC::MessagePolicy* message_policy() override { return this; }
+    virtual bool is_primary_connection() const override;
+
+    // Later slices tighten these policies for RequestServer messages that need them.
+    virtual bool is_test_mode() const override { return true; }
+    virtual bool allows_principal(URL::URL const&) const override { return true; }
+    virtual bool allows_principal(URL::Origin const&) const override { return true; }
+    virtual bool allows_principal(String const&) const override { return true; }
+    virtual bool allows_site(StringView) const override { return true; }
+    virtual bool owns_page(u64) const override { return true; }
+    virtual bool has_transient_activation(u64) const override { return true; }
+    virtual void did_misbehave(StringView message, StringView) override
+    {
+        auto message_string = message.to_byte_string();
+        IPC::ConnectionFromClient<RequestClientEndpoint, RequestServerEndpoint>::did_misbehave(message_string.characters());
+    }
 
     virtual Messages::RequestServer::InitTransportResponse init_transport(int peer_pid) override;
     virtual Messages::RequestServer::ConnectNewClientResponse connect_new_client(IsPrivate) override;

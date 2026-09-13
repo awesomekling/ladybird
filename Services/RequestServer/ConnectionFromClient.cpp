@@ -162,6 +162,11 @@ Optional<ConnectionFromClient&> ConnectionFromClient::primary_connection()
     return {};
 }
 
+bool ConnectionFromClient::is_primary_connection() const
+{
+    return g_primary_connection == this;
+}
+
 void ConnectionFromClient::request_complete(Badge<Request>, Request const& request)
 {
     if (request.has_transfer_lease())
@@ -935,8 +940,6 @@ Messages::RequestServer::WebsocketSetCertificateResponse ConnectionFromClient::w
 
 void ConnectionFromClient::set_performance_monitor_enabled(bool enabled)
 {
-    if (g_primary_connection != this)
-        return;
     Request::set_performance_monitor_enabled(enabled);
     if (enabled) {
         if (!m_performance_timer) {

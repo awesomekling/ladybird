@@ -67,6 +67,13 @@ public:
         VERIFY(!response);
     }
 
+    void set_dns_server()
+    {
+        auto message = make<Messages::RequestServer::SetDnsServer>(ByteString { "localhost" }, 53, false, false);
+        auto response = dispatch(move(message));
+        VERIFY(!response);
+    }
+
     void stop_request(u64 request_id)
     {
         auto message = make<Messages::RequestServer::StopRequest>(request_id);
@@ -124,6 +131,16 @@ TEST_CASE(non_primary_connection_cannot_send_cookie_responses)
     TestConnection connection { server, RequestServer::ConnectionFromClient::IsPrimaryConnection::No };
 
     connection.retrieve_http_cookie(connection.client_id(), 0, RequestServer::RequestType::Fetch);
+
+    EXPECT(!connection.is_open());
+}
+
+TEST_CASE(non_primary_connection_cannot_set_dns_server)
+{
+    TestServer server;
+    TestConnection connection { server, RequestServer::ConnectionFromClient::IsPrimaryConnection::No };
+
+    connection.set_dns_server();
 
     EXPECT(!connection.is_open());
 }
