@@ -816,7 +816,28 @@ impl StyleEngineState {
                 );
             }
             if !regions.covers_document() {
-                self.route_relational_sequence_changes(&sequences, &mut regions, counters);
+                // The elements that left the document. Their subtrees are staged with them, so the
+                // list names every element that left. An element that moved to another parent took
+                // its subtree along without staging it, which no list of rows can speak for.
+                let mut departed = Some(Vec::new());
+                for (node, before, after) in self.host.tree_staging.rows() {
+                    let Some(before) = before else {
+                        continue;
+                    };
+                    match after {
+                        None => {
+                            if let Some(departed) = departed.as_mut() {
+                                departed.push(node);
+                            }
+                        }
+                        Some(after) if after.parent != before.parent => {
+                            departed = None;
+                            break;
+                        }
+                        Some(_) => {}
+                    }
+                }
+                self.route_relational_sequence_changes(&sequences, departed.as_deref(), &mut regions, counters);
             }
             sequence_routing_timer.stop(Counter::SequenceRoutingMicroseconds, counters);
             let mut prefix_convergence = PrefixConvergenceOutcome::default();
