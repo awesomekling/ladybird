@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html class="reftest-wait">
+<link rel="match" href="../expected/marker-animation-with-list-item-before-and-after-ref.html" />
+<style>
+    li::marker {
+        color: red;
+    }
+    li::before,
+    li::after {
+        display: list-item;
+        content: "x";
+        height: 0;
+        overflow: hidden;
+    }
+</style>
+<ul>
+    <li id="target">item</li>
+</ul>
+<script>
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            document.getElementById("target").animate({ color: ["green", "green"] }, { pseudoElement: "::marker", duration: 1000000 });
+            document.documentElement.classList.remove("reftest-wait");
+        });
+    });
+</script>
+</html>
