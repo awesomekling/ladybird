@@ -414,35 +414,66 @@ void StyleComputer::end_style_record_view_epoch() const
         const_cast<StyleComputer&>(*this).m_style_engine.end_style_record_view_epoch();
 }
 
-void StyleComputer::register_style_node(StyleNodeID style_node_id, DOM::Element& element)
+void StyleComputer::register_style_node(StyleNodeID style_node_id, DOM::Node& node)
 {
     if (style_node_id == 0)
         return;
     ensure_style_node_slot(style_node_id);
-    m_style_nodes[style_node_id.value()] = element;
+    if (style_node_is_text(style_node_id))
+        m_text_style_nodes[style_node_index(style_node_id)] = node;
+    else
+        m_element_style_nodes[style_node_index(style_node_id)] = as<DOM::Element>(node);
+}
+
+static void ensure_slot(auto& nodes, u32 index)
+{
+    if (index >= nodes.size()) {
+        nodes.grow_capacity(index + 1);
+        nodes.resize(index + 1);
+    }
 }
 
 void StyleComputer::ensure_style_node_slot(StyleNodeID style_node_id)
 {
-    if (style_node_id != 0 && style_node_id.value() >= m_style_nodes.size()) {
-        m_style_nodes.grow_capacity(style_node_id.value() + 1);
-        m_style_nodes.resize(style_node_id.value() + 1);
-    }
+    if (style_node_id == 0)
+        return;
+    if (style_node_is_text(style_node_id))
+        ensure_slot(m_text_style_nodes, style_node_index(style_node_id));
+    else
+        ensure_slot(m_element_style_nodes, style_node_index(style_node_id));
 }
 
 void StyleComputer::unregister_style_node(StyleNodeID style_node_id)
 {
-    if (style_node_id != 0 && style_node_id.value() < m_style_nodes.size()) {
-        m_style_nodes[style_node_id.value()] = nullptr;
+    if (style_node_id == 0)
+        return;
+    auto index = style_node_index(style_node_id);
+    if (style_node_is_text(style_node_id)) {
+        if (index < m_text_style_nodes.size())
+            m_text_style_nodes[index] = nullptr;
+        return;
+    }
+    if (index < m_element_style_nodes.size()) {
+        m_element_style_nodes[index] = nullptr;
         m_style_engine.consume_recorded_element_style_input_change(style_node_id);
     }
 }
 
 GC::Ptr<DOM::Element> StyleComputer::element_for_style_node(StyleNodeID style_node_id) const
 {
-    if (style_node_id == 0 || style_node_id.value() >= m_style_nodes.size())
+    if (style_node_id == 0 || style_node_is_text(style_node_id) || style_node_id.value() >= m_element_style_nodes.size())
         return nullptr;
-    return m_style_nodes[style_node_id.value()];
+    return m_element_style_nodes[style_node_id.value()];
+}
+
+GC::Ptr<DOM::Node> StyleComputer::node_for_style_node(StyleNodeID style_node_id) const
+{
+    if (!style_node_is_text(style_node_id))
+        return element_for_style_node(style_node_id);
+    auto index = style_node_index(style_node_id);
+    if (index >= m_text_style_nodes.size())
+        return nullptr;
+    return m_text_style_nodes[index];
 }
 
 void StyleComputer::prepare_elements_for_style_computation()
@@ -461,7 +492,7 @@ void StyleComputer::prepare_elements_for_style_computation()
 
 void StyleComputer::for_each_style_node(Function<void(DOM::Element&)> callback) const
 {
-    for (auto element : m_style_nodes) {
+    for (auto element : m_element_style_nodes) {
         if (element)
             callback(*element);
     }
@@ -472,7 +503,8 @@ void StyleComputer::visit_edges(Visitor& visitor)
     Base::visit_edges(visitor);
     visitor.visit(m_document);
     m_style_engine.visit_edges(visitor);
-    visitor.visit(m_style_nodes);
+    visitor.visit(m_element_style_nodes);
+    visitor.visit(m_text_style_nodes);
     // NB: Source sheets are weak references; their owners trace them.
     visitor.ignore(m_style_engine_sheet_sources);
     for (auto const& entry : m_non_author_style_sheets)
