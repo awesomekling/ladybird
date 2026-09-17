@@ -169,6 +169,15 @@ Utf16String Text::whole_text()
 }
 
 // https://html.spec.whatwg.org/multipage/dom.html#text-node-directionality
+void Text::set_style_node_id(CSS::StyleNodeID style_node_id)
+{
+    if (m_style_node_id == style_node_id)
+        return;
+    auto old_style_node_id = m_style_node_id;
+    m_style_node_id = style_node_id;
+    Layout::Node::dom_node_style_node_changed(*this, old_style_node_id);
+}
+
 Optional<Element::Directionality> Text::directionality() const
 {
     // 1. If text's data does not contain a code point whose bidirectional character type is L, AL, or R, then return null.
