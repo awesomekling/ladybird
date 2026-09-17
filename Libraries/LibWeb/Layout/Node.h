@@ -367,7 +367,6 @@ private:
     // A DOM mutation can disconnect a node before the next layout-tree update. The arena roots the DOM node
     // through Document::visit_edges while this slot is live, so detach hooks never observe a collected element.
     GC::RawPtr<DOM::Node> m_dom_node;
-    GC::Weak<DOM::Element> m_pseudo_element_generator;
     RustFFI::NodeKind m_kind { RustFFI::NodeKind::Unset };
     bool m_arena_is_destroying_shell { false };
 };
