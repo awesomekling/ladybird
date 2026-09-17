@@ -35,6 +35,10 @@ WEB_API void record_subtree_connecting(DOM::Node& root);
 // Called once a node has been linked into a connected tree. Allocates the element's style node
 // identity if it does not have one yet.
 WEB_API void record_element_connected(DOM::Element&);
+
+// Called once a text node has been linked into a connected tree that no subtree arrival covered.
+// Allocates the text node's style node identity if it does not have one yet.
+WEB_API void record_text_connected(DOM::Text&);
 WEB_API void publish_pending_element_features(StyleEngine&, StyleComputer&);
 WEB_API void publish_required_attribute_value_texts(StyleEngine&, StyleComputer&);
 
@@ -56,6 +60,10 @@ WEB_API void record_subtree_disconnecting(DOM::Node&);
 // Report that an element moved without leaving the tree. `moveBefore()` keeps the element's state
 // and its identity, so nothing disconnects and nothing connects, and only its relations move.
 WEB_API void record_element_moved(DOM::Element&, DOM::Node* old_parent, DOM::Element* old_previous_sibling, DOM::Element* old_next_sibling);
+
+// Report that an element or text node moved without leaving the tree, which moves its place in the
+// DOM child sequence even where its element relations stay the same.
+WEB_API void record_node_moved_in_dom_order(DOM::Node&, DOM::Node const& old_parent);
 
 // A slottable's assigned slot is its parent in the flat tree, and a slot's name changing reassigns
 // it there without any DOM mutation. Nothing else says so: the element did not move, so no tree

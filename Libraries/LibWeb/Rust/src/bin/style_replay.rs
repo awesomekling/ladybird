@@ -229,6 +229,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         );
                     }
                 }
+                EventKind::AllocateTextStyleNodes => {
+                    let engine = read_engine(&mut event.payload, &live_engines)?;
+                    let expected = event.payload.read_u32_vec()?;
+                    let mut actual = vec![0; expected.len()];
+                    unsafe {
+                        bridge::style_engine_allocate_text_style_nodes(engine, actual.as_mut_ptr(), actual.len())
+                    };
+                    if actual != expected {
+                        return Err(format!(
+                            "text style-node allocation diverged: expected {expected:?}, got {actual:?}"
+                        )
+                        .into());
+                    }
+                }
                 EventKind::ApplyTransaction => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
                     // The row arrays are consumed in place from the mapped log; nothing is copied.
