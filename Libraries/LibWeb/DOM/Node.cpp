@@ -1486,6 +1486,25 @@ void Node::update_layout_tree_for_removal(Node& parent, LayoutSubtreeRemoval rem
     parent.set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeRemove);
 }
 
+// The rows a removal leaves for the parent's rebuild stop being the removed nodes' layout nodes once the style engine
+// retires their StyleNodeIDs, so anything the removal does to them has to happen before.
+void Node::detach_remaining_layout_nodes_for_removal()
+{
+    for_each_shadow_including_inclusive_descendant([](Node& node) {
+        auto* layout_node = node.unsafe_layout_node();
+        if (!layout_node)
+            return TraversalDecision::Continue;
+        layout_node->clear_committed_box();
+        // A top layer element's box is a viewport child rather than part of the parent's box
+        // subtree, so the parent rebuild triggered by this removal can never detach it.
+        if (auto* top_layer_placement = layout_node->topmost_layout_node_of_top_layer_placement()) {
+            top_layer_placement->prepare_subtree_for_detach_from_layout_tree();
+            VERIFY(Layout::destroy_layout_subtree(*top_layer_placement));
+        }
+        return TraversalDecision::Continue;
+    });
+}
+
 void Node::assign_slottables_after_removal(Node& parent, Node& parent_root)
 {
     if (auto assigned_slot = assigned_slot_for_node(*this))
@@ -1615,6 +1634,7 @@ void Node::remove(bool suppress_observers)
         auto layout_subtree_removal = suppress_observers ? LayoutSubtreeRemoval::RebuildParent : LayoutSubtreeRemoval::DetachInPlace;
         // Layout goes first: the removed rows resolve their DOM nodes through StyleNodeIDs the style engine retires.
         update_layout_tree_for_removal(*parent, layout_subtree_removal, AncestorsMayHaveFirstLetter::Yes);
+        detach_remaining_layout_nodes_for_removal();
         report_removal_to_style_engine(*parent);
     }
 
@@ -2392,30 +2412,6 @@ GC::Ptr<Node> Node::editing_host()
     return {};
 }
 
-void Node::set_layout_node(Badge<Layout::Node>, Layout::Node& layout_node)
-{
-    if (m_layout_node && m_layout_node.ptr() != &layout_node)
-        m_layout_node->pin_style_record_for_detachment();
-    m_layout_node = layout_node;
-}
-
-void Node::rebind_layout_node(Badge<Layout::Node>, Layout::Node& layout_node)
-{
-    m_layout_node = layout_node;
-}
-
-void Node::clear_layout_node(Badge<Document>)
-{
-    m_layout_node = nullptr;
-}
-
-void Node::detach_layout_node(Badge<Layout::LayoutTreeBuilderAccess>)
-{
-    if (m_layout_node)
-        m_layout_node->prepare_for_detach_from_layout_tree();
-    m_layout_node = nullptr;
-}
-
 EventTarget* Node::get_parent(Event const&)
 {
     // A node’s get the parent algorithm, given an event, returns the node’s assigned slot, if node is assigned;
@@ -2607,14 +2603,6 @@ void Node::inserted()
     }
 }
 
-void Node::clear_committed_layout_box()
-{
-    if (!m_layout_node)
-        return;
-
-    m_layout_node->clear_committed_box();
-}
-
 void Node::removed_from(IsSubtreeRoot, Node* old_parent, Node&)
 {
     // The text is out of the tree now, so a dir=auto ancestor that was reading it resolves to
@@ -2631,18 +2619,6 @@ void Node::removed_from(IsSubtreeRoot, Node* old_parent, Node&)
 
     m_is_connected = false;
     m_in_editable_subtree = false;
-    if (m_layout_node)
-        m_layout_node->pin_style_record_for_detachment();
-    clear_committed_layout_box();
-    // A top layer element's box is a viewport child rather than part of the parent's box
-    // subtree, so the parent rebuild triggered by this removal can never detach it.
-    if (m_layout_node) {
-        if (auto* top_layer_placement = m_layout_node->topmost_layout_node_of_top_layer_placement()) {
-            top_layer_placement->prepare_subtree_for_detach_from_layout_tree();
-            VERIFY(Layout::destroy_layout_subtree(*top_layer_placement));
-        }
-    }
-    m_layout_node = nullptr;
 
     if (auto* element = as_if<Element>(*this))
         element->clear_synthetic_pseudo_element_layout_nodes(Badge<Node> {});
@@ -2873,6 +2849,7 @@ void Node::remove_all_children(bool suppress_observers)
         removal_style_record_pins.pin_style_records_before_removal(*child, was_tracked_by_style_engine);
         if (was_tracked_by_style_engine) {
             child->update_layout_tree_for_removal(*this, LayoutSubtreeRemoval::RebuildParent, ancestors_may_have_first_letter);
+            child->detach_remaining_layout_nodes_for_removal();
             child->report_removal_to_style_engine(*this);
         }
 
@@ -3736,16 +3713,32 @@ size_t Node::length() const
 
 Layout::Node const* Node::layout_node() const
 {
-    if (m_layout_node)
+    auto const* layout_node = unsafe_layout_node();
+    if (layout_node)
         VERIFY(document().layout_is_up_to_date());
-    return m_layout_node;
+    return layout_node;
 }
 
 Layout::Node* Node::layout_node()
 {
-    if (m_layout_node)
-        VERIFY(document().layout_is_up_to_date());
-    return m_layout_node;
+    return const_cast<Layout::Node*>(static_cast<Node const*>(this)->layout_node());
+}
+
+// A node's layout node is the row its StyleNodeID is bound to in the document's layout node arena.
+// The document has no identity; it is bound to a viewport row.
+Layout::Node const* Node::unsafe_layout_node() const
+{
+    auto* arena = m_document->layout_node_arena_if_created();
+    Layout::Node const* layout_node = nullptr;
+    if (arena) {
+        if (auto const* element = as_if<Element>(*this))
+            layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_shell(arena->handle(), element->style_node_id().value()));
+        else if (auto const* text = as_if<Text>(*this))
+            layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_shell(arena->handle(), text->style_node_id().value()));
+        else if (is_document())
+            layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_viewport_shell(arena->handle()));
+    }
+    return layout_node;
 }
 
 void Node::set_needs_repaint(InvalidateDisplayList should_invalidate_display_list)

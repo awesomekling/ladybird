@@ -50,7 +50,6 @@ public:
 
     virtual ~Node();
     static void delete_arena_owned_shell(Node&);
-    static void rebind_dom_node_to_surviving_shell(DOM::Node&, Node& shell);
     StringView class_name() const;
 
     static Compositing::RustFFI::NodeSlotId slot_id(Node const*);

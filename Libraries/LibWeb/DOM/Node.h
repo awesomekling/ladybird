@@ -407,8 +407,8 @@ public:
     Layout::Node const* layout_node() const;
     Layout::Node* layout_node();
 
-    Layout::Node const* unsafe_layout_node() const { return m_layout_node.ptr(); }
-    Layout::Node* unsafe_layout_node() { return m_layout_node.ptr(); }
+    Layout::Node const* unsafe_layout_node() const;
+    Layout::Node* unsafe_layout_node() { return const_cast<Layout::Node*>(static_cast<Node const*>(this)->unsafe_layout_node()); }
     Element const* first_letter_owner_for_layout_subtree_from(Node const& inclusive_ancestor) const;
     Element* first_letter_owner_for_layout_subtree_from(Node const& inclusive_ancestor)
     {
@@ -425,11 +425,6 @@ public:
     // Whether a list item's box appearing or disappearing changes the list-item counter value of
     // some item that stays in the list.
     static bool list_item_box_change_renumbers_list(Element const& list_item);
-
-    void clear_layout_node(Badge<Document>);
-    void set_layout_node(Badge<Layout::Node>, Layout::Node&);
-    void rebind_layout_node(Badge<Layout::Node>, Layout::Node&);
-    void detach_layout_node(Badge<Layout::LayoutTreeBuilderAccess>);
 
     virtual bool is_child_allowed(Node const&) const { return true; }
 
@@ -612,7 +607,6 @@ protected:
 
     GC::Ptr<Document> m_document;
     GC::Ptr<Node> m_root;
-    WeakPtr<Layout::Node> m_layout_node;
     NodeType m_type { NodeType::INVALID };
     bool m_needs_layout_tree_update { false };
     bool m_child_needs_layout_tree_update { false };
@@ -646,6 +640,7 @@ private:
     bool schedule_list_item_renumber_for_removal();
     void report_removal_to_style_engine(Node& parent);
     void update_layout_tree_for_removal(Node& parent, LayoutSubtreeRemoval, AncestorsMayHaveFirstLetter);
+    void detach_remaining_layout_nodes_for_removal();
     void assign_slottables_after_removal(Node& parent, Node& parent_root);
     void run_removing_steps(Node& parent, Node& parent_root, bool was_tracked_by_style_engine);
     void add_transient_registered_observers_for_removal(Node& parent);
@@ -663,7 +658,6 @@ private:
     void append_child_impl(GC::Ref<Node>);
     void remove_child_impl(GC::Ref<Node>);
     void set_root_for_subtree(Node&);
-    void clear_committed_layout_box();
 
     static Optional<Utf16View> first_valid_id(Utf16View, Document const&);
 
