@@ -86,18 +86,18 @@ static RustFFI::FfiNodeConstructionFacts build_node_construction_facts(DOM::Docu
     };
 }
 
-bool Node::refresh_dom_paint_facts()
+bool Node::refresh_dom_paint_facts(DOM::Node const& dom_node)
 {
-    return RustFFI::layout_arena_set_node_dom_paint_facts(m_arena->handle(), m_slot, dom_paint_facts_of(m_dom_node));
+    VERIFY(RustFFI::layout_arena_node_dom_node(m_arena->handle(), m_slot) == &dom_node);
+    return RustFFI::layout_arena_set_node_dom_paint_facts(m_arena->handle(), m_slot, dom_paint_facts_of(&dom_node));
 }
 
 Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind kind, AttachToDOMNode attach_to_dom_node)
     : m_arena(document.layout_node_arena())
     , m_slot(m_arena->allocate(build_node_construction_facts(document, node, kind, this)))
-    , m_dom_node(node)
     , m_kind(kind)
 {
-    VERIFY(RustFFI::layout_arena_node_dom_node(m_arena->handle(), m_slot) == m_dom_node.ptr());
+    VERIFY(RustFFI::layout_arena_node_dom_node(m_arena->handle(), m_slot) == node.ptr());
     update_has_scroll_offset_flag();
 
     if (!node)
@@ -130,7 +130,7 @@ void Node::delete_arena_owned_shell(Node& node)
 
 void Node::rebind_dom_node_to_surviving_shell(DOM::Node& dom_node, Node& shell)
 {
-    VERIFY(shell.m_dom_node.ptr() == &dom_node);
+    VERIFY(RustFFI::layout_arena_node_dom_node(shell.m_arena->handle(), shell.m_slot) == &dom_node);
     dom_node.rebind_layout_node({}, shell);
 }
 
@@ -794,18 +794,21 @@ void Node::clear_committed_box()
 
 DOM::Node const* Node::dom_node() const
 {
-    if (is_anonymous())
-        return nullptr;
-    VERIFY(m_dom_node);
-    return m_dom_node.ptr();
+    return const_cast<Node*>(this)->dom_node();
 }
 
 DOM::Node* Node::dom_node()
 {
     if (is_anonymous())
         return nullptr;
-    VERIFY(m_dom_node);
-    return m_dom_node.ptr();
+    auto* document = m_arena->document();
+    if (!document)
+        return nullptr;
+    // The document has no StyleNodeID; its row is the viewport.
+    if (m_kind == RustFFI::NodeKind::Viewport)
+        return document;
+    // A row kept after its node was removed has a StyleNodeID of 0 and resolves to null.
+    return document->style_computer().node_for_style_node(style_node_id()).ptr();
 }
 
 GC::Ptr<DOM::Element const> Node::pseudo_element_generator() const
