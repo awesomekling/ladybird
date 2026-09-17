@@ -840,24 +840,22 @@ void Node::dom_node_style_node_changed(DOM::Node& dom_node, CSS::StyleNodeID old
     if (!arena)
         return;
     auto new_style_node = style_node_of(&dom_node);
-    // The node's rows take its new identity along with their binding.
+    // The node's rows, and those of its pseudo-elements, take its new identity along with their
+    // bindings. Both are still keyed by the old identity here, so this precedes retiring it.
     if (old_style_node != 0 && new_style_node != 0) {
         if (auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_bound_shell(arena->handle(), old_style_node.value())))
             RustFFI::layout_arena_set_style_node_of_rows_sharing_dom_node_with(arena->handle(), layout_node->m_slot, new_style_node.value());
+        if (auto* element = as_if<DOM::Element>(dom_node)) {
+            element->for_each_synthetic_pseudo_element([&](CSS::PseudoElement pseudo_element, DOM::SyntheticPseudoElement const&) {
+                if (auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_bound_pseudo_element_shell(arena->handle(), old_style_node.value(), encode_generated_for(pseudo_element))))
+                    RustFFI::layout_arena_set_style_node_of_generated_subtree(arena->handle(), layout_node->m_slot, new_style_node.value());
+            });
+        }
     }
     // A retired identity may be reused, so it leaves every row carrying it, including rows of a
     // removed subtree that outlive the disconnection.
     if (old_style_node != 0)
         RustFFI::layout_arena_forget_style_node(arena->handle(), old_style_node.value());
-    if (new_style_node == 0)
-        return;
-    auto* element = as_if<DOM::Element>(dom_node);
-    if (!element)
-        return;
-    element->for_each_synthetic_pseudo_element([&](CSS::PseudoElement, DOM::SyntheticPseudoElement const& pseudo_element) {
-        if (auto* layout_node = pseudo_element.unsafe_layout_node())
-            RustFFI::layout_arena_set_style_node_of_generated_subtree(arena->handle(), layout_node->m_slot, new_style_node.value());
-    });
 }
 
 CSS::StyleNodeID Node::style_node_id() const

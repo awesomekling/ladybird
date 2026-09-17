@@ -1506,6 +1506,10 @@ void Node::update_layout_tree_for_removal(Node& parent, LayoutSubtreeRemoval rem
 void Node::detach_remaining_layout_nodes_for_removal()
 {
     for_each_shadow_including_inclusive_descendant([](Node& node) {
+        // A pseudo-element's box is found through its generator's identity, and a box that escaped
+        // the generator's subtree is no one else's to destroy.
+        if (auto* element = as_if<Element>(node))
+            element->clear_synthetic_pseudo_element_layout_nodes(Badge<Node> {});
         auto* layout_node = node.unsafe_layout_node();
         if (!layout_node)
             return TraversalDecision::Continue;
@@ -2647,9 +2651,6 @@ void Node::removed_from(IsSubtreeRoot, Node* old_parent, Node&)
 
     m_is_connected = false;
     m_in_editable_subtree = false;
-
-    if (auto* element = as_if<Element>(*this))
-        element->clear_synthetic_pseudo_element_layout_nodes(Badge<Node> {});
 }
 
 // https://dom.spec.whatwg.org/#concept-node-move-ext
