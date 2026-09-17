@@ -1503,7 +1503,6 @@ private:
 
     virtual void finalize() override final;
 
-    void tear_down_layout_tree_for_inactive_document();
     void set_layout_root(Compositing::RustFFI::NodeSlotId viewport_slot);
     void tear_down_layout_tree();
     void process_pending_top_layer_layout_changes();

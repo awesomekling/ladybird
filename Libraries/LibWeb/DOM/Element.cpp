@@ -2945,8 +2945,15 @@ void Element::set_shadow_root(GC::Ptr<ShadowRoot> shadow_root)
     if (m_shadow_root == shadow_root)
         return;
     if (m_shadow_root) {
-        if (is_connected())
+        if (is_connected()) {
+            // A pseudo-element's box is found through its generator's identity, which the disconnect retires.
+            m_shadow_root->for_each_shadow_including_descendant([](DOM::Node& descendant) {
+                if (auto* element = as_if<Element>(descendant))
+                    element->clear_synthetic_pseudo_element_layout_nodes();
+                return TraversalDecision::Continue;
+            });
             CSS::record_subtree_disconnecting(*m_shadow_root);
+        }
         m_shadow_root->set_host(nullptr);
         m_shadow_root->set_is_connected(false);
         // NB: We don't need to run the removed steps if the children have already been disconnected (or were never
@@ -5396,9 +5403,9 @@ SyntheticPseudoElement& Element::ensure_synthetic_pseudo_element(CSS::PseudoElem
 
     if (!pseudo_element_data->get(type).has_value()) {
         if (is_pseudo_element_root(type))
-            pseudo_element_data->set(type, heap().allocate<SyntheticPseudoElementTreeNode>(const_cast<Element&>(*this)));
+            pseudo_element_data->set(type, heap().allocate<SyntheticPseudoElementTreeNode>(type, const_cast<Element&>(*this)));
         else
-            pseudo_element_data->set(type, heap().allocate<SyntheticPseudoElement>(const_cast<Element&>(*this)));
+            pseudo_element_data->set(type, heap().allocate<SyntheticPseudoElement>(type, const_cast<Element&>(*this)));
     }
 
     return as<SyntheticPseudoElement>(*pseudo_element_data->get(type).value());
