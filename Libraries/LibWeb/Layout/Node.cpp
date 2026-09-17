@@ -810,14 +810,17 @@ DOM::Node* Node::dom_node()
 
 GC::Ptr<DOM::Element const> Node::pseudo_element_generator() const
 {
-    VERIFY(is_generated_for_pseudo_element());
-    return m_pseudo_element_generator.ptr();
+    return const_cast<Node*>(this)->pseudo_element_generator();
 }
 
 GC::Ptr<DOM::Element> Node::pseudo_element_generator()
 {
     VERIFY(is_generated_for_pseudo_element());
-    return m_pseudo_element_generator.ptr();
+    // A stale row's StyleNodeID is 0 once its generator disconnects, so it resolves to null.
+    auto* document = m_arena->document();
+    if (!document)
+        return nullptr;
+    return document->style_computer().element_for_style_node(style_node_id());
 }
 
 void Node::set_generated_for(CSS::PseudoElement type, DOM::Element& element)
@@ -826,7 +829,6 @@ void Node::set_generated_for(CSS::PseudoElement type, DOM::Element& element)
     static_assert(encode_generated_for(CSS::PseudoElement::FirstLetter) == RustFFI::GENERATED_FOR_FIRST_LETTER);
     static_assert(encode_generated_for(CSS::PseudoElement::Marker) == RustFFI::GENERATED_FOR_MARKER);
     RustFFI::layout_arena_set_node_generated_for(arena_handle(), slot_id(this), encode_generated_for(type), element.style_node_id().value());
-    m_pseudo_element_generator = element;
     if (auto* node_with_style = as_if<NodeWithStyle>(*this))
         node_with_style->bind_generated_style_record(element.style_record_identity(type));
 }
