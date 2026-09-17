@@ -305,7 +305,7 @@ public:
 
     bool is_editing_host() const { return has_flag(RustFFI::NodeFlag::IsEditingHost); }
     void set_is_editing_host(bool value) { set_flag(RustFFI::NodeFlag::IsEditingHost, value); }
-    bool refresh_dom_paint_facts();
+    bool refresh_dom_paint_facts(DOM::Node const&);
 
     // https://drafts.csswg.org/css-ui/#propdef-user-select
     CSS::UserSelect user_select_used_value() const;
@@ -364,9 +364,6 @@ private:
 
     NonnullRefPtr<NodeArena> m_arena;
     Compositing::RustFFI::NodeSlotId m_slot;
-    // A DOM mutation can disconnect a node before the next layout-tree update. The arena roots the DOM node
-    // through Document::visit_edges while this slot is live, so detach hooks never observe a collected element.
-    GC::RawPtr<DOM::Node> m_dom_node;
     RustFFI::NodeKind m_kind { RustFFI::NodeKind::Unset };
     bool m_arena_is_destroying_shell { false };
 };
