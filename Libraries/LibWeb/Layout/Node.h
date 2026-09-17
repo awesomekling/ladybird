@@ -235,9 +235,10 @@ public:
     bool is_generated_for_backdrop_pseudo_element() const { return generated_for() == encode_generated_for(CSS::PseudoElement::Backdrop); }
     void set_generated_for(CSS::PseudoElement type, DOM::Element&);
 
-    // The StyleNodeID of the element this row is bound to or generated for, or 0.
+    // The StyleNodeID of the element or text node this row is bound to, or of the element it is
+    // generated for, or 0.
     CSS::StyleNodeID style_node_id() const;
-    static void element_style_node_changed(DOM::Element&, CSS::StyleNodeID old_style_node);
+    static void dom_node_style_node_changed(DOM::Node&, CSS::StyleNodeID old_style_node);
 
     void clear_committed_box();
     void prepare_for_detach_from_layout_tree();
