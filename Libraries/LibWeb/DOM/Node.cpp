@@ -2005,6 +2005,7 @@ WebIDL::ExceptionOr<void> Node::move_node(Node& new_parent, Node* child)
         new_parent.insert_before_impl(*this, child);
     }
 
+    CSS::record_node_moved_in_dom_order(*this, *old_parent);
     if (moved_element)
         CSS::record_element_moved(*moved_element, moved_from_parent.ptr(), moved_from_previous.ptr(), moved_from_next.ptr());
     else if (is<CharacterData>(*this)) {
@@ -2601,6 +2602,11 @@ void Node::inserted()
     if (is_connected())
         document().page().keyboard_scroll_dom_tree_changed(*this);
     recompute_editable_subtree_flag();
+
+    // Text an element clones into its shadow tree from its own insertion steps is not covered by a
+    // subtree arrival, so it takes its identity here.
+    if (auto* text = as_if<Text>(*this); text && text->style_node_id() == 0)
+        CSS::record_text_connected(*text);
 
     if (auto* element = as_if<Element>(*this)) {
         // The content an element clones into its shadow tree from its own insertion steps lands under

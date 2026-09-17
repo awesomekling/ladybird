@@ -461,6 +461,33 @@ impl RetainedState {
         self.tree.set_shadow_root(host, shadow_root, &mut self.memory);
     }
 
+    // -- DOM child sequence ------------------------------------------------------------------
+    //
+    // Text nodes take identities so that the style tree can describe the DOM child sequence, but
+    // nothing selects, styles or invalidates them. Their arrivals and departures are spliced
+    // directly rather than journaled.
+
+    /// Retire text identities as their nodes disconnect.
+    pub fn retire_text_style_nodes(&mut self, nodes: &[StyleNodeID]) {
+        self.tree.retire_texts(nodes, &mut self.memory);
+    }
+
+    /// Splice nodes into the DOM child sequence, given as `(node, parent, previous sibling)`
+    /// triples of raw identities in tree order, so that each previous sibling is linked first.
+    pub fn link_style_nodes_in_dom_order(&mut self, links: &[u32]) {
+        for &[node, parent, previous] in links.as_chunks::<3>().0 {
+            let Some(node) = StyleNodeID::from_raw(node) else {
+                continue;
+            };
+            self.tree
+                .link_in_dom_order(node, StyleNodeID::from_raw(parent), StyleNodeID::from_raw(previous));
+        }
+    }
+
+    pub fn unlink_style_node_from_dom_order(&mut self, node: StyleNodeID, parent: Option<StyleNodeID>) {
+        self.tree.unlink_from_dom_order(node, parent);
+    }
+
     // -- Stylesheet program ------------------------------------------------------------------
     //
     // Every CSSOM mutation maps to a precise typed delta. None of them produces a generic document
@@ -1780,6 +1807,15 @@ impl StyleEngineState {
         version.declaration_block = Some(DeclarationBlockID(block_version));
         self.replace_rule_version(rule, version, counters);
         self.settle_program();
+    }
+
+    /// Mint `out.len()` text identities in one call.
+    pub fn allocate_text_style_nodes(&mut self, out: &mut [u32], counters: &mut Counters) {
+        for slot in out.iter_mut() {
+            let node = self.retained.tree.allocate_text(&mut self.retained.memory);
+            counters.bump(Counter::StyleNodesAllocated);
+            *slot = node.raw();
+        }
     }
 
     /// Mint `out.len()` element identities in one call. Identity allocation is batched because a
