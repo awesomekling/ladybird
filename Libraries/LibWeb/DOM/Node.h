@@ -409,10 +409,18 @@ public:
 
     Layout::Node const* unsafe_layout_node() const;
     Layout::Node* unsafe_layout_node() { return const_cast<Layout::Node*>(static_cast<Node const*>(this)->unsafe_layout_node()); }
-    // Whether the last layout tree build gave this node a box, and whether layout committed geometry for it. Code
-    // that only needs to know whether there is a box should ask these instead of reaching for the box.
-    [[nodiscard]] bool has_layout_box() const { return unsafe_layout_node(); }
-    [[nodiscard]] bool is_rendered() const;
+
+    // What the render side last said about this node's boxes: whether a layout tree build gave it
+    // one, and whether a layout pass committed geometry for it. Both are bits the render side
+    // commits as it changes them, so asking is a read of the node, not of render state.
+    [[nodiscard]] bool has_layout_box() const { return m_has_layout_box; }
+    [[nodiscard]] bool is_rendered() const { return m_has_committed_box; }
+    // Only the render side writes these, as it changes the boxes they describe.
+    void set_box_presence(bool has_layout_box, bool has_committed_box)
+    {
+        m_has_layout_box = has_layout_box;
+        m_has_committed_box = has_committed_box;
+    }
     Element const* first_letter_owner_for_layout_subtree_from(Node const& inclusive_ancestor) const;
     Element* first_letter_owner_for_layout_subtree_from(Node const& inclusive_ancestor)
     {
@@ -625,6 +633,8 @@ protected:
     NodeType m_type { NodeType::INVALID };
     bool m_needs_layout_tree_update { false };
     bool m_child_needs_layout_tree_update { false };
+    bool m_has_layout_box { false };
+    bool m_has_committed_box { false };
     enum LayoutTreeUpdateReuseReason : u8 {
         ChildListInsertion = 1,
         PseudoElementChange = 2,

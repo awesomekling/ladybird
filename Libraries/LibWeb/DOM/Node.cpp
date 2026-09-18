@@ -3742,12 +3742,6 @@ size_t Node::length() const
     return child_count();
 }
 
-bool Node::is_rendered() const
-{
-    auto const* layout_node = unsafe_layout_node();
-    return layout_node && Painting::has_committed_box(*layout_node);
-}
-
 Layout::Node const* Node::layout_node() const
 {
     auto const* layout_node = unsafe_layout_node();

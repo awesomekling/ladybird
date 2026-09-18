@@ -387,6 +387,16 @@ enum AncestorInvalidation {
 
 type ShellFactory = (*mut c_void, unsafe extern "C" fn(*mut c_void, NodeSlotId, NodeKind));
 
+/// How the host learns what boxes a DOM node has. The identity is 0 for the document, which has
+/// none of its own. The callback must not reenter the arena: it runs while the arena is changing
+/// the bindings it would read.
+type BoxPresenceHost = (*mut c_void, unsafe extern "C" fn(*mut c_void, u32, u8));
+
+/// A row is bound to the node.
+pub const BOX_PRESENCE_HAS_LAYOUT_BOX: u8 = 1 << 0;
+/// The bound row has a committed box.
+pub const BOX_PRESENCE_HAS_COMMITTED_BOX: u8 = 1 << 1;
+
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiStyleRecordHostCallbacks {
@@ -530,6 +540,10 @@ pub(crate) struct LayoutNodeArena {
     bound_viewport_row: Cell<NodeSlotId>,
     style_record_host: Cell<Option<FfiStyleRecordHostCallbacks>>,
     shell_factory: Cell<Option<ShellFactory>>,
+    box_presence_host: Cell<Option<BoxPresenceHost>>,
+    /// Rows whose committed box appeared or went away since the host last heard. A commit changes
+    /// them with the arena borrowed for writing, so the host hears about them when it drains this.
+    rows_with_changed_committed_box: RefCell<Vec<NodeSlotId>>,
     layout_host: Cell<Option<FfiLayoutHostCallbacks>>,
     /// Depth of synchronous layout passes, including their commits, on the stack.
     active_layout_pass_depth: Cell<u32>,
@@ -634,6 +648,8 @@ impl LayoutNodeArena {
             bound_viewport_row: Cell::new(NodeSlotId::INVALID),
             style_record_host: Cell::new(None),
             shell_factory: Cell::new(None),
+            box_presence_host: Cell::new(None),
+            rows_with_changed_committed_box: RefCell::new(Vec::new()),
             layout_host: Cell::new(None),
             active_layout_pass_depth: Cell::new(0),
             fragment_cache_epoch_changed_during_layout_pass: Cell::new(false),
@@ -1090,6 +1106,13 @@ impl LayoutNodeArena {
                 self.with_bound_row_entry_of(BoundNode::of(style_node, generated_for), |bound_row| *bound_row = id);
             }
         }
+        drop(first_rows);
+        if let Some(previous) = previous {
+            self.notify_box_presence(BoundNode::of(previous, generated_for));
+        }
+        if let Some(style_node) = style_node {
+            self.notify_box_presence(BoundNode::of(style_node, generated_for));
+        }
     }
 
     /// The row the element or text node with `style_node` is bound to, if any.
@@ -1155,6 +1178,7 @@ impl LayoutNodeArena {
             return;
         };
         self.with_bound_row_entry_of(node, |bound_row| *bound_row = id);
+        self.notify_box_presence(node);
     }
 
     /// Leaves the node `id` is bound to without a bound row.
@@ -1168,6 +1192,7 @@ impl LayoutNodeArena {
                 *bound_row = NodeSlotId::INVALID;
             }
         });
+        self.notify_box_presence(node);
     }
 
     /// Records a new identity for the element bound to `id`, on every row that shares its DOM node.
@@ -1795,6 +1820,69 @@ impl LayoutNodeArena {
 
     pub(crate) fn set_shell_factory(&self, factory: Option<ShellFactory>) {
         self.shell_factory.set(factory);
+    }
+
+    pub(crate) fn set_box_presence_host(&self, host: Option<BoxPresenceHost>) {
+        self.box_presence_host.set(host);
+        if host.is_none() {
+            self.rows_with_changed_committed_box.borrow_mut().clear();
+        }
+    }
+
+    /// What boxes the node bound to `row` has. An invalid row means the node has none.
+    fn box_presence_bits(&self, row: NodeSlotId) -> u8 {
+        if row.is_invalid() {
+            return 0;
+        }
+        let mut bits = BOX_PRESENCE_HAS_LAYOUT_BOX;
+        if self.paintable_rows().paintable_row_is_populated(row) {
+            bits |= BOX_PRESENCE_HAS_COMMITTED_BOX;
+        }
+        bits
+    }
+
+    /// Tells the host what boxes `node` has now. No row list may be borrowed here. A
+    /// pseudo-element's boxes stay unmirrored, since nothing on the DOM side reads them as a bit.
+    fn notify_box_presence(&self, node: BoundNode) {
+        let Some((context, callback)) = self.box_presence_host.get() else {
+            return;
+        };
+        let (style_node, row) = match node {
+            BoundNode::Identity(style_node) => (style_node.raw(), self.bound_row(style_node)),
+            BoundNode::Document => (0, self.bound_viewport_row()),
+            BoundNode::PseudoElement(..) => return,
+        };
+        // SAFETY: Registration and unregistration keep the host context live, and the host does
+        // not reenter the arena.
+        unsafe { callback(context, style_node, self.box_presence_bits(row)) };
+    }
+
+    /// Records that `row` is gaining or losing its committed box. The paint state is borrowed for
+    /// writing while that happens, so the host hears about it from the flush that follows.
+    pub(crate) fn note_committed_box_changed(&mut self, row: NodeSlotId) {
+        if self.box_presence_host.get().is_some() {
+            self.rows_with_changed_committed_box.get_mut().push(row);
+        }
+    }
+
+    /// Tells the host about the committed boxes that appeared or went away since it last heard.
+    pub(crate) fn flush_committed_box_changes(&self) {
+        loop {
+            let rows = std::mem::take(&mut *self.rows_with_changed_committed_box.borrow_mut());
+            if rows.is_empty() {
+                return;
+            }
+            for row in rows {
+                // A row freed after its committed box went away named its node through the free.
+                if !self.slot_is_live(row) {
+                    continue;
+                }
+                let Some(node) = self.bound_node_of(row) else {
+                    continue;
+                };
+                self.notify_box_presence(node);
+            }
+        }
     }
 
     fn materialize_shell(&self, id: NodeSlotId) -> *mut c_void {
@@ -4013,6 +4101,31 @@ pub unsafe extern "C" fn layout_arena_set_shell_factory(
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
     unsafe { &*arena.cast::<LayoutNodeArena>() }.set_shell_factory(Some((context, factory)));
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread. The host must stay registered only while
+/// its context is live, and must not reenter the arena from the callback.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_box_presence_host(
+    arena: *mut c_void,
+    context: *mut c_void,
+    callback: unsafe extern "C" fn(*mut c_void, u32, u8),
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_box_presence_host(Some((context, callback)));
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_clear_box_presence_host(arena: *mut c_void) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_box_presence_host(None);
 }
 
 #[unsafe(no_mangle)]

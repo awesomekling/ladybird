@@ -671,6 +671,20 @@ Layout::NodeArena& Document::layout_node_arena()
             },
         };
         Layout::RustFFI::layout_arena_set_style_record_host_callbacks(m_layout_node_arena->handle(), style_record_host_callbacks);
+        // The render side says which nodes have a box and which of those boxes layout committed, so
+        // that DOM code reads a bit instead of looking up the node's row.
+        Layout::RustFFI::layout_arena_set_box_presence_host(m_layout_node_arena->handle(), this, [](void* context, u32 style_node, u8 bits) {
+            auto& document = *static_cast<Document*>(context);
+            bool has_layout_box = (bits & Layout::RustFFI::BOX_PRESENCE_HAS_LAYOUT_BOX) != 0;
+            bool has_committed_box = (bits & Layout::RustFFI::BOX_PRESENCE_HAS_COMMITTED_BOX) != 0;
+            // The document has no identity of its own; it is named by 0.
+            if (style_node == 0) {
+                document.set_box_presence(has_layout_box, has_committed_box);
+                return;
+            }
+            if (auto node = document.style_computer().node_for_style_node(CSS::StyleNodeID { style_node }))
+                node->set_box_presence(has_layout_box, has_committed_box);
+        });
         Layout::RustFFI::layout_arena_set_shell_factory(m_layout_node_arena->handle(), this, [](void* context, Compositing::RustFFI::NodeSlotId slot, Layout::RustFFI::NodeKind kind) {
             auto& document = *static_cast<Document*>(context);
             switch (kind) {
@@ -846,6 +860,8 @@ Layout::RustFFI::FfiLayoutTreeBuildStats Document::layout_tree_build_stats() con
 void Document::finalize()
 {
     stop_compositor_animation_timers();
+    if (m_layout_node_arena)
+        Layout::RustFFI::layout_arena_clear_box_presence_host(m_layout_node_arena->handle());
     tear_down_layout_tree();
     if (m_layout_node_arena) {
         Layout::RustFFI::layout_arena_clear_chrome_state_callback(m_layout_node_arena->handle());

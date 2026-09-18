@@ -843,25 +843,30 @@ void Node::set_generated_for(CSS::PseudoElement type, DOM::Element& element)
 void Node::dom_node_style_node_changed(DOM::Node& dom_node, CSS::StyleNodeID old_style_node)
 {
     auto* arena = dom_node.document().layout_node_arena_if_created();
-    if (!arena)
-        return;
-    auto new_style_node = Node::style_node_of(&dom_node);
-    // The node's rows, and those of its pseudo-elements, take its new identity along with their
-    // bindings. Both are still keyed by the old identity here, so this precedes retiring it.
-    if (old_style_node != 0 && new_style_node != 0) {
-        if (auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_bound_shell(arena->handle(), old_style_node.value())))
-            RustFFI::layout_arena_set_style_node_of_rows_sharing_dom_node_with(arena->handle(), layout_node->m_slot, new_style_node.value());
-        if (auto* element = as_if<DOM::Element>(dom_node)) {
-            element->for_each_synthetic_pseudo_element([&](CSS::PseudoElement pseudo_element, DOM::SyntheticPseudoElement const&) {
-                if (auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_bound_pseudo_element_shell(arena->handle(), old_style_node.value(), encode_generated_for(pseudo_element))))
-                    RustFFI::layout_arena_set_style_node_of_generated_subtree(arena->handle(), layout_node->m_slot, new_style_node.value());
-            });
+    if (arena) {
+        auto new_style_node = Node::style_node_of(&dom_node);
+        // The node's rows, and those of its pseudo-elements, take its new identity along with their
+        // bindings. Both are still keyed by the old identity here, so this precedes retiring it.
+        if (old_style_node != 0 && new_style_node != 0) {
+            if (auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_bound_shell(arena->handle(), old_style_node.value())))
+                RustFFI::layout_arena_set_style_node_of_rows_sharing_dom_node_with(arena->handle(), layout_node->m_slot, new_style_node.value());
+            if (auto* element = as_if<DOM::Element>(dom_node)) {
+                element->for_each_synthetic_pseudo_element([&](CSS::PseudoElement pseudo_element, DOM::SyntheticPseudoElement const&) {
+                    if (auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_bound_pseudo_element_shell(arena->handle(), old_style_node.value(), encode_generated_for(pseudo_element))))
+                        RustFFI::layout_arena_set_style_node_of_generated_subtree(arena->handle(), layout_node->m_slot, new_style_node.value());
+                });
+            }
         }
+        // A retired identity may be reused, so it leaves every row carrying it, including rows of a
+        // removed subtree that outlive the disconnection.
+        if (old_style_node != 0)
+            RustFFI::layout_arena_forget_style_node(arena->handle(), old_style_node.value());
     }
-    // A retired identity may be reused, so it leaves every row carrying it, including rows of a
-    // removed subtree that outlive the disconnection.
-    if (old_style_node != 0)
-        RustFFI::layout_arena_forget_style_node(arena->handle(), old_style_node.value());
+    // The arena names the node it tells about a binding change by identity, so a node changing
+    // identity is one the arena cannot name. Its box-presence bits are re-committed here instead,
+    // from the row its new identity reaches.
+    Node const* row = arena ? DOM::NodeIdentity::of(dom_node).bound_layout_node(*arena) : nullptr;
+    dom_node.set_box_presence(row != nullptr, row && Painting::has_committed_box(*row));
 }
 
 CSS::StyleNodeID Node::style_node_id() const
