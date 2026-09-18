@@ -117,6 +117,7 @@
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/HTMLCollection.h>
 #include <LibWeb/DOM/InputEventsTarget.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/DOM/LiveNodeList.h>
 #include <LibWeb/DOM/MutationObserver.h>
 #include <LibWeb/DOM/MutationType.h>
@@ -622,6 +623,7 @@ Document::Document(Page& page, GC::Ref<EventTarget> relevant_global_event_target
     , m_url(url)
     , m_relevant_global_event_target(relevant_global_event_target)
     , m_chrome_widget_registry(make_ref_counted<Painting::ChromeWidgetRegistry>())
+    , m_invalidation_journal(make<InvalidationJournal>(*this))
     , m_fonts(CSS::FontFaceSet::create(relevant_settings_object()))
     , m_temporary_document_for_fragment_parsing(temporary_document_for_fragment_parsing == TemporaryDocumentForFragmentParsing::Yes)
     , m_editing_host_manager(EditingHostManager::create(*this))
@@ -2248,8 +2250,17 @@ void Document::clear_devtools_layout_inspection_data()
     clear_flexbox_highlighted_node(nullptr);
 }
 
+void Document::drain_invalidation_journal() const
+{
+    m_invalidation_journal->drain();
+}
+
 bool Document::layout_is_up_to_date() const
 {
+    // NB: Draining is what makes this exact: every question about pending layout work comes
+    //     through here, so no journalled mark can hide behind an up-to-date answer.
+    drain_invalidation_journal();
+
     if (!navigable() || navigable()->active_document().ptr() != this)
         return true;
     // Without an arena there is no layout root either, so there is a tree to build.

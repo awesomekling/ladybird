@@ -44,11 +44,13 @@
 #include <LibWeb/DOM/EventDispatcher.h>
 #include <LibWeb/DOM/HTMLCollection.h>
 #include <LibWeb/DOM/IDLEventListener.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/DOM/LiveNodeList.h>
 #include <LibWeb/DOM/MutationObserver.h>
 #include <LibWeb/DOM/MutationType.h>
 #include <LibWeb/DOM/NamedNodeMap.h>
 #include <LibWeb/DOM/Node.h>
+#include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/DOM/NodeIterator.h>
 #include <LibWeb/DOM/ProcessingInstruction.h>
 #include <LibWeb/DOM/Range.h>
@@ -3763,11 +3765,12 @@ void Node::set_needs_layout_update(SetNeedsLayoutReason reason)
 
 void Node::set_needs_layout_update(SetNeedsLayoutReason reason, Layout::LayoutUpdatePropagation propagation)
 {
-    if (auto* node = unsafe_layout_node()) {
-        node->set_needs_layout_update(reason, propagation);
-        document().note_render_state_mutation();
-        document().set_needs_repaint(Badge<Node> {}, InvalidateDisplayList::No);
-    }
+    // A node without a box has nothing to mark, exactly as when this resolved the row first.
+    if (!has_layout_box())
+        return;
+    document().invalidation_journal().note_needs_layout_update(NodeIdentity::of(*this), reason, propagation);
+    document().note_render_state_mutation();
+    document().set_needs_repaint(Badge<Node> {}, InvalidateDisplayList::No);
 }
 
 // https://dom.spec.whatwg.org/#queue-a-mutation-record

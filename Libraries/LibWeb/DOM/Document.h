@@ -524,6 +524,9 @@ public:
     [[nodiscard]] u64 partial_layout_count() const;
     [[nodiscard]] u64 full_layout_count() const;
     [[nodiscard]] bool layout_is_up_to_date() const;
+    // The marks the DOM side has made on this document's render state but not written there yet.
+    [[nodiscard]] InvalidationJournal& invalidation_journal() { return *m_invalidation_journal; }
+    void drain_invalidation_journal() const;
     void clear_devtools_layout_inspection_data();
     void prepare_for_rendering();
     void update_paint_and_hit_testing_properties_if_needed();
@@ -1668,6 +1671,7 @@ private:
     RefPtr<Layout::NodeArena> m_layout_node_arena;
     OwnPtr<Painting::DocumentPaintState> m_paint_state;
     NonnullRefPtr<Painting::ChromeWidgetRegistry> m_chrome_widget_registry;
+    NonnullOwnPtr<InvalidationJournal> m_invalidation_journal;
     bool m_may_have_content_visibility_auto_style { false };
 
     GC::Ptr<Node> m_hovered_node;
