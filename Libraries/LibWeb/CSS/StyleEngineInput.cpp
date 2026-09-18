@@ -78,14 +78,16 @@ static StyleNodeID dom_order_identity_of(DOM::Node const& node)
     return no_style_node;
 }
 
-// Only an element or a shadow root owns a child sequence. The document's own children are not one
-// anything reads.
+// An element, a shadow root or the document owns a child sequence. Every other node is only ever a
+// member of one.
 static StyleNodeID dom_order_parent_of(DOM::Node const* parent)
 {
     if (auto const* element = as_if<DOM::Element>(parent))
         return element->style_node_id();
     if (auto const* shadow_root = as_if<DOM::ShadowRoot>(parent))
         return shadow_root->style_node_id();
+    if (auto const* document = as_if<DOM::Document>(parent))
+        return document->style_node_id();
     return no_style_node;
 }
 
@@ -287,6 +289,21 @@ void record_text_connected(DOM::Text& text)
     Vector<u32, 192> links;
     append_dom_order_link(links, text);
     style_engine->link_style_nodes_in_dom_order(links.span());
+}
+
+// The document's identity, minted before anything connects under it.
+//
+// The document is not an element and gets no style, but it is the parent the document element's
+// place in the DOM child sequence names, and so the root the sequence can be walked from. It is
+// deliberately kept out of the element-only relation columns: a selector that reaches for the
+// document element's parent must still find nothing.
+void record_document_tree_tracked(DOM::Document& document)
+{
+    if (document.style_node_id() != no_style_node)
+        return;
+    auto& style_engine = document.style_computer().style_engine();
+    document.set_style_node_id(style_engine.allocate_style_node());
+    style_engine.mark_relation_only_style_node(document.style_node_id());
 }
 
 void record_subtree_connecting(DOM::Node& root)
