@@ -422,6 +422,7 @@ impl<'pass> SvgFormattingContext<'pass> {
     }
 
     fn svg_facts(&self, node: Node) -> FfiSvgElementFacts {
+        seal::note_host_call(self.callbacks.arena().layout_pass_is_running(), "build_svg_facts");
         // SAFETY: The callback snapshots plain data from a live node and
         // returns no borrowed storage.
         unsafe { (self.callbacks.host.build_svg_facts)(self.callbacks.host.context, self.callbacks.shell(node)) }
@@ -761,6 +762,7 @@ impl<'pass> SvgFormattingContext<'pass> {
 
     fn layout_path_like_element(&mut self, run: &FormattingContextRun<'pass>, graphics_box: Node, input: LayoutInput) {
         let facts = self.svg_facts(graphics_box);
+        seal::note_host_call(self.callbacks.arena().layout_pass_is_running(), "compute_svg_path");
         // SAFETY: The callback computes geometry synchronously and transfers
         // sole ownership of a heap-allocated path into the result.
         let result = unsafe {
@@ -807,6 +809,10 @@ impl<'pass> SvgFormattingContext<'pass> {
     }
 
     fn layout_image_element(&self, image_box: Node) {
+        seal::note_host_call(
+            self.callbacks.arena().layout_pass_is_running(),
+            "svg_image_bounding_box",
+        );
         // SAFETY: The callback returns a POD bounding box for the live image
         // node and requested viewport.
         let source = unsafe {

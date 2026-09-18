@@ -375,6 +375,7 @@ impl AbsposEngine<'_> {
             .as_deref()
             .map(|fragments| fragments.anchor_candidate_shells(&self.callbacks))
             .unwrap_or_default();
+        seal::note_host_call(self.callbacks.arena().layout_pass_is_running(), "anchor_lookup");
         // SAFETY: The name handle is retained by either the style snapshot or
         let anchor_box = unsafe {
             (self.callbacks.host.anchor_lookup)(

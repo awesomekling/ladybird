@@ -2220,6 +2220,10 @@ pub(crate) unsafe fn run_root_layout(
     // SAFETY: The caller keeps the arena alive for this synchronous call. The host table is
     // copied out so no arena borrow spans a host callback.
     let host = unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_host();
+    seal::note_host_call(
+        unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_pass_is_running(),
+        "viewport_propagation_facts",
+    );
     // SAFETY: The document answers from its elements' style records without entering the arena.
     let propagation_facts = unsafe { (host.viewport_propagation_facts)(host.context) };
     // The style rewrites enroll the affected boxes' text children for content sync, so the sync
