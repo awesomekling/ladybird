@@ -53,7 +53,7 @@ public:
 
     CSS::PseudoElement type() const { return m_type; }
 
-    Layout::NodeWithStyle* layout_node() const override { return unsafe_layout_node(); }
+    Layout::NodeWithStyle* layout_node() const override;
     Layout::NodeWithStyle* unsafe_layout_node() const override;
     void set_layout_node(Layout::NodeWithStyle*);
 
