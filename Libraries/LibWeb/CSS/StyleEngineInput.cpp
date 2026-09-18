@@ -113,6 +113,7 @@ static StyleNodeID identity_of_shadow_root(DOM::ShadowRoot& shadow_root, StyleEn
 {
     if (shadow_root.style_node_id() == no_style_node) {
         shadow_root.set_style_node_id(style_engine.allocate_style_node());
+        shadow_root.document().style_computer().register_style_node(shadow_root.style_node_id(), shadow_root);
         // A shadow root is a scope and a subtree at once. Naming the subtree is what lets a sheet
         // attached here be bounded by the tree it decides in, even when its rules dispatch on
         // nothing the engine can enumerate. It is named here rather than where a scope is numbered,
@@ -364,7 +365,9 @@ void record_subtree_connecting(DOM::Node& root)
                 style_computer.register_style_node(identity, *element);
             } else {
                 auto identity = identities[next_shadow_root_identity++];
-                as<DOM::ShadowRoot>(*arrival.node).set_style_node_id(identity);
+                auto& shadow_root = as<DOM::ShadowRoot>(*arrival.node);
+                shadow_root.set_style_node_id(identity);
+                style_computer.register_style_node(identity, shadow_root);
                 style_engine.set_tree_scope_root(arrival.tree_scope, identity);
             }
         }
@@ -1301,6 +1304,7 @@ void record_shadow_root_disconnecting(DOM::ShadowRoot& shadow_root)
             .new_relations = detached_relations(),
         });
     }
+    shadow_root.document().style_computer().unregister_style_node(node);
     shadow_root.set_style_node_id(no_style_node);
 }
 

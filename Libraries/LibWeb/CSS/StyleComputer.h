@@ -518,7 +518,9 @@ private:
     mutable u64 m_computed_style_record_view_pin_count { 0 };
     mutable u32 m_style_record_view_epoch_depth { 0 };
     // Indexed by each kind's dense index; see style_node_is_text().
-    Vector<GC::Ptr<DOM::Element>> m_element_style_nodes;
+    // An element or a shadow root; the root is not an element but it owns a child sequence, so it is
+    // named here too.
+    Vector<GC::Ptr<DOM::Node>> m_element_style_nodes;
     Vector<GC::Ptr<DOM::Node>> m_text_style_nodes;
     TreeScopeID m_next_tree_scope;
     Vector<NonAuthorStyleSheet> m_non_author_style_sheets;

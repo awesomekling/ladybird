@@ -30,11 +30,8 @@ NodeIdentity NodeIdentity::of(Node const& node)
         return of_style_node(element->style_node_id());
     if (auto const* text = as_if<Text>(node))
         return of_style_node(text->style_node_id());
-    if (auto const* shadow_root = as_if<ShadowRoot>(node)) {
-        auto const* host = shadow_root->host();
-        if (host && host->style_node_id() != 0)
-            return { Kind::ShadowRootOfStyleNode, host->style_node_id() };
-    }
+    if (auto const* shadow_root = as_if<ShadowRoot>(node))
+        return of_style_node(shadow_root->style_node_id());
     return {};
 }
 
@@ -45,10 +42,6 @@ GC::Ptr<Node> NodeIdentity::resolve(Document& document) const
         return nullptr;
     case Kind::StyleNode:
         return document.style_computer().node_for_style_node(m_style_node);
-    case Kind::ShadowRootOfStyleNode: {
-        auto host = document.style_computer().element_for_style_node(m_style_node);
-        return host ? host->shadow_root() : nullptr;
-    }
     case Kind::Document:
         return document;
     }
@@ -59,7 +52,6 @@ Layout::Node* NodeIdentity::bound_layout_node(Layout::NodeArena& arena) const
 {
     switch (m_kind) {
     case Kind::None:
-    case Kind::ShadowRootOfStyleNode:
         return nullptr;
     case Kind::StyleNode:
         return static_cast<Layout::Node*>(Layout::RustFFI::layout_arena_bound_shell(arena.handle(), m_style_node.value()));

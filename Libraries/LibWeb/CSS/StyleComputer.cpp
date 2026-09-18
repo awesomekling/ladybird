@@ -422,7 +422,7 @@ void StyleComputer::register_style_node(StyleNodeID style_node_id, DOM::Node& no
     if (style_node_is_text(style_node_id))
         m_text_style_nodes[style_node_index(style_node_id)] = node;
     else
-        m_element_style_nodes[style_node_index(style_node_id)] = as<DOM::Element>(node);
+        m_element_style_nodes[style_node_index(style_node_id)] = node;
 }
 
 static void ensure_slot(auto& nodes, u32 index)
@@ -461,15 +461,16 @@ void StyleComputer::unregister_style_node(StyleNodeID style_node_id)
 
 GC::Ptr<DOM::Element> StyleComputer::element_for_style_node(StyleNodeID style_node_id) const
 {
-    if (style_node_id == 0 || style_node_is_text(style_node_id) || style_node_id.value() >= m_element_style_nodes.size())
-        return nullptr;
-    return m_element_style_nodes[style_node_id.value()];
+    return as_if<DOM::Element>(node_for_style_node(style_node_id).ptr());
 }
 
 GC::Ptr<DOM::Node> StyleComputer::node_for_style_node(StyleNodeID style_node_id) const
 {
-    if (!style_node_is_text(style_node_id))
-        return element_for_style_node(style_node_id);
+    if (!style_node_is_text(style_node_id)) {
+        if (style_node_id == 0 || style_node_id.value() >= m_element_style_nodes.size())
+            return nullptr;
+        return m_element_style_nodes[style_node_id.value()];
+    }
     auto index = style_node_index(style_node_id);
     if (index >= m_text_style_nodes.size())
         return nullptr;
@@ -492,8 +493,8 @@ void StyleComputer::prepare_elements_for_style_computation()
 
 void StyleComputer::for_each_style_node(Function<void(DOM::Element&)> callback) const
 {
-    for (auto element : m_element_style_nodes) {
-        if (element)
+    for (auto node : m_element_style_nodes) {
+        if (auto* element = as_if<DOM::Element>(node.ptr()))
             callback(*element);
     }
 }
