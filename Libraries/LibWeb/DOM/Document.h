@@ -547,6 +547,11 @@ public:
 
     Layout::Viewport const* unsafe_layout_node() const;
     Layout::Viewport* unsafe_layout_node();
+
+    // The row the document's layout tree is rooted at. The tree build records it in the arena, so
+    // the document keeps no copy of its own.
+    [[nodiscard]] Layout::RustFFI::NodeSlotId layout_root_slot() const;
+    [[nodiscard]] bool has_layout_root() const { return layout_root_slot().index != Layout::RustFFI::INVALID_NODE_SLOT_INDEX; }
     bool has_committed_viewport_box() const;
 
     Painting::DocumentPaintState& paint_state();
@@ -1582,7 +1587,7 @@ private:
 
     virtual void finalize() override final;
 
-    void set_layout_root(Compositing::RustFFI::NodeSlotId viewport_slot);
+    Layout::RustFFI::FfiLayoutTreeBuildOutcome build_layout_tree();
     void tear_down_layout_tree();
     void process_pending_top_layer_layout_changes();
 
@@ -1661,7 +1666,6 @@ private:
     RefPtr<Layout::NodeArena> m_layout_node_arena;
     OwnPtr<Painting::DocumentPaintState> m_paint_state;
     NonnullRefPtr<Painting::ChromeWidgetRegistry> m_chrome_widget_registry;
-    Layout::Viewport* m_layout_root { nullptr };
     bool m_may_have_content_visibility_auto_style { false };
 
     GC::Ptr<Node> m_hovered_node;

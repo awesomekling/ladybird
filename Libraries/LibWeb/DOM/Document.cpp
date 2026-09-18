@@ -1653,28 +1653,37 @@ WebIDL::ExceptionOr<void> Document::set_title(Utf16View title)
     return {};
 }
 
-void Document::set_layout_root(Compositing::RustFFI::NodeSlotId viewport_slot)
+Compositing::RustFFI::NodeSlotId Document::layout_root_slot() const
 {
-    auto* viewport_shell = static_cast<Layout::Node*>(Layout::RustFFI::layout_arena_node_shell_if_live(layout_node_arena().handle(), viewport_slot));
-    VERIFY(viewport_shell);
-    auto& viewport = as<Layout::Viewport>(*viewport_shell);
-    if (m_layout_root == &viewport)
-        return;
-    if (auto* replaced_layout_root = exchange(m_layout_root, nullptr)) {
+    if (!m_layout_node_arena)
+        return Layout::RustFFI::NodeSlotId_INVALID;
+    return Layout::RustFFI::layout_arena_layout_root(m_layout_node_arena->handle());
+}
+
+// The build records the root it placed in the arena itself, so what is left for the document is to
+// retire the tree that was replaced and give the new one a paint state.
+Layout::RustFFI::FfiLayoutTreeBuildOutcome Document::build_layout_tree()
+{
+    auto replaced_root = layout_root_slot();
+    auto outcome = Layout::build_layout_tree(*this);
+    if (replaced_root.index == outcome.viewport.index)
+        return outcome;
+    if (auto* replaced_layout_root = layout_node_arena().node_if_live(replaced_root)) {
         replaced_layout_root->prepare_subtree_for_detach_from_layout_tree();
-        layout_node_arena().free_subtree(Layout::Node::slot_id(replaced_layout_root));
+        layout_node_arena().free_subtree(replaced_root);
     }
-    m_layout_root = &viewport;
     m_paint_state = make<Painting::DocumentPaintState>(layout_node_arena());
+    return outcome;
 }
 
 void Document::tear_down_layout_tree()
 {
-    if (m_layout_root)
-        m_layout_root->prepare_subtree_for_detach_from_layout_tree();
+    auto* layout_root = m_layout_node_arena ? layout_node_arena().node_if_live(layout_root_slot()) : nullptr;
+    if (layout_root)
+        layout_root->prepare_subtree_for_detach_from_layout_tree();
     m_hit_test_display_list = nullptr;
     m_chrome_widget_registry->clear();
-    if (auto* layout_root = exchange(m_layout_root, nullptr))
+    if (layout_root)
         layout_node_arena().free_subtree(Layout::Node::slot_id(layout_root));
     m_paint_state = nullptr;
     set_needs_full_layout_tree_update(true);
@@ -1953,7 +1962,7 @@ Optional<Utf16String> Document::encoding_parse_and_serialize_url(Utf16View url) 
 
 void Document::invalidate_layout_tree(InvalidateLayoutTreeReason reason)
 {
-    if (m_layout_root)
+    if (has_layout_root())
         dbgln_if(UPDATE_LAYOUT_DEBUG, "DROP TREE {}", to_string(reason));
     tear_down_layout_tree();
 }
@@ -2040,7 +2049,7 @@ void Document::end_style_stabilization_epoch()
 void Document::after_layout_commit(LayoutTreeChanged layout_tree_changed)
 {
     // NB: Called during layout update.
-    m_layout_root->invalidate_text_blocks_cache();
+    Layout::RustFFI::layout_arena_invalidate_searchable_text(layout_node_arena().handle());
 
     set_needs_to_record_display_list();
 
@@ -2633,7 +2642,7 @@ void Document::update_paint_and_hit_testing_properties_if_needed()
 
 bool Document::can_compute_client_rects_without_accumulated_visual_contexts_update(Layout::Node const& layout_node) const
 {
-    if (!m_needs_accumulated_visual_contexts_update || !m_layout_root)
+    if (!m_needs_accumulated_visual_contexts_update || !has_layout_root())
         return false;
 
     auto navigable = this->navigable();
@@ -9270,7 +9279,7 @@ void Document::process_pending_top_layer_layout_changes()
     m_top_layer_needs_layout_zone_rebuild = false;
 
     // An already pending full build recreates every box anyway.
-    if (!m_layout_root || needs_full_layout_tree_update())
+    if (!has_layout_root() || needs_full_layout_tree_update())
         return;
 
     // Marks are applied only after every detach has run: detaching clears the flags across the
