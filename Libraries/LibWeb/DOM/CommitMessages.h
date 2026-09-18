@@ -53,6 +53,7 @@ private:
         ContentSizeChangedForContainerQueries,
         NavigableContainerViewportCommitted,
         NeedsLayoutTreeUpdate,
+        UnexpectedFragmentedInline,
     };
 
     struct Message {
