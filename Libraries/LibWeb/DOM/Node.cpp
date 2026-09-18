@@ -2451,20 +2451,19 @@ static bool is_structural_boundary_self_rebuild_reason(SetNeedsLayoutTreeUpdateR
     }
 }
 
-// Whether a layout tree build can produce anything for this node. Only an element, a text node, the
-// document and a shadow root ever reach the build as something that keeps or gets a box; a comment,
-// a doctype or a processing instruction never does.
-static bool can_have_a_layout_tree_update(Node const& node)
-{
-    return node.is_element() || node.is_text() || node.is_document() || node.is_shadow_root();
-}
-
 void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReason reason)
 {
-    // A node with no possible box has nothing for the build to rebuild, and the mutation that
-    // reached it has already dirtied its parent, which is where the child list is read again.
-    if (value && !can_have_a_layout_tree_update(*this))
-        return;
+    // A tree update mark names a node for the render side, so a node the style tree has not named
+    // has nowhere to hold one. That is every node a build can produce nothing for -- a comment, a
+    // doctype, a processing instruction -- and, of the rest, only a node in a document that never
+    // lays out, or one whose subtree is still arriving: the insertion that names it marks it and
+    // its new parent once it is named, which is what covers a slot assigned during the insertion.
+    NodeIdentity identity;
+    if (value) {
+        identity = NodeIdentity::of(*this);
+        if (!identity)
+            return;
+    }
 
     if (value && reason == SetNeedsLayoutTreeUpdateReason::NodeInsertBefore) {
         if (auto* first_letter_owner = first_letter_owner_for_layout_subtree_from(*this); first_letter_owner && first_letter_owner != this)
@@ -2532,13 +2531,11 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
         }
 
         // A mark made from inside a layout update is one the journal writes through at once, so it
-        // saves the entry and goes straight to render state; a node the style tree has not named
-        // cannot be journalled at all, and has nowhere else to go.
-        auto identity = document().is_running_update_layout() ? NodeIdentity {} : NodeIdentity::of(*this);
-        if (identity)
-            document().invalidation_journal().note_needs_layout_tree_update(identity, reason);
-        else
+        // saves the entry and goes straight to render state.
+        if (document().is_running_update_layout())
             apply_layout_tree_update_mark(reason);
+        else
+            document().invalidation_journal().note_needs_layout_tree_update(identity, reason);
     }
 }
 
