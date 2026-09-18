@@ -188,6 +188,12 @@ enum class UpdateLayoutReason {
 #undef ENUMERATE_UPDATE_LAYOUT_REASON
 };
 
+static constexpr size_t update_layout_reason_count = 0
+#define ENUMERATE_UPDATE_LAYOUT_REASON(e, reads_layout_geometry) +1
+    ENUMERATE_UPDATE_LAYOUT_REASONS(ENUMERATE_UPDATE_LAYOUT_REASON)
+#undef ENUMERATE_UPDATE_LAYOUT_REASON
+    ;
+
 [[nodiscard]] constexpr bool reason_reads_layout_geometry(UpdateLayoutReason reason)
 {
     switch (reason) {
@@ -1184,6 +1190,64 @@ public:
     StyleInvalidationCounters& style_invalidation_counters() const { return m_style_invalidation_counters; }
     void reset_style_invalidation_counters() const;
 
+    // What one synchronous read of render state cost, kept for each reason a read names. A read is
+    // a "join": script asks for something that only style or layout can answer, and the answer has
+    // to exist before the read returns.
+    struct JoinCounters {
+        // Every entry into one of the two funnels, including the ones charged to an outer read.
+        u64 calls { 0 };
+        // Reads that found the render state dirty and had to bring it up to date.
+        u64 joins { 0 };
+        // Reads answered from render state that was already up to date.
+        u64 clean_reads { 0 };
+        // Entries that did not measure anything of their own: a read entered while another one was
+        // running, and each pass after the first of a read that ran layout more than once.
+        u64 nested { 0 };
+        u64 total_nanoseconds { 0 };
+        // The part of that spent on reads that found the render state clean. Today a clean read
+        // still walks the pipeline to decide it has nothing to do; a render thread answers it from
+        // the published state instead, so this is time the design gives back outright.
+        u64 clean_read_nanoseconds { 0 };
+        u64 max_nanoseconds { 0 };
+        // Summed over the joins, how long before each one the page last dirtied render state. A
+        // join that follows its own mutation could never have overlapped with anything; one that
+        // follows a quiet stretch could have been answered from work done during it.
+        u64 nanoseconds_since_mutation { 0 };
+    };
+    using JoinCountersByReason = Array<JoinCounters, update_layout_reason_count>;
+    // Whether style and layout already describe the current DOM, so that a read of layout geometry
+    // needs nothing run before it can be answered.
+    [[nodiscard]] bool is_clean_for_layout_geometry_read() const;
+
+    JoinCountersByReason const& join_counters() const { return m_join_counters; }
+    void reset_join_counters();
+    void dump_join_counters() const;
+
+    // Notes that the page dirtied render state, for the joins that will have to wait for it.
+    void note_render_state_mutation() { m_last_render_state_mutation_nanoseconds = MonotonicTime::now().nanoseconds(); }
+
+    // Measures one read of render state against the reason it named. A read entered while another
+    // one is running is charged to the outer read, so a funnel that delegates to the other funnel
+    // is counted once.
+    class JoinScope {
+        AK_MAKE_NONCOPYABLE(JoinScope);
+        AK_MAKE_NONMOVABLE(JoinScope);
+
+    public:
+        JoinScope(Document&, UpdateLayoutReason);
+        ~JoinScope();
+
+        // Notes a further pass of the same read, which the first pass already charges time for.
+        void note_extra_pass() const;
+
+    private:
+        Document& m_document;
+        UpdateLayoutReason m_reason;
+        u64 m_started_at_nanoseconds { 0 };
+        bool m_is_nested { false };
+        bool m_render_state_was_clean { false };
+    };
+
     // Confinement report of the most recent layout tree build, for tests observing whether a
     // partial rebuild stayed inside its rebuilt subtrees.
     [[nodiscard]] Layout::RustFFI::FfiLayoutTreeBuildStats layout_tree_build_stats() const;
@@ -1500,10 +1564,6 @@ protected:
     void initialize_document();
 
 private:
-    // Whether nothing this document has pending could change layout geometry: style, layout and every input
-    // that feeds them are settled.
-    [[nodiscard]] bool is_clean_for_layout_geometry_read() const;
-
     void did_add_supported_property_name();
     friend struct AdoptedStyleSheetsAccess;
 
@@ -1953,6 +2013,9 @@ private:
     Optional<CSSPixelRect> m_caret_hit_test_debug_rect;
 
     mutable StyleInvalidationCounters m_style_invalidation_counters;
+    JoinCountersByReason m_join_counters;
+    u64 m_last_render_state_mutation_nanoseconds { 0 };
+    size_t m_join_depth { 0 };
 
     mutable GC::Ptr<WebIDL::ObservableArray> m_adopted_style_sheets;
 

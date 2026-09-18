@@ -1516,6 +1516,58 @@ void Internals::reset_style_invalidation_counters()
     window().associated_document().reset_style_invalidation_counters();
 }
 
+GC::Ref<JS::Object> Internals::join_counters_object() const
+{
+    auto& realm = HTML::relevant_realm(window());
+    auto const& counters_by_reason = window().associated_document().join_counters();
+
+    auto counters_object = [&](DOM::Document::JoinCounters const& counters) {
+        auto object = JS::Object::create(realm, nullptr);
+        object->define_direct_property("calls"_utf16_fly_string, JS::Value(counters.calls), JS::default_attributes);
+        object->define_direct_property("joins"_utf16_fly_string, JS::Value(counters.joins), JS::default_attributes);
+        object->define_direct_property("cleanReads"_utf16_fly_string, JS::Value(counters.clean_reads), JS::default_attributes);
+        object->define_direct_property("nested"_utf16_fly_string, JS::Value(counters.nested), JS::default_attributes);
+        object->define_direct_property("totalNanoseconds"_utf16_fly_string, JS::Value(counters.total_nanoseconds), JS::default_attributes);
+        object->define_direct_property("cleanReadNanoseconds"_utf16_fly_string, JS::Value(counters.clean_read_nanoseconds), JS::default_attributes);
+        object->define_direct_property("maxNanoseconds"_utf16_fly_string, JS::Value(counters.max_nanoseconds), JS::default_attributes);
+        object->define_direct_property("nanosecondsSinceMutation"_utf16_fly_string, JS::Value(counters.nanoseconds_since_mutation), JS::default_attributes);
+        return object;
+    };
+
+    DOM::Document::JoinCounters totals;
+    auto by_reason = JS::Object::create(realm, nullptr);
+    for (size_t reason = 0; reason < DOM::update_layout_reason_count; ++reason) {
+        auto const& counters = counters_by_reason[reason];
+        totals.calls += counters.calls;
+        totals.joins += counters.joins;
+        totals.clean_reads += counters.clean_reads;
+        totals.nested += counters.nested;
+        totals.total_nanoseconds += counters.total_nanoseconds;
+        totals.clean_read_nanoseconds += counters.clean_read_nanoseconds;
+        totals.max_nanoseconds = max(totals.max_nanoseconds, counters.max_nanoseconds);
+        totals.nanoseconds_since_mutation += counters.nanoseconds_since_mutation;
+        if (counters.calls == 0)
+            continue;
+        auto name = Utf16FlyString::from_utf16(DOM::to_string(static_cast<DOM::UpdateLayoutReason>(reason)));
+        by_reason->define_direct_property(name, counters_object(counters), JS::default_attributes);
+    }
+
+    auto object = JS::Object::create(realm, nullptr);
+    object->define_direct_property("totals"_utf16_fly_string, counters_object(totals), JS::default_attributes);
+    object->define_direct_property("byReason"_utf16_fly_string, by_reason, JS::default_attributes);
+    return object;
+}
+
+void Internals::reset_join_counters()
+{
+    window().associated_document().reset_join_counters();
+}
+
+void Internals::dump_join_counters() const
+{
+    window().associated_document().dump_join_counters();
+}
+
 GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
 {
     auto& realm = HTML::relevant_realm(window());
