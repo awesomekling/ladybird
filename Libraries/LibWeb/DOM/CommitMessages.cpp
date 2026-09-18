@@ -28,6 +28,18 @@ void CommitMessages::note_box_presence(NodeIdentity identity, bool has_layout_bo
     apply();
 }
 
+void CommitMessages::note_needs_layout_tree_update(NodeIdentity identity, SetNeedsLayoutTreeUpdateReason reason)
+{
+    m_messages.append(Message {
+        .identity = identity,
+        .kind = Kind::NeedsLayoutTreeUpdate,
+        .layout_tree_update_reason = reason,
+    });
+    // The mark decides what the next tree build does, and the DOM side reads that back as soon as
+    // the mutation that made it returns.
+    apply();
+}
+
 // A message from the render side names its node by the style node the style tree gave it, with 0
 // for the document.
 void CommitMessages::append(Layout::RustFFI::FfiCommitMessage const& message)
@@ -74,6 +86,10 @@ void CommitMessages::apply(Message const& message)
         // Only an element can be a query container; the viewport names the document, which is not.
         if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
             CSS::Invalidation::invalidate_descendant_styles_depending_on_size_container_query(*element);
+        return;
+    case Kind::NeedsLayoutTreeUpdate:
+        if (auto node = message.identity.resolve(m_document))
+            node->set_needs_layout_tree_update(true, message.layout_tree_update_reason);
         return;
     case Kind::NavigableContainerViewportCommitted:
         // The committed box is the one the identity is bound to in the arena; no DOM node is asked

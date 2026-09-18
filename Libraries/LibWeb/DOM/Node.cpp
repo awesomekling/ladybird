@@ -35,6 +35,7 @@
 #include <LibWeb/DOM/CDATASection.h>
 #include <LibWeb/DOM/CharacterData.h>
 #include <LibWeb/DOM/Comment.h>
+#include <LibWeb/DOM/CommitMessages.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/DocumentFragment.h>
 #include <LibWeb/DOM/DocumentType.h>
@@ -2552,9 +2553,13 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
 
             // FIXME: Escalating a rebuild past anonymous parents is not optimal, and we should
             //        figure out how to rebuild a smaller part of the tree.
-            if (auto* ancestor_to_re_mark = static_cast<Layout::Node*>(Layout::RustFFI::layout_arena_node_shell_if_live(
-                    layout_node->arena_handle(), classification.nearest_non_anonymous_ancestor_when_parent_is_anonymous)))
-                ancestor_to_re_mark->dom_node()->set_needs_layout_tree_update(true, reason);
+            if (classification.escalates_past_anonymous_parents) {
+                // The document has no style node of its own; it is named by 0.
+                auto ancestor = classification.escalation_target_style_node == 0
+                    ? NodeIdentity::of_document()
+                    : NodeIdentity::of_style_node(CSS::StyleNodeID { classification.escalation_target_style_node });
+                document().commit_messages().note_needs_layout_tree_update(ancestor, reason);
+            }
         }
         // NB: A dirty node with no layout node needs no escape tracking: rebuilding it either
         //     still produces no layout node, or the change is covered by the escalations
