@@ -1096,7 +1096,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             auto* slot_element = as_if<HTML::HTMLSlotElement>(element);
             auto shadow_root = element.shadow_root();
             return {
-                .rendered_in_top_layer = element.rendered_in_top_layer(),
                 .child_needs_layout_tree_update = element.child_needs_layout_tree_update(),
                 .dom_children_parent = static_cast<DOM::ParentNode*>(&element),
                 .shadow_root = shadow_root ? static_cast<DOM::ParentNode*>(shadow_root.ptr()) : nullptr,
@@ -1165,17 +1164,14 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
         .top_layer_element_count = [](void* document_pointer) {
             VERIFY(document_pointer);
             return static_cast<DOM::Document*>(document_pointer)->top_layer_elements().size(); },
-        .copy_top_layer_elements = [](void* document_pointer, void** output, size_t count) {
+        .copy_top_layer_elements = [](void* document_pointer, RustFFI::FfiIdentifiedDomNode* output, size_t count) {
             VERIFY(document_pointer);
             VERIFY(output || count == 0);
             auto const& elements = static_cast<DOM::Document*>(document_pointer)->top_layer_elements();
             VERIFY(count == elements.size());
             size_t index = 0;
             for (auto const& element : elements)
-                output[index++] = element.ptr(); },
-        .rendered_in_top_layer = [](void* element_pointer) {
-            VERIFY(element_pointer);
-            return static_cast<DOM::Element*>(element_pointer)->rendered_in_top_layer(); },
+                output[index++] = identified_dom_node(element.ptr()); },
         .flat_tree_parent = [](void* node_pointer) -> void* {
             VERIFY(node_pointer);
             return static_cast<DOM::Node*>(node_pointer)->flat_tree_parent(); },
@@ -1213,7 +1209,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
                 .may_reuse_layout_node_for_child_list_insertion = can_reuse && can_insert_children,
                 .may_update_pseudo_elements_in_place = can_reuse && can_update_pseudo_elements,
                 .has_layout_node = existing_layout_node != nullptr,
-                .rendered_in_top_layer = element && element->rendered_in_top_layer(),
                 .layout_node_is_attached = existing_layout_node && existing_layout_node->has_parent(),
                 .style_node = Node::style_node_of(&node).value(),
                 .shadow_including_parent_element = element ? Node::style_node_of(element->parent_or_shadow_host_element()).value() : 0,

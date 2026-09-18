@@ -621,6 +621,9 @@ pub mod element_adjustment_fact {
     pub const IS_SVG_MASK_ELEMENT: u32 = 1 << 26;
     pub const IS_SVG_CLIP_PATH_ELEMENT: u32 = 1 << 27;
     pub const IS_SVG_PATTERN_ELEMENT: u32 = 1 << 28;
+    /// Whether the element is rendered in the top layer. Unlike the type facts above it moves
+    /// during the element's lifetime, and every move is recorded where the top layer is maintained.
+    pub const RENDERED_IN_TOP_LAYER: u32 = 1 << 29;
 }
 
 /// Which local fact a feature delta describes.
