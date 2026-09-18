@@ -500,6 +500,10 @@ pub struct StyleNodeTree {
     tree_scope: Option<Vec<TreeScopeID>>,
 
     live: BitColumn,
+    /// Identities that stand in the tree without being styled: the document, whose children the
+    /// DOM child sequence hangs from. A selector never names one and nothing publishes features
+    /// for one, so a style pass that reaches one must pass it by rather than ask it to match.
+    relation_only: BitColumn,
     connected_element_count: u32,
     /// Identities retired in the current epoch. They cannot be reused until the epoch that could
     /// still observe them has retired.
@@ -548,6 +552,7 @@ impl StyleNodeTree {
             depth: Vec::new(),
             tree_scope: None,
             live: BitColumn::default(),
+            relation_only: BitColumn::default(),
             connected_element_count: 0,
             pending_reuse: Vec::new(),
             free_element_indexes: Vec::new(),
@@ -581,6 +586,25 @@ impl StyleNodeTree {
     #[must_use]
     pub fn connected_element_count(&self) -> u32 {
         self.connected_element_count
+    }
+
+    /// Mark an identity as standing in the tree without being styled. See `relation_only`.
+    pub fn mark_relation_only(&mut self, node: StyleNodeID) {
+        let Some(index) = node.element_index() else {
+            return;
+        };
+        if !self.relation_only.set(index as usize, true).0 {
+            return;
+        }
+        // The count is the number of elements a style pass has to answer for, and this is not one.
+        self.connected_element_count -= 1;
+    }
+
+    /// Whether the identity stands in the tree without being styled. See `relation_only`.
+    #[must_use]
+    pub fn is_relation_only(&self, node: StyleNodeID) -> bool {
+        node.element_index()
+            .is_some_and(|index| self.relation_only.contains(index as usize))
     }
 
     #[must_use]
@@ -637,6 +661,7 @@ impl StyleNodeTree {
             }
         };
         self.live.set(index as usize, true);
+        self.relation_only.set(index as usize, false);
         if let Some(capacity_before_growth) = capacity_before_growth {
             let current = self.identity_capacity_bytes();
             self.record_capacity_change(memory, capacity_before_growth, current);
@@ -666,6 +691,9 @@ impl StyleNodeTree {
                 shadow.retire_node(node);
             }
             self.live.set(index as usize, false);
+            if !self.relation_only.set(index as usize, false).0 {
+                self.connected_element_count -= 1;
+            }
             self.parent[index as usize] = None;
             self.first_element_child[index as usize] = None;
             self.next_element_sibling[index as usize] = None;
@@ -674,7 +702,6 @@ impl StyleNodeTree {
             self.first_child[index as usize] = None;
             self.next_sibling[index as usize] = None;
             self.previous_sibling[index as usize] = None;
-            self.connected_element_count -= 1;
             self.pending_reuse.push(index);
         }
         let current = self.retirement_capacity_bytes();
@@ -1360,6 +1387,7 @@ impl StyleNodeTree {
                     .as_ref()
                     .map_or(0, |column| column.capacity() * size_of::<TreeScopeID>()),
                 self.live.capacity_bytes(),
+                self.relation_only.capacity_bytes(),
             ];
             skip [];
         }
