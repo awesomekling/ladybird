@@ -100,7 +100,6 @@ pub struct FfiDomTreeBuilderCallbacks {
     pub resolve_counters: unsafe extern "C" fn(*mut c_void, FfiPseudoElement),
     pub principal_descendant_facts:
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> FfiPrincipalDescendantFacts,
-    pub layout_node_has_first_letter_style: unsafe extern "C" fn(*mut c_void) -> bool,
     pub create_first_letter_nodes:
         unsafe extern "C" fn(*mut c_void, *mut c_void, FfiFirstLetterTarget) -> FfiFirstLetterNodes,
     pub top_layer_element_count: unsafe extern "C" fn(*mut c_void) -> usize,
@@ -1370,9 +1369,8 @@ unsafe fn update_principal_node_descendants(
                 assert!(placed.is_none());
                 assert!(state.ancestor_stack.pop().is_some());
 
-                // SAFETY: The layout node's shell and its associated DOM node remain live throughout the call.
                 if node_kind_is_block_container(layout_host.data(layout_node).kind.get())
-                    && unsafe { (host.callbacks.layout_node_has_first_letter_style)(layout_host.shell(layout_node)) }
+                    && layout_host.has_first_letter_style(layout_node)
                 {
                     let target = find_first_letter_in_block(host, layout_node);
                     if target.found {
@@ -2721,6 +2719,12 @@ impl TreeBuilderHost<'_> {
         unsafe { &*self.arena }
     }
 
+    /// Whether the element this row was built for has a `::first-letter` style.
+    fn has_first_letter_style(&self, node: LayoutNode) -> bool {
+        let arena = self.arena();
+        arena.has_published_first_letter_style(arena.node_style_node(node))
+    }
+
     fn created(&self, slot: NodeSlotId) -> UnplacedLayoutNode {
         UnplacedLayoutNode::new(slot)
     }
@@ -3521,8 +3525,7 @@ fn find_first_letter_in_block(host: &DomTreeBuilderHost<'_>, block: LayoutNode) 
         }
         // Stop descending if this child block defines its own ::first-letter: the child will style the first letter
         // inside it, so the ancestor's ::first-letter must not also claim the same letter.
-        // SAFETY: The child shell and its associated DOM node remain live throughout the walk.
-        if !is_anonymous && unsafe { (host.callbacks.layout_node_has_first_letter_style)(layout_host.shell(child)) } {
+        if !is_anonymous && layout_host.has_first_letter_style(child) {
             break;
         }
         let target = find_first_letter_in_block(host, child);

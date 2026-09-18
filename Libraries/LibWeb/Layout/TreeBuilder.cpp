@@ -1165,10 +1165,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
                 .svg_fill_pattern = const_cast<SVG::SVGPatternElement*>(fill_pattern.ptr()),
                 .svg_stroke_pattern = const_cast<SVG::SVGPatternElement*>(stroke_pattern.ptr()),
             }; },
-        .layout_node_has_first_letter_style = [](void* layout_node_pointer) {
-            VERIFY(layout_node_pointer);
-            auto* element = as_if<DOM::Element>(static_cast<Node*>(layout_node_pointer)->dom_node());
-            return element && element->has_style(CSS::PseudoElement::FirstLetter); },
         .create_first_letter_nodes = [](void*, void* element_pointer, RustFFI::FfiFirstLetterTarget target) -> RustFFI::FfiFirstLetterNodes {
             VERIFY(element_pointer);
             return create_first_letter_nodes(*static_cast<DOM::Element*>(element_pointer), target); },
