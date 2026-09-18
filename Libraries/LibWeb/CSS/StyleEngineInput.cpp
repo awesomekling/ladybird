@@ -132,6 +132,16 @@ static StyleNodeID identity_of_shadow_root(DOM::ShadowRoot& shadow_root, StyleEn
     return shadow_root.style_node_id();
 }
 
+// A shadow root takes its identity from whatever first needs it, and a child taking its place in the
+// root's DOM child sequence needs it: the sequence is named by the root. An element child mints it
+// on the way through `style_tree_parent_of`; a text child would otherwise leave the root unnamed,
+// and with it a child sequence nothing can be walked from.
+static void ensure_dom_order_parent_identity(DOM::Node* parent, StyleEngine& style_engine)
+{
+    if (auto* shadow_root = as_if<DOM::ShadowRoot>(parent); shadow_root && shadow_root->style_node_id() == no_style_node)
+        (void)identity_of_shadow_root(*shadow_root, style_engine);
+}
+
 // The style scope a node belongs to.
 //
 // The document is scope zero. A shadow root's scope is numbered once and kept for as long as the
@@ -285,6 +295,7 @@ void record_text_connected(DOM::Text& text)
     style_engine->allocate_text_style_nodes({ &identity, 1 });
     text.set_style_node_id(identity);
     text.document().style_computer().register_style_node(identity, text);
+    ensure_dom_order_parent_identity(text.parent(), *style_engine);
 
     Vector<u32, 192> links;
     append_dom_order_link(links, text);
@@ -337,6 +348,7 @@ void record_subtree_connecting(DOM::Node& root)
     for_each_shadow_including_inclusive_descendant_with_scope(root, tree_scope_of(root.root()), collect);
     if (arrivals.is_empty() && text_arrivals.is_empty())
         return;
+    ensure_dom_order_parent_identity(root.parent(), style_engine);
 
     if (!arrivals.is_empty()) {
         Vector<StyleNodeID, 64> identities;
