@@ -14,6 +14,8 @@ use super::*;
 pub struct PublishedBoxFacts {
     pub display: crate::css::display::FfiDisplay,
     pub content_visibility: u8,
+    pub position: u8,
+    pub float_: u8,
 }
 
 impl RetainedState {
@@ -463,6 +465,8 @@ impl RetainedState {
         Some(PublishedBoxFacts {
             display: view.display(),
             content_visibility: view.content_visibility(),
+            position: view.position(),
+            float_: view.float_(),
         })
     }
 
