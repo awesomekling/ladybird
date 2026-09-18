@@ -118,6 +118,8 @@
     [115, "UnlinkStyleNodeFromDomOrder"],
     [116, "RetireTextStyleNodes"],
     [117, "MarkRelationOnlyStyleNode"],
+    [118, "ChildNeedsLayoutTreeUpdate"],
+    [119, "SetChildNeedsLayoutTreeUpdate"],
     [136, "AttachSheetOccurrence"],
     [137, "DetachSheetOccurrence"],
     [138, "SetSheetOccurrenceConditions"]
@@ -131,6 +133,8 @@
     { "event": "SetHtmlElementNamespace", "ffi": "style_engine_set_html_element_namespace", "cpp": "set_html_element_namespace", "return": "void", "args": [["namespace_atom", "style_atom"]], "body": "engine.set_html_element_namespace(StyleAtomID(namespace_atom));" },
     { "event": "SetElementNamespace", "ffi": "style_engine_set_element_namespace", "cpp": "set_element_namespace", "return": "void", "args": [["node", "style_node"], ["namespace_atom", "style_atom"]], "body": "if let Some(style_node) = StyleNodeID::from_raw(node) { engine.set_element_namespace(style_node, StyleAtomID(namespace_atom)); }" },
     { "event": "MarkRelationOnlyStyleNode", "ffi": "style_engine_mark_relation_only_style_node", "cpp": "mark_relation_only_style_node", "return": "void", "args": [["node", "style_node"]], "body": "if let Some(node) = StyleNodeID::from_raw(node) { engine.mark_relation_only_style_node(node); }" },
+    { "event": "ChildNeedsLayoutTreeUpdate", "ffi": "style_engine_child_needs_layout_tree_update", "cpp": "child_needs_layout_tree_update", "return": "bool", "receiver": "const", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return false; }; let result = engine.child_needs_layout_tree_update(node);" },
+    { "event": "SetChildNeedsLayoutTreeUpdate", "ffi": "style_engine_set_child_needs_layout_tree_update", "cpp": "set_child_needs_layout_tree_update", "return": "bool", "args": [["node", "style_node"], ["value", "bool"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return false; }; let result = engine.set_child_needs_layout_tree_update(node, value);" },
     { "event": "LinkStyleNodesInDomOrder", "ffi": "style_engine_link_style_nodes_in_dom_order", "cpp": "link_style_nodes_in_dom_order", "return": "void", "args": [["links", "u32_slice"]], "body": "engine.link_style_nodes_in_dom_order(links);" },
     { "event": "UnlinkStyleNodeFromDomOrder", "ffi": "style_engine_unlink_style_node_from_dom_order", "cpp": "unlink_style_node_from_dom_order", "return": "void", "args": [["node", "style_node"], ["parent", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.unlink_style_node_from_dom_order(node, StyleNodeID::from_raw(parent));" },
     { "event": "RetireTextStyleNodes", "ffi": "style_engine_retire_text_style_nodes", "cpp": "retire_text_style_nodes", "return": "void", "args": [["nodes", "style_node_slice"]], "body": "let nodes = nodes.iter().copied().filter_map(StyleNodeID::from_raw).collect::<Vec<_>>(); engine.retire_text_style_nodes(&nodes);" },

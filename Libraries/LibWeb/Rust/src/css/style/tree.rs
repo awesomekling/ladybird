@@ -504,6 +504,10 @@ pub struct StyleNodeTree {
     /// DOM child sequence hangs from. A selector never names one and nothing publishes features
     /// for one, so a style pass that reaches one must pass it by rather than ask it to match.
     relation_only: BitColumn,
+    /// Whether a flat-tree descendant holds a layout tree update mark: the chain the layout tree
+    /// build climbs to reach a node it has to rebuild. Only an element, a shadow root and the
+    /// document ever carry one, so this needs no place in the text index space.
+    child_needs_layout_tree_update: BitColumn,
     connected_element_count: u32,
     /// Identities retired in the current epoch. They cannot be reused until the epoch that could
     /// still observe them has retired.
@@ -553,6 +557,7 @@ impl StyleNodeTree {
             tree_scope: None,
             live: BitColumn::default(),
             relation_only: BitColumn::default(),
+            child_needs_layout_tree_update: BitColumn::default(),
             connected_element_count: 0,
             pending_reuse: Vec::new(),
             free_element_indexes: Vec::new(),
@@ -598,6 +603,32 @@ impl StyleNodeTree {
         }
         // The count is the number of elements a style pass has to answer for, and this is not one.
         self.connected_element_count -= 1;
+    }
+
+    /// Whether a flat-tree descendant holds a layout tree update mark. A text node is never on the
+    /// chain the mark climbs, so it answers no.
+    #[must_use]
+    pub fn child_needs_layout_tree_update(&self, node: StyleNodeID) -> bool {
+        node.element_index()
+            .is_some_and(|index| self.child_needs_layout_tree_update.contains(index as usize))
+    }
+
+    /// Record whether a flat-tree descendant holds a layout tree update mark, answering what the
+    /// column said before. The mark's ancestor walk stops where the answer is already yes.
+    pub fn set_child_needs_layout_tree_update(
+        &mut self,
+        node: StyleNodeID,
+        value: bool,
+        memory: &mut MemoryController,
+    ) -> bool {
+        let Some(index) = node.element_index() else {
+            return false;
+        };
+        let before = self.identity_capacity_bytes();
+        let (changed, _) = self.child_needs_layout_tree_update.set(index as usize, value);
+        let current = self.identity_capacity_bytes();
+        self.record_capacity_change(memory, before, current);
+        if changed { !value } else { value }
     }
 
     /// Whether the identity stands in the tree without being styled. See `relation_only`.
@@ -662,6 +693,7 @@ impl StyleNodeTree {
         };
         self.live.set(index as usize, true);
         self.relation_only.set(index as usize, false);
+        self.child_needs_layout_tree_update.set(index as usize, false);
         if let Some(capacity_before_growth) = capacity_before_growth {
             let current = self.identity_capacity_bytes();
             self.record_capacity_change(memory, capacity_before_growth, current);
@@ -694,6 +726,7 @@ impl StyleNodeTree {
             if !self.relation_only.set(index as usize, false).0 {
                 self.connected_element_count -= 1;
             }
+            self.child_needs_layout_tree_update.set(index as usize, false);
             self.parent[index as usize] = None;
             self.first_element_child[index as usize] = None;
             self.next_element_sibling[index as usize] = None;
@@ -1388,6 +1421,7 @@ impl StyleNodeTree {
                     .map_or(0, |column| column.capacity() * size_of::<TreeScopeID>()),
                 self.live.capacity_bytes(),
                 self.relation_only.capacity_bytes(),
+                self.child_needs_layout_tree_update.capacity_bytes(),
             ];
             skip [];
         }

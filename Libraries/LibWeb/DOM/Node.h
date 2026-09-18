@@ -451,8 +451,11 @@ public:
     [[nodiscard]] bool needs_pseudo_element_layout_tree_update() const { return m_layout_tree_update_reuse_reasons & PseudoElementChange; }
     [[nodiscard]] bool may_reuse_layout_node_for_child_list_insertion() const { return m_layout_tree_update_reuse_reasons & ChildListInsertion; }
 
-    [[nodiscard]] bool child_needs_layout_tree_update() const { return m_child_needs_layout_tree_update; }
-    void set_child_needs_layout_tree_update(bool b) { m_child_needs_layout_tree_update = b; }
+    // Whether a flat-tree descendant holds a layout tree update mark: the chain the build climbs to
+    // reach a node it has to rebuild. It lives in the style mirror, beside the identity that names
+    // the node, so the build reads it without a DOM node in hand.
+    [[nodiscard]] bool child_needs_layout_tree_update() const;
+    void set_child_needs_layout_tree_update(bool);
 
     // The number of animations associated with this node's shadow-including inclusive subtree. A
     // synchronous read of layout geometry has to catch up the style of a throttled animation that
@@ -633,7 +636,6 @@ protected:
     GC::Ptr<Node> m_root;
     NodeType m_type { NodeType::INVALID };
     bool m_needs_layout_tree_update { false };
-    bool m_child_needs_layout_tree_update { false };
     bool m_has_layout_box { false };
     bool m_has_committed_box { false };
     enum LayoutTreeUpdateReuseReason : u8 {

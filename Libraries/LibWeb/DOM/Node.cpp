@@ -2539,6 +2539,37 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
     }
 }
 
+// The identity the style mirror files this node's tree-update marks under. A node the style tree
+// has not named holds none; see Node::set_needs_layout_tree_update.
+static CSS::StyleNodeID style_node_id_of(Node const& node)
+{
+    if (auto const* element = as_if<Element>(node))
+        return element->style_node_id();
+    if (auto const* text = as_if<Text>(node))
+        return text->style_node_id();
+    if (auto const* shadow_root = as_if<ShadowRoot>(node))
+        return shadow_root->style_node_id();
+    if (auto const* document = as_if<Document>(node))
+        return document->style_node_id();
+    return {};
+}
+
+bool Node::child_needs_layout_tree_update() const
+{
+    auto style_node = style_node_id_of(*this);
+    if (!style_node)
+        return false;
+    return document().style_computer().style_engine().child_needs_layout_tree_update(style_node);
+}
+
+void Node::set_child_needs_layout_tree_update(bool value)
+{
+    auto style_node = style_node_id_of(*this);
+    if (!style_node)
+        return;
+    (void)document().style_computer().style_engine().set_child_needs_layout_tree_update(style_node, value);
+}
+
 void Node::apply_layout_tree_update_mark(SetNeedsLayoutTreeUpdateReason reason)
 {
     bool const document_has_top_layer_elements = !document().top_layer_elements().is_empty();
@@ -2549,12 +2580,16 @@ void Node::apply_layout_tree_update_mark(SetNeedsLayoutTreeUpdateReason reason)
         return element && element->rendered_in_top_layer();
     };
     bool update_is_inside_top_layer_member = is_rendered_top_layer_element(*this);
+    auto& style_engine = document().style_computer().style_engine();
     for (auto* ancestor = flat_tree_parent(); ancestor; ancestor = ancestor->flat_tree_parent()) {
         if (!update_is_inside_top_layer_member && is_rendered_top_layer_element(*ancestor))
             update_is_inside_top_layer_member = true;
-        if (ancestor->m_child_needs_layout_tree_update)
+        auto ancestor_style_node = style_node_id_of(*ancestor);
+        // An ancestor the style tree has not named is on no path the build walks by identity.
+        if (!ancestor_style_node)
+            continue;
+        if (style_engine.set_child_needs_layout_tree_update(ancestor_style_node, true))
             break;
-        ancestor->m_child_needs_layout_tree_update = true;
     }
     if (update_is_inside_top_layer_member)
         document().set_child_needs_layout_tree_update(true);

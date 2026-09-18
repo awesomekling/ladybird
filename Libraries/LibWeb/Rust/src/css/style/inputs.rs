@@ -453,6 +453,19 @@ impl RetainedState {
         self.computed_group_sets.adjustment_facts(node)
     }
 
+    /// Whether a flat-tree descendant of the node holds a layout tree update mark.
+    #[must_use]
+    pub fn child_needs_layout_tree_update(&self, node: StyleNodeID) -> bool {
+        self.tree.child_needs_layout_tree_update(node)
+    }
+
+    /// Record whether a flat-tree descendant of the node holds a layout tree update mark, answering
+    /// what the column said before.
+    pub fn set_child_needs_layout_tree_update(&mut self, node: StyleNodeID, value: bool) -> bool {
+        self.tree
+            .set_child_needs_layout_tree_update(node, value, &mut self.memory)
+    }
+
     /// The box facts the element's published style record holds. `None` while the element has no
     /// record: a text node, a retired identity, or an element style has not reached yet.
     #[must_use]
