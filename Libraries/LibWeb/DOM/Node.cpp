@@ -8,11 +8,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/Array.h>
 #include <AK/HashTable.h>
 #include <AK/JsonObjectSerializer.h>
 #include <AK/NeverDestroyed.h>
-#include <AK/StringBuilder.h>
 #include <AK/Utf16StringBuilder.h>
 #include <AK/Vector.h>
 #include <LibGC/ConservativeVector.h>
@@ -94,8 +92,6 @@
 #include <LibWeb/SVG/SVGTitleElement.h>
 #include <LibWeb/XLink/AttributeNames.h>
 #include <LibWebCommon/Infra/CharacterTypes.h>
-#include <fcntl.h>
-#include <unistd.h>
 
 namespace Web::DOM {
 
@@ -3759,81 +3755,6 @@ Layout::Node* Node::layout_node()
     return const_cast<Layout::Node*>(static_cast<Node const*>(this)->layout_node());
 }
 
-// A temporary cross-check of the committed box-presence bits against the rows they mirror. When
-// LADYBIRD_BOX_PRESENCE_AUDIT names a file, every resolution of a node's row also compares the two
-// bits with what the arena says and appends a line per disagreement, up to a few per category.
-// Nothing is checked or logged otherwise, and nothing ever fails.
-namespace BoxPresenceAudit {
-
-#define ENUMERATE_BOX_PRESENCE_AUDIT_CATEGORIES(C) \
-    C(layout_box_bit_set_without_row)              \
-    C(layout_box_bit_unset_with_row)               \
-    C(committed_box_bit_set_without_committed_row) \
-    C(committed_box_bit_unset_with_committed_row)
-
-enum class Category : u8 {
-#define __ENUMERATE(name) name,
-    ENUMERATE_BOX_PRESENCE_AUDIT_CATEGORIES(__ENUMERATE)
-#undef __ENUMERATE
-        Count,
-};
-
-static constexpr Array category_names = {
-#define __ENUMERATE(name) #name##sv,
-    ENUMERATE_BOX_PRESENCE_AUDIT_CATEGORIES(__ENUMERATE)
-#undef __ENUMERATE
-};
-
-static char const* audit_path()
-{
-    auto const* path = getenv("LADYBIRD_BOX_PRESENCE_AUDIT");
-    return path && *path ? path : nullptr;
-}
-
-bool const g_enabled = audit_path() != nullptr;
-
-static constexpr size_t max_reports_per_category = 5;
-
-static void report(Category category, Node const& node, Layout::Node const* row)
-{
-    static Array<size_t, to_underlying(Category::Count)> reports_per_category {};
-    auto& reports = reports_per_category[to_underlying(category)];
-    if (reports >= max_reports_per_category)
-        return;
-    ++reports;
-
-    StringBuilder builder;
-    builder.appendff("{} node={} has_identity={} connected={} layout_is_up_to_date={} has_row={} row_is_committed={} url={}\n",
-        category_names[to_underlying(category)],
-        node.node_name(),
-        !NodeIdentity::of(node).is_none(),
-        node.is_connected(),
-        node.document().layout_is_up_to_date(),
-        row != nullptr,
-        row && Painting::has_committed_box(*row),
-        node.document().url().serialize());
-    auto line = builder.string_view();
-
-    int fd = ::open(audit_path(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
-    if (fd < 0)
-        return;
-    (void)::write(fd, line.characters_without_null_termination(), line.length());
-    ::close(fd);
-}
-
-static void check(Node const& node, Layout::Node const* row)
-{
-    if (node.has_layout_box() != (row != nullptr))
-        report(row ? Category::layout_box_bit_unset_with_row : Category::layout_box_bit_set_without_row, node, row);
-    bool row_is_committed = row && Painting::has_committed_box(*row);
-    if (node.is_rendered() != row_is_committed) {
-        report(row_is_committed ? Category::committed_box_bit_unset_with_committed_row : Category::committed_box_bit_set_without_committed_row,
-            node, row);
-    }
-}
-
-}
-
 // A node's layout node is the row its StyleNodeID is bound to in the document's layout node arena.
 // The document has no identity; it is bound to a viewport row.
 Layout::Node const* Node::unsafe_layout_node() const
@@ -3848,8 +3769,6 @@ Layout::Node const* Node::unsafe_layout_node() const
         else if (is_document())
             layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_viewport_shell(arena->handle()));
     }
-    if (BoxPresenceAudit::g_enabled)
-        BoxPresenceAudit::check(*this, layout_node);
     return layout_node;
 }
 
