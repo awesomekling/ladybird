@@ -132,6 +132,9 @@ enum ElementStyleAdjustmentFact : u32 {
     IsSvgMaskElement = 1 << 26,
     IsSvgClipPathElement = 1 << 27,
     IsSvgPatternElement = 1 << 28,
+    // Whether the element is rendered in the top layer. Unlike the type facts above it moves during
+    // the element's lifetime, and every move is recorded where the top layer is maintained.
+    RenderedInTopLayer = 1 << 29,
 };
 WEB_API u32 element_style_adjustment_facts(DOM::Element const&);
 WEB_API u32 element_box_type_adjustment_facts(DOM::Element const&);

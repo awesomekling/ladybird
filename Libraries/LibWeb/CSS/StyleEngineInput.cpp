@@ -630,6 +630,7 @@ u32 element_style_adjustment_facts(DOM::Element const& element)
     set(is<SVG::SVGMaskElement>(element), ElementStyleAdjustmentFact::IsSvgMaskElement);
     set(is<SVG::SVGClipPathElement>(element), ElementStyleAdjustmentFact::IsSvgClipPathElement);
     set(is<SVG::SVGPatternElement>(element), ElementStyleAdjustmentFact::IsSvgPatternElement);
+    set(element.rendered_in_top_layer(), ElementStyleAdjustmentFact::RenderedInTopLayer);
     return facts;
 }
 

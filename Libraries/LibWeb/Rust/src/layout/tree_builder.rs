@@ -103,8 +103,7 @@ pub struct FfiDomTreeBuilderCallbacks {
     pub create_first_letter_nodes:
         unsafe extern "C" fn(*mut c_void, *mut c_void, FfiFirstLetterTarget) -> FfiFirstLetterNodes,
     pub top_layer_element_count: unsafe extern "C" fn(*mut c_void) -> usize,
-    pub copy_top_layer_elements: unsafe extern "C" fn(*mut c_void, *mut *mut c_void, usize),
-    pub rendered_in_top_layer: unsafe extern "C" fn(*mut c_void) -> bool,
+    pub copy_top_layer_elements: unsafe extern "C" fn(*mut c_void, *mut FfiIdentifiedDomNode, usize),
     pub flat_tree_parent: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
     pub flat_tree_render_facts: unsafe extern "C" fn(*mut c_void) -> FfiFlatTreeRenderFacts,
     pub svg_pattern_content_element: unsafe extern "C" fn(*mut c_void) -> FfiIdentifiedDomNode,
@@ -157,7 +156,6 @@ pub struct FfiPreparedPrincipalElementFacts {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiDisplayContentsFacts {
-    pub rendered_in_top_layer: bool,
     pub child_needs_layout_tree_update: bool,
     pub dom_children_parent: *mut c_void,
     pub shadow_root: *mut c_void,
@@ -204,7 +202,6 @@ pub struct FfiPrincipalNodeEntryFacts {
     pub may_reuse_layout_node_for_child_list_insertion: bool,
     pub may_update_pseudo_elements_in_place: bool,
     pub has_layout_node: bool,
-    pub rendered_in_top_layer: bool,
     pub layout_node_is_attached: bool,
     /// The node's own identity, which names its rows in the arena and its facts in the style store.
     pub style_node: u32,
@@ -596,7 +593,8 @@ pub(crate) fn principal_node_entry_decision(
             || context.document_needs_full_layout_tree_update
             || (kind.is_document() && !facts.has_layout_node);
 
-        let top_layer = if kind.is_element() && facts.rendered_in_top_layer && !context.layout_top_layer {
+        let rendered_in_top_layer = element_type_facts & element_adjustment_fact::RENDERED_IN_TOP_LAYER != 0;
+        let top_layer = if kind.is_element() && rendered_in_top_layer && !context.layout_top_layer {
             if !facts.layout_node_is_attached && !facts.needs_layout_tree_update {
                 TopLayerEntryDecision::SkipAndRequestZoneRebuild
             } else {
@@ -675,6 +673,11 @@ impl DomTreeBuilderHost<'_> {
         self.layout()
             .arena()
             .has_dom_children(StyleNodeID::from_raw(style_node))
+    }
+
+    /// Whether the style store holds the element in the top layer.
+    fn rendered_in_top_layer(&self, style_node: u32) -> bool {
+        self.element_type_facts(style_node) & element_adjustment_fact::RENDERED_IN_TOP_LAYER != 0
     }
 
     /// The element type facts the style store holds for a node the walk reached.
@@ -898,7 +901,7 @@ unsafe fn update_layout_tree_for_display_contents(
 
         // A display:contents member builds its children through this path, so the top layer flag
         // is consumed here the same way update_layout_tree does for members with a box.
-        let clear_layout_top_layer_for_descendants = facts.rendered_in_top_layer && context.layout_top_layer;
+        let clear_layout_top_layer_for_descendants = host.rendered_in_top_layer(style_node) && context.layout_top_layer;
         if clear_layout_top_layer_for_descendants {
             context.layout_top_layer = false;
         }
@@ -1235,15 +1238,21 @@ unsafe fn update_principal_node_descendants(
                 context.layout_top_layer = true;
                 // SAFETY: The DOM document remains live and owns a stable top-layer list during this pass.
                 let count = unsafe { (host.callbacks.top_layer_element_count)(dom_node) };
-                let mut top_layer_elements = vec![std::ptr::null_mut(); count];
+                let mut top_layer_elements = vec![
+                    FfiIdentifiedDomNode {
+                        node: std::ptr::null_mut(),
+                        style_node: 0,
+                    };
+                    count
+                ];
                 // SAFETY: The output slice has room for the stable top-layer list reported above.
                 unsafe {
                     (host.callbacks.copy_top_layer_elements)(dom_node, top_layer_elements.as_mut_ptr(), count);
                 }
-                for element in top_layer_elements {
+                for identified in top_layer_elements {
+                    let element = identified.node;
                     assert!(!element.is_null());
-                    // SAFETY: `element` is a live DOM Element.
-                    if !unsafe { (host.callbacks.rendered_in_top_layer)(element) } {
+                    if !host.rendered_in_top_layer(identified.style_node) {
                         continue;
                     }
                     // SAFETY: `element` is a live DOM Element.
@@ -1703,7 +1712,7 @@ fn update_principal_node_after_entry(
             is_in_dom_order_insertion: update.insertion_mode == FfiInsertionMode::InDomOrder,
             is_document: update.kind.is_document(),
             is_element: update.kind.is_element(),
-            rendered_in_top_layer: entry_facts.rendered_in_top_layer,
+            rendered_in_top_layer: update.element_type_facts & element_adjustment_fact::RENDERED_IN_TOP_LAYER != 0,
         };
         let layout_node_is_svg_box = node_kind_is_svg_box(host.layout().data(layout_node).kind.get());
         let prior_layout_top_layer = context.layout_top_layer;
@@ -4489,7 +4498,6 @@ mod tests {
             may_reuse_layout_node_for_child_list_insertion: false,
             may_update_pseudo_elements_in_place: false,
             has_layout_node: true,
-            rendered_in_top_layer: false,
             layout_node_is_attached: true,
             style_node: 0,
             shadow_including_parent_element: 0,
@@ -4502,12 +4510,11 @@ mod tests {
         assert_eq!(decision.top_layer, TopLayerEntryDecision::Continue);
         assert_eq!(decision.svg, SvgEntryDecision::Continue);
 
-        facts.rendered_in_top_layer = true;
         facts.layout_node_is_attached = false;
+        element_type_facts = element_adjustment_fact::RENDERED_IN_TOP_LAYER;
         let decision = principal_node_entry_decision(facts, PrincipalNodeKind::Element, element_type_facts, &context);
         assert_eq!(decision.top_layer, TopLayerEntryDecision::SkipAndRequestZoneRebuild);
 
-        facts.rendered_in_top_layer = false;
         element_type_facts = element_adjustment_fact::REQUIRES_SVG_CONTAINER;
         let decision = principal_node_entry_decision(facts, PrincipalNodeKind::Element, element_type_facts, &context);
         assert_eq!(decision.svg, SvgEntryDecision::Skip);
