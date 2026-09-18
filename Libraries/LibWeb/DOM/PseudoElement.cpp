@@ -49,6 +49,17 @@ void SyntheticPseudoElement::visit_edges(JS::Cell::Visitor& visitor)
 
 // A pseudo-element's box is the row bound to its generator's identity and its type. The generated
 // content inside the box carries the same pair, so only this binding tells the box from its content.
+// Node::layout_node() verifies that a row it hands out describes up-to-date layout. The
+// pseudo-element path forwarded to the unchecked accessor instead, so nothing ever checked it.
+// Report a stale read rather than assert on one, until we know whether any caller performs one.
+Layout::NodeWithStyle* SyntheticPseudoElement::layout_node() const
+{
+    auto* layout_node = unsafe_layout_node();
+    if (layout_node && !m_originating_element->document().layout_is_up_to_date())
+        dbgln("FIXME: SyntheticPseudoElement::layout_node() read a layout row while layout was stale");
+    return layout_node;
+}
+
 Layout::NodeWithStyle* SyntheticPseudoElement::unsafe_layout_node() const
 {
     if (!m_originating_element)
