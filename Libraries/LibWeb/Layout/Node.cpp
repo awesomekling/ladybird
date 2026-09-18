@@ -72,7 +72,6 @@ static RustFFI::FfiNodeConstructionFacts build_node_construction_facts(DOM::Docu
     return {
         .kind = kind,
         .shell = shell,
-        .dom_node = node.ptr(),
         .is_anonymous = node == nullptr,
         .is_html_input_element = node && is<HTML::HTMLInputElement>(*node),
         .is_html_html_element = node && node->is_html_html_element(),
@@ -88,7 +87,7 @@ static RustFFI::FfiNodeConstructionFacts build_node_construction_facts(DOM::Docu
 
 bool Node::refresh_dom_paint_facts(DOM::Node const& dom_node)
 {
-    VERIFY(RustFFI::layout_arena_node_dom_node(m_arena->handle(), m_slot) == &dom_node);
+    VERIFY(this->dom_node() == &dom_node);
     return RustFFI::layout_arena_set_node_dom_paint_facts(m_arena->handle(), m_slot, dom_paint_facts_of(&dom_node));
 }
 
@@ -97,7 +96,6 @@ Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind k
     , m_slot(m_arena->allocate(build_node_construction_facts(document, node, kind, this)))
     , m_kind(kind)
 {
-    VERIFY(RustFFI::layout_arena_node_dom_node(m_arena->handle(), m_slot) == node.ptr());
     update_has_scroll_offset_flag();
 
     if (!node)
@@ -117,7 +115,6 @@ Node::Node(DOM::Document& document, BindToPreparedArenaSlot, Compositing::RustFF
     , m_slot(slot)
     , m_kind(kind)
 {
-    VERIFY(RustFFI::layout_arena_node_dom_node(m_arena->handle(), m_slot) == nullptr);
     RustFFI::layout_arena_attach_shell(m_arena->handle(), m_slot, this);
 }
 

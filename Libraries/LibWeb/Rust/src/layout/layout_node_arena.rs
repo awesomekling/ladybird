@@ -509,7 +509,6 @@ pub(crate) struct LayoutNodeArena {
     chunks: Vec<Box<Chunk>>,
     chunks_by_address: Vec<ChunkAddress>,
     slot_metadata: Vec<SlotMetadata>,
-    dom_nodes: Vec<Cell<*mut c_void>>,
     style_records: Vec<Cell<u64>>,
     style_records_pinned_by_arena: Vec<Cell<bool>>,
     /// The StyleNodeID of the element or text node each row is bound to, or of the element it is
@@ -625,7 +624,6 @@ impl LayoutNodeArena {
             chunks: Vec::new(),
             chunks_by_address: Vec::new(),
             slot_metadata: Vec::new(),
-            dom_nodes: Vec::new(),
             style_records: Vec::new(),
             style_records_pinned_by_arena: Vec::new(),
             style_nodes: Vec::new(),
@@ -770,15 +768,13 @@ impl LayoutNodeArena {
     // Freshly created chunks are default-initialized and free() resets slots on release, so
     // allocate() always hands out clean NodeData without writing it again.
     pub(crate) fn allocate(&mut self, construction_facts: FfiNodeConstructionFacts) -> NodeSlotId {
-        let slot = self.allocate_unbound(construction_facts.dom_node);
+        let slot = self.allocate_unbound();
         self.bind_shell(slot, construction_facts);
         slot
     }
 
-    pub(crate) fn allocate_unbound(&mut self, dom_node: *mut c_void) -> NodeSlotId {
-        let slot = self.allocate_slot();
-        self.dom_nodes[slot.slot_index() as usize].set(dom_node);
-        slot
+    pub(crate) fn allocate_unbound(&mut self) -> NodeSlotId {
+        self.allocate_slot()
     }
 
     pub(crate) fn bind_shell(&self, slot: NodeSlotId, construction_facts: FfiNodeConstructionFacts) {
@@ -791,7 +787,6 @@ impl LayoutNodeArena {
             data.shell.get().is_null(),
             "layout node arena bound a second shell to a slot"
         );
-        self.dom_nodes[slot.slot_index() as usize].set(construction_facts.dom_node);
         data.kind.set(construction_facts.kind);
         data.shell.set(construction_facts.shell);
         data.flags
@@ -840,7 +835,6 @@ impl LayoutNodeArena {
                 self.chunks.push(chunk);
             }
             self.slot_metadata.push(SlotMetadata::default());
-            self.dom_nodes.push(Cell::new(std::ptr::null_mut()));
             self.style_records.push(Cell::new(0));
             self.style_records_pinned_by_arena.push(Cell::new(false));
             self.style_nodes.push(Cell::new(None));
@@ -969,7 +963,6 @@ impl LayoutNodeArena {
         self.forget_row_sharing_dom_node(id);
         self.unbind_row(id);
         self.set_node_style_node(id, None);
-        self.dom_nodes[index as usize].set(std::ptr::null_mut());
         self.style_records[index as usize].set(0);
         self.style_records_pinned_by_arena[index as usize].set(false);
 
@@ -1776,7 +1769,6 @@ impl LayoutNodeArena {
             .set(super::node_facts::construction_flags(&FfiNodeConstructionFacts {
                 kind,
                 shell: std::ptr::null_mut(),
-                dom_node: std::ptr::null_mut(),
                 is_anonymous: true,
                 is_html_input_element: false,
                 is_html_html_element: false,
@@ -3372,22 +3364,6 @@ impl LayoutNodeArena {
             .is_some_and(|metadata| metadata.occupied && metadata.generation == id.generation())
     }
 
-    pub(crate) fn visit_dom_nodes(&self, mut visit: impl FnMut(*mut c_void)) {
-        for (metadata, dom_node) in self.slot_metadata.iter().zip(&self.dom_nodes) {
-            let dom_node = dom_node.get();
-            if metadata.occupied && !dom_node.is_null() {
-                visit(dom_node);
-            }
-        }
-    }
-
-    pub(crate) fn node_dom_node(&self, id: NodeSlotId) -> *mut c_void {
-        if !self.slot_is_live(id) {
-            return std::ptr::null_mut();
-        }
-        self.dom_nodes[id.slot_index() as usize].get()
-    }
-
     /// Whether the row was built for a DOM node: an element, a text node or the document. Anonymous
     /// boxes and generated content were not, so they have none. The node itself is named by the row's
     /// identity and resolved on the host side.
@@ -3633,25 +3609,6 @@ pub unsafe extern "C" fn layout_arena_detach_and_free_subtree(arena: *mut c_void
 
 /// # Safety
 ///
-/// The arena must remain valid for the duration of the call, and the visitor must not
-/// re-enter the arena.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_visit_dom_nodes(
-    arena: *mut c_void,
-    context: *mut c_void,
-    visit: unsafe extern "C" fn(*mut c_void, *mut c_void),
-) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.visit_dom_nodes(|dom_node| {
-        // SAFETY: Guaranteed by the entry point's contract.
-        unsafe { visit(context, dom_node) }
-    });
-}
-
-/// # Safety
-///
 /// The arena must remain valid for the duration of the call, and `start` must name a live node
 /// in this arena.
 #[unsafe(no_mangle)]
@@ -3664,14 +3621,6 @@ pub unsafe extern "C" fn layout_arena_previous_dom_backed_or_generated_node(
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
     unsafe { &*arena.cast::<LayoutNodeArena>() }.previous_dom_backed_or_generated_node(start, previous_sibling_only)
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_node_dom_node(arena: *mut c_void, node: NodeSlotId) -> *mut c_void {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.node_dom_node(node)
 }
 
 #[unsafe(no_mangle)]
@@ -4260,16 +4209,22 @@ mod tests {
     use crate::layout::{CssPixels, fragment_tree, used_values};
     use std::ffi::c_void;
 
-    fn test_construction_facts(dom_node: *mut c_void) -> FfiNodeConstructionFacts {
-        test_construction_facts_with_kind(dom_node, NodeKind::Box)
+    fn test_construction_facts() -> FfiNodeConstructionFacts {
+        test_construction_facts_with_kind(NodeKind::Box)
     }
 
-    fn test_construction_facts_with_kind(dom_node: *mut c_void, kind: NodeKind) -> FfiNodeConstructionFacts {
+    fn test_anonymous_construction_facts() -> FfiNodeConstructionFacts {
+        FfiNodeConstructionFacts {
+            is_anonymous: true,
+            ..test_construction_facts()
+        }
+    }
+
+    fn test_construction_facts_with_kind(kind: NodeKind) -> FfiNodeConstructionFacts {
         FfiNodeConstructionFacts {
             kind,
             shell: std::ptr::null_mut(),
-            dom_node,
-            is_anonymous: dom_node.is_null(),
+            is_anonymous: false,
             is_html_input_element: false,
             is_html_html_element: false,
             is_document_element: false,
@@ -4286,18 +4241,16 @@ mod tests {
     fn a_retired_style_node_leaves_every_row_carrying_it() {
         use crate::css::style::tree::StyleNodeID;
         let mut arena = LayoutNodeArena::new();
-        let mut dom_node_storage = 0u8;
-        let dom_node = std::ptr::from_mut(&mut dom_node_storage).cast::<c_void>();
         let style_node = StyleNodeID::element(3);
         let rows: Vec<_> = (0..3)
             .map(|_| {
                 arena.allocate(FfiNodeConstructionFacts {
                     style_node: style_node.raw(),
-                    ..test_construction_facts(dom_node)
+                    ..test_construction_facts()
                 })
             })
             .collect();
-        let generated = arena.allocate(test_construction_facts(std::ptr::null_mut()));
+        let generated = arena.allocate(test_anonymous_construction_facts());
         arena.set_node_generated_for(generated, 1, Some(style_node));
         assert!(rows.iter().all(|row| arena.node_style_node(*row) == Some(style_node)));
 
@@ -4320,12 +4273,10 @@ mod tests {
     fn a_node_is_bound_only_to_the_row_that_took_the_binding() {
         use crate::css::style::tree::StyleNodeID;
         let mut arena = LayoutNodeArena::new();
-        let mut dom_node_storage = 0u8;
-        let dom_node = std::ptr::from_mut(&mut dom_node_storage).cast::<c_void>();
         let element = StyleNodeID::element(3);
         let facts = FfiNodeConstructionFacts {
             style_node: element.raw(),
-            ..test_construction_facts(dom_node)
+            ..test_construction_facts()
         };
         let old_row = arena.allocate(facts);
         assert!(arena.bound_row(element).is_invalid());
@@ -4355,7 +4306,7 @@ mod tests {
         arena.forget_style_node(changed);
         assert!(arena.bound_row(changed).is_invalid());
 
-        let viewport = arena.allocate(test_construction_facts_with_kind(dom_node, NodeKind::Viewport));
+        let viewport = arena.allocate(test_construction_facts_with_kind(NodeKind::Viewport));
         arena.bind_row(viewport);
         assert_eq!(arena.bound_viewport_row(), viewport);
         arena.free_subtree(viewport).destroy_shells_and_invoke_callbacks();
@@ -4370,17 +4321,15 @@ mod tests {
     fn element_and_text_style_nodes_with_the_same_index_chain_separately() {
         use crate::css::style::tree::StyleNodeID;
         let mut arena = LayoutNodeArena::new();
-        let mut element_storage = 0u8;
-        let mut text_storage = 0u8;
         let element = StyleNodeID::element(2);
         let text = StyleNodeID::text(2);
         let element_row = arena.allocate(FfiNodeConstructionFacts {
             style_node: element.raw(),
-            ..test_construction_facts(std::ptr::from_mut(&mut element_storage).cast::<c_void>())
+            ..test_construction_facts()
         });
         let text_row = arena.allocate(FfiNodeConstructionFacts {
             style_node: text.raw(),
-            ..test_construction_facts(std::ptr::from_mut(&mut text_storage).cast::<c_void>())
+            ..test_construction_facts()
         });
         assert_eq!(arena.node_style_node(element_row), Some(element));
         assert_eq!(arena.node_style_node(text_row), Some(text));
@@ -4399,21 +4348,18 @@ mod tests {
     #[test]
     fn an_unbound_slot_has_no_shell_until_a_shell_is_bound() {
         let mut arena = LayoutNodeArena::new();
-        let mut dom_node_storage = 0u8;
-        let dom_node = std::ptr::from_mut(&mut dom_node_storage).cast::<c_void>();
-        let slot = arena.allocate_unbound(dom_node);
+        let slot = arena.allocate_unbound();
         assert!(arena.slot_is_live(slot));
         assert!(arena.node_shell(slot).is_null());
         assert_eq!(arena.data(slot).kind.get(), NodeKind::Unset);
-        assert_eq!(arena.node_dom_node(slot), dom_node);
 
         let unbound_freed = arena.free_subtree(slot);
         assert_eq!(unbound_freed.shell_count(), 1);
         unbound_freed.destroy_shells_and_invoke_callbacks();
         assert!(!arena.slot_is_live(slot));
 
-        let slot = arena.allocate_unbound(dom_node);
-        arena.bind_shell(slot, test_construction_facts(dom_node));
+        let slot = arena.allocate_unbound();
+        arena.bind_shell(slot, test_construction_facts());
         assert_eq!(arena.data(slot).kind.get(), NodeKind::Box);
         assert!(arena.data(slot).flags.get() & NodeFlag::HasStyle as u32 != 0);
         arena.free_subtree(slot).destroy_shells_and_invoke_callbacks();
@@ -4422,8 +4368,8 @@ mod tests {
     #[test]
     fn freeing_the_layout_root_forgets_it_and_the_pending_rebuilt_roots() {
         let mut arena = LayoutNodeArena::new();
-        let viewport = arena.allocate_unbound(std::ptr::null_mut());
-        let rebuilt = arena.allocate_unbound(std::ptr::null_mut());
+        let viewport = arena.allocate_unbound();
+        let rebuilt = arena.allocate_unbound();
         arena.set_layout_root(viewport);
         arena.set_pending_rebuilt_subtree_roots(vec![rebuilt], true);
         assert_eq!(arena.layout_root(), viewport);
@@ -4442,7 +4388,7 @@ mod tests {
     fn an_anonymous_box_stamped_by_the_arena_keeps_its_style_record_until_freed() {
         let mut arena = LayoutNodeArena::new();
         let payloads = [std::ptr::null::<c_void>(); 1];
-        let slot = arena.allocate_unbound(std::ptr::null_mut());
+        let slot = arena.allocate_unbound();
         arena.stamp_anonymous_box(
             slot,
             NodeKind::InlineNode,
@@ -4457,10 +4403,7 @@ mod tests {
         assert_eq!(arena.node_style_record(slot), 7);
         assert!(arena.node_style_record_is_pinned_by_arena(slot));
 
-        let element = arena.allocate(test_construction_facts_with_kind(
-            std::ptr::null_mut(),
-            NodeKind::InlineNode,
-        ));
+        let element = arena.allocate(test_construction_facts_with_kind(NodeKind::InlineNode));
         arena.set_node_style(element, 9, payloads.as_ptr().cast());
         assert_eq!(arena.node_style_record(element), 9);
         assert!(!arena.node_style_record_is_pinned_by_arena(element));
@@ -4476,14 +4419,10 @@ mod tests {
     #[test]
     fn previous_dom_backed_or_generated_node_skips_anonymous_slots() {
         let mut arena = LayoutNodeArena::new();
-        let mut root_dom_node_storage = 0u8;
-        let mut element_dom_node_storage = 0u8;
-        let root_dom_node = std::ptr::from_mut(&mut root_dom_node_storage).cast::<c_void>();
-        let element_dom_node = std::ptr::from_mut(&mut element_dom_node_storage).cast::<c_void>();
-        let root = arena.allocate(test_construction_facts(root_dom_node));
-        let anonymous_wrapper = arena.allocate(test_construction_facts(std::ptr::null_mut()));
-        let nested_anonymous = arena.allocate(test_construction_facts(std::ptr::null_mut()));
-        let element = arena.allocate(test_construction_facts(element_dom_node));
+        let root = arena.allocate(test_construction_facts());
+        let anonymous_wrapper = arena.allocate(test_anonymous_construction_facts());
+        let nested_anonymous = arena.allocate(test_anonymous_construction_facts());
+        let element = arena.allocate(test_construction_facts());
         arena.insert_child(root, anonymous_wrapper, NodeSlotId::INVALID);
         arena.insert_child(anonymous_wrapper, nested_anonymous, NodeSlotId::INVALID);
         arena.insert_child(root, element, NodeSlotId::INVALID);
@@ -4502,28 +4441,20 @@ mod tests {
     }
 
     #[test]
-    fn dom_nodes_are_reported_only_while_their_slot_is_live() {
+    fn rows_are_dom_backed_only_while_their_slot_is_live() {
         let mut arena = LayoutNodeArena::new();
-        let mut dom_node_storage = 0u8;
-        let dom_node = std::ptr::from_mut(&mut dom_node_storage).cast::<c_void>();
-        let anonymous = arena.allocate(test_construction_facts(std::ptr::null_mut()));
-        let element = arena.allocate(test_construction_facts(dom_node));
-        assert!(arena.node_dom_node(anonymous).is_null());
-        assert_eq!(arena.node_dom_node(element), dom_node);
-        let mut visited = Vec::new();
-        arena.visit_dom_nodes(|node| visited.push(node));
-        assert_eq!(visited, vec![dom_node]);
+        let anonymous = arena.allocate(test_anonymous_construction_facts());
+        let element = arena.allocate(test_construction_facts());
+        assert!(!arena.node_is_dom_backed(anonymous));
+        assert!(arena.node_is_dom_backed(element));
         assert_eq!(arena.live_slot_count(), 2);
 
         arena.free_subtree(element).destroy_shells_and_invoke_callbacks();
-        assert!(arena.node_dom_node(element).is_null());
+        assert!(!arena.node_is_dom_backed(element));
         let reoccupant = arena.allocate_for_test();
         assert_eq!(reoccupant.slot.slot_index(), element.slot_index());
-        assert!(arena.node_dom_node(element).is_null());
-        assert!(arena.node_dom_node(reoccupant.slot).is_null());
-        visited.clear();
-        arena.visit_dom_nodes(|node| visited.push(node));
-        assert!(visited.is_empty());
+        assert!(!arena.node_is_dom_backed(element));
+        assert!(!arena.node_is_dom_backed(reoccupant.slot));
 
         arena.free_subtree(anonymous).destroy_shells_and_invoke_callbacks();
         arena
