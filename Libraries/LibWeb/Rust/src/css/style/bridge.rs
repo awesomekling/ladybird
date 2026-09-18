@@ -613,6 +613,16 @@ pub mod element_adjustment_fact {
     /// The element's presentational hints are mapped from another element's attributes, and
     /// move without any of its own moving.
     pub const HAS_DERIVED_PRESENTATIONAL_HINTS: u32 = 1 << 20;
+    // The element types layout tree construction branches on. An element's type is fixed when it
+    // is created, so the store holds these rather than the tree builder asking the DOM for them.
+    pub const IS_SVG_ELEMENT: u32 = 1 << 21;
+    pub const IS_SVG_SWITCH_ELEMENT: u32 = 1 << 22;
+    pub const IS_SVG_CONTAINER: u32 = 1 << 23;
+    pub const REQUIRES_SVG_CONTAINER: u32 = 1 << 24;
+    pub const IS_SVG_FOREIGN_OBJECT_ELEMENT: u32 = 1 << 25;
+    pub const IS_SVG_MASK_ELEMENT: u32 = 1 << 26;
+    pub const IS_SVG_CLIP_PATH_ELEMENT: u32 = 1 << 27;
+    pub const IS_SVG_PATTERN_ELEMENT: u32 = 1 << 28;
 }
 
 /// Which local fact a feature delta describes.

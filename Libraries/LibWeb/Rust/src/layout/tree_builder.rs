@@ -7,6 +7,7 @@
 use super::*;
 
 use crate::abort_on_panic;
+use crate::css::style::bridge::element_adjustment_fact;
 use crate::css::style::layout_style::{AnonymousStyleKind, AnonymousStyleOverrides};
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::layout_node_arena::{LayoutNodeArena, ShadowIncludingParent};
@@ -85,12 +86,11 @@ pub enum FfiStaleSubtreeClearScope {
 #[repr(C)]
 pub struct FfiDomTreeBuilderCallbacks {
     pub builder: *mut c_void,
-    pub first_child: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
+    pub first_child: unsafe extern "C" fn(*mut c_void) -> FfiIdentifiedDomNode,
     pub next_sibling: unsafe extern "C" fn(*mut c_void) -> FfiIdentifiedDomNode,
     pub clear_dom_update_flags: unsafe extern "C" fn(*mut c_void),
     pub assigned_node_count: unsafe extern "C" fn(*mut c_void) -> usize,
     pub assigned_node_at: unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void,
-    pub is_svg_element: unsafe extern "C" fn(*mut c_void) -> bool,
     pub clear_stale_layout_node: unsafe extern "C" fn(*mut c_void, *mut c_void),
     pub display_contents_facts: unsafe extern "C" fn(*mut c_void, *mut c_void) -> FfiDisplayContentsFacts,
     pub clear_stale_subtree: unsafe extern "C" fn(*mut c_void, *mut c_void, FfiStaleSubtreeClearScope),
@@ -139,14 +139,12 @@ pub struct FfiIdentifiedDomNode {
 }
 
 /// The C++ frame that retains a principal node's old and new layout boxes, paired with the old
-/// box's arena slot and the node's identity so Rust can reason about in-place replacement and find
-/// the node's other rows without calling back.
+/// box's arena slot so Rust can reason about in-place replacement.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiPrincipalNodeFrame {
     pub frame: *mut c_void,
     pub old_layout_node: NodeSlotId,
-    pub style_node: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -192,7 +190,6 @@ pub struct FfiPrincipalDescendantFacts {
     pub content_visibility_hidden: bool,
     pub should_layout_dom_children: bool,
     pub child_needs_layout_tree_update: bool,
-    pub is_svg_switch_element: bool,
     pub is_document: bool,
     pub dom_children_parent: *mut c_void,
     pub shadow_root: *mut c_void,
@@ -217,9 +214,8 @@ pub struct FfiPrincipalNodeEntryFacts {
     pub is_text: bool,
     pub rendered_in_top_layer: bool,
     pub layout_node_is_attached: bool,
-    pub is_svg_container: bool,
-    pub requires_svg_container: bool,
-    pub is_svg_foreign_object: bool,
+    /// The node's own identity, which names its rows in the arena and its facts in the style store.
+    pub style_node: u32,
     /// The identity of the node's shadow-including parent element, or 0, and whether the step to it
     /// crossed a shadow root. Layout walks this ancestry to find the inline that establishes an
     /// absolutely positioned box's containing block, and the tree scope an anchor name resolves in.
@@ -242,9 +238,6 @@ pub struct FfiPrincipalDisplayFacts {
 #[repr(C)]
 pub struct FfiElementLayoutFacts {
     pub has_content_replacement: bool,
-    pub is_svg_mask_element: bool,
-    pub is_svg_clip_path_element: bool,
-    pub is_svg_pattern_element: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -275,20 +268,22 @@ fn apply_replaced_display_adjustment(
 
 pub(crate) fn element_layout_kind(
     facts: FfiElementLayoutFacts,
+    element_type_facts: u32,
     layout_svg_mask_or_clip_path: bool,
     layout_svg_pattern: bool,
 ) -> FfiElementLayoutKind {
+    let has = |fact: u32| element_type_facts & fact != 0;
     if facts.has_content_replacement {
         FfiElementLayoutKind::ContentReplacement
     } else if layout_svg_mask_or_clip_path {
-        if facts.is_svg_mask_element {
+        if has(element_adjustment_fact::IS_SVG_MASK_ELEMENT) {
             FfiElementLayoutKind::SvgMask
         } else {
-            assert!(facts.is_svg_clip_path_element);
+            assert!(has(element_adjustment_fact::IS_SVG_CLIP_PATH_ELEMENT));
             FfiElementLayoutKind::SvgClipPath
         }
     } else if layout_svg_pattern {
-        assert!(facts.is_svg_pattern_element);
+        assert!(has(element_adjustment_fact::IS_SVG_PATTERN_ELEMENT));
         FfiElementLayoutKind::SvgPattern
     } else {
         FfiElementLayoutKind::Normal
@@ -578,6 +573,7 @@ pub(crate) fn principal_box_placement_decision(
 
 pub(crate) fn principal_node_entry_decision(
     facts: FfiPrincipalNodeEntryFacts,
+    element_type_facts: u32,
     context: &TreeBuilderContext,
 ) -> PrincipalNodeEntryDecision {
     abort_on_panic(|| {
@@ -598,13 +594,15 @@ pub(crate) fn principal_node_entry_decision(
             TopLayerEntryDecision::Continue
         };
 
-        let svg = if facts.is_svg_container {
+        let has = |fact: u32| element_type_facts & fact != 0;
+        let requires_svg_container = has(element_adjustment_fact::REQUIRES_SVG_CONTAINER);
+        let svg = if has(element_adjustment_fact::IS_SVG_CONTAINER) {
             SvgEntryDecision::EnterSvgRoot
-        } else if facts.requires_svg_container && !context.has_svg_root {
+        } else if requires_svg_container && !context.has_svg_root {
             SvgEntryDecision::Skip
-        } else if facts.is_svg_foreign_object {
+        } else if has(element_adjustment_fact::IS_SVG_FOREIGN_OBJECT_ELEMENT) {
             SvgEntryDecision::EnterForeignContent
-        } else if facts.is_element && !facts.requires_svg_container && context.has_svg_root {
+        } else if facts.is_element && !requires_svg_container && context.has_svg_root {
             SvgEntryDecision::Skip
         } else {
             SvgEntryDecision::Continue
@@ -625,6 +623,10 @@ struct DomTreeBuilderHost<'a> {
 
 impl DomTreeBuilderHost<'_> {
     fn first_child(&self, parent: *mut c_void) -> *mut c_void {
+        self.identified_first_child(parent).node
+    }
+
+    fn identified_first_child(&self, parent: *mut c_void) -> FfiIdentifiedDomNode {
         // SAFETY: Entry points guarantee that `parent` is a live ParentNode.
         unsafe { (self.callbacks.first_child)(parent) }
     }
@@ -636,6 +638,12 @@ impl DomTreeBuilderHost<'_> {
     fn next_identified_sibling(&self, node: *mut c_void) -> FfiIdentifiedDomNode {
         // SAFETY: Callers only pass live DOM nodes.
         unsafe { (self.callbacks.next_sibling)(node) }
+    }
+
+    /// The element type facts the style store holds for a node the walk reached.
+    fn element_type_facts(&self, style_node: u32) -> u32 {
+        // SAFETY: The arena outlives the build.
+        unsafe { &*self.arena }.element_adjustment_facts(StyleNodeID::from_raw(style_node))
     }
 
     fn layout(&self) -> TreeBuilderHost<'_> {
@@ -782,15 +790,14 @@ unsafe fn update_layout_tree_for_svg_switch_children(
         // true. All others will be bypassed and therefore not rendered. If the child element is a container element
         // such as a ‘g’, then the entire subtree is either processed/rendered or bypassed/not rendered.
         let mut rendered_child = std::ptr::null_mut();
-        let mut child = host.first_child(switch_element);
-        while !child.is_null() {
+        let mut child = host.identified_first_child(switch_element);
+        while !child.node.is_null() {
             // FIXME: Evaluate the requiredExtensions and systemLanguage attributes.
-            // SAFETY: `child` is a live DOM node.
-            if unsafe { (host.callbacks.is_svg_element)(child) } {
-                rendered_child = child;
+            if host.element_type_facts(child.style_node) & element_adjustment_fact::IS_SVG_ELEMENT != 0 {
+                rendered_child = child.node;
                 break;
             }
-            child = host.next_sibling(child);
+            child = host.next_identified_sibling(child.node);
         }
 
         // NB: Clean up any stale children that should no longer be rendered.
@@ -1016,6 +1023,7 @@ fn update_svg_pattern(
 }
 
 struct PrincipalDescendantUpdate {
+    element_type_facts: u32,
     should_create_layout_node: bool,
     update_pseudo_elements_in_place: bool,
     must_create_subtree: bool,
@@ -1130,7 +1138,7 @@ unsafe fn update_principal_node_descendants(
                 }
             } else if facts.should_layout_dom_children {
                 assert!(!facts.dom_children_parent.is_null());
-                if facts.is_svg_switch_element {
+                if update.element_type_facts & element_adjustment_fact::IS_SVG_SWITCH_ELEMENT != 0 {
                     // SAFETY: The callback table, parent, and context remain valid.
                     unsafe {
                         update_layout_tree_for_svg_switch_children(
@@ -1348,6 +1356,7 @@ struct PrincipalNodeUpdate<'host, 'callbacks, 'state, 'context> {
     old_layout_node: LayoutNode,
     dom_node: *mut c_void,
     style_node: u32,
+    element_type_facts: u32,
     context: &'context mut TreeBuilderContext,
     must_create_subtree: bool,
     insertion_mode: FfiInsertionMode,
@@ -1421,6 +1430,7 @@ fn construct_principal_layout_node(
     let dom_node = update.dom_node;
     let old_layout_node = update.old_layout_node;
     let must_create_subtree = update.must_create_subtree;
+    let element_type_facts = update.element_type_facts;
     let context = &mut *update.context;
     if entry_facts.is_element {
         if should_create_layout_node {
@@ -1477,6 +1487,7 @@ fn construct_principal_layout_node(
             let layout_facts = unsafe { (host.callbacks.principal_element_layout_facts)(frame, dom_node) };
             let layout_kind = element_layout_kind(
                 layout_facts,
+                element_type_facts,
                 context.layout_svg_mask_or_clip_path,
                 context.layout_svg_pattern,
             );
@@ -1748,6 +1759,7 @@ fn update_principal_node_after_entry(
                 (host.callbacks.principal_layout_node)(frame),
                 context,
                 PrincipalDescendantUpdate {
+                    element_type_facts: update.element_type_facts,
                     should_create_layout_node: entry_decision.should_create_layout_node,
                     update_pseudo_elements_in_place: entry_facts.may_update_pseudo_elements_in_place
                         && !entry_decision.should_create_layout_node,
@@ -1815,7 +1827,8 @@ fn update_layout_tree(
         let entry_facts = unsafe {
             (host.callbacks.principal_node_entry_facts)(host.callbacks.builder, dom_node, must_create_subtree)
         };
-        let entry_decision = principal_node_entry_decision(entry_facts, context);
+        let element_type_facts = host.element_type_facts(entry_facts.style_node);
+        let entry_decision = principal_node_entry_decision(entry_facts, element_type_facts, context);
         if entry_decision.top_layer != TopLayerEntryDecision::Continue {
             if entry_decision.top_layer == TopLayerEntryDecision::SkipAndRequestZoneRebuild {
                 // A member found here without an attached box was cleared together with a hidden ancestor subtree, and
@@ -1831,7 +1844,7 @@ fn update_layout_tree(
         let pushed_frame = unsafe { (host.callbacks.push_principal_frame)(host.callbacks.builder, dom_node) };
         assert!(!pushed_frame.frame.is_null());
         if entry_facts.is_element
-            && let Some(element) = StyleNodeID::from_raw(pushed_frame.style_node)
+            && let Some(element) = StyleNodeID::from_raw(entry_facts.style_node)
         {
             // Recorded before the display decision, because an element with no box of its own is
             // still a step on the ancestry a descendant walks.
@@ -1849,7 +1862,8 @@ fn update_layout_tree(
             frame: pushed_frame.frame,
             old_layout_node: pushed_frame.old_layout_node,
             dom_node,
-            style_node: pushed_frame.style_node,
+            style_node: entry_facts.style_node,
+            element_type_facts,
             context,
             must_create_subtree,
             insertion_mode,
@@ -4159,6 +4173,7 @@ fn fixup_tables(host: &TreeBuilderHost<'_>, root: LayoutNode) {
 
 #[cfg(test)]
 mod tests {
+    use crate::css::style::bridge::element_adjustment_fact;
     use crate::layout::node_data::NodeSlotId;
     use crate::layout::tree_builder::{
         FfiCodePointCategoryFacts, FfiComputedContentType, FfiElementLayoutFacts, FfiElementLayoutKind,
@@ -4388,51 +4403,49 @@ mod tests {
             is_text: false,
             rendered_in_top_layer: false,
             layout_node_is_attached: true,
-            is_svg_container: false,
-            requires_svg_container: false,
-            is_svg_foreign_object: false,
+            style_node: 0,
             shadow_including_parent_element: 0,
             parent_is_a_shadow_root: false,
         };
+        let mut element_type_facts = 0;
         let mut context = TreeBuilderContext::default();
-        let decision = principal_node_entry_decision(facts, &context);
+        let decision = principal_node_entry_decision(facts, element_type_facts, &context);
         assert!(!decision.should_create_layout_node);
         assert_eq!(decision.top_layer, TopLayerEntryDecision::Continue);
         assert_eq!(decision.svg, SvgEntryDecision::Continue);
 
         facts.rendered_in_top_layer = true;
         facts.layout_node_is_attached = false;
-        let decision = principal_node_entry_decision(facts, &context);
+        let decision = principal_node_entry_decision(facts, element_type_facts, &context);
         assert_eq!(decision.top_layer, TopLayerEntryDecision::SkipAndRequestZoneRebuild);
 
         facts.rendered_in_top_layer = false;
-        facts.requires_svg_container = true;
-        let decision = principal_node_entry_decision(facts, &context);
+        element_type_facts = element_adjustment_fact::REQUIRES_SVG_CONTAINER;
+        let decision = principal_node_entry_decision(facts, element_type_facts, &context);
         assert_eq!(decision.svg, SvgEntryDecision::Skip);
 
         facts.must_create_subtree = true;
-        facts.is_svg_container = true;
+        element_type_facts |= element_adjustment_fact::IS_SVG_CONTAINER;
         context.has_svg_root = false;
-        let decision = principal_node_entry_decision(facts, &context);
+        let decision = principal_node_entry_decision(facts, element_type_facts, &context);
         assert!(decision.should_create_layout_node);
         assert_eq!(decision.svg, SvgEntryDecision::EnterSvgRoot);
 
-        facts.is_svg_container = false;
-        facts.is_svg_foreign_object = true;
+        element_type_facts =
+            element_adjustment_fact::REQUIRES_SVG_CONTAINER | element_adjustment_fact::IS_SVG_FOREIGN_OBJECT_ELEMENT;
         context.has_svg_root = true;
-        let decision = principal_node_entry_decision(facts, &context);
+        let decision = principal_node_entry_decision(facts, element_type_facts, &context);
         assert_eq!(decision.svg, SvgEntryDecision::EnterForeignContent);
         context.has_svg_root = false;
-        let decision = principal_node_entry_decision(facts, &context);
+        let decision = principal_node_entry_decision(facts, element_type_facts, &context);
         assert_eq!(decision.svg, SvgEntryDecision::Skip);
 
-        facts.is_svg_foreign_object = false;
-        facts.requires_svg_container = false;
+        element_type_facts = 0;
         context.has_svg_root = true;
-        let decision = principal_node_entry_decision(facts, &context);
+        let decision = principal_node_entry_decision(facts, element_type_facts, &context);
         assert_eq!(decision.svg, SvgEntryDecision::Skip);
         context.has_svg_root = false;
-        let decision = principal_node_entry_decision(facts, &context);
+        let decision = principal_node_entry_decision(facts, element_type_facts, &context);
         assert_eq!(decision.svg, SvgEntryDecision::Continue);
     }
 
@@ -4440,25 +4453,25 @@ mod tests {
     fn specialized_element_layout_kinds() {
         let mut facts = FfiElementLayoutFacts {
             has_content_replacement: false,
-            is_svg_mask_element: false,
-            is_svg_clip_path_element: false,
-            is_svg_pattern_element: false,
         };
-        assert_eq!(element_layout_kind(facts, false, false), FfiElementLayoutKind::Normal);
+        assert_eq!(
+            element_layout_kind(facts, 0, false, false),
+            FfiElementLayoutKind::Normal
+        );
 
         facts.has_content_replacement = true;
         assert_eq!(
-            element_layout_kind(facts, false, false),
+            element_layout_kind(facts, 0, false, false),
             FfiElementLayoutKind::ContentReplacement
         );
         facts.has_content_replacement = false;
-        facts.is_svg_mask_element = true;
-        assert_eq!(element_layout_kind(facts, true, false), FfiElementLayoutKind::SvgMask);
-
-        facts.is_svg_mask_element = false;
-        facts.is_svg_pattern_element = true;
         assert_eq!(
-            element_layout_kind(facts, false, true),
+            element_layout_kind(facts, element_adjustment_fact::IS_SVG_MASK_ELEMENT, true, false),
+            FfiElementLayoutKind::SvgMask
+        );
+
+        assert_eq!(
+            element_layout_kind(facts, element_adjustment_fact::IS_SVG_PATTERN_ELEMENT, false, true),
             FfiElementLayoutKind::SvgPattern
         );
     }

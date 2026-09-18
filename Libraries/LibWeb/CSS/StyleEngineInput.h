@@ -118,6 +118,16 @@ enum ElementStyleAdjustmentFact : u32 {
     // cell's from its table's, an image's from its picture's source, a link's from the body's link
     // colors. They move without any attribute of the element moving.
     HasDerivedPresentationalHints = 1 << 20,
+    // The element types layout tree construction branches on. An element's type is fixed when it is
+    // created, so the store holds these rather than the tree builder asking the DOM for them.
+    IsSvgElement = 1 << 21,
+    IsSvgSwitchElement = 1 << 22,
+    IsSvgContainer = 1 << 23,
+    RequiresSvgContainer = 1 << 24,
+    IsSvgForeignObjectElement = 1 << 25,
+    IsSvgMaskElement = 1 << 26,
+    IsSvgClipPathElement = 1 << 27,
+    IsSvgPatternElement = 1 << 28,
 };
 WEB_API u32 element_style_adjustment_facts(DOM::Element const&);
 WEB_API u32 element_box_type_adjustment_facts(DOM::Element const&);
