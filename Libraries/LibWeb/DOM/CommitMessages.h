@@ -10,6 +10,7 @@
 #include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
 
 namespace Web::DOM {
 
@@ -35,12 +36,16 @@ public:
     // What boxes a node has now. DOM code reads these as bits instead of looking up the node's row.
     void note_box_presence(NodeIdentity, bool has_layout_box, bool has_committed_box);
 
+    // A message a finished layout pass left for this document.
+    void append(Layout::RustFFI::FfiCommitMessage const&);
+
     // Applies every message in order and empties the list.
     void apply();
 
 private:
     enum class Kind : u8 {
         BoxPresence,
+        ContentSizeChangedForContainerQueries,
     };
 
     struct Message {
