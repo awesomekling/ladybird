@@ -45,6 +45,16 @@ void InvalidationJournal::note_needs_repaint(NodeIdentity identity, InvalidateDi
     drain_if_the_render_side_is_reading();
 }
 
+void InvalidationJournal::note_needs_layout_tree_update(NodeIdentity identity, SetNeedsLayoutTreeUpdateReason reason)
+{
+    auto& entry = entry_for(identity);
+    if (!entry.needs_layout_tree_update) {
+        entry.needs_layout_tree_update = true;
+        entry.layout_tree_update_reason = reason;
+    }
+    drain_if_the_render_side_is_reading();
+}
+
 // A mark made from inside a layout update is one the render side is about to read, so it goes
 // through at once. Outside one, nothing reads what these marks change before the next drain.
 void InvalidationJournal::drain_if_the_render_side_is_reading()
@@ -62,12 +72,19 @@ void InvalidationJournal::drain()
     m_entry_index_by_identity.clear_with_capacity();
 
     auto* arena = m_document.layout_node_arena_if_created();
-    if (!arena)
-        return;
 
     for (auto const& entry : entries) {
+        if (entry.needs_layout_tree_update) {
+            // A node that left the tree between the mark and here is on no path the build walks,
+            // and the mutation that took it out dirtied the parent it left.
+            if (auto node = entry.identity.resolve(m_document))
+                node->apply_layout_tree_update_mark(entry.layout_tree_update_reason);
+        }
+
+        if (!entry.needs_layout_update && !entry.needs_repaint)
+            continue;
         // A node whose box went away between the mark and here has nothing left to mark.
-        auto* layout_node = entry.identity.bound_layout_node(*arena);
+        auto* layout_node = arena ? entry.identity.bound_layout_node(*arena) : nullptr;
         if (!layout_node)
             continue;
         if (entry.needs_layout_update)
