@@ -442,6 +442,11 @@ public:
 
     [[nodiscard]] bool needs_layout_tree_update() const { return m_needs_layout_tree_update; }
     void set_needs_layout_tree_update(bool, SetNeedsLayoutTreeUpdateReason);
+    // The half of a layout tree update mark that names render state: the ancestor chain the build
+    // has to climb to reach this node, and the layout invalidation the node's box needs. The
+    // journal holds it back until the render side reads, so both are answered against the tree the
+    // render side is about to walk.
+    void apply_layout_tree_update_mark(SetNeedsLayoutTreeUpdateReason);
 
     [[nodiscard]] bool needs_pseudo_element_layout_tree_update() const { return m_layout_tree_update_reuse_reasons & PseudoElementChange; }
     [[nodiscard]] bool may_reuse_layout_node_for_child_list_insertion() const { return m_layout_tree_update_reuse_reasons & ChildListInsertion; }

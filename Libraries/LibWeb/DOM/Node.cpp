@@ -2532,24 +2532,6 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
     if (m_needs_layout_tree_update) {
         document().set_needs_repaint(Badge<Node> {}, InvalidateDisplayList::No);
 
-        bool const document_has_top_layer_elements = !document().top_layer_elements().is_empty();
-        auto is_rendered_top_layer_element = [&](Node& node) {
-            if (!document_has_top_layer_elements)
-                return false;
-            auto* element = as_if<Element>(node);
-            return element && element->rendered_in_top_layer();
-        };
-        bool update_is_inside_top_layer_member = is_rendered_top_layer_element(*this);
-        for (auto* ancestor = flat_tree_parent(); ancestor; ancestor = ancestor->flat_tree_parent()) {
-            if (!update_is_inside_top_layer_member && is_rendered_top_layer_element(*ancestor))
-                update_is_inside_top_layer_member = true;
-            if (ancestor->m_child_needs_layout_tree_update)
-                break;
-            ancestor->m_child_needs_layout_tree_update = true;
-        }
-        if (update_is_inside_top_layer_member)
-            document().set_child_needs_layout_tree_update(true);
-
         // A <mask>, <clipPath>, or <pattern> is laid out as a resource box under each element that references it,
         // not at its own DOM position. So a layout tree change inside one must rebuild those referencing subtrees.
         for (auto* node = is_svg_element() ? this : parent(); node && node->is_svg_element(); node = node->parent())
@@ -2564,35 +2546,65 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
             }
         }
 
-        // NB: Propagating layout invalidation, layout is not up to date.
-        if (auto layout_node = this->unsafe_layout_node()) {
-            auto classification = Layout::RustFFI::layout_arena_classify_layout_tree_update(
-                layout_node->arena_handle(), Layout::Node::slot_id(layout_node),
-                is_structural_boundary_self_rebuild_reason(reason));
-
-            if (classification.marks_partial_relayout_boundary_self_only) {
-                layout_node->set_needs_layout_update(SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::BoundarySelfOnly);
-            } else if (reason == SetNeedsLayoutTreeUpdateReason::NodeInsertBefore) {
-                // What an insertion invalidates depends on the boxes it attaches, which only the layout tree build knows.
-                Layout::RustFFI::layout_arena_defer_child_list_insertion_layout_update(layout_node->arena_handle(), Layout::Node::slot_id(layout_node));
-            } else {
-                layout_node->set_needs_layout_update(SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::ThroughAncestors);
-            }
-
-            // FIXME: Escalating a rebuild past anonymous parents is not optimal, and we should
-            //        figure out how to rebuild a smaller part of the tree.
-            if (classification.escalates_past_anonymous_parents) {
-                // The document has no style node of its own; it is named by 0.
-                auto ancestor = classification.escalation_target_style_node == 0
-                    ? NodeIdentity::of_document()
-                    : NodeIdentity::of_style_node(CSS::StyleNodeID { classification.escalation_target_style_node });
-                document().commit_messages().note_needs_layout_tree_update(ancestor, reason);
-            }
-        }
-        // NB: A dirty node with no layout node needs no escape tracking: rebuilding it either
-        //     still produces no layout node, or the change is covered by the escalations
-        //     above, which mark a node whose layout node classifies it in the ancestor walk.
+        // A mark made from inside a layout update is one the journal writes through at once, so it
+        // saves the entry and goes straight to render state; a node the style tree has not named
+        // cannot be journalled at all, and has nowhere else to go.
+        auto identity = document().is_running_update_layout() ? NodeIdentity {} : NodeIdentity::of(*this);
+        if (identity)
+            document().invalidation_journal().note_needs_layout_tree_update(identity, reason);
+        else
+            apply_layout_tree_update_mark(reason);
     }
+}
+
+void Node::apply_layout_tree_update_mark(SetNeedsLayoutTreeUpdateReason reason)
+{
+    bool const document_has_top_layer_elements = !document().top_layer_elements().is_empty();
+    auto is_rendered_top_layer_element = [&](Node& node) {
+        if (!document_has_top_layer_elements)
+            return false;
+        auto* element = as_if<Element>(node);
+        return element && element->rendered_in_top_layer();
+    };
+    bool update_is_inside_top_layer_member = is_rendered_top_layer_element(*this);
+    for (auto* ancestor = flat_tree_parent(); ancestor; ancestor = ancestor->flat_tree_parent()) {
+        if (!update_is_inside_top_layer_member && is_rendered_top_layer_element(*ancestor))
+            update_is_inside_top_layer_member = true;
+        if (ancestor->m_child_needs_layout_tree_update)
+            break;
+        ancestor->m_child_needs_layout_tree_update = true;
+    }
+    if (update_is_inside_top_layer_member)
+        document().set_child_needs_layout_tree_update(true);
+
+    // NB: Propagating layout invalidation, layout is not up to date.
+    if (auto layout_node = this->unsafe_layout_node()) {
+        auto classification = Layout::RustFFI::layout_arena_classify_layout_tree_update(
+            layout_node->arena_handle(), Layout::Node::slot_id(layout_node),
+            is_structural_boundary_self_rebuild_reason(reason));
+
+        if (classification.marks_partial_relayout_boundary_self_only) {
+            layout_node->set_needs_layout_update(SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::BoundarySelfOnly);
+        } else if (reason == SetNeedsLayoutTreeUpdateReason::NodeInsertBefore) {
+            // What an insertion invalidates depends on the boxes it attaches, which only the layout tree build knows.
+            Layout::RustFFI::layout_arena_defer_child_list_insertion_layout_update(layout_node->arena_handle(), Layout::Node::slot_id(layout_node));
+        } else {
+            layout_node->set_needs_layout_update(SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::ThroughAncestors);
+        }
+
+        // FIXME: Escalating a rebuild past anonymous parents is not optimal, and we should
+        //        figure out how to rebuild a smaller part of the tree.
+        if (classification.escalates_past_anonymous_parents) {
+            // The document has no style node of its own; it is named by 0.
+            auto ancestor = classification.escalation_target_style_node == 0
+                ? NodeIdentity::of_document()
+                : NodeIdentity::of_style_node(CSS::StyleNodeID { classification.escalation_target_style_node });
+            document().commit_messages().note_needs_layout_tree_update(ancestor, reason);
+        }
+    }
+    // NB: A dirty node with no layout node needs no escape tracking: rebuilding it either
+    //     still produces no layout node, or the change is covered by the escalations
+    //     above, which mark a node whose layout node classifies it in the ancestor walk.
 }
 
 void Node::post_connection()

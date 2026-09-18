@@ -34,6 +34,7 @@ public:
 
     void note_needs_layout_update(NodeIdentity, SetNeedsLayoutReason, Layout::LayoutUpdatePropagation);
     void note_needs_repaint(NodeIdentity, InvalidateDisplayList);
+    void note_needs_layout_tree_update(NodeIdentity, SetNeedsLayoutTreeUpdateReason);
 
     // Writes every entry through to the render side and empties the journal.
     void drain();
@@ -44,9 +45,13 @@ private:
         // The reason of the first layout mark. Only the layout update trace reads it.
         SetNeedsLayoutReason layout_reason { SetNeedsLayoutReason::StyleChange };
         Layout::LayoutUpdatePropagation layout_propagation {};
+        // The reason of the tree update mark that made the node dirty. A later mark on an already
+        // dirty node changes nothing about the build, so only the first one's reason is kept.
+        SetNeedsLayoutTreeUpdateReason layout_tree_update_reason { SetNeedsLayoutTreeUpdateReason::None };
         InvalidateDisplayList invalidate_display_list { InvalidateDisplayList::No };
         bool needs_layout_update { false };
         bool needs_repaint { false };
+        bool needs_layout_tree_update { false };
     };
 
     Entry& entry_for(NodeIdentity);
