@@ -765,6 +765,10 @@ void EventLoop::update_the_rendering()
 
     // 22. For each doc of docs, update the rendering or user interface of doc and its node navigable to reflect the current state.
     for (auto& doc : docs.in_reverse()) {
+        // Steps after the layout update above can still mark something for repaint, and the gate
+        // below is the first thing to read that.
+        doc->drain_invalidation_journal();
+
         auto navigable = doc->navigable();
         // AD-HOC: Script that ran earlier in this rendering update may have spun the event loop and run tasks that
         //         detached doc from its navigable (e.g. after its iframe was removed).

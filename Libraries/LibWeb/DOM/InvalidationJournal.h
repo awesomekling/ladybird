@@ -12,6 +12,7 @@
 #include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
+#include <LibWeb/InvalidateDisplayList.h>
 
 namespace Web::DOM {
 
@@ -32,6 +33,7 @@ public:
     }
 
     void note_needs_layout_update(NodeIdentity, SetNeedsLayoutReason, Layout::LayoutUpdatePropagation);
+    void note_needs_repaint(NodeIdentity, InvalidateDisplayList);
 
     // Writes every entry through to the render side and empties the journal.
     void drain();
@@ -42,7 +44,9 @@ private:
         // The reason of the first layout mark. Only the layout update trace reads it.
         SetNeedsLayoutReason layout_reason { SetNeedsLayoutReason::StyleChange };
         Layout::LayoutUpdatePropagation layout_propagation {};
+        InvalidateDisplayList invalidate_display_list { InvalidateDisplayList::No };
         bool needs_layout_update { false };
+        bool needs_repaint { false };
     };
 
     Entry& entry_for(NodeIdentity);
