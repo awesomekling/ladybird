@@ -813,6 +813,7 @@ set(SOURCES
     Painting/DocumentPaintState.cpp
     Painting/HitTestDisplayList.cpp
     Painting/CompositorAnimationEffectState.cpp
+    Painting/HitTestResult.cpp
     Painting/PaintingRustBridge.cpp
     Painting/ResizeHandle.cpp
     Painting/Scrollbar.cpp
