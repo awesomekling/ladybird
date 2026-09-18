@@ -2774,7 +2774,7 @@ Layout::Viewport* Document::unsafe_layout_node()
 
 bool Document::has_committed_viewport_box() const
 {
-    return m_layout_root && Painting::has_committed_box(*m_layout_root);
+    return is_rendered();
 }
 
 void Document::set_inspected_node(GC::Ptr<Node> node)
@@ -9222,10 +9222,8 @@ void Document::process_top_layer_removals()
     // NB: Called during top layer processing.
     for (auto& element : m_top_layer_pending_removals) {
         // FIXME: Implement overlay property
-        auto const* layout_node = element->unsafe_layout_node();
-        if (!layout_node || !Painting::has_committed_box(*layout_node)) {
+        if (!element->is_rendered())
             elements_to_remove.append(element);
-        }
     }
 
     for (auto& element : elements_to_remove) {
