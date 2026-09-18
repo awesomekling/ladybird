@@ -33,6 +33,9 @@ public:
     bool operator==(NodeIdentity const&) const = default;
 
     [[nodiscard]] GC::Ptr<Node> resolve(Document&) const;
+    // The layout row this identity's node is bound to in `arena`, if any. This is the arena's own
+    // index; no DOM node is asked for its layout node.
+    [[nodiscard]] Layout::Node* bound_layout_node(Layout::NodeArena&) const;
 
 private:
     enum class Kind : u8 {
