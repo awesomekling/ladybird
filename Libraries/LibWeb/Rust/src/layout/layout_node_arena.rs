@@ -1577,6 +1577,20 @@ impl LayoutNodeArena {
         unsafe { callback(&mut *host.style_engine.cast::<StyleEngine>()) }
     }
 
+    /// Whether the style mirror's DOM child sequence holds a child for `style_node`. Only an
+    /// element, a shadow root and the document own a sequence; a text node owns none. Nodes that
+    /// can never have a box - a comment, a doctype, a processing instruction - hold no place in
+    /// it, so a parent whose children are all of those answers no.
+    pub(crate) fn has_dom_children(&self, style_node: Option<StyleNodeID>) -> bool {
+        let Some(style_node) = style_node else {
+            return false;
+        };
+        if style_node.element_index().is_none() {
+            return false;
+        }
+        self.with_style_engine(|engine| engine.tree().dom_children(style_node).next().is_some())
+    }
+
     /// The element type facts the style store holds for `style_node`. A text node, an anonymous
     /// row and the document hold none, and answer zero.
     pub(crate) fn element_adjustment_facts(&self, style_node: Option<StyleNodeID>) -> u32 {
