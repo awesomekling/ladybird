@@ -541,6 +541,12 @@ void EventLoop::update_the_rendering()
         return true;
     });
 
+    // Everything the render side told each document goes through before the rendering opportunity
+    // that reports it can observe it. Animation events, observations and input are ordered by the
+    // list, so they keep their place relative to the steps below.
+    for (auto& document : docs)
+        document->apply_commit_messages();
+
     // FIXME: 4. Unnecessary rendering: Remove from docs any Document object doc for which all of the following are true:
 
     // FIXME: 5. Remove from docs all Document objects for which the user agent believes that it's preferable to skip updating the rendering for other reasons.
