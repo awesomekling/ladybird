@@ -1577,6 +1577,17 @@ impl LayoutNodeArena {
         unsafe { callback(&mut *host.style_engine.cast::<StyleEngine>()) }
     }
 
+    /// The element type facts the style store holds for `style_node`. A text node, an anonymous
+    /// row and the document hold none, and answer zero.
+    pub(crate) fn element_adjustment_facts(&self, style_node: Option<StyleNodeID>) -> u32 {
+        match style_node {
+            Some(style_node) if style_node.element_index().is_some() => {
+                self.with_style_engine(|engine| engine.element_adjustment_facts(style_node))
+            }
+            _ => 0,
+        }
+    }
+
     pub(crate) fn derive_anonymous_style_record(
         &self,
         parent: u64,
