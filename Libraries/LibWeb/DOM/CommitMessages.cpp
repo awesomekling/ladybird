@@ -10,6 +10,8 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Node.h>
+#include <LibWeb/Layout/Box.h>
+#include <LibWeb/Layout/NodeArena.h>
 
 namespace Web::DOM {
 
@@ -36,6 +38,9 @@ void CommitMessages::append(Layout::RustFFI::FfiCommitMessage const& message)
     switch (message.kind) {
     case Layout::RustFFI::FfiCommitMessageKind::ContentSizeChangedForContainerQueries:
         m_messages.append(Message { .identity = identity, .kind = Kind::ContentSizeChangedForContainerQueries });
+        return;
+    case Layout::RustFFI::FfiCommitMessageKind::NavigableContainerViewportCommitted:
+        m_messages.append(Message { .identity = identity, .kind = Kind::NavigableContainerViewportCommitted });
         return;
     }
     VERIFY_NOT_REACHED();
@@ -69,6 +74,14 @@ void CommitMessages::apply(Message const& message)
         // Only an element can be a query container; the viewport names the document, which is not.
         if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
             CSS::Invalidation::invalidate_descendant_styles_depending_on_size_container_query(*element);
+        return;
+    case Kind::NavigableContainerViewportCommitted:
+        // The committed box is the one the identity is bound to in the arena; no DOM node is asked
+        // for its layout node.
+        if (auto* arena = m_document.layout_node_arena_if_created()) {
+            if (auto* box = as_if<Layout::Box>(message.identity.bound_layout_node(*arena)))
+                box->notify_content_navigable_of_committed_viewport();
+        }
         return;
     }
     VERIFY_NOT_REACHED();
