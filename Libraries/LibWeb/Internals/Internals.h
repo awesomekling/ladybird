@@ -213,6 +213,9 @@ public:
     DOM::Document::StyleInvalidationCounters const& style_invalidation_counters() const;
     GC::Ref<JS::Object> style_invalidation_counters_object() const;
     void reset_style_invalidation_counters();
+    GC::Ref<JS::Object> join_counters_object() const;
+    void reset_join_counters();
+    void dump_join_counters() const;
     GC::Ref<JS::Object> get_rendering_scheduler_counters() const;
     void reset_rendering_scheduler_counters();
     void set_manual_rendering_opportunities(bool enabled);

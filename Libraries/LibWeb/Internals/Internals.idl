@@ -202,6 +202,14 @@ interface Internals {
     // elementStyleRecomputations, and styleEnvironmentVersion.
     [ImplementedAs=style_invalidation_counters_object] object getStyleInvalidationCounters();
     undefined resetStyleInvalidationCounters();
+    // Returns what the synchronous reads of render state ("joins") in this document have cost.
+    // Keys: totals, and byReason with one entry per UpdateLayoutReason that was named at least
+    // once. Each holds calls, joins, cleanReads, nested, totalNanoseconds,
+    // cleanReadNanoseconds, maxNanoseconds and nanosecondsSinceMutation (summed over the joins).
+    [ImplementedAs=join_counters_object] object getJoinCounters();
+    undefined resetJoinCounters();
+    // Prints the reasons that blocked this document the longest to the debug log.
+    undefined dumpJoinCounters();
     object getRenderingSchedulerCounters();
     undefined resetRenderingSchedulerCounters();
     undefined setManualRenderingOpportunities(boolean enabled);

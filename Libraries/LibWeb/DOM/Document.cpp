@@ -704,6 +704,111 @@ void Document::reset_style_invalidation_counters() const
     CSS::reset_longhand_wrappers_minted();
 }
 
+void Document::reset_join_counters()
+{
+    m_join_counters = {};
+}
+
+// Whether a read can be answered from what style and layout already describe. This is the question
+// the render thread will ask of the journal: is there anything the published state does not cover
+// yet? A read that can answer yes is a clean read and needs no join.
+bool Document::is_clean_for_layout_geometry_read() const
+{
+    return m_has_completed_style_update
+        && layout_is_up_to_date()
+        && m_elements_with_dirty_style_attributes.is_empty()
+        && !style_computer().style_engine().has_pending_transaction()
+        && !m_needs_media_rule_evaluation
+        && !m_needs_animated_style_update
+        && m_query_containers_needing_container_query_evaluation_after_layout.is_empty()
+        && m_elements_with_pending_top_layer_membership_change.is_empty()
+        && !m_top_layer_needs_layout_zone_rebuild;
+}
+
+Document::JoinScope::JoinScope(Document& document, UpdateLayoutReason reason)
+    : m_document(document)
+    , m_reason(reason)
+{
+    auto& counters = m_document.m_join_counters[to_underlying(m_reason)];
+    ++counters.calls;
+
+    m_is_nested = m_document.m_join_depth > 0;
+    ++m_document.m_join_depth;
+    if (m_is_nested) {
+        ++counters.nested;
+        return;
+    }
+
+    m_render_state_was_clean = m_document.is_clean_for_layout_geometry_read();
+    m_started_at_nanoseconds = MonotonicTime::now().nanoseconds();
+    if (m_render_state_was_clean) {
+        ++counters.clean_reads;
+        return;
+    }
+
+    ++counters.joins;
+    // A document that has not been dirtied yet has no mutation to measure against.
+    if (m_document.m_last_render_state_mutation_nanoseconds != 0)
+        counters.nanoseconds_since_mutation += m_started_at_nanoseconds - m_document.m_last_render_state_mutation_nanoseconds;
+}
+
+Document::JoinScope::~JoinScope()
+{
+    --m_document.m_join_depth;
+    if (m_is_nested)
+        return;
+
+    auto elapsed = MonotonicTime::now().nanoseconds() - m_started_at_nanoseconds;
+    auto& counters = m_document.m_join_counters[to_underlying(m_reason)];
+    counters.total_nanoseconds += elapsed;
+    if (m_render_state_was_clean)
+        counters.clean_read_nanoseconds += elapsed;
+    counters.max_nanoseconds = max(counters.max_nanoseconds, elapsed);
+}
+
+void Document::JoinScope::note_extra_pass() const
+{
+    ++m_document.m_join_counters[to_underlying(m_reason)].nested;
+}
+
+void Document::dump_join_counters() const
+{
+    Vector<size_t> reasons;
+    for (size_t i = 0; i < update_layout_reason_count; ++i) {
+        if (m_join_counters[i].calls != 0)
+            reasons.append(i);
+    }
+    quick_sort(reasons, [&](auto a, auto b) { return m_join_counters[a].total_nanoseconds > m_join_counters[b].total_nanoseconds; });
+
+    JoinCounters totals;
+    for (auto const& counters : m_join_counters) {
+        totals.calls += counters.calls;
+        totals.joins += counters.joins;
+        totals.clean_reads += counters.clean_reads;
+        totals.nested += counters.nested;
+        totals.total_nanoseconds += counters.total_nanoseconds;
+        totals.clean_read_nanoseconds += counters.clean_read_nanoseconds;
+        totals.max_nanoseconds = max(totals.max_nanoseconds, counters.max_nanoseconds);
+        totals.nanoseconds_since_mutation += counters.nanoseconds_since_mutation;
+    }
+
+    dbgln("Joins: {} calls, {} joins, {} clean reads, {} nested, {:.3f}ms blocked ({:.3f}ms of it on clean reads)",
+        totals.calls, totals.joins, totals.clean_reads, totals.nested,
+        totals.total_nanoseconds / 1'000'000.0, totals.clean_read_nanoseconds / 1'000'000.0);
+    for (auto reason : reasons) {
+        auto const& counters = m_join_counters[reason];
+        dbgln("  {:>9.3f}ms ({:>8.3f}ms clean) {:>7} joins {:>7} clean {:>7} nested  max {:>8.3f}ms  since mutation {:>9.3f}ms  {}",
+            counters.total_nanoseconds / 1'000'000.0,
+            counters.clean_read_nanoseconds / 1'000'000.0,
+            counters.joins,
+            counters.clean_reads,
+            counters.nested,
+            counters.max_nanoseconds / 1'000'000.0,
+            counters.joins == 0 ? 0.0 : counters.nanoseconds_since_mutation / 1'000'000.0 / counters.joins,
+            to_string(static_cast<UpdateLayoutReason>(reason)));
+    }
+}
+
 bool Document::needs_full_layout_tree_update() const
 {
     return m_layout_node_arena && Layout::RustFFI::layout_arena_needs_full_layout_tree_update(m_layout_node_arena->handle());
@@ -1946,6 +2051,8 @@ void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutRe
     if (!node.is_connected())
         return;
 
+    JoinScope join_scope { *this, reason };
+
     if (reason != UpdateLayoutReason::HTMLEventLoopRenderingUpdate)
         flush_throttled_animation_style_update_for_node(node);
 
@@ -1966,24 +2073,13 @@ void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutRe
         && !m_top_layer_needs_layout_zone_rebuild
         && !style_computer().style_engine().css_transitions_may_observe_style_changes()
         && !may_have_style_query_dependencies) {
-        auto document_is_clean_for_layout_geometry_read = [](Document const& document) {
-            return document.m_has_completed_style_update
-                && document.layout_is_up_to_date()
-                && document.m_elements_with_dirty_style_attributes.is_empty()
-                && !document.style_computer().style_engine().has_pending_transaction()
-                && !document.m_needs_media_rule_evaluation
-                && !document.m_needs_animated_style_update
-                && document.m_query_containers_needing_container_query_evaluation_after_layout.is_empty()
-                && document.m_elements_with_pending_top_layer_membership_change.is_empty()
-                && !document.m_top_layer_needs_layout_zone_rebuild;
-        };
         auto embedding_document_chain_is_clean = [&] {
             auto const* embedded_document = this;
             while (auto navigable = embedded_document->navigable()) {
                 auto embedding_document = navigable->container_document();
                 if (!embedding_document || embedding_document.ptr() == embedded_document)
                     return true;
-                if (!document_is_clean_for_layout_geometry_read(*embedding_document))
+                if (!embedding_document->is_clean_for_layout_geometry_read())
                     return false;
                 embedded_document = embedding_document.ptr();
             }

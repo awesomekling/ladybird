@@ -436,9 +436,14 @@ void StyleEngine::set_element_language(StyleNodeID node, StyleAtomID language, U
 // from a timer would otherwise sit unflushed indefinitely, and a transition it should start would
 // not run until something unrelated woke the rendering loop. Only the first input needs the poke:
 // the frame it schedules flushes everything recorded before it runs.
-static void request_frame_for_first_recorded_input(StyleEngine const& style_engine, GC::Ptr<StyleComputer> style_computer)
+static void note_recorded_input(StyleEngine const& style_engine, GC::Ptr<StyleComputer> style_computer)
 {
-    if (style_engine.has_recorded_input() || !style_computer)
+    if (!style_computer)
+        return;
+    // Every style input the page writes passes here, so this is also where a join learns how long
+    // ago the render state it has to wait for was dirtied.
+    style_computer->document().note_render_state_mutation();
+    if (style_engine.has_recorded_input())
         return;
     style_computer->document().page().client().request_frame();
 }
@@ -452,14 +457,14 @@ static void flush_deferred_geometry_transaction_before_non_replayable_input(Styl
 void StyleEngine::record_tree_delta(StyleEngineFFI::FfiTreeDelta const& delta)
 {
     flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
-    request_frame_for_first_recorded_input(*this, m_style_computer);
+    note_recorded_input(*this, m_style_computer);
     m_tree_deltas.append(delta);
 }
 
 void StyleEngine::record_element_arrival(StyleEngineFFI::FfiElementArrival arrival, ReadonlySpan<StyleAtomID> custom_states)
 {
     flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
-    request_frame_for_first_recorded_input(*this, m_style_computer);
+    note_recorded_input(*this, m_style_computer);
     VERIFY(m_arrival_custom_state_atoms.size() <= NumericLimits<u32>::max());
     VERIFY(custom_states.size() <= NumericLimits<u32>::max());
     VERIFY(m_arrival_custom_state_atoms.size() + custom_states.size() <= NumericLimits<u32>::max());
@@ -472,20 +477,20 @@ void StyleEngine::record_element_arrival(StyleEngineFFI::FfiElementArrival arriv
 
 void StyleEngine::record_local_feature_delta(StyleEngineFFI::FfiLocalFeatureDelta const& delta)
 {
-    request_frame_for_first_recorded_input(*this, m_style_computer);
+    note_recorded_input(*this, m_style_computer);
     m_local_feature_deltas.append(delta);
 }
 
 void StyleEngine::record_state_delta(StyleEngineFFI::FfiStateDelta const& delta)
 {
-    request_frame_for_first_recorded_input(*this, m_style_computer);
+    note_recorded_input(*this, m_style_computer);
     m_state_deltas.append(delta);
 }
 
 void StyleEngine::record_element_declaration_delta(StyleEngineFFI::FfiElementDeclarationDelta const& delta)
 {
     flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
-    request_frame_for_first_recorded_input(*this, m_style_computer);
+    note_recorded_input(*this, m_style_computer);
     m_element_declaration_deltas.append(delta);
 }
 
@@ -493,7 +498,7 @@ void StyleEngine::record_element_style_input_change(StyleNodeID style_node, u8 r
 {
     if (style_node != 0 && reaction != 0) {
         flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
-        request_frame_for_first_recorded_input(*this, m_style_computer);
+        note_recorded_input(*this, m_style_computer);
         record_element_style_input(style_node, reaction, inherited_style_groups);
     }
 }
@@ -502,7 +507,7 @@ void StyleEngine::record_derived_element_style_input_change(StyleNodeID style_no
 {
     if (style_node != 0 && reaction != 0) {
         flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
-        request_frame_for_first_recorded_input(*this, m_style_computer);
+        note_recorded_input(*this, m_style_computer);
         record_derived_element_style_input(style_node, reaction, inherited_style_groups);
     }
 }
@@ -515,7 +520,7 @@ void StyleEngine::record_flat_tree_descendant_style_input_changes(StyleNodeID st
     flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
     // The relation columns must include every tree delta recorded before this derived action.
     submit_recorded_input();
-    request_frame_for_first_recorded_input(*this, m_style_computer);
+    note_recorded_input(*this, m_style_computer);
     record_flat_tree_descendant_style_inputs(style_node, reaction, inherited_style_groups);
 }
 

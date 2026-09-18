@@ -2471,6 +2471,8 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
     }
     m_needs_layout_tree_update = value;
     m_layout_tree_update_reuse_reasons = reuse_reason;
+    if (value)
+        document().note_render_state_mutation();
 
     if constexpr (UPDATE_LAYOUT_DEBUG) {
         if (m_needs_layout_tree_update) {
@@ -3763,6 +3765,7 @@ void Node::set_needs_layout_update(SetNeedsLayoutReason reason, Layout::LayoutUp
 {
     if (auto* node = unsafe_layout_node()) {
         node->set_needs_layout_update(reason, propagation);
+        document().note_render_state_mutation();
         document().set_needs_repaint(Badge<Node> {}, InvalidateDisplayList::No);
     }
 }
