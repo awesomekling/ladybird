@@ -18,7 +18,7 @@ use super::used_values::UsedValues;
 use crate::css::style::fast_hash::{FastMap as HashMap, FastSet as HashSet};
 use crate::css::style::tree::StyleNodeID;
 use crate::css::style::{
-    StyleEngine,
+    PublishedBoxFacts, StyleEngine,
     layout_style::{AnonymousStyleKind, AnonymousStyleOverrides, DerivedStyleRecord, LayoutStyle},
 };
 use crate::layout::ComputedValuesView;
@@ -1586,6 +1586,14 @@ impl LayoutNodeArena {
             }
             _ => 0,
         }
+    }
+
+    /// The box facts the element's published style record holds. A text node, an anonymous row and
+    /// the document have no record and answer nothing.
+    pub(crate) fn published_box_facts(&self, style_node: Option<StyleNodeID>) -> Option<PublishedBoxFacts> {
+        let style_node = style_node?;
+        style_node.element_index()?;
+        self.with_style_engine(|engine| engine.element_published_box_facts(style_node))
     }
 
     pub(crate) fn derive_anonymous_style_record(
