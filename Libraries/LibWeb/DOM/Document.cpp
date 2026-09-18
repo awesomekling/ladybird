@@ -2794,7 +2794,7 @@ Layout::Viewport* Document::unsafe_layout_node()
 
 bool Document::has_committed_viewport_box() const
 {
-    return m_layout_root && Painting::has_committed_box(*m_layout_root);
+    return is_rendered();
 }
 
 void Document::set_inspected_node(GC::Ptr<Node> node)
