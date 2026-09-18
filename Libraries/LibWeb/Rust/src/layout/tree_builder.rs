@@ -148,7 +148,6 @@ pub struct FfiPrincipalNodeFrame {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiPreparedPrincipalElementFacts {
-    pub display: FfiPrincipalDisplayFacts,
     // Only meaningful when the element is about to get a fresh layout node.
     pub has_content_replacement: bool,
 }
@@ -157,7 +156,6 @@ pub struct FfiPreparedPrincipalElementFacts {
 #[repr(C)]
 pub struct FfiDisplayContentsFacts {
     pub rendered_in_top_layer: bool,
-    pub content_visibility_hidden: bool,
     pub should_layout_dom_children: bool,
     pub child_needs_layout_tree_update: bool,
     pub dom_children_parent: *mut c_void,
@@ -186,7 +184,6 @@ pub struct FfiFlatTreeRenderFacts {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiPrincipalDescendantFacts {
-    pub content_visibility_hidden: bool,
     pub should_layout_dom_children: bool,
     pub child_needs_layout_tree_update: bool,
     pub dom_children_parent: *mut c_void,
@@ -216,17 +213,6 @@ pub struct FfiPrincipalNodeEntryFacts {
     /// absolutely positioned box's containing block, and the tree scope an anchor name resolves in.
     pub shadow_including_parent_element: u32,
     pub parent_is_a_shadow_root: bool,
-}
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiPrincipalDisplayFacts {
-    pub display_is_none: bool,
-    pub display_is_contents: bool,
-    pub display_is_table_inside: bool,
-    pub display_is_block_outside: bool,
-    pub display_is_internal_table: bool,
-    pub display_is_table_caption: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -666,6 +652,24 @@ impl DomTreeBuilderHost<'_> {
         unsafe { (self.callbacks.next_sibling)(node) }
     }
 
+    /// The display the element's published style record asks for.
+    fn published_display(&self, style_node: u32) -> FfiDisplay {
+        self.layout()
+            .arena()
+            .published_box_facts(StyleNodeID::from_raw(style_node))
+            .expect("an element the walk prepares has published its style")
+            .display
+    }
+
+    /// Whether the element's published style record hides its content. Only an element has a
+    /// record, so every other node answers no, as its `content-visibility` never applied.
+    fn content_visibility_is_hidden(&self, style_node: u32) -> bool {
+        self.layout()
+            .arena()
+            .published_box_facts(StyleNodeID::from_raw(style_node))
+            .is_some_and(|facts| facts.content_visibility == crate::css::css_enums::content_visibility::HIDDEN)
+    }
+
     /// The element type facts the style store holds for a node the walk reached.
     fn element_type_facts(&self, style_node: u32) -> u32 {
         // SAFETY: The arena outlives the build.
@@ -860,6 +864,7 @@ unsafe fn update_layout_tree_for_display_contents(
     host: &DomTreeBuilderHost<'_>,
     state: &mut TreeBuilderState,
     element: *mut c_void,
+    style_node: u32,
     context: &mut TreeBuilderContext,
     must_create_subtree: bool,
     should_create_layout_node: bool,
@@ -868,6 +873,7 @@ unsafe fn update_layout_tree_for_display_contents(
         assert!(!element.is_null());
         // SAFETY: The element remains live for the duration of the call.
         let facts = unsafe { (host.callbacks.display_contents_facts)(host.callbacks.builder, element) };
+        let content_visibility_hidden = host.content_visibility_is_hidden(style_node);
 
         // A display:contents member builds its children through this path, so the top layer flag
         // is consumed here the same way update_layout_tree does for members with a box.
@@ -888,7 +894,7 @@ unsafe fn update_layout_tree_for_display_contents(
             }
         }
 
-        if should_create_layout_node && !facts.content_visibility_hidden && !context.has_svg_root {
+        if should_create_layout_node && !content_visibility_hidden && !context.has_svg_root {
             let placed = create_pseudo_element(
                 host,
                 state,
@@ -899,7 +905,7 @@ unsafe fn update_layout_tree_for_display_contents(
             assert!(placed.is_none());
         }
 
-        if !facts.content_visibility_hidden && (should_create_layout_node || facts.child_needs_layout_tree_update) {
+        if !content_visibility_hidden && (should_create_layout_node || facts.child_needs_layout_tree_update) {
             let must_create_children = should_create_layout_node;
             if !facts.shadow_root.is_null() {
                 // SAFETY: The callback table, shadow root, and context remain valid.
@@ -929,7 +935,7 @@ unsafe fn update_layout_tree_for_display_contents(
         }
 
         if !facts.slot_element.is_null() {
-            if !facts.content_visibility_hidden {
+            if !content_visibility_hidden {
                 // SAFETY: The callback table, slot element, and context remain valid.
                 unsafe {
                     update_layout_tree_for_assigned_slottables(
@@ -956,7 +962,7 @@ unsafe fn update_layout_tree_for_display_contents(
             }
         }
 
-        if should_create_layout_node && !facts.content_visibility_hidden && !context.has_svg_root {
+        if should_create_layout_node && !content_visibility_hidden && !context.has_svg_root {
             let placed = create_pseudo_element(
                 host,
                 state,
@@ -1050,6 +1056,7 @@ fn update_svg_pattern(
 
 struct PrincipalDescendantUpdate {
     kind: PrincipalNodeKind,
+    style_node: u32,
     element_type_facts: u32,
     should_create_layout_node: bool,
     update_pseudo_elements_in_place: bool,
@@ -1083,6 +1090,7 @@ unsafe fn update_principal_node_descendants(
                 layout_host.shell(layout_node),
             )
         };
+        let content_visibility_hidden = host.content_visibility_is_hidden(update.style_node);
         let (layout_node_can_have_children, layout_node_is_replaced_box_with_children) = {
             let layout_node_data = layout_host.data(layout_node);
             let can_have_children = node_facts::node_can_have_children(layout_node_data);
@@ -1103,7 +1111,7 @@ unsafe fn update_principal_node_descendants(
             // Add the ::before pseudo-element before walking normal children.
             if update.kind.is_element()
                 && layout_node_can_have_children
-                && !facts.content_visibility_hidden
+                && !content_visibility_hidden
                 && !context.has_svg_root
             {
                 state.ancestor_stack.push(layout_node);
@@ -1119,7 +1127,7 @@ unsafe fn update_principal_node_descendants(
             }
         }
 
-        if facts.content_visibility_hidden {
+        if content_visibility_hidden {
             // SAFETY: The builder and DOM node remain live throughout the call.
             unsafe {
                 (host.callbacks.clear_stale_subtree)(
@@ -1133,7 +1141,7 @@ unsafe fn update_principal_node_descendants(
         if (should_create_layout_node || facts.child_needs_layout_tree_update)
             && (!facts.shadow_root.is_null() || facts.should_layout_dom_children)
             && layout_node_can_have_children
-            && !facts.content_visibility_hidden
+            && !content_visibility_hidden
         {
             state.ancestor_stack.push(layout_node);
 
@@ -1237,7 +1245,7 @@ unsafe fn update_principal_node_descendants(
         }
 
         if !facts.slot_element.is_null() {
-            if !facts.content_visibility_hidden {
+            if !content_visibility_hidden {
                 state.ancestor_stack.push(layout_node);
                 // SAFETY: The callback table, slot element, and context remain valid.
                 unsafe {
@@ -1308,7 +1316,7 @@ unsafe fn update_principal_node_descendants(
             // Add ::marker and ::after once normal and SVG resource children are complete.
             if update.kind.is_element()
                 && layout_node_can_have_children
-                && !facts.content_visibility_hidden
+                && !content_visibility_hidden
                 && !context.has_svg_root
             {
                 state.ancestor_stack.push(layout_node);
@@ -1484,10 +1492,11 @@ fn construct_principal_layout_node(
                 should_create_layout_node,
             )
         };
+        let display = host.published_display(update.style_node);
         let generation = principal_box_generation_decision(
             true,
-            should_create_layout_node && prepared.display.display_is_none,
-            prepared.display.display_is_contents,
+            should_create_layout_node && display.is_none(),
+            display.is_contents(),
         );
         if generation == PrincipalBoxGenerationDecision::Suppress {
             return PrincipalBoxConstruction::none();
@@ -1499,6 +1508,7 @@ fn construct_principal_layout_node(
                     host,
                     update.state,
                     dom_node,
+                    update.style_node,
                     context,
                     must_create_subtree,
                     should_create_layout_node,
@@ -1785,6 +1795,7 @@ fn update_principal_node_after_entry(
                 context,
                 PrincipalDescendantUpdate {
                     kind: update.kind,
+                    style_node: update.style_node,
                     element_type_facts: update.element_type_facts,
                     should_create_layout_node: entry_decision.should_create_layout_node,
                     update_pseudo_elements_in_place: entry_facts.may_update_pseudo_elements_in_place

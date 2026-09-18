@@ -96,7 +96,6 @@ void LayoutTreeBuilderAccess::set_synthetic_pseudo_element_node(DOM::Element& el
     element.set_synthetic_pseudo_element_node({}, pseudo_element, layout_node);
 }
 
-static RustFFI::FfiPrincipalDisplayFacts ffi_principal_display_facts(CSS::Display);
 static void update_style_if_needed_for_layout_tree_bypass_path(DOM::Element&);
 struct PrincipalNodeFrame;
 static Compositing::RustFFI::NodeSlotId create_layout_node_for_text(PrincipalNodeFrame&, DOM::Text&);
@@ -1068,18 +1067,6 @@ LayoutTreeBuildBridge::~LayoutTreeBuildBridge()
 {
 }
 
-static RustFFI::FfiPrincipalDisplayFacts ffi_principal_display_facts(CSS::Display display)
-{
-    return {
-        .display_is_none = display.is_none(),
-        .display_is_contents = display.is_contents(),
-        .display_is_table_inside = display.is_table_inside(),
-        .display_is_block_outside = display.is_block_outside(),
-        .display_is_internal_table = display.is_internal_table(),
-        .display_is_table_caption = display.is_table_caption(),
-    };
-}
-
 RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_builder_callbacks()
 {
     return {
@@ -1110,7 +1097,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             auto shadow_root = element.shadow_root();
             return {
                 .rendered_in_top_layer = element.rendered_in_top_layer(),
-                .content_visibility_hidden = element.style_group<CSS::ComputedValues::InheritedBoxValues>()->content_visibility_value() == CSS::ContentVisibility::Hidden,
                 .should_layout_dom_children = slot_element ? slot_element->assigned_nodes_internal().is_empty() && element.has_children() : element.has_children(),
                 .child_needs_layout_tree_update = element.child_needs_layout_tree_update(),
                 .dom_children_parent = static_cast<DOM::ParentNode*>(&element),
@@ -1164,7 +1150,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
                 stroke_pattern = graphics_element->stroke_pattern(layout_node);
             }
             return {
-                .content_visibility_hidden = element && element->style_group<CSS::ComputedValues::InheritedBoxValues>()->content_visibility_value() == CSS::ContentVisibility::Hidden,
                 .should_layout_dom_children = slot_element ? slot_element->assigned_nodes_internal().is_empty() && node.has_children() : node.has_children(),
                 .child_needs_layout_tree_update = node.child_needs_layout_tree_update(),
                 .dom_children_parent = parent_node,
@@ -1317,8 +1302,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             VERIFY(frame.style_record_identity);
             frame.style_record_owner = &element.document().style_computer();
             frame.style_record_owner->pin_style_record(frame.style_record_identity);
-            auto const* box_values = element.style_group<CSS::ComputedValues::BoxValues>();
-            VERIFY(box_values);
             auto has_content_replacement = false;
             if (should_create_layout_node) {
                 auto const* content_values = element.style_group<CSS::ComputedValues::ContentValues>();
@@ -1326,7 +1309,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
                 has_content_replacement = content_replacement_image(content_values->computed_content_value()) != nullptr;
             }
             return {
-                .display = ffi_principal_display_facts(box_values->display_value()),
                 .has_content_replacement = has_content_replacement,
             }; },
         .create_principal_element_layout = [](void* builder_pointer, void* frame_pointer, void* element_pointer, RustFFI::FfiElementLayoutKind kind) -> Compositing::RustFFI::NodeSlotId {
