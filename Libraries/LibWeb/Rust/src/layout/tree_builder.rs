@@ -122,7 +122,6 @@ pub struct FfiDomTreeBuilderCallbacks {
     pub set_principal_layout_node: unsafe extern "C" fn(*mut c_void, *mut c_void, NodeSlotId),
     pub principal_layout_node: unsafe extern "C" fn(*mut c_void) -> NodeSlotId,
     pub attach_principal_style_resources: unsafe extern "C" fn(*mut c_void),
-    pub document_layout_node: unsafe extern "C" fn(*mut c_void) -> NodeSlotId,
     pub document_element_layout_node: unsafe extern "C" fn(*mut c_void) -> NodeSlotId,
     pub layout: FfiTreeBuilderCallbacks,
     pub pseudo: FfiPseudoTreeBuilderCallbacks,
@@ -1911,10 +1910,7 @@ pub unsafe extern "C" fn rust_build_layout_tree(
         FfiInsertionMode::Append,
     );
 
-    // NB: Called during layout tree construction.
-    // SAFETY: The document remains live and any attached layout root is owned by it and the builder.
-    let document_layout_node = unsafe { (host.callbacks.document_layout_node)(document) };
-    debug_assert_eq!(host.layout().arena().layout_root(), document_layout_node);
+    let document_layout_node = host.layout().arena().layout_root();
     let rebuilt_subtrees_were_updated_individually = !document_layout_node.is_invalid()
         && !(context.document_needs_full_layout_tree_update
             || !entry_facts.has_layout_node
