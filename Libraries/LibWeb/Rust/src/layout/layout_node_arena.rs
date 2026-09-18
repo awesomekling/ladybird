@@ -4329,6 +4329,10 @@ pub(crate) unsafe fn sync_enrolled_content_for_layout(arena: *mut c_void) {
         }
         live_replaced_nodes.push(node);
         let mut facts = FfiReplacedContentFacts::default();
+        super::seal::note_host_call(
+            unsafe { &*arena.cast::<LayoutNodeArena>() }.layout_pass_is_running(),
+            "build_replaced_content_facts",
+        );
         // SAFETY: The callback receives a live shell and a valid out-pointer.
         unsafe { (host.build_replaced_content_facts)(host.context, shell, &raw mut facts) };
         // Changed facts invalidate cached formatting-context runs regardless of which
