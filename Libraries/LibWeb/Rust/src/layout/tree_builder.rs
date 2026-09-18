@@ -186,11 +186,9 @@ pub struct FfiFlatTreeRenderFacts {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiPrincipalDescendantFacts {
-    pub is_element: bool,
     pub content_visibility_hidden: bool,
     pub should_layout_dom_children: bool,
     pub child_needs_layout_tree_update: bool,
-    pub is_document: bool,
     pub dom_children_parent: *mut c_void,
     pub shadow_root: *mut c_void,
     pub slot_element: *mut c_void,
@@ -208,10 +206,7 @@ pub struct FfiPrincipalNodeEntryFacts {
     pub needs_layout_tree_update: bool,
     pub may_reuse_layout_node_for_child_list_insertion: bool,
     pub may_update_pseudo_elements_in_place: bool,
-    pub is_document: bool,
     pub has_layout_node: bool,
-    pub is_element: bool,
-    pub is_text: bool,
     pub rendered_in_top_layer: bool,
     pub layout_node_is_attached: bool,
     /// The node's own identity, which names its rows in the arena and its facts in the style store.
@@ -281,6 +276,42 @@ pub(crate) fn element_layout_kind(
         FfiElementLayoutKind::SvgPattern
     } else {
         FfiElementLayoutKind::Normal
+    }
+}
+
+/// Which kind of DOM node the walk is standing on.
+///
+/// A `StyleNodeID` says element or text by itself, and the document is the only other node the walk
+/// enters with a box of its own - it is the build's root. Everything else (a comment, a doctype, a
+/// processing instruction) can never have a box, and is only visited so its update flags are cleared.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PrincipalNodeKind {
+    Document,
+    Element,
+    Text,
+    Other,
+}
+
+impl PrincipalNodeKind {
+    fn of(style_node: u32, is_document_root: bool) -> Self {
+        match StyleNodeID::from_raw(style_node) {
+            Some(style_node) if style_node.is_text() => Self::Text,
+            Some(_) => Self::Element,
+            None if is_document_root => Self::Document,
+            None => Self::Other,
+        }
+    }
+
+    pub(crate) fn is_document(self) -> bool {
+        self == Self::Document
+    }
+
+    pub(crate) fn is_element(self) -> bool {
+        self == Self::Element
+    }
+
+    pub(crate) fn is_text(self) -> bool {
+        self == Self::Text
     }
 }
 
@@ -567,6 +598,7 @@ pub(crate) fn principal_box_placement_decision(
 
 pub(crate) fn principal_node_entry_decision(
     facts: FfiPrincipalNodeEntryFacts,
+    kind: PrincipalNodeKind,
     element_type_facts: u32,
     context: &TreeBuilderContext,
 ) -> PrincipalNodeEntryDecision {
@@ -576,9 +608,9 @@ pub(crate) fn principal_node_entry_decision(
                 && !facts.may_reuse_layout_node_for_child_list_insertion
                 && !facts.may_update_pseudo_elements_in_place)
             || context.document_needs_full_layout_tree_update
-            || (facts.is_document && !facts.has_layout_node);
+            || (kind.is_document() && !facts.has_layout_node);
 
-        let top_layer = if facts.is_element && facts.rendered_in_top_layer && !context.layout_top_layer {
+        let top_layer = if kind.is_element() && facts.rendered_in_top_layer && !context.layout_top_layer {
             if !facts.layout_node_is_attached && !facts.needs_layout_tree_update {
                 TopLayerEntryDecision::SkipAndRequestZoneRebuild
             } else {
@@ -596,7 +628,7 @@ pub(crate) fn principal_node_entry_decision(
             SvgEntryDecision::Skip
         } else if has(element_adjustment_fact::IS_SVG_FOREIGN_OBJECT_ELEMENT) {
             SvgEntryDecision::EnterForeignContent
-        } else if facts.is_element && !requires_svg_container && context.has_svg_root {
+        } else if kind.is_element() && !requires_svg_container && context.has_svg_root {
             SvgEntryDecision::Skip
         } else {
             SvgEntryDecision::Continue
@@ -1017,6 +1049,7 @@ fn update_svg_pattern(
 }
 
 struct PrincipalDescendantUpdate {
+    kind: PrincipalNodeKind,
     element_type_facts: u32,
     should_create_layout_node: bool,
     update_pseudo_elements_in_place: bool,
@@ -1062,13 +1095,13 @@ unsafe fn update_principal_node_descendants(
 
         if should_create_layout_node || update.update_pseudo_elements_in_place {
             // Resolve counters now that we exist in the layout tree.
-            if should_create_layout_node && facts.is_element {
+            if should_create_layout_node && update.kind.is_element() {
                 // SAFETY: `dom_node` is a live Element when this fact is set.
                 unsafe { (host.callbacks.resolve_counters)(dom_node, FfiPseudoElement::None) };
             }
 
             // Add the ::before pseudo-element before walking normal children.
-            if facts.is_element
+            if update.kind.is_element()
                 && layout_node_can_have_children
                 && !facts.content_visibility_hidden
                 && !context.has_svg_root
@@ -1158,7 +1191,7 @@ unsafe fn update_principal_node_descendants(
                 }
             }
 
-            if facts.is_document {
+            if update.kind.is_document() {
                 // Elements in the top layer do not lay out normally based on their position in the document; instead
                 // they generate boxes as if they were siblings of the root element.
                 let prior_layout_top_layer = context.layout_top_layer;
@@ -1273,7 +1306,7 @@ unsafe fn update_principal_node_descendants(
             }
 
             // Add ::marker and ::after once normal and SVG resource children are complete.
-            if facts.is_element
+            if update.kind.is_element()
                 && layout_node_can_have_children
                 && !facts.content_visibility_hidden
                 && !context.has_svg_root
@@ -1344,6 +1377,7 @@ unsafe fn update_principal_node_descendants(
 }
 
 struct PrincipalNodeUpdate<'host, 'callbacks, 'state, 'context> {
+    kind: PrincipalNodeKind,
     host: &'host DomTreeBuilderHost<'callbacks>,
     state: &'state mut TreeBuilderState,
     frame: *mut c_void,
@@ -1415,7 +1449,6 @@ fn keep_principal_layout_node(host: &DomTreeBuilderHost<'_>, frame: *mut c_void,
 
 fn construct_principal_layout_node(
     update: &mut PrincipalNodeUpdate<'_, '_, '_, '_>,
-    entry_facts: FfiPrincipalNodeEntryFacts,
     should_create_layout_node: bool,
 ) -> PrincipalBoxConstruction {
     let host = update.host;
@@ -1426,7 +1459,7 @@ fn construct_principal_layout_node(
     let must_create_subtree = update.must_create_subtree;
     let element_type_facts = update.element_type_facts;
     let context = &mut *update.context;
-    if entry_facts.is_element {
+    if update.kind.is_element() {
         if should_create_layout_node {
             // ::backdrop is a sibling of the element, not a child, so unlike other pseudo-elements, it is not
             // automatically discarded when the element's layout is recomputed.
@@ -1504,11 +1537,11 @@ fn construct_principal_layout_node(
             keep_principal_layout_node(host, frame, old_layout_node);
         }
     } else if should_create_layout_node {
-        if entry_facts.is_document {
+        if update.kind.is_document() {
             // SAFETY: The frame and DOM document remain live throughout construction.
             let created = unsafe { (host.callbacks.create_principal_document_layout)(frame, dom_node) };
             created_box = Some(host.layout().created(created));
-        } else if entry_facts.is_text {
+        } else if update.kind.is_text() {
             // SAFETY: The DOM text node remains live throughout the fact query.
             let facts = unsafe { (host.callbacks.principal_text_layout_facts)(dom_node) };
             let needs_style_wrapper = display_contents_text_needs_style_wrapper(
@@ -1590,13 +1623,13 @@ fn update_principal_node_after_entry(
     let construction = if entry_decision.svg == SvgEntryDecision::Skip {
         PrincipalBoxConstruction::none()
     } else {
-        construct_principal_layout_node(update, entry_facts, entry_decision.should_create_layout_node)
+        construct_principal_layout_node(update, entry_decision.should_create_layout_node)
     };
     let mut created_box = construction.created_box;
     let context = &mut *update.context;
 
     if !construction.layout_node.is_invalid() {
-        if entry_facts.is_element || entry_facts.is_document {
+        if update.kind.is_element() || update.kind.is_document() {
             // SAFETY: The frame owns a live NodeWithStyle for elements and documents.
             unsafe { (host.callbacks.attach_principal_style_resources)(frame) };
         }
@@ -1630,8 +1663,8 @@ fn update_principal_node_after_entry(
             old_and_new_layout_nodes_are_same: old_layout_node == layout_node,
             has_current_rebuild_root: !update.state.current_rebuild_root.is_invalid(),
             is_in_dom_order_insertion: update.insertion_mode == FfiInsertionMode::InDomOrder,
-            is_document: entry_facts.is_document,
-            is_element: entry_facts.is_element,
+            is_document: update.kind.is_document(),
+            is_element: update.kind.is_element(),
             rendered_in_top_layer: entry_facts.rendered_in_top_layer,
         };
         let layout_node_is_svg_box = node_kind_is_svg_box(host.layout().data(layout_node).kind.get());
@@ -1751,6 +1784,7 @@ fn update_principal_node_after_entry(
                 (host.callbacks.principal_layout_node)(frame),
                 context,
                 PrincipalDescendantUpdate {
+                    kind: update.kind,
                     element_type_facts: update.element_type_facts,
                     should_create_layout_node: entry_decision.should_create_layout_node,
                     update_pseudo_elements_in_place: entry_facts.may_update_pseudo_elements_in_place
@@ -1813,14 +1847,35 @@ fn update_layout_tree(
     must_create_subtree: bool,
     insertion_mode: FfiInsertionMode,
 ) {
+    update_layout_tree_from(
+        host,
+        state,
+        dom_node,
+        context,
+        must_create_subtree,
+        insertion_mode,
+        false,
+    );
+}
+
+fn update_layout_tree_from(
+    host: &DomTreeBuilderHost<'_>,
+    state: &mut TreeBuilderState,
+    dom_node: *mut c_void,
+    context: &mut TreeBuilderContext,
+    must_create_subtree: bool,
+    insertion_mode: FfiInsertionMode,
+    is_document_root: bool,
+) {
     abort_on_panic(|| {
         assert!(!dom_node.is_null());
         // SAFETY: The builder and DOM node remain live throughout the call.
         let entry_facts = unsafe {
             (host.callbacks.principal_node_entry_facts)(host.callbacks.builder, dom_node, must_create_subtree)
         };
+        let kind = PrincipalNodeKind::of(entry_facts.style_node, is_document_root);
         let element_type_facts = host.element_type_facts(entry_facts.style_node);
-        let entry_decision = principal_node_entry_decision(entry_facts, element_type_facts, context);
+        let entry_decision = principal_node_entry_decision(entry_facts, kind, element_type_facts, context);
         if entry_decision.top_layer != TopLayerEntryDecision::Continue {
             if entry_decision.top_layer == TopLayerEntryDecision::SkipAndRequestZoneRebuild {
                 // A member found here without an attached box was cleared together with a hidden ancestor subtree, and
@@ -1835,7 +1890,7 @@ fn update_layout_tree(
         // SAFETY: The builder and DOM node remain live, and the callback retains frame-owned C++ objects.
         let pushed_frame = unsafe { (host.callbacks.push_principal_frame)(host.callbacks.builder, dom_node) };
         assert!(!pushed_frame.frame.is_null());
-        if entry_facts.is_element
+        if kind.is_element()
             && let Some(element) = StyleNodeID::from_raw(entry_facts.style_node)
         {
             // Recorded before the display decision, because an element with no box of its own is
@@ -1849,6 +1904,7 @@ fn update_layout_tree(
             );
         }
         let mut update = PrincipalNodeUpdate {
+            kind,
             host,
             state,
             frame: pushed_frame.frame,
@@ -1899,15 +1955,15 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     };
     // SAFETY: All pointers remain live throughout the build.
     let entry_facts = unsafe { (host.callbacks.principal_node_entry_facts)(host.callbacks.builder, document, false) };
-    assert!(entry_facts.is_document);
 
-    update_layout_tree(
+    update_layout_tree_from(
         &host,
         &mut state,
         document,
         &mut context,
         false,
         FfiInsertionMode::Append,
+        true,
     );
 
     let document_layout_node = host.layout().arena().layout_root();
@@ -4168,10 +4224,10 @@ mod tests {
         FfiCodePointCategoryFacts, FfiComputedContentType, FfiElementLayoutKind, FfiPrincipalBoxPlacement,
         FfiPrincipalNodeEntryFacts, FfiPseudoElement, FfiPseudoElementDecision, FfiPseudoElementFacts,
         FfiReplacedElementDisplayAdjustment, PrincipalBoxGenerationDecision, PrincipalBoxPlacementFacts,
-        SvgEntryDecision, TopLayerEntryDecision, TreeBuilderContext, adjusted_table_display_for_replaced_element,
-        display_contents_text_needs_style_wrapper, element_layout_kind, find_first_letter_in_text,
-        principal_box_generation_decision, principal_box_placement_decision, principal_node_entry_decision,
-        pseudo_element_decision,
+        PrincipalNodeKind, SvgEntryDecision, TopLayerEntryDecision, TreeBuilderContext,
+        adjusted_table_display_for_replaced_element, display_contents_text_needs_style_wrapper, element_layout_kind,
+        find_first_letter_in_text, principal_box_generation_decision, principal_box_placement_decision,
+        principal_node_entry_decision, pseudo_element_decision,
     };
     fn code_point_facts(code_point: u32) -> FfiCodePointCategoryFacts {
         FfiCodePointCategoryFacts {
@@ -4386,10 +4442,7 @@ mod tests {
             needs_layout_tree_update: false,
             may_reuse_layout_node_for_child_list_insertion: false,
             may_update_pseudo_elements_in_place: false,
-            is_document: false,
             has_layout_node: true,
-            is_element: true,
-            is_text: false,
             rendered_in_top_layer: false,
             layout_node_is_attached: true,
             style_node: 0,
@@ -4398,43 +4451,43 @@ mod tests {
         };
         let mut element_type_facts = 0;
         let mut context = TreeBuilderContext::default();
-        let decision = principal_node_entry_decision(facts, element_type_facts, &context);
+        let decision = principal_node_entry_decision(facts, PrincipalNodeKind::Element, element_type_facts, &context);
         assert!(!decision.should_create_layout_node);
         assert_eq!(decision.top_layer, TopLayerEntryDecision::Continue);
         assert_eq!(decision.svg, SvgEntryDecision::Continue);
 
         facts.rendered_in_top_layer = true;
         facts.layout_node_is_attached = false;
-        let decision = principal_node_entry_decision(facts, element_type_facts, &context);
+        let decision = principal_node_entry_decision(facts, PrincipalNodeKind::Element, element_type_facts, &context);
         assert_eq!(decision.top_layer, TopLayerEntryDecision::SkipAndRequestZoneRebuild);
 
         facts.rendered_in_top_layer = false;
         element_type_facts = element_adjustment_fact::REQUIRES_SVG_CONTAINER;
-        let decision = principal_node_entry_decision(facts, element_type_facts, &context);
+        let decision = principal_node_entry_decision(facts, PrincipalNodeKind::Element, element_type_facts, &context);
         assert_eq!(decision.svg, SvgEntryDecision::Skip);
 
         facts.must_create_subtree = true;
         element_type_facts |= element_adjustment_fact::IS_SVG_CONTAINER;
         context.has_svg_root = false;
-        let decision = principal_node_entry_decision(facts, element_type_facts, &context);
+        let decision = principal_node_entry_decision(facts, PrincipalNodeKind::Element, element_type_facts, &context);
         assert!(decision.should_create_layout_node);
         assert_eq!(decision.svg, SvgEntryDecision::EnterSvgRoot);
 
         element_type_facts =
             element_adjustment_fact::REQUIRES_SVG_CONTAINER | element_adjustment_fact::IS_SVG_FOREIGN_OBJECT_ELEMENT;
         context.has_svg_root = true;
-        let decision = principal_node_entry_decision(facts, element_type_facts, &context);
+        let decision = principal_node_entry_decision(facts, PrincipalNodeKind::Element, element_type_facts, &context);
         assert_eq!(decision.svg, SvgEntryDecision::EnterForeignContent);
         context.has_svg_root = false;
-        let decision = principal_node_entry_decision(facts, element_type_facts, &context);
+        let decision = principal_node_entry_decision(facts, PrincipalNodeKind::Element, element_type_facts, &context);
         assert_eq!(decision.svg, SvgEntryDecision::Skip);
 
         element_type_facts = 0;
         context.has_svg_root = true;
-        let decision = principal_node_entry_decision(facts, element_type_facts, &context);
+        let decision = principal_node_entry_decision(facts, PrincipalNodeKind::Element, element_type_facts, &context);
         assert_eq!(decision.svg, SvgEntryDecision::Skip);
         context.has_svg_root = false;
-        let decision = principal_node_entry_decision(facts, element_type_facts, &context);
+        let decision = principal_node_entry_decision(facts, PrincipalNodeKind::Element, element_type_facts, &context);
         assert_eq!(decision.svg, SvgEntryDecision::Continue);
     }
 
