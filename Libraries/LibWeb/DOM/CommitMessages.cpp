@@ -10,6 +10,7 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Node.h>
+#include <LibWeb/Dump.h>
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/NodeArena.h>
 
@@ -54,6 +55,9 @@ void CommitMessages::append(Layout::RustFFI::FfiCommitMessage const& message)
     case Layout::RustFFI::FfiCommitMessageKind::NavigableContainerViewportCommitted:
         m_messages.append(Message { .identity = identity, .kind = Kind::NavigableContainerViewportCommitted });
         return;
+    case Layout::RustFFI::FfiCommitMessageKind::UnexpectedFragmentedInline:
+        m_messages.append(Message { .identity = identity, .kind = Kind::UnexpectedFragmentedInline });
+        return;
     }
     VERIFY_NOT_REACHED();
 }
@@ -97,6 +101,14 @@ void CommitMessages::apply(Message const& message)
         if (auto* arena = m_document.layout_node_arena_if_created()) {
             if (auto* box = as_if<Layout::Box>(message.identity.bound_layout_node(*arena)))
                 box->notify_content_navigable_of_committed_viewport();
+        }
+        return;
+    case Kind::UnexpectedFragmentedInline:
+        if (auto* arena = m_document.layout_node_arena_if_created()) {
+            if (auto* node = message.identity.bound_layout_node(*arena)) {
+                dbgln("FIXME: InlineFormattingContext::dimension_box_on_line got unexpected box in inline context:");
+                dump_tree(*node);
+            }
         }
         return;
     }
