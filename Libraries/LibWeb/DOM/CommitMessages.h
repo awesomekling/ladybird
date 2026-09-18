@@ -46,6 +46,7 @@ private:
     enum class Kind : u8 {
         BoxPresence,
         ContentSizeChangedForContainerQueries,
+        NavigableContainerViewportCommitted,
     };
 
     struct Message {
