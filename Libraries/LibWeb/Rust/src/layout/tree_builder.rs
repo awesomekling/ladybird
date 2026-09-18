@@ -8,8 +8,11 @@ use super::*;
 
 use crate::abort_on_panic;
 use crate::css::style::layout_style::{AnonymousStyleKind, AnonymousStyleOverrides};
+use crate::css::style::tree::StyleNodeID;
 use crate::layout::layout_node_arena::LayoutNodeArena;
-use crate::layout::node_data::{GENERATED_FOR_AFTER, GENERATED_FOR_MARKER, NodeData, NodeFlag, NodeKind, NodeSlotId};
+use crate::layout::node_data::{
+    GENERATED_FOR_AFTER, GENERATED_FOR_BACKDROP, GENERATED_FOR_MARKER, NodeData, NodeFlag, NodeKind, NodeSlotId,
+};
 use crate::layout::text_chunker::{GraphemeSegmenter, code_point_at, code_unit_length_for_code_point};
 use crate::layout::tree_mutation::{UnplacedLayoutNode, free_subtree_and_destroy_shells};
 use crate::layout::{ComputedValuesView, FfiDisplay};
@@ -105,7 +108,6 @@ pub struct FfiDomTreeBuilderCallbacks {
     pub element_layout_node: unsafe extern "C" fn(*mut c_void) -> NodeSlotId,
     pub dom_node_layout_node: unsafe extern "C" fn(*mut c_void) -> NodeSlotId,
     pub layout_node_dom_element: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
-    pub element_pseudo_layout_node: unsafe extern "C" fn(*mut c_void, FfiPseudoElement) -> NodeSlotId,
     pub principal_node_entry_facts: unsafe extern "C" fn(*mut c_void, *mut c_void, bool) -> FfiPrincipalNodeEntryFacts,
     pub request_top_layer_zone_rebuild: unsafe extern "C" fn(*mut c_void),
     pub request_layout_tree_rebuild: unsafe extern "C" fn(*mut c_void, *mut c_void),
@@ -129,12 +131,14 @@ pub struct FfiDomTreeBuilderCallbacks {
 }
 
 /// The C++ frame that retains a principal node's old and new layout boxes, paired with the old
-/// box's arena slot so Rust can reason about in-place replacement without calling back.
+/// box's arena slot and the node's identity so Rust can reason about in-place replacement and find
+/// the node's other rows without calling back.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiPrincipalNodeFrame {
     pub frame: *mut c_void,
     pub old_layout_node: NodeSlotId,
+    pub style_node: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -1329,6 +1333,7 @@ struct PrincipalNodeUpdate<'host, 'callbacks, 'state, 'context> {
     frame: *mut c_void,
     old_layout_node: LayoutNode,
     dom_node: *mut c_void,
+    style_node: u32,
     context: &'context mut TreeBuilderContext,
     must_create_subtree: bool,
     insertion_mode: FfiInsertionMode,
@@ -1347,6 +1352,29 @@ impl PrincipalBoxConstruction {
             created_box: None,
             handled_display_contents: false,
         }
+    }
+}
+
+/// The box of the pseudo-element `generated_for` on the element `style_node` names, if it has one.
+fn pseudo_element_box(arena: &LayoutNodeArena, style_node: u32, generated_for: u8) -> LayoutNode {
+    match StyleNodeID::from_raw(style_node) {
+        Some(generator) => arena.bound_pseudo_element_row(generator, generated_for),
+        None => NodeSlotId::INVALID,
+    }
+}
+
+/// The box of the pseudo-element `generated_for` on the element `node` is the box of. Rows of a
+/// text node and anonymous rows name no element and have no pseudo-elements.
+fn pseudo_element_box_of_element_box(layout: &TreeBuilderHost<'_>, node: LayoutNode, generated_for: u8) -> LayoutNode {
+    if node_has_flag(layout.data(node), NodeFlag::Anonymous) {
+        return NodeSlotId::INVALID;
+    }
+    let arena = layout.arena();
+    match arena.node_style_node(node) {
+        Some(style_node) if style_node.element_index().is_some() => {
+            arena.bound_pseudo_element_row(style_node, generated_for)
+        }
+        _ => NodeSlotId::INVALID,
     }
 }
 
@@ -1378,9 +1406,7 @@ fn construct_principal_layout_node(
             // automatically discarded when the element's layout is recomputed.
             // A stale ::backdrop box is a viewport child, so removing it restructures the tree outside
             // every rebuild root.
-            // SAFETY: The DOM element remains live throughout the call.
-            let old_backdrop =
-                unsafe { (host.callbacks.element_pseudo_layout_node)(dom_node, FfiPseudoElement::Backdrop) };
+            let old_backdrop = pseudo_element_box(host.layout().arena(), update.style_node, GENERATED_FOR_BACKDROP);
             if !old_backdrop.is_invalid() {
                 update.state.layout_tree_update_escaped_rebuild_roots = true;
                 let layout_host = host.layout();
@@ -1788,6 +1814,7 @@ fn update_layout_tree(
             frame: pushed_frame.frame,
             old_layout_node: pushed_frame.old_layout_node,
             dom_node,
+            style_node: pushed_frame.style_node,
             context,
             must_create_subtree,
             insertion_mode,
@@ -3056,21 +3083,15 @@ fn insert_child_in_dom_order(
         sibling = host.next_sibling(sibling);
     }
 
-    // SAFETY: `parent` is a live layout node.
-    let parent_element = unsafe { (host.callbacks.layout_node_dom_element)(layout.shell(parent)) };
-    if !parent_element.is_null() {
-        // SAFETY: `parent_element` is a live element.
-        let after_layout_node =
-            unsafe { (host.callbacks.element_pseudo_layout_node)(parent_element, FfiPseudoElement::After) };
-        if !after_layout_node.is_invalid() {
-            let mut after_layout_child = after_layout_node;
-            while !layout.parent(after_layout_child).is_invalid() && layout.parent(after_layout_child) != parent {
-                after_layout_child = layout.parent(after_layout_child);
-            }
-            if layout.parent(after_layout_child) == parent {
-                layout.attach_child(parent, child, after_layout_child);
-                return;
-            }
+    let after_layout_node = pseudo_element_box_of_element_box(&layout, parent, GENERATED_FOR_AFTER);
+    if !after_layout_node.is_invalid() {
+        let mut after_layout_child = after_layout_node;
+        while !layout.parent(after_layout_child).is_invalid() && layout.parent(after_layout_child) != parent {
+            after_layout_child = layout.parent(after_layout_child);
+        }
+        if layout.parent(after_layout_child) == parent {
+            layout.attach_child(parent, child, after_layout_child);
+            return;
         }
     }
 

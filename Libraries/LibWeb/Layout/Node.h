@@ -242,6 +242,8 @@ public:
     // The StyleNodeID of the element or text node this row is bound to, or of the element it is
     // generated for, or 0.
     CSS::StyleNodeID style_node_id() const;
+    // The StyleNodeID a row bound to this DOM node records, or 0 for a node that has none.
+    static CSS::StyleNodeID style_node_of(DOM::Node const*);
     static void dom_node_style_node_changed(DOM::Node&, CSS::StyleNodeID old_style_node);
 
     void clear_committed_box();
