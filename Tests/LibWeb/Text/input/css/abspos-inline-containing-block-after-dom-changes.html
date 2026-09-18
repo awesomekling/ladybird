@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    body { margin: 0; }
+    .inline-containing-block { position: relative; }
+    .absolutely-positioned { position: absolute; inset: 0; }
+</style>
+<div style="height: 100px;"></div>
+<span class="inline-containing-block" id="first">first inline containing block</span>
+<div style="height: 100px;"></div>
+<span class="inline-containing-block" id="second">second inline containing block</span>
+<div style="height: 100px;"></div>
+<span class="inline-containing-block" id="third">third<span id="wrapper"></span></span>
+<div style="height: 100px;"></div>
+<span class="inline-containing-block" id="generator">generator</span>
+<script>
+    function printWhetherFilled(description, element, inlineContainingBlock) {
+        const rect = element.getBoundingClientRect();
+        const containingBlockRect = inlineContainingBlock.getBoundingClientRect();
+        const fills = rect.x === containingBlockRect.x && rect.y === containingBlockRect.y
+            && rect.width === containingBlockRect.width && rect.height === containingBlockRect.height;
+        println(`${description}: ${fills}`);
+    }
+
+    test(() => {
+        const absolutelyPositioned = document.createElement("div");
+        absolutelyPositioned.className = "absolutely-positioned";
+
+        // The inline containing block follows the box from one inline to the other, although
+        // nothing about either inline's style changes.
+        first.appendChild(absolutelyPositioned);
+        printWhetherFilled("moved into the first inline", absolutelyPositioned, first);
+        second.appendChild(absolutelyPositioned);
+        printWhetherFilled("moved into the second inline", absolutelyPositioned, second);
+
+        // An ancestor that generates no box of its own is still a step of the ancestry the
+        // answer is found along.
+        wrapper.appendChild(absolutelyPositioned);
+        printWhetherFilled("below an inline ancestor", absolutelyPositioned, third);
+        wrapper.style.display = "contents";
+        printWhetherFilled("below a display: contents ancestor", absolutelyPositioned, third);
+
+        // Whether an inline establishes a containing block is a matter of its style, which
+        // changes without the layout tree being rebuilt.
+        third.style.position = "static";
+        const viewportRect = absolutelyPositioned.getBoundingClientRect();
+        println(`fills the viewport without a positioned inline: ${viewportRect.x === 0 && viewportRect.y === 0
+            && viewportRect.width === window.innerWidth && viewportRect.height === window.innerHeight}`);
+        third.style.position = "relative";
+        printWhetherFilled("below an inline that became positioned again", absolutelyPositioned, third);
+
+        // A pseudo-element starts its walk at its generator, which may itself be the answer.
+        const style = document.createElement("style");
+        style.textContent = "#generator::before { content: ''; position: absolute; inset: 0; }";
+        document.head.appendChild(style);
+        const generatorRect = generator.getBoundingClientRect();
+        const beforeStyle = getComputedStyle(generator, "::before");
+        println(`a pseudo-element of the inline itself: ${parseFloat(beforeStyle.width) === generatorRect.width
+            && parseFloat(beforeStyle.height) === generatorRect.height}`);
+    });
+</script>

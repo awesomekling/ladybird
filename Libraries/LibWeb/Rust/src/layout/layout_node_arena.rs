@@ -536,6 +536,11 @@ pub(crate) struct LayoutNodeArena {
     /// The principal box each pseudo-element is bound to, keyed by its generator's identity and its
     /// kind. The generated content inside the box carries the same pair but is never bound.
     bound_pseudo_element_rows: RefCell<HashMap<(StyleNodeID, u8), NodeSlotId>>,
+    /// The shadow-including parent element of each element, as the tree build last saw it, indexed
+    /// by the element's dense index. An element's DOM parent only changes when it is inserted or
+    /// removed, and either one makes the tree build visit it again, so the fact keeps up with the
+    /// tree without being recomputed. 0 names no parent.
+    shadow_including_parent_elements: RefCell<Vec<u32>>,
     /// The viewport row the document is bound to. The document has no identity of its own.
     bound_viewport_row: Cell<NodeSlotId>,
     style_record_host: Cell<Option<FfiStyleRecordHostCallbacks>>,
@@ -647,6 +652,7 @@ impl LayoutNodeArena {
             first_rows_by_style_node: RefCell::new(RowsByStyleNode::default()),
             bound_rows_by_style_node: RefCell::new(RowsByStyleNode::default()),
             bound_pseudo_element_rows: RefCell::new(HashMap::default()),
+            shadow_including_parent_elements: RefCell::new(Vec::new()),
             bound_viewport_row: Cell::new(NodeSlotId::INVALID),
             style_record_host: Cell::new(None),
             shell_factory: Cell::new(None),
@@ -1251,10 +1257,36 @@ impl LayoutNodeArena {
         });
     }
 
+    /// Records what the tree build saw as `element`'s shadow-including parent element.
+    pub(crate) fn set_shadow_including_parent_element(&self, element: StyleNodeID, parent: Option<StyleNodeID>) {
+        let Some(index) = element.element_index() else {
+            return;
+        };
+        let mut parents = self.shadow_including_parent_elements.borrow_mut();
+        let index = index as usize;
+        let parent = parent.map_or(0, StyleNodeID::raw);
+        if parents.len() <= index {
+            if parent == 0 {
+                return;
+            }
+            parents.resize(index + 1, 0);
+        }
+        parents[index] = parent;
+    }
+
+    /// The shadow-including parent element of `element`: the DOM parent, or the shadow host when
+    /// the DOM parent is a shadow root. Elements whose layout the tree build never reached, and the
+    /// root element, have none.
+    pub(crate) fn shadow_including_parent_element(&self, element: StyleNodeID) -> Option<StyleNodeID> {
+        let index = element.element_index()? as usize;
+        StyleNodeID::from_raw(self.shadow_including_parent_elements.borrow().get(index).copied()?)
+    }
+
     /// Clears a retired identity from every row still carrying it, including rows of a removed
     /// subtree that outlive the element's disconnection.
     pub(crate) fn forget_style_node(&self, style_node: StyleNodeID) {
         self.assert_owner_thread();
+        self.set_shadow_including_parent_element(style_node, None);
         loop {
             let row = self.first_rows_by_style_node.borrow().head(style_node);
             if row.is_invalid() {

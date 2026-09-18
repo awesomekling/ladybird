@@ -1,0 +1,7 @@
+moved into the first inline: true
+moved into the second inline: true
+below an inline ancestor: true
+below a display: contents ancestor: true
+fills the viewport without a positioned inline: true
+below an inline that became positioned again: true
+a pseudo-element of the inline itself: true

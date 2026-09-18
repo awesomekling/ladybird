@@ -219,6 +219,9 @@ pub struct FfiPrincipalNodeEntryFacts {
     pub is_svg_container: bool,
     pub requires_svg_container: bool,
     pub is_svg_foreign_object: bool,
+    /// The identity of the node's shadow-including parent element, or 0. Layout walks this ancestry
+    /// to find the inline that establishes an absolutely positioned box's containing block.
+    pub shadow_including_parent_element: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -1824,6 +1827,16 @@ fn update_layout_tree(
         // SAFETY: The builder and DOM node remain live, and the callback retains frame-owned C++ objects.
         let pushed_frame = unsafe { (host.callbacks.push_principal_frame)(host.callbacks.builder, dom_node) };
         assert!(!pushed_frame.frame.is_null());
+        if entry_facts.is_element
+            && let Some(element) = StyleNodeID::from_raw(pushed_frame.style_node)
+        {
+            // Recorded before the display decision, because an element with no box of its own is
+            // still a step on the ancestry a descendant walks.
+            host.layout().arena().set_shadow_including_parent_element(
+                element,
+                StyleNodeID::from_raw(entry_facts.shadow_including_parent_element),
+            );
+        }
         let mut update = PrincipalNodeUpdate {
             host,
             state,
@@ -4364,6 +4377,7 @@ mod tests {
             is_svg_container: false,
             requires_svg_container: false,
             is_svg_foreign_object: false,
+            shadow_including_parent_element: 0,
         };
         let mut context = TreeBuilderContext::default();
         let decision = principal_node_entry_decision(facts, &context);

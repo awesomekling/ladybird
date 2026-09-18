@@ -346,6 +346,21 @@ pub(crate) fn establishes_positioning_containing_blocks(arena: &LayoutNodeArena,
     (false, false)
 }
 
+/// Whether a non-atomic inline establishes an absolute positioning containing block.
+///
+/// The trigger set is narrower than `establishes_positioning_containing_blocks()`: transform,
+/// contain, perspective and their friends explicitly do not apply to non-atomic inlines per their
+/// respective specs, so only `position` and the two filters are left.
+pub(crate) fn inline_establishes_positioning_containing_block(style: ComputedValuesView<'_>) -> bool {
+    let effects = style.effects();
+    style.box_values().position != positioning::STATIC
+        || will_change_has_property(style, b"position")
+        || filter_has_filters(&effects.filter)
+        || will_change_has_property(style, b"filter")
+        || filter_has_filters(&effects.backdrop_filter)
+        || will_change_has_property(style, b"backdrop-filter")
+}
+
 pub(crate) fn any_ancestor_establishes_a_fixed_position_containing_block(
     arena: &LayoutNodeArena,
     node: NodeSlotId,

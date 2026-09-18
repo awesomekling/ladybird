@@ -1259,6 +1259,7 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
                 .is_svg_container = node.is_svg_container(),
                 .requires_svg_container = node.requires_svg_container(),
                 .is_svg_foreign_object = node.is_svg_foreign_object_element(),
+                .shadow_including_parent_element = element ? Node::style_node_of(element->parent_or_shadow_host_element()).value() : 0,
             }; },
         .request_top_layer_zone_rebuild = [](void* node_pointer) {
             VERIFY(node_pointer);
