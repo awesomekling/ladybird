@@ -1604,6 +1604,17 @@ impl LayoutNodeArena {
 
     /// The box facts the element's published style record holds. A text node, an anonymous row and
     /// the document have no record and answer nothing.
+    /// Whether the element's published style record holds a `::first-letter`. A text node, an
+    /// anonymous row that names no element and the document have no record and answer no.
+    pub(crate) fn has_published_first_letter_style(&self, style_node: Option<StyleNodeID>) -> bool {
+        match style_node {
+            Some(style_node) if style_node.element_index().is_some() => {
+                self.with_style_engine(|engine| engine.has_published_first_letter_style(style_node))
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn published_box_facts(&self, style_node: Option<StyleNodeID>) -> Option<PublishedBoxFacts> {
         let style_node = style_node?;
         style_node.element_index()?;
