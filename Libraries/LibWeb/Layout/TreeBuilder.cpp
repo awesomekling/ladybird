@@ -1164,11 +1164,9 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
                 stroke_pattern = graphics_element->stroke_pattern(layout_node);
             }
             return {
-                .is_element = element != nullptr,
                 .content_visibility_hidden = element && element->style_group<CSS::ComputedValues::InheritedBoxValues>()->content_visibility_value() == CSS::ContentVisibility::Hidden,
                 .should_layout_dom_children = slot_element ? slot_element->assigned_nodes_internal().is_empty() && node.has_children() : node.has_children(),
                 .child_needs_layout_tree_update = node.child_needs_layout_tree_update(),
-                .is_document = node.is_document(),
                 .dom_children_parent = parent_node,
                 .shadow_root = shadow_root ? static_cast<DOM::ParentNode*>(shadow_root.ptr()) : nullptr,
                 .slot_element = slot_element,
@@ -1235,10 +1233,7 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
                 .needs_layout_tree_update = node.needs_layout_tree_update(),
                 .may_reuse_layout_node_for_child_list_insertion = can_reuse && can_insert_children,
                 .may_update_pseudo_elements_in_place = can_reuse && can_update_pseudo_elements,
-                .is_document = node.is_document(),
                 .has_layout_node = existing_layout_node != nullptr,
-                .is_element = element != nullptr,
-                .is_text = is<DOM::Text>(node),
                 .rendered_in_top_layer = element && element->rendered_in_top_layer(),
                 .layout_node_is_attached = existing_layout_node && existing_layout_node->has_parent(),
                 .style_node = Node::style_node_of(&node).value(),
