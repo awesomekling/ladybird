@@ -115,6 +115,9 @@ void Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     ScopeGuard guard = [&] {
         Layout::RustFFI::layout_arena_end_update_layout(arena.handle());
 
+        // Whatever the pass told the document takes effect before the read that joined for it.
+        apply_commit_messages();
+
         if (m_needs_scroll_container_resnap) {
             if (auto navigable = this->navigable(); navigable && navigable->active_document().ptr() == this)
                 navigable->re_snap_scroll_containers_after_layout_change();

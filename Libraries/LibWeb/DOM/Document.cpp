@@ -103,6 +103,7 @@
 #include <LibWeb/DOM/CDATASection.h>
 #include <LibWeb/DOM/CaretPosition.h>
 #include <LibWeb/DOM/Comment.h>
+#include <LibWeb/DOM/CommitMessages.h>
 #include <LibWeb/DOM/CustomEvent.h>
 #include <LibWeb/DOM/DOMImplementation.h>
 #include <LibWeb/DOM/Document.h>
@@ -624,6 +625,7 @@ Document::Document(Page& page, GC::Ref<EventTarget> relevant_global_event_target
     , m_relevant_global_event_target(relevant_global_event_target)
     , m_chrome_widget_registry(make_ref_counted<Painting::ChromeWidgetRegistry>())
     , m_invalidation_journal(make<InvalidationJournal>(*this))
+    , m_commit_messages(make<CommitMessages>(*this))
     , m_fonts(CSS::FontFaceSet::create(relevant_settings_object()))
     , m_temporary_document_for_fragment_parsing(temporary_document_for_fragment_parsing == TemporaryDocumentForFragmentParsing::Yes)
     , m_editing_host_manager(EditingHostManager::create(*this))
@@ -675,15 +677,11 @@ Layout::NodeArena& Document::layout_node_arena()
         // that DOM code reads a bit instead of looking up the node's row.
         Layout::RustFFI::layout_arena_set_box_presence_host(m_layout_node_arena->handle(), this, [](void* context, u32 style_node, u8 bits) {
             auto& document = *static_cast<Document*>(context);
-            bool has_layout_box = (bits & Layout::RustFFI::BOX_PRESENCE_HAS_LAYOUT_BOX) != 0;
-            bool has_committed_box = (bits & Layout::RustFFI::BOX_PRESENCE_HAS_COMMITTED_BOX) != 0;
-            // The document has no identity of its own; it is named by 0.
-            if (style_node == 0) {
-                document.set_box_presence(has_layout_box, has_committed_box);
-                return;
-            }
-            if (auto node = document.style_computer().node_for_style_node(CSS::StyleNodeID { style_node }))
-                node->set_box_presence(has_layout_box, has_committed_box);
+            // The document has no style node of its own; it is named by 0.
+            auto identity = style_node == 0 ? NodeIdentity::of_document() : NodeIdentity::of_style_node(CSS::StyleNodeID { style_node });
+            document.commit_messages().note_box_presence(identity,
+                (bits & Layout::RustFFI::BOX_PRESENCE_HAS_LAYOUT_BOX) != 0,
+                (bits & Layout::RustFFI::BOX_PRESENCE_HAS_COMMITTED_BOX) != 0);
         });
         Layout::RustFFI::layout_arena_set_shell_factory(m_layout_node_arena->handle(), this, [](void* context, Compositing::RustFFI::NodeSlotId slot, Layout::RustFFI::NodeKind kind) {
             auto& document = *static_cast<Document*>(context);
@@ -2253,6 +2251,11 @@ void Document::clear_devtools_layout_inspection_data()
 void Document::drain_invalidation_journal() const
 {
     m_invalidation_journal->drain();
+}
+
+void Document::apply_commit_messages()
+{
+    m_commit_messages->apply();
 }
 
 bool Document::layout_is_up_to_date() const

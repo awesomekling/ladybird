@@ -527,6 +527,9 @@ public:
     // The marks the DOM side has made on this document's render state but not written there yet.
     [[nodiscard]] InvalidationJournal& invalidation_journal() { return *m_invalidation_journal; }
     void drain_invalidation_journal() const;
+    // What the render side has told this document and the document has not acted on yet.
+    [[nodiscard]] CommitMessages& commit_messages() { return *m_commit_messages; }
+    void apply_commit_messages();
     void clear_devtools_layout_inspection_data();
     void prepare_for_rendering();
     void update_paint_and_hit_testing_properties_if_needed();
@@ -1672,6 +1675,7 @@ private:
     OwnPtr<Painting::DocumentPaintState> m_paint_state;
     NonnullRefPtr<Painting::ChromeWidgetRegistry> m_chrome_widget_registry;
     NonnullOwnPtr<InvalidationJournal> m_invalidation_journal;
+    NonnullOwnPtr<CommitMessages> m_commit_messages;
     bool m_may_have_content_visibility_auto_style { false };
 
     GC::Ptr<Node> m_hovered_node;
