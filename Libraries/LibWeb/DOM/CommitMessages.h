@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Vector.h>
+#include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
@@ -39,6 +40,10 @@ public:
     // A message a finished layout pass left for this document.
     void append(Layout::RustFFI::FfiCommitMessage const&);
 
+    // The node a rebuild escalates to, because the node that asked for it sits under an anonymous
+    // parent and only the render side knows where the escalation stops.
+    void note_needs_layout_tree_update(NodeIdentity, SetNeedsLayoutTreeUpdateReason);
+
     // Applies every message in order and empties the list.
     void apply();
 
@@ -47,6 +52,7 @@ private:
         BoxPresence,
         ContentSizeChangedForContainerQueries,
         NavigableContainerViewportCommitted,
+        NeedsLayoutTreeUpdate,
     };
 
     struct Message {
@@ -54,6 +60,8 @@ private:
         Kind kind;
         bool has_layout_box { false };
         bool has_committed_box { false };
+        // Only the layout tree update trace reads this.
+        SetNeedsLayoutTreeUpdateReason layout_tree_update_reason {};
     };
 
     void apply(Message const&);

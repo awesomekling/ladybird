@@ -101,7 +101,7 @@ fn commit_subtree(
             && crate::layout::node_facts::node_style_view(paintables.arena().data(node)).is_some_and(|style| {
                 content_size_change_affects_container_queries(style, old_content_size, new_content_size)
             })
-            && let Some(style_node) = commit_message_style_node(paintables.arena(), node)
+            && let Some(style_node) = paintables.arena().commit_message_style_node(node)
         {
             messages.push(FfiCommitMessage {
                 style_node,
@@ -146,17 +146,6 @@ fn commit_subtree(
     }
 }
 
-/// Names the node a row is bound to the way a commit message does: by its style node, or by 0 for
-/// the document, which is what the viewport row is bound to. An anonymous row names no DOM node,
-/// and there is nothing to tell the document about one.
-fn commit_message_style_node(arena: &LayoutNodeArena, node: Node) -> Option<u32> {
-    match arena.node_style_node(node) {
-        Some(style_node) => Some(style_node.raw()),
-        None if arena.data(node).kind.get() == NodeKind::Viewport => Some(0),
-        None => None,
-    }
-}
-
 fn content_size_change_affects_container_queries(
     style: crate::css::computed_value_views::ComputedValuesView<'_>,
     old_size: FfiCssPixelSize,
@@ -195,7 +184,7 @@ pub(crate) fn commit_replacing(
     );
     paintables.discard_absolute_rects_memoized_during_commit();
     for viewport in paintables.committed_navigable_container_viewports() {
-        if let Some(style_node) = commit_message_style_node(paintables.arena(), *viewport) {
+        if let Some(style_node) = paintables.arena().commit_message_style_node(*viewport) {
             messages.push(FfiCommitMessage {
                 style_node,
                 kind: FfiCommitMessageKind::NavigableContainerViewportCommitted,

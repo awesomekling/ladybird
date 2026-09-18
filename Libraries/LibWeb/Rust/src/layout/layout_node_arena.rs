@@ -819,6 +819,11 @@ impl LayoutNodeArena {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_style_node_for_test(&self, slot: NodeSlotId, style_node: Option<StyleNodeID>) {
+        self.set_node_style_node(slot, style_node);
+    }
+
     pub(crate) fn enroll_node_for_replaced_content_facts_sync_if_eligible(&self, node: NodeSlotId) {
         let data = self.data(node);
         if !super::node_facts::node_may_have_replaced_content_facts_including_size_containment(data) {
@@ -1054,6 +1059,20 @@ impl LayoutNodeArena {
         let data = self.data(id);
         data.generated_for.set(generated_for);
         self.set_node_style_node(id, generator);
+    }
+
+    /// Names the DOM node a row is bound to the way a commit message does: by its style node, or
+    /// by 0 for the document, which is what the viewport row is bound to. An anonymous row names
+    /// no DOM node, and there is nothing to tell the document about one.
+    pub(crate) fn commit_message_style_node(&self, id: NodeSlotId) -> Option<u32> {
+        if !self.slot_is_live(id) {
+            return None;
+        }
+        match self.node_style_node(id) {
+            Some(style_node) => Some(style_node.raw()),
+            None if self.data(id).kind.get() == NodeKind::Viewport => Some(0),
+            None => None,
+        }
     }
 
     pub(crate) fn node_style_node(&self, id: NodeSlotId) -> Option<StyleNodeID> {
