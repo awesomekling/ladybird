@@ -1231,10 +1231,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             LayoutTreeBuilderAccess::register_svg_resource_reference(
                 *static_cast<SVG::SVGElement*>(resource_pointer),
                 *static_cast<SVG::SVGGraphicsElement*>(graphics_element_pointer)); },
-        .layout_node_dom_element = [](void* layout_node_pointer) -> void* {
-            VERIFY(layout_node_pointer);
-            auto* dom_node = static_cast<Layout::Node*>(layout_node_pointer)->dom_node();
-            return dom_node ? as_if<DOM::Element>(*dom_node) : nullptr; },
         .principal_node_entry_facts = [](void*, void* node_pointer, bool must_create_subtree) -> RustFFI::FfiPrincipalNodeEntryFacts {
             VERIFY(node_pointer);
             auto& node = *static_cast<DOM::Node*>(node_pointer);
@@ -1265,10 +1261,12 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
         .request_top_layer_zone_rebuild = [](void* node_pointer) {
             VERIFY(node_pointer);
             static_cast<DOM::Node*>(node_pointer)->document().set_top_layer_needs_layout_zone_rebuild(); },
-        .request_layout_tree_rebuild = [](void* builder_pointer, void* element_pointer) {
+        .request_layout_tree_rebuild = [](void* builder_pointer, u32 style_node) {
             VERIFY(builder_pointer);
-            VERIFY(element_pointer);
-            static_cast<DOM::Element*>(element_pointer)->set_needs_layout_tree_update(true, DOM::SetNeedsLayoutTreeUpdateReason::PseudoElementBoxEscapedRebuildRoot); },
+            auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
+            auto element = builder.m_document->style_computer().element_for_style_node(CSS::StyleNodeID { style_node });
+            VERIFY(element);
+            element->set_needs_layout_tree_update(true, DOM::SetNeedsLayoutTreeUpdateReason::PseudoElementBoxEscapedRebuildRoot); },
         .push_principal_frame = [](void* builder_pointer, void* node_pointer) -> RustFFI::FfiPrincipalNodeFrame {
             VERIFY(builder_pointer);
             VERIFY(node_pointer);
