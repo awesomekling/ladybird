@@ -156,7 +156,6 @@ pub struct FfiPreparedPrincipalElementFacts {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiDisplayContentsFacts {
-    pub child_needs_layout_tree_update: bool,
     pub dom_children_parent: *mut c_void,
     pub shadow_root: *mut c_void,
     pub slot_element: *mut c_void,
@@ -183,7 +182,6 @@ pub struct FfiFlatTreeRenderFacts {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiPrincipalDescendantFacts {
-    pub child_needs_layout_tree_update: bool,
     pub dom_children_parent: *mut c_void,
     pub shadow_root: *mut c_void,
     pub slot_element: *mut c_void,
@@ -675,6 +673,14 @@ impl DomTreeBuilderHost<'_> {
             .has_dom_children(StyleNodeID::from_raw(style_node))
     }
 
+    /// Whether the style mirror holds a layout tree update mark below the node `style_node` names,
+    /// which is what tells the walk it has to descend into a node whose own box can stay.
+    fn child_needs_layout_tree_update(&self, style_node: u32) -> bool {
+        self.layout()
+            .arena()
+            .child_needs_layout_tree_update(StyleNodeID::from_raw(style_node))
+    }
+
     /// Whether the style store holds the element in the top layer.
     fn rendered_in_top_layer(&self, style_node: u32) -> bool {
         self.element_type_facts(style_node) & element_adjustment_fact::RENDERED_IN_TOP_LAYER != 0
@@ -929,7 +935,8 @@ unsafe fn update_layout_tree_for_display_contents(
             assert!(placed.is_none());
         }
 
-        if !content_visibility_hidden && (should_create_layout_node || facts.child_needs_layout_tree_update) {
+        if !content_visibility_hidden && (should_create_layout_node || host.child_needs_layout_tree_update(style_node))
+        {
             let must_create_children = should_create_layout_node;
             if !facts.shadow_root.is_null() {
                 // SAFETY: The callback table, shadow root, and context remain valid.
@@ -1170,7 +1177,7 @@ unsafe fn update_principal_node_descendants(
             }
         }
 
-        if (should_create_layout_node || facts.child_needs_layout_tree_update)
+        if (should_create_layout_node || host.child_needs_layout_tree_update(dom_children_owner))
             && (!facts.shadow_root.is_null() || lays_out_dom_children)
             && layout_node_can_have_children
             && !content_visibility_hidden
