@@ -114,7 +114,6 @@ pub struct FfiDomTreeBuilderCallbacks {
     pub pop_principal_frame: unsafe extern "C" fn(*mut c_void, *mut c_void),
     pub prepare_principal_element:
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, bool) -> FfiPreparedPrincipalElementFacts,
-    pub principal_element_layout_facts: unsafe extern "C" fn(*mut c_void, *mut c_void) -> FfiElementLayoutFacts,
     pub create_principal_element_layout:
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, FfiElementLayoutKind) -> NodeSlotId,
     pub create_principal_document_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
@@ -151,6 +150,8 @@ pub struct FfiPrincipalNodeFrame {
 #[repr(C)]
 pub struct FfiPreparedPrincipalElementFacts {
     pub display: FfiPrincipalDisplayFacts,
+    // Only meaningful when the element is about to get a fresh layout node.
+    pub has_content_replacement: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -234,12 +235,6 @@ pub struct FfiPrincipalDisplayFacts {
     pub display_is_table_caption: bool,
 }
 
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiElementLayoutFacts {
-    pub has_content_replacement: bool,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum FfiElementLayoutKind {
@@ -267,13 +262,13 @@ fn apply_replaced_display_adjustment(
 }
 
 pub(crate) fn element_layout_kind(
-    facts: FfiElementLayoutFacts,
+    has_content_replacement: bool,
     element_type_facts: u32,
     layout_svg_mask_or_clip_path: bool,
     layout_svg_pattern: bool,
 ) -> FfiElementLayoutKind {
     let has = |fact: u32| element_type_facts & fact != 0;
-    if facts.has_content_replacement {
+    if has_content_replacement {
         FfiElementLayoutKind::ContentReplacement
     } else if layout_svg_mask_or_clip_path {
         if has(element_adjustment_fact::IS_SVG_MASK_ELEMENT) {
@@ -1483,10 +1478,8 @@ fn construct_principal_layout_node(
             };
         }
         if should_create_layout_node {
-            // SAFETY: The frame and element remain live throughout construction.
-            let layout_facts = unsafe { (host.callbacks.principal_element_layout_facts)(frame, dom_node) };
             let layout_kind = element_layout_kind(
-                layout_facts,
+                prepared.has_content_replacement,
                 element_type_facts,
                 context.layout_svg_mask_or_clip_path,
                 context.layout_svg_pattern,
@@ -4154,13 +4147,13 @@ mod tests {
     use crate::css::style::bridge::element_adjustment_fact;
     use crate::layout::node_data::NodeSlotId;
     use crate::layout::tree_builder::{
-        FfiCodePointCategoryFacts, FfiComputedContentType, FfiElementLayoutFacts, FfiElementLayoutKind,
-        FfiPrincipalBoxPlacement, FfiPrincipalNodeEntryFacts, FfiPseudoElement, FfiPseudoElementDecision,
-        FfiPseudoElementFacts, FfiReplacedElementDisplayAdjustment, PrincipalBoxGenerationDecision,
-        PrincipalBoxPlacementFacts, SvgEntryDecision, TopLayerEntryDecision, TreeBuilderContext,
-        adjusted_table_display_for_replaced_element, display_contents_text_needs_style_wrapper, element_layout_kind,
-        find_first_letter_in_text, principal_box_generation_decision, principal_box_placement_decision,
-        principal_node_entry_decision, pseudo_element_decision,
+        FfiCodePointCategoryFacts, FfiComputedContentType, FfiElementLayoutKind, FfiPrincipalBoxPlacement,
+        FfiPrincipalNodeEntryFacts, FfiPseudoElement, FfiPseudoElementDecision, FfiPseudoElementFacts,
+        FfiReplacedElementDisplayAdjustment, PrincipalBoxGenerationDecision, PrincipalBoxPlacementFacts,
+        SvgEntryDecision, TopLayerEntryDecision, TreeBuilderContext, adjusted_table_display_for_replaced_element,
+        display_contents_text_needs_style_wrapper, element_layout_kind, find_first_letter_in_text,
+        principal_box_generation_decision, principal_box_placement_decision, principal_node_entry_decision,
+        pseudo_element_decision,
     };
     fn code_point_facts(code_point: u32) -> FfiCodePointCategoryFacts {
         FfiCodePointCategoryFacts {
@@ -4429,27 +4422,22 @@ mod tests {
 
     #[test]
     fn specialized_element_layout_kinds() {
-        let mut facts = FfiElementLayoutFacts {
-            has_content_replacement: false,
-        };
         assert_eq!(
-            element_layout_kind(facts, 0, false, false),
+            element_layout_kind(false, 0, false, false),
             FfiElementLayoutKind::Normal
         );
 
-        facts.has_content_replacement = true;
         assert_eq!(
-            element_layout_kind(facts, 0, false, false),
+            element_layout_kind(true, 0, false, false),
             FfiElementLayoutKind::ContentReplacement
         );
-        facts.has_content_replacement = false;
         assert_eq!(
-            element_layout_kind(facts, element_adjustment_fact::IS_SVG_MASK_ELEMENT, true, false),
+            element_layout_kind(false, element_adjustment_fact::IS_SVG_MASK_ELEMENT, true, false),
             FfiElementLayoutKind::SvgMask
         );
 
         assert_eq!(
-            element_layout_kind(facts, element_adjustment_fact::IS_SVG_PATTERN_ELEMENT, false, true),
+            element_layout_kind(false, element_adjustment_fact::IS_SVG_PATTERN_ELEMENT, false, true),
             FfiElementLayoutKind::SvgPattern
         );
     }

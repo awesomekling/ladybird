@@ -1324,17 +1324,15 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             frame.style_record_owner->pin_style_record(frame.style_record_identity);
             auto const* box_values = element.style_group<CSS::ComputedValues::BoxValues>();
             VERIFY(box_values);
+            auto has_content_replacement = false;
+            if (should_create_layout_node) {
+                auto const* content_values = element.style_group<CSS::ComputedValues::ContentValues>();
+                VERIFY(content_values);
+                has_content_replacement = content_replacement_image(content_values->computed_content_value()) != nullptr;
+            }
             return {
                 .display = ffi_principal_display_facts(box_values->display_value()),
-            }; },
-        .principal_element_layout_facts = [](void* frame_pointer, void* element_pointer) -> RustFFI::FfiElementLayoutFacts {
-            VERIFY(frame_pointer);
-            VERIFY(element_pointer);
-            auto& element = *static_cast<DOM::Element*>(element_pointer);
-            auto const* content_values = element.style_group<CSS::ComputedValues::ContentValues>();
-            VERIFY(content_values);
-            return {
-                .has_content_replacement = content_replacement_image(content_values->computed_content_value()) != nullptr,
+                .has_content_replacement = has_content_replacement,
             }; },
         .create_principal_element_layout = [](void* builder_pointer, void* frame_pointer, void* element_pointer, RustFFI::FfiElementLayoutKind kind) -> Compositing::RustFFI::NodeSlotId {
             VERIFY(builder_pointer);
