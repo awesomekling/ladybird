@@ -1,0 +1,4 @@
+document target: 70
+shadow target with no name of its own: 70
+shadow target beside a name of its own: 200
+target two shadow trees deep: 130

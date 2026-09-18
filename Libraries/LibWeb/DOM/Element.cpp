@@ -2197,17 +2197,31 @@ void Element::publish_custom_property_names()
     }
 }
 
+// The anchor names of one tree scope, and the identity the render side names that scope by: the
+// shadow host of the scope's root, or nothing for the document tree.
+struct AnchorNameScope {
+    AnchorNameMap& names;
+    Optional<CSS::StyleNodeID> host;
+};
+
+static AnchorNameScope anchor_name_scope_of(Element& element, Node& tree_root)
+{
+    if (auto* shadow_root = as_if<ShadowRoot>(tree_root)) {
+        auto* host = shadow_root->host();
+        return { shadow_root->anchor_name_map(), Optional<CSS::StyleNodeID> { host ? host->style_node_id() : CSS::StyleNodeID {} } };
+    }
+    return { element.document().anchor_name_map(), OptionalNone {} };
+}
+
 static bool unregister_current_anchor_names(Element& element, Node& tree_root)
 {
     auto const* anchor_values = element.style_group<CSS::ComputedValues::AnchorValues>();
     if (!anchor_values || anchor_values->anchor_names_span().is_empty())
         return false;
 
-    auto& anchor_names = is<ShadowRoot>(tree_root)
-        ? as<ShadowRoot>(tree_root).anchor_name_map()
-        : element.document().anchor_name_map();
+    auto scope = anchor_name_scope_of(element, tree_root);
     for (auto const& name : anchor_values->anchor_names_span())
-        anchor_names.unregister_name(name, element);
+        scope.names.unregister_name(name, element, scope.host);
     return true;
 }
 
@@ -2524,20 +2538,18 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_style_engine_reaction(b
     // Update the anchor name registry when anchor-name changes.
     // FIXME: The tree root should be determined by the stylesheet origin, not the element's position in the tree.
     if (is_connected()) {
-        auto& anchor_names = as_if<ShadowRoot>(root())
-            ? as<ShadowRoot>(root()).anchor_name_map()
-            : document().anchor_name_map();
+        auto scope = anchor_name_scope_of(*this, root());
         bool element_had_registered_anchor_names = false;
         if (old_computed_values) {
             for (auto const& name : old_computed_values->anchor_names()) {
                 element_had_registered_anchor_names = true;
-                anchor_names.unregister_name(name, *this);
+                scope.names.unregister_name(name, *this, scope.host);
             }
         }
         bool element_has_anchor_names = false;
         for (auto const& name : new_style->anchor_names()) {
             element_has_anchor_names = true;
-            anchor_names.register_name(name, *this);
+            scope.names.register_name(name, *this, scope.host);
         }
 
         // Anchor names that vanish here become invisible to the partial relayout planner's

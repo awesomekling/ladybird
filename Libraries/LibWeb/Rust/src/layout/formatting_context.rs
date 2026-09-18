@@ -928,7 +928,6 @@ pub struct FfiLayoutHostCallbacks {
     ) -> svg_formatting_context::FfiSvgPathResult,
     pub svg_image_bounding_box:
         unsafe extern "C" fn(*mut c_void, *mut c_void, CssPixels, CssPixels) -> svg_formatting_context::FfiFloatRect,
-    pub anchor_lookup: unsafe extern "C" fn(*mut c_void, *mut c_void, usize, *const *mut c_void, usize) -> NodeSlotId,
     /// The commit messages a finished commit leaves for the document, in the order it produced
     /// them.
     pub deliver_commit_messages: unsafe extern "C" fn(*mut c_void, *const commit::FfiCommitMessage, usize),

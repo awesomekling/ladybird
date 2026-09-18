@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    body { margin: 0; }
+    #document-anchor { anchor-name: --shared; width: 40px; height: 10px; margin-left: 70px; }
+    #document-target { position: absolute; left: anchor(--shared left, 7px); }
+</style>
+<div id="document-anchor"></div>
+<div id="document-target"></div>
+<div id="scoped-host"></div>
+<div id="outward-host"></div>
+<div id="nested-host"></div>
+<script>
+    const shadowTarget = `<div id="target" style="position: absolute; left: anchor(--shared left, 7px);"></div>`;
+
+    test(() => {
+        // A name registered inside a shadow tree is invisible to the document tree.
+        const scopedRoot = document.getElementById("scoped-host").attachShadow({ mode: "open" });
+        scopedRoot.innerHTML = `<div style="anchor-name: --shared; margin-left: 200px;"></div>`;
+        println(`document target: ${document.getElementById("document-target").offsetLeft}`);
+
+        // A name the shadow tree does not register is looked for in the host's tree scope.
+        const outwardRoot = document.getElementById("outward-host").attachShadow({ mode: "open" });
+        outwardRoot.innerHTML = shadowTarget;
+        println(`shadow target with no name of its own: ${outwardRoot.getElementById("target").offsetLeft}`);
+
+        // The name the innermost scope registers wins over the one outside it.
+        scopedRoot.append(document.createRange().createContextualFragment(shadowTarget));
+        println(`shadow target beside a name of its own: ${scopedRoot.getElementById("target").offsetLeft}`);
+
+        // The search leaves one shadow tree at a time.
+        const nestedRoot = document.getElementById("nested-host").attachShadow({ mode: "open" });
+        nestedRoot.innerHTML = `<div id="inner-host" style="anchor-name: --shared; margin-left: 130px;"></div>`;
+        const innerRoot = nestedRoot.getElementById("inner-host").attachShadow({ mode: "open" });
+        innerRoot.innerHTML = shadowTarget;
+        println(`target two shadow trees deep: ${innerRoot.getElementById("target").offsetLeft}`);
+    });
+</script>

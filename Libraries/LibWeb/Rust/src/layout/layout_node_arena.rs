@@ -515,6 +515,15 @@ impl RowsByStyleNode {
     }
 }
 
+/// Where an element sits in the shadow-including tree, as the tree build last saw it: the identity
+/// of its shadow-including parent element, or 0, and whether the step to that parent crossed a
+/// shadow root, which makes the parent the host of the tree scope the element is in.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct ShadowIncludingParent {
+    pub(crate) element: u32,
+    pub(crate) parent_is_a_shadow_root: bool,
+}
+
 pub(crate) struct LayoutNodeArena {
     chunks: Vec<Box<Chunk>>,
     chunks_by_address: Vec<ChunkAddress>,
@@ -536,11 +545,16 @@ pub(crate) struct LayoutNodeArena {
     /// The principal box each pseudo-element is bound to, keyed by its generator's identity and its
     /// kind. The generated content inside the box carries the same pair but is never bound.
     bound_pseudo_element_rows: RefCell<HashMap<(StyleNodeID, u8), NodeSlotId>>,
-    /// The shadow-including parent element of each element, as the tree build last saw it, indexed
+    /// Where each element sits in the shadow-including tree, as the tree build last saw it, indexed
     /// by the element's dense index. An element's DOM parent only changes when it is inserted or
     /// removed, and either one makes the tree build visit it again, so the fact keeps up with the
-    /// tree without being recomputed. 0 names no parent.
-    shadow_including_parent_elements: RefCell<Vec<u32>>,
+    /// tree without being recomputed.
+    shadow_including_parent_elements: RefCell<Vec<ShadowIncludingParent>>,
+    /// The elements carrying each anchor name, in tree order, keyed by the tree scope the name is
+    /// registered in - the identity of its shadow host, or 0 for the document tree - and the name's
+    /// interned representation. The document keeps the registry the names go into and republishes a
+    /// name's list whenever it changes, so an anchor query during layout reads it instead of asking.
+    anchor_name_elements: RefCell<HashMap<(u32, usize), Vec<StyleNodeID>>>,
     /// The viewport row the document is bound to. The document has no identity of its own.
     bound_viewport_row: Cell<NodeSlotId>,
     style_record_host: Cell<Option<FfiStyleRecordHostCallbacks>>,
@@ -653,6 +667,7 @@ impl LayoutNodeArena {
             bound_rows_by_style_node: RefCell::new(RowsByStyleNode::default()),
             bound_pseudo_element_rows: RefCell::new(HashMap::default()),
             shadow_including_parent_elements: RefCell::new(Vec::new()),
+            anchor_name_elements: RefCell::new(HashMap::default()),
             bound_viewport_row: Cell::new(NodeSlotId::INVALID),
             style_record_host: Cell::new(None),
             shell_factory: Cell::new(None),
@@ -1257,36 +1272,88 @@ impl LayoutNodeArena {
         });
     }
 
-    /// Records what the tree build saw as `element`'s shadow-including parent element.
-    pub(crate) fn set_shadow_including_parent_element(&self, element: StyleNodeID, parent: Option<StyleNodeID>) {
+    /// Records what the tree build saw of `element`'s place in the shadow-including tree.
+    pub(crate) fn set_shadow_including_parent_element(&self, element: StyleNodeID, parent: ShadowIncludingParent) {
         let Some(index) = element.element_index() else {
             return;
         };
         let mut parents = self.shadow_including_parent_elements.borrow_mut();
         let index = index as usize;
-        let parent = parent.map_or(0, StyleNodeID::raw);
         if parents.len() <= index {
-            if parent == 0 {
+            if parent.element == 0 {
                 return;
             }
-            parents.resize(index + 1, 0);
+            parents.resize(index + 1, ShadowIncludingParent::default());
         }
         parents[index] = parent;
+    }
+
+    fn shadow_including_parent(&self, element: StyleNodeID) -> ShadowIncludingParent {
+        let Some(index) = element.element_index() else {
+            return ShadowIncludingParent::default();
+        };
+        self.shadow_including_parent_elements
+            .borrow()
+            .get(index as usize)
+            .copied()
+            .unwrap_or_default()
     }
 
     /// The shadow-including parent element of `element`: the DOM parent, or the shadow host when
     /// the DOM parent is a shadow root. Elements whose layout the tree build never reached, and the
     /// root element, have none.
     pub(crate) fn shadow_including_parent_element(&self, element: StyleNodeID) -> Option<StyleNodeID> {
-        let index = element.element_index()? as usize;
-        StyleNodeID::from_raw(self.shadow_including_parent_elements.borrow().get(index).copied()?)
+        StyleNodeID::from_raw(self.shadow_including_parent(element).element)
+    }
+
+    /// The host of the shadow root `element` is in, or none when it is in the document tree. The
+    /// shadow root itself has no identity, so the tree scope is named by its host.
+    pub(crate) fn tree_scope_host(&self, element: StyleNodeID) -> Option<StyleNodeID> {
+        let mut ancestor = Some(element);
+        while let Some(current) = ancestor {
+            let parent = self.shadow_including_parent(current);
+            if parent.parent_is_a_shadow_root {
+                return StyleNodeID::from_raw(parent.element);
+            }
+            ancestor = StyleNodeID::from_raw(parent.element);
+        }
+        None
+    }
+
+    /// Replaces the elements registered under `anchor_name` in the tree scope hosted by
+    /// `scope_host`, in tree order. An empty list forgets the name.
+    pub(crate) fn set_anchor_name_elements(&self, scope_host: u32, anchor_name: usize, elements: &[StyleNodeID]) {
+        let mut names = self.anchor_name_elements.borrow_mut();
+        if elements.is_empty() {
+            names.remove(&(scope_host, anchor_name));
+        } else {
+            names.insert((scope_host, anchor_name), elements.to_vec());
+        }
+    }
+
+    /// The last element in tree order registered under `anchor_name` in the tree scope hosted by
+    /// `scope_host` that `is_acceptable` accepts.
+    pub(crate) fn last_element_with_anchor_name(
+        &self,
+        scope_host: Option<StyleNodeID>,
+        anchor_name: usize,
+        mut is_acceptable: impl FnMut(StyleNodeID) -> bool,
+    ) -> Option<StyleNodeID> {
+        let names = self.anchor_name_elements.borrow();
+        let elements = names.get(&(scope_host.map_or(0, StyleNodeID::raw), anchor_name))?;
+        elements.iter().rev().copied().find(|&element| is_acceptable(element))
     }
 
     /// Clears a retired identity from every row still carrying it, including rows of a removed
     /// subtree that outlive the element's disconnection.
     pub(crate) fn forget_style_node(&self, style_node: StyleNodeID) {
         self.assert_owner_thread();
-        self.set_shadow_including_parent_element(style_node, None);
+        self.set_shadow_including_parent_element(style_node, ShadowIncludingParent::default());
+        // A retired shadow host takes its tree scope with it, and the host withdraws no names from
+        // a scope it can no longer name.
+        self.anchor_name_elements
+            .borrow_mut()
+            .retain(|&(scope_host, _), _| scope_host != style_node.raw());
         loop {
             let row = self.first_rows_by_style_node.borrow().head(style_node);
             if row.is_invalid() {
@@ -3938,6 +4005,33 @@ pub unsafe extern "C" fn layout_arena_bump_fragment_cache_epoch_of_self_and_ance
 ) {
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
     unsafe { LayoutNodeArena::from_handle(arena) }.bump_fragment_cache_epoch_of_self_and_ancestors(node);
+}
+
+/// Publishes the elements registered under one anchor name in one tree scope, in tree order.
+///
+/// # Safety
+///
+/// `elements` must name `count` element identities for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_anchor_name_elements(
+    arena: *mut c_void,
+    scope_host: u32,
+    anchor_name: usize,
+    elements: *const u32,
+    count: usize,
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let elements: Vec<_> = if count == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: The C++ caller keeps the element array alive for this call.
+        unsafe { std::slice::from_raw_parts(elements, count) }
+            .iter()
+            .filter_map(|&raw| StyleNodeID::from_raw(raw))
+            .collect()
+    };
+    // SAFETY: The C++ wrapper keeps the arena alive for this call.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_anchor_name_elements(scope_host, anchor_name, &elements);
 }
 
 #[unsafe(no_mangle)]

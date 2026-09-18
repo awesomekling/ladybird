@@ -5,11 +5,13 @@
  */
 
 #include <LibWeb/DOM/AnchorNameMap.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/Layout/NodeArena.h>
 
 namespace Web::DOM {
 
-void AnchorNameMap::register_name(Utf16FlyString const& name, GC::Ref<Element> element)
+void AnchorNameMap::register_name(Utf16FlyString const& name, GC::Ref<Element> element, Optional<CSS::StyleNodeID> scope_host)
 {
     auto& elements = m_map.ensure(name);
     if (elements.contains_slow(element))
@@ -23,28 +25,52 @@ void AnchorNameMap::register_name(Utf16FlyString const& name, GC::Ref<Element> e
         elements.insert(*index, element);
     else
         elements.append(element);
+
+    publish(name, element->document(), scope_host);
 }
 
-void AnchorNameMap::unregister_name(Utf16FlyString const& name, GC::Ref<Element> element)
+void AnchorNameMap::unregister_name(Utf16FlyString const& name, GC::Ref<Element> element, Optional<CSS::StyleNodeID> scope_host)
 {
     auto it = m_map.find(name);
     if (it == m_map.end())
         return;
     it->value.remove_first_matching([&](auto& e) { return e == element; });
+    auto& document = element->document();
     if (it->value.is_empty())
         m_map.remove(it);
+    publish(name, document, scope_host);
 }
 
-GC::Ptr<Element> AnchorNameMap::last_element_by_name_matching(Utf16FlyString const& name, Function<bool(Element&)> const& is_acceptable) const
+void AnchorNameMap::publish(Utf16FlyString const& name, Document& document, Optional<CSS::StyleNodeID> scope_host) const
 {
+    // A shadow host whose identity is already retired has left the tree together with its shadow
+    // root, so nothing can reach this scope any more. Naming it anyway would name the document.
+    if (scope_host.has_value() && !scope_host->value())
+        return;
+
     auto it = m_map.find(name);
-    if (it == m_map.end())
-        return {};
-    for (auto i = it->value.size(); i-- > 0;) {
-        if (is_acceptable(it->value[i]))
-            return it->value[i];
+    auto* arena = document.layout_node_arena_if_created();
+    if (!arena) {
+        // Nothing was published to a document without an arena, so there is nothing to withdraw
+        // either. A document that registers a name is one that lays out, so the arena the fact
+        // belongs to is worth creating here rather than replaying the registry later.
+        if (it == m_map.end())
+            return;
+        arena = &document.layout_node_arena();
     }
-    return {};
+
+    Vector<u32> style_nodes;
+    if (it != m_map.end()) {
+        style_nodes.ensure_capacity(it->value.size());
+        for (auto const& element : it->value)
+            style_nodes.unchecked_append(element->style_node_id().value());
+    }
+    Layout::RustFFI::layout_arena_set_anchor_name_elements(
+        arena->handle(),
+        scope_host.value_or(CSS::StyleNodeID {}).value(),
+        name.raw_identity(),
+        style_nodes.data(),
+        style_nodes.size());
 }
 
 }
