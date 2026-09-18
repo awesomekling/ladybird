@@ -9,7 +9,7 @@ use super::*;
 use crate::abort_on_panic;
 use crate::css::style::layout_style::{AnonymousStyleKind, AnonymousStyleOverrides};
 use crate::css::style::tree::StyleNodeID;
-use crate::layout::layout_node_arena::LayoutNodeArena;
+use crate::layout::layout_node_arena::{LayoutNodeArena, ShadowIncludingParent};
 use crate::layout::node_data::{
     GENERATED_FOR_AFTER, GENERATED_FOR_BACKDROP, GENERATED_FOR_MARKER, NodeData, NodeFlag, NodeKind, NodeSlotId,
 };
@@ -219,9 +219,11 @@ pub struct FfiPrincipalNodeEntryFacts {
     pub is_svg_container: bool,
     pub requires_svg_container: bool,
     pub is_svg_foreign_object: bool,
-    /// The identity of the node's shadow-including parent element, or 0. Layout walks this ancestry
-    /// to find the inline that establishes an absolutely positioned box's containing block.
+    /// The identity of the node's shadow-including parent element, or 0, and whether the step to it
+    /// crossed a shadow root. Layout walks this ancestry to find the inline that establishes an
+    /// absolutely positioned box's containing block, and the tree scope an anchor name resolves in.
     pub shadow_including_parent_element: u32,
+    pub parent_is_a_shadow_root: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -1834,7 +1836,10 @@ fn update_layout_tree(
             // still a step on the ancestry a descendant walks.
             host.layout().arena().set_shadow_including_parent_element(
                 element,
-                StyleNodeID::from_raw(entry_facts.shadow_including_parent_element),
+                ShadowIncludingParent {
+                    element: entry_facts.shadow_including_parent_element,
+                    parent_is_a_shadow_root: entry_facts.parent_is_a_shadow_root,
+                },
             );
         }
         let mut update = PrincipalNodeUpdate {
@@ -4378,6 +4383,7 @@ mod tests {
             requires_svg_container: false,
             is_svg_foreign_object: false,
             shadow_including_parent_element: 0,
+            parent_is_a_shadow_root: false,
         };
         let mut context = TreeBuilderContext::default();
         let decision = principal_node_entry_decision(facts, &context);

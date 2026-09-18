@@ -687,11 +687,11 @@ impl RunFragmentBuilder {
             .any(|entry| entry.inline_containing_block() == inline_box)
     }
 
-    pub(crate) fn anchor_candidate_shells(&self, callbacks: &LayoutPass<'_>) -> Vec<*mut c_void> {
+    pub(crate) fn anchor_candidate_nodes(&self) -> Vec<crate::layout::node_data::NodeSlotId> {
         self.inner
             .borrow()
             .iter_anchor_candidates()
-            .map(|candidate| callbacks.shell(candidate.node))
+            .map(|candidate| candidate.node)
             .collect()
     }
 
