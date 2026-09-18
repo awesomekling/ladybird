@@ -8,6 +8,7 @@
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/DOM/Position.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/DOM/Text.h>
@@ -694,13 +695,25 @@ Optional<String> grid_layout_json(Layout::Node const& node, UniqueNodeID contain
     return result;
 }
 
+// The devtools protocol names a flex item by its DOM node's unique id, while the layout row that
+// recorded the item names it by its style node.
+static i64 devtools_node_id_for_style_node(void* context, u32 style_node)
+{
+    auto& document = *static_cast<DOM::Document*>(context);
+    auto dom_node = DOM::NodeIdentity::of_style_node(CSS::StyleNodeID { style_node }).resolve(document);
+    return dom_node ? dom_node->unique_id().value() : -1;
+}
+
 Optional<String> flex_layout_json(Layout::Node const& node, UniqueNodeID container_node_id)
 {
     Optional<String> result;
-    Layout::RustFFI::layout_arena_paintable_flex_layout_json(node.arena_handle(), committed_row_slot(node), container_node_id.value(), &result,
+    auto& document = const_cast<DOM::Document&>(node.document());
+    Layout::RustFFI::layout_arena_paintable_flex_layout_json(
+        node.arena_handle(), committed_row_slot(node), container_node_id.value(), &result,
         [](void* context, u8 const* bytes, size_t length) {
             *static_cast<Optional<String>*>(context) = MUST(String::from_utf8(StringView { bytes, length }));
-        });
+        },
+        &document, devtools_node_id_for_style_node);
     return result;
 }
 
