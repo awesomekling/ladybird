@@ -689,45 +689,50 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn populate_paintable_row(&mut self, layout_node: NodeSlotId) {
+        self.note_committed_box_changed(layout_node);
         self.note_overflow_contained_box_added(layout_node);
         let overflow_style = self
             .node_style_if_live(layout_node)
             .map(crate::painting::scrollable_overflow::OverflowStyle::new);
-        let store = &mut self.paintable_rows;
-        let index = layout_node.slot_index() as usize;
-        let chunks = &mut store.chunks;
-        let mut side_data = store.side_data.borrow_mut();
-        let mut row_paint_states = store.row_paint_states.borrow_mut();
-        let mut absolute_rect_memo = store.absolute_rect_memo.borrow_mut();
-        let mut visual_context_records = store.visual_context_records.borrow_mut();
-        let mut stacking_context_entries = store.stacking_context_entries.borrow_mut();
-        while side_data.len() <= index {
-            if side_data.len().is_multiple_of(PAINTABLE_SLOTS_PER_CHUNK) {
-                chunks.push(new_chunk());
+        {
+            let store = &mut self.paintable_rows;
+            let index = layout_node.slot_index() as usize;
+            let chunks = &mut store.chunks;
+            let mut side_data = store.side_data.borrow_mut();
+            let mut row_paint_states = store.row_paint_states.borrow_mut();
+            let mut absolute_rect_memo = store.absolute_rect_memo.borrow_mut();
+            let mut visual_context_records = store.visual_context_records.borrow_mut();
+            let mut stacking_context_entries = store.stacking_context_entries.borrow_mut();
+            while side_data.len() <= index {
+                if side_data.len().is_multiple_of(PAINTABLE_SLOTS_PER_CHUNK) {
+                    chunks.push(new_chunk());
+                }
+                side_data.push(PaintableSideData::default());
+                row_paint_states.push(RowPaintState::default());
+                absolute_rect_memo.push(None);
+                visual_context_records.push(None);
+                stacking_context_entries.push(None);
             }
-            side_data.push(PaintableSideData::default());
-            row_paint_states.push(RowPaintState::default());
-            absolute_rect_memo.push(None);
-            visual_context_records.push(None);
-            stacking_context_entries.push(None);
-        }
 
-        chunks[index / PAINTABLE_SLOTS_PER_CHUNK].slots[index % PAINTABLE_SLOTS_PER_CHUNK] = PaintableData {
-            slot_generation: layout_node.generation(),
-            ..PaintableData::default()
-        };
-        side_data[index] = PaintableSideData {
-            overflow_style,
-            ..Default::default()
-        };
-        row_paint_states[index].clear();
-        absolute_rect_memo[index] = None;
-        visual_context_records[index] = None;
-        stacking_context_entries[index] = None;
+            chunks[index / PAINTABLE_SLOTS_PER_CHUNK].slots[index % PAINTABLE_SLOTS_PER_CHUNK] = PaintableData {
+                slot_generation: layout_node.generation(),
+                ..PaintableData::default()
+            };
+            side_data[index] = PaintableSideData {
+                overflow_style,
+                ..Default::default()
+            };
+            row_paint_states[index].clear();
+            absolute_rect_memo[index] = None;
+            visual_context_records[index] = None;
+            stacking_context_entries[index] = None;
+        }
+        self.flush_committed_box_changes();
     }
 
     fn reset_paintable_row(&mut self, row_is_still_linked: bool, reset: PaintableRowReset) {
         let id = reset.slot;
+        self.note_committed_box_changed(id);
         if row_is_still_linked {
             // A cleared row is still linked, so the ancestor whose plans listed it is known now.
             self.push_enclosing_paint_order_damage(id);
@@ -762,6 +767,7 @@ impl LayoutNodeArena {
         store.row_paint_states.borrow()[index].clear();
         store.visual_context_records.borrow_mut()[index] = None;
         store.stacking_context_entries.borrow_mut()[index] = None;
+        self.flush_committed_box_changes();
     }
 
     pub(crate) fn paintable_visual_context_record(
