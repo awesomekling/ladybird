@@ -8,6 +8,8 @@
 #include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/NodeArena.h>
+#include <LibWeb/Layout/TextNode.h>
+#include <LibWeb/Painting/BoxViews.h>
 
 namespace Web::DOM {
 
@@ -31,6 +33,15 @@ void InvalidationJournal::note_needs_layout_update(NodeIdentity identity, SetNee
         // Marking the ancestors as well covers marking only the node, so the wider mark wins.
         entry.layout_propagation = propagation;
     }
+    drain_if_the_render_side_is_reading();
+}
+
+void InvalidationJournal::note_needs_repaint(NodeIdentity identity, InvalidateDisplayList invalidate_display_list)
+{
+    auto& entry = entry_for(identity);
+    entry.needs_repaint = true;
+    // Each level of display list invalidation covers the one below it, so the widest mark wins.
+    entry.invalidate_display_list = max(entry.invalidate_display_list, invalidate_display_list);
     drain_if_the_render_side_is_reading();
 }
 
@@ -61,6 +72,12 @@ void InvalidationJournal::drain()
             continue;
         if (entry.needs_layout_update)
             layout_node->set_needs_layout_update(entry.layout_reason, entry.layout_propagation);
+        if (entry.needs_repaint) {
+            if (auto* text_node = as_if<Layout::TextNode>(*layout_node))
+                text_node->set_needs_repaint(entry.invalidate_display_list);
+            else if (Painting::has_committed_box(*layout_node))
+                Painting::set_needs_repaint(*layout_node, entry.invalidate_display_list);
+        }
     }
 }
 
