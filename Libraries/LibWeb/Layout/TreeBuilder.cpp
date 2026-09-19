@@ -781,21 +781,18 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
                 .svg_graphics_element = graphics_element,
                 .svg_mask = identified_dom_node(mask.ptr()),
                 .svg_clip_path = identified_dom_node(clip_path.ptr()),
-                .svg_fill_pattern = const_cast<SVG::SVGPatternElement*>(fill_pattern.ptr()),
-                .svg_stroke_pattern = const_cast<SVG::SVGPatternElement*>(stroke_pattern.ptr()),
+                .svg_fill_pattern = Node::style_node_of(fill_pattern.ptr()).value(),
+                .svg_stroke_pattern = Node::style_node_of(stroke_pattern.ptr()).value(),
             }; },
         .create_first_letter_nodes = [](void*, void* element_pointer, RustFFI::FfiFirstLetterTarget target) -> RustFFI::FfiFirstLetterNodes {
             VERIFY(element_pointer);
             return create_first_letter_nodes(*static_cast<DOM::Element*>(element_pointer), target); },
-        .svg_pattern_content_element = [](void* pattern_pointer) -> RustFFI::FfiIdentifiedDomNode {
-            VERIFY(pattern_pointer);
-            return identified_dom_node(static_cast<SVG::SVGPatternElement*>(pattern_pointer)->pattern_content_element().ptr()); },
-        .register_svg_resource_reference = [](void* resource_pointer, void* graphics_element_pointer) {
-            VERIFY(resource_pointer);
+        .register_svg_resource_reference = [](u32 resource_style_node, void* graphics_element_pointer) {
             VERIFY(graphics_element_pointer);
-            LayoutTreeBuilderAccess::register_svg_resource_reference(
-                *static_cast<SVG::SVGElement*>(resource_pointer),
-                *static_cast<SVG::SVGGraphicsElement*>(graphics_element_pointer)); },
+            auto& graphics_element = *static_cast<SVG::SVGGraphicsElement*>(graphics_element_pointer);
+            auto resource = graphics_element.document().style_computer().element_for_style_node(CSS::StyleNodeID { resource_style_node });
+            VERIFY(resource);
+            LayoutTreeBuilderAccess::register_svg_resource_reference(as<SVG::SVGElement>(*resource), graphics_element); },
         .request_top_layer_zone_rebuild = [](void* node_pointer) {
             VERIFY(node_pointer);
             static_cast<DOM::Node*>(node_pointer)->document().set_top_layer_needs_layout_zone_rebuild(); },
