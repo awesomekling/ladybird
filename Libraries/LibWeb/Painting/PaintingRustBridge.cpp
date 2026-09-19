@@ -217,9 +217,6 @@ Layout::RustFFI::FfiVisualContextHostCallbacks visual_context_host_callbacks(DOM
             inputs.viewport_wheel_overflow_y = static_cast<u8>(to_underlying(viewport_overflow.y));
             return inputs;
         },
-        .scroll_offset = [](void*, void* layout_node_shell) -> CSSPixelPoint {
-            return scroll_offset(*static_cast<Layout::Node const*>(layout_node_shell));
-        },
         .node_identity = [](void*, void* layout_node_shell) -> i64 {
             auto const& layout_node = *static_cast<Layout::NodeWithStyle const*>(layout_node_shell);
             if (is_viewport_paintable(layout_node))

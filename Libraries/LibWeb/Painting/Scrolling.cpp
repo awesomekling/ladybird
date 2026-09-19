@@ -27,18 +27,9 @@ CSSPixelPoint scroll_offset(Layout::Node const& node)
     if (!has_committed_box(node))
         return {};
 
-    if (node.is_viewport()) {
-        auto navigable = node.document().navigable();
-        VERIFY(navigable);
-        return navigable->viewport_scroll_offset();
-    }
-
-    if (auto pseudo_element = node.generated_for_pseudo_element(); pseudo_element.has_value())
-        return node.pseudo_element_generator()->scroll_offset(*pseudo_element);
-
-    if (auto const* element = as_if<DOM::Element>(node.dom_node()))
-        return element->scroll_offset({});
-    return {};
+    // The box publishes the offset stored for what it is the box of, so this reads the arena
+    // rather than asking the element, the pseudo-element or the navigable where that store is.
+    return Layout::RustFFI::layout_arena_published_scroll_offset(node.arena_handle(), committed_row_slot(node));
 }
 
 CSSPixelPoint minimum_scroll_offset(Layout::Node const& node)
@@ -284,11 +275,6 @@ static ViewportWheelOverflowValues viewport_wheel_overflow(DOM::Document const& 
     return { .x = to_underlying(overflow.x), .y = to_underlying(overflow.y) };
 }
 
-static CSSPixelPoint scroll_offset_of_layout_node_shell(void* layout_node_shell)
-{
-    return scroll_offset(*static_cast<Layout::Node const*>(layout_node_shell));
-}
-
 Layout::Node* wheel_scroll_along_containing_block_chain(Layout::Node& node, double wheel_delta_x, double wheel_delta_y, ScrollKind scroll_kind)
 {
     struct WheelScrollableBox {
@@ -299,7 +285,7 @@ Layout::Node* wheel_scroll_along_containing_block_chain(Layout::Node& node, doub
     Vector<WheelScrollableBox, 4> wheel_scrollable_boxes;
     auto overflow = viewport_wheel_overflow(node.document());
     Layout::RustFFI::layout_arena_for_each_wheel_scrollable_box_in_containing_block_chain(
-        node.arena_handle(), committed_row_slot(node), wheel_delta_x, wheel_delta_y, overflow.x, overflow.y, scroll_offset_of_layout_node_shell,
+        node.arena_handle(), committed_row_slot(node), wheel_delta_x, wheel_delta_y, overflow.x, overflow.y,
         &wheel_scrollable_boxes, [](void* context, void* layout_node_shell, double accepted_delta_x, double accepted_delta_y) {
             static_cast<Vector<WheelScrollableBox, 4>*>(context)->append({ static_cast<Layout::Node*>(layout_node_shell), accepted_delta_x, accepted_delta_y });
         });
@@ -314,7 +300,7 @@ Layout::Node* scrolling_box_for_scroll_step_in_containing_block_chain(Layout::No
 {
     auto overflow = viewport_wheel_overflow(target.document());
     return static_cast<Layout::Node*>(Layout::RustFFI::layout_arena_scrolling_box_for_scroll_step(
-        target.arena_handle(), committed_row_slot(target), viewport_row_slot(target.document()), delta, overflow.x, overflow.y, scroll_offset_of_layout_node_shell));
+        target.arena_handle(), committed_row_slot(target), viewport_row_slot(target.document()), delta, overflow.x, overflow.y));
 }
 
 Layout::Node* first_wheel_scrollable_box_in_containing_block_chain(Layout::Node const& node)
