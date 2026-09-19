@@ -945,7 +945,6 @@ fn apply_walk_assignments(
 fn fresh_visual_context_tree_build(
     arena: *mut c_void,
     viewport: NodeSlotId,
-    callbacks: &FfiVisualContextHostCallbacks,
     inputs: crate::painting::host::FfiVisualContextTreeInputs,
     state: &mut crate::painting::visual_context::VisualContextState,
 ) -> crate::painting::host::FfiVisualContextUpdateOutcome {
@@ -961,7 +960,7 @@ fn fresh_visual_context_tree_build(
             viewport,
             &inputs,
         );
-        fresh_tree.viewport_assignment.node_identity = callbacks.node_identity(arena.shell_if_live(viewport));
+        fresh_tree.viewport_assignment.node_identity = arena.unique_node_ids().id(viewport);
         fresh_tree
     };
     {
@@ -978,7 +977,6 @@ fn fresh_visual_context_tree_build(
         let paintable_rows = arena.paintable_rows();
         match update_visual_context_tree(
             &paintable_rows,
-            callbacks,
             viewport,
             inputs,
             VisualContextUpdateScope::FreshTree,
@@ -1073,7 +1071,7 @@ pub unsafe extern "C" fn layout_arena_update_accumulated_visual_contexts(
         }
         let result = {
             let paintable_rows = arena_ref.paintable_rows();
-            update_visual_context_tree(&paintable_rows, &callbacks, viewport, inputs, scope, &mut state)
+            update_visual_context_tree(&paintable_rows, viewport, inputs, scope, &mut state)
         };
         match result {
             IncrementalUpdateResult::Applied(mut outcome) => {
@@ -1117,7 +1115,7 @@ pub unsafe extern "C" fn layout_arena_update_accumulated_visual_contexts(
     }
 
     state.last_full_build_reason = reason;
-    let outcome = fresh_visual_context_tree_build(arena, viewport, &callbacks, inputs, &mut state);
+    let outcome = fresh_visual_context_tree_build(arena, viewport, inputs, &mut state);
     state.last_tree_inputs = Some(inputs);
     let arena_ref = unsafe { arena_from_handle(arena) };
     arena_ref.paint_state().borrow_mut().visual_context = state;
@@ -2700,6 +2698,18 @@ pub unsafe extern "C" fn layout_arena_publish_scroll_offset(
         .publish(slot, offset.into());
 }
 
+/// Publishes the unique node id of what a box is the box of, as the document names it. Called
+/// wherever that answer can change: a box being built for a DOM node, a box becoming the box of a
+/// pseudo-element, and the viewport's box, which is the document's.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_publish_unique_node_id(arena: *mut c_void, slot: NodeSlotId, id: i64) {
+    unsafe { arena_from_handle(arena) }.unique_node_ids().publish(slot, id);
+}
+
 /// The scroll offset last published for a box, or zero for one that holds none.
 ///
 /// # Safety
@@ -3669,9 +3679,6 @@ mod tests {
         unsafe extern "C" fn tree_inputs(_: *mut c_void) -> crate::painting::host::FfiVisualContextTreeInputs {
             unreachable!("no visual context tree exists to refresh")
         }
-        unsafe extern "C" fn node_identity(_: *mut c_void, _: *mut c_void) -> i64 {
-            unreachable!("no visual context tree exists to refresh")
-        }
 
         let mut arena = LayoutNodeArena::new();
         let viewport = arena.allocate_for_test().slot;
@@ -3707,7 +3714,6 @@ mod tests {
                 FfiVisualContextHostCallbacks {
                     context: std::ptr::null_mut(),
                     tree_inputs,
-                    node_identity,
                 },
                 FfiRootBackgroundSource {
                     root_layout_node: root,

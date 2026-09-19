@@ -99,6 +99,7 @@ Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind k
     , m_kind(kind)
 {
     publish_scroll_offset();
+    publish_unique_node_id();
 
     if (!node)
         return;
@@ -124,6 +125,7 @@ Node::Node(DOM::Document& document, BindToPreparedArenaSlot, Compositing::RustFF
     , m_kind(kind)
 {
     RustFFI::layout_arena_attach_shell(m_arena->handle(), m_slot, this);
+    publish_unique_node_id();
 }
 
 Node::~Node()
@@ -845,6 +847,7 @@ void Node::set_generated_for(CSS::PseudoElement type, DOM::Element& element)
     static_assert(encode_generated_for(CSS::PseudoElement::FirstLetter) == RustFFI::GENERATED_FOR_FIRST_LETTER);
     static_assert(encode_generated_for(CSS::PseudoElement::Marker) == RustFFI::GENERATED_FOR_MARKER);
     RustFFI::layout_arena_set_node_generated_for(arena_handle(), slot_id(this), encode_generated_for(type), element.style_node_id().value());
+    publish_unique_node_id();
     if (auto* node_with_style = as_if<NodeWithStyle>(*this))
         node_with_style->bind_generated_style_record(element.style_record_identity(type));
 }
@@ -930,6 +933,28 @@ void Node::publish_scroll_offset()
 {
     set_flag(RustFFI::NodeFlag::HasScrollOffset, dom_target_stores_scroll_offset());
     RustFFI::layout_arena_publish_scroll_offset(m_arena->handle(), m_slot, dom_target_scroll_offset());
+}
+
+// The same three answers the render side used to ask the document for, in the same order: the
+// viewport's box names the document, a pseudo-element's box names its generator, and every other
+// box names the element it belongs to. Anything else - an anonymous box, a text node's row - names
+// nothing.
+i64 Node::dom_target_unique_node_id() const
+{
+    if (is_viewport())
+        return document().unique_id().value();
+    if (generated_for_pseudo_element().has_value()) {
+        auto generator = pseudo_element_generator();
+        return generator ? generator->unique_id().value() : 0;
+    }
+    if (auto const* element = as_if<DOM::Element>(dom_node()))
+        return element->unique_id().value();
+    return 0;
+}
+
+void Node::publish_unique_node_id()
+{
+    RustFFI::layout_arena_publish_unique_node_id(m_arena->handle(), m_slot, dom_target_unique_node_id());
 }
 
 void Node::verify_published_scroll_offset() const
