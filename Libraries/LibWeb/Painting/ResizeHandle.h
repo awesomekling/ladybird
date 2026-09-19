@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <LibGC/Weak.h>
+#include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/Painting/ChromeWidget.h>
 
 namespace Web::Painting {
@@ -24,7 +24,9 @@ public:
 private:
     ResizeHandle(Layout::NodeArena&, Compositing::RustFFI::NodeSlotId);
 
-    GC::Weak<DOM::Element> m_element;
+    // The element the handle resizes, named rather than held: the handle outlives a pointer
+    // gesture and resolves the name when one arrives.
+    DOM::NodeIdentity m_element;
     OwnPtr<ElementResizeAction> m_resize_action;
 };
 
