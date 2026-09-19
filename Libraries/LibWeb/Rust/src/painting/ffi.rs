@@ -203,14 +203,12 @@ pub unsafe extern "C" fn layout_arena_paintable_maximum_scroll_offset(
     crate::painting::chrome_geometry::maximum_scroll_offset(&arena.paintable_rows(), slot).into()
 }
 
-fn scroll_offset_reader(
-    arena: &LayoutNodeArena,
-    scroll_offset_of_layout_node: unsafe extern "C" fn(*mut c_void) -> FfiCssPixelPoint,
-) -> impl Fn(NodeSlotId) -> CssPixelPoint {
+fn scroll_offset_reader(arena: &LayoutNodeArena) -> impl Fn(NodeSlotId) -> CssPixelPoint {
     move |node| {
-        crate::painting::seal::note_host_call("scroll_offset_of_layout_node");
-        // SAFETY: The C++ host reads the offset of a live layout node shell synchronously.
-        unsafe { scroll_offset_of_layout_node(arena.node_shell(node)) }.into()
+        if !arena.paintable_row_is_populated(node) {
+            return CssPixelPoint::default();
+        }
+        arena.scroll_offsets().offset(node)
     }
 }
 
@@ -226,7 +224,6 @@ pub unsafe extern "C" fn layout_arena_scrolling_box_for_scroll_step(
     delta: FfiCssPixelPoint,
     viewport_wheel_overflow_x: u8,
     viewport_wheel_overflow_y: u8,
-    scroll_offset_of_layout_node: unsafe extern "C" fn(*mut c_void) -> FfiCssPixelPoint,
 ) -> *mut c_void {
     let arena = unsafe { arena_from_handle(arena) };
     let scrolling_box = crate::painting::scroll_chain::scrolling_box_for_scroll_step(
@@ -238,7 +235,7 @@ pub unsafe extern "C" fn layout_arena_scrolling_box_for_scroll_step(
             x: viewport_wheel_overflow_x,
             y: viewport_wheel_overflow_y,
         },
-        &scroll_offset_reader(arena, scroll_offset_of_layout_node),
+        &scroll_offset_reader(arena),
     );
     arena.shell_if_live(scrolling_box)
 }
@@ -255,7 +252,6 @@ pub unsafe extern "C" fn layout_arena_for_each_wheel_scrollable_box_in_containin
     wheel_delta_y: f64,
     viewport_wheel_overflow_x: u8,
     viewport_wheel_overflow_y: u8,
-    scroll_offset_of_layout_node: unsafe extern "C" fn(*mut c_void) -> FfiCssPixelPoint,
     context: *mut c_void,
     push_scrollable_box: unsafe extern "C" fn(*mut c_void, *mut c_void, f64, f64),
 ) {
@@ -269,7 +265,7 @@ pub unsafe extern "C" fn layout_arena_for_each_wheel_scrollable_box_in_containin
             x: viewport_wheel_overflow_x,
             y: viewport_wheel_overflow_y,
         },
-        &scroll_offset_reader(arena, scroll_offset_of_layout_node),
+        &scroll_offset_reader(arena),
         |node, accepted_delta_x, accepted_delta_y| {
             // SAFETY: The C++ callback appends the shell and deltas to a caller-owned collection.
             unsafe { push_scrollable_box(context, arena.node_shell(node), accepted_delta_x, accepted_delta_y) };
@@ -1256,11 +1252,7 @@ pub unsafe extern "C" fn layout_arena_refresh_scroll_state(
             return false;
         }
         state.needs_to_refresh_scroll_state = false;
-        crate::painting::visual_context::refresh::refresh_scroll_state(
-            &paintable_rows,
-            &callbacks,
-            &mut state.scroll_state,
-        );
+        crate::painting::visual_context::refresh::refresh_scroll_state(&paintable_rows, &mut state.scroll_state);
         let mut snapshot = state
             .scroll_state
             .snapshot(callbacks.tree_inputs().device_pixels_per_css_pixel);
@@ -3671,9 +3663,6 @@ mod tests {
         unsafe extern "C" fn tree_inputs(_: *mut c_void) -> crate::painting::host::FfiVisualContextTreeInputs {
             unreachable!("no visual context tree exists to refresh")
         }
-        unsafe extern "C" fn scroll_offset(_: *mut c_void, _: *mut c_void) -> FfiCssPixelPoint {
-            unreachable!("no visual context tree exists to refresh")
-        }
         unsafe extern "C" fn node_identity(_: *mut c_void, _: *mut c_void) -> i64 {
             unreachable!("no visual context tree exists to refresh")
         }
@@ -3712,7 +3701,6 @@ mod tests {
                 FfiVisualContextHostCallbacks {
                     context: std::ptr::null_mut(),
                     tree_inputs,
-                    scroll_offset,
                     node_identity,
                 },
                 FfiRootBackgroundSource {

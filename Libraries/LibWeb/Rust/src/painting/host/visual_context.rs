@@ -6,7 +6,6 @@
 
 use crate::css::easing::FfiEasingDescriptor;
 use crate::css::ffi_support::FfiUtf16View;
-use crate::layout::used_values;
 use crate::layout::used_values::OptionalCssPixelRect;
 use libgfx_rust::filter::Filter;
 use libgfx_rust::{Color, CompositingAndBlendingOperator, IntRect, InterpolationColorSpace};
@@ -151,7 +150,6 @@ pub(crate) struct ResolvedSvgFilter {
 pub struct FfiVisualContextHostCallbacks {
     pub context: *mut c_void,
     pub tree_inputs: unsafe extern "C" fn(*mut c_void) -> FfiVisualContextTreeInputs,
-    pub scroll_offset: unsafe extern "C" fn(*mut c_void, *mut c_void) -> used_values::FfiCssPixelPoint,
     pub node_identity: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i64,
 }
 
@@ -165,11 +163,6 @@ impl FfiVisualContextHostCallbacks {
         crate::painting::seal::note_host_call("node_identity");
         // SAFETY: The C++ host answers synchronously from a live layout node shell.
         unsafe { (self.node_identity)(self.context, layout_node_shell) }
-    }
-    pub(crate) fn scroll_offset(&self, layout_node_shell: *mut c_void) -> used_values::FfiCssPixelPoint {
-        crate::painting::seal::note_host_call("scroll_offset");
-        // SAFETY: The C++ host answers synchronously from a live layout node shell.
-        unsafe { (self.scroll_offset)(self.context, layout_node_shell) }
     }
 }
 
