@@ -614,6 +614,29 @@ impl<'a> ComputedValuesView<'a> {
             .all(|item| matches!(item.optional_data(), Some(StyleValueData::String { .. })))
     }
 
+    /// Whether `content` is a single image, which is what makes the element a replaced element
+    /// whose box renders that image instead of its children.
+    pub(crate) fn content_is_single_image(self) -> bool {
+        let Some(StyleValueData::Content { content, .. }) = self.content().content.data() else {
+            return false;
+        };
+        let Some(StyleValueData::ValueList { values, .. }) = content.optional_data() else {
+            return false;
+        };
+        let values = values.as_slice();
+        values.len() == 1
+            && matches!(
+                values[0].optional_data(),
+                Some(
+                    StyleValueData::Image { .. }
+                        | StyleValueData::ImageSet { .. }
+                        | StyleValueData::LinearGradient { .. }
+                        | StyleValueData::ConicGradient { .. }
+                        | StyleValueData::RadialGradient { .. }
+                )
+            )
+    }
+
     /// Whether the style can move the generated-content state a later sibling reads: any counter
     /// it touches, or a quote its content opens or closes.
     pub(crate) fn affects_generated_content_state(self) -> bool {

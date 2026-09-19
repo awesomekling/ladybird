@@ -1683,6 +1683,16 @@ impl LayoutNodeArena {
         })
     }
 
+    /// Whether the element's published style record replaces its contents with a single image,
+    /// which is what makes its box a replaced box rather than a container for its children.
+    pub(crate) fn published_content_is_single_image(&self, style_node: Option<StyleNodeID>) -> bool {
+        let Some(style_node) = style_node else {
+            return false;
+        };
+        style_node.element_index().is_some()
+            && self.with_style_engine(|engine| engine.element_content_is_single_image(style_node))
+    }
+
     /// Whether the style mirror holds a layout tree update mark on a flat-tree descendant of
     /// `style_node`. An anonymous row names no node and answers no.
     pub(crate) fn child_needs_layout_tree_update(&self, style_node: Option<StyleNodeID>) -> bool {

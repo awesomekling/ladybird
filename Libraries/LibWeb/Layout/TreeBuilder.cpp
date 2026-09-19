@@ -856,7 +856,7 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             frame.anonymous_computed_values = nullptr;
             frame.style_record_identity = 0;
             --storage.active_frame_count; },
-        .prepare_principal_element = [](void* builder_pointer, void* frame_pointer, void* element_pointer, bool should_create_layout_node) -> RustFFI::FfiPreparedPrincipalElementFacts {
+        .prepare_principal_element = [](void* builder_pointer, void* frame_pointer, void* element_pointer, bool should_create_layout_node) {
             VERIFY(builder_pointer);
             VERIFY(frame_pointer);
             VERIFY(element_pointer);
@@ -885,16 +885,7 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             frame.style_record_identity = element.style_record_identity();
             VERIFY(frame.style_record_identity);
             frame.style_record_owner = &element.document().style_computer();
-            frame.style_record_owner->pin_style_record(frame.style_record_identity);
-            auto has_content_replacement = false;
-            if (should_create_layout_node) {
-                auto const* content_values = element.style_group<CSS::ComputedValues::ContentValues>();
-                VERIFY(content_values);
-                has_content_replacement = content_replacement_image(content_values->computed_content_value()) != nullptr;
-            }
-            return {
-                .has_content_replacement = has_content_replacement,
-            }; },
+            frame.style_record_owner->pin_style_record(frame.style_record_identity); },
         .create_principal_element_layout = [](void* builder_pointer, void* frame_pointer, void* element_pointer, RustFFI::FfiElementLayoutKind kind) -> Compositing::RustFFI::NodeSlotId {
             VERIFY(builder_pointer);
             VERIFY(frame_pointer);
