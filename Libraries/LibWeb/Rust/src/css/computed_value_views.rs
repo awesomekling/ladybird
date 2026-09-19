@@ -596,6 +596,16 @@ impl<'a> ComputedValuesView<'a> {
         }
     }
 
+    /// The computed `content` value.
+    pub(crate) fn content_value(self) -> Option<&'a StyleValueData> {
+        self.content().content.data()
+    }
+
+    /// The computed `quotes` value.
+    pub(crate) fn quotes_value(self) -> Option<&'a StyleValueData> {
+        self.inherited_list().quotes.data()
+    }
+
     /// The `counter-reset` list, empty for `none`.
     pub(crate) fn counter_reset(self) -> &'a [crate::css::style_value::RetainedCounterDefinition] {
         counter_definitions(&self.content().counter_reset)
@@ -710,7 +720,6 @@ impl<'a> ComputedValuesView<'a> {
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub(crate) fn inherited_list(self) -> &'a InheritedListValues {
         self.native_group(STYLE_GROUP_INDEX_INHERITED_LIST)
     }

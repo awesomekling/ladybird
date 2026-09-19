@@ -23,6 +23,8 @@
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleInvalidation.h>
 #include <LibWeb/CSS/StyleValues/ContentStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CounterStyleStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CounterStyleValue.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ImageStyleValue.h>
 #include <LibWeb/DOM/Document.h>
@@ -273,53 +275,95 @@ Box& LayoutTreeBuildBridge::create_list_item_marker(Box& list_box, CSS::LayoutSt
     return list_item_marker;
 }
 
-// https://drafts.csswg.org/css-lists-3/#text-markers
-// "<counter-style>: Specifies the element's marker string as the value of the list-item counter
-// represented using the specified <counter-style>. Specifically, the marker string is the result of
-// generating a counter representation of the list-item counter value using the specified
-// <counter-style>, prefixed by the prefix of the <counter-style>, and followed by the suffix of the
-// <counter-style>. If the specified <counter-style> does not exist, decimal is assumed.
-// <string>: The element's marker string is the specified <string>."
-static CSS::ContentData resolve_normal_marker_content(DOM::AbstractElement& element_reference, Box const& list_box, Box const& marker)
+static void* layout_node_arena_handle(DOM::AbstractElement const& element_reference)
 {
-    CSS::ContentData content;
-    content.type = CSS::ContentData::Type::List;
+    return element_reference.document().layout_node_arena().handle();
+}
 
-    if (auto const* list_style_image = marker.list_style_image()) {
-        content.data.append(NonnullRefPtr { const_cast<CSS::AbstractImageStyleValue&>(*list_style_image) });
-        return content;
+static u8 generated_for(DOM::AbstractElement const& element_reference)
+{
+    return Node::encode_generated_for(*element_reference.pseudo_element());
+}
+
+// https://drafts.csswg.org/css-lists-3/#text-markers
+// NB: The tree build generates the marker string. What it is generated from is resolved here, when the marker box is
+//     built, since resolving a counter style name settles the style scope's counter styles.
+static Vector<ValueComparingRefPtr<CSS::CounterStyle const>> publish_normal_marker_content(DOM::AbstractElement const& element_reference, BlockContainer const& list_box, BlockContainer const& marker)
+{
+    RustFFI::FfiMarkerContent content {
+        .kind = RustFFI::FfiMarkerContentKind::Image,
+        .string = 0,
+        .counter_style = nullptr,
+        .text_depends_on_list_item_counter = false,
+    };
+    Vector<ValueComparingRefPtr<CSS::CounterStyle const>> counter_style_dependencies;
+    if (!marker.list_style_image()) {
+        auto const& list_style_type = list_box.list_style_type();
+        content.text_depends_on_list_item_counter = CSS::marker_text_depends_on_list_item_counter_value(list_style_type);
+        auto use_counter_style = [&](RefPtr<CSS::CounterStyle const> const& counter_style) {
+            content.kind = RustFFI::FfiMarkerContentKind::CounterStyle;
+            if (counter_style) {
+                content.counter_style = counter_style->rust_counter_style();
+                counter_style_dependencies.append(counter_style);
+            }
+        };
+        list_style_type.visit(
+            [](Empty const&) { VERIFY_NOT_REACHED(); },
+            [&](RefPtr<CSS::CounterStyle const> const& counter_style) {
+                use_counter_style(counter_style);
+            },
+            [&](Utf16String const& string) {
+                content.kind = RustFFI::FfiMarkerContentKind::String;
+                content.string = string.to_raw_leaked();
+            },
+            [&](CSS::UnresolvedCounterStyleName const&) {
+                use_counter_style(nullptr);
+            },
+            [&](CSS::ListStyleSymbols const& symbols) {
+                use_counter_style(symbols.counter_style);
+            });
+    }
+    RustFFI::layout_arena_set_marker_content(layout_node_arena_handle(element_reference), element_reference.element().style_node_id().value(),
+        generated_for(element_reference), element_reference.style_scope().style_engine_tree_scope().value(), content);
+    return counter_style_dependencies;
+}
+
+// NB: The tree build resolves a pseudo-element's content. The counter styles it names are resolved here, when the
+//     box is built, since resolving a counter style name settles the style scope's counter styles.
+static void publish_generated_content(DOM::AbstractElement const& element_reference, NodeWithStyle& layout_node, BlockContainer const* originating_list_box)
+{
+    auto const* payloads = element_reference.style_record_payloads();
+    VERIFY(payloads);
+    auto const& content_values = *CSS::style_group_from_payloads<CSS::ComputedValues::ContentValues>(payloads);
+    if (layout_node.is_list_item_marker_box() && content_values.content_is_normal()) {
+        VERIFY(originating_list_box);
+        layout_node.set_content_counter_style_dependencies(publish_normal_marker_content(element_reference, *originating_list_box, static_cast<BlockContainer const&>(layout_node)));
+        return;
     }
 
-    if (CSS::marker_text_depends_on_list_item_counter_value(list_box.list_style_type()))
-        element_reference.element().document().did_render_list_item_counter_value(element_reference.element());
-
-    auto counter_value = CSS::counter_value_for_use(element_reference, CSS::list_item_counter_name());
-
-    auto generate_from_counter_style = [&](RefPtr<CSS::CounterStyle const> const& counter_style) -> Utf16String {
-        auto counter_representation = CSS::generate_a_counter_representation(counter_style, element_reference.style_scope(), counter_value);
-        if (counter_style) {
-            content.counter_style_dependencies.append(counter_style);
-            return Utf16String::formatted("{}{}{}", counter_style->prefix(), counter_representation, counter_style->suffix());
+    Vector<ValueComparingRefPtr<CSS::CounterStyle const>> counter_style_dependencies;
+    auto value = content_values.computed_content_value();
+    if (value->is_content()) {
+        auto const& style_scope = element_reference.style_scope();
+        Vector<void const*> counter_styles;
+        auto resolve_counter_style = [&](CSS::StyleValue const& item) {
+            if (!item.is_counter())
+                return;
+            auto counter_style = item.as_counter().counter_style()->as_counter_style().resolve_counter_style(style_scope);
+            counter_styles.append(counter_style ? counter_style->rust_counter_style() : nullptr);
+            counter_style_dependencies.append(move(counter_style));
+        };
+        auto const& content_style_value = value->as_content();
+        for (auto const& item : content_style_value.content().values())
+            resolve_counter_style(*item);
+        if (auto alt_text = content_style_value.alt_text()) {
+            for (auto const& item : alt_text->values())
+                resolve_counter_style(*item);
         }
-        return Utf16String::formatted("{}. ", counter_representation);
-    };
-
-    auto marker_string = list_box.list_style_type().visit(
-        [](Empty const&) -> Utf16String { VERIFY_NOT_REACHED(); },
-        [&](RefPtr<CSS::CounterStyle const> const& counter_style) -> Utf16String {
-            return generate_from_counter_style(counter_style);
-        },
-        [](Utf16String const& string) -> Utf16String {
-            return string;
-        },
-        [&](CSS::UnresolvedCounterStyleName const&) -> Utf16String {
-            return generate_from_counter_style(nullptr);
-        },
-        [&](CSS::ListStyleSymbols const& symbols) -> Utf16String {
-            return generate_from_counter_style(symbols.counter_style);
-        });
-    content.data.append(move(marker_string));
-    return content;
+        RustFFI::layout_arena_set_content_counter_styles(layout_node_arena_handle(element_reference), element_reference.element().style_node_id().value(),
+            generated_for(element_reference), style_scope.style_engine_tree_scope().value(), counter_styles.data(), counter_styles.size());
+    }
+    layout_node.set_content_counter_style_dependencies(move(counter_style_dependencies));
 }
 
 // The node an identity the walk carries names. The document is the build's root and is not in the
@@ -370,8 +414,6 @@ struct PseudoElementFrame {
     RefPtr<CSS::AbstractImageStyleValue const> replacement_image;
     Box* originating_list_box { nullptr };
     NodeWithStyle* layout_node { nullptr };
-    CSS::ContentData resolved_content;
-    Layout::Node* content_item { nullptr };
 };
 
 struct LayoutTreeBuildBridge::PseudoElementFrameStorage {
@@ -426,7 +468,6 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
             frame.replacement_image = nullptr;
             frame.originating_list_box = nullptr;
             frame.layout_node = nullptr;
-            frame.content_item = nullptr;
             auto const* pseudo_payloads = element.style_record_payloads(pseudo_element);
             if (!pseudo_payloads) {
                 return {
@@ -463,7 +504,7 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
                 .marker_position_is_inside = frame.originating_list_box
                     && frame.originating_list_box->list_style_position() == CSS::ListStylePosition::Inside,
             }; },
-        .create_layout_node = [](void* builder_pointer, void* frame_pointer, void* element_pointer, RustFFI::FfiPseudoElement, RustFFI::FfiPseudoElementDecision decision) -> Compositing::RustFFI::NodeSlotId {
+        .create_layout_node = [](void* builder_pointer, void* frame_pointer, void* element_pointer, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiPseudoElementDecision decision) -> Compositing::RustFFI::NodeSlotId {
             VERIFY(builder_pointer);
             VERIFY(frame_pointer);
             VERIFY(element_pointer);
@@ -491,6 +532,8 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
                 frame.layout_node = DOM::Element::create_layout_node_for_display_type(document, frame.display, style, nullptr);
                 break;
             }
+            if (frame.layout_node)
+                publish_generated_content({ element, css_pseudo_element(ffi_pseudo) }, *frame.layout_node, frame.originating_list_box);
             return Node::slot_id(frame.layout_node); },
         .attach_style_resources = [](void* frame_pointer) {
             VERIFY(frame_pointer);
@@ -516,32 +559,8 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
             // NB: The marker of a list-item ::before or ::after belongs to that pseudo-element, not to the element's own
             //     ::marker, so it is generated for the originating pseudo-element and never becomes the ::marker's box.
             list_item_marker.set_generated_for(css_pseudo_element(originating_pseudo), element);
+            list_item_marker.set_content_counter_style_dependencies(publish_normal_marker_content({ element, css_pseudo_element(originating_pseudo) }, as<BlockContainer>(*frame.layout_node), list_item_marker));
             return Node::slot_id(&list_item_marker); },
-        .create_nested_list_marker_content = [](void* frame_pointer, void* element_pointer, RustFFI::FfiPseudoElement originating_pseudo, void* marker_pointer) -> Compositing::RustFFI::NodeSlotId {
-            VERIFY(frame_pointer);
-            VERIFY(element_pointer);
-            VERIFY(marker_pointer);
-            auto& frame = *static_cast<PseudoElementFrame*>(frame_pointer);
-            auto& element = *static_cast<DOM::Element*>(element_pointer);
-            auto& list_box = as<Box>(*frame.layout_node);
-            auto& list_item_marker = as<Box>(*static_cast<Node*>(marker_pointer));
-            DOM::AbstractElement element_reference { element, css_pseudo_element(originating_pseudo) };
-            auto content = resolve_normal_marker_content(element_reference, list_box, list_item_marker);
-            auto& content_node = [&]() -> Node& {
-                if (auto const* text = content.data.first().get_pointer<Utf16String>()) {
-                    auto& text_node = allocate_layout_node<GeneratedTextNode>(list_box.document(), *text);
-                    text_node.set_generated_for(css_pseudo_element(originating_pseudo), element);
-                    return text_node;
-                }
-                auto& image = *content.data.first().get<NonnullRefPtr<CSS::AbstractImageStyleValue>>();
-                auto& image_box = create_content_image_box(list_box.document(), nullptr, list_item_marker.copy_computed_values(), image);
-                image_box.set_display(CSS::Display(CSS::DisplayOutside::Inline, CSS::DisplayInside::Flow));
-                image_box.attach_style_resources();
-                image_box.set_generated_for(css_pseudo_element(originating_pseudo), element);
-                return image_box;
-            }();
-            list_item_marker.set_content(content);
-            return Node::slot_id(&content_node); },
         .configure_layout_node = [](void* frame_pointer, void* element_pointer, RustFFI::FfiPseudoElement ffi_pseudo) {
             VERIFY(frame_pointer);
             VERIFY(element_pointer);
@@ -551,62 +570,44 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
             VERIFY(frame.layout_node);
             frame.layout_node->set_generated_for(pseudo_element, element);
             LayoutTreeBuilderAccess::set_synthetic_pseudo_element_node(element, pseudo_element, frame.layout_node); },
-        .resolve_content = [](void* frame_pointer, void* element_pointer, RustFFI::FfiPseudoElement ffi_pseudo, u32 initial_quote_nesting_level) -> RustFFI::FfiResolvedPseudoContentFacts {
-            VERIFY(frame_pointer);
-            VERIFY(element_pointer);
-            auto& frame = *static_cast<PseudoElementFrame*>(frame_pointer);
-            VERIFY(frame.layout_node);
-            DOM::AbstractElement element_reference { *static_cast<DOM::Element*>(element_pointer), css_pseudo_element(ffi_pseudo) };
-            auto const* payloads = element_reference.style_record_payloads();
-            VERIFY(payloads);
-            auto const* content_values = CSS::style_group_from_payloads<CSS::ComputedValues::ContentValues>(payloads);
-            if (auto* marker = frame.layout_node->is_list_item_marker_box() ? static_cast<Box*>(frame.layout_node) : nullptr;
-                marker && content_values->content_is_normal()) {
-                VERIFY(frame.originating_list_box);
-                frame.resolved_content = resolve_normal_marker_content(element_reference, *frame.originating_list_box, *marker);
-                frame.layout_node->set_content(frame.resolved_content);
-                return {
-                    .final_quote_nesting_level = initial_quote_nesting_level,
-                    .content_is_list = true,
-                    .content_item_count = frame.resolved_content.data.size(),
-                };
-            }
-            auto [content, final_quote_nesting_level] = CSS::ComputedValues::resolved_content(*content_values,
-                *CSS::style_group_from_payloads<CSS::ComputedValues::InheritedListValues>(payloads),
-                element_reference, initial_quote_nesting_level, CSS::NotifyListItemCounterRendered::Yes);
-            frame.resolved_content = move(content);
-            frame.layout_node->set_content(frame.resolved_content);
-            return {
-                .final_quote_nesting_level = final_quote_nesting_level,
-                .content_is_list = frame.resolved_content.type == CSS::ContentData::Type::List,
-                .content_item_count = frame.resolved_content.data.size(),
-            }; },
-        .create_content_item = [](void* frame_pointer, void* element_pointer, RustFFI::FfiPseudoElement ffi_pseudo, size_t index) -> Compositing::RustFFI::NodeSlotId {
+        .create_content_item = [](void* frame_pointer, void* element_pointer, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiGeneratedContentItem item) -> Compositing::RustFFI::NodeSlotId {
             VERIFY(frame_pointer);
             VERIFY(element_pointer);
             auto& frame = *static_cast<PseudoElementFrame*>(frame_pointer);
             auto& element = *static_cast<DOM::Element*>(element_pointer);
             VERIFY(frame.layout_node);
-            VERIFY(index < frame.resolved_content.data.size());
-            auto& item = frame.resolved_content.data[index];
-            if (auto const* string = item.get_pointer<Utf16String>()) {
+            // The marker a list-item pseudo-element nests takes its content's style from itself.
+            BlockContainer* nested_marker = nullptr;
+            if (item.nested_marker.index != RustFFI::INVALID_NODE_SLOT_INDEX)
+                nested_marker = &as<BlockContainer>(*static_cast<Node*>(RustFFI::layout_arena_node_shell_if_live(frame.layout_node->arena_handle(), item.nested_marker)));
+            Node* content_item = nullptr;
+            if (item.kind == RustFFI::FfiGeneratedContentItemKind::Text) {
+                auto text = Utf16String::adopt_raw(item.text);
                 // An empty generated text node carries the inline fragment of an ordinary inline pseudo-element.
                 // Other pseudo-element boxes exist independently of their contents, so avoid giving them a
                 // zero-length child that would force layout to measure an otherwise empty box.
-                if (string->is_empty() && !(frame.display.is_inline_outside() && frame.display.is_flow_inside()))
+                if (!nested_marker && text.is_empty() && !(frame.display.is_inline_outside() && frame.display.is_flow_inside()))
                     return Node::slot_id(nullptr);
-                frame.content_item = &allocate_layout_node<GeneratedTextNode>(element.document(), *string);
+                content_item = &allocate_layout_node<GeneratedTextNode>(element.document(), move(text));
             } else {
-                auto& image = *item.get<NonnullRefPtr<CSS::AbstractImageStyleValue>>();
-                auto& image_box = create_content_image_box(element.document(), nullptr, frame.layout_node->copy_computed_values(), image);
+                auto& style_box = nested_marker ? static_cast<NodeWithStyle&>(*nested_marker) : *frame.layout_node;
+                auto image = [&] -> NonnullRefPtr<CSS::AbstractImageStyleValue const> {
+                    if (item.kind == RustFFI::FfiGeneratedContentItemKind::ListStyleImage)
+                        return *style_box.list_style_image();
+                    auto const* payloads = DOM::AbstractElement { element, css_pseudo_element(ffi_pseudo) }.style_record_payloads();
+                    VERIFY(payloads);
+                    auto content = CSS::style_group_from_payloads<CSS::ComputedValues::ContentValues>(payloads)->computed_content_value();
+                    return content->as_content().content().values()[item.content_index]->as_abstract_image();
+                }();
+                auto& image_box = create_content_image_box(element.document(), nullptr, style_box.copy_computed_values(), const_cast<CSS::AbstractImageStyleValue&>(*image));
                 // https://drafts.csswg.org/css-content-3/#content-property
                 // For <image>, this is an inline anonymous replaced element.
                 image_box.set_display(CSS::Display(CSS::DisplayOutside::Inline, CSS::DisplayInside::Flow));
                 image_box.attach_style_resources();
-                frame.content_item = &image_box;
+                content_item = &image_box;
             }
-            frame.content_item->set_generated_for(css_pseudo_element(ffi_pseudo), element);
-            return Node::slot_id(frame.content_item); },
+            content_item->set_generated_for(css_pseudo_element(ffi_pseudo), element);
+            return Node::slot_id(content_item); },
     };
 }
 

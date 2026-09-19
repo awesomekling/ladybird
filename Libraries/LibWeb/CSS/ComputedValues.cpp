@@ -1890,7 +1890,7 @@ RefPtr<StyleValue const> ComputedValues::computed_style_value(PropertyID propert
     return value;
 }
 
-static ContentDataAndQuoteNestingLevel resolve_content(StyleValue const& value, QuotesData const& quotes_data, DOM::AbstractElement& element_reference, u32 initial_quote_nesting_level, NotifyListItemCounterRendered notify_list_item_counter_rendered)
+static ContentDataAndQuoteNestingLevel resolve_content(StyleValue const& value, QuotesData const& quotes_data, DOM::AbstractElement& element_reference, u32 initial_quote_nesting_level)
 {
     auto quote_nesting_level = initial_quote_nesting_level;
 
@@ -1962,8 +1962,6 @@ static ContentDataAndQuoteNestingLevel resolve_content(StyleValue const& value, 
                 }
             } else if (item->is_counter()) {
                 flush_pending_text();
-                if (notify_list_item_counter_rendered == NotifyListItemCounterRendered::Yes && item->as_counter().counter_name() == list_item_counter_name())
-                    element_reference.element().document().did_render_list_item_counter_value(element_reference.element());
                 content_data.counter_style_dependencies.append(item->as_counter().counter_style()->as_counter_style().resolve_counter_style(element_reference.style_scope()));
                 content_data.data.append(item->as_counter().resolve(element_reference));
             } else if (item->is_image() || item->is_image_set()) {
@@ -1986,8 +1984,6 @@ static ContentDataAndQuoteNestingLevel resolve_content(StyleValue const& value, 
                 if (item->is_string()) {
                     alt_text_builder.append(item->as_string().string_value().view());
                 } else if (item->is_counter()) {
-                    if (notify_list_item_counter_rendered == NotifyListItemCounterRendered::Yes && item->as_counter().counter_name() == list_item_counter_name())
-                        element_reference.element().document().did_render_list_item_counter_value(element_reference.element());
                     content_data.counter_style_dependencies.append(item->as_counter().counter_style()->as_counter_style().resolve_counter_style(element_reference.style_scope()));
                     alt_text_builder.append(item->as_counter().resolve(element_reference));
                 } else {
@@ -2012,16 +2008,16 @@ static ContentDataAndQuoteNestingLevel resolve_content(StyleValue const& value, 
     return { {}, quote_nesting_level };
 }
 
-ContentDataAndQuoteNestingLevel ComputedValues::resolved_content(DOM::AbstractElement& element_reference, u32 initial_quote_nesting_level, NotifyListItemCounterRendered notify_list_item_counter_rendered) const
+ContentDataAndQuoteNestingLevel ComputedValues::resolved_content(DOM::AbstractElement& element_reference, u32 initial_quote_nesting_level) const
 {
-    return resolved_content(*m_noninherited.content_data, *m_inherited.list, element_reference, initial_quote_nesting_level, notify_list_item_counter_rendered);
+    return resolved_content(*m_noninherited.content_data, *m_inherited.list, element_reference, initial_quote_nesting_level);
 }
 
-ContentDataAndQuoteNestingLevel ComputedValues::resolved_content(ContentValues const& content_values, InheritedListValues const& list_values, DOM::AbstractElement& element_reference, u32 initial_quote_nesting_level, NotifyListItemCounterRendered notify_list_item_counter_rendered)
+ContentDataAndQuoteNestingLevel ComputedValues::resolved_content(ContentValues const& content_values, InheritedListValues const& list_values, DOM::AbstractElement& element_reference, u32 initial_quote_nesting_level)
 {
     // Read the content group's value directly, including the resource context attached to its images.
     auto value = content_values.computed_content_value();
-    return resolve_content(value, list_values.quotes_value(), element_reference, initial_quote_nesting_level, notify_list_item_counter_rendered);
+    return resolve_content(value, list_values.quotes_value(), element_reference, initial_quote_nesting_level);
 }
 
 }

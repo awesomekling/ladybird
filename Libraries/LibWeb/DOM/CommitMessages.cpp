@@ -69,6 +69,9 @@ void CommitMessages::append(Layout::RustFFI::FfiCommitMessage const& message)
     case Layout::RustFFI::FfiCommitMessageKind::TopLayerZoneRebuildNeeded:
         m_messages.append(Message { .identity = identity, .kind = Kind::TopLayerZoneRebuildNeeded });
         return;
+    case Layout::RustFFI::FfiCommitMessageKind::ListItemCounterValueRendered:
+        m_messages.append(Message { .identity = identity, .kind = Kind::ListItemCounterValueRendered });
+        return;
     case Layout::RustFFI::FfiCommitMessageKind::SvgResourceReferenced:
         m_messages.append(Message {
             .identity = identity,
@@ -108,6 +111,10 @@ void CommitMessages::apply(Message const& message)
         // Only an element can be a query container; the viewport names the document, which is not.
         if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
             CSS::Invalidation::invalidate_descendant_styles_depending_on_size_container_query(*element);
+        return;
+    case Kind::ListItemCounterValueRendered:
+        if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
+            m_document.did_render_list_item_counter_value(*element);
         return;
     case Kind::NeedsLayoutTreeUpdate:
         if (auto node = message.identity.resolve(m_document))

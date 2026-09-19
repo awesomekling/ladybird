@@ -26,6 +26,9 @@ pub enum FfiCommitMessageKind {
     /// The node is the element a pseudo-element box escaped its rebuild root under, so its layout
     /// tree has to be built again.
     LayoutTreeRebuildRequested,
+    /// The node is the element a pseudo-element was generated for, and the pseudo-element's content
+    /// or list marker shows the value of the `list-item` counter.
+    ListItemCounterValueRendered,
 }
 
 /// One thing the render side has to tell the document. The node it is about is named by the style

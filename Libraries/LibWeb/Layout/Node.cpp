@@ -769,9 +769,9 @@ void NodeWithStyle::set_display(CSS::Display display)
     RustFFI::layout_arena_set_layout_display(arena_handle(), slot_id(this), bit_cast<u32>(display));
 }
 
-void NodeWithStyle::set_content(CSS::ContentData const& content)
+void NodeWithStyle::set_content_counter_style_dependencies(Vector<ValueComparingRefPtr<CSS::CounterStyle const>> dependencies)
 {
-    m_content = content;
+    m_content_counter_style_dependencies = move(dependencies);
 }
 
 bool overflow_value_makes_box_a_scroll_container(CSS::Overflow overflow)
