@@ -210,8 +210,9 @@ void publish_visual_context_tree_inputs(DOM::Document& document)
     inputs.visual_viewport_offset_x = offset.x();
     inputs.visual_viewport_offset_y = offset.y();
     inputs.visual_viewport_scale = visual_viewport.scale();
-    inputs.viewport_wheel_overflow_x = static_cast<u8>(to_underlying(overflow_value_applied_to_viewport_for_wheel_scrolling(document, ScrollDirection::Horizontal)));
-    inputs.viewport_wheel_overflow_y = static_cast<u8>(to_underlying(overflow_value_applied_to_viewport_for_wheel_scrolling(document, ScrollDirection::Vertical)));
+    auto viewport_overflow = overflow_values_applied_to_viewport_for_wheel_scrolling(document);
+    inputs.viewport_wheel_overflow_x = static_cast<u8>(to_underlying(viewport_overflow.x));
+    inputs.viewport_wheel_overflow_y = static_cast<u8>(to_underlying(viewport_overflow.y));
     Layout::RustFFI::layout_arena_publish_visual_context_tree_inputs(document.layout_node_arena().handle(), inputs);
 }
 
