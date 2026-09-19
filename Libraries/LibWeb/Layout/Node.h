@@ -317,7 +317,6 @@ public:
     bool is_editing_host() const { return has_flag(RustFFI::NodeFlag::IsEditingHost); }
     void set_is_editing_host(bool value) { set_flag(RustFFI::NodeFlag::IsEditingHost, value); }
     bool refresh_dom_paint_facts(DOM::Node const&);
-    void refresh_svg_attribute_facts(DOM::Node const&);
 
     // https://drafts.csswg.org/css-ui/#propdef-user-select
     CSS::UserSelect user_select_used_value() const;
