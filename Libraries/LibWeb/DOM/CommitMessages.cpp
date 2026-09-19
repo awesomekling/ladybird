@@ -59,6 +59,9 @@ void CommitMessages::append(Layout::RustFFI::FfiCommitMessage const& message)
     case Layout::RustFFI::FfiCommitMessageKind::UnexpectedFragmentedInline:
         m_messages.append(Message { .identity = identity, .kind = Kind::UnexpectedFragmentedInline });
         return;
+    case Layout::RustFFI::FfiCommitMessageKind::TopLayerZoneRebuildNeeded:
+        m_messages.append(Message { .identity = identity, .kind = Kind::TopLayerZoneRebuildNeeded });
+        return;
     case Layout::RustFFI::FfiCommitMessageKind::SvgResourceReferenced:
         m_messages.append(Message {
             .identity = identity,
@@ -120,6 +123,9 @@ void CommitMessages::apply(Message const& message)
             resource->register_resource_box_referencing_element({}, *referencing_element);
         return;
     }
+    case Kind::TopLayerZoneRebuildNeeded:
+        m_document.set_top_layer_needs_layout_zone_rebuild();
+        return;
     case Kind::UnexpectedFragmentedInline:
         if (auto* arena = m_document.layout_node_arena_if_created()) {
             if (auto* node = message.identity.bound_layout_node(*arena)) {
