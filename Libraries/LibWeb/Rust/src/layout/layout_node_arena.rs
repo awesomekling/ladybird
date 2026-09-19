@@ -2433,12 +2433,18 @@ impl LayoutNodeArena {
         points: &[super::svg_formatting_context::FfiFloatPoint],
     ) {
         self.assert_owner_thread();
-        match self.svg_attribute_facts.borrow_mut().entry(style_node) {
-            std::collections::hash_map::Entry::Occupied(mut published) => **published.get_mut() = facts,
+        let replaced = match self.svg_attribute_facts.borrow_mut().entry(style_node) {
+            std::collections::hash_map::Entry::Occupied(mut published) => {
+                let replaced = published.get().reference_fragment_atom;
+                **published.get_mut() = facts;
+                replaced
+            }
             std::collections::hash_map::Entry::Vacant(slot) => {
                 slot.insert(Box::new(facts));
+                0
             }
-        }
+        };
+        self.retain_published_reference_atom(facts.reference_fragment_atom, replaced);
         let mut column = self.svg_points.borrow_mut();
         if points.is_empty() {
             column.remove(&style_node);
@@ -2494,8 +2500,32 @@ impl LayoutNodeArena {
 
     pub(crate) fn clear_style_node_svg_attribute_facts(&self, style_node: StyleNodeID) {
         self.assert_owner_thread();
-        self.svg_attribute_facts.borrow_mut().remove(&style_node);
+        let removed = self.svg_attribute_facts.borrow_mut().remove(&style_node);
+        if let Some(removed) = removed {
+            self.retain_published_reference_atom(0, removed.reference_fragment_atom);
+        }
         self.svg_points.borrow_mut().remove(&style_node);
+    }
+
+    /// Hand the retention a published SVG reference holds from the name it used to carry to the
+    /// name it carries now, so the style engine's atom sweep cannot reissue either number while a
+    /// publication still reads it. The atom an id names is otherwise rooted only by the element
+    /// answering to it, and a reference to an id that is in no document has no such element.
+    fn retain_published_reference_atom(&self, retained: u32, released: u32) {
+        if retained == released {
+            return;
+        }
+        // A document being torn down drops its style record host before the last publication is
+        // cleared. The engine it named is going with it, so there is nothing left to retain for.
+        let Some(host) = self.style_record_host.get() else {
+            return;
+        };
+        assert!(!host.style_engine.is_null());
+        // SAFETY: As with `with_style_engine`, the engine outlives the arena's live nodes and no
+        // host callback runs while the borrow is active.
+        let engine = unsafe { &mut *host.style_engine.cast::<StyleEngine>() };
+        engine.retain_published_atom(crate::css::style::index::StyleAtomID(retained));
+        engine.release_published_atom(crate::css::style::index::StyleAtomID(released));
     }
 
     pub(crate) fn node_has_dom_paint_fact(&self, id: NodeSlotId, fact: DomPaintFact) -> bool {
