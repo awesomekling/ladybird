@@ -99,8 +99,13 @@ Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind k
     , m_kind(kind)
 {
     publish_scroll_offset();
-    publish_unique_node_id();
-    publish_is_in_focused_text_control();
+    // The node is in hand here, so neither of these has to look one up. A fresh row is in no
+    // focused text control until something says otherwise, so only a row that is in a user agent
+    // shadow tree at all has to ask.
+    RustFFI::layout_arena_publish_unique_node_id(m_arena->handle(), m_slot,
+        is_viewport() ? document.unique_id().value() : (is<DOM::Element>(node.ptr()) ? node->unique_id().value() : 0));
+    if (has_flag(RustFFI::NodeFlag::IsInUserAgentShadowTree))
+        publish_is_in_focused_text_control();
 
     if (!node)
         return;
@@ -127,7 +132,8 @@ Node::Node(DOM::Document& document, BindToPreparedArenaSlot, Compositing::RustFF
 {
     RustFFI::layout_arena_attach_shell(m_arena->handle(), m_slot, this);
     publish_unique_node_id();
-    publish_is_in_focused_text_control();
+    if (has_flag(RustFFI::NodeFlag::IsInUserAgentShadowTree))
+        publish_is_in_focused_text_control();
 }
 
 Node::~Node()
