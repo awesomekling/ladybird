@@ -2366,6 +2366,7 @@ pub(crate) unsafe fn run_root_layout(
         arena,
         &host,
         CssPixels::from_raw(viewport_inline_size_raw),
+        CssPixels::from_raw(viewport_block_size_raw),
         document_in_quirks_mode,
     );
     let viewport_inline_size = CssPixels::from_raw(viewport_inline_size_raw);
@@ -2536,6 +2537,7 @@ pub(crate) unsafe fn compute_subtree_layout(
         arena,
         &host,
         CssPixels::from_raw(viewport_inline_size_raw),
+        CssPixels::from_raw(viewport_block_size_raw),
         document_in_quirks_mode,
     );
     // The boundary can be wider than the rebuilt roots that led to it, and laying it out may
