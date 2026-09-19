@@ -16,10 +16,39 @@
 //! Reports go to standard error, or to the file `LIBWEB_SEAL_LAYOUT_STAGE_LOG` names, since a
 //! test runner does not keep the render process's standard error.
 //!
-//! The seal covers the host tables the arena holds, except what the render side tells the
-//! document: the commit messages a finished pass delivers and the box presence a bound or
-//! unbound row reports. Those are outputs, not reads of the document, and a sealed stage still
-//! sends them.
+//! **The layout stage is sealed.** As of the commit that retired `compute_svg_path`, the whole
+//! test suite runs under `LIBWEB_SEAL_LAYOUT_STAGE=abort` without a single report, and
+//! [`super::layout_pass::LayoutPass`] no longer borrows the host table at all. What follows is
+//! what the seal still permits, and why each of them is not a read of the document.
+//!
+//! # The allow-list
+//!
+//! **Outputs.** The render side tells the document what it decided. These run from commit, after
+//! the pass has ended and the arena's mutable borrow has been released:
+//!
+//! - `deliver_commit_messages` - the messages a finished commit leaves, in the order it made
+//!   them. `FfiLayoutHostCallbacks::deliver_commit_messages`, sent from
+//!   `commit::CommitNotifications::notify_host`.
+//! - box presence - a row telling the document that it gained or lost a box, and the paintable
+//!   row resets that ride with it. `LayoutNodeArena::notify_box_presence` and
+//!   `PaintableRowReset::invoke_callback`.
+//!
+//! **Inputs synced before a pass, never during one.** These are host calls, and they are the
+//! three `note_host_call` sites that remain; each passes `layout_pass_is_running()`, so a call
+//! from inside a pass would still be reported. None has ever fired inside one:
+//!
+//! - `text_source` - a text row's character data, synced into the arena ahead of the pass.
+//! - `build_replaced_content_facts` - the intrinsic size of an enrolled replaced box, likewise.
+//! - `viewport_propagation_facts` - the document element and body facts the viewport propagation
+//!   decides from, read once at the layout entry before the pass begins.
+//!
+//! **The shared resource service.** Fonts and text shaping (`libgfx_rust::text_layout`, the
+//! thread-local shaping cache) are the one purity exception a render thread keeps: a
+//! thread-safe service, not a read of the document. They are not host calls and the seal does
+//! not see them.
+//!
+//! Anything else a running pass asks the document is a regression. Add a `note_host_call` beside
+//! any new host call rather than leaving it uncounted.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
