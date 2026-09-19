@@ -573,6 +573,21 @@ impl RetainedState {
         })
     }
 
+    /// The element's published style record, or its record for one pseudo-element kind, as a view.
+    /// `None` while there is no such record.
+    #[must_use]
+    pub(crate) fn published_style_view(
+        &self,
+        node: StyleNodeID,
+        pseudo_kind: Option<u8>,
+    ) -> Option<crate::css::computed_value_views::ComputedValuesView<'_>> {
+        let style_record = match pseudo_kind {
+            Some(pseudo_kind) => self.computed_group_sets.pseudo_style_record(node, pseudo_kind),
+            None => self.computed_group_sets.assigned_style_record(node),
+        };
+        self.published_style_record_view(style_record)
+    }
+
     /// A bit per pseudo-element kind the element holds a settled record for, which is what says
     /// each of them exists at all. The style store settles no record for `::backdrop` or a
     /// highlight pseudo-element, so neither is ever named here.
