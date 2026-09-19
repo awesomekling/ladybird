@@ -70,6 +70,10 @@ public:
 protected:
     SVGGraphicsElement(DOM::Document&, DOM::QualifiedName);
 
+    // The resources `mask`, `clip-path`, `fill` and `stroke` name travel with the presentation
+    // attributes, so a new style has to republish them.
+    virtual void computed_properties_changed() override;
+
     GC::Ptr<DOM::Element> resolve_url_to_element(CSS::URL const& url) const;
     GC::Ptr<DOM::Element> resolve_url_to_element(Utf16String const& url) const;
 

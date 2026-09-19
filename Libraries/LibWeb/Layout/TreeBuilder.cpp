@@ -747,29 +747,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
                 DOM::AbstractElement element_reference { element, css_pseudo_element(ffi_pseudo) };
                 CSS::resolve_counters(element_reference);
             } },
-        .principal_descendant_facts = [](void*, void* node_pointer, void* layout_node_pointer) -> RustFFI::FfiPrincipalDescendantFacts {
-            VERIFY(node_pointer);
-            VERIFY(layout_node_pointer);
-            auto& node = *static_cast<DOM::Node*>(node_pointer);
-            auto* graphics_element = as_if<SVG::SVGGraphicsElement>(node);
-            GC::Ptr<SVG::SVGMaskElement const> mask;
-            GC::Ptr<SVG::SVGClipPathElement const> clip_path;
-            GC::Ptr<SVG::SVGPatternElement const> fill_pattern;
-            GC::Ptr<SVG::SVGPatternElement const> stroke_pattern;
-            if (graphics_element) {
-                auto const& layout_node = as<NodeWithStyle>(*static_cast<Node*>(layout_node_pointer));
-                mask = graphics_element->mask(layout_node);
-                clip_path = graphics_element->clip_path(layout_node);
-                fill_pattern = graphics_element->fill_pattern(layout_node);
-                stroke_pattern = graphics_element->stroke_pattern(layout_node);
-            }
-            return {
-                .is_svg_graphics_element = graphics_element != nullptr,
-                .svg_mask = Node::style_node_of(mask.ptr()).value(),
-                .svg_clip_path = Node::style_node_of(clip_path.ptr()).value(),
-                .svg_fill_pattern = Node::style_node_of(fill_pattern.ptr()).value(),
-                .svg_stroke_pattern = Node::style_node_of(stroke_pattern.ptr()).value(),
-            }; },
         .create_first_letter_nodes = [](void*, void* element_pointer, RustFFI::FfiFirstLetterTarget target) -> RustFFI::FfiFirstLetterNodes {
             VERIFY(element_pointer);
             return create_first_letter_nodes(*static_cast<DOM::Element*>(element_pointer), target); },
