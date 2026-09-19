@@ -147,6 +147,17 @@ void SVGSVGElement::update_fallback_view_box_for_svg_as_image()
 void SVGSVGElement::set_fallback_view_box_for_svg_as_image(Optional<ViewBox> view_box)
 {
     m_fallback_view_box_for_svg_as_image = view_box;
+    publish_svg_attribute_facts();
+}
+
+// The active view box is the one thing in the published attribute facts that no attribute of this
+// element names, so each of its two other sources republishes for itself.
+void SVGSVGElement::set_active_view_element(GC::Ptr<SVGViewElement> view_element)
+{
+    if (m_active_view_element == view_element)
+        return;
+    m_active_view_element = view_element;
+    publish_svg_attribute_facts();
 }
 
 Optional<ViewBox> SVGSVGElement::active_view_box() const
