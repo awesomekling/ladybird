@@ -1602,6 +1602,15 @@ impl LayoutNodeArena {
         self.with_style_engine(|engine| engine.tree().next_sibling_in_dom_order(style_node))
     }
 
+    /// The shadow root attached to the host `style_node` names, or nothing when it hosts none. A
+    /// root is named the moment it is attached, so a host that has one is never answered for with
+    /// nothing.
+    pub(crate) fn shadow_root_of(&self, style_node: Option<StyleNodeID>) -> Option<StyleNodeID> {
+        let style_node = style_node?;
+        style_node.element_index()?;
+        self.with_style_engine(|engine| engine.tree().shadow_root_of(style_node))
+    }
+
     /// Whether the style mirror's DOM child sequence holds a child for `style_node`.
     pub(crate) fn has_dom_children(&self, style_node: Option<StyleNodeID>) -> bool {
         self.first_dom_child(style_node).is_some()
