@@ -573,6 +573,11 @@ impl RetainedState {
         self.tree.set_shadow_root(host, shadow_root, &mut self.memory);
     }
 
+    /// Replace the ordered list of nodes a slot has assigned to it, text nodes included.
+    pub fn set_slot_assigned_nodes(&mut self, slot: StyleNodeID, nodes: &[StyleNodeID]) {
+        self.tree.set_assigned_nodes(slot, nodes, &mut self.memory);
+    }
+
     // -- DOM child sequence ------------------------------------------------------------------
     //
     // Text nodes take identities so that the style tree can describe the DOM child sequence, but

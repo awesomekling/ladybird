@@ -7,6 +7,8 @@
 #pragma once
 
 #include <AK/Function.h>
+#include <AK/Span.h>
+#include <LibGC/Ptr.h>
 #include <LibWeb/CSS/PseudoClass.h>
 #include <LibWeb/CSS/StyleProperty.h>
 #include <LibWeb/Export.h>
@@ -77,6 +79,16 @@ WEB_API void record_node_moved_in_dom_order(DOM::Node&, DOM::Node const& old_par
 // it there without any DOM mutation. Nothing else says so: the element did not move, so no tree
 // delta carries it.
 WEB_API void record_element_assigned_slot_changed(DOM::Element&, DOM::Element* old_slot);
+
+// Report the whole ordered list of slottables a slot has assigned to it. The per-slottable relation
+// above cannot stand in for it: a text slottable holds no relation row to stage a change on, and the
+// order is the DOM's rather than the order assignments arrive in -- a manual assignment orders its
+// nodes the way `assign()` named them, and a reorder among one slot's assignees changes no
+// slottable's slot at all.
+//
+// Assignment runs inside an insertion, before the inserted subtree is named, so a slottable's
+// arrival republishes the list it is now a member of.
+WEB_API void record_slot_assignment_changed(HTML::HTMLSlotElement&);
 
 // Called once every element of a shadow tree has recorded its own removal, so nothing still names
 // the root as a parent. A shadow root's identity follows its host's lifetime: keeping it across a
