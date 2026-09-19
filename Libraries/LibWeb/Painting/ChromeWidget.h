@@ -104,6 +104,7 @@ protected:
     ChromeWidget(Layout::NodeArena&, Compositing::RustFFI::NodeSlotId);
 
     Layout::Node* layout_node() const;
+    Layout::NodeArena& arena() const { return m_arena; }
 
 private:
     friend class ChromeWidgetRegistry;

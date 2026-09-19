@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibGC/WeakInlines.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Page/ElementResizeAction.h>
@@ -22,7 +22,7 @@ NonnullRefPtr<ResizeHandle> ResizeHandle::create(Layout::NodeArena& arena, Compo
 
 ResizeHandle::ResizeHandle(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot)
     : ChromeWidget(arena, slot)
-    , m_element(as<DOM::Element>(*layout_node()->dom_node()))
+    , m_element(layout_node()->dom_node_identity())
 {
 }
 
@@ -52,7 +52,8 @@ MouseAction ResizeHandle::handle_pointer_event(Utf16FlyString const& type, unsig
         return MouseAction::None;
     }
 
-    auto element = m_element.ptr();
+    auto* document = arena().document();
+    auto* element = document ? as_if<DOM::Element>(m_element.resolve(*document).ptr()) : nullptr;
     if (!element || !element->is_connected()) {
         m_resize_action.clear();
         return MouseAction::None;
