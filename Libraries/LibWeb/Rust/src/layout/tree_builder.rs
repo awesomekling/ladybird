@@ -39,9 +39,9 @@ pub(crate) struct TreeBuilderState {
     /// The elements a finished build asks the document to rebuild, by identity. Zero asks for the
     /// whole tree: the box that escaped its rebuild root stands for no element of its own.
     layout_tree_rebuild_requests: Vec<u32>,
-    /// The SVG resources whose content this build laid out under a graphics element's box, in the
-    /// order it laid them out. Reported to the document when the build ends.
-    svg_resource_references: Vec<crate::layout::commit::FfiCommitMessage>,
+    /// What the build found out that the document has to be told, in the order it found it out.
+    /// Delivered when the build ends: nothing inside the build reads any of it back.
+    reports: Vec<crate::layout::commit::FfiCommitMessage>,
 }
 
 impl Default for TreeBuilderState {
@@ -56,7 +56,7 @@ impl Default for TreeBuilderState {
             layout_tree_update_escaped_rebuild_roots: false,
             new_subtree_root: NodeSlotId::INVALID,
             layout_tree_rebuild_requests: Vec::new(),
-            svg_resource_references: Vec::new(),
+            reports: Vec::new(),
         }
     }
 }
@@ -104,7 +104,6 @@ pub struct FfiDomTreeBuilderCallbacks {
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> FfiPrincipalDescendantFacts,
     pub create_first_letter_nodes:
         unsafe extern "C" fn(*mut c_void, *mut c_void, FfiFirstLetterTarget) -> FfiFirstLetterNodes,
-    pub request_top_layer_zone_rebuild: unsafe extern "C" fn(*mut c_void),
     pub request_layout_tree_rebuild: unsafe extern "C" fn(*mut c_void, u32),
     pub push_principal_frame: unsafe extern "C" fn(*mut c_void, u32) -> FfiPrincipalNodeFrame,
     pub pop_principal_frame: unsafe extern "C" fn(*mut c_void, *mut c_void),
@@ -1629,13 +1628,11 @@ fn ancestor_stack_contains_element_box(arena: &LayoutNodeArena, state: &TreeBuil
 /// resource outlives that box, so the document has to rebuild the referencing subtree when the
 /// resource goes away or changes - which is the only thing it does with this.
 fn report_svg_resource_reference(state: &mut TreeBuilderState, resource: u32, graphics_element: u32) {
-    state
-        .svg_resource_references
-        .push(crate::layout::commit::FfiCommitMessage {
-            style_node: resource,
-            other_style_node: graphics_element,
-            kind: crate::layout::commit::FfiCommitMessageKind::SvgResourceReferenced,
-        });
+    state.reports.push(crate::layout::commit::FfiCommitMessage {
+        style_node: resource,
+        other_style_node: graphics_element,
+        kind: crate::layout::commit::FfiCommitMessageKind::SvgResourceReferenced,
+    });
 }
 
 fn update_svg_resource(
@@ -2581,8 +2578,11 @@ fn update_layout_tree_from(
                 // A member found here without an attached box was cleared together with a hidden ancestor subtree, and
                 // nothing is scheduled to rebuild it. Request another top-layer zone pass instead of stranding dirty
                 // flags below ancestors whose walks already finished.
-                // SAFETY: `dom_node` remains live throughout the call.
-                unsafe { (host.callbacks.request_top_layer_zone_rebuild)(dom_node) };
+                state.reports.push(crate::layout::commit::FfiCommitMessage {
+                    style_node: 0,
+                    other_style_node: 0,
+                    kind: crate::layout::commit::FfiCommitMessageKind::TopLayerZoneRebuildNeeded,
+                });
             }
             // SAFETY: `frame` is the most recently pushed principal frame and is no longer used by Rust.
             unsafe { (host.callbacks.pop_principal_frame)(host.callbacks.builder, pushed_frame.frame) };
@@ -2745,17 +2745,13 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     let viewport = arena.layout_root();
     assert!(!viewport.is_invalid(), "a layout tree build places the viewport");
 
-    // What the build found out about SVG resources goes to the document now that the tree is
-    // settled, in the order the build found it out.
-    if !state.svg_resource_references.is_empty() {
+    // What the build found out goes to the document now that the tree is settled, in the order the
+    // build found it out.
+    if !state.reports.is_empty() {
         let layout_host = arena.layout_host();
         // SAFETY: The document outlives the build, and no arena borrow is held here.
         unsafe {
-            (layout_host.deliver_commit_messages)(
-                layout_host.context,
-                state.svg_resource_references.as_ptr(),
-                state.svg_resource_references.len(),
-            );
+            (layout_host.deliver_commit_messages)(layout_host.context, state.reports.as_ptr(), state.reports.len());
         }
     }
 

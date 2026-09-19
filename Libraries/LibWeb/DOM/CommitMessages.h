@@ -54,6 +54,7 @@ private:
         NavigableContainerViewportCommitted,
         NeedsLayoutTreeUpdate,
         SvgResourceReferenced,
+        TopLayerZoneRebuildNeeded,
         UnexpectedFragmentedInline,
     };
 

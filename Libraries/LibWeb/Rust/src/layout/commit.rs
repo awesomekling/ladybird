@@ -20,6 +20,9 @@ pub enum FfiCommitMessageKind {
     /// tree build laid out under the graphics element `other_style_node` names. The resource
     /// outlives that box, so removing it has to rebuild the subtree the box sits in.
     SvgResourceReferenced,
+    /// A top layer member was reached with no box and nothing scheduled to rebuild it, so the
+    /// document has to run another top layer zone pass. This one is about the document itself.
+    TopLayerZoneRebuildNeeded,
 }
 
 /// One thing the render side has to tell the document. The node it is about is named by the style
