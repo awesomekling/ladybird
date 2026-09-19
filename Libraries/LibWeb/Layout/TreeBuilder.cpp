@@ -794,29 +794,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
         .create_first_letter_nodes = [](void*, void* element_pointer, RustFFI::FfiFirstLetterTarget target) -> RustFFI::FfiFirstLetterNodes {
             VERIFY(element_pointer);
             return create_first_letter_nodes(*static_cast<DOM::Element*>(element_pointer), target); },
-        .top_layer_element_count = [](void* document_pointer) {
-            VERIFY(document_pointer);
-            return static_cast<DOM::Document*>(document_pointer)->top_layer_elements().size(); },
-        .copy_top_layer_elements = [](void* document_pointer, RustFFI::FfiIdentifiedDomNode* output, size_t count) {
-            VERIFY(document_pointer);
-            VERIFY(output || count == 0);
-            auto const& elements = static_cast<DOM::Document*>(document_pointer)->top_layer_elements();
-            VERIFY(count == elements.size());
-            size_t index = 0;
-            for (auto const& element : elements)
-                output[index++] = identified_dom_node(element.ptr()); },
-        .flat_tree_parent = [](void* node_pointer) -> void* {
-            VERIFY(node_pointer);
-            return static_cast<DOM::Node*>(node_pointer)->flat_tree_parent(); },
-        .flat_tree_render_facts = [](void* node_pointer) -> RustFFI::FfiFlatTreeRenderFacts {
-            VERIFY(node_pointer);
-            auto* element = as_if<DOM::Element>(*static_cast<DOM::Node*>(node_pointer));
-            auto const* box_values = element ? element->style_group<CSS::ComputedValues::BoxValues>() : nullptr;
-            return {
-                .is_element = element != nullptr,
-                .has_computed_style = box_values != nullptr,
-                .display_is_none = box_values && box_values->display_value().is_none(),
-            }; },
         .svg_pattern_content_element = [](void* pattern_pointer) -> RustFFI::FfiIdentifiedDomNode {
             VERIFY(pattern_pointer);
             return identified_dom_node(static_cast<SVG::SVGPatternElement*>(pattern_pointer)->pattern_content_element().ptr()); },

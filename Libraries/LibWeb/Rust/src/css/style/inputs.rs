@@ -597,6 +597,17 @@ impl RetainedState {
         self.tree.set_assigned_nodes(slot, nodes, &mut self.memory);
     }
 
+    /// Replace the document's top layer, in membership order.
+    pub fn set_top_layer_elements(&mut self, elements: &[StyleNodeID]) {
+        self.top_layer_elements.clear();
+        self.top_layer_elements.extend_from_slice(elements);
+    }
+
+    #[must_use]
+    pub fn top_layer_elements(&self) -> &[StyleNodeID] {
+        &self.top_layer_elements
+    }
+
     // -- DOM child sequence ------------------------------------------------------------------
     //
     // Text nodes take identities so that the style tree can describe the DOM child sequence, but
@@ -1060,6 +1071,7 @@ impl StyleEngineState {
                 exact_covered_scratch: Vec::new(),
                 cascade_compaction_scratch: ordering::CascadeCompactionWorkspace::default(),
                 cascade_compaction_scratch_memory: MemoryLease::new(MemoryCategory::BatchScratch),
+                top_layer_elements: Vec::new(),
                 next_style_transaction_version: StyleTransactionVersion(1),
                 document_style_computation_inputs: None,
                 font_resolution: None,
@@ -1814,6 +1826,13 @@ impl StyleEngineState {
             self.retained
                 .tree
                 .retire_elements(&retired_nodes, &mut self.retained.memory);
+            // An identity can be minted again for another element, so the top layer cannot be left
+            // naming one that has been given up.
+            if !self.retained.top_layer_elements.is_empty() {
+                self.retained
+                    .top_layer_elements
+                    .retain(|member| !retired_nodes.contains(member));
+            }
             let live_animation_overlays_after = self.retained.computed_group_sets.live_animation_overlay_records();
             self.settle_computed_memory();
             counters.add(

@@ -101,10 +101,6 @@ pub struct FfiDomTreeBuilderCallbacks {
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> FfiPrincipalDescendantFacts,
     pub create_first_letter_nodes:
         unsafe extern "C" fn(*mut c_void, *mut c_void, FfiFirstLetterTarget) -> FfiFirstLetterNodes,
-    pub top_layer_element_count: unsafe extern "C" fn(*mut c_void) -> usize,
-    pub copy_top_layer_elements: unsafe extern "C" fn(*mut c_void, *mut FfiIdentifiedDomNode, usize),
-    pub flat_tree_parent: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
-    pub flat_tree_render_facts: unsafe extern "C" fn(*mut c_void) -> FfiFlatTreeRenderFacts,
     pub svg_pattern_content_element: unsafe extern "C" fn(*mut c_void) -> FfiIdentifiedDomNode,
     pub register_svg_resource_reference: unsafe extern "C" fn(*mut c_void, *mut c_void),
     pub principal_node_entry_facts: unsafe extern "C" fn(*mut c_void, u32, bool) -> FfiPrincipalNodeEntryFacts,
@@ -169,14 +165,6 @@ pub struct FfiTextLayoutFacts {
     pub parent_display_is_contents: bool,
     pub parent_collapses_whitespace: bool,
     pub style_parent_style_record: u64,
-}
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiFlatTreeRenderFacts {
-    pub is_element: bool,
-    pub has_computed_style: bool,
-    pub display_is_none: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -1378,18 +1366,23 @@ impl DomTreeBuilderHost<'_> {
     }
 }
 
-fn has_unrendered_flat_tree_ancestor(host: &DomTreeBuilderHost<'_>, element: *mut c_void) -> bool {
-    // SAFETY: `element` and every returned flat-tree ancestor remain live throughout layout-tree construction.
-    let mut ancestor = unsafe { (host.callbacks.flat_tree_parent)(element) };
-    while !ancestor.is_null() {
-        // SAFETY: `ancestor` is a live DOM node.
-        let facts = unsafe { (host.callbacks.flat_tree_render_facts)(ancestor) };
-        // Null style means the style update pass skipped a display:none subtree.
-        if facts.is_element && (!facts.has_computed_style || facts.display_is_none) {
+/// Whether a flat-tree ancestor of the element keeps it out of the rendered tree.
+///
+/// Only an element ever hides a subtree, and the mirror's flat tree steps straight from a node to
+/// the element above it, so every ancestor the walk reaches has a published record to ask. No
+/// record at all means the style update pass skipped a display:none subtree.
+fn has_unrendered_flat_tree_ancestor(host: &DomTreeBuilderHost<'_>, style_node: u32) -> bool {
+    let layout = host.layout();
+    let arena = layout.arena();
+    let mut ancestor = arena.flat_tree_parent(StyleNodeID::from_raw(style_node));
+    while let Some(current) = ancestor {
+        if !arena
+            .published_box_facts(Some(current))
+            .is_some_and(|facts| !facts.display.is_none())
+        {
             return true;
         }
-        // SAFETY: `ancestor` remains live throughout the walk.
-        ancestor = unsafe { (host.callbacks.flat_tree_parent)(ancestor) };
+        ancestor = arena.flat_tree_parent(Some(current));
     }
     false
 }
@@ -1867,32 +1860,17 @@ unsafe fn update_principal_node_descendants(
                 // they generate boxes as if they were siblings of the root element.
                 let prior_layout_top_layer = context.layout_top_layer;
                 context.layout_top_layer = true;
-                // SAFETY: The DOM document remains live and owns a stable top-layer list during this pass.
-                let count = unsafe { (host.callbacks.top_layer_element_count)(dom_node) };
-                let mut top_layer_elements = vec![
-                    FfiIdentifiedDomNode {
-                        node: std::ptr::null_mut(),
-                        style_node: 0,
-                    };
-                    count
-                ];
-                // SAFETY: The output slice has room for the stable top-layer list reported above.
-                unsafe {
-                    (host.callbacks.copy_top_layer_elements)(dom_node, top_layer_elements.as_mut_ptr(), count);
-                }
-                for identified in top_layer_elements {
-                    let element = identified.node;
-                    assert!(!element.is_null());
-                    if !host.rendered_in_top_layer(identified.style_node) {
+                for member in layout_host.arena().top_layer_elements() {
+                    let member = member.raw();
+                    if !host.rendered_in_top_layer(member) {
                         continue;
                     }
-                    // SAFETY: `element` is a live DOM Element.
-                    if has_unrendered_flat_tree_ancestor(host, element) {
+                    if has_unrendered_flat_tree_ancestor(host, member) {
                         // SAFETY: The builder remains live, and the identity names a live DOM node.
                         unsafe {
                             (host.callbacks.clear_stale_subtree)(
                                 host.callbacks.builder,
-                                identified.style_node,
+                                member,
                                 FfiStaleSubtreeClearScope::InclusiveBoundedToRoot,
                             );
                         }
@@ -1901,7 +1879,7 @@ unsafe fn update_principal_node_descendants(
                     update_layout_tree(
                         host,
                         state,
-                        identified.style_node,
+                        member,
                         context,
                         should_create_layout_node,
                         FfiInsertionMode::Append,
