@@ -18,7 +18,7 @@ use super::used_values::UsedValues;
 use crate::css::style::fast_hash::{FastMap as HashMap, FastSet as HashSet};
 use crate::css::style::tree::StyleNodeID;
 use crate::css::style::{
-    PublishedBoxFacts, StyleEngine,
+    PublishedBoxFacts, StyleEngine, TextStyleParentFacts,
     layout_style::{AnonymousStyleKind, AnonymousStyleOverrides, DerivedStyleRecord, LayoutStyle},
 };
 use crate::layout::ComputedValuesView;
@@ -1691,6 +1691,14 @@ impl LayoutNodeArena {
         };
         style_node.element_index().is_some()
             && self.with_style_engine(|engine| engine.element_content_is_single_image(style_node))
+    }
+
+    /// What the element above the text node in the flat tree publishes, in one borrow.
+    pub(crate) fn text_style_parent_facts(&self, style_node: Option<StyleNodeID>) -> TextStyleParentFacts {
+        let Some(style_node) = style_node else {
+            return TextStyleParentFacts::default();
+        };
+        self.with_style_engine(|engine| engine.text_style_parent_facts(style_node))
     }
 
     /// Whether the style mirror holds a layout tree update mark on a flat-tree descendant of
