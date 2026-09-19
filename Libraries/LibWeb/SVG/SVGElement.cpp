@@ -507,6 +507,12 @@ GC::Ref<SVGAnimatedString> SVGElement::class_name()
     return *m_class_name_animated_string;
 }
 
+void SVGElement::publish_svg_attribute_facts()
+{
+    if (auto* layout_node = unsafe_layout_node())
+        layout_node->refresh_svg_attribute_facts(*this);
+}
+
 // https://svgwg.org/svg2-draft/types.html#__svg__SVGElement__ownerSVGElement
 GC::Ptr<SVGSVGElement> SVGElement::owner_svg_element()
 {

@@ -25,6 +25,7 @@
 #include <LibWeb/HTML/HTMLTableColElement.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/NavigableContainer.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Layout/TextNode.h>
@@ -91,6 +92,12 @@ bool Node::refresh_dom_paint_facts(DOM::Node const& dom_node)
     return RustFFI::layout_arena_set_node_dom_paint_facts(m_arena->handle(), m_slot, dom_paint_facts_of(&dom_node));
 }
 
+void Node::refresh_svg_attribute_facts(DOM::Node const& dom_node)
+{
+    VERIFY(this->dom_node() == &dom_node);
+    RustFFI::layout_arena_set_node_svg_attribute_facts(m_arena->handle(), m_slot, build_svg_attribute_facts(dom_node));
+}
+
 Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind kind, AttachToDOMNode attach_to_dom_node)
     : m_arena(document.layout_node_arena())
     , m_slot(m_arena->allocate(build_node_construction_facts(document, node, kind, this)))
@@ -103,6 +110,10 @@ Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind k
     auto* row_already_bound_to_dom_node = node->unsafe_layout_node();
     if (row_already_bound_to_dom_node)
         RustFFI::layout_arena_note_rows_share_dom_node(m_arena->handle(), row_already_bound_to_dom_node->m_slot, m_slot);
+    // A row starts out with the attributes its element carries now; every later change to them
+    // publishes itself.
+    if (node->is_svg_element())
+        RustFFI::layout_arena_set_node_svg_attribute_facts(m_arena->handle(), m_slot, build_svg_attribute_facts(*node));
     if (attach_to_dom_node == AttachToDOMNode::Yes) {
         if (row_already_bound_to_dom_node)
             row_already_bound_to_dom_node->pin_style_record_for_detachment();
