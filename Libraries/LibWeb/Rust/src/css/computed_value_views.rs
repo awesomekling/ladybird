@@ -13,15 +13,15 @@ use crate::css::calc;
 use crate::css::computed_value_types::{
     AlignmentValues, AnchorValues, BackgroundValues, BorderLayoutFacts, BorderValues, BoxValues, ComputedAspectRatio,
     ComputedGap, ComputedLengthPercentageOrAuto, ComputedSize, ComputedSizeKind, ComputedStyleValueHandle,
-    EffectsValues, FontValues, GridValues, InheritedListValues, InheritedSVGValues, InheritedTextLayoutFacts,
-    InheritedTextValues, InheritedUIValues, MaskValues, MiscResetValues, STYLE_GROUP_INDEX_ALIGNMENT,
-    STYLE_GROUP_INDEX_ANCHOR, STYLE_GROUP_INDEX_BACKGROUND, STYLE_GROUP_INDEX_BORDER, STYLE_GROUP_INDEX_BOX,
-    STYLE_GROUP_INDEX_EFFECTS, STYLE_GROUP_INDEX_FONT, STYLE_GROUP_INDEX_GRID, STYLE_GROUP_INDEX_INHERITED_BOX,
-    STYLE_GROUP_INDEX_INHERITED_LIST, STYLE_GROUP_INDEX_INHERITED_SVG, STYLE_GROUP_INDEX_INHERITED_TABLE,
-    STYLE_GROUP_INDEX_INHERITED_TEXT, STYLE_GROUP_INDEX_INHERITED_UI, STYLE_GROUP_INDEX_MASK,
-    STYLE_GROUP_INDEX_MISC_RESET, STYLE_GROUP_INDEX_SIZING, STYLE_GROUP_INDEX_SURROUND, STYLE_GROUP_INDEX_SVG_RESET,
-    STYLE_GROUP_INDEX_TEXT_RESET, STYLE_GROUP_INDEX_TRANSFORM, SVGResetValues, SizingValues, SurroundValues,
-    TextResetValues, TransformValues,
+    ContentValues, EffectsValues, FontValues, GridValues, InheritedListValues, InheritedSVGValues,
+    InheritedTextLayoutFacts, InheritedTextValues, InheritedUIValues, MaskValues, MiscResetValues,
+    STYLE_GROUP_INDEX_ALIGNMENT, STYLE_GROUP_INDEX_ANCHOR, STYLE_GROUP_INDEX_BACKGROUND, STYLE_GROUP_INDEX_BORDER,
+    STYLE_GROUP_INDEX_BOX, STYLE_GROUP_INDEX_CONTENT, STYLE_GROUP_INDEX_EFFECTS, STYLE_GROUP_INDEX_FONT,
+    STYLE_GROUP_INDEX_GRID, STYLE_GROUP_INDEX_INHERITED_BOX, STYLE_GROUP_INDEX_INHERITED_LIST,
+    STYLE_GROUP_INDEX_INHERITED_SVG, STYLE_GROUP_INDEX_INHERITED_TABLE, STYLE_GROUP_INDEX_INHERITED_TEXT,
+    STYLE_GROUP_INDEX_INHERITED_UI, STYLE_GROUP_INDEX_MASK, STYLE_GROUP_INDEX_MISC_RESET, STYLE_GROUP_INDEX_SIZING,
+    STYLE_GROUP_INDEX_SURROUND, STYLE_GROUP_INDEX_SVG_RESET, STYLE_GROUP_INDEX_TEXT_RESET, STYLE_GROUP_INDEX_TRANSFORM,
+    SVGResetValues, SizingValues, SurroundValues, TextResetValues, TransformValues,
 };
 use crate::css::computed_values::{InheritedBoxValues, InheritedTableValues};
 use crate::css::css_enums::{direction, writing_mode};
@@ -563,6 +563,42 @@ impl<'a> ComputedValuesView<'a> {
     #[inline]
     pub(crate) fn image_rendering(self) -> u8 {
         self.inherited_box().image_rendering
+    }
+
+    #[inline]
+    fn content(self) -> &'a ContentValues {
+        self.native_group(STYLE_GROUP_INDEX_CONTENT)
+    }
+
+    /// Whether the style can move the generated-content state a later sibling reads: any counter
+    /// it touches, or a quote its content opens or closes.
+    pub(crate) fn affects_generated_content_state(self) -> bool {
+        let content = self.content();
+        let names_counters =
+            |handle: &ComputedStyleValueHandle| !matches!(handle.data(), None | Some(StyleValueData::Keyword { .. }));
+        if names_counters(&content.counter_increment)
+            || names_counters(&content.counter_reset)
+            || names_counters(&content.counter_set)
+        {
+            return true;
+        }
+        let Some(StyleValueData::Content { content, .. }) = content.content.data() else {
+            return false;
+        };
+        let Some(StyleValueData::ValueList { values, .. }) = content.optional_data() else {
+            return false;
+        };
+        values.as_slice().iter().any(|item| {
+            use crate::css::style_compute::keyword;
+            matches!(
+                item.optional_data(),
+                Some(StyleValueData::Keyword { keyword })
+                    if matches!(
+                        *keyword,
+                        keyword::OPEN_QUOTE | keyword::CLOSE_QUOTE | keyword::NO_OPEN_QUOTE | keyword::NO_CLOSE_QUOTE
+                    )
+            )
+        })
     }
 
     #[inline]
