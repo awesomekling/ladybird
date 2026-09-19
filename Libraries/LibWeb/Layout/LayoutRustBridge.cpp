@@ -17,6 +17,7 @@
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/Display.h>
 #include <LibWeb/CSS/LengthBox.h>
+#include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleValues/AnchorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
 #include <LibWeb/CSS/ValueType.h>
@@ -36,6 +37,7 @@
 #include <LibWeb/Layout/TextNode.h>
 #include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Painting/PaintableTypes.h>
+#include <LibWeb/SVG/FragmentIdentifier.h>
 #include <LibWeb/SVG/SVGCircleElement.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
 #include <LibWeb/SVG/SVGEllipseElement.h>
@@ -97,8 +99,24 @@ static RustFFI::FfiSvgLengthValue to_ffi_svg_length_value(Optional<SVG::SVGLengt
     VERIFY_NOT_REACHED();
 }
 
+// The element an SVG reference names, as the style mirror's id index can answer for it: the URL's
+// decoded fragment, interned as the atom the element's id is indexed under. Parsing a URL is
+// document work rather than layout work, so a reference travels as an atom and the pass resolves
+// it through the index instead of asking the document for the element.
+// FIXME: A same-document fragment is all this carries, which is all SVG resolves today.
+static CSS::StyleAtomID svg_reference_fragment_atom(DOM::Element& element, Optional<Utf16String> const& url_string)
+{
+    if (!url_string.has_value())
+        return {};
+    auto url = element.document().encoding_parse_url(*url_string);
+    if (!url.has_value() || !url->fragment().has_value())
+        return {};
+    auto fragment = SVG::decode_fragment_identifier(*url->fragment());
+    return element.document().style_computer().style_engine().intern_atom(Utf16FlyString::from_utf16(fragment.utf16_view()));
+}
+
 // The SVG presentation attributes an element parses, as the layout stage reads them.
-static RustFFI::FfiSvgAttributeFacts build_svg_attribute_facts(DOM::Node const& dom_node)
+static RustFFI::FfiSvgAttributeFacts build_svg_attribute_facts(DOM::Element& dom_node)
 {
     auto const* svg_element = as_if<SVG::SVGElement>(dom_node);
     if (!svg_element)
@@ -172,6 +190,13 @@ static RustFFI::FfiSvgAttributeFacts build_svg_attribute_facts(DOM::Node const& 
     if (auto const* text_positioning_element = as_if<SVG::SVGTextPositioningElement>(dom_node))
         text_positioning = text_positioning_element->parsed_text_positioning();
 
+    CSS::StyleAtomID reference_fragment;
+    SVG::NumberPercentage start_offset = SVG::NumberPercentage::create_number(0);
+    if (auto const* text_path_element = as_if<SVG::SVGTextPathElement>(dom_node)) {
+        reference_fragment = svg_reference_fragment_atom(dom_node, text_path_element->href_attribute_value());
+        start_offset = text_path_element->parsed_start_offset().value_or(start_offset);
+    }
+
     return {
         .is_graphics_element = is<SVG::SVGGraphicsElement>(dom_node),
         .is_use_element = is<SVG::SVGUseElement>(dom_node),
@@ -201,6 +226,8 @@ static RustFFI::FfiSvgAttributeFacts build_svg_attribute_facts(DOM::Node const& 
         .text_y = to_ffi_svg_length_value(text_positioning.y),
         .text_dx = to_ffi_svg_length_value(text_positioning.dx),
         .text_dy = to_ffi_svg_length_value(text_positioning.dy),
+        .reference_fragment_atom = reference_fragment.value(),
+        .text_path_start_offset = to_ffi_number_percentage(start_offset),
     };
 }
 
