@@ -15,6 +15,7 @@
 #include <LibWeb/Geometry/DOMMatrix.h>
 #include <LibWeb/Geometry/DOMRect.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Page/Page.h>
@@ -37,6 +38,13 @@ namespace Web::SVG {
 SVGGraphicsElement::SVGGraphicsElement(DOM::Document& document, DOM::QualifiedName qualified_name)
     : SVGElement(document, move(qualified_name))
 {
+}
+
+void SVGGraphicsElement::computed_properties_changed()
+{
+    // An element that has not been named by the style tree yet publishes when it is.
+    if (style_node_id() != 0)
+        Layout::publish_svg_style_references(*this);
 }
 
 GC::Ptr<DOM::Element> SVGGraphicsElement::paint_server_element(Optional<CSS::SVGPaint> const& paint_value) const

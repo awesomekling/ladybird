@@ -100,8 +100,6 @@ pub struct FfiDomTreeBuilderCallbacks {
     pub clear_stale_layout_node: unsafe extern "C" fn(*mut c_void, u32),
     pub clear_stale_subtree: unsafe extern "C" fn(*mut c_void, u32, FfiStaleSubtreeClearScope),
     pub resolve_counters: unsafe extern "C" fn(*mut c_void, FfiPseudoElement),
-    pub principal_descendant_facts:
-        unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> FfiPrincipalDescendantFacts,
     pub create_first_letter_nodes:
         unsafe extern "C" fn(*mut c_void, *mut c_void, FfiFirstLetterTarget) -> FfiFirstLetterNodes,
     pub push_principal_frame: unsafe extern "C" fn(*mut c_void, u32) -> FfiPrincipalNodeFrame,
@@ -129,16 +127,6 @@ pub struct FfiPrincipalNodeFrame {
     /// The DOM node the walk's identity names. The walk navigates by identity and takes the pointer
     /// from here, so the node is resolved once per visit rather than once per payload callback.
     pub dom_node: *mut c_void,
-}
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiPrincipalDescendantFacts {
-    pub is_svg_graphics_element: bool,
-    pub svg_mask: u32,
-    pub svg_clip_path: u32,
-    pub svg_fill_pattern: u32,
-    pub svg_stroke_pattern: u32,
 }
 
 /// What the build knows about a node when it enters it: what its marks ask for, and what layout
@@ -1691,6 +1679,20 @@ fn svg_pattern_content_element(host: &DomTreeBuilderHost<'_>, pattern: u32) -> O
     }
 }
 
+/// The element one of `mask`, `clip-path`, `fill` and `stroke` names, as
+/// `SVGGraphicsElement::try_resolve_url_to<T>` answers for it: the id index resolved in the
+/// referrer's scope order, and then the element type the C++ cast requires. A reference to an
+/// element of any other type names nothing at all.
+fn svg_style_reference_element(
+    host: &DomTreeBuilderHost<'_>,
+    referrer: StyleNodeID,
+    atom: u32,
+    required_element_fact: u32,
+) -> Option<StyleNodeID> {
+    let resolved = host.layout().arena().element_by_svg_reference(referrer, atom)?;
+    (host.element_type_facts(resolved.raw()) & required_element_fact != 0).then_some(resolved)
+}
+
 fn update_svg_pattern(
     host: &DomTreeBuilderHost<'_>,
     state: &mut TreeBuilderState,
@@ -1746,14 +1748,6 @@ unsafe fn update_principal_node_descendants(
         assert!(!dom_node.is_null());
         assert!(!layout_node.is_invalid());
         let layout_host = host.layout();
-        // SAFETY: All pointers remain live throughout the call.
-        let facts = unsafe {
-            (host.callbacks.principal_descendant_facts)(
-                host.callbacks.builder,
-                dom_node,
-                layout_host.shell(layout_node),
-            )
-        };
         let content_visibility_hidden = host.content_visibility_is_hidden(update.style_node);
         // Only a pass that can generate a pseudo-element box asks which ones exist.
         let published_pseudo_records = if should_create_layout_node || update.update_pseudo_elements_in_place {
@@ -1929,26 +1923,50 @@ unsafe fn update_principal_node_descendants(
         }
 
         if should_create_layout_node {
-            if facts.is_svg_graphics_element {
-                for resource in [facts.svg_mask, facts.svg_clip_path] {
-                    if resource != 0 {
-                        update_svg_resource(
-                            host,
-                            state,
-                            resource,
-                            update.style_node,
-                            layout_node,
-                            context,
-                            context.layout_svg_mask_or_clip_path,
-                        );
-                    }
+            let svg_attributes = StyleNodeID::from_raw(update.style_node)
+                .map(|referrer| layout_host.arena().style_node_svg_attribute_facts(referrer));
+            if let Some(svg_attributes) = svg_attributes.filter(|facts| facts.is_graphics_element) {
+                let referrer = StyleNodeID::from_raw(update.style_node).expect("a graphics element is named");
+                let reference = |atom, required| svg_style_reference_element(host, referrer, atom, required);
+                for resource in [
+                    reference(
+                        svg_attributes.mask_reference_atom,
+                        element_adjustment_fact::IS_SVG_MASK_ELEMENT,
+                    ),
+                    reference(
+                        svg_attributes.clip_path_reference_atom,
+                        element_adjustment_fact::IS_SVG_CLIP_PATH_ELEMENT,
+                    ),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    update_svg_resource(
+                        host,
+                        state,
+                        resource.raw(),
+                        update.style_node,
+                        layout_node,
+                        context,
+                        context.layout_svg_mask_or_clip_path,
+                    );
                 }
 
                 let mut seen_content_elements = Vec::with_capacity(2);
-                for pattern in [facts.svg_fill_pattern, facts.svg_stroke_pattern] {
-                    if pattern == 0 {
+                for pattern in [
+                    reference(
+                        svg_attributes.fill_reference_atom,
+                        element_adjustment_fact::IS_SVG_PATTERN_ELEMENT,
+                    ),
+                    reference(
+                        svg_attributes.stroke_reference_atom,
+                        element_adjustment_fact::IS_SVG_PATTERN_ELEMENT,
+                    ),
+                ] {
+                    let Some(pattern) = pattern else {
                         continue;
-                    }
+                    };
+                    let pattern = pattern.raw();
                     let Some(content_element) = svg_pattern_content_element(host, pattern) else {
                         continue;
                     };

@@ -12,6 +12,9 @@ use super::geometry::AvailableSize;
 use super::geometry::AvailableSpace;
 use super::rendered_text::{FfiTextSource, FfiTextSourceRange, RenderedTextBoundary, TextContent, TextFragments};
 use super::svg_formatting_context::FfiSvgAttributeFacts;
+
+/// How many interned names one SVG element's publication can name.
+const PUBLISHED_REFERENCE_ATOM_COUNT: usize = 5;
 use super::tree_builder::FfiLayoutTreeBuildOutcome;
 use super::update_layout::{FfiLayoutTreeBuildStats, FfiLayoutUpdateHostCallbacks};
 use super::used_values::SizeConstraint;
@@ -2426,6 +2429,28 @@ impl LayoutNodeArena {
         self.svg_points.borrow().get(&style_node).cloned()
     }
 
+    /// Replace only the four names a graphics element's style carries. An element that has not
+    /// published its attributes yet has no place to put them, and will carry them itself when it
+    /// does: the publication is made when the style tree names the element, which is before any
+    /// style of its own is installed.
+    pub(crate) fn set_style_node_svg_style_references(&self, style_node: StyleNodeID, references: [u32; 4]) {
+        self.assert_owner_thread();
+        let mut published = self.svg_attribute_facts.borrow_mut();
+        let Some(facts) = published.get_mut(&style_node) else {
+            return;
+        };
+        let replaced = Self::published_reference_atoms(facts);
+        [
+            facts.mask_reference_atom,
+            facts.clip_path_reference_atom,
+            facts.fill_reference_atom,
+            facts.stroke_reference_atom,
+        ] = references;
+        let retained = Self::published_reference_atoms(facts);
+        drop(published);
+        self.retain_published_reference_atoms(retained, replaced);
+    }
+
     pub(crate) fn set_style_node_svg_attribute_facts(
         &self,
         style_node: StyleNodeID,
@@ -2435,16 +2460,16 @@ impl LayoutNodeArena {
         self.assert_owner_thread();
         let replaced = match self.svg_attribute_facts.borrow_mut().entry(style_node) {
             std::collections::hash_map::Entry::Occupied(mut published) => {
-                let replaced = published.get().reference_fragment_atom;
+                let replaced = Self::published_reference_atoms(published.get());
                 **published.get_mut() = facts;
                 replaced
             }
             std::collections::hash_map::Entry::Vacant(slot) => {
                 slot.insert(Box::new(facts));
-                0
+                [0; PUBLISHED_REFERENCE_ATOM_COUNT]
             }
         };
-        self.retain_published_reference_atom(facts.reference_fragment_atom, replaced);
+        self.retain_published_reference_atoms(Self::published_reference_atoms(&facts), replaced);
         let mut column = self.svg_points.borrow_mut();
         if points.is_empty() {
             column.remove(&style_node);
@@ -2502,16 +2527,36 @@ impl LayoutNodeArena {
         self.assert_owner_thread();
         let removed = self.svg_attribute_facts.borrow_mut().remove(&style_node);
         if let Some(removed) = removed {
-            self.retain_published_reference_atom(0, removed.reference_fragment_atom);
+            self.retain_published_reference_atoms(
+                [0; PUBLISHED_REFERENCE_ATOM_COUNT],
+                Self::published_reference_atoms(&removed),
+            );
         }
         self.svg_points.borrow_mut().remove(&style_node);
     }
 
-    /// Hand the retention a published SVG reference holds from the name it used to carry to the
-    /// name it carries now, so the style engine's atom sweep cannot reissue either number while a
-    /// publication still reads it. The atom an id names is otherwise rooted only by the element
-    /// answering to it, and a reference to an id that is in no document has no such element.
-    fn retain_published_reference_atom(&self, retained: u32, released: u32) {
+    /// The names a publication holds a sweep retention on: the one an `href` names, and the four
+    /// a graphics element's style names.
+    fn published_reference_atoms(facts: &FfiSvgAttributeFacts) -> [u32; PUBLISHED_REFERENCE_ATOM_COUNT] {
+        [
+            facts.reference_fragment_atom,
+            facts.mask_reference_atom,
+            facts.clip_path_reference_atom,
+            facts.fill_reference_atom,
+            facts.stroke_reference_atom,
+        ]
+    }
+
+    /// Hand the retention a publication's SVG references hold from the names they used to carry to
+    /// the names they carry now, so the style engine's atom sweep cannot reissue either number
+    /// while a publication still reads it. The atom an id names is otherwise rooted only by the
+    /// element answering to it, and a reference to an id that is in no document has no such
+    /// element.
+    fn retain_published_reference_atoms(
+        &self,
+        retained: [u32; PUBLISHED_REFERENCE_ATOM_COUNT],
+        released: [u32; PUBLISHED_REFERENCE_ATOM_COUNT],
+    ) {
         if retained == released {
             return;
         }
@@ -2524,8 +2569,12 @@ impl LayoutNodeArena {
         // SAFETY: As with `with_style_engine`, the engine outlives the arena's live nodes and no
         // host callback runs while the borrow is active.
         let engine = unsafe { &mut *host.style_engine.cast::<StyleEngine>() };
-        engine.retain_published_atom(crate::css::style::index::StyleAtomID(retained));
-        engine.release_published_atom(crate::css::style::index::StyleAtomID(released));
+        for atom in retained {
+            engine.retain_published_atom(crate::css::style::index::StyleAtomID(atom));
+        }
+        for atom in released {
+            engine.release_published_atom(crate::css::style::index::StyleAtomID(atom));
+        }
     }
 
     pub(crate) fn node_has_dom_paint_fact(&self, id: NodeSlotId, fact: DomPaintFact) -> bool {

@@ -138,6 +138,13 @@ pub struct FfiSvgAttributeFacts {
     /// URL's decoded fragment, interned as the atom an element's id is indexed under. Zero when
     /// the element names nothing, or names a URL with no fragment.
     pub reference_fragment_atom: u32,
+    /// The resources this element's style names, in the same form. These come from `mask`,
+    /// `clip-path`, `fill` and `stroke`, so they are republished when the element's style is
+    /// installed rather than when an attribute changes.
+    pub mask_reference_atom: u32,
+    pub clip_path_reference_atom: u32,
+    pub fill_reference_atom: u32,
+    pub stroke_reference_atom: u32,
     /// The `startOffset` of a `<textPath>`, against the length of the path it follows.
     pub text_path_start_offset: FfiSvgNumberPercentage,
 }
@@ -178,6 +185,29 @@ pub unsafe extern "C" fn layout_arena_set_style_node_svg_attribute_facts(
         unsafe { std::slice::from_raw_parts(points, count) }
     };
     arena.set_style_node_svg_attribute_facts(style_node, facts, points);
+}
+
+/// Publishes only the resources a graphics element's style names, leaving what its attributes
+/// parse to alone. Style is installed far more often than an SVG attribute changes, and parsing
+/// every presentation attribute again to carry four names would make every style change pay for it.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_style_node_svg_style_references(
+    arena: *mut c_void,
+    style_node: u32,
+    mask: u32,
+    clip_path: u32,
+    fill: u32,
+    stroke: u32,
+) {
+    let arena = unsafe { crate::painting::ffi::arena_from_handle(arena) };
+    let Some(style_node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
+        return;
+    };
+    arena.set_style_node_svg_style_references(style_node, [mask, clip_path, fill, stroke]);
 }
 
 /// # Safety
