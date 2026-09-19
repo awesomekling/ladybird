@@ -111,7 +111,6 @@ pub struct FfiDomTreeBuilderCallbacks {
     pub create_principal_element_layout:
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, FfiElementLayoutKind) -> NodeSlotId,
     pub create_principal_document_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
-    pub principal_text_layout_facts: unsafe extern "C" fn(*mut c_void) -> FfiTextLayoutFacts,
     pub create_principal_text_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
     pub set_principal_layout_node: unsafe extern "C" fn(*mut c_void, *mut c_void, NodeSlotId),
     pub principal_layout_node: unsafe extern "C" fn(*mut c_void) -> NodeSlotId,
@@ -150,15 +149,6 @@ pub struct FfiDisplayContentsFacts {
     /// zero while this is set.
     pub has_shadow_root: bool,
     pub shadow_root_style_node: u32,
-}
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiTextLayoutFacts {
-    pub has_style_parent: bool,
-    pub parent_display_is_contents: bool,
-    pub parent_collapses_whitespace: bool,
-    pub style_parent_style_record: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -2208,8 +2198,10 @@ fn construct_principal_layout_node(
             let created = unsafe { (host.callbacks.create_principal_document_layout)(frame, dom_node) };
             created_box = Some(host.layout().created(created));
         } else if update.kind.is_text() {
-            // SAFETY: The DOM text node remains live throughout the fact query.
-            let facts = unsafe { (host.callbacks.principal_text_layout_facts)(dom_node) };
+            let facts = host
+                .layout()
+                .arena()
+                .text_style_parent_facts(StyleNodeID::from_raw(update.style_node));
             let needs_style_wrapper = display_contents_text_needs_style_wrapper(
                 facts.has_style_parent,
                 facts.parent_display_is_contents,
@@ -2221,7 +2213,7 @@ fn construct_principal_layout_node(
             let layout_host = host.layout();
             if needs_style_wrapper {
                 let wrapper = layout_host.create_anonymous_box_from_style_record(
-                    facts.style_parent_style_record,
+                    facts.style_record,
                     AnonymousStyleKind::InlineStyleWrapper,
                     AnonymousStyleOverrides::default(),
                     NodeKind::InlineNode,
