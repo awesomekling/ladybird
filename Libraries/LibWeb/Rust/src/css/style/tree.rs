@@ -23,6 +23,7 @@
 
 use super::fast_hash::FastMap as HashMap;
 use super::fast_hash::FastSet as HashSet;
+use smallvec::SmallVec;
 use std::cmp::Ordering;
 use std::num::NonZeroU32;
 
@@ -479,6 +480,70 @@ impl ShadowRelations {
     }
 }
 
+/// The inverse of the element id column: which elements answer to an id name.
+///
+/// The name is the id as it is written, not the atom a selector is compiled against: a quirks-mode
+/// document folds an id selector's name to lowercase, while `getElementById` is case-sensitive in
+/// every mode. The two therefore cannot share one atom, and this index keeps the unfolded one.
+///
+/// A name is not keyed by tree scope. An element carries its scope in a column that a move or an
+/// adoption already maintains, so keying by it here would mean maintaining it twice; the scope is
+/// settled at the lookup instead, where the candidate list is almost always one element long.
+#[derive(Default)]
+struct ElementIdIndex {
+    /// The name each element answers to, which is the key a change or a retirement removes under.
+    name_of_node: HashMap<StyleNodeID, StyleAtomID>,
+    /// The elements answering to a name, in the order they took it rather than in tree order.
+    /// Nearly every name is unique, so the list that holds one stays inline.
+    nodes_by_name: HashMap<StyleAtomID, SmallVec<[StyleNodeID; 1]>>,
+    /// What the spilled candidate lists hold, carried rather than summed: every element that takes
+    /// an id writes here, and walking one list per name would make a page of ids quadratic.
+    candidate_bytes: usize,
+}
+
+impl ElementIdIndex {
+    fn set(&mut self, node: StyleNodeID, name: StyleAtomID) {
+        if let Some(previous) = self.name_of_node.remove(&node)
+            && let Some(nodes) = self.nodes_by_name.get_mut(&previous)
+        {
+            let before = Self::candidate_bytes_of(nodes);
+            nodes.retain(|&mut candidate| candidate != node);
+            let empty = nodes.is_empty();
+            let after = if empty { 0 } else { Self::candidate_bytes_of(nodes) };
+            self.candidate_bytes -= before - after;
+            if empty {
+                self.nodes_by_name.remove(&previous);
+            }
+        }
+        if name.is_none() {
+            return;
+        }
+        self.name_of_node.insert(node, name);
+        let nodes = self.nodes_by_name.entry(name).or_default();
+        let before = Self::candidate_bytes_of(nodes);
+        nodes.push(node);
+        self.candidate_bytes += Self::candidate_bytes_of(nodes) - before;
+    }
+
+    /// What a candidate list holds beyond its inline room.
+    fn candidate_bytes_of(nodes: &SmallVec<[StyleNodeID; 1]>) -> usize {
+        if nodes.spilled() {
+            nodes.capacity() * size_of::<StyleNodeID>()
+        } else {
+            0
+        }
+    }
+
+    fn capacity_bytes(&self) -> u64 {
+        capacity_bytes! {
+            shallow [self.name_of_node, self.nodes_by_name];
+            cached [];
+            nested [self.candidate_bytes];
+            skip [];
+        }
+    }
+}
+
 /// Flat-tree children of one node.
 pub enum FlatTreeChildren<'a> {
     /// The node's DOM children, which is the common case and the whole story for a document with
@@ -534,6 +599,9 @@ pub struct StyleNodeTree {
     /// Allocated only once a shadow tree exists.
     shadow: Option<Box<ShadowRelations>>,
 
+    /// Allocated only once an element carries an id.
+    ids: Option<Box<ElementIdIndex>>,
+
     // The DOM child sequence, text nodes included. Elements keep these beside their element-only
     // links, which every selector walk reads; text nodes have nothing else.
     //
@@ -580,6 +648,7 @@ impl StyleNodeTree {
             pending_reuse: Vec::new(),
             free_element_indexes: Vec::new(),
             shadow: None,
+            ids: None,
             first_child: Vec::new(),
             next_sibling: Vec::new(),
             previous_sibling: Vec::new(),
@@ -794,6 +863,9 @@ impl StyleNodeTree {
             );
             if let Some(shadow) = &mut self.shadow {
                 shadow.retire_node(node);
+            }
+            if let Some(ids) = &mut self.ids {
+                ids.set(node, StyleAtomID::NONE);
             }
             self.live.set(index as usize, false);
             if !self.relation_only.set(index as usize, false).0 {
@@ -1130,6 +1202,94 @@ impl StyleNodeTree {
             .as_mut()
             .expect("set_tree_scope requires the tree-scope column");
         column[index] = scope;
+    }
+
+    // -- Element ids -------------------------------------------------------------------------
+
+    /// Record the id an element answers to, or clear it with atom zero. The name is the id as
+    /// written; see [`ElementIdIndex`] for why that is not the atom a selector is compiled against.
+    pub fn set_element_id_name(&mut self, node: StyleNodeID, name: StyleAtomID, memory: &mut MemoryController) {
+        if name.is_none()
+            && self
+                .ids
+                .as_ref()
+                .is_none_or(|index| !index.name_of_node.contains_key(&node))
+        {
+            return;
+        }
+        let before = self.id_capacity_bytes();
+        self.ids.get_or_insert_with(Box::default).set(node, name);
+        let current = self.id_capacity_bytes();
+        self.record_capacity_change(memory, before, current);
+    }
+
+    /// The first element in tree order that answers to `name` inside `tree_scope`, which is what
+    /// `getElementById` answers with.
+    ///
+    /// Duplicate ids are legal, so the candidates are ordered here rather than at the write: an
+    /// element's place in the tree moves without its id moving, so an index kept in tree order
+    /// would have to be resorted by every insertion.
+    #[must_use]
+    pub fn element_by_id(&self, tree_scope: TreeScopeID, name: StyleAtomID) -> Option<StyleNodeID> {
+        let nodes = self.ids.as_ref()?.nodes_by_name.get(&name)?;
+        let mut first = None;
+        for &node in nodes {
+            let Some(index) = node.element_index() else {
+                continue;
+            };
+            if !self.live.contains(index as usize) || self.tree_scope(node) != tree_scope {
+                continue;
+            }
+            first = match first {
+                Some(current) if !self.precedes_in_tree_order(node, current) => Some(current),
+                _ => Some(node),
+            };
+        }
+        first
+    }
+
+    /// Whether `a` comes before `b` in the tree order of the scope they share.
+    fn precedes_in_tree_order(&self, a: StyleNodeID, b: StyleNodeID) -> bool {
+        if a == b {
+            return false;
+        }
+        // Climb the deeper of the two to the other's level. Arriving at the other node says it is
+        // an ancestor, and an ancestor always comes first.
+        let (mut left, mut right) = (a, b);
+        for _ in self.depth(b)..self.depth(a) {
+            let Some(parent) = self.parent(left) else {
+                return false;
+            };
+            left = parent;
+        }
+        if left == b {
+            return false;
+        }
+        for _ in self.depth(a)..self.depth(b) {
+            let Some(parent) = self.parent(right) else {
+                return false;
+            };
+            right = parent;
+        }
+        if right == a {
+            return true;
+        }
+        while self.parent(left) != self.parent(right) {
+            let (Some(next_left), Some(next_right)) = (self.parent(left), self.parent(right)) else {
+                return false;
+            };
+            left = next_left;
+            right = next_right;
+        }
+        // Siblings now, so whichever the child sequence reaches first comes first.
+        let mut sibling = self.next_element_sibling(left);
+        while let Some(node) = sibling {
+            if node == right {
+                return true;
+            }
+            sibling = self.next_element_sibling(node);
+        }
+        false
     }
 
     // -- Shadow relations --------------------------------------------------------------------
@@ -1585,14 +1745,21 @@ impl StyleNodeTree {
         self.shadow.as_ref().map_or(0, |relations| relations.capacity_bytes())
     }
 
+    fn id_capacity_bytes(&self) -> u64 {
+        self.ids.as_ref().map_or(0, |index| index.capacity_bytes())
+    }
+
     fn retirement_capacity_bytes(&self) -> u64 {
-        (self.pending_reuse.capacity() * size_of::<u32>()) as u64 + self.shadow_capacity_bytes()
+        (self.pending_reuse.capacity() * size_of::<u32>()) as u64
+            + self.shadow_capacity_bytes()
+            + self.id_capacity_bytes()
     }
 
     fn recompute_capacity_bytes(&self) -> u64 {
         self.identity_capacity_bytes()
             + self.reuse_capacity_bytes()
             + self.shadow_capacity_bytes()
+            + self.id_capacity_bytes()
             + self.text.capacity_bytes()
     }
 
