@@ -1647,6 +1647,42 @@ impl LayoutNodeArena {
         self.with_style_engine(|engine| engine.clear_layout_tree_update_marks(style_node));
     }
 
+    /// Whether the style mirror holds a layout tree update mark on `style_node` itself. An
+    /// anonymous row names no node and answers no.
+    pub(crate) fn needs_layout_tree_update(&self, style_node: Option<StyleNodeID>) -> bool {
+        let Some(style_node) = style_node else {
+            return false;
+        };
+        self.with_style_engine(|engine| engine.needs_layout_tree_update(style_node))
+    }
+
+    /// The element above `element` in the shadow-including tree, and whether the step to it crossed
+    /// a shadow root. The document is no element, so the document element answers none. Layout
+    /// walks this ancestry to find the inline that establishes an absolutely positioned box's
+    /// containing block, and the tree scope an anchor name resolves in.
+    pub(crate) fn published_shadow_including_parent(&self, element: StyleNodeID) -> ShadowIncludingParent {
+        self.with_style_engine(|engine| {
+            let tree = engine.tree();
+            let Some(parent) = tree.parent(element) else {
+                return ShadowIncludingParent::default();
+            };
+            if let Some(host) = tree.host_of(parent) {
+                return ShadowIncludingParent {
+                    element: host.raw(),
+                    parent_is_a_shadow_root: true,
+                };
+            }
+            // The document stands in the tree without being styled, and is no element.
+            if tree.is_relation_only(parent) {
+                return ShadowIncludingParent::default();
+            }
+            ShadowIncludingParent {
+                element: parent.raw(),
+                parent_is_a_shadow_root: false,
+            }
+        })
+    }
+
     /// Whether the style mirror holds a layout tree update mark on a flat-tree descendant of
     /// `style_node`. An anonymous row names no node and answers no.
     pub(crate) fn child_needs_layout_tree_update(&self, style_node: Option<StyleNodeID>) -> bool {

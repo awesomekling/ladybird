@@ -803,22 +803,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             LayoutTreeBuilderAccess::register_svg_resource_reference(
                 *static_cast<SVG::SVGElement*>(resource_pointer),
                 *static_cast<SVG::SVGGraphicsElement*>(graphics_element_pointer)); },
-        .principal_node_entry_facts = [](void* builder_pointer, u32 style_node, bool must_create_subtree) -> RustFFI::FfiPrincipalNodeEntryFacts {
-            VERIFY(builder_pointer);
-            auto& node = static_cast<LayoutTreeBuildBridge*>(builder_pointer)->dom_node_for_style_node(style_node);
-            // NB: Called during layout tree construction.
-            auto* existing_layout_node = node.unsafe_layout_node();
-            auto* element = as_if<DOM::Element>(node);
-            return {
-                .dom_node = &node,
-                .must_create_subtree = must_create_subtree,
-                .needs_layout_tree_update = node.needs_layout_tree_update(),
-                .has_layout_node = existing_layout_node != nullptr,
-                .layout_node_is_attached = existing_layout_node && existing_layout_node->has_parent(),
-                .style_node = Node::style_node_of(&node).value(),
-                .shadow_including_parent_element = element ? Node::style_node_of(element->parent_or_shadow_host_element()).value() : 0,
-                .parent_is_a_shadow_root = element && is<DOM::ShadowRoot>(element->parent()),
-            }; },
         .request_top_layer_zone_rebuild = [](void* node_pointer) {
             VERIFY(node_pointer);
             static_cast<DOM::Node*>(node_pointer)->document().set_top_layer_needs_layout_zone_rebuild(); },
@@ -828,9 +812,8 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             auto element = builder.m_document->style_computer().element_for_style_node(CSS::StyleNodeID { style_node });
             VERIFY(element);
             element->set_needs_layout_tree_update(true, DOM::SetNeedsLayoutTreeUpdateReason::PseudoElementBoxEscapedRebuildRoot); },
-        .push_principal_frame = [](void* builder_pointer, void* node_pointer) -> RustFFI::FfiPrincipalNodeFrame {
+        .push_principal_frame = [](void* builder_pointer, u32 style_node) -> RustFFI::FfiPrincipalNodeFrame {
             VERIFY(builder_pointer);
-            VERIFY(node_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
             if (!builder.m_principal_frames)
                 builder.m_principal_frames = make<PrincipalNodeFrameStorage>();
@@ -838,7 +821,7 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             if (storage.active_frame_count == storage.frames.size())
                 storage.frames.append(make<PrincipalNodeFrame>());
             auto& frame = *storage.frames[storage.active_frame_count++];
-            auto& node = *static_cast<DOM::Node*>(node_pointer);
+            auto& node = builder.dom_node_for_style_node(style_node);
             frame.layout_node = nullptr;
             frame.anonymous_computed_values = nullptr;
             VERIFY(!frame.style_record_owner);
@@ -847,6 +830,7 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             return {
                 .frame = &frame,
                 .old_layout_node = Node::slot_id(node.unsafe_layout_node()),
+                .dom_node = &node,
             }; },
         .pop_principal_frame = [](void* builder_pointer, void* frame_pointer) {
             VERIFY(builder_pointer);
