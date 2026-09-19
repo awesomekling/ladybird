@@ -13,6 +13,7 @@
 #include <LibWeb/Dump.h>
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/NodeArena.h>
+#include <LibWeb/SVG/SVGElement.h>
 
 namespace Web::DOM {
 
@@ -57,6 +58,13 @@ void CommitMessages::append(Layout::RustFFI::FfiCommitMessage const& message)
         return;
     case Layout::RustFFI::FfiCommitMessageKind::UnexpectedFragmentedInline:
         m_messages.append(Message { .identity = identity, .kind = Kind::UnexpectedFragmentedInline });
+        return;
+    case Layout::RustFFI::FfiCommitMessageKind::SvgResourceReferenced:
+        m_messages.append(Message {
+            .identity = identity,
+            .other_identity = NodeIdentity::of_style_node(CSS::StyleNodeID { message.other_style_node }),
+            .kind = Kind::SvgResourceReferenced,
+        });
         return;
     }
     VERIFY_NOT_REACHED();
@@ -103,6 +111,15 @@ void CommitMessages::apply(Message const& message)
                 box->notify_content_navigable_of_committed_viewport();
         }
         return;
+    case Kind::SvgResourceReferenced: {
+        // Either element may have left the document since the build placed the resource box; the
+        // registration only matters while both are still here.
+        auto* resource = as_if<SVG::SVGElement>(message.identity.resolve(m_document).ptr());
+        auto* referencing_element = as_if<Element>(message.other_identity.resolve(m_document).ptr());
+        if (resource && referencing_element)
+            resource->register_resource_box_referencing_element({}, *referencing_element);
+        return;
+    }
     case Kind::UnexpectedFragmentedInline:
         if (auto* arena = m_document.layout_node_arena_if_created()) {
             if (auto* node = message.identity.bound_layout_node(*arena)) {

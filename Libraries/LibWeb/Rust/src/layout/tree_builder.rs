@@ -39,6 +39,9 @@ pub(crate) struct TreeBuilderState {
     /// The elements a finished build asks the document to rebuild, by identity. Zero asks for the
     /// whole tree: the box that escaped its rebuild root stands for no element of its own.
     layout_tree_rebuild_requests: Vec<u32>,
+    /// The SVG resources whose content this build laid out under a graphics element's box, in the
+    /// order it laid them out. Reported to the document when the build ends.
+    svg_resource_references: Vec<crate::layout::commit::FfiCommitMessage>,
 }
 
 impl Default for TreeBuilderState {
@@ -53,6 +56,7 @@ impl Default for TreeBuilderState {
             layout_tree_update_escaped_rebuild_roots: false,
             new_subtree_root: NodeSlotId::INVALID,
             layout_tree_rebuild_requests: Vec::new(),
+            svg_resource_references: Vec::new(),
         }
     }
 }
@@ -100,7 +104,6 @@ pub struct FfiDomTreeBuilderCallbacks {
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> FfiPrincipalDescendantFacts,
     pub create_first_letter_nodes:
         unsafe extern "C" fn(*mut c_void, *mut c_void, FfiFirstLetterTarget) -> FfiFirstLetterNodes,
-    pub register_svg_resource_reference: unsafe extern "C" fn(u32, *mut c_void),
     pub request_top_layer_zone_rebuild: unsafe extern "C" fn(*mut c_void),
     pub request_layout_tree_rebuild: unsafe extern "C" fn(*mut c_void, u32),
     pub push_principal_frame: unsafe extern "C" fn(*mut c_void, u32) -> FfiPrincipalNodeFrame,
@@ -118,15 +121,6 @@ pub struct FfiDomTreeBuilderCallbacks {
     pub pseudo: FfiPseudoTreeBuilderCallbacks,
 }
 
-/// A DOM node the tree builder reasons about by identity as well as by pointer: the identity names
-/// the node's rows in the arena, so Rust finds them without asking C++ for the answer.
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiIdentifiedDomNode {
-    pub node: *mut c_void,
-    pub style_node: u32,
-}
-
 /// The C++ frame that retains a principal node's old and new layout boxes, paired with the old
 /// box's arena slot so Rust can reason about in-place replacement.
 #[derive(Clone, Copy)]
@@ -142,9 +136,9 @@ pub struct FfiPrincipalNodeFrame {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiPrincipalDescendantFacts {
-    pub svg_graphics_element: *mut c_void,
-    pub svg_mask: FfiIdentifiedDomNode,
-    pub svg_clip_path: FfiIdentifiedDomNode,
+    pub is_svg_graphics_element: bool,
+    pub svg_mask: u32,
+    pub svg_clip_path: u32,
     pub svg_fill_pattern: u32,
     pub svg_stroke_pattern: u32,
 }
@@ -1631,11 +1625,24 @@ fn ancestor_stack_contains_element_box(arena: &LayoutNodeArena, state: &TreeBuil
     !element_box.is_invalid() && state.ancestor_stack.contains(&element_box)
 }
 
+/// Tells the document that a graphics element's box now holds the content of an SVG resource. The
+/// resource outlives that box, so the document has to rebuild the referencing subtree when the
+/// resource goes away or changes - which is the only thing it does with this.
+fn report_svg_resource_reference(state: &mut TreeBuilderState, resource: u32, graphics_element: u32) {
+    state
+        .svg_resource_references
+        .push(crate::layout::commit::FfiCommitMessage {
+            style_node: resource,
+            other_style_node: graphics_element,
+            kind: crate::layout::commit::FfiCommitMessageKind::SvgResourceReferenced,
+        });
+}
+
 fn update_svg_resource(
     host: &DomTreeBuilderHost<'_>,
     state: &mut TreeBuilderState,
-    resource: FfiIdentifiedDomNode,
-    graphics_element: *mut c_void,
+    resource: u32,
+    graphics_element: u32,
     layout_node: LayoutNode,
     context: &mut TreeBuilderContext,
     prior_context_value: bool,
@@ -1645,17 +1652,9 @@ fn update_svg_resource(
     context.has_svg_root = true;
     state.ancestor_stack.push(layout_node);
 
-    if !ancestor_stack_contains_element_box(host.layout().arena(), state, resource.style_node) {
-        update_layout_tree(
-            host,
-            state,
-            resource.style_node,
-            context,
-            true,
-            FfiInsertionMode::Append,
-        );
-        // SAFETY: The pointer denotes a live SVG element, and the identity names one.
-        unsafe { (host.callbacks.register_svg_resource_reference)(resource.style_node, graphics_element) };
+    if !ancestor_stack_contains_element_box(host.layout().arena(), state, resource) {
+        update_layout_tree(host, state, resource, context, true, FfiInsertionMode::Append);
+        report_svg_resource_reference(state, resource, graphics_element);
     } else {
         // FIXME: Somehow either remove ancestor from the layout tree or mark it as invalid.
     }
@@ -1701,7 +1700,7 @@ fn update_svg_pattern(
     state: &mut TreeBuilderState,
     pattern: u32,
     content_element: u32,
-    graphics_element: *mut c_void,
+    graphics_element: u32,
     layout_node: LayoutNode,
     context: &mut TreeBuilderContext,
 ) {
@@ -1713,12 +1712,9 @@ fn update_svg_pattern(
         update_layout_tree(host, state, content_element, context, true, FfiInsertionMode::Append);
         // The referenced pattern may inherit its content from another pattern via href. Removing either element
         // invalidates the attached resource box, so register the referencer with both.
-        // SAFETY: The pointer denotes a live SVG element, and the identities name live elements.
-        unsafe {
-            (host.callbacks.register_svg_resource_reference)(content_element, graphics_element);
-            if pattern != content_element {
-                (host.callbacks.register_svg_resource_reference)(pattern, graphics_element);
-            }
+        report_svg_resource_reference(state, content_element, graphics_element);
+        if pattern != content_element {
+            report_svg_resource_reference(state, pattern, graphics_element);
         }
     }
 
@@ -1937,14 +1933,14 @@ unsafe fn update_principal_node_descendants(
         }
 
         if should_create_layout_node {
-            if !facts.svg_graphics_element.is_null() {
+            if facts.is_svg_graphics_element {
                 for resource in [facts.svg_mask, facts.svg_clip_path] {
-                    if !resource.node.is_null() {
+                    if resource != 0 {
                         update_svg_resource(
                             host,
                             state,
                             resource,
-                            facts.svg_graphics_element,
+                            update.style_node,
                             layout_node,
                             context,
                             context.layout_svg_mask_or_clip_path,
@@ -1969,7 +1965,7 @@ unsafe fn update_principal_node_descendants(
                         state,
                         pattern,
                         content_element.raw(),
-                        facts.svg_graphics_element,
+                        update.style_node,
                         layout_node,
                         context,
                     );
@@ -2748,6 +2744,21 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     );
     let viewport = arena.layout_root();
     assert!(!viewport.is_invalid(), "a layout tree build places the viewport");
+
+    // What the build found out about SVG resources goes to the document now that the tree is
+    // settled, in the order the build found it out.
+    if !state.svg_resource_references.is_empty() {
+        let layout_host = arena.layout_host();
+        // SAFETY: The document outlives the build, and no arena borrow is held here.
+        unsafe {
+            (layout_host.deliver_commit_messages)(
+                layout_host.context,
+                state.svg_resource_references.as_ptr(),
+                state.svg_resource_references.len(),
+            );
+        }
+    }
+
     FfiLayoutTreeBuildOutcome {
         viewport,
         rebuilt_subtree_root_count,
