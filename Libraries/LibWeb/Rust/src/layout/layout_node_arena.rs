@@ -607,11 +607,13 @@ pub(crate) struct LayoutNodeArena {
     layer_image_paint_facts:
         RefCell<HashMap<NodeSlotId, Vec<crate::painting::layer_image_paint_facts::LayerImagePaintFactsEntry>>>,
     svg_paint_resources: crate::painting::svg_paint_resources::SvgPaintResources,
-    /// The SVG presentation attributes the document published for each row's element, indexed by
-    /// slot. A layout pass reads these once per SVG box, so the column is a dense index rather than
-    /// a map, and only a row built for an SVG element holds a value.
-    svg_attribute_facts: RefCell<Vec<Option<Box<FfiSvgAttributeFacts>>>>,
-    svg_points: RefCell<Vec<Option<std::rc::Rc<[super::svg_formatting_context::FfiFloatPoint]>>>>,
+    /// The SVG presentation attributes the document published for an element, keyed by the
+    /// element's style node rather than by a row. An SVG element that draws nothing itself - the
+    /// `<path>` inside a `<defs>` a `<textPath>` follows - has no row at all, and one that is a
+    /// mask, a clip or a pattern has a row per referencing element; both fall out of keying the
+    /// column by the element rather than by the box.
+    svg_attribute_facts: RefCell<HashMap<StyleNodeID, Box<FfiSvgAttributeFacts>>>,
+    svg_points: RefCell<HashMap<StyleNodeID, std::rc::Rc<[super::svg_formatting_context::FfiFloatPoint]>>>,
     run_used_records: RefCell<Vec<RunRecordSlot>>,
     next_run_nonce: Cell<u64>,
     live_run_nonces: RefCell<Vec<u64>>,
@@ -713,8 +715,8 @@ impl LayoutNodeArena {
             replaced_paint_facts: RefCell::new(HashMap::default()),
             layer_image_paint_facts: RefCell::new(HashMap::default()),
             svg_paint_resources: crate::painting::svg_paint_resources::SvgPaintResources::default(),
-            svg_attribute_facts: RefCell::new(Vec::new()),
-            svg_points: RefCell::new(Vec::new()),
+            svg_attribute_facts: RefCell::new(HashMap::default()),
+            svg_points: RefCell::new(HashMap::default()),
             run_used_records: RefCell::new(Vec::new()),
             next_run_nonce: Cell::new(1),
             live_run_nonces: RefCell::new(Vec::new()),
@@ -1051,12 +1053,6 @@ impl LayoutNodeArena {
         self.replaced_paint_facts.get_mut().remove(&id);
         self.layer_image_paint_facts.get_mut().remove(&id);
         self.svg_paint_resources.forget_slot(id);
-        if let Some(slot) = self.svg_attribute_facts.get_mut().get_mut(index as usize) {
-            *slot = None;
-        }
-        if let Some(slot) = self.svg_points.get_mut().get_mut(index as usize) {
-            *slot = None;
-        }
         self.paint_state.get_mut().selection_pseudo_styles.remove(&id);
         let data = self.data_mut(index);
         debug_assert!(
@@ -2384,60 +2380,62 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn svg_attribute_facts(&self, id: NodeSlotId) -> FfiSvgAttributeFacts {
-        match self.svg_attribute_facts.borrow().get(id.slot_index() as usize) {
-            Some(Some(facts)) => **facts,
-            _ => FfiSvgAttributeFacts::default(),
+        match self.node_style_node(id) {
+            Some(style_node) => self.style_node_svg_attribute_facts(style_node),
+            None => FfiSvgAttributeFacts::default(),
         }
     }
 
-    /// The `points` list a <polyline> or <polygon> parsed, shared by every row its element has.
+    /// The SVG presentation attributes an element published, named by its style node. An element
+    /// the document never published for - anything that is not an SVG element - answers with the
+    /// default facts, whose `geometry_kind` says it draws no shape.
+    pub(crate) fn style_node_svg_attribute_facts(&self, style_node: StyleNodeID) -> FfiSvgAttributeFacts {
+        match self.svg_attribute_facts.borrow().get(&style_node) {
+            Some(facts) => **facts,
+            None => FfiSvgAttributeFacts::default(),
+        }
+    }
+
+    /// The `points` list a <polyline> or <polygon> parsed.
     pub(crate) fn svg_points(
         &self,
         id: NodeSlotId,
     ) -> Option<std::rc::Rc<[super::svg_formatting_context::FfiFloatPoint]>> {
-        self.svg_points
-            .borrow()
-            .get(id.slot_index() as usize)
-            .cloned()
-            .flatten()
+        self.style_node_svg_points(self.node_style_node(id)?)
     }
 
-    pub(crate) fn set_svg_points(&self, id: NodeSlotId, points: &[super::svg_formatting_context::FfiFloatPoint]) {
+    pub(crate) fn style_node_svg_points(
+        &self,
+        style_node: StyleNodeID,
+    ) -> Option<std::rc::Rc<[super::svg_formatting_context::FfiFloatPoint]>> {
+        self.svg_points.borrow().get(&style_node).cloned()
+    }
+
+    pub(crate) fn set_style_node_svg_attribute_facts(
+        &self,
+        style_node: StyleNodeID,
+        facts: FfiSvgAttributeFacts,
+        points: &[super::svg_formatting_context::FfiFloatPoint],
+    ) {
         self.assert_owner_thread();
-        if !self.slot_is_live(id) {
-            return;
-        }
-        let shared: Option<std::rc::Rc<[super::svg_formatting_context::FfiFloatPoint]>> =
-            (!points.is_empty()).then(|| points.into());
-        for row in self.rows_sharing_dom_node_with(id) {
-            let index = row.slot_index() as usize;
-            let mut column = self.svg_points.borrow_mut();
-            if column.len() <= index {
-                column.resize_with(index + 1, || None);
+        match self.svg_attribute_facts.borrow_mut().entry(style_node) {
+            std::collections::hash_map::Entry::Occupied(mut published) => **published.get_mut() = facts,
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(Box::new(facts));
             }
-            column[index] = shared.clone();
+        }
+        let mut column = self.svg_points.borrow_mut();
+        if points.is_empty() {
+            column.remove(&style_node);
+        } else {
+            column.insert(style_node, points.into());
         }
     }
 
-    // A resource box built on behalf of a referencing element shares its DOM node with the
-    // element's own row, and each of them lays out for itself, so a publication reaches every row
-    // the element has.
-    pub(crate) fn set_svg_attribute_facts(&self, id: NodeSlotId, facts: FfiSvgAttributeFacts) {
+    pub(crate) fn clear_style_node_svg_attribute_facts(&self, style_node: StyleNodeID) {
         self.assert_owner_thread();
-        if !self.slot_is_live(id) {
-            return;
-        }
-        for row in self.rows_sharing_dom_node_with(id) {
-            let index = row.slot_index() as usize;
-            let mut column = self.svg_attribute_facts.borrow_mut();
-            if column.len() <= index {
-                column.resize_with(index + 1, || None);
-            }
-            match &mut column[index] {
-                Some(published) => **published = facts,
-                slot @ None => *slot = Some(Box::new(facts)),
-            }
-        }
+        self.svg_attribute_facts.borrow_mut().remove(&style_node);
+        self.svg_points.borrow_mut().remove(&style_node);
     }
 
     pub(crate) fn node_has_dom_paint_fact(&self, id: NodeSlotId, fact: DomPaintFact) -> bool {

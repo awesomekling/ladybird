@@ -97,10 +97,8 @@ static RustFFI::FfiSvgLengthValue to_ffi_svg_length_value(Optional<SVG::SVGLengt
     VERIFY_NOT_REACHED();
 }
 
-// The SVG presentation attributes an element parses, as the layout stage reads them. They are
-// element data, so the document publishes them onto the element's rows when they change and when a
-// row is built, rather than answering for them while a pass runs.
-RustFFI::FfiSvgAttributeFacts build_svg_attribute_facts(DOM::Node const& dom_node)
+// The SVG presentation attributes an element parses, as the layout stage reads them.
+static RustFFI::FfiSvgAttributeFacts build_svg_attribute_facts(DOM::Node const& dom_node)
 {
     auto const* svg_element = as_if<SVG::SVGElement>(dom_node);
     if (!svg_element)
@@ -204,6 +202,32 @@ RustFFI::FfiSvgAttributeFacts build_svg_attribute_facts(DOM::Node const& dom_nod
         .text_dx = to_ffi_svg_length_value(text_positioning.dx),
         .text_dy = to_ffi_svg_length_value(text_positioning.dy),
     };
+}
+
+// The publication is keyed by the element's style node rather than by a row, because an element
+// that draws nothing itself - the <path> inside a <defs> that a <textPath> follows - has no row at
+// all, while a mask, a clip or a pattern has one row per referencing element.
+void publish_svg_attribute_facts(DOM::Element& element)
+{
+    VERIFY(element.style_node_id() != 0);
+    ReadonlySpan<Gfx::FloatPoint> points;
+    if (auto const* polygon = as_if<SVG::SVGPolygonElement>(element))
+        points = polygon->points();
+    else if (auto const* polyline = as_if<SVG::SVGPolylineElement>(element))
+        points = polyline->points();
+    static_assert(sizeof(Gfx::FloatPoint) == sizeof(RustFFI::FfiFloatPoint));
+    RustFFI::layout_arena_set_style_node_svg_attribute_facts(
+        element.document().layout_node_arena().handle(),
+        element.style_node_id().value(),
+        build_svg_attribute_facts(element),
+        reinterpret_cast<RustFFI::FfiFloatPoint const*>(points.data()),
+        points.size());
+}
+
+void clear_svg_attribute_facts(DOM::Document& document, CSS::StyleNodeID style_node)
+{
+    if (auto* arena = document.layout_node_arena_if_created())
+        RustFFI::layout_arena_clear_style_node_svg_attribute_facts(arena->handle(), style_node.value());
 }
 
 static Utf16String rendered_svg_text_contents(SVG::SVGTextContentElement const& element)

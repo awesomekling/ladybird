@@ -33,8 +33,11 @@ namespace Web::Layout {
 // Registers the document-side answers every layout pass needs on the arena, once per document.
 WEB_API void register_layout_host(NodeArena&, DOM::Document&);
 
-// The SVG presentation attributes a node's rows carry; empty for a node that is not an SVG element.
-RustFFI::FfiSvgAttributeFacts build_svg_attribute_facts(DOM::Node const&);
+// Publishes what the SVG element's presentation attributes parse to, under its style node, and
+// retires that publication. An element's attributes are layout input that no pass can change, so
+// the document publishes them as they are written rather than answering for them while a pass runs.
+void publish_svg_attribute_facts(DOM::Element&);
+void clear_svg_attribute_facts(DOM::Document&, CSS::StyleNodeID);
 
 inline RustFFI::FfiSvgNumberPercentage to_ffi_number_percentage(SVG::NumberPercentage value)
 {

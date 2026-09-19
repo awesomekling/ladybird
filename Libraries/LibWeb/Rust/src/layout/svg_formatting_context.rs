@@ -94,7 +94,8 @@ struct SvgElementFacts {
 
 /// The SVG presentation attributes one element parses, as the document last published them. They
 /// are element data, not layout output: the document writes them when an attribute changes and
-/// when a box is built, so a running pass reads them from the row instead of asking.
+/// when the style tree names the element, so a running pass reads what it published instead of
+/// asking.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[repr(C)]
 pub struct FfiSvgAttributeFacts {
@@ -144,39 +145,45 @@ pub const SVG_GEOMETRY_KIND_LINE: u8 = 5;
 pub const SVG_GEOMETRY_KIND_POLYLINE: u8 = 6;
 pub const SVG_GEOMETRY_KIND_POLYGON: u8 = 7;
 
+/// Publishes what an SVG element's presentation attributes parse to, under its style node. The
+/// `points` list of a <polyline> or <polygon> travels beside the facts rather than inside them,
+/// being the one geometry attribute that is not a fixed number of values.
+///
 /// # Safety
 ///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread, `id`
-/// must name a live row, and `points` must address `count` points for the duration of the call.
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread, and
+/// `points` must address `count` points for the duration of the call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_set_node_svg_points(
+pub unsafe extern "C" fn layout_arena_set_style_node_svg_attribute_facts(
     arena: *mut c_void,
-    id: NodeSlotId,
+    style_node: u32,
+    facts: FfiSvgAttributeFacts,
     points: *const FfiFloatPoint,
     count: usize,
 ) {
     let arena = unsafe { crate::painting::ffi::arena_from_handle(arena) };
+    let Some(style_node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
+        return;
+    };
     let points = if count == 0 {
         &[][..]
     } else {
         // SAFETY: The caller keeps the list alive for this synchronous call.
         unsafe { std::slice::from_raw_parts(points, count) }
     };
-    arena.set_svg_points(id, points);
+    arena.set_style_node_svg_attribute_facts(style_node, facts, points);
 }
 
 /// # Safety
 ///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread, and `id`
-/// must name a live row.
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_set_node_svg_attribute_facts(
-    arena: *mut c_void,
-    id: NodeSlotId,
-    facts: FfiSvgAttributeFacts,
-) {
+pub unsafe extern "C" fn layout_arena_clear_style_node_svg_attribute_facts(arena: *mut c_void, style_node: u32) {
     let arena = unsafe { crate::painting::ffi::arena_from_handle(arena) };
-    arena.set_svg_attribute_facts(id, facts);
+    let Some(style_node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
+        return;
+    };
+    arena.clear_style_node_svg_attribute_facts(style_node);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
