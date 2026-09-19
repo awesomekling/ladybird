@@ -5985,7 +5985,7 @@ void Element::set_scroll_offset(Optional<CSS::PseudoElement> pseudo_element_type
             document().invalidate_scroll_state();
         pseudo_element->set_scroll_offset(offset);
         if (auto* layout_node = pseudo_element->unsafe_layout_node())
-            layout_node->update_has_scroll_offset_flag();
+            layout_node->publish_scroll_offset();
         return;
     }
 
@@ -5996,7 +5996,7 @@ void Element::set_scroll_offset(Optional<CSS::PseudoElement> pseudo_element_type
     else if (auto* rare_data = element_rare_data())
         rare_data->scroll_offset = {};
     if (auto* layout_node = unsafe_layout_node())
-        layout_node->update_has_scroll_offset_flag();
+        layout_node->publish_scroll_offset();
 }
 
 Optional<Element::Dir> Element::dir() const

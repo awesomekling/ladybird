@@ -82,7 +82,7 @@ void SyntheticPseudoElement::set_layout_node(Layout::NodeWithStyle* value)
     if (value) {
         Layout::RustFFI::layout_arena_set_node_flag(value->arena_handle(), Layout::Node::slot_id(value), Layout::RustFFI::NodeFlag::IsPseudoElementPrincipalBox, true);
         Layout::RustFFI::layout_arena_bind_row(value->arena_handle(), Layout::Node::slot_id(value));
-        value->update_has_scroll_offset_flag();
+        value->publish_scroll_offset();
     }
 }
 

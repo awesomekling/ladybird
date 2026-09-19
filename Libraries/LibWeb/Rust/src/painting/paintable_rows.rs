@@ -190,6 +190,7 @@ pub(crate) struct PaintableRowStore {
     chrome_state_callback: Cell<Option<ChromeStateCallback>>,
     paint_recording_in_progress: Cell<bool>,
     layout_commit_generation: Cell<u64>,
+    scroll_offsets: crate::painting::visual_context::scroll_state::ScrollOffsetColumn,
 }
 
 pub(crate) struct PaintableRows<Arena> {
@@ -674,6 +675,11 @@ impl LayoutNodeArena {
         self.paintable_rows.side_data.borrow().len()
     }
 
+    /// The scroll offset each box holds, as published by the one place the DOM stores it.
+    pub(crate) fn scroll_offsets(&self) -> &crate::painting::visual_context::scroll_state::ScrollOffsetColumn {
+        &self.paintable_rows.scroll_offsets
+    }
+
     /// Counts the layout commits the arena has published. A main-side reader that remembers the
     /// generation it read at can tell whether the committed geometry it saw is still the one
     /// published, without asking what was dirty at the time.
@@ -745,6 +751,9 @@ impl LayoutNodeArena {
 
     fn reset_paintable_row(&mut self, row_is_still_linked: bool, reset: PaintableRowReset) {
         let id = reset.slot;
+        if reset.kind == crate::painting::paintable_data::PaintableRowResetKind::Freed {
+            self.paintable_rows.scroll_offsets.forget(id);
+        }
         self.note_committed_box_changed(id);
         if row_is_still_linked {
             // A cleared row is still linked, so the ancestor whose plans listed it is known now.

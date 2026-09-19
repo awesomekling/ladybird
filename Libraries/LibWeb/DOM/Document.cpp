@@ -2606,16 +2606,17 @@ void Document::prepare_for_rendering()
     if (!m_layout_node_arena)
         return;
 
-    // The update reads each box's scroll-offset flag in place of the offset it mirrors.
+    // The update reads each box's scroll-offset flag, and the render side reads the offset the box
+    // publishes, in place of the offset the DOM stores.
     static bool const verify_scroll_offset_flags = getenv("LIBWEB_VERIFY_SCROLL_OFFSET_FLAGS") != nullptr;
     if (verify_scroll_offset_flags) {
         for_each_shadow_including_inclusive_descendant([](DOM::Node& node) {
             if (auto const* layout_node = node.unsafe_layout_node())
-                layout_node->verify_has_scroll_offset_flag();
+                layout_node->verify_published_scroll_offset();
             if (auto const* element = as_if<DOM::Element>(node)) {
                 element->for_each_synthetic_pseudo_element([](CSS::PseudoElement, DOM::SyntheticPseudoElement const& pseudo_element) {
                     if (auto const* layout_node = pseudo_element.unsafe_layout_node())
-                        layout_node->verify_has_scroll_offset_flag();
+                        layout_node->verify_published_scroll_offset();
                 });
             }
             return TraversalDecision::Continue;
