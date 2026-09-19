@@ -88,11 +88,6 @@ void LayoutTreeBuilderAccess::detach_layout_node(DOM::Node& node)
     }
 }
 
-void LayoutTreeBuilderAccess::register_svg_resource_reference(SVG::SVGElement& resource, DOM::Element& referencing_element)
-{
-    resource.register_resource_box_referencing_element({}, referencing_element);
-}
-
 void LayoutTreeBuilderAccess::set_synthetic_pseudo_element_node(DOM::Element& element, CSS::PseudoElement pseudo_element, Layout::NodeWithStyle* layout_node)
 {
     element.set_synthetic_pseudo_element_node({}, pseudo_element, layout_node);
@@ -325,15 +320,6 @@ static CSS::ContentData resolve_normal_marker_content(DOM::AbstractElement& elem
         });
     content.data.append(move(marker_string));
     return content;
-}
-
-// A DOM node paired with the identity its layout rows carry, so Rust can find them itself.
-static RustFFI::FfiIdentifiedDomNode identified_dom_node(DOM::Node const* node)
-{
-    return {
-        .node = const_cast<DOM::Node*>(node),
-        .style_node = Node::style_node_of(node).value(),
-    };
 }
 
 // The node an identity the walk carries names. The document is the build's root and is not in the
@@ -772,21 +758,15 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
                 stroke_pattern = graphics_element->stroke_pattern(layout_node);
             }
             return {
-                .svg_graphics_element = graphics_element,
-                .svg_mask = identified_dom_node(mask.ptr()),
-                .svg_clip_path = identified_dom_node(clip_path.ptr()),
+                .is_svg_graphics_element = graphics_element != nullptr,
+                .svg_mask = Node::style_node_of(mask.ptr()).value(),
+                .svg_clip_path = Node::style_node_of(clip_path.ptr()).value(),
                 .svg_fill_pattern = Node::style_node_of(fill_pattern.ptr()).value(),
                 .svg_stroke_pattern = Node::style_node_of(stroke_pattern.ptr()).value(),
             }; },
         .create_first_letter_nodes = [](void*, void* element_pointer, RustFFI::FfiFirstLetterTarget target) -> RustFFI::FfiFirstLetterNodes {
             VERIFY(element_pointer);
             return create_first_letter_nodes(*static_cast<DOM::Element*>(element_pointer), target); },
-        .register_svg_resource_reference = [](u32 resource_style_node, void* graphics_element_pointer) {
-            VERIFY(graphics_element_pointer);
-            auto& graphics_element = *static_cast<SVG::SVGGraphicsElement*>(graphics_element_pointer);
-            auto resource = graphics_element.document().style_computer().element_for_style_node(CSS::StyleNodeID { resource_style_node });
-            VERIFY(resource);
-            LayoutTreeBuilderAccess::register_svg_resource_reference(as<SVG::SVGElement>(*resource), graphics_element); },
         .request_top_layer_zone_rebuild = [](void* node_pointer) {
             VERIFY(node_pointer);
             static_cast<DOM::Node*>(node_pointer)->document().set_top_layer_needs_layout_zone_rebuild(); },

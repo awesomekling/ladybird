@@ -53,11 +53,14 @@ private:
         ContentSizeChangedForContainerQueries,
         NavigableContainerViewportCommitted,
         NeedsLayoutTreeUpdate,
+        SvgResourceReferenced,
         UnexpectedFragmentedInline,
     };
 
     struct Message {
         NodeIdentity identity;
+        // The second node a message about a pair names. Only SvgResourceReferenced has one.
+        NodeIdentity other_identity {};
         Kind kind;
         bool has_layout_box { false };
         bool has_committed_box { false };

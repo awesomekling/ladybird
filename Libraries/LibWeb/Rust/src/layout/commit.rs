@@ -16,6 +16,10 @@ pub enum FfiCommitMessageKind {
     NavigableContainerViewportCommitted,
     /// The node is an inline box that reached atomic-inline layout without line box fragments.
     UnexpectedFragmentedInline,
+    /// The node is an SVG resource - a `<mask>`, `<clipPath>` or `<pattern>` - whose content the
+    /// tree build laid out under the graphics element `other_style_node` names. The resource
+    /// outlives that box, so removing it has to rebuild the subtree the box sits in.
+    SvgResourceReferenced,
 }
 
 /// One thing the render side has to tell the document. The node it is about is named by the style
@@ -24,6 +28,8 @@ pub enum FfiCommitMessageKind {
 #[repr(C)]
 pub struct FfiCommitMessage {
     pub style_node: u32,
+    /// A second node the message names, for the kinds that are about a pair. Zero otherwise.
+    pub other_style_node: u32,
     pub kind: FfiCommitMessageKind,
 }
 
@@ -107,6 +113,7 @@ fn commit_subtree(
         {
             messages.push(FfiCommitMessage {
                 style_node,
+                other_style_node: 0,
                 kind: FfiCommitMessageKind::ContentSizeChangedForContainerQueries,
             });
         }
@@ -190,6 +197,7 @@ pub(crate) fn commit_replacing(
         if let Some(style_node) = paintables.arena().commit_message_style_node(*viewport) {
             messages.push(FfiCommitMessage {
                 style_node,
+                other_style_node: 0,
                 kind: FfiCommitMessageKind::NavigableContainerViewportCommitted,
             });
         }

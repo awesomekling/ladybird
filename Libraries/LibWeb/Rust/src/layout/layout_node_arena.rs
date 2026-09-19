@@ -1120,7 +1120,11 @@ impl LayoutNodeArena {
         };
         self.messages_reported_during_pass
             .borrow_mut()
-            .push(super::commit::FfiCommitMessage { style_node, kind });
+            .push(super::commit::FfiCommitMessage {
+                style_node,
+                other_style_node: 0,
+                kind,
+            });
     }
 
     pub(crate) fn take_messages_reported_during_pass(&self) -> Vec<super::commit::FfiCommitMessage> {
