@@ -127,6 +127,8 @@
     [124, "SubtreeAffectsGeneratedContentState"],
     [125, "SetSlotAssignedNodes"],
     [126, "SetTopLayerElements"],
+    [127, "SetElementIdName"],
+    [128, "ElementById"],
     [136, "AttachSheetOccurrence"],
     [137, "DetachSheetOccurrence"],
     [138, "SetSheetOccurrenceConditions"]
@@ -150,6 +152,8 @@
     { "event": "RetireTextStyleNodes", "ffi": "style_engine_retire_text_style_nodes", "cpp": "retire_text_style_nodes", "return": "void", "args": [["nodes", "style_node_slice"]], "body": "let nodes = nodes.iter().copied().filter_map(StyleNodeID::from_raw).collect::<Vec<_>>(); engine.retire_text_style_nodes(&nodes);" },
     { "event": "SubtreeAffectsGeneratedContentState", "ffi": "style_engine_subtree_affects_generated_content_state", "cpp": "subtree_affects_generated_content_state", "return": "bool", "receiver": "const", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return false; }; let result = engine.subtree_affects_generated_content_state(node);" },
     { "event": "SetTextIsAsciiWhitespace", "ffi": "style_engine_set_text_is_ascii_whitespace", "cpp": "set_text_is_ascii_whitespace", "return": "void", "args": [["node", "style_node"], ["value", "bool"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_text_is_ascii_whitespace(node, value);" },
+    { "event": "SetElementIdName", "ffi": "style_engine_set_element_id_name", "cpp": "set_element_id_name", "return": "void", "args": [["node", "style_node"], ["name", "style_atom"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_element_id_name(node, StyleAtomID(name));" },
+    { "event": "ElementById", "ffi": "style_engine_element_by_id", "cpp": "element_by_id", "return": "u32", "receiver": "const", "args": [["tree_scope", "tree_scope_id"], ["name", "style_atom"]], "body": "let result = engine.element_by_id(TreeScopeID(tree_scope), StyleAtomID(name)).map_or(0, StyleNodeID::raw);" },
     { "event": "SetShadowRoot", "ffi": "style_engine_set_shadow_root", "cpp": "set_shadow_root", "return": "void", "args": [["host", "style_node"], ["shadow_root", "style_node"]], "body": "if let (Some(host), Some(shadow_root)) = (StyleNodeID::from_raw(host), StyleNodeID::from_raw(shadow_root)) { engine.set_shadow_root(host, shadow_root); }" },
     { "event": "SetSlotAssignedNodes", "ffi": "style_engine_set_slot_assigned_nodes", "cpp": "set_slot_assigned_nodes", "return": "void", "args": [["slot", "style_node"], ["assigned", "style_node_slice"]], "body": "let Some(slot) = StyleNodeID::from_raw(slot) else { return; }; let assigned: Vec<StyleNodeID> = assigned.iter().filter_map(|&node| StyleNodeID::from_raw(node)).collect(); engine.set_slot_assigned_nodes(slot, &assigned);" },
     { "event": "SetTopLayerElements", "ffi": "style_engine_set_top_layer_elements", "cpp": "set_top_layer_elements", "return": "void", "args": [["elements", "style_node_slice"]], "body": "let elements: Vec<StyleNodeID> = elements.iter().filter_map(|&node| StyleNodeID::from_raw(node)).collect(); engine.set_top_layer_elements(&elements);" },
