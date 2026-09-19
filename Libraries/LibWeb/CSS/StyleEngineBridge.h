@@ -231,6 +231,13 @@ public:
         u64 transaction;
         u64 program;
     };
+    // The version pair the last non-empty style transaction published. The program version names
+    // the match program the engine answered from; the transaction version names the publication.
+    // A reader that saw a value at a program version is looking at the same program while it has
+    // not moved.
+    [[nodiscard]] PublishedTransactionVersion published_transaction_version() const { return m_published_transaction_version; }
+    void note_published_transaction_version(PublishedTransactionVersion version) { m_published_transaction_version = version; }
+
     struct PublishedStyleTransaction {
         PublishedTransactionVersion version;
         ReadonlySpan<PublishedStyleDelta> reactions;
@@ -301,6 +308,7 @@ private:
     HashMap<StyleAtomID, HashMap<StyleAtomID, StyleAtomID>> m_attribute_name_atoms;
     HashMap<StyleAtomID, bool> m_attribute_names_requiring_value_text;
     u64 m_atom_generation { 1 };
+    PublishedTransactionVersion m_published_transaction_version { 0, 0 };
     u64 m_attribute_value_text_requirements_version { 0 };
     HashTable<StyleNodeID> m_nodes_with_pending_initial_features;
     HashTable<StyleNodeID> m_nodes_awaiting_first_style_computation;

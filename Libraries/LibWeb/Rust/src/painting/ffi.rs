@@ -2684,6 +2684,18 @@ pub unsafe extern "C" fn layout_arena_has_visual_context_tree(arena: *mut c_void
     paint_state.visual_context.tree.is_some()
 }
 
+/// The number of layout commits this arena has published. It does not say whether layout is up
+/// to date - a reader asks the arena that - but it does say whether the committed geometry a
+/// reader saw earlier is still the one published.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_layout_commit_generation(arena: *mut c_void) -> u64 {
+    unsafe { arena_from_handle(arena) }.layout_commit_generation()
+}
+
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.

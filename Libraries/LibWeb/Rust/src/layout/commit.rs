@@ -186,6 +186,7 @@ pub(crate) fn commit_replacing(
     pass_fragments: &fragment_tree::CompletedPassFragments,
 ) -> CommitNotifications {
     let links_by_slot = pass_fragments.links_by_slot();
+    arena.note_layout_commit();
     let mut paintables = crate::painting::paintable_build::PaintableCommit::new(arena, root);
     paintables.begin_commit();
     // What the pass itself found out comes before what committing it finds out.

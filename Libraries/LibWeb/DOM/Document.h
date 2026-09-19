@@ -1228,6 +1228,11 @@ public:
         // join that follows its own mutation could never have overlapped with anything; one that
         // follows a quiet stretch could have been answered from work done during it.
         u64 nanoseconds_since_mutation { 0 };
+        // Joins that published nothing: the read found render state dirty, ran the pipeline, and
+        // came out with the same style program and the same committed layout it went in with. The
+        // dirty bits said work was owed and the versions say none of it changed anything, so this
+        // counts how conservative the bits are.
+        u64 joins_that_published_nothing { 0 };
     };
     using JoinCountersByReason = Array<JoinCounters, update_layout_reason_count>;
     // Whether style and layout already describe the current DOM, so that a read of layout geometry
@@ -1240,6 +1245,12 @@ public:
 
     // Notes that the page dirtied render state, for the joins that will have to wait for it.
     void note_render_state_mutation() { m_last_render_state_mutation_nanoseconds = MonotonicTime::now().nanoseconds(); }
+
+    // What the published render state is, rather than what is owed on it. The layout commit
+    // generation counts the commits the arena published; the style transaction version pair names
+    // the last published style transaction. Together they say whether anything a reader could see
+    // has moved since it last looked.
+    [[nodiscard]] u64 layout_commit_generation() const;
 
     // Measures one read of render state against the reason it named. A read entered while another
     // one is running is charged to the outer read, so a funnel that delegates to the other funnel
@@ -1259,6 +1270,8 @@ public:
         Document& m_document;
         UpdateLayoutReason m_reason;
         u64 m_started_at_nanoseconds { 0 };
+        u64 m_layout_commit_generation { 0 };
+        u64 m_style_transaction_version { 0 };
         bool m_is_nested { false };
         bool m_render_state_was_clean { false };
     };
