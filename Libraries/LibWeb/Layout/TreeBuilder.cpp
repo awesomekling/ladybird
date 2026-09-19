@@ -773,12 +773,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
         .create_first_letter_nodes = [](void*, void* element_pointer, RustFFI::FfiFirstLetterTarget target) -> RustFFI::FfiFirstLetterNodes {
             VERIFY(element_pointer);
             return create_first_letter_nodes(*static_cast<DOM::Element*>(element_pointer), target); },
-        .request_layout_tree_rebuild = [](void* builder_pointer, u32 style_node) {
-            VERIFY(builder_pointer);
-            auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
-            auto element = builder.m_document->style_computer().element_for_style_node(CSS::StyleNodeID { style_node });
-            VERIFY(element);
-            element->set_needs_layout_tree_update(true, DOM::SetNeedsLayoutTreeUpdateReason::PseudoElementBoxEscapedRebuildRoot); },
         .push_principal_frame = [](void* builder_pointer, u32 style_node) -> RustFFI::FfiPrincipalNodeFrame {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);

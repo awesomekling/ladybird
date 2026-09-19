@@ -59,6 +59,13 @@ void CommitMessages::append(Layout::RustFFI::FfiCommitMessage const& message)
     case Layout::RustFFI::FfiCommitMessageKind::UnexpectedFragmentedInline:
         m_messages.append(Message { .identity = identity, .kind = Kind::UnexpectedFragmentedInline });
         return;
+    case Layout::RustFFI::FfiCommitMessageKind::LayoutTreeRebuildRequested:
+        m_messages.append(Message {
+            .identity = identity,
+            .kind = Kind::NeedsLayoutTreeUpdate,
+            .layout_tree_update_reason = SetNeedsLayoutTreeUpdateReason::PseudoElementBoxEscapedRebuildRoot,
+        });
+        return;
     case Layout::RustFFI::FfiCommitMessageKind::TopLayerZoneRebuildNeeded:
         m_messages.append(Message { .identity = identity, .kind = Kind::TopLayerZoneRebuildNeeded });
         return;

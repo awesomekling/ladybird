@@ -104,7 +104,6 @@ pub struct FfiDomTreeBuilderCallbacks {
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> FfiPrincipalDescendantFacts,
     pub create_first_letter_nodes:
         unsafe extern "C" fn(*mut c_void, *mut c_void, FfiFirstLetterTarget) -> FfiFirstLetterNodes,
-    pub request_layout_tree_rebuild: unsafe extern "C" fn(*mut c_void, u32),
     pub push_principal_frame: unsafe extern "C" fn(*mut c_void, u32) -> FfiPrincipalNodeFrame,
     pub pop_principal_frame: unsafe extern "C" fn(*mut c_void, *mut c_void),
     pub prepare_principal_element: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, bool),
@@ -2702,13 +2701,26 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     }
 
     for &element in &state.layout_tree_rebuild_requests {
-        // A request that names no element asks for the whole tree.
+        // A request that names no element asks for the whole tree, which the arena answers itself.
         if element == 0 {
             host.layout().arena().set_needs_full_layout_tree_update(true);
             continue;
         }
-        // SAFETY: The builder remains live, and the walk that could clear DOM update flags is complete.
-        unsafe { (host.callbacks.request_layout_tree_rebuild)(host.callbacks.builder, element) };
+        state.reports.push(crate::layout::commit::FfiCommitMessage {
+            style_node: element,
+            other_style_node: 0,
+            kind: crate::layout::commit::FfiCommitMessageKind::LayoutTreeRebuildRequested,
+        });
+    }
+
+    // What the build found out goes to the document now that the walk is complete and nothing can
+    // clear a DOM update flag again, in the order the build found it out.
+    if !state.reports.is_empty() {
+        let layout_host = host.layout().arena().layout_host();
+        // SAFETY: The document outlives the build, and no arena borrow is held here.
+        unsafe {
+            (layout_host.deliver_commit_messages)(layout_host.context, state.reports.as_ptr(), state.reports.len());
+        }
     }
 
     if rebuilt_subtrees_were_updated_individually {
@@ -2744,16 +2756,6 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     );
     let viewport = arena.layout_root();
     assert!(!viewport.is_invalid(), "a layout tree build places the viewport");
-
-    // What the build found out goes to the document now that the tree is settled, in the order the
-    // build found it out.
-    if !state.reports.is_empty() {
-        let layout_host = arena.layout_host();
-        // SAFETY: The document outlives the build, and no arena borrow is held here.
-        unsafe {
-            (layout_host.deliver_commit_messages)(layout_host.context, state.reports.as_ptr(), state.reports.len());
-        }
-    }
 
     FfiLayoutTreeBuildOutcome {
         viewport,
