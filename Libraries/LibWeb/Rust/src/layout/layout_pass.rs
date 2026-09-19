@@ -6,12 +6,13 @@
 
 use super::*;
 
-/// Arena and host inputs borrowed while computing a layout result. The pass ends before
-/// commit takes a mutable arena borrow, so its text and style views cannot survive commit.
+/// The arena inputs borrowed while computing a layout result. The pass ends before commit takes a
+/// mutable arena borrow, so its text and style views cannot survive commit.
+///
+/// It holds no host table: a running pass asks the document nothing. See `super::seal`.
 #[derive(Clone, Copy)]
 pub(crate) struct LayoutPass<'arena> {
     arena: &'arena LayoutNodeArena,
-    pub(crate) host: &'arena FfiLayoutHostCallbacks,
     pub(crate) initial_containing_block_inline_size: CssPixels,
     pub(crate) initial_containing_block_block_size: CssPixels,
     pub(crate) document_in_quirks_mode: bool,
@@ -20,14 +21,12 @@ pub(crate) struct LayoutPass<'arena> {
 impl<'arena> LayoutPass<'arena> {
     pub(crate) fn new(
         arena: &'arena LayoutNodeArena,
-        host: &'arena FfiLayoutHostCallbacks,
         initial_containing_block_inline_size: CssPixels,
         initial_containing_block_block_size: CssPixels,
         document_in_quirks_mode: bool,
     ) -> Self {
         Self {
             arena,
-            host,
             initial_containing_block_inline_size,
             initial_containing_block_block_size,
             document_in_quirks_mode,
@@ -86,13 +85,6 @@ impl<'arena> LayoutPass<'arena> {
             child = data.next_sibling.get();
         }
         true
-    }
-
-    pub(crate) fn shell(&self, node: Node) -> *mut c_void {
-        self.arena.assert_layout_read_is_in_scope(node);
-        let shell = self.arena().node_shell(node);
-        assert!(!shell.is_null());
-        shell
     }
 
     pub(crate) fn is_before(&self, node: Node, other: Node) -> bool {

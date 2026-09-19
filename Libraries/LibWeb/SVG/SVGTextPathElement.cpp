@@ -34,22 +34,6 @@ Optional<Utf16String> SVGTextPathElement::href_attribute_value() const
     return get_attribute(AttributeNames::xlink_href);
 }
 
-GC::Ptr<SVGGeometryElement const> SVGTextPathElement::path_or_shape() const
-{
-    auto href = href_attribute_value();
-    if (!href.has_value())
-        return {};
-    return try_resolve_url_to<SVGGeometryElement const>(*href);
-}
-
-// https://svgwg.org/svg2-draft/text.html#TextPathElementStartOffsetAttribute
-float SVGTextPathElement::start_offset_for_path_length(float path_length) const
-{
-    if (!m_start_offset.has_value())
-        return 0;
-    return m_start_offset->resolve_relative_to(path_length);
-}
-
 void SVGTextPathElement::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);

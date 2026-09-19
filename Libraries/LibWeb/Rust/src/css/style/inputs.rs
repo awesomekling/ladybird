@@ -650,6 +650,16 @@ impl RetainedState {
         self.tree.element_by_id(tree_scope, name)
     }
 
+    /// The style group payloads the element's published record holds, for a reader that reaches an
+    /// element by identity rather than through a layout row. `None` while the element has no
+    /// record.
+    #[must_use]
+    pub fn element_published_style_payloads(&self, node: StyleNodeID) -> Option<&[*const std::ffi::c_void]> {
+        let record = self.computed_group_sets.assigned_style_record(node)?;
+        let payloads = self.computed_group_sets.style_record_payloads(record.raw())?;
+        Some(crate::css::host_shared::SharedPayload::as_pointer_slice(payloads))
+    }
+
     pub fn set_shadow_root(&mut self, host: StyleNodeID, shadow_root: StyleNodeID) {
         self.tree.set_shadow_root(host, shadow_root, &mut self.memory);
     }

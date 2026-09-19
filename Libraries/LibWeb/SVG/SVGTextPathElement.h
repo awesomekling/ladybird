@@ -23,14 +23,10 @@ class SVGTextPathElement
 public:
     virtual Layout::Node* create_layout_node(CSS::LayoutStyle) override;
 
-    GC::Ptr<SVGGeometryElement const> path_or_shape() const;
-
     // The `href`/`xlink:href` this element names a shape with, and the parsed `startOffset`, as
     // the layout stage reads them off the element's published attributes.
     Optional<Utf16String> href_attribute_value() const;
     Optional<NumberPercentage> const& parsed_start_offset() const { return m_start_offset; }
-
-    float start_offset_for_path_length(float path_length) const;
 
     // https://w3c.github.io/svgwg/svg2-draft/text.html#__svg__SVGTextPathElement__startOffset
     REFLECT_ANIMATED_LENGTH_ATTRIBUTE_WITH_GETTER(startOffset, start_offset, Horizontal, SVGLengthValue::number(0));

@@ -2432,6 +2432,40 @@ impl LayoutNodeArena {
         }
     }
 
+    /// The element an SVG reference resolves to, named by the atom its URL fragment interned to.
+    /// `SVGGraphicsElement::resolve_fragment_identifier_to_element` asks the document first and the
+    /// shadow tree the referring element sits in second, so the lookup is made in that order.
+    pub(crate) fn element_by_svg_reference(&self, referrer: StyleNodeID, name: u32) -> Option<StyleNodeID> {
+        let name = crate::css::style::index::StyleAtomID(name);
+        if name.is_none() {
+            return None;
+        }
+        self.with_style_store(|engine| {
+            let scope = engine.tree().tree_scope(referrer);
+            engine
+                .element_by_id(crate::css::style::tree::TreeScopeID::DOCUMENT, name)
+                .or_else(|| {
+                    (scope != crate::css::style::tree::TreeScopeID::DOCUMENT)
+                        .then(|| engine.element_by_id(scope, name))
+                        .flatten()
+                })
+        })
+    }
+
+    /// The published computed style of an element the style tree names, which a box's own style
+    /// pointer cannot reach: a `<defs>` builds no box, so nothing under it has a row.
+    ///
+    /// The group pointers are copied out rather than borrowed, since the style store's borrow ends
+    /// with the query while the record they address is retained for the pass.
+    pub(crate) fn style_node_style_payloads(&self, style_node: StyleNodeID) -> Option<FfiStylePayloads> {
+        self.with_style_store(|engine| {
+            let groups = engine.element_published_style_payloads(style_node)?;
+            let mut payloads = FfiStylePayloads::default();
+            payloads.groups.copy_from_slice(groups);
+            Some(payloads)
+        })
+    }
+
     pub(crate) fn clear_style_node_svg_attribute_facts(&self, style_node: StyleNodeID) {
         self.assert_owner_thread();
         self.svg_attribute_facts.borrow_mut().remove(&style_node);
