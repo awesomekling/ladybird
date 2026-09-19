@@ -815,6 +815,16 @@ pub(crate) fn generate_a_counter_representation(
 /// A counter style C++ holds a handle to and names in a publication or a representation request.
 pub struct FfiRegisteredCounterStyle(Arc<CounterStyle>);
 
+/// The counter style a handle from `rust_counter_style_create` names, or none for a null handle.
+///
+/// # Safety
+///
+/// `handle` must be null or a live handle from `rust_counter_style_create`.
+pub(crate) unsafe fn counter_style_from_handle(handle: *const c_void) -> Option<Arc<CounterStyle>> {
+    // SAFETY: The caller passes a null or live handle.
+    unsafe { handle.cast::<FfiRegisteredCounterStyle>().as_ref() }.map(|style| style.0.clone())
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct FfiCounterStyleRange {

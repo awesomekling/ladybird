@@ -580,11 +580,6 @@ struct ContentDataAndQuoteNestingLevel {
     u32 final_quote_nesting_level { 0 };
 };
 
-enum class NotifyListItemCounterRendered : u8 {
-    No,
-    Yes,
-};
-
 struct CounterData {
     Utf16FlyString name;
     bool is_reversed;
@@ -937,7 +932,7 @@ public:
     NonnullRefPtr<StyleValue const> computed_content() const { return m_noninherited.content_data->computed_content_value(); }
     bool content_is_normal() const { return m_noninherited.content_data->content_is_normal(); }
     bool content_uses_list_item_counter() const { return m_noninherited.content_data->content_uses_list_item_counter(); }
-    ContentDataAndQuoteNestingLevel resolved_content(DOM::AbstractElement&, u32 initial_quote_nesting_level, NotifyListItemCounterRendered) const;
+    ContentDataAndQuoteNestingLevel resolved_content(DOM::AbstractElement&, u32 initial_quote_nesting_level) const;
     Vector<CounterData, 0> counter_increment() const { return m_noninherited.content_data->counter_increment_value(); }
     Vector<CounterData, 0> counter_reset() const { return m_noninherited.content_data->counter_reset_value(); }
     Vector<CounterData, 0> counter_set() const { return m_noninherited.content_data->counter_set_value(); }
@@ -1725,7 +1720,7 @@ public:
 
     // Resolves the content property straight from the two groups it reads, for a caller holding a
     // style record's payloads rather than a whole style.
-    static ContentDataAndQuoteNestingLevel resolved_content(ContentValues const&, InheritedListValues const&, DOM::AbstractElement&, u32 initial_quote_nesting_level, NotifyListItemCounterRendered);
+    static ContentDataAndQuoteNestingLevel resolved_content(ContentValues const&, InheritedListValues const&, DOM::AbstractElement&, u32 initial_quote_nesting_level);
 
 private:
     struct NonInheritedValues {

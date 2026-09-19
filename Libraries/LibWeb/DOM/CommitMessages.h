@@ -51,6 +51,7 @@ private:
     enum class Kind : u8 {
         BoxPresence,
         ContentSizeChangedForContainerQueries,
+        ListItemCounterValueRendered,
         NavigableContainerViewportCommitted,
         NeedsLayoutTreeUpdate,
         SvgResourceReferenced,

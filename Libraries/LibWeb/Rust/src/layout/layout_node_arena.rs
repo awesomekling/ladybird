@@ -623,6 +623,8 @@ pub(crate) struct LayoutNodeArena {
     counter_styles: RefCell<crate::css::counter_representation::CounterStyleRegistry>,
     /// The CSS counters set of every element and pseudo-element the tree build resolved one for.
     counters_sets: RefCell<super::counters::CountersSets>,
+    /// The generated content of every pseudo-element the tree build gave a box.
+    generated_content: RefCell<super::generated_content::GeneratedContent>,
     run_used_records: RefCell<Vec<RunRecordSlot>>,
     next_run_nonce: Cell<u64>,
     live_run_nonces: RefCell<Vec<u64>>,
@@ -728,6 +730,7 @@ impl LayoutNodeArena {
             svg_points: RefCell::new(HashMap::default()),
             counter_styles: RefCell::new(crate::css::counter_representation::CounterStyleRegistry::default()),
             counters_sets: RefCell::new(super::counters::CountersSets::default()),
+            generated_content: RefCell::new(super::generated_content::GeneratedContent::default()),
             run_used_records: RefCell::new(Vec::new()),
             next_run_nonce: Cell::new(1),
             live_run_nonces: RefCell::new(Vec::new()),
@@ -1383,6 +1386,7 @@ impl LayoutNodeArena {
             .borrow_mut()
             .retain(|&(scope_host, _), _| scope_host != style_node.raw());
         self.counters_sets.borrow_mut().forget(style_node);
+        self.generated_content.borrow_mut().forget(style_node);
         loop {
             let row = self.first_rows_by_style_node.borrow().head(style_node);
             if row.is_invalid() {
@@ -2474,6 +2478,11 @@ impl LayoutNodeArena {
     pub(crate) fn counters_sets(&self) -> &RefCell<super::counters::CountersSets> {
         self.assert_owner_thread();
         &self.counters_sets
+    }
+
+    pub(crate) fn generated_content(&self) -> &RefCell<super::generated_content::GeneratedContent> {
+        self.assert_owner_thread();
+        &self.generated_content
     }
 
     pub(crate) fn with_counter_style_registry<T>(
@@ -4314,7 +4323,7 @@ pub unsafe extern "C" fn layout_arena_counter_value_for_use(
         return 0;
     };
     // SAFETY: The caller passes the raw word of a string that outlives the call.
-    let name = unsafe { ak::utf16_string_units(&name) };
+    let name = super::counters::CounterName::Host(unsafe { ak::utf16_string_units(&name) });
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the
     // document thread.
     unsafe { &*arena.cast::<LayoutNodeArena>() }
@@ -4344,7 +4353,7 @@ pub unsafe extern "C" fn layout_arena_counter_values_for_use(
     let values = match counter_owner(style_node, generated_for) {
         Some(owner) => {
             // SAFETY: The caller passes the raw word of a string that outlives the call.
-            let name = unsafe { ak::utf16_string_units(&name) };
+            let name = super::counters::CounterName::Host(unsafe { ak::utf16_string_units(&name) });
             // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access
             // on the document thread.
             unsafe { &*arena.cast::<LayoutNodeArena>() }
@@ -4358,6 +4367,150 @@ pub unsafe extern "C" fn layout_arena_counter_values_for_use(
         // SAFETY: The caller keeps `context` valid for the callback.
         unsafe { callback(context, value) };
     }
+}
+
+/// What a list marker whose `content` is `normal` shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+// NB: Constructed by C++ through the FFI.
+#[allow(dead_code)]
+pub enum FfiMarkerContentKind {
+    /// The marker box's `list-style-image`.
+    Image,
+    /// A `list-style-type` string.
+    String,
+    /// The `list-item` counter in a counter style.
+    CounterStyle,
+}
+
+/// What the host resolved a list marker's `list-style-type` and `list-style-image` to when it built
+/// the marker box.
+#[repr(C)]
+pub struct FfiMarkerContent {
+    pub kind: FfiMarkerContentKind,
+    /// For `String`: the string, as a leaked `AK::Utf16String` reference this side gives up.
+    pub string: usize,
+    /// For `CounterStyle`: the registered counter style, or null for a name that resolves to none.
+    pub counter_style: *const c_void,
+    /// Whether the marker text shows the value of the `list-item` counter.
+    pub text_depends_on_list_item_counter: bool,
+}
+
+/// Records the counter styles the `content` of the pseudo-element `generated_for` of the element
+/// `style_node` names, one per `counter()` or `counters()` in `content` and then in its alt text, as
+/// the host resolved them from the style scope `tree_scope` when it built the box. A null style is a
+/// name that resolves to none.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call, and `counter_styles` must address
+/// `count` null or live handles from `rust_counter_style_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_content_counter_styles(
+    arena: *mut c_void,
+    style_node: u32,
+    generated_for: u8,
+    tree_scope: u32,
+    counter_styles: *const *const c_void,
+    count: usize,
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let owner = counter_owner(style_node, generated_for).expect("a pseudo-element's element has an identity");
+    let counter_styles = if count == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: The caller passes `count` handles.
+        unsafe { std::slice::from_raw_parts(counter_styles, count) }
+            .iter()
+            // SAFETY: Each handle is null or live for the duration of the call.
+            .map(|&counter_style| unsafe {
+                crate::css::counter_representation::counter_style_from_handle(counter_style)
+            })
+            .collect()
+    };
+    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the
+    // document thread.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }
+        .generated_content()
+        .borrow_mut()
+        .set_content_counter_styles(
+            owner,
+            super::generated_content::ContentCounterStyles {
+                tree_scope,
+                counter_styles,
+            },
+        );
+}
+
+/// Records what the list marker the pseudo-element `generated_for` of the element `style_node`
+/// generates, or nests, shows when its `content` is `normal`, as the host resolved it from the style
+/// scope `tree_scope` when it built the marker box.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call, and `content` must follow the rules
+/// `FfiMarkerContent` documents.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_marker_content(
+    arena: *mut c_void,
+    style_node: u32,
+    generated_for: u8,
+    tree_scope: u32,
+    content: FfiMarkerContent,
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let owner = counter_owner(style_node, generated_for).expect("a pseudo-element's element has an identity");
+    let marker_content = match content.kind {
+        FfiMarkerContentKind::Image => super::generated_content::MarkerContent::Image,
+        FfiMarkerContentKind::String => super::generated_content::MarkerContent::String(
+            // SAFETY: The caller leaks one reference to a live string.
+            unsafe { crate::css::css_string::CssString::from_leaked_raw(content.string) }
+                .units()
+                .to_vec(),
+        ),
+        FfiMarkerContentKind::CounterStyle => super::generated_content::MarkerContent::CounterStyle(
+            // SAFETY: The handle is null or live for the duration of the call.
+            unsafe { crate::css::counter_representation::counter_style_from_handle(content.counter_style) },
+        ),
+    };
+    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the
+    // document thread.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }
+        .generated_content()
+        .borrow_mut()
+        .set_marker_content_styles(
+            owner,
+            super::generated_content::MarkerContentStyles {
+                tree_scope,
+                content: marker_content,
+                text_depends_on_list_item_counter: content.text_depends_on_list_item_counter,
+            },
+        );
+}
+
+/// The text the content of the pseudo-element `generated_for` of the element `style_node` names last
+/// resolved to, the way accessibility reads it: the alt text when there is one, otherwise every
+/// string in order. The result is an `AK::Utf16String` raw representation the caller adopts.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_generated_content_accessible_text(
+    arena: *mut c_void,
+    style_node: u32,
+    generated_for: u8,
+) -> usize {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(owner) = counter_owner(style_node, generated_for) else {
+        return ak::Utf16String::from_utf16(&[]).into_raw();
+    };
+    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the
+    // document thread.
+    let generated_content = unsafe { &*arena.cast::<LayoutNodeArena>() }
+        .generated_content()
+        .borrow();
+    ak::Utf16String::from_utf16(generated_content.accessible_text(owner)).into_raw()
 }
 
 /// Whether the innermost `list-item` counter in the counters set of the element `style_node` names

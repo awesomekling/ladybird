@@ -1419,8 +1419,8 @@ struct ElementDependentInvalidationState {
     {
         if (!layout_node)
             return;
-        if (auto const& content = layout_node->content(); content.has_value())
-            content_counter_style_dependencies = content->counter_style_dependencies;
+        if (auto const& dependencies = layout_node->content_counter_style_dependencies(); dependencies.has_value())
+            content_counter_style_dependencies = *dependencies;
         // Only a list item renders a marker, so only its counter style can matter; a display
         // change to or from list-item rebuilds the box regardless.
         if (layout_node->display().is_list_item()) {
@@ -1440,7 +1440,7 @@ static void add_element_dependent_invalidation(CSS::RequiredInvalidationAfterSty
     // 'content' change, they rebuild from the element rather than its parent.
     auto compare = [&](Optional<Vector<ValueComparingRefPtr<CSS::CounterStyle const>>> const& old_content_dependencies, Optional<ValueComparingRefPtr<CSS::CounterStyle const>> const& old_list_counter_style) {
         if (old_content_dependencies.has_value()
-            && *old_content_dependencies != new_computed_values.resolved_content(abstract_element, 0, CSS::NotifyListItemCounterRendered::No).content_data.counter_style_dependencies)
+            && *old_content_dependencies != new_computed_values.resolved_content(abstract_element, 0).content_data.counter_style_dependencies)
             invalidation |= CSS::RequiredInvalidationAfterStyleChange::rebuild_layout_tree_from(CSS::LayoutTreeRebuildRoot::Self);
 
         if (old_list_counter_style.has_value()) {
@@ -1455,8 +1455,8 @@ static void add_element_dependent_invalidation(CSS::RequiredInvalidationAfterSty
 
     if (old_state.layout_node) {
         Optional<Vector<ValueComparingRefPtr<CSS::CounterStyle const>>> old_content_dependencies;
-        if (auto const& content = old_state.layout_node->content(); content.has_value())
-            old_content_dependencies = content->counter_style_dependencies;
+        if (auto const& dependencies = old_state.layout_node->content_counter_style_dependencies(); dependencies.has_value())
+            old_content_dependencies = *dependencies;
         Optional<ValueComparingRefPtr<CSS::CounterStyle const>> old_list_counter_style;
         if (old_state.layout_node->display().is_list_item()) {
             if (auto const& list_style_type = old_state.layout_node->list_style_type(); list_style_type.has<RefPtr<CSS::CounterStyle const>>())
