@@ -37,11 +37,18 @@
 #include <LibWeb/Layout/TextNode.h>
 #include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Painting/PaintableTypes.h>
+#include <LibWeb/SVG/SVGCircleElement.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
+#include <LibWeb/SVG/SVGEllipseElement.h>
 #include <LibWeb/SVG/SVGGeometryElement.h>
 #include <LibWeb/SVG/SVGImageElement.h>
+#include <LibWeb/SVG/SVGLineElement.h>
 #include <LibWeb/SVG/SVGMaskElement.h>
+#include <LibWeb/SVG/SVGPathElement.h>
 #include <LibWeb/SVG/SVGPatternElement.h>
+#include <LibWeb/SVG/SVGPolygonElement.h>
+#include <LibWeb/SVG/SVGPolylineElement.h>
+#include <LibWeb/SVG/SVGRectElement.h>
 #include <LibWeb/SVG/SVGSVGElement.h>
 #include <LibWeb/SVG/SVGSymbolElement.h>
 #include <LibWeb/SVG/SVGTextElement.h>
@@ -123,6 +130,32 @@ RustFFI::FfiSvgAttributeFacts build_svg_attribute_facts(DOM::Node const& dom_nod
         pattern_height = pattern_element->pattern_height();
     }
 
+    auto geometry_kind = RustFFI::SVG_GEOMETRY_KIND_NONE;
+    if (is<SVG::SVGPathElement>(dom_node))
+        geometry_kind = RustFFI::SVG_GEOMETRY_KIND_PATH;
+    else if (is<SVG::SVGRectElement>(dom_node))
+        geometry_kind = RustFFI::SVG_GEOMETRY_KIND_RECT;
+    else if (is<SVG::SVGCircleElement>(dom_node))
+        geometry_kind = RustFFI::SVG_GEOMETRY_KIND_CIRCLE;
+    else if (is<SVG::SVGEllipseElement>(dom_node))
+        geometry_kind = RustFFI::SVG_GEOMETRY_KIND_ELLIPSE;
+    else if (is<SVG::SVGPolylineElement>(dom_node))
+        geometry_kind = RustFFI::SVG_GEOMETRY_KIND_POLYLINE;
+    else if (is<SVG::SVGPolygonElement>(dom_node))
+        geometry_kind = RustFFI::SVG_GEOMETRY_KIND_POLYGON;
+
+    SVG::NumberPercentage line_x1 = SVG::NumberPercentage::create_number(0);
+    SVG::NumberPercentage line_y1 = SVG::NumberPercentage::create_number(0);
+    SVG::NumberPercentage line_x2 = SVG::NumberPercentage::create_number(0);
+    SVG::NumberPercentage line_y2 = SVG::NumberPercentage::create_number(0);
+    if (auto const* line_element = as_if<SVG::SVGLineElement>(dom_node)) {
+        geometry_kind = RustFFI::SVG_GEOMETRY_KIND_LINE;
+        line_x1 = line_element->x1_value();
+        line_y1 = line_element->y1_value();
+        line_x2 = line_element->x2_value();
+        line_y2 = line_element->y2_value();
+    }
+
     return {
         .is_graphics_element = is<SVG::SVGGraphicsElement>(dom_node),
         .is_use_element = is<SVG::SVGUseElement>(dom_node),
@@ -142,6 +175,11 @@ RustFFI::FfiSvgAttributeFacts build_svg_attribute_facts(DOM::Node const& dom_nod
         .mask_y = to_ffi_number_percentage(mask_y),
         .mask_width = to_ffi_number_percentage(mask_width),
         .mask_height = to_ffi_number_percentage(mask_height),
+        .geometry_kind = geometry_kind,
+        .line_x1 = to_ffi_number_percentage(line_x1),
+        .line_y1 = to_ffi_number_percentage(line_y1),
+        .line_x2 = to_ffi_number_percentage(line_x2),
+        .line_y2 = to_ffi_number_percentage(line_y2),
     };
 }
 
@@ -295,10 +333,7 @@ static RustFFI::FfiSvgPathResult compute_svg_path(NodeWithStyle const& node, Rus
     };
 
     Gfx::Path path;
-    if (graphics_box.is_svg_geometry_box()) {
-        auto& geometry_element = as<SVG::SVGGeometryElement>(const_cast<DOM::Node&>(*graphics_box.dom_node()));
-        path = geometry_element.get_path(viewport_size, *geometry_element.computed_style());
-    } else if (graphics_box.kind() == RustFFI::NodeKind::SVGTextBox) {
+    if (graphics_box.kind() == RustFFI::NodeKind::SVGTextBox) {
         auto const* text_box = &graphics_box;
         auto const& text_element = as<SVG::SVGTextPositioningElement>(*text_box->dom_node());
         // https://svgwg.org/svg2-draft/text.html#TextElementXAttribute

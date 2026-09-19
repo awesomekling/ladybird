@@ -38,6 +38,8 @@
 #include <LibWeb/SVG/SVGFilterElement.h>
 #include <LibWeb/SVG/SVGGradientElement.h>
 #include <LibWeb/SVG/SVGPatternElement.h>
+#include <LibWeb/SVG/SVGPolygonElement.h>
+#include <LibWeb/SVG/SVGPolylineElement.h>
 #include <LibWeb/SVG/SVGTextContentElement.h>
 
 namespace Web::Layout {
@@ -92,10 +94,24 @@ bool Node::refresh_dom_paint_facts(DOM::Node const& dom_node)
     return RustFFI::layout_arena_set_node_dom_paint_facts(m_arena->handle(), m_slot, dom_paint_facts_of(&dom_node));
 }
 
+// A `points` list is the one geometry attribute that is not a fixed number of values, so it
+// travels beside the facts rather than inside them.
+static void publish_svg_points(NodeArena& arena, RustFFI::NodeSlotId slot, DOM::Node const& dom_node)
+{
+    ReadonlySpan<Gfx::FloatPoint> points;
+    if (auto const* polygon = as_if<SVG::SVGPolygonElement>(dom_node))
+        points = polygon->points();
+    else if (auto const* polyline = as_if<SVG::SVGPolylineElement>(dom_node))
+        points = polyline->points();
+    static_assert(sizeof(Gfx::FloatPoint) == sizeof(RustFFI::FfiFloatPoint));
+    RustFFI::layout_arena_set_node_svg_points(arena.handle(), slot, reinterpret_cast<RustFFI::FfiFloatPoint const*>(points.data()), points.size());
+}
+
 void Node::refresh_svg_attribute_facts(DOM::Node const& dom_node)
 {
     VERIFY(this->dom_node() == &dom_node);
     RustFFI::layout_arena_set_node_svg_attribute_facts(m_arena->handle(), m_slot, build_svg_attribute_facts(dom_node));
+    publish_svg_points(*m_arena, m_slot, dom_node);
 }
 
 Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind kind, AttachToDOMNode attach_to_dom_node)
@@ -112,8 +128,10 @@ Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind k
         RustFFI::layout_arena_note_rows_share_dom_node(m_arena->handle(), row_already_bound_to_dom_node->m_slot, m_slot);
     // A row starts out with the attributes its element carries now; every later change to them
     // publishes itself.
-    if (node->is_svg_element())
+    if (node->is_svg_element()) {
         RustFFI::layout_arena_set_node_svg_attribute_facts(m_arena->handle(), m_slot, build_svg_attribute_facts(*node));
+        publish_svg_points(*m_arena, m_slot, *node);
+    }
     if (attach_to_dom_node == AttachToDOMNode::Yes) {
         if (row_already_bound_to_dom_node)
             row_already_bound_to_dom_node->pin_style_record_for_detachment();
