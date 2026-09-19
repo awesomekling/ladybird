@@ -974,6 +974,25 @@ void record_slot_assignment_changed(HTML::HTMLSlotElement& slot)
     style_engine->set_slot_assigned_nodes(slot.style_node_id(), identities.span());
 }
 
+// The document's top layer, published whole whenever its membership changes.
+//
+// The order is the order boxes are built in, and it belongs to the document rather than to any one
+// element, so it is not recoverable from the per-element membership bit. A member that has already
+// given up its identity is left out: it can have no box for the top layer pass to place.
+void record_top_layer_elements_changed(DOM::Document& document)
+{
+    if (!document.style_engine_tracks_tree())
+        return;
+    auto const& elements = document.top_layer_elements();
+    Vector<StyleNodeID, 8> identities;
+    identities.ensure_capacity(elements.size());
+    for (auto const& element : elements) {
+        if (element->style_node_id() != no_style_node)
+            identities.unchecked_append(element->style_node_id());
+    }
+    document.style_computer().style_engine().set_top_layer_elements(identities.span());
+}
+
 // Assignment runs inside the insertion that connects a node, which happens before the subtree it
 // arrived in is named, and the list published then names only the members that already had an
 // identity. Both ends of the relation therefore republish on arrival: a slottable the list it has

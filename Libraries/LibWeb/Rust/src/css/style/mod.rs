@@ -832,6 +832,10 @@ pub struct RetainedState {
     exact_covered_scratch: Vec<StyleNodeID>,
     cascade_compaction_scratch: ordering::CascadeCompactionWorkspace,
     cascade_compaction_scratch_memory: MemoryLease,
+    /// The document's top layer, in the order its members were added. The membership bit each
+    /// element carries says whether a member is rendered; the order is the order their boxes are
+    /// built in, and belongs to the document rather than to any one element.
+    top_layer_elements: Vec<StyleNodeID>,
     /// Monotonic identity assigned to each non-empty normalized style transaction.
     next_style_transaction_version: StyleTransactionVersion,
     /// Latest document-wide scalar computation facts, copied at the transaction boundary.

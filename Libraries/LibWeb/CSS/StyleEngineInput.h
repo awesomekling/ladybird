@@ -89,6 +89,7 @@ WEB_API void record_element_assigned_slot_changed(DOM::Element&, DOM::Element* o
 // Assignment runs inside an insertion, before the inserted subtree is named, so a slottable's
 // arrival republishes the list it is now a member of.
 WEB_API void record_slot_assignment_changed(HTML::HTMLSlotElement&);
+WEB_API void record_top_layer_elements_changed(DOM::Document&);
 
 // Called once every element of a shadow tree has recorded its own removal, so nothing still names
 // the root as a parent. A shadow root's identity follows its host's lifetime: keeping it across a

@@ -1625,6 +1625,20 @@ impl LayoutNodeArena {
         self.with_style_engine(|engine| engine.tree().assigned_nodes_of(style_node)[index])
     }
 
+    /// The document's top layer, in the order its members were added.
+    pub(crate) fn top_layer_elements(&self) -> Vec<StyleNodeID> {
+        self.with_style_engine(|engine| engine.top_layer_elements().to_vec())
+    }
+
+    /// The node above `style_node` in the flat tree, or nothing for a root and for a node the flat
+    /// tree leaves out - a shadow host's unassigned light child, or a slot's fallback content while
+    /// the slot has assigned nodes.
+    pub(crate) fn flat_tree_parent(&self, style_node: Option<StyleNodeID>) -> Option<StyleNodeID> {
+        let style_node = style_node?;
+        style_node.element_index()?;
+        self.with_style_engine(|engine| engine.tree().flat_tree_parent(style_node))
+    }
+
     /// Retire the layout tree update marks `style_node` holds, own and child alike.
     pub(crate) fn clear_layout_tree_update_marks(&self, style_node: Option<StyleNodeID>) {
         let Some(style_node) = style_node else {
