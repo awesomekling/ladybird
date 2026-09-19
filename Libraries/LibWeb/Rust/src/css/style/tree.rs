@@ -508,6 +508,8 @@ pub struct StyleNodeTree {
     /// build climbs to reach a node it has to rebuild. Only an element, a shadow root and the
     /// document ever carry one, so this needs no place in the text index space.
     child_needs_layout_tree_update: BitColumn,
+    /// The layout tree update mark elements hold. Text nodes hold one too, in `text.marks`.
+    marks: LayoutTreeUpdateMarks,
     connected_element_count: u32,
     /// Identities retired in the current epoch. They cannot be reused until the epoch that could
     /// still observe them has retired.
@@ -558,6 +560,7 @@ impl StyleNodeTree {
             live: BitColumn::default(),
             relation_only: BitColumn::default(),
             child_needs_layout_tree_update: BitColumn::default(),
+            marks: LayoutTreeUpdateMarks::default(),
             connected_element_count: 0,
             pending_reuse: Vec::new(),
             free_element_indexes: Vec::new(),
@@ -631,6 +634,48 @@ impl StyleNodeTree {
         if changed { !value } else { value }
     }
 
+    /// Whether the layout tree build has to rebuild what this node produces.
+    #[must_use]
+    pub fn needs_layout_tree_update(&self, node: StyleNodeID) -> bool {
+        match node.element_index() {
+            Some(index) => self.marks.needs(index as usize),
+            None => self.text.marks.needs(node.text_index().unwrap() as usize),
+        }
+    }
+
+    /// Which narrower rebuilds the marks collected on this node still permit. See
+    /// [`layout_tree_update_reuse_reason`].
+    #[must_use]
+    pub fn layout_tree_update_reuse_reasons(&self, node: StyleNodeID) -> u8 {
+        match node.element_index() {
+            Some(index) => self.marks.reuse_reasons(index as usize),
+            None => self.text.marks.reuse_reasons(node.text_index().unwrap() as usize),
+        }
+    }
+
+    /// Fold one layout tree update mark into the node's, answering whether its own bit changed.
+    /// That answer is what tells the mark site it has a transition to widen from.
+    pub fn merge_layout_tree_update_mark(
+        &mut self,
+        node: StyleNodeID,
+        value: bool,
+        reuse_reason: u8,
+        memory: &mut MemoryController,
+    ) -> bool {
+        let (changed, growth) = match node.element_index() {
+            Some(index) => self.marks.merge(index as usize, value, reuse_reason),
+            None => self
+                .text
+                .marks
+                .merge(node.text_index().unwrap() as usize, value, reuse_reason),
+        };
+        if growth != 0 {
+            self.capacity_bytes += growth;
+            memory.reserve_required(MemoryCategory::RelationColumns, growth);
+        }
+        changed
+    }
+
     /// Whether the identity stands in the tree without being styled. See `relation_only`.
     #[must_use]
     pub fn is_relation_only(&self, node: StyleNodeID) -> bool {
@@ -694,6 +739,7 @@ impl StyleNodeTree {
         self.live.set(index as usize, true);
         self.relation_only.set(index as usize, false);
         self.child_needs_layout_tree_update.set(index as usize, false);
+        self.marks.clear(index as usize);
         if let Some(capacity_before_growth) = capacity_before_growth {
             let current = self.identity_capacity_bytes();
             self.record_capacity_change(memory, capacity_before_growth, current);
@@ -727,6 +773,7 @@ impl StyleNodeTree {
                 self.connected_element_count -= 1;
             }
             self.child_needs_layout_tree_update.set(index as usize, false);
+            self.marks.clear(index as usize);
             self.parent[index as usize] = None;
             self.first_element_child[index as usize] = None;
             self.next_element_sibling[index as usize] = None;
@@ -771,6 +818,7 @@ impl StyleNodeTree {
             }
         };
         self.text.live.set(index as usize, true);
+        self.text.marks.clear(index as usize);
         let current = self.text_capacity_bytes();
         self.record_capacity_change(memory, before, current);
         StyleNodeID::text(index)
@@ -788,6 +836,7 @@ impl StyleNodeTree {
                 continue;
             }
             self.text.live.set(index as usize, false);
+            self.text.marks.clear(index as usize);
             self.text.parent[index as usize] = None;
             self.text.next_sibling[index as usize] = None;
             self.text.previous_sibling[index as usize] = None;
@@ -1422,6 +1471,7 @@ impl StyleNodeTree {
                 self.live.capacity_bytes(),
                 self.relation_only.capacity_bytes(),
                 self.child_needs_layout_tree_update.capacity_bytes(),
+                self.marks.capacity_bytes(),
             ];
             skip [];
         }
@@ -1486,6 +1536,78 @@ impl StyleNodeTree {
     }
 }
 
+/// Which narrower rebuild the marks a node has collected so far still permit, as
+/// `Node::LayoutTreeUpdateReuseReason` spells them. Nothing set means only a full rebuild will do.
+pub mod layout_tree_update_reuse_reason {
+    pub const CHILD_LIST_INSERTION: u8 = 1;
+    pub const PSEUDO_ELEMENT_CHANGE: u8 = 2;
+}
+
+/// The layout tree update mark one index space holds: whether the build has to rebuild the node,
+/// and which narrower rebuilds every mark collected since the last build still permits.
+#[derive(Default)]
+struct LayoutTreeUpdateMarks {
+    needs: BitColumn,
+    reuse_child_list_insertion: BitColumn,
+    reuse_pseudo_element_change: BitColumn,
+}
+
+impl LayoutTreeUpdateMarks {
+    fn needs(&self, index: usize) -> bool {
+        self.needs.contains(index)
+    }
+
+    fn reuse_reasons(&self, index: usize) -> u8 {
+        let mut reasons = 0;
+        if self.reuse_child_list_insertion.contains(index) {
+            reasons |= layout_tree_update_reuse_reason::CHILD_LIST_INSERTION;
+        }
+        if self.reuse_pseudo_element_change.contains(index) {
+            reasons |= layout_tree_update_reuse_reason::PSEUDO_ELEMENT_CHANGE;
+        }
+        reasons
+    }
+
+    fn set_reuse_reasons(&mut self, index: usize, reasons: u8) -> u64 {
+        let child_list = self.reuse_child_list_insertion.set(
+            index,
+            reasons & layout_tree_update_reuse_reason::CHILD_LIST_INSERTION != 0,
+        );
+        let pseudo = self.reuse_pseudo_element_change.set(
+            index,
+            reasons & layout_tree_update_reuse_reason::PSEUDO_ELEMENT_CHANGE != 0,
+        );
+        child_list.1 + pseudo.1
+    }
+
+    /// Fold one mark in, answering whether the node's own bit changed. Once a reason that forbids
+    /// reuse arrives, a later one cannot narrow it back.
+    fn merge(&mut self, index: usize, value: bool, reuse_reason: u8) -> (bool, u64) {
+        if self.needs(index) == value {
+            let reasons = self.reuse_reasons(index);
+            let merged = if reuse_reason == 0 || reasons == 0 {
+                0
+            } else {
+                reasons | reuse_reason
+            };
+            return (false, self.set_reuse_reasons(index, merged));
+        }
+        let (_, growth) = self.needs.set(index, value);
+        (true, growth + self.set_reuse_reasons(index, reuse_reason))
+    }
+
+    fn clear(&mut self, index: usize) {
+        self.needs.set(index, false);
+        self.set_reuse_reasons(index, 0);
+    }
+
+    fn capacity_bytes(&self) -> u64 {
+        self.needs.capacity_bytes()
+            + self.reuse_child_list_insertion.capacity_bytes()
+            + self.reuse_pseudo_element_change.capacity_bytes()
+    }
+}
+
 /// The rows of text identities, indexed by text index with slot 0 unused.
 #[derive(Default)]
 struct TextRows {
@@ -1493,6 +1615,7 @@ struct TextRows {
     next_sibling: Vec<Option<StyleNodeID>>,
     previous_sibling: Vec<Option<StyleNodeID>>,
     live: BitColumn,
+    marks: LayoutTreeUpdateMarks,
     pending_reuse: Vec<u32>,
     free_indexes: Vec<u32>,
 }
@@ -1502,7 +1625,7 @@ impl TextRows {
         capacity_bytes! {
             shallow [self.parent, self.next_sibling, self.previous_sibling];
             cached [];
-            nested [self.live.capacity_bytes()];
+            nested [self.live.capacity_bytes(), self.marks.capacity_bytes()];
             skip [self.pending_reuse, self.free_indexes];
         }
     }

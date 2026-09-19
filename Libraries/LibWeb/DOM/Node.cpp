@@ -2451,6 +2451,37 @@ static bool is_structural_boundary_self_rebuild_reason(SetNeedsLayoutTreeUpdateR
     }
 }
 
+// The identity the style mirror files this node's tree-update marks under. A node the style tree
+// has not named holds none; see Node::set_needs_layout_tree_update.
+static CSS::StyleNodeID style_node_id_of(Node const& node)
+{
+    if (auto const* element = as_if<Element>(node))
+        return element->style_node_id();
+    if (auto const* text = as_if<Text>(node))
+        return text->style_node_id();
+    if (auto const* shadow_root = as_if<ShadowRoot>(node))
+        return shadow_root->style_node_id();
+    if (auto const* document = as_if<Document>(node))
+        return document->style_node_id();
+    return {};
+}
+
+bool Node::needs_layout_tree_update() const
+{
+    auto style_node = style_node_id_of(*this);
+    if (!style_node)
+        return false;
+    return document().style_computer().style_engine().needs_layout_tree_update(style_node);
+}
+
+u8 Node::layout_tree_update_reuse_reasons() const
+{
+    auto style_node = style_node_id_of(*this);
+    if (!style_node)
+        return 0;
+    return document().style_computer().style_engine().layout_tree_update_reuse_reasons(style_node);
+}
+
 void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReason reason)
 {
     // A tree update mark names a node for the render side, so a node the style tree has not named
@@ -2458,12 +2489,9 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
     // doctype, a processing instruction -- and, of the rest, only a node in a document that never
     // lays out, or one whose subtree is still arriving: the insertion that names it marks it and
     // its new parent once it is named, which is what covers a slot assigned during the insertion.
-    NodeIdentity identity;
-    if (value) {
-        identity = NodeIdentity::of(*this);
-        if (!identity)
-            return;
-    }
+    auto style_node = style_node_id_of(*this);
+    if (!style_node)
+        return;
 
     if (value && reason == SetNeedsLayoutTreeUpdateReason::NodeInsertBefore) {
         if (auto* first_letter_owner = first_letter_owner_for_layout_subtree_from(*this); first_letter_owner && first_letter_owner != this)
@@ -2476,21 +2504,15 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
     else if (value && reason == SetNeedsLayoutTreeUpdateReason::PseudoElementChange)
         reuse_reason = PseudoElementChange;
     // NB: Every pending reason must permit reuse. Once a full rebuild is requested, later
-    //     incremental changes cannot narrow it again.
-    if (m_needs_layout_tree_update == value) {
-        if (!reuse_reason)
-            m_layout_tree_update_reuse_reasons = 0;
-        else if (m_layout_tree_update_reuse_reasons)
-            m_layout_tree_update_reuse_reasons |= reuse_reason;
+    //     incremental changes cannot narrow it again. The mirror folds both, and answers whether
+    //     this mark was a transition -- which is what the widenings below hang off.
+    if (!document().style_computer().style_engine().merge_layout_tree_update_mark(style_node, value, reuse_reason))
         return;
-    }
-    m_needs_layout_tree_update = value;
-    m_layout_tree_update_reuse_reasons = reuse_reason;
     if (value)
         document().note_render_state_mutation();
 
     if constexpr (UPDATE_LAYOUT_DEBUG) {
-        if (m_needs_layout_tree_update) {
+        if (value) {
             // NOTE: We check some conditions here to avoid debug spam in documents that don't do layout.
             auto navigable = this->navigable();
             bool any_ancestor_needs_layout_tree_update = false;
@@ -2513,7 +2535,7 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
             host->set_needs_layout_tree_update(value, reason);
     }
 
-    if (m_needs_layout_tree_update) {
+    if (value) {
         document().set_needs_repaint(Badge<Node> {}, InvalidateDisplayList::No);
 
         // A <mask>, <clipPath>, or <pattern> is laid out as a resource box under each element that references it,
@@ -2535,23 +2557,8 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
         if (document().is_running_update_layout())
             apply_layout_tree_update_mark(reason);
         else
-            document().invalidation_journal().note_needs_layout_tree_update(identity, reason);
+            document().invalidation_journal().note_needs_layout_tree_update(NodeIdentity::of(*this), reason);
     }
-}
-
-// The identity the style mirror files this node's tree-update marks under. A node the style tree
-// has not named holds none; see Node::set_needs_layout_tree_update.
-static CSS::StyleNodeID style_node_id_of(Node const& node)
-{
-    if (auto const* element = as_if<Element>(node))
-        return element->style_node_id();
-    if (auto const* text = as_if<Text>(node))
-        return text->style_node_id();
-    if (auto const* shadow_root = as_if<ShadowRoot>(node))
-        return shadow_root->style_node_id();
-    if (auto const* document = as_if<Document>(node))
-        return document->style_node_id();
-    return {};
 }
 
 bool Node::child_needs_layout_tree_update() const

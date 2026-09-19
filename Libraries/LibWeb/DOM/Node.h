@@ -440,7 +440,9 @@ public:
 
     virtual bool is_child_allowed(Node const&) const { return true; }
 
-    [[nodiscard]] bool needs_layout_tree_update() const { return m_needs_layout_tree_update; }
+    // Whether the layout tree build has to rebuild what this node produces. The mark lives in the
+    // style mirror, beside the identity that names the node.
+    [[nodiscard]] bool needs_layout_tree_update() const;
     void set_needs_layout_tree_update(bool, SetNeedsLayoutTreeUpdateReason);
     // The half of a layout tree update mark that names render state: the ancestor chain the build
     // has to climb to reach this node, and the layout invalidation the node's box needs. The
@@ -448,8 +450,10 @@ public:
     // render side is about to walk.
     void apply_layout_tree_update_mark(SetNeedsLayoutTreeUpdateReason);
 
-    [[nodiscard]] bool needs_pseudo_element_layout_tree_update() const { return m_layout_tree_update_reuse_reasons & PseudoElementChange; }
-    [[nodiscard]] bool may_reuse_layout_node_for_child_list_insertion() const { return m_layout_tree_update_reuse_reasons & ChildListInsertion; }
+    // Which narrower rebuilds the marks collected on this node since the last build still permit.
+    [[nodiscard]] u8 layout_tree_update_reuse_reasons() const;
+    [[nodiscard]] bool needs_pseudo_element_layout_tree_update() const { return layout_tree_update_reuse_reasons() & PseudoElementChange; }
+    [[nodiscard]] bool may_reuse_layout_node_for_child_list_insertion() const { return layout_tree_update_reuse_reasons() & ChildListInsertion; }
 
     // Whether a flat-tree descendant holds a layout tree update mark: the chain the build climbs to
     // reach a node it has to rebuild. It lives in the style mirror, beside the identity that names
@@ -635,14 +639,12 @@ protected:
     GC::Ptr<Document> m_document;
     GC::Ptr<Node> m_root;
     NodeType m_type { NodeType::INVALID };
-    bool m_needs_layout_tree_update { false };
     bool m_has_layout_box { false };
     bool m_has_committed_box { false };
     enum LayoutTreeUpdateReuseReason : u8 {
         ChildListInsertion = 1,
         PseudoElementChange = 2,
     };
-    u8 m_layout_tree_update_reuse_reasons { 0 };
 
     u32 m_children_explicitly_inherited_non_inherited_style_groups { 0 };
     u32 m_associated_animation_count_in_subtree { 0 };

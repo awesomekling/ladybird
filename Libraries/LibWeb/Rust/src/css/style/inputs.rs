@@ -466,6 +466,24 @@ impl RetainedState {
             .set_child_needs_layout_tree_update(node, value, &mut self.memory)
     }
 
+    /// Whether the layout tree build has to rebuild what the node produces.
+    #[must_use]
+    pub fn needs_layout_tree_update(&self, node: StyleNodeID) -> bool {
+        self.tree.needs_layout_tree_update(node)
+    }
+
+    /// Which narrower rebuilds the marks collected on the node still permit.
+    #[must_use]
+    pub fn layout_tree_update_reuse_reasons(&self, node: StyleNodeID) -> u8 {
+        self.tree.layout_tree_update_reuse_reasons(node)
+    }
+
+    /// Fold one layout tree update mark into the node's, answering whether its own bit changed.
+    pub fn merge_layout_tree_update_mark(&mut self, node: StyleNodeID, value: bool, reuse_reason: u8) -> bool {
+        self.tree
+            .merge_layout_tree_update_mark(node, value, reuse_reason, &mut self.memory)
+    }
+
     /// The box facts the element's published style record holds. `None` while the element has no
     /// record: a text node, a retired identity, or an element style has not reached yet.
     #[must_use]
