@@ -264,21 +264,8 @@ fn padding_inflated_scrollable_overflow(
     CssPixelRect::new(left, top, right - left, bottom - top)
 }
 
-fn fragment_node_is_in_focused_text_control(
-    layout_arena: &LayoutNodeArena,
-    overflow_callbacks: Option<&FfiGeometryHostCallbacks>,
-    node: NodeSlotId,
-) -> bool {
-    let flags = layout_arena.node_flags_if_live(node);
-    let node_has_dom_node = flags & NodeFlag::Anonymous as u32 == 0;
-    if !node_has_dom_node || flags & NodeFlag::IsInUserAgentShadowTree as u32 == 0 {
-        return false;
-    }
-    let shell = layout_arena.shell_if_live(node);
-    if shell.is_null() {
-        return false;
-    }
-    overflow_callbacks.is_some_and(|callbacks| callbacks.layout_node_is_in_focused_text_control(shell))
+fn fragment_node_is_in_focused_text_control(layout_arena: &LayoutNodeArena, node: NodeSlotId) -> bool {
+    layout_arena.node_flags_if_live(node) & NodeFlag::IsInFocusedTextControl as u32 != 0
 }
 
 #[derive(Clone, Copy)]
@@ -366,7 +353,6 @@ fn store_overflow_data(
 pub(crate) fn measure_scrollable_overflow(
     layout_arena: &impl PaintableRowsRead,
     non_child_boxes_by_containing_block: &HashMap<NodeSlotId, Vec<NodeSlotId>>,
-    overflow_callbacks: Option<&FfiGeometryHostCallbacks>,
     box_paintable: NodeSlotId,
 ) -> Vec<OverflowAssignment> {
     // Each box occurs under only one containing block, so this traversal visits each box at most once and can stage
@@ -375,7 +361,6 @@ pub(crate) fn measure_scrollable_overflow(
     measure_scrollable_overflow_impl(
         layout_arena,
         non_child_boxes_by_containing_block,
-        overflow_callbacks,
         box_paintable,
         &mut assignments,
     );
@@ -385,7 +370,6 @@ pub(crate) fn measure_scrollable_overflow(
 fn measure_scrollable_overflow_impl(
     layout_arena: &impl PaintableRowsRead,
     non_child_boxes_by_containing_block: &HashMap<NodeSlotId, Vec<NodeSlotId>>,
-    overflow_callbacks: Option<&FfiGeometryHostCallbacks>,
     box_paintable: NodeSlotId,
     assignments: &mut Vec<OverflowAssignment>,
 ) -> CssPixelRect {
@@ -452,7 +436,7 @@ fn measure_scrollable_overflow_impl(
         }
         for fragment in side_data.fragments() {
             let mut fragment_rect = text_fragment::absolute_rect(layout_arena, fragment);
-            if fragment_node_is_in_focused_text_control(layout_arena, overflow_callbacks, fragment.layout_node)
+            if fragment_node_is_in_focused_text_control(layout_arena, fragment.layout_node)
                 && let Some(style_source_style) =
                     layout_arena.node_style_if_live(text_fragment::style_source(layout_arena, fragment))
             {
@@ -629,7 +613,6 @@ fn measure_scrollable_overflow_impl(
             let untransformed_child_scrollable_overflow = measure_scrollable_overflow_impl(
                 layout_arena,
                 non_child_boxes_by_containing_block,
-                overflow_callbacks,
                 child_node,
                 assignments,
             );
@@ -809,12 +792,7 @@ impl LayoutNodeArena {
         }
         self.ensure_overflow_contained_boxes();
         let rows = self.paintable_rows();
-        let assignments = measure_scrollable_overflow(
-            &rows,
-            &self.scrollable_overflow.non_child_boxes.borrow(),
-            self.scrollable_overflow.host.get().as_ref(),
-            slot,
-        );
+        let assignments = measure_scrollable_overflow(&rows, &self.scrollable_overflow.non_child_boxes.borrow(), slot);
         for assignment in assignments {
             assignment.apply(&rows);
         }
