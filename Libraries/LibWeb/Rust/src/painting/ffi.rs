@@ -567,12 +567,18 @@ pub unsafe extern "C" fn layout_arena_prepare_for_rendering(
     visual_context_update_pending: bool,
 ) -> FfiRenderingPreparationOutcome {
     let arena = unsafe { arena_from_handle(arena) };
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
-    let background_source_changed = arena
-        .paint_state()
-        .borrow_mut()
-        .update_root_background_source(arena, root_background_source);
+    let background_source_changed = {
+        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
+        arena
+            .paint_state()
+            .borrow_mut()
+            .update_root_background_source(arena, root_background_source)
+    };
+    // The overflow recalculation is a pass of its own, and it hands the document the scroll
+    // offsets it settled only once that pass is over. Enter the visual context update after it,
+    // so that handover is not inside a pass either.
     crate::painting::scrollable_overflow::update_scrollable_overflow(arena);
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
     // The root background covers the viewport united with the root's scrollable overflow, which
     // recording reads. Measure it here: measuring it lazily during recording could flip its
     // scrollability while the paint state is borrowed, and the flip would miss this frame.
