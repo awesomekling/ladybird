@@ -100,6 +100,7 @@ Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind k
 {
     publish_scroll_offset();
     publish_unique_node_id();
+    publish_is_in_focused_text_control();
 
     if (!node)
         return;
@@ -126,6 +127,7 @@ Node::Node(DOM::Document& document, BindToPreparedArenaSlot, Compositing::RustFF
 {
     RustFFI::layout_arena_attach_shell(m_arena->handle(), m_slot, this);
     publish_unique_node_id();
+    publish_is_in_focused_text_control();
 }
 
 Node::~Node()
@@ -950,6 +952,27 @@ i64 Node::dom_target_unique_node_id() const
     if (auto const* element = as_if<DOM::Element>(dom_node()))
         return element->unique_id().value();
     return 0;
+}
+
+bool Node::dom_target_is_in_focused_text_control() const
+{
+    // The construction facts already asked which shadow tree the node is in, and only a user agent
+    // one can be a text control's, so this answers for almost every row without a walk.
+    if (!has_flag(RustFFI::NodeFlag::IsInUserAgentShadowTree))
+        return false;
+    auto const* node = dom_node();
+    if (!node)
+        return false;
+    auto shadow_root = node->containing_shadow_root();
+    return shadow_root
+        && shadow_root->is_user_agent_internal()
+        && is<HTML::FormAssociatedTextControlElement>(shadow_root->host())
+        && shadow_root->host()->is_focused();
+}
+
+void Node::publish_is_in_focused_text_control()
+{
+    set_flag(RustFFI::NodeFlag::IsInFocusedTextControl, dom_target_is_in_focused_text_control());
 }
 
 void Node::publish_unique_node_id()

@@ -43,17 +43,9 @@ pub struct FfiGeometryHostCallbacks {
         *mut std::ffi::c_void,
         crate::layout::used_values::FfiCssPixelPoint,
     ),
-    pub layout_node_is_in_focused_text_control:
-        unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> bool,
 }
 
 impl FfiGeometryHostCallbacks {
-    pub(crate) fn layout_node_is_in_focused_text_control(&self, layout_node_shell: *mut std::ffi::c_void) -> bool {
-        crate::painting::seal::note_host_call("layout_node_is_in_focused_text_control");
-        // SAFETY: The C++ host answers synchronously from a live layout node shell.
-        unsafe { (self.layout_node_is_in_focused_text_control)(self.context, layout_node_shell) }
-    }
-
     /// # Safety
     ///
     /// `layout_node_shell` must be a live layout node shell. The host re-enters geometry

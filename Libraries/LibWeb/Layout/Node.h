@@ -223,6 +223,13 @@ public:
     void publish_unique_node_id();
     [[nodiscard]] i64 dom_target_unique_node_id() const;
 
+    // Whether this row's node sits in the user agent shadow tree of a text control that has focus.
+    // The overflow measurement reserves a pixel for the caret of one, so the render side is told
+    // the answer rather than asking: published when a row is built, and again for both sides of a
+    // change of the document's focused area.
+    void publish_is_in_focused_text_control();
+    [[nodiscard]] bool dom_target_is_in_focused_text_control() const;
+
     // Any invalidation below a node must reach every ancestor's epoch: cached runs capture
     // subtree structure, and unlike intrinsic-size invalidation there is no absolutely-positioned
     // or SVG boundary — those descendants' fragments live in ancestor run trees. The arena runs
