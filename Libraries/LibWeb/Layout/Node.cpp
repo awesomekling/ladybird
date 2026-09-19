@@ -108,9 +108,9 @@ Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind k
     // A <pattern> inherits the attributes it does not carry from the pattern its `href` names, so
     // its published facts are not a pure function of its own attributes and its own change steps
     // cannot keep them fresh. Republishing as a box is built covers the case, since a pattern is
-    // read through a box.
-    if (auto* svg_element = as_if<SVG::SVGElement>(node.ptr()))
-        svg_element->publish_svg_attribute_facts();
+    // read through a box. Every other SVG element published once, when it was registered.
+    if (auto* pattern_element = as_if<SVG::SVGPatternElement>(node.ptr()))
+        pattern_element->publish_svg_attribute_facts();
     if (attach_to_dom_node == AttachToDOMNode::Yes) {
         if (row_already_bound_to_dom_node)
             row_already_bound_to_dom_node->pin_style_record_for_detachment();
