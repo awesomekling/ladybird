@@ -63,10 +63,17 @@ void SVGPatternElement::attribute_changed(Utf16FlyString const& name, Optional<U
     }
 }
 
+Optional<Utf16String> SVGPatternElement::href_attribute_value() const
+{
+    if (has_attribute(AttributeNames::href))
+        return get_attribute(AttributeNames::href);
+    return get_attribute(AttributeNames::xlink_href);
+}
+
 GC::Ptr<SVGPatternElement const> SVGPatternElement::linked_pattern(GC::RootHashTable<SVGPatternElement const*>& seen_patterns) const
 {
     // FIXME: This can only resolve same-document references. The spec allows cross-document references.
-    auto link = has_attribute(AttributeNames::href) ? get_attribute(AttributeNames::href) : get_attribute(AttributeNames::xlink_href);
+    auto link = href_attribute_value();
     if (!link.has_value() || link->is_empty())
         return {};
 

@@ -192,6 +192,12 @@ static RustFFI::FfiSvgAttributeFacts build_svg_attribute_facts(DOM::Element& dom
     if (auto const* text_path_element = as_if<SVG::SVGTextPathElement>(dom_node)) {
         reference_fragment = svg_reference_fragment_atom(dom_node, text_path_element->href_attribute_value());
         start_offset = text_path_element->parsed_start_offset().value_or(start_offset);
+    } else if (auto const* pattern_element = as_if<SVG::SVGPatternElement>(dom_node)) {
+        // The pattern a <pattern> inherits its content and attributes from. An empty href names
+        // nothing, rather than naming the document's own fragment.
+        auto link = pattern_element->href_attribute_value();
+        if (link.has_value() && !link->is_empty())
+            reference_fragment = svg_reference_fragment_atom(dom_node, link);
     }
 
     return {

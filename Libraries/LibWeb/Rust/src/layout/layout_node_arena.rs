@@ -1637,6 +1637,17 @@ impl LayoutNodeArena {
         self.first_dom_child(style_node).is_some()
     }
 
+    /// Whether the node has an element child, which is what `childElementCount` counts.
+    pub(crate) fn has_dom_element_children(&self, style_node: Option<StyleNodeID>) -> bool {
+        let Some(style_node) = style_node else {
+            return false;
+        };
+        if style_node.element_index().is_none() {
+            return false;
+        }
+        self.with_style_engine(|engine| engine.tree().first_element_child(style_node).is_some())
+    }
+
     /// How many nodes the style mirror holds assigned to the slot `style_node` names. Anything that
     /// is not a slot with assigned nodes answers zero, which is also what a slot rendering its
     /// fallback content answers.
@@ -2450,6 +2461,17 @@ impl LayoutNodeArena {
                         .flatten()
                 })
         })
+    }
+
+    /// The element the document's id index holds for the atom `name`, which is what
+    /// `Document::get_element_by_id` answers with. A reference that resolves in the document scope
+    /// alone - an SVG `href` chain - asks for this rather than for `element_by_svg_reference`.
+    pub(crate) fn element_by_document_id(&self, name: u32) -> Option<StyleNodeID> {
+        let name = crate::css::style::index::StyleAtomID(name);
+        if name.is_none() {
+            return None;
+        }
+        self.with_style_store(|engine| engine.element_by_id(crate::css::style::tree::TreeScopeID::DOCUMENT, name))
     }
 
     /// The published computed style of an element the style tree names, which a box's own style

@@ -100,8 +100,7 @@ pub struct FfiDomTreeBuilderCallbacks {
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> FfiPrincipalDescendantFacts,
     pub create_first_letter_nodes:
         unsafe extern "C" fn(*mut c_void, *mut c_void, FfiFirstLetterTarget) -> FfiFirstLetterNodes,
-    pub svg_pattern_content_element: unsafe extern "C" fn(*mut c_void) -> FfiIdentifiedDomNode,
-    pub register_svg_resource_reference: unsafe extern "C" fn(*mut c_void, *mut c_void),
+    pub register_svg_resource_reference: unsafe extern "C" fn(u32, *mut c_void),
     pub request_top_layer_zone_rebuild: unsafe extern "C" fn(*mut c_void),
     pub request_layout_tree_rebuild: unsafe extern "C" fn(*mut c_void, u32),
     pub push_principal_frame: unsafe extern "C" fn(*mut c_void, u32) -> FfiPrincipalNodeFrame,
@@ -146,8 +145,8 @@ pub struct FfiPrincipalDescendantFacts {
     pub svg_graphics_element: *mut c_void,
     pub svg_mask: FfiIdentifiedDomNode,
     pub svg_clip_path: FfiIdentifiedDomNode,
-    pub svg_fill_pattern: *mut c_void,
-    pub svg_stroke_pattern: *mut c_void,
+    pub svg_fill_pattern: u32,
+    pub svg_stroke_pattern: u32,
 }
 
 /// What the build knows about a node when it enters it: what its marks ask for, and what layout
@@ -1655,8 +1654,8 @@ fn update_svg_resource(
             true,
             FfiInsertionMode::Append,
         );
-        // SAFETY: Both pointers denote live SVG elements held by the graphics element.
-        unsafe { (host.callbacks.register_svg_resource_reference)(resource.node, graphics_element) };
+        // SAFETY: The pointer denotes a live SVG element, and the identity names one.
+        unsafe { (host.callbacks.register_svg_resource_reference)(resource.style_node, graphics_element) };
     } else {
         // FIXME: Somehow either remove ancestor from the layout tree or mark it as invalid.
     }
@@ -1666,11 +1665,42 @@ fn update_svg_resource(
     context.layout_svg_mask_or_clip_path = prior_context_value;
 }
 
+/// The pattern whose children a `<pattern>` draws: itself if it has element children, and
+/// otherwise the pattern its `href` chain leads to, following
+/// `SVGPatternElement::pattern_content_element`.
+///
+/// The chain is walked here rather than asked of the document: a pattern publishes its `href`'s
+/// fragment as an id atom, and the mirror's id index answers what that atom names. Only the
+/// document scope is searched, which is where `SVGPatternElement::linked_pattern` searches.
+fn svg_pattern_content_element(host: &DomTreeBuilderHost<'_>, pattern: u32) -> Option<StyleNodeID> {
+    let layout = host.layout();
+    let arena = layout.arena();
+    let mut current = StyleNodeID::from_raw(pattern)?;
+    // A pattern may name itself somewhere along the chain, so every pattern stepped to is
+    // remembered and a second arrival ends the walk. A chain is at most a handful of links long.
+    let mut seen = Vec::new();
+    loop {
+        if arena.has_dom_element_children(Some(current)) {
+            return Some(current);
+        }
+        let atom = arena.style_node_svg_attribute_facts(current).reference_fragment_atom;
+        let linked = arena.element_by_document_id(atom)?;
+        if linked == current || seen.contains(&linked) {
+            return None;
+        }
+        if host.element_type_facts(linked.raw()) & element_adjustment_fact::IS_SVG_PATTERN_ELEMENT == 0 {
+            return None;
+        }
+        seen.push(linked);
+        current = linked;
+    }
+}
+
 fn update_svg_pattern(
     host: &DomTreeBuilderHost<'_>,
     state: &mut TreeBuilderState,
-    pattern: *mut c_void,
-    content_element: FfiIdentifiedDomNode,
+    pattern: u32,
+    content_element: u32,
     graphics_element: *mut c_void,
     layout_node: LayoutNode,
     context: &mut TreeBuilderContext,
@@ -1679,21 +1709,14 @@ fn update_svg_pattern(
     context.layout_svg_pattern = true;
     state.ancestor_stack.push(layout_node);
 
-    if !ancestor_stack_contains_element_box(host.layout().arena(), state, content_element.style_node) {
-        update_layout_tree(
-            host,
-            state,
-            content_element.style_node,
-            context,
-            true,
-            FfiInsertionMode::Append,
-        );
+    if !ancestor_stack_contains_element_box(host.layout().arena(), state, content_element) {
+        update_layout_tree(host, state, content_element, context, true, FfiInsertionMode::Append);
         // The referenced pattern may inherit its content from another pattern via href. Removing either element
         // invalidates the attached resource box, so register the referencer with both.
-        // SAFETY: All pointers denote live SVG elements held by the graphics element or pattern chain.
+        // SAFETY: The pointer denotes a live SVG element, and the identities name live elements.
         unsafe {
-            (host.callbacks.register_svg_resource_reference)(content_element.node, graphics_element);
-            if pattern != content_element.node {
+            (host.callbacks.register_svg_resource_reference)(content_element, graphics_element);
+            if pattern != content_element {
                 (host.callbacks.register_svg_resource_reference)(pattern, graphics_element);
             }
         }
@@ -1931,20 +1954,21 @@ unsafe fn update_principal_node_descendants(
 
                 let mut seen_content_elements = Vec::with_capacity(2);
                 for pattern in [facts.svg_fill_pattern, facts.svg_stroke_pattern] {
-                    if pattern.is_null() {
+                    if pattern == 0 {
                         continue;
                     }
-                    // SAFETY: `pattern` is a live SVGPatternElement.
-                    let content_element = unsafe { (host.callbacks.svg_pattern_content_element)(pattern) };
-                    if content_element.node.is_null() || seen_content_elements.contains(&content_element.node) {
+                    let Some(content_element) = svg_pattern_content_element(host, pattern) else {
+                        continue;
+                    };
+                    if seen_content_elements.contains(&content_element) {
                         continue;
                     }
-                    seen_content_elements.push(content_element.node);
+                    seen_content_elements.push(content_element);
                     update_svg_pattern(
                         host,
                         state,
                         pattern,
-                        content_element,
+                        content_element.raw(),
                         facts.svg_graphics_element,
                         layout_node,
                         context,

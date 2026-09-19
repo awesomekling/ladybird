@@ -55,6 +55,8 @@ public:
 
     GC::Ptr<SVGPatternElement const> pattern_content_element() const;
 
+    Optional<Utf16String> href_attribute_value() const;
+
     void push_paint_server_description(void* sink, Layout::Node const& target_layout_node) const;
 
     virtual Layout::Node* create_layout_node(CSS::LayoutStyle) override { return nullptr; }
