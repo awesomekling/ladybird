@@ -4,46 +4,26 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/GeneratedContent.h>
-#include <LibWeb/CSS/StyleValues/ContentStyleValue.h>
+#include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEngineBridge.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Node.h>
+#include <LibWeb/DOM/Text.h>
 
 namespace Web::CSS {
 
-static bool style_affects_generated_content_state(ComputedValues const& style)
-{
-    if (!style.counter_increment().is_empty() || !style.counter_reset().is_empty() || !style.counter_set().is_empty())
-        return true;
-    auto content = style.computed_content();
-    return content->is_content() && any_of(content->as_content().content().values(), [](auto const& item) {
-        return item->is_keyword() && first_is_one_of(item->to_keyword(), Keyword::OpenQuote, Keyword::CloseQuote, Keyword::NoOpenQuote, Keyword::NoCloseQuote);
-    });
-}
-
 bool subtree_affects_generated_content_state(DOM::Node const& node)
 {
-    auto style_affects_state = [](auto const& style) {
-        return style && style_affects_generated_content_state(*style);
-    };
-    bool affects_generated_content_state = false;
-    node.for_each_in_inclusive_subtree([&](DOM::Node const& descendant) {
-        auto const* element = as_if<DOM::Element>(descendant);
-        if (!element)
-            return TraversalDecision::Continue;
-
-        if (!style_affects_state(element->computed_style())
-            && !style_affects_state(element->computed_style(PseudoElement::Before))
-            && !style_affects_state(element->computed_style(PseudoElement::After))
-            && !style_affects_state(element->computed_style(PseudoElement::Marker))) {
-            return TraversalDecision::Continue;
-        }
-
-        affects_generated_content_state = true;
-        return TraversalDecision::Break;
-    });
-    return affects_generated_content_state;
+    StyleNodeID identity;
+    if (auto const* element = as_if<DOM::Element>(node))
+        identity = element->style_node_id();
+    else if (auto const* text = as_if<DOM::Text>(node))
+        identity = text->style_node_id();
+    if (identity.value() == 0)
+        return false;
+    return node.document().style_computer().style_engine().subtree_affects_generated_content_state(identity);
 }
 
 }

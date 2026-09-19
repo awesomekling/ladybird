@@ -2080,6 +2080,43 @@ impl RetainedState {
             .is_some()
     }
 
+    /// Whether the style record answers for a counter or a quote: the two things whose state runs
+    /// along the whole tree rather than staying inside one box.
+    fn style_record_affects_generated_content_state(&self, style_record: Option<computed::FinalStyleRecordID>) -> bool {
+        let Some(style_record) = style_record else {
+            return false;
+        };
+        let Some(payloads) = self.computed_group_sets.style_record_payloads(style_record.raw()) else {
+            return false;
+        };
+        crate::css::computed_value_views::ComputedValuesView::new(
+            crate::css::host_shared::SharedPayload::as_pointer_slice(payloads),
+        )
+        .affects_generated_content_state()
+    }
+
+    /// Whether the node or any of its DOM descendants styles a counter or a quote. Moving such a
+    /// subtree renumbers what follows it, so the layout tree build has to rebuild rather than
+    /// splice, and so does a removal.
+    #[must_use]
+    pub fn subtree_affects_generated_content_state(&self, node: StyleNodeID) -> bool {
+        if node.element_index().is_some()
+            && (self.style_record_affects_generated_content_state(self.computed_group_sets.assigned_style_record(node))
+                || [pseudo_kind::BEFORE, pseudo_kind::AFTER, pseudo_kind::MARKER]
+                    .into_iter()
+                    .any(|kind| {
+                        self.style_record_affects_generated_content_state(
+                            self.computed_group_sets.pseudo_style_record(node, kind),
+                        )
+                    }))
+        {
+            return true;
+        }
+        self.tree
+            .dom_children(node)
+            .any(|child| self.subtree_affects_generated_content_state(child))
+    }
+
     /// The value a winner's declaration was written with, and the declaration's index in its
     /// block: the drive computes from the spelling the declaration was written in, which the
     /// cascade's canonical identity may have rewritten. A rule keeps its written values beside its
