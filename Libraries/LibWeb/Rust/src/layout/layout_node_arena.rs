@@ -1571,6 +1571,16 @@ impl LayoutNodeArena {
 
     // The engine outlives the arena's live nodes. No host callback runs while this
     // native style-store borrow is active; shell notifications follow publication.
+    /// Borrows the style store for one read-only query. Nothing the query calls may reach back
+    /// into the arena for another style-store read: this borrow stands for the whole query.
+    pub(crate) fn with_style_store<T>(&self, query: impl FnOnce(&StyleEngine) -> T) -> T {
+        let host = self.style_record_host();
+        assert!(!host.style_engine.is_null());
+        // SAFETY: As with `with_style_engine`, the engine outlives the arena's live nodes and no
+        // host callback runs while the borrow is active.
+        unsafe { query(&*host.style_engine.cast::<StyleEngine>()) }
+    }
+
     fn with_style_engine<T>(&self, callback: impl FnOnce(&mut StyleEngine) -> T) -> T {
         let host = self.style_record_host();
         assert!(!host.style_engine.is_null());

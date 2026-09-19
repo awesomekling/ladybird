@@ -568,6 +568,18 @@ impl<'a> ComputedValuesView<'a> {
         self.native_group(STYLE_GROUP_INDEX_CONTENT)
     }
 
+    /// Whether `counter-reset` names a counter counting down from its own last item, which the
+    /// layout tree build cannot renumber without visiting every item again.
+    pub(crate) fn counter_reset_has_reversed_counter(self) -> bool {
+        match self.content().counter_reset.data() {
+            Some(StyleValueData::CounterDefinitions { counter_definitions }) => counter_definitions
+                .as_slice()
+                .iter()
+                .any(crate::css::style_value::RetainedCounterDefinition::is_reversed),
+            _ => false,
+        }
+    }
+
     /// Whether the style can move the generated-content state a later sibling reads: any counter
     /// it touches, or a quote its content opens or closes.
     pub(crate) fn affects_generated_content_state(self) -> bool {

@@ -504,17 +504,48 @@ impl RetainedState {
     /// record: a text node, a retired identity, or an element style has not reached yet.
     #[must_use]
     pub fn element_published_box_facts(&self, node: StyleNodeID) -> Option<PublishedBoxFacts> {
-        let record = self.computed_group_sets.assigned_style_record(node)?;
-        let payloads = self.computed_group_sets.style_record_payloads(record.raw())?;
-        let view = crate::css::computed_value_views::ComputedValuesView::new(
-            crate::css::host_shared::SharedPayload::as_pointer_slice(payloads),
-        );
+        self.published_box_facts(self.computed_group_sets.assigned_style_record(node))
+    }
+
+    /// The box facts the element's published record for one pseudo-element kind holds. `None`
+    /// while the element styles no such pseudo-element.
+    #[must_use]
+    pub fn pseudo_published_box_facts(&self, node: StyleNodeID, pseudo_kind: u8) -> Option<PublishedBoxFacts> {
+        self.published_box_facts(self.computed_group_sets.pseudo_style_record(node, pseudo_kind))
+    }
+
+    /// Whether the element's published style record counts a counter down from its own last item,
+    /// which nothing short of a full rebuild can renumber.
+    #[must_use]
+    pub fn element_counter_reset_has_reversed_counter(&self, node: StyleNodeID) -> bool {
+        self.published_style_record_view(self.computed_group_sets.assigned_style_record(node))
+            .is_some_and(crate::css::computed_value_views::ComputedValuesView::counter_reset_has_reversed_counter)
+    }
+
+    /// Whether the element is a `<slot>`, whose children the flat tree takes elsewhere.
+    #[must_use]
+    pub fn element_is_slot(&self, node: StyleNodeID) -> bool {
+        self.facts.is_slot(node)
+    }
+
+    fn published_box_facts(&self, style_record: Option<computed::FinalStyleRecordID>) -> Option<PublishedBoxFacts> {
+        let view = self.published_style_record_view(style_record)?;
         Some(PublishedBoxFacts {
             display: view.display(),
             content_visibility: view.content_visibility(),
             position: view.position(),
             float_: view.float_(),
         })
+    }
+
+    pub(super) fn published_style_record_view(
+        &self,
+        style_record: Option<computed::FinalStyleRecordID>,
+    ) -> Option<crate::css::computed_value_views::ComputedValuesView<'_>> {
+        let payloads = self.computed_group_sets.style_record_payloads(style_record?.raw())?;
+        Some(crate::css::computed_value_views::ComputedValuesView::new(
+            crate::css::host_shared::SharedPayload::as_pointer_slice(payloads),
+        ))
     }
 
     /// Record what an attribute-value atom spells, for the operators an atom cannot answer.
