@@ -91,7 +91,6 @@ pub struct FfiDomTreeBuilderCallbacks {
     pub builder: *mut c_void,
     pub first_child: unsafe extern "C" fn(*mut c_void) -> FfiIdentifiedDomNode,
     pub next_sibling: unsafe extern "C" fn(*mut c_void) -> FfiIdentifiedDomNode,
-    pub clear_dom_update_flags: unsafe extern "C" fn(*mut c_void),
     pub assigned_node_count: unsafe extern "C" fn(*mut c_void) -> usize,
     pub assigned_node_at: unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void,
     pub clear_stale_layout_node: unsafe extern "C" fn(*mut c_void, *mut c_void),
@@ -158,6 +157,7 @@ pub struct FfiPreparedPrincipalElementFacts {
 pub struct FfiDisplayContentsFacts {
     pub dom_children_parent: *mut c_void,
     pub shadow_root: *mut c_void,
+    pub shadow_root_style_node: u32,
     pub slot_element: *mut c_void,
 }
 
@@ -184,6 +184,7 @@ pub struct FfiFlatTreeRenderFacts {
 pub struct FfiPrincipalDescendantFacts {
     pub dom_children_parent: *mut c_void,
     pub shadow_root: *mut c_void,
+    pub shadow_root_style_node: u32,
     pub slot_element: *mut c_void,
     pub svg_graphics_element: *mut c_void,
     pub svg_mask: FfiIdentifiedDomNode,
@@ -673,6 +674,13 @@ impl DomTreeBuilderHost<'_> {
             .has_dom_children(StyleNodeID::from_raw(style_node))
     }
 
+    /// Retire the layout tree update marks the node holds: the build has just answered them.
+    fn clear_layout_tree_update_marks(&self, style_node: u32) {
+        self.layout()
+            .arena()
+            .clear_layout_tree_update_marks(StyleNodeID::from_raw(style_node));
+    }
+
     /// Whether the style mirror holds a layout tree update mark below the node `style_node` names,
     /// which is what tells the walk it has to descend into a node whose own box can stay.
     fn child_needs_layout_tree_update(&self, style_node: u32) -> bool {
@@ -774,6 +782,7 @@ unsafe fn update_layout_tree_for_shadow_root_children(
     host: &DomTreeBuilderHost<'_>,
     state: &mut TreeBuilderState,
     shadow_root: *mut c_void,
+    shadow_root_style_node: u32,
     context: &mut TreeBuilderContext,
     must_create_subtree: bool,
 ) {
@@ -791,8 +800,7 @@ unsafe fn update_layout_tree_for_shadow_root_children(
             );
             node = host.next_sibling(node);
         }
-        // SAFETY: `shadow_root` remains live throughout the call.
-        unsafe { (host.callbacks.clear_dom_update_flags)(shadow_root) };
+        host.clear_layout_tree_update_marks(shadow_root_style_node);
     });
 }
 
@@ -945,6 +953,7 @@ unsafe fn update_layout_tree_for_display_contents(
                         host,
                         state,
                         facts.shadow_root,
+                        facts.shadow_root_style_node,
                         context,
                         must_create_children,
                     );
@@ -1005,8 +1014,7 @@ unsafe fn update_layout_tree_for_display_contents(
         }
 
         assert!(!facts.dom_children_parent.is_null());
-        // SAFETY: The element's ParentNode subobject remains live throughout this call.
-        unsafe { (host.callbacks.clear_dom_update_flags)(facts.dom_children_parent) };
+        host.clear_layout_tree_update_marks(style_node);
 
         if clear_layout_top_layer_for_descendants {
             context.layout_top_layer = true;
@@ -1203,6 +1211,7 @@ unsafe fn update_principal_node_descendants(
                         host,
                         state,
                         facts.shadow_root,
+                        facts.shadow_root_style_node,
                         context,
                         should_create_layout_node,
                     );
@@ -1423,8 +1432,7 @@ unsafe fn update_principal_node_descendants(
             state.quote_nesting_level = prior_quote_nesting_level;
         }
 
-        // SAFETY: `dom_node` remains live throughout the call.
-        unsafe { (host.callbacks.clear_dom_update_flags)(dom_node) };
+        host.clear_layout_tree_update_marks(dom_children_owner);
     });
 }
 

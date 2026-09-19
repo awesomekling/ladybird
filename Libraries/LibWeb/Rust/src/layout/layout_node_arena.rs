@@ -1591,6 +1591,14 @@ impl LayoutNodeArena {
         self.with_style_engine(|engine| engine.tree().dom_children(style_node).next().is_some())
     }
 
+    /// Retire the layout tree update marks `style_node` holds, own and child alike.
+    pub(crate) fn clear_layout_tree_update_marks(&self, style_node: Option<StyleNodeID>) {
+        let Some(style_node) = style_node else {
+            return;
+        };
+        self.with_style_engine(|engine| engine.clear_layout_tree_update_marks(style_node));
+    }
+
     /// Whether the style mirror holds a layout tree update mark on a flat-tree descendant of
     /// `style_node`. An anonymous row names no node and answers no.
     pub(crate) fn child_needs_layout_tree_update(&self, style_node: Option<StyleNodeID>) -> bool {

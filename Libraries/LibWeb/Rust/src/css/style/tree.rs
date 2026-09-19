@@ -653,6 +653,18 @@ impl StyleNodeTree {
         }
     }
 
+    /// Retire the marks the node holds, own and child alike: the build has just answered them.
+    /// Clearing never grows a column, so this needs no memory accounting.
+    pub fn clear_layout_tree_update_marks(&mut self, node: StyleNodeID) {
+        match node.element_index() {
+            Some(index) => {
+                self.marks.clear(index as usize);
+                self.child_needs_layout_tree_update.set(index as usize, false);
+            }
+            None => self.text.marks.clear(node.text_index().unwrap() as usize),
+        }
+    }
+
     /// Fold one layout tree update mark into the node's, answering whether its own bit changed.
     /// That answer is what tells the mark site it has a transition to widen from.
     pub fn merge_layout_tree_update_mark(
