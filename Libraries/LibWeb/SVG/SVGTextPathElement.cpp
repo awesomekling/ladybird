@@ -27,9 +27,16 @@ void SVGTextPathElement::attribute_changed(Utf16FlyString const& name, Optional<
         m_start_offset = parse_number_percentage(value.value_or({}));
 }
 
+Optional<Utf16String> SVGTextPathElement::href_attribute_value() const
+{
+    if (has_attribute(AttributeNames::href))
+        return get_attribute(AttributeNames::href);
+    return get_attribute(AttributeNames::xlink_href);
+}
+
 GC::Ptr<SVGGeometryElement const> SVGTextPathElement::path_or_shape() const
 {
-    auto href = has_attribute(AttributeNames::href) ? get_attribute(AttributeNames::href) : get_attribute(AttributeNames::xlink_href);
+    auto href = href_attribute_value();
     if (!href.has_value())
         return {};
     return try_resolve_url_to<SVGGeometryElement const>(*href);

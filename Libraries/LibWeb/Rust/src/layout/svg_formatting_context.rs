@@ -134,6 +134,12 @@ pub struct FfiSvgAttributeFacts {
     pub text_y: FfiSvgLengthValue,
     pub text_dx: FfiSvgLengthValue,
     pub text_dy: FfiSvgLengthValue,
+    /// The element this one's `href` names, as the style mirror's id index answers for it: the
+    /// URL's decoded fragment, interned as the atom an element's id is indexed under. Zero when
+    /// the element names nothing, or names a URL with no fragment.
+    pub reference_fragment_atom: u32,
+    /// The `startOffset` of a `<textPath>`, against the length of the path it follows.
+    pub text_path_start_offset: FfiSvgNumberPercentage,
 }
 
 pub const SVG_GEOMETRY_KIND_NONE: u8 = 0;
