@@ -2159,16 +2159,8 @@ impl RetainedState {
     /// Whether the style record answers for a counter or a quote: the two things whose state runs
     /// along the whole tree rather than staying inside one box.
     fn style_record_affects_generated_content_state(&self, style_record: Option<computed::FinalStyleRecordID>) -> bool {
-        let Some(style_record) = style_record else {
-            return false;
-        };
-        let Some(payloads) = self.computed_group_sets.style_record_payloads(style_record.raw()) else {
-            return false;
-        };
-        crate::css::computed_value_views::ComputedValuesView::new(
-            crate::css::host_shared::SharedPayload::as_pointer_slice(payloads),
-        )
-        .affects_generated_content_state()
+        self.published_style_record_view(style_record)
+            .is_some_and(crate::css::computed_value_views::ComputedValuesView::affects_generated_content_state)
     }
 
     /// Whether the node or any of its DOM descendants styles a counter or a quote. Moving such a
