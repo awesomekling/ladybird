@@ -1587,18 +1587,42 @@ impl LayoutNodeArena {
         unsafe { callback(&mut *host.style_engine.cast::<StyleEngine>()) }
     }
 
-    /// Whether the style mirror's DOM child sequence holds a child for `style_node`. Only an
-    /// element, a shadow root and the document own a sequence; a text node owns none. Nodes that
-    /// can never have a box - a comment, a doctype, a processing instruction - hold no place in
-    /// it, so a parent whose children are all of those answers no.
+    /// The first child the style mirror's DOM child sequence holds for `style_node`, text nodes
+    /// included. Only an element, a shadow root and the document own a sequence; a text node owns
+    /// none. Nodes that can never have a box - a comment, a doctype, a processing instruction -
+    /// hold no place in it, so a parent whose children are all of those answers nothing.
+    pub(crate) fn first_dom_child(&self, style_node: Option<StyleNodeID>) -> Option<StyleNodeID> {
+        let style_node = style_node?;
+        style_node.element_index()?;
+        self.with_style_engine(|engine| engine.tree().dom_children(style_node).next())
+    }
+
+    /// The next node after `style_node` in its parent's DOM child sequence.
+    pub(crate) fn next_dom_sibling(&self, style_node: StyleNodeID) -> Option<StyleNodeID> {
+        self.with_style_engine(|engine| engine.tree().next_sibling_in_dom_order(style_node))
+    }
+
+    /// Whether the style mirror's DOM child sequence holds a child for `style_node`.
     pub(crate) fn has_dom_children(&self, style_node: Option<StyleNodeID>) -> bool {
+        self.first_dom_child(style_node).is_some()
+    }
+
+    /// How many nodes the style mirror holds assigned to the slot `style_node` names. Anything that
+    /// is not a slot with assigned nodes answers zero, which is also what a slot rendering its
+    /// fallback content answers.
+    pub(crate) fn assigned_node_count(&self, style_node: Option<StyleNodeID>) -> usize {
         let Some(style_node) = style_node else {
-            return false;
+            return 0;
         };
         if style_node.element_index().is_none() {
-            return false;
+            return 0;
         }
-        self.with_style_engine(|engine| engine.tree().dom_children(style_node).next().is_some())
+        self.with_style_engine(|engine| engine.tree().assigned_nodes_of(style_node).len())
+    }
+
+    /// The node assigned to the slot `style_node` names at `index`, in flat-tree order.
+    pub(crate) fn assigned_node_at(&self, style_node: StyleNodeID, index: usize) -> StyleNodeID {
+        self.with_style_engine(|engine| engine.tree().assigned_nodes_of(style_node)[index])
     }
 
     /// Retire the layout tree update marks `style_node` holds, own and child alike.

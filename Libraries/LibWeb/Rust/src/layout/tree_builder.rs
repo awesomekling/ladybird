@@ -93,13 +93,9 @@ pub enum FfiStaleSubtreeClearScope {
 #[repr(C)]
 pub struct FfiDomTreeBuilderCallbacks {
     pub builder: *mut c_void,
-    pub first_child: unsafe extern "C" fn(*mut c_void) -> FfiIdentifiedDomNode,
-    pub next_sibling: unsafe extern "C" fn(*mut c_void) -> FfiIdentifiedDomNode,
-    pub assigned_node_count: unsafe extern "C" fn(*mut c_void) -> usize,
-    pub assigned_node_at: unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void,
-    pub clear_stale_layout_node: unsafe extern "C" fn(*mut c_void, *mut c_void),
+    pub clear_stale_layout_node: unsafe extern "C" fn(*mut c_void, u32),
     pub display_contents_facts: unsafe extern "C" fn(*mut c_void, *mut c_void) -> FfiDisplayContentsFacts,
-    pub clear_stale_subtree: unsafe extern "C" fn(*mut c_void, *mut c_void, FfiStaleSubtreeClearScope),
+    pub clear_stale_subtree: unsafe extern "C" fn(*mut c_void, u32, FfiStaleSubtreeClearScope),
     pub resolve_counters: unsafe extern "C" fn(*mut c_void, FfiPseudoElement),
     pub principal_descendant_facts:
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> FfiPrincipalDescendantFacts,
@@ -111,7 +107,7 @@ pub struct FfiDomTreeBuilderCallbacks {
     pub flat_tree_render_facts: unsafe extern "C" fn(*mut c_void) -> FfiFlatTreeRenderFacts,
     pub svg_pattern_content_element: unsafe extern "C" fn(*mut c_void) -> FfiIdentifiedDomNode,
     pub register_svg_resource_reference: unsafe extern "C" fn(*mut c_void, *mut c_void),
-    pub principal_node_entry_facts: unsafe extern "C" fn(*mut c_void, *mut c_void, bool) -> FfiPrincipalNodeEntryFacts,
+    pub principal_node_entry_facts: unsafe extern "C" fn(*mut c_void, u32, bool) -> FfiPrincipalNodeEntryFacts,
     pub request_top_layer_zone_rebuild: unsafe extern "C" fn(*mut c_void),
     pub request_layout_tree_rebuild: unsafe extern "C" fn(*mut c_void, u32),
     pub push_principal_frame: unsafe extern "C" fn(*mut c_void, *mut c_void) -> FfiPrincipalNodeFrame,
@@ -159,10 +155,11 @@ pub struct FfiPreparedPrincipalElementFacts {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiDisplayContentsFacts {
-    pub dom_children_parent: *mut c_void,
-    pub shadow_root: *mut c_void,
+    /// Whether the element hosts a shadow root, which is what makes its own DOM children
+    /// unrendered. A root that owns no child sequence is never named, so the identity below can be
+    /// zero while this is set.
+    pub has_shadow_root: bool,
     pub shadow_root_style_node: u32,
-    pub slot_element: *mut c_void,
 }
 
 #[derive(Clone, Copy)]
@@ -185,10 +182,9 @@ pub struct FfiFlatTreeRenderFacts {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiPrincipalDescendantFacts {
-    pub dom_children_parent: *mut c_void,
-    pub shadow_root: *mut c_void,
+    /// Whether the node hosts a shadow root. See `FfiDisplayContentsFacts::has_shadow_root`.
+    pub has_shadow_root: bool,
     pub shadow_root_style_node: u32,
-    pub slot_element: *mut c_void,
     pub svg_graphics_element: *mut c_void,
     pub svg_mask: FfiIdentifiedDomNode,
     pub svg_clip_path: FfiIdentifiedDomNode,
@@ -199,6 +195,9 @@ pub struct FfiPrincipalDescendantFacts {
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiPrincipalNodeEntryFacts {
+    /// The DOM node the walk's identity names. The walk navigates by identity and takes the pointer
+    /// from here, so the node is resolved once per visit rather than once per payload callback.
+    pub dom_node: *mut c_void,
     pub must_create_subtree: bool,
     pub needs_layout_tree_update: bool,
     pub has_layout_node: bool,
@@ -265,23 +264,25 @@ pub(crate) fn element_layout_kind(
 /// Which kind of DOM node the walk is standing on.
 ///
 /// A `StyleNodeID` says element or text by itself, and the document is the only other node the walk
-/// enters with a box of its own - it is the build's root. Everything else (a comment, a doctype, a
-/// processing instruction) can never have a box, and is only visited so its update flags are cleared.
+/// enters - it is the build's root. A node that can never have a box (a comment, a doctype, a
+/// processing instruction) holds no place in the style mirror's child sequence, so the walk never
+/// reaches one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PrincipalNodeKind {
     Document,
     Element,
     Text,
-    Other,
 }
 
 impl PrincipalNodeKind {
     fn of(style_node: u32, is_document_root: bool) -> Self {
+        if is_document_root {
+            return Self::Document;
+        }
         match StyleNodeID::from_raw(style_node) {
             Some(style_node) if style_node.is_text() => Self::Text,
             Some(_) => Self::Element,
-            None if is_document_root => Self::Document,
-            None => Self::Other,
+            None => panic!("the layout tree build walks only nodes the style mirror names"),
         }
     }
 
@@ -479,27 +480,30 @@ pub unsafe extern "C" fn rust_detach_top_layer_element_layout_subtree(
     // SAFETY: The callback returns the element's adjusted HTMLSlotElement pointer, if any.
     let slot_element = unsafe { (callbacks.slot_element)(element) };
     if !slot_element.is_null() {
-        clear_stale_assigned_slottables(
-            slot_element,
-            |slot| unsafe { (callbacks.assigned_node_count)(slot) },
-            |slot, index| unsafe { (callbacks.assigned_node_at)(slot, index) },
-            |root| unsafe { (callbacks.clear_stale_subtree)(root) },
-        );
+        // SAFETY: `slot_element` is a live HTMLSlotElement holding a stable assigned-node list.
+        let count = unsafe { (callbacks.assigned_node_count)(slot_element) };
+        for index in 0..count {
+            // SAFETY: `index` is below the count reported for this unchanged assigned-node list.
+            let root = unsafe { (callbacks.assigned_node_at)(slot_element, index) };
+            assert!(!root.is_null());
+            // SAFETY: `root` is a live DOM node projected into the slot.
+            unsafe { (callbacks.clear_stale_subtree)(root) };
+        }
     }
 }
 
-fn clear_stale_assigned_slottables(
-    slot_element: *mut c_void,
-    assigned_node_count: impl Fn(*mut c_void) -> usize,
-    assigned_node_at: impl Fn(*mut c_void, usize) -> *mut c_void,
-    clear_assigned_subtree: impl Fn(*mut c_void),
-) {
-    assert!(!slot_element.is_null());
-    let count = assigned_node_count(slot_element);
-    for index in 0..count {
-        let root = assigned_node_at(slot_element, index);
-        assert!(!root.is_null());
-        clear_assigned_subtree(root);
+/// Removes the stale layout subtree of every node a slot projects, for a slot whose own box hides
+/// its content.
+fn clear_stale_assigned_slottables(host: &DomTreeBuilderHost<'_>, slot_style_node: u32) {
+    for index in 0..host.assigned_node_count(slot_style_node) {
+        // SAFETY: The builder remains live, and the identity names a live DOM node.
+        unsafe {
+            (host.callbacks.clear_stale_subtree)(
+                host.callbacks.builder,
+                host.assigned_node_at(slot_style_node, index),
+                FfiStaleSubtreeClearScope::InclusiveBoundedToRoot,
+            );
+        }
     }
 }
 
@@ -1270,23 +1274,42 @@ struct DomTreeBuilderHost<'a> {
     arena: *mut LayoutNodeArena,
 }
 
+/// The raw form the walk carries an identity in: 0 for no node at all.
+fn raw_style_node(style_node: Option<StyleNodeID>) -> u32 {
+    style_node.map_or(0, StyleNodeID::raw)
+}
+
 impl DomTreeBuilderHost<'_> {
-    fn first_child(&self, parent: *mut c_void) -> *mut c_void {
-        self.identified_first_child(parent).node
+    /// The first node in the DOM child sequence the style mirror holds for `style_node`, or 0.
+    fn first_dom_child(&self, style_node: u32) -> u32 {
+        raw_style_node(self.layout().arena().first_dom_child(StyleNodeID::from_raw(style_node)))
     }
 
-    fn identified_first_child(&self, parent: *mut c_void) -> FfiIdentifiedDomNode {
-        // SAFETY: Entry points guarantee that `parent` is a live ParentNode.
-        unsafe { (self.callbacks.first_child)(parent) }
+    /// The node after `style_node` in the DOM child sequence its parent holds, or 0.
+    fn next_dom_sibling(&self, style_node: u32) -> u32 {
+        let Some(style_node) = StyleNodeID::from_raw(style_node) else {
+            return 0;
+        };
+        raw_style_node(self.layout().arena().next_dom_sibling(style_node))
     }
 
-    fn next_sibling(&self, node: *mut c_void) -> *mut c_void {
-        self.next_identified_sibling(node).node
+    /// How many nodes the style mirror holds assigned to the slot `style_node` names. A node that is
+    /// not a slot, and a slot rendering its fallback content, answer zero.
+    fn assigned_node_count(&self, style_node: u32) -> usize {
+        self.layout()
+            .arena()
+            .assigned_node_count(StyleNodeID::from_raw(style_node))
     }
 
-    fn next_identified_sibling(&self, node: *mut c_void) -> FfiIdentifiedDomNode {
-        // SAFETY: Callers only pass live DOM nodes.
-        unsafe { (self.callbacks.next_sibling)(node) }
+    /// The node the style mirror holds assigned to the slot `style_node` names at `index`.
+    fn assigned_node_at(&self, style_node: u32, index: usize) -> u32 {
+        self.layout()
+            .arena()
+            .assigned_node_at(
+                StyleNodeID::from_raw(style_node).expect("a slot with assigned nodes is named"),
+                index,
+            )
+            .raw()
     }
 
     /// The display the element's published style record asks for.
@@ -1384,59 +1407,47 @@ unsafe fn dom_tree_builder_host<'a>(
     }
 }
 
-/// Whether the walk lays out the node's own DOM children.
+/// How many nodes the node projects as a slot, and whether the walk lays out its own DOM children.
 ///
-/// A slot lays out its children only as fallback content, when nothing is assigned to it. Text
-/// slottables hold no place in the style mirror's assignment column yet, so a slot's count still
-/// comes from the host; every other node answers from the mirror alone.
-fn should_layout_dom_children(host: &DomTreeBuilderHost<'_>, style_node: u32, slot_element: *mut c_void) -> bool {
-    // SAFETY: `slot_element` is a live HTMLSlotElement when it is not null.
-    if !slot_element.is_null() && unsafe { (host.callbacks.assigned_node_count)(slot_element) } != 0 {
-        return false;
-    }
-    host.has_dom_children(style_node)
+/// A slot lays out its children only as fallback content, when nothing is assigned to it. Both
+/// answers come from the style mirror, which holds a slot's whole assigned-node list.
+fn dom_child_layout_plan(host: &DomTreeBuilderHost<'_>, style_node: u32) -> (usize, bool) {
+    let assigned_node_count = host.assigned_node_count(style_node);
+    (
+        assigned_node_count,
+        assigned_node_count == 0 && host.has_dom_children(style_node),
+    )
 }
 
 /// Updates every direct DOM child in tree order.
-///
-/// # Safety
-///
-/// The callback table, parent, and context must remain valid for the duration of the call.
-unsafe fn update_layout_tree_for_dom_children(
+fn update_layout_tree_for_dom_children(
     host: &DomTreeBuilderHost<'_>,
     state: &mut TreeBuilderState,
-    parent: *mut c_void,
+    parent: u32,
     context: &mut TreeBuilderContext,
     must_create_subtree: bool,
     insertion_mode: FfiInsertionMode,
 ) {
     abort_on_panic(|| {
-        assert!(!parent.is_null());
-        let mut node = host.first_child(parent);
-        while !node.is_null() {
+        let mut node = host.first_dom_child(parent);
+        while node != 0 {
             update_layout_tree(host, state, node, context, must_create_subtree, insertion_mode);
-            node = host.next_sibling(node);
+            node = host.next_dom_sibling(node);
         }
     });
 }
 
 /// Updates every shadow-root child in tree order and clears the root's update flags.
-///
-/// # Safety
-///
-/// The callback table, shadow root, and context must remain valid for the duration of the call.
-unsafe fn update_layout_tree_for_shadow_root_children(
+fn update_layout_tree_for_shadow_root_children(
     host: &DomTreeBuilderHost<'_>,
     state: &mut TreeBuilderState,
-    shadow_root: *mut c_void,
     shadow_root_style_node: u32,
     context: &mut TreeBuilderContext,
     must_create_subtree: bool,
 ) {
     abort_on_panic(|| {
-        assert!(!shadow_root.is_null());
-        let mut node = host.first_child(shadow_root);
-        while !node.is_null() {
+        let mut node = host.first_dom_child(shadow_root_style_node);
+        while node != 0 {
             update_layout_tree(
                 host,
                 state,
@@ -1445,36 +1456,26 @@ unsafe fn update_layout_tree_for_shadow_root_children(
                 must_create_subtree,
                 FfiInsertionMode::Append,
             );
-            node = host.next_sibling(node);
+            node = host.next_dom_sibling(node);
         }
         host.clear_layout_tree_update_marks(shadow_root_style_node);
     });
 }
 
 /// Updates a slot's assigned nodes in flat-tree order.
-///
-/// # Safety
-///
-/// The callback table, slot element, and context must remain valid for the duration of the call.
-unsafe fn update_layout_tree_for_assigned_slottables(
+fn update_layout_tree_for_assigned_slottables(
     host: &DomTreeBuilderHost<'_>,
     state: &mut TreeBuilderState,
-    slot_element: *mut c_void,
+    slot_style_node: u32,
     context: &mut TreeBuilderContext,
     must_create_subtree: bool,
 ) {
     abort_on_panic(|| {
-        assert!(!slot_element.is_null());
-        // SAFETY: `slot_element` remains live throughout the call.
-        let assigned_node_count = unsafe { (host.callbacks.assigned_node_count)(slot_element) };
-        for index in 0..assigned_node_count {
-            // SAFETY: `index` is below the count reported for this unchanged assigned-node list.
-            let node = unsafe { (host.callbacks.assigned_node_at)(slot_element, index) };
-            assert!(!node.is_null());
+        for index in 0..host.assigned_node_count(slot_style_node) {
             update_layout_tree(
                 host,
                 state,
-                node,
+                host.assigned_node_at(slot_style_node, index),
                 context,
                 must_create_subtree,
                 FfiInsertionMode::Append,
@@ -1484,49 +1485,43 @@ unsafe fn update_layout_tree_for_assigned_slottables(
 }
 
 /// Applies SVG `<switch>` child selection and updates its rendered child.
-///
-/// # Safety
-///
-/// The callback table, switch element, and context must remain valid for the duration of the call.
-unsafe fn update_layout_tree_for_svg_switch_children(
+fn update_layout_tree_for_svg_switch_children(
     host: &DomTreeBuilderHost<'_>,
     state: &mut TreeBuilderState,
-    switch_element: *mut c_void,
+    switch_element: u32,
     context: &mut TreeBuilderContext,
     must_create_subtree: bool,
 ) {
     abort_on_panic(|| {
-        assert!(!switch_element.is_null());
-
         // https://svgwg.org/svg2-draft/struct.html#SwitchElement
         // The ‘switch’ element evaluates the ‘requiredExtensions’ and ‘systemLanguage’ attributes on its direct child
         // elements in order, and then processes and renders the first child for which these attributes evaluate to
         // true. All others will be bypassed and therefore not rendered. If the child element is a container element
         // such as a ‘g’, then the entire subtree is either processed/rendered or bypassed/not rendered.
-        let mut rendered_child = std::ptr::null_mut();
-        let mut child = host.identified_first_child(switch_element);
-        while !child.node.is_null() {
+        let mut rendered_child = 0;
+        let mut child = host.first_dom_child(switch_element);
+        while child != 0 {
             // FIXME: Evaluate the requiredExtensions and systemLanguage attributes.
-            if host.element_type_facts(child.style_node) & element_adjustment_fact::IS_SVG_ELEMENT != 0 {
-                rendered_child = child.node;
+            if host.element_type_facts(child) & element_adjustment_fact::IS_SVG_ELEMENT != 0 {
+                rendered_child = child;
                 break;
             }
-            child = host.next_identified_sibling(child.node);
+            child = host.next_dom_sibling(child);
         }
 
         // NB: Clean up any stale children that should no longer be rendered.
-        let mut child = host.first_child(switch_element);
-        while !child.is_null() {
+        let mut child = host.first_dom_child(switch_element);
+        while child != 0 {
             if child != rendered_child {
-                // SAFETY: The builder and `child` remain live throughout the call.
+                // SAFETY: The builder remains live, and `child` names a live DOM node.
                 unsafe {
                     (host.callbacks.clear_stale_layout_node)(host.callbacks.builder, child);
                 }
             }
-            child = host.next_sibling(child);
+            child = host.next_dom_sibling(child);
         }
 
-        if !rendered_child.is_null() {
+        if rendered_child != 0 {
             update_layout_tree(
                 host,
                 state,
@@ -1558,7 +1553,7 @@ unsafe fn update_layout_tree_for_display_contents(
         // SAFETY: The element remains live for the duration of the call.
         let facts = unsafe { (host.callbacks.display_contents_facts)(host.callbacks.builder, element) };
         let content_visibility_hidden = host.content_visibility_is_hidden(style_node);
-        let lays_out_dom_children = should_layout_dom_children(host, style_node, facts.slot_element);
+        let (assigned_node_count, lays_out_dom_children) = dom_child_layout_plan(host, style_node);
 
         // A display:contents member builds its children through this path, so the top layer flag
         // is consumed here the same way update_layout_tree does for members with a box.
@@ -1572,7 +1567,7 @@ unsafe fn update_layout_tree_for_display_contents(
             unsafe {
                 (host.callbacks.clear_stale_subtree)(
                     host.callbacks.builder,
-                    element,
+                    style_node,
                     FfiStaleSubtreeClearScope::Inclusive,
                 );
                 (host.callbacks.resolve_counters)(element, FfiPseudoElement::None);
@@ -1593,59 +1588,37 @@ unsafe fn update_layout_tree_for_display_contents(
         if !content_visibility_hidden && (should_create_layout_node || host.child_needs_layout_tree_update(style_node))
         {
             let must_create_children = should_create_layout_node;
-            if !facts.shadow_root.is_null() {
-                // SAFETY: The callback table, shadow root, and context remain valid.
-                unsafe {
-                    update_layout_tree_for_shadow_root_children(
-                        host,
-                        state,
-                        facts.shadow_root,
-                        facts.shadow_root_style_node,
-                        context,
-                        must_create_children,
-                    );
-                }
+            if facts.has_shadow_root {
+                update_layout_tree_for_shadow_root_children(
+                    host,
+                    state,
+                    facts.shadow_root_style_node,
+                    context,
+                    must_create_children,
+                );
             } else if lays_out_dom_children {
-                assert!(!facts.dom_children_parent.is_null());
-                // SAFETY: The callback table, parent, and context remain valid.
-                unsafe {
-                    update_layout_tree_for_dom_children(
-                        host,
-                        state,
-                        facts.dom_children_parent,
-                        context,
-                        must_create_children,
-                        FfiInsertionMode::Append,
-                    );
-                }
+                update_layout_tree_for_dom_children(
+                    host,
+                    state,
+                    style_node,
+                    context,
+                    must_create_children,
+                    FfiInsertionMode::Append,
+                );
             }
         }
 
-        if !facts.slot_element.is_null() {
+        if assigned_node_count != 0 {
             if !content_visibility_hidden {
-                // SAFETY: The callback table, slot element, and context remain valid.
-                unsafe {
-                    update_layout_tree_for_assigned_slottables(
-                        host,
-                        state,
-                        facts.slot_element,
-                        context,
-                        must_create_subtree || should_create_layout_node,
-                    );
-                }
-            } else {
-                clear_stale_assigned_slottables(
-                    facts.slot_element,
-                    |slot| unsafe { (host.callbacks.assigned_node_count)(slot) },
-                    |slot, index| unsafe { (host.callbacks.assigned_node_at)(slot, index) },
-                    |root| unsafe {
-                        (host.callbacks.clear_stale_subtree)(
-                            host.callbacks.builder,
-                            root,
-                            FfiStaleSubtreeClearScope::InclusiveBoundedToRoot,
-                        );
-                    },
+                update_layout_tree_for_assigned_slottables(
+                    host,
+                    state,
+                    style_node,
+                    context,
+                    must_create_subtree || should_create_layout_node,
                 );
+            } else {
+                clear_stale_assigned_slottables(host, style_node);
             }
         }
 
@@ -1660,7 +1633,6 @@ unsafe fn update_layout_tree_for_display_contents(
             assert!(placed.is_none());
         }
 
-        assert!(!facts.dom_children_parent.is_null());
         host.clear_layout_tree_update_marks(style_node);
 
         if clear_layout_top_layer_for_descendants {
@@ -1691,7 +1663,14 @@ fn update_svg_resource(
     state.ancestor_stack.push(layout_node);
 
     if !ancestor_stack_contains_element_box(host.layout().arena(), state, resource.style_node) {
-        update_layout_tree(host, state, resource.node, context, true, FfiInsertionMode::Append);
+        update_layout_tree(
+            host,
+            state,
+            resource.style_node,
+            context,
+            true,
+            FfiInsertionMode::Append,
+        );
         // SAFETY: Both pointers denote live SVG elements held by the graphics element.
         unsafe { (host.callbacks.register_svg_resource_reference)(resource.node, graphics_element) };
     } else {
@@ -1720,7 +1699,7 @@ fn update_svg_pattern(
         update_layout_tree(
             host,
             state,
-            content_element.node,
+            content_element.style_node,
             context,
             true,
             FfiInsertionMode::Append,
@@ -1784,7 +1763,7 @@ unsafe fn update_principal_node_descendants(
         } else {
             update.style_node
         };
-        let lays_out_dom_children = should_layout_dom_children(host, dom_children_owner, facts.slot_element);
+        let (assigned_node_count, lays_out_dom_children) = dom_child_layout_plan(host, dom_children_owner);
         let (layout_node_can_have_children, layout_node_is_replaced_box_with_children) = {
             let layout_node_data = layout_host.data(layout_node);
             let can_have_children = node_facts::node_can_have_children(layout_node_data);
@@ -1822,24 +1801,24 @@ unsafe fn update_principal_node_descendants(
         }
 
         if content_visibility_hidden {
-            // SAFETY: The builder and DOM node remain live throughout the call.
+            // SAFETY: The builder remains live, and the identity names a live DOM node.
             unsafe {
                 (host.callbacks.clear_stale_subtree)(
                     host.callbacks.builder,
-                    dom_node,
+                    update.style_node,
                     FfiStaleSubtreeClearScope::DescendantsBoundedToRoot,
                 );
             }
         }
 
         if (should_create_layout_node || host.child_needs_layout_tree_update(dom_children_owner))
-            && (!facts.shadow_root.is_null() || lays_out_dom_children)
+            && (facts.has_shadow_root || lays_out_dom_children)
             && layout_node_can_have_children
             && !content_visibility_hidden
         {
             state.ancestor_stack.push(layout_node);
 
-            if !facts.shadow_root.is_null() {
+            if facts.has_shadow_root {
                 if layout_node_is_replaced_box_with_children {
                     // For replaced elements with shadow DOM children, wrap the children in an
                     // anonymous BlockContainer so that a BFC handles their layout.
@@ -1852,45 +1831,34 @@ unsafe fn update_principal_node_descendants(
                     assert!(!wrapper.is_invalid());
                     state.ancestor_stack.push(wrapper);
                 }
-                // SAFETY: The callback table, shadow root, and context remain valid.
-                unsafe {
-                    update_layout_tree_for_shadow_root_children(
-                        host,
-                        state,
-                        facts.shadow_root,
-                        facts.shadow_root_style_node,
-                        context,
-                        should_create_layout_node,
-                    );
-                }
+                update_layout_tree_for_shadow_root_children(
+                    host,
+                    state,
+                    facts.shadow_root_style_node,
+                    context,
+                    should_create_layout_node,
+                );
                 if layout_node_is_replaced_box_with_children {
                     assert!(state.ancestor_stack.pop().is_some());
                 }
             } else if lays_out_dom_children {
-                assert!(!facts.dom_children_parent.is_null());
                 if update.element_type_facts & element_adjustment_fact::IS_SVG_SWITCH_ELEMENT != 0 {
-                    // SAFETY: The callback table, parent, and context remain valid.
-                    unsafe {
-                        update_layout_tree_for_svg_switch_children(
-                            host,
-                            state,
-                            facts.dom_children_parent,
-                            context,
-                            should_create_layout_node,
-                        );
-                    }
+                    update_layout_tree_for_svg_switch_children(
+                        host,
+                        state,
+                        dom_children_owner,
+                        context,
+                        should_create_layout_node,
+                    );
                 } else {
-                    // SAFETY: The callback table, parent, and context remain valid.
-                    unsafe {
-                        update_layout_tree_for_dom_children(
-                            host,
-                            state,
-                            facts.dom_children_parent,
-                            context,
-                            should_create_layout_node,
-                            update.insertion_mode,
-                        );
-                    }
+                    update_layout_tree_for_dom_children(
+                        host,
+                        state,
+                        dom_children_owner,
+                        context,
+                        should_create_layout_node,
+                        update.insertion_mode,
+                    );
                 }
             }
 
@@ -1920,11 +1888,11 @@ unsafe fn update_principal_node_descendants(
                     }
                     // SAFETY: `element` is a live DOM Element.
                     if has_unrendered_flat_tree_ancestor(host, element) {
-                        // SAFETY: The builder and element remain live throughout cleanup.
+                        // SAFETY: The builder remains live, and the identity names a live DOM node.
                         unsafe {
                             (host.callbacks.clear_stale_subtree)(
                                 host.callbacks.builder,
-                                element,
+                                identified.style_node,
                                 FfiStaleSubtreeClearScope::InclusiveBoundedToRoot,
                             );
                         }
@@ -1933,7 +1901,7 @@ unsafe fn update_principal_node_descendants(
                     update_layout_tree(
                         host,
                         state,
-                        element,
+                        identified.style_node,
                         context,
                         should_create_layout_node,
                         FfiInsertionMode::Append,
@@ -1945,33 +1913,19 @@ unsafe fn update_principal_node_descendants(
             assert!(state.ancestor_stack.pop().is_some());
         }
 
-        if !facts.slot_element.is_null() {
+        if assigned_node_count != 0 {
             if !content_visibility_hidden {
                 state.ancestor_stack.push(layout_node);
-                // SAFETY: The callback table, slot element, and context remain valid.
-                unsafe {
-                    update_layout_tree_for_assigned_slottables(
-                        host,
-                        state,
-                        facts.slot_element,
-                        context,
-                        update.must_create_subtree || should_create_layout_node,
-                    );
-                }
+                update_layout_tree_for_assigned_slottables(
+                    host,
+                    state,
+                    dom_children_owner,
+                    context,
+                    update.must_create_subtree || should_create_layout_node,
+                );
                 assert!(state.ancestor_stack.pop().is_some());
             } else {
-                clear_stale_assigned_slottables(
-                    facts.slot_element,
-                    |slot| unsafe { (host.callbacks.assigned_node_count)(slot) },
-                    |slot, index| unsafe { (host.callbacks.assigned_node_at)(slot, index) },
-                    |root| unsafe {
-                        (host.callbacks.clear_stale_subtree)(
-                            host.callbacks.builder,
-                            root,
-                            FfiStaleSubtreeClearScope::InclusiveBoundedToRoot,
-                        );
-                    },
-                );
+                clear_stale_assigned_slottables(host, dom_children_owner);
             }
         }
 
@@ -2437,7 +2391,7 @@ fn update_principal_node_after_entry(
                     created_box.take().expect("a principal box to place"),
                     is_inline_outside,
                     update.insertion_mode,
-                    dom_node,
+                    update.style_node,
                 );
             }
             FfiPrincipalBoxPlacement::AppendSvg => {
@@ -2526,11 +2480,11 @@ fn update_principal_node_after_entry(
             }
         }
         // If no layout node was created, remove every stale layout and paint node from the shadow-including subtree.
-        // SAFETY: The builder and DOM node remain live throughout cleanup.
+        // SAFETY: The builder remains live, and the identity names a live DOM node.
         unsafe {
             (host.callbacks.clear_stale_subtree)(
                 host.callbacks.builder,
-                dom_node,
+                update.style_node,
                 FfiStaleSubtreeClearScope::Inclusive,
             );
         }
@@ -2544,15 +2498,11 @@ fn update_principal_node_after_entry(
     }
 }
 
-/// Updates one DOM node and its layout-tree subtree.
-///
-/// # Safety
-///
-/// The callback table and DOM node must remain valid for the duration of the call.
+/// Updates the node an identity names, and its layout-tree subtree.
 fn update_layout_tree(
     host: &DomTreeBuilderHost<'_>,
     state: &mut TreeBuilderState,
-    dom_node: *mut c_void,
+    style_node: u32,
     context: &mut TreeBuilderContext,
     must_create_subtree: bool,
     insertion_mode: FfiInsertionMode,
@@ -2560,7 +2510,7 @@ fn update_layout_tree(
     update_layout_tree_from(
         host,
         state,
-        dom_node,
+        style_node,
         context,
         must_create_subtree,
         insertion_mode,
@@ -2571,18 +2521,20 @@ fn update_layout_tree(
 fn update_layout_tree_from(
     host: &DomTreeBuilderHost<'_>,
     state: &mut TreeBuilderState,
-    dom_node: *mut c_void,
+    style_node: u32,
     context: &mut TreeBuilderContext,
     must_create_subtree: bool,
     insertion_mode: FfiInsertionMode,
     is_document_root: bool,
 ) {
     abort_on_panic(|| {
-        assert!(!dom_node.is_null());
-        // SAFETY: The builder and DOM node remain live throughout the call.
+        assert!(style_node != 0);
+        // SAFETY: The builder remains live, and the identity names a live DOM node.
         let entry_facts = unsafe {
-            (host.callbacks.principal_node_entry_facts)(host.callbacks.builder, dom_node, must_create_subtree)
+            (host.callbacks.principal_node_entry_facts)(host.callbacks.builder, style_node, must_create_subtree)
         };
+        let dom_node = entry_facts.dom_node;
+        assert!(!dom_node.is_null());
         let kind = PrincipalNodeKind::of(entry_facts.style_node, is_document_root);
         let reuse = resolve_layout_node_reuse(host, kind, entry_facts);
         let element_type_facts = host.element_type_facts(entry_facts.style_node);
@@ -2668,12 +2620,13 @@ pub unsafe extern "C" fn rust_build_layout_tree(
         ..Default::default()
     };
     // SAFETY: All pointers remain live throughout the build.
-    let entry_facts = unsafe { (host.callbacks.principal_node_entry_facts)(host.callbacks.builder, document, false) };
+    let entry_facts =
+        unsafe { (host.callbacks.principal_node_entry_facts)(host.callbacks.builder, document_style_node, false) };
 
     update_layout_tree_from(
         &host,
         &mut state,
-        document,
+        document_style_node,
         &mut context,
         false,
         FfiInsertionMode::Append,
@@ -3007,7 +2960,7 @@ fn create_pseudo_element_with_frame(
             unplaced_box.take().expect("the pseudo-element box"),
             is_inline_outside,
             insertion_mode,
-            std::ptr::null_mut(),
+            0,
         );
     }
     // SAFETY: The element remains live and its pseudo-element layout node is attached when requested.
@@ -3060,7 +3013,7 @@ fn create_pseudo_element_with_frame(
                 layout_host.created(content_item),
                 is_inline_outside,
                 FfiInsertionMode::Append,
-                std::ptr::null_mut(),
+                0,
             );
         }
         assert!(state.ancestor_stack.pop().is_some());
@@ -3873,9 +3826,9 @@ fn insert_child_in_dom_order(
     host: &DomTreeBuilderHost<'_>,
     parent: LayoutNode,
     child: UnplacedLayoutNode,
-    dom_node: *mut c_void,
+    style_node: u32,
 ) {
-    assert!(!dom_node.is_null());
+    assert!(style_node != 0);
     let layout = host.layout();
 
     // An inline child of a block container with block children is placed in a newly appended
@@ -3888,9 +3841,9 @@ fn insert_child_in_dom_order(
         )
     };
     if parent_is_empty_anonymous_wrapper && !wrapper_parent.is_invalid() {
-        let mut sibling = host.next_identified_sibling(dom_node);
-        while !sibling.node.is_null() {
-            let mut sibling_layout_node = bound_box(layout.arena(), sibling.style_node);
+        let mut sibling = host.next_dom_sibling(style_node);
+        while sibling != 0 {
+            let mut sibling_layout_node = bound_box(layout.arena(), sibling);
             while !sibling_layout_node.is_invalid() && layout.parent(sibling_layout_node) != wrapper_parent {
                 sibling_layout_node = layout.parent(sibling_layout_node);
             }
@@ -3898,18 +3851,18 @@ fn insert_child_in_dom_order(
                 layout.move_child(parent, wrapper_parent, sibling_layout_node);
                 break;
             }
-            sibling = host.next_identified_sibling(sibling.node);
+            sibling = host.next_dom_sibling(sibling);
         }
     }
 
-    let mut sibling = host.next_identified_sibling(dom_node);
-    while !sibling.node.is_null() {
-        let sibling_layout_node = bound_box(layout.arena(), sibling.style_node);
+    let mut sibling = host.next_dom_sibling(style_node);
+    while sibling != 0 {
+        let sibling_layout_node = bound_box(layout.arena(), sibling);
         if !sibling_layout_node.is_invalid() && layout.parent(sibling_layout_node) == parent {
             layout.attach_child(parent, child, sibling_layout_node);
             return;
         }
-        sibling = host.next_identified_sibling(sibling.node);
+        sibling = host.next_dom_sibling(sibling);
     }
 
     let after_layout_node = pseudo_element_box_of_element_box(&layout, parent, GENERATED_FOR_AFTER);
@@ -3942,7 +3895,7 @@ fn insert_node_into_inline_or_block_ancestor(
     node: UnplacedLayoutNode,
     is_inline_outside: bool,
     mode: FfiInsertionMode,
-    dom_node: *mut c_void,
+    style_node: u32,
 ) {
     assert!(!nearest_insertion_ancestor.is_invalid());
     let layout = host.layout();
@@ -3973,7 +3926,7 @@ fn insert_node_into_inline_or_block_ancestor(
             let first_child = layout.first_child(insertion_point);
             layout.attach_child(insertion_point, node, first_child);
         }
-        FfiInsertionMode::InDomOrder => insert_child_in_dom_order(host, insertion_point, node, dom_node),
+        FfiInsertionMode::InDomOrder => insert_child_in_dom_order(host, insertion_point, node, style_node),
     }
 
     if is_inline_outside {
@@ -5142,6 +5095,7 @@ mod tests {
     #[test]
     fn principal_node_entry_decisions() {
         let mut facts = FfiPrincipalNodeEntryFacts {
+            dom_node: std::ptr::null_mut(),
             must_create_subtree: false,
             needs_layout_tree_update: false,
             has_layout_node: true,
