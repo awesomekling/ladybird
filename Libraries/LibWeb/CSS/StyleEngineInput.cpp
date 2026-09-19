@@ -283,6 +283,7 @@ void record_element_connected(DOM::Element& element)
     element.set_style_node_id(style_engine->allocate_style_node());
     element.document().style_computer().register_style_node(element.style_node_id(), element);
     record_element_arrival_delta(element, *style_engine, tree_scope_of(element.root()));
+    ensure_dom_order_parent_identity(element.parent(), *style_engine);
 
     Vector<u32, 192> links;
     append_dom_order_link(links, element);
@@ -923,6 +924,7 @@ void record_node_moved_in_dom_order(DOM::Node& node, DOM::Node const& old_parent
     if (!style_engine || identity == no_style_node)
         return;
     style_engine->unlink_style_node_from_dom_order(identity, dom_order_parent_of(&old_parent));
+    ensure_dom_order_parent_identity(node.parent(), *style_engine);
     Vector<u32, 192> links;
     append_dom_order_link(links, node);
     style_engine->link_style_nodes_in_dom_order(links.span());
