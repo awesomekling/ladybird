@@ -2568,6 +2568,17 @@ impl ComputedGroupSets {
         Some(self.final_style_record(assignment.style_record, assignment.animation_overlay_slot))
     }
 
+    /// A bit per pseudo-element kind the node holds a settled record for. The tree build asks this
+    /// once per element rather than once per pseudo-element, because most elements hold none and
+    /// the answer is one lookup for all of them.
+    #[must_use]
+    pub fn published_pseudo_record_mask(&self, node: StyleNodeID) -> u32 {
+        self.pseudo_rows(node)
+            .iter()
+            .filter(|row| row.assignment.is_some())
+            .fold(0, |mask, row| mask | 1 << row.kind)
+    }
+
     /// The pseudo-element kinds this node holds published computed styles for.
     pub fn assigned_pseudo_kinds(&self, node: StyleNodeID) -> impl Iterator<Item = u8> + '_ {
         self.pseudo_rows(node)

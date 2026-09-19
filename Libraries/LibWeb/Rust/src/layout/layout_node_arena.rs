@@ -1667,9 +1667,19 @@ impl LayoutNodeArena {
         }
     }
 
-    /// The box facts the element's published style record holds. A text node, an anonymous row and
-    /// the document have no record and answer nothing.
-    /// Whether the element's published style record holds a `::first-letter`. A text node, an
+    /// A bit per pseudo-element kind the element's published style holds a record for, which is
+    /// what says each of them exists at all. The style store settles no record for `::backdrop` or
+    /// a highlight pseudo-element, so neither can be asked about this way.
+    pub(crate) fn published_pseudo_record_mask(&self, style_node: Option<StyleNodeID>) -> u32 {
+        match style_node {
+            Some(style_node) if style_node.element_index().is_some() => {
+                self.with_style_engine(|engine| engine.published_pseudo_record_mask(style_node))
+            }
+            _ => 0,
+        }
+    }
+
+    /// Whether the element's published style holds a `::first-letter`. A text node, an
     /// anonymous row that names no element and the document have no record and answer no.
     pub(crate) fn has_published_first_letter_style(&self, style_node: Option<StyleNodeID>) -> bool {
         match style_node {

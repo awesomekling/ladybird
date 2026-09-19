@@ -541,6 +541,14 @@ impl RetainedState {
         })
     }
 
+    /// A bit per pseudo-element kind the element holds a settled record for, which is what says
+    /// each of them exists at all. The style store settles no record for `::backdrop` or a
+    /// highlight pseudo-element, so neither is ever named here.
+    #[must_use]
+    pub fn published_pseudo_record_mask(&self, node: StyleNodeID) -> u32 {
+        self.computed_group_sets.published_pseudo_record_mask(node)
+    }
+
     /// Whether the element is a `<slot>`, whose children the flat tree takes elsewhere.
     #[must_use]
     pub fn element_is_slot(&self, node: StyleNodeID) -> bool {
