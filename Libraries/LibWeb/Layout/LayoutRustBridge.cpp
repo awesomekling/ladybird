@@ -434,18 +434,6 @@ void register_layout_host(NodeArena& arena, DOM::Document& document)
             auto const* node_with_style = as_if<NodeWithStyle>(*static_cast<Node const*>(node));
             VERIFY(node_with_style);
             return compute_svg_path(*node_with_style, request); },
-        .svg_image_bounding_box = [](void*, void* node, CSSPixels viewport_width, CSSPixels viewport_height) {
-            auto const& image_element = as<SVG::SVGImageElement>(*static_cast<Node const*>(node)->dom_node());
-            auto bounding_box = image_element.bounding_box({
-                viewport_width,
-                viewport_height,
-            });
-            return RustFFI::FfiFloatRect {
-                .x = bounding_box.x(),
-                .y = bounding_box.y(),
-                .width = bounding_box.width(),
-                .height = bounding_box.height(),
-            }; },
         .deliver_commit_messages = [](void* context, RustFFI::FfiCommitMessage const* messages, size_t count) {
             auto& document = *static_cast<DOM::Document*>(context);
             for (size_t index = 0; index < count; ++index)

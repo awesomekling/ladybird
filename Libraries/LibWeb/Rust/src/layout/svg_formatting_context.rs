@@ -974,22 +974,49 @@ impl<'pass> SvgFormattingContext<'pass> {
         used.has_definite_block_size.set(true);
     }
 
-    fn layout_image_element(&self, image_box: Node) {
-        seal::note_host_call(
-            self.callbacks.arena().layout_pass_is_running(),
-            "svg_image_bounding_box",
-        );
-        // SAFETY: The callback returns a POD bounding box for the live image
-        // node and requested viewport.
-        let source = unsafe {
-            (self.callbacks.host.svg_image_bounding_box)(
-                self.callbacks.host.context,
-                self.callbacks.shell(image_box),
-                self.viewport_width,
-                self.viewport_height,
-            )
+    // https://w3c.github.io/svgwg/svg2-draft/embedded.html#Placement
+    // Computation of automatically-sized values follows the Default Sizing Algorithm defined for
+    // replaced elements in CSS layout [css-images-3]. In particular, when the referenced resource
+    // does not have an intrinsic size (such as image types with no defined dimensions), it is
+    // assumed to have a width of 300px and a height of 150px.
+    fn svg_image_bounding_box(&self, image_box: Node) -> SvgCssPixelRect {
+        use crate::painting::record::paint::replaced::{SizeWithAspectRatio, run_default_sizing_algorithm};
+        let style = self.style(image_box);
+        let specified_width = style
+            .width()
+            .is_length_percentage()
+            .then(|| style.width().to_px(self.viewport_width));
+        let specified_height = style
+            .height()
+            .is_length_percentage()
+            .then(|| style.height().to_px(self.viewport_height));
+
+        let facts = self.callbacks.replaced_content_facts(image_box).unwrap_or_default();
+        let natural = SizeWithAspectRatio {
+            width: facts.has_auto_content_width.then_some(facts.auto_content_width),
+            height: facts.has_auto_content_height.then_some(facts.auto_content_height),
+            aspect_ratio: (facts.auto_content_aspect_ratio_denominator != CssPixels::default()).then_some(
+                crate::painting::record::paint::replaced::Fraction {
+                    numerator: facts.auto_content_aspect_ratio_numerator,
+                    denominator: facts.auto_content_aspect_ratio_denominator,
+                },
+            ),
         };
-        let bounding_box = float_rect_to_css_pixels(source);
+        // The default object size applies only once something has decoded; until then the image
+        // has no size at all.
+        let default_size = CssPixelSize::new(facts.default_preferred_width, facts.default_preferred_height);
+
+        let sizing = run_default_sizing_algorithm(specified_width, specified_height, &natural, default_size);
+        SvgCssPixelRect {
+            x: style.x().to_px(self.viewport_width),
+            y: style.y().to_px(self.viewport_height),
+            width: sizing.width,
+            height: sizing.height,
+        }
+    }
+
+    fn layout_image_element(&self, image_box: Node) {
+        let bounding_box = self.svg_image_bounding_box(image_box);
         let used_pointer = self.used_values(image_box);
         let used = &used_pointer;
         used.set_content_inline_size(bounding_box.width);
