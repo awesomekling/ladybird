@@ -293,7 +293,7 @@ static CSS::ContentData resolve_normal_marker_content(DOM::AbstractElement& elem
     if (CSS::marker_text_depends_on_list_item_counter_value(list_box.list_style_type()))
         element_reference.element().document().did_render_list_item_counter_value(element_reference.element());
 
-    auto counter_value = element_reference.ensure_counters_set().counter_value_for_use(CSS::list_item_counter_name(), element_reference);
+    auto counter_value = CSS::counter_value_for_use(element_reference, CSS::list_item_counter_name());
 
     auto generate_from_counter_style = [&](RefPtr<CSS::CounterStyle const> const& counter_style) -> Utf16String {
         auto counter_representation = CSS::generate_a_counter_representation(counter_style, element_reference.style_scope(), counter_value);
@@ -736,16 +736,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
                 root.for_each_shadow_including_inclusive_descendant([&](auto& node) {
                     return builder.clear_stale_layout_node_in_subtree(node, root, cleared_subtree_root);
                 });
-            } },
-        .resolve_counters = [](void* element_pointer, RustFFI::FfiPseudoElement ffi_pseudo) {
-            VERIFY(element_pointer);
-            auto& element = *static_cast<DOM::Element*>(element_pointer);
-            if (ffi_pseudo == RustFFI::FfiPseudoElement::None) {
-                DOM::AbstractElement element_reference { element };
-                CSS::resolve_counters(element_reference);
-            } else {
-                DOM::AbstractElement element_reference { element, css_pseudo_element(ffi_pseudo) };
-                CSS::resolve_counters(element_reference);
             } },
         .create_first_letter_nodes = [](void*, void* element_pointer, RustFFI::FfiFirstLetterTarget target) -> RustFFI::FfiFirstLetterNodes {
             VERIFY(element_pointer);

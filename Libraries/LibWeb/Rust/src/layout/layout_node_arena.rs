@@ -621,6 +621,8 @@ pub(crate) struct LayoutNodeArena {
     /// and the document owns the result because a fallback chain is followed from the scope the
     /// counter is used in, not from the scope the style was written in.
     counter_styles: RefCell<crate::css::counter_representation::CounterStyleRegistry>,
+    /// The CSS counters set of every element and pseudo-element the tree build resolved one for.
+    counters_sets: RefCell<super::counters::CountersSets>,
     run_used_records: RefCell<Vec<RunRecordSlot>>,
     next_run_nonce: Cell<u64>,
     live_run_nonces: RefCell<Vec<u64>>,
@@ -725,6 +727,7 @@ impl LayoutNodeArena {
             svg_attribute_facts: RefCell::new(HashMap::default()),
             svg_points: RefCell::new(HashMap::default()),
             counter_styles: RefCell::new(crate::css::counter_representation::CounterStyleRegistry::default()),
+            counters_sets: RefCell::new(super::counters::CountersSets::default()),
             run_used_records: RefCell::new(Vec::new()),
             next_run_nonce: Cell::new(1),
             live_run_nonces: RefCell::new(Vec::new()),
@@ -1379,6 +1382,7 @@ impl LayoutNodeArena {
         self.anchor_name_elements
             .borrow_mut()
             .retain(|&(scope_host, _), _| scope_host != style_node.raw());
+        self.counters_sets.borrow_mut().forget(style_node);
         loop {
             let row = self.first_rows_by_style_node.borrow().head(style_node);
             if row.is_invalid() {
@@ -2465,6 +2469,11 @@ impl LayoutNodeArena {
     ) {
         self.assert_owner_thread();
         self.counter_styles.borrow_mut().publish_scope(tree_scope, scope);
+    }
+
+    pub(crate) fn counters_sets(&self) -> &RefCell<super::counters::CountersSets> {
+        self.assert_owner_thread();
+        &self.counters_sets
     }
 
     pub(crate) fn with_counter_style_registry<T>(
@@ -4281,20 +4290,97 @@ pub unsafe extern "C" fn layout_arena_detach_and_free_subtree(arena: *mut c_void
     was_attached
 }
 
+fn counter_owner(style_node: u32, generated_for: u8) -> Option<super::counters::CounterOwner> {
+    StyleNodeID::from_raw(style_node).map(|element| super::counters::CounterOwner { element, generated_for })
+}
+
+/// The value of the innermost counter named `name` in the counters set of the element `style_node`
+/// names, or of its pseudo-element `generated_for`, instantiating the counter first when there is
+/// none. An element without an identity has an empty set.
+///
 /// # Safety
 ///
-/// The arena must remain valid for the duration of the call, and `start` must name a live node
-/// in this arena.
+/// The arena must remain valid for the duration of the call, and `name` must be the raw word of a
+/// live `AK::Utf16FlyString`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_previous_dom_backed_or_generated_node(
+pub unsafe extern "C" fn layout_arena_counter_value_for_use(
     arena: *mut c_void,
-    start: NodeSlotId,
-    previous_sibling_only: bool,
-) -> NodeSlotId {
+    style_node: u32,
+    generated_for: u8,
+    name: usize,
+) -> i32 {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.previous_dom_backed_or_generated_node(start, previous_sibling_only)
+    let Some(owner) = counter_owner(style_node, generated_for) else {
+        return 0;
+    };
+    // SAFETY: The caller passes the raw word of a string that outlives the call.
+    let name = unsafe { ak::utf16_string_units(&name) };
+    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the
+    // document thread.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }
+        .counters_sets()
+        .borrow_mut()
+        .counter_value_for_use(owner, &name)
+}
+
+/// Every value named `name` in the counters set of the element `style_node` names, or of its
+/// pseudo-element `generated_for`, outermost first, instantiating the counter first when there is
+/// none. An element without an identity has an empty set.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call, and `name` must be the raw word of a
+/// live `AK::Utf16FlyString`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_counter_values_for_use(
+    arena: *mut c_void,
+    style_node: u32,
+    generated_for: u8,
+    name: usize,
+    context: *mut c_void,
+    callback: unsafe extern "C" fn(*mut c_void, i32),
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let values = match counter_owner(style_node, generated_for) {
+        Some(owner) => {
+            // SAFETY: The caller passes the raw word of a string that outlives the call.
+            let name = unsafe { ak::utf16_string_units(&name) };
+            // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access
+            // on the document thread.
+            unsafe { &*arena.cast::<LayoutNodeArena>() }
+                .counters_sets()
+                .borrow_mut()
+                .counter_values_for_use(owner, &name)
+        }
+        None => vec![0],
+    };
+    for value in values {
+        // SAFETY: The caller keeps `context` valid for the callback.
+        unsafe { callback(context, value) };
+    }
+}
+
+/// Whether the innermost `list-item` counter in the counters set of the element `style_node` names
+/// counts forward and was created by that element.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_innermost_list_item_counter_is_own_forward_counter(
+    arena: *mut c_void,
+    style_node: u32,
+) -> bool {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(element) = StyleNodeID::from_raw(style_node) else {
+        return false;
+    };
+    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the
+    // document thread.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }
+        .counters_sets()
+        .borrow()
+        .innermost_list_item_counter_is_own_forward_counter(element)
 }
 
 #[unsafe(no_mangle)]

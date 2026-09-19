@@ -99,7 +99,6 @@ pub struct FfiDomTreeBuilderCallbacks {
     pub builder: *mut c_void,
     pub clear_stale_layout_node: unsafe extern "C" fn(*mut c_void, u32),
     pub clear_stale_subtree: unsafe extern "C" fn(*mut c_void, u32, FfiStaleSubtreeClearScope),
-    pub resolve_counters: unsafe extern "C" fn(*mut c_void, FfiPseudoElement),
     pub create_first_letter_nodes:
         unsafe extern "C" fn(*mut c_void, *mut c_void, FfiFirstLetterTarget) -> FfiFirstLetterNodes,
     pub push_principal_frame: unsafe extern "C" fn(*mut c_void, u32) -> FfiPrincipalNodeFrame,
@@ -1529,8 +1528,8 @@ unsafe fn update_layout_tree_for_display_contents(
                     style_node,
                     FfiStaleSubtreeClearScope::Inclusive,
                 );
-                (host.callbacks.resolve_counters)(element, FfiPseudoElement::None);
             }
+            resolve_counters(host, style_node, FfiPseudoElement::None);
         }
 
         if should_create_layout_node && !content_visibility_hidden && !context.has_svg_root {
@@ -1776,8 +1775,7 @@ unsafe fn update_principal_node_descendants(
         if should_create_layout_node || update.update_pseudo_elements_in_place {
             // Resolve counters now that we exist in the layout tree.
             if should_create_layout_node && update.kind.is_element() {
-                // SAFETY: `dom_node` is a live Element when this fact is set.
-                unsafe { (host.callbacks.resolve_counters)(dom_node, FfiPseudoElement::None) };
+                resolve_counters(host, update.style_node, FfiPseudoElement::None);
             }
 
             // Add the ::before pseudo-element before walking normal children.
@@ -2979,6 +2977,26 @@ fn pseudo_element_may_need_a_box(
         .is_invalid()
 }
 
+/// Resolves the CSS counters set of the element `style_node` names, or of one of its pseudo-elements,
+/// now that its box is in the layout tree.
+fn resolve_counters(host: &DomTreeBuilderHost<'_>, style_node: u32, pseudo_element: FfiPseudoElement) {
+    let element_style_node =
+        StyleNodeID::from_raw(style_node).expect("an element that resolves counters has an identity");
+    let generated_for = match pseudo_element {
+        FfiPseudoElement::None => 0,
+        FfiPseudoElement::Before => GENERATED_FOR_BEFORE,
+        FfiPseudoElement::After => GENERATED_FOR_AFTER,
+        FfiPseudoElement::Marker => GENERATED_FOR_MARKER,
+        FfiPseudoElement::Backdrop => GENERATED_FOR_BACKDROP,
+        FfiPseudoElement::Other => unreachable!("only a box-generating pseudo-element resolves counters"),
+    };
+    let owner = crate::layout::counters::CounterOwner {
+        element: element_style_node,
+        generated_for,
+    };
+    crate::layout::counters::resolve_counters(host.layout().arena(), owner);
+}
+
 fn create_pseudo_element(
     host: &DomTreeBuilderHost<'_>,
     state: &mut TreeBuilderState,
@@ -2996,7 +3014,8 @@ fn create_pseudo_element(
     // SAFETY: The builder owns frame storage that remains live throughout the build.
     let frame = unsafe { (callbacks.push_frame)(callbacks.builder) };
     assert!(!frame.is_null());
-    let unplaced_box = create_pseudo_element_with_frame(host, state, frame, element, pseudo_element, insertion_mode);
+    let unplaced_box =
+        create_pseudo_element_with_frame(host, state, frame, element, style_node, pseudo_element, insertion_mode);
     // SAFETY: `frame` is the most recently pushed pseudo-element frame and Rust no longer uses it.
     unsafe { (callbacks.pop_frame)(callbacks.builder, frame) };
     unplaced_box
@@ -3007,6 +3026,7 @@ fn create_pseudo_element_with_frame(
     state: &mut TreeBuilderState,
     frame: *mut c_void,
     element: *mut c_void,
+    style_node: u32,
     pseudo_element: FfiPseudoElement,
     insertion_mode: Option<FfiInsertionMode>,
 ) -> Option<UnplacedLayoutNode> {
@@ -3069,8 +3089,7 @@ fn create_pseudo_element_with_frame(
             0,
         );
     }
-    // SAFETY: The element remains live and its pseudo-element layout node is attached when requested.
-    unsafe { (host.callbacks.resolve_counters)(element, pseudo_element) };
+    resolve_counters(host, style_node, pseudo_element);
 
     // FIXME: This code actually computes style for element::marker, and shouldn't for element::pseudo::marker.
     if layout_node_kind == NodeKind::ListItemBox {
