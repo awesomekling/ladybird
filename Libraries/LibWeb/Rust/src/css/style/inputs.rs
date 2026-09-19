@@ -478,6 +478,11 @@ impl RetainedState {
         self.tree.layout_tree_update_reuse_reasons(node)
     }
 
+    /// Retire the layout tree update marks the node holds, own and child alike.
+    pub fn clear_layout_tree_update_marks(&mut self, node: StyleNodeID) {
+        self.tree.clear_layout_tree_update_marks(node);
+    }
+
     /// Fold one layout tree update mark into the node's, answering whether its own bit changed.
     pub fn merge_layout_tree_update_mark(&mut self, node: StyleNodeID, value: bool, reuse_reason: u8) -> bool {
         self.tree
