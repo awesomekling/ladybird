@@ -208,6 +208,7 @@ fn scroll_offset_reader(
     scroll_offset_of_layout_node: unsafe extern "C" fn(*mut c_void) -> FfiCssPixelPoint,
 ) -> impl Fn(NodeSlotId) -> CssPixelPoint {
     move |node| {
+        crate::painting::seal::note_host_call("scroll_offset_of_layout_node");
         // SAFETY: The C++ host reads the offset of a live layout node shell synchronously.
         unsafe { scroll_offset_of_layout_node(arena.node_shell(node)) }.into()
     }
@@ -570,6 +571,7 @@ pub unsafe extern "C" fn layout_arena_prepare_for_rendering(
     visual_context_update_pending: bool,
 ) -> FfiRenderingPreparationOutcome {
     let arena = unsafe { arena_from_handle(arena) };
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
     let background_source_changed = arena
         .paint_state()
         .borrow_mut()
@@ -1042,6 +1044,7 @@ pub unsafe extern "C" fn layout_arena_update_accumulated_visual_contexts(
     if !arena_ref.paintable_row_is_populated(viewport) {
         return crate::painting::host::FfiVisualContextUpdateOutcome::default();
     }
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
     let inputs = callbacks.tree_inputs();
     let mut state = std::mem::take(&mut arena_ref.paint_state().borrow_mut().visual_context);
     state.release_quarantined_slots_while_no_handle_is_retained();
@@ -1180,6 +1183,7 @@ pub unsafe extern "C" fn layout_arena_update_visual_viewport_transform(
     callbacks: FfiVisualContextHostCallbacks,
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
     let mut paint_state = arena.paint_state().borrow_mut();
     let Some(tree) = &mut paint_state.visual_context.tree else {
         return false;
@@ -1243,6 +1247,7 @@ pub unsafe extern "C" fn layout_arena_refresh_scroll_state(
     publish: unsafe extern "C" fn(*mut c_void, *const libgfx_rust::FloatPoint, usize),
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollStateRefresh);
     let snapshot = {
         let paintable_rows = arena.paintable_rows();
         let mut paint_state = arena.paint_state().borrow_mut();
@@ -1344,6 +1349,7 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
         };
         let copies_from_published_frame = source_frame.is_some();
         arena.set_paint_recording_in_progress(true);
+        let pass = crate::painting::seal::enter(crate::painting::seal::Pass::Recording);
         let recording = crate::painting::record::traversal::record_display_list(
             arena,
             &paint_state,
@@ -1379,6 +1385,7 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
                     false,
                 )
             });
+        drop(pass);
         arena.set_paint_recording_in_progress(false);
         (recording, recording_from_scratch)
     };
@@ -1537,6 +1544,7 @@ pub unsafe extern "C" fn layout_arena_publish_recording(
     let Some(pending) = arena.paint_state().borrow_mut().pending_recording.take() else {
         return 0;
     };
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::RecordingPublish);
     crate::painting::record::publish::publish_recording(arena, pending, &publish)
 }
 
@@ -2556,6 +2564,7 @@ pub unsafe extern "C" fn layout_arena_for_each_subtree_fragment_rect(
         for fragment in arena.paintable_side_data(current).fragments() {
             let shell = arena.shell_if_live(fragment.layout_node);
             let rect = crate::painting::text_fragment::absolute_rect(&paintable_rows, fragment).into();
+            crate::painting::seal::note_host_call("for_each_subtree_fragment_rect_consume");
             // SAFETY: The consumer copies its plain-data arguments synchronously.
             unsafe { consume(context, shell, rect) };
         }
@@ -3012,6 +3021,7 @@ pub unsafe extern "C" fn layout_arena_hit_test_caret_line_for_position(
     offset: usize,
     affinity_is_downstream: bool,
 ) -> crate::painting::host::FfiCaretLineForPosition {
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
     with_hit_test_list_and_caret_lines(arena, Default::default(), |list, arena| {
         match list.caret_line_for_position(arena, &callbacks, offset, affinity_is_downstream) {
             Some(line_index) => crate::painting::host::FfiCaretLineForPosition {
@@ -3125,6 +3135,7 @@ pub unsafe extern "C" fn layout_arena_sync_svg_paint_resources(
         if matches!(kind, SvgPaintResourceKind::Fill | SvgPaintResourceKind::Stroke) {
             let is_stroke = kind == SvgPaintResourceKind::Stroke;
             let mut published = PublishedSvgPaintServer::None;
+            crate::painting::seal::note_host_call("resolve_paint_server");
             // SAFETY: The host resolves synchronously from the live shell and only pushes into
             // the sink it is handed.
             unsafe { resolve_paint_server(arena.shell_if_live(slot), is_stroke, (&raw mut published).cast()) };
@@ -3152,6 +3163,7 @@ pub unsafe extern "C" fn layout_arena_sync_svg_paint_resources(
                 continue;
             }
             let mut primitives: Vec<SvgFilterPrimitive> = Vec::new();
+            crate::painting::seal::note_host_call("resolve_filter");
             // SAFETY: The host resolves synchronously from the live shell and only pushes into the
             // primitive list it is handed as its sink.
             let resolved = unsafe { resolve_filter(shell, operation.url_value.pointer, (&raw mut primitives).cast()) };
@@ -3322,6 +3334,7 @@ pub unsafe extern "C" fn layout_arena_hit_test_find_topmost_item(
     callbacks: crate::painting::host::FfiHitTestQueryCallbacks,
     point: FfiCssPixelPoint,
 ) -> crate::painting::host::FfiTopmostItem {
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
     with_hit_test_list_spatial_indexes_and_visual_context_tree(arena, false, Default::default(), |list, tree, arena| {
         ffi_topmost(list.find_topmost_item(arena, tree, &callbacks, point.into()))
     })
@@ -3336,6 +3349,7 @@ pub unsafe extern "C" fn layout_arena_hit_test_find_topmost_items_for_caret(
     callbacks: crate::painting::host::FfiHitTestQueryCallbacks,
     point: FfiCssPixelPoint,
 ) -> crate::painting::host::FfiTopmostItemsForCaret {
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
     with_hit_test_list_spatial_indexes_and_visual_context_tree(arena, false, Default::default(), |list, tree, arena| {
         let (caret_item, hit_item) = list.find_topmost_items_for_caret(arena, tree, &callbacks, point.into());
         crate::painting::host::FfiTopmostItemsForCaret {
@@ -3356,6 +3370,7 @@ pub unsafe extern "C" fn layout_arena_hit_test_all(
     push_context: *mut c_void,
     push: unsafe extern "C" fn(*mut c_void, usize),
 ) {
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
     let indices =
         with_hit_test_list_spatial_indexes_and_visual_context_tree(arena, false, Vec::new(), |list, tree, arena| {
             list.hit_test_all(arena, tree, &callbacks, point.into())
@@ -3442,6 +3457,7 @@ pub unsafe extern "C" fn layout_arena_hit_test_find_closest_line(
     scoped: bool,
     respect_clip: bool,
 ) -> crate::painting::host::FfiClosestLine {
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
     with_hit_test_list_spatial_indexes_and_visual_context_tree(arena, true, Default::default(), |list, tree, arena| {
         let closest = list.find_closest_line(
             arena,
@@ -3477,6 +3493,7 @@ pub unsafe extern "C" fn layout_arena_hit_test_adjacent_line(
     direction: u8,
     inline_coordinate_raw: i32,
 ) -> crate::painting::host::FfiAdjacentLine {
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
     let direction = if direction == 1 {
         crate::painting::hit_test::caret::CaretLineDirection::Next
     } else {

@@ -35,6 +35,7 @@ pub(crate) mod replaced_paint_facts;
 pub(crate) mod scroll_chain;
 pub(crate) mod scroll_snap;
 pub mod scrollable_overflow;
+pub(crate) mod seal;
 pub mod selection;
 pub mod stacking_context;
 pub mod style_queries;
