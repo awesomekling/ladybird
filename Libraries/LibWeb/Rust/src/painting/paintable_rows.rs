@@ -239,6 +239,7 @@ pub(crate) struct PaintableRowStore {
     layout_commit_generation: Cell<u64>,
     scroll_offsets: crate::painting::visual_context::scroll_state::ScrollOffsetColumn,
     unique_node_ids: UniqueNodeIdColumn,
+    visual_context_tree_inputs: Cell<crate::painting::host::FfiVisualContextTreeInputs>,
 }
 
 pub(crate) struct PaintableRows<Arena> {
@@ -731,6 +732,15 @@ impl LayoutNodeArena {
     /// The unique node id each box is the box of something with, as the document published it.
     pub(crate) fn unique_node_ids(&self) -> &UniqueNodeIdColumn {
         &self.paintable_rows.unique_node_ids
+    }
+
+    /// What the document last published about the viewport the render side draws into.
+    pub(crate) fn visual_context_tree_inputs(&self) -> crate::painting::host::FfiVisualContextTreeInputs {
+        self.paintable_rows.visual_context_tree_inputs.get()
+    }
+
+    pub(crate) fn publish_visual_context_tree_inputs(&self, inputs: crate::painting::host::FfiVisualContextTreeInputs) {
+        self.paintable_rows.visual_context_tree_inputs.set(inputs);
     }
 
     /// Counts the layout commits the arena has published. A main-side reader that remembers the

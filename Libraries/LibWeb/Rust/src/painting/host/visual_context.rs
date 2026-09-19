@@ -145,21 +145,6 @@ pub(crate) struct ResolvedSvgFilter {
     pub svg_filter_bounds: OptionalCssPixelRect,
 }
 
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiVisualContextHostCallbacks {
-    pub context: *mut c_void,
-    pub tree_inputs: unsafe extern "C" fn(*mut c_void) -> FfiVisualContextTreeInputs,
-}
-
-impl FfiVisualContextHostCallbacks {
-    pub(crate) fn tree_inputs(&self) -> FfiVisualContextTreeInputs {
-        crate::painting::seal::note_host_call("tree_inputs");
-        // SAFETY: The C++ host answers synchronously.
-        unsafe { (self.tree_inputs)(self.context) }
-    }
-}
-
 /// Whether a keyframe gives a property a value of its own, takes the target's underlying style
 /// for it, or leaves it out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

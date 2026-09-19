@@ -557,12 +557,10 @@ pub struct FfiRenderingPreparationOutcome {
 
 /// # Safety
 ///
-/// `arena` must be a live arena used on the document thread. Host callbacks must
-/// remain valid for this call and must not mutate layout geometry.
+/// `arena` must be a live arena used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_prepare_for_rendering(
     arena: *mut c_void,
-    callbacks: FfiVisualContextHostCallbacks,
     root_background_source: crate::painting::host::FfiRootBackgroundSource,
     visual_context_update_pending: bool,
 ) -> FfiRenderingPreparationOutcome {
@@ -595,7 +593,7 @@ pub unsafe extern "C" fn layout_arena_prepare_for_rendering(
                 &rows,
                 &state.scroll_state,
                 tree,
-                &callbacks.tree_inputs(),
+                &arena.visual_context_tree_inputs(),
             );
         }
         state.needs_to_refresh_scroll_state = true;
@@ -923,8 +921,6 @@ pub unsafe extern "C" fn layout_arena_paintable_visual_context_copy_node_indices
     });
 }
 
-use crate::painting::host::FfiVisualContextHostCallbacks;
-
 fn apply_walk_assignments(
     arena: &mut crate::layout::LayoutNodeArena,
     viewport: NodeSlotId,
@@ -1034,7 +1030,6 @@ fn paintables_with_mask_nodes_in_paint_order(
 pub unsafe extern "C" fn layout_arena_update_accumulated_visual_contexts(
     arena: *mut c_void,
     viewport: NodeSlotId,
-    callbacks: FfiVisualContextHostCallbacks,
 ) -> crate::painting::host::FfiVisualContextUpdateOutcome {
     use crate::painting::visual_context::dirty::{VisualContextGlobalRebuildReason, VisualContextUpdateScope};
     use crate::painting::visual_context::incremental::{
@@ -1045,7 +1040,7 @@ pub unsafe extern "C" fn layout_arena_update_accumulated_visual_contexts(
         return crate::painting::host::FfiVisualContextUpdateOutcome::default();
     }
     let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
-    let inputs = callbacks.tree_inputs();
+    let inputs = arena_ref.visual_context_tree_inputs();
     let mut state = std::mem::take(&mut arena_ref.paint_state().borrow_mut().visual_context);
     state.release_quarantined_slots_while_no_handle_is_retained();
 
@@ -1178,17 +1173,14 @@ pub unsafe extern "C" fn layout_arena_scroll_snapport_rect(
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_update_visual_viewport_transform(
-    arena: *mut c_void,
-    callbacks: FfiVisualContextHostCallbacks,
-) -> bool {
+pub unsafe extern "C" fn layout_arena_update_visual_viewport_transform(arena: *mut c_void) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
     let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
     let mut paint_state = arena.paint_state().borrow_mut();
     let Some(tree) = &mut paint_state.visual_context.tree else {
         return false;
     };
-    let inputs = callbacks.tree_inputs();
+    let inputs = arena.visual_context_tree_inputs();
     Rc::make_mut(tree).set_visual_viewport_transform(
         crate::painting::visual_context::node_values::visual_viewport_transform_data(&inputs),
     );
@@ -1241,7 +1233,6 @@ pub unsafe extern "C" fn layout_arena_sticky_spatial_node_index(arena: *mut c_vo
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_refresh_scroll_state(
     arena: *mut c_void,
-    callbacks: FfiVisualContextHostCallbacks,
     force: bool,
     sink: *mut c_void,
     publish: unsafe extern "C" fn(*mut c_void, *const libgfx_rust::FloatPoint, usize),
@@ -1259,7 +1250,7 @@ pub unsafe extern "C" fn layout_arena_refresh_scroll_state(
         crate::painting::visual_context::refresh::refresh_scroll_state(&paintable_rows, &mut state.scroll_state);
         let mut snapshot = state
             .scroll_state
-            .snapshot(callbacks.tree_inputs().device_pixels_per_css_pixel);
+            .snapshot(arena.visual_context_tree_inputs().device_pixels_per_css_pixel);
         // https://drafts.csswg.org/css-position/#sticky-pos
         if let Some(tree) = state.tree.as_deref() {
             tree.resolve_sticky_offsets_in_place(&mut snapshot);
@@ -2698,6 +2689,20 @@ pub unsafe extern "C" fn layout_arena_publish_scroll_offset(
         .publish(slot, offset.into());
 }
 
+/// Publishes what the render side needs to know about the viewport it draws into. The document
+/// publishes it before each pass that reads it, so no pass asks for it.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_publish_visual_context_tree_inputs(
+    arena: *mut c_void,
+    inputs: crate::painting::host::FfiVisualContextTreeInputs,
+) {
+    unsafe { arena_from_handle(arena) }.publish_visual_context_tree_inputs(inputs);
+}
+
 /// Publishes the unique node id of what a box is the box of, as the document names it. Called
 /// wherever that answer can change: a box being built for a DOM node, a box becoming the box of a
 /// pseudo-element, and the viewport's box, which is the document's.
@@ -3676,10 +3681,6 @@ mod tests {
 
     #[test]
     fn preparing_for_rendering_measures_root_overflow_before_recording_reads_it() {
-        unsafe extern "C" fn tree_inputs(_: *mut c_void) -> crate::painting::host::FfiVisualContextTreeInputs {
-            unreachable!("no visual context tree exists to refresh")
-        }
-
         let mut arena = LayoutNodeArena::new();
         let viewport = arena.allocate_for_test().slot;
         arena.data(viewport).kind.set(NodeKind::Viewport);
@@ -3711,10 +3712,6 @@ mod tests {
         let outcome = unsafe {
             layout_arena_prepare_for_rendering(
                 handle,
-                FfiVisualContextHostCallbacks {
-                    context: std::ptr::null_mut(),
-                    tree_inputs,
-                },
                 FfiRootBackgroundSource {
                     root_layout_node: root,
                     ..Default::default()
