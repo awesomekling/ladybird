@@ -183,20 +183,6 @@ CounterStyle::~CounterStyle()
     Parser::ValueParserFFI::rust_counter_style_release(m_rust_counter_style);
 }
 
-// https://drafts.csswg.org/css-counter-styles-3/#generate-a-counter
-Utf16String generate_a_counter_representation(RefPtr<CounterStyle const> const& counter_style, StyleScope const& style_scope, i32 value)
-{
-    // NB: The scope has settled its counter styles - and so published them - by the time a
-    //     representation is asked for: the counter style being asked about was resolved from a name
-    //     through `get_registered_counter_style`, which settles the cache.
-    auto representation = Parser::ValueParserFFI::rust_generate_a_counter_representation(
-        style_scope.document().layout_node_arena().handle(),
-        style_scope.style_engine_tree_scope().value(),
-        counter_style ? counter_style->rust_counter_style() : nullptr,
-        value);
-    return Utf16String::adopt_raw(representation);
-}
-
 bool counter_style_representation_depends_on_value(CounterStyle const& counter_style)
 {
     return Parser::ValueParserFFI::rust_counter_style_representation_depends_on_value(counter_style.rust_counter_style());

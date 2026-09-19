@@ -7,7 +7,6 @@
 #pragma once
 
 #include <AK/Utf16FlyString.h>
-#include <AK/Vector.h>
 #include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/Forward.h>
 
@@ -18,10 +17,8 @@ namespace Web::CSS {
 // must be clamped to that range." - https://drafts.csswg.org/css-lists-3/#auto-numbering
 using CounterValue = i32;
 
-// NB: The CSS counters sets live in the layout node arena, which resolves them during the layout
-//     tree build. These read them back, instantiating a counter that is used without existing.
-CounterValue counter_value_for_use(DOM::AbstractElement const&, Utf16FlyString const& name);
-Vector<CounterValue> counter_values_for_use(DOM::AbstractElement const&, Utf16FlyString const& name);
+// NB: The CSS counters sets live in the layout node arena, which resolves them during the layout tree
+//     build. This reads back the one thing the document asks about outside a build.
 bool innermost_list_item_counter_is_own_forward_counter(DOM::Element const&);
 
 Utf16FlyString const& list_item_counter_name();

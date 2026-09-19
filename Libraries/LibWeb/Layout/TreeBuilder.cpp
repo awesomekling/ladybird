@@ -341,25 +341,14 @@ static void publish_generated_content(DOM::AbstractElement const& element_refere
         return;
     }
 
-    Vector<ValueComparingRefPtr<CSS::CounterStyle const>> counter_style_dependencies;
+    auto const& style_scope = element_reference.style_scope();
     auto value = content_values.computed_content_value();
+    auto counter_style_dependencies = CSS::content_counter_style_dependencies(*value, style_scope);
     if (value->is_content()) {
-        auto const& style_scope = element_reference.style_scope();
         Vector<void const*> counter_styles;
-        auto resolve_counter_style = [&](CSS::StyleValue const& item) {
-            if (!item.is_counter())
-                return;
-            auto counter_style = item.as_counter().counter_style()->as_counter_style().resolve_counter_style(style_scope);
-            counter_styles.append(counter_style ? counter_style->rust_counter_style() : nullptr);
-            counter_style_dependencies.append(move(counter_style));
-        };
-        auto const& content_style_value = value->as_content();
-        for (auto const& item : content_style_value.content().values())
-            resolve_counter_style(*item);
-        if (auto alt_text = content_style_value.alt_text()) {
-            for (auto const& item : alt_text->values())
-                resolve_counter_style(*item);
-        }
+        counter_styles.ensure_capacity(counter_style_dependencies.size());
+        for (auto const& counter_style : counter_style_dependencies)
+            counter_styles.unchecked_append(counter_style ? counter_style->rust_counter_style() : nullptr);
         RustFFI::layout_arena_set_content_counter_styles(layout_node_arena_handle(element_reference), element_reference.element().style_node_id().value(),
             generated_for(element_reference), style_scope.style_engine_tree_scope().value(), counter_styles.data(), counter_styles.size());
     }

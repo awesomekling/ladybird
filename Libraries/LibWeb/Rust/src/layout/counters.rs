@@ -39,9 +39,9 @@ fn is_list_item_counter_name(name: &[u16]) -> bool {
     name == LIST_ITEM_COUNTER_NAME
 }
 
-/// A counter name as a reader of the counters set has it: from the host, or from a computed style.
+/// A counter name as a reader of the counters set has it.
 pub(crate) enum CounterName<'a> {
-    Host(ak::Utf16StringUnits<'a>),
+    /// A name a computed style spells.
     Css(&'a CssString),
     Units(&'a [u16]),
 }
@@ -49,15 +49,6 @@ pub(crate) enum CounterName<'a> {
 impl CounterName<'_> {
     fn matches(&self, counter_name: &CssString) -> bool {
         match self {
-            Self::Host(ak::Utf16StringUnits::Ascii(bytes)) => {
-                let counter_name = counter_name.units();
-                bytes.len() == counter_name.len()
-                    && bytes
-                        .iter()
-                        .zip(counter_name)
-                        .all(|(&byte, &unit)| u16::from(byte) == unit)
-            }
-            Self::Host(ak::Utf16StringUnits::Utf16(units)) => *units == counter_name.units(),
             Self::Css(name) => *name == counter_name,
             Self::Units(units) => *units == counter_name.units(),
         }
@@ -65,10 +56,6 @@ impl CounterName<'_> {
 
     fn to_css_string(&self) -> CssString {
         match self {
-            Self::Host(ak::Utf16StringUnits::Ascii(bytes)) => {
-                CssString::from_utf16(&bytes.iter().map(|&byte| u16::from(byte)).collect::<Vec<_>>())
-            }
-            Self::Host(ak::Utf16StringUnits::Utf16(units)) => CssString::from_utf16(units),
             Self::Css(name) => (*name).clone(),
             Self::Units(units) => CssString::from_utf16(units),
         }
