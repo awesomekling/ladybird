@@ -87,8 +87,7 @@ impl TreeBuilderState {
 // boxes whose layout attachment lies inside the cleared root; the unbounded scope always lets
 // them survive the cleanup.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum FfiStaleSubtreeClearScope {
+pub(crate) enum StaleSubtreeClearScope {
     Inclusive,
     InclusiveBoundedToRoot,
     DescendantsBoundedToRoot,
@@ -97,8 +96,10 @@ pub enum FfiStaleSubtreeClearScope {
 #[repr(C)]
 pub struct FfiDomTreeBuilderCallbacks {
     pub builder: *mut c_void,
-    pub clear_stale_layout_node: unsafe extern "C" fn(*mut c_void, u32),
-    pub clear_stale_subtree: unsafe extern "C" fn(*mut c_void, u32, FfiStaleSubtreeClearScope),
+    /// Clears one node's stale layout box, answering whether its subtree must survive with it.
+    /// The second identity is the root of the subtree being cleared, or 0 when the clear is not
+    /// bounded to one; only an SVG resource box reads it.
+    pub clear_stale_layout_node: unsafe extern "C" fn(*mut c_void, u32, u32) -> bool,
     pub create_first_letter_nodes:
         unsafe extern "C" fn(*mut c_void, *mut c_void, FfiFirstLetterTarget) -> FfiFirstLetterNodes,
     pub push_principal_frame: unsafe extern "C" fn(*mut c_void, u32) -> FfiPrincipalNodeFrame,
@@ -419,18 +420,65 @@ pub unsafe extern "C" fn rust_detach_top_layer_element_layout_subtree(
     }
 }
 
+/// Clears every stale layout node in the shadow-including subtree `root` names.
+///
+/// The DOM walk this replaced visited a node, then its shadow root's subtree, then its DOM
+/// children, and did nothing at all for a node the style mirror has not named: such a node holds
+/// no tree update mark and can have no box. So navigating the mirror's DOM child sequence reaches
+/// everything the DOM walk had work for, in the same order.
+fn clear_stale_subtree(host: &DomTreeBuilderHost<'_>, root: u32, scope: StaleSubtreeClearScope) {
+    let cleared_subtree_root = match scope {
+        StaleSubtreeClearScope::Inclusive => 0,
+        _ => root,
+    };
+    if scope == StaleSubtreeClearScope::DescendantsBoundedToRoot {
+        clear_stale_subtree_descendants(host, root, root, cleared_subtree_root);
+    } else {
+        clear_stale_node(host, root, root, cleared_subtree_root);
+    }
+}
+
+fn clear_stale_node(host: &DomTreeBuilderHost<'_>, node: u32, subtree_root: u32, cleared_subtree_root: u32) {
+    // A top layer member lays out as a sibling of the root element, so its boxes are not this
+    // subtree's to clear.
+    if node != subtree_root && host.rendered_in_top_layer(node) {
+        return;
+    }
+    // SAFETY: The builder remains live, and the identity names a live DOM node.
+    let subtree_survives =
+        unsafe { (host.callbacks.clear_stale_layout_node)(host.callbacks.builder, node, cleared_subtree_root) };
+    if subtree_survives {
+        return;
+    }
+    clear_stale_subtree_descendants(host, node, subtree_root, cleared_subtree_root);
+}
+
+fn clear_stale_subtree_descendants(
+    host: &DomTreeBuilderHost<'_>,
+    node: u32,
+    subtree_root: u32,
+    cleared_subtree_root: u32,
+) {
+    let shadow_root = host.shadow_root_style_node(node);
+    if shadow_root != 0 {
+        clear_stale_node(host, shadow_root, subtree_root, cleared_subtree_root);
+    }
+    let mut child = host.first_dom_child(node);
+    while child != 0 {
+        clear_stale_node(host, child, subtree_root, cleared_subtree_root);
+        child = host.next_dom_sibling(child);
+    }
+}
+
 /// Removes the stale layout subtree of every node a slot projects, for a slot whose own box hides
 /// its content.
 fn clear_stale_assigned_slottables(host: &DomTreeBuilderHost<'_>, slot_style_node: u32) {
     for index in 0..host.assigned_node_count(slot_style_node) {
-        // SAFETY: The builder remains live, and the identity names a live DOM node.
-        unsafe {
-            (host.callbacks.clear_stale_subtree)(
-                host.callbacks.builder,
-                host.assigned_node_at(slot_style_node, index),
-                FfiStaleSubtreeClearScope::InclusiveBoundedToRoot,
-            );
-        }
+        clear_stale_subtree(
+            host,
+            host.assigned_node_at(slot_style_node, index),
+            StaleSubtreeClearScope::InclusiveBoundedToRoot,
+        );
     }
 }
 
@@ -1468,7 +1516,7 @@ fn update_layout_tree_for_svg_switch_children(
             if child != rendered_child {
                 // SAFETY: The builder remains live, and `child` names a live DOM node.
                 unsafe {
-                    (host.callbacks.clear_stale_layout_node)(host.callbacks.builder, child);
+                    (host.callbacks.clear_stale_layout_node)(host.callbacks.builder, child, 0);
                 }
             }
             child = host.next_dom_sibling(child);
@@ -1521,14 +1569,7 @@ unsafe fn update_layout_tree_for_display_contents(
         }
 
         if should_create_layout_node {
-            // SAFETY: The builder and element remain live throughout this call.
-            unsafe {
-                (host.callbacks.clear_stale_subtree)(
-                    host.callbacks.builder,
-                    style_node,
-                    FfiStaleSubtreeClearScope::Inclusive,
-                );
-            }
+            clear_stale_subtree(host, style_node, StaleSubtreeClearScope::Inclusive);
             resolve_counters(host, style_node, FfiPseudoElement::None);
         }
 
@@ -1800,14 +1841,11 @@ unsafe fn update_principal_node_descendants(
         }
 
         if content_visibility_hidden {
-            // SAFETY: The builder remains live, and the identity names a live DOM node.
-            unsafe {
-                (host.callbacks.clear_stale_subtree)(
-                    host.callbacks.builder,
-                    update.style_node,
-                    FfiStaleSubtreeClearScope::DescendantsBoundedToRoot,
-                );
-            }
+            clear_stale_subtree(
+                host,
+                update.style_node,
+                StaleSubtreeClearScope::DescendantsBoundedToRoot,
+            );
         }
 
         // Asked for only where the answer can change what the walk descends into: a host with a
@@ -1879,14 +1917,7 @@ unsafe fn update_principal_node_descendants(
                         continue;
                     }
                     if has_unrendered_flat_tree_ancestor(host, member) {
-                        // SAFETY: The builder remains live, and the identity names a live DOM node.
-                        unsafe {
-                            (host.callbacks.clear_stale_subtree)(
-                                host.callbacks.builder,
-                                member,
-                                FfiStaleSubtreeClearScope::InclusiveBoundedToRoot,
-                            );
-                        }
+                        clear_stale_subtree(host, member, StaleSubtreeClearScope::InclusiveBoundedToRoot);
                         continue;
                     }
                     update_layout_tree(
@@ -2511,14 +2542,7 @@ fn update_principal_node_after_entry(
             }
         }
         // If no layout node was created, remove every stale layout and paint node from the shadow-including subtree.
-        // SAFETY: The builder remains live, and the identity names a live DOM node.
-        unsafe {
-            (host.callbacks.clear_stale_subtree)(
-                host.callbacks.builder,
-                update.style_node,
-                FfiStaleSubtreeClearScope::Inclusive,
-            );
-        }
+        clear_stale_subtree(host, update.style_node, StaleSubtreeClearScope::Inclusive);
     }
 
     if matches!(
