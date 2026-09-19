@@ -1347,6 +1347,14 @@ impl DomTreeBuilderHost<'_> {
             .child_needs_layout_tree_update(StyleNodeID::from_raw(style_node))
     }
 
+    /// A bit per pseudo-element kind the element's published style settles a record for, read once
+    /// per element because most elements settle none and one lookup answers for all the kinds.
+    fn published_pseudo_records(&self, style_node: u32) -> u32 {
+        self.layout()
+            .arena()
+            .published_pseudo_record_mask(StyleNodeID::from_raw(style_node))
+    }
+
     /// Whether the style store holds the element in the top layer.
     fn rendered_in_top_layer(&self, style_node: u32) -> bool {
         self.element_type_facts(style_node) & element_adjustment_fact::RENDERED_IN_TOP_LAYER != 0
@@ -1546,6 +1554,12 @@ unsafe fn update_layout_tree_for_display_contents(
         // SAFETY: The element remains live for the duration of the call.
         let facts = unsafe { (host.callbacks.display_contents_facts)(host.callbacks.builder, element) };
         let content_visibility_hidden = host.content_visibility_is_hidden(style_node);
+        // Only a pass that can generate a pseudo-element box asks which ones exist.
+        let published_pseudo_records = if should_create_layout_node {
+            host.published_pseudo_records(style_node)
+        } else {
+            0
+        };
         let (assigned_node_count, lays_out_dom_children) = dom_child_layout_plan(host, style_node);
 
         // A display:contents member builds its children through this path, so the top layer flag
@@ -1572,6 +1586,8 @@ unsafe fn update_layout_tree_for_display_contents(
                 host,
                 state,
                 element,
+                style_node,
+                published_pseudo_records,
                 FfiPseudoElement::Before,
                 Some(FfiInsertionMode::Append),
             );
@@ -1620,6 +1636,8 @@ unsafe fn update_layout_tree_for_display_contents(
                 host,
                 state,
                 element,
+                style_node,
+                published_pseudo_records,
                 FfiPseudoElement::After,
                 Some(FfiInsertionMode::Append),
             );
@@ -1749,6 +1767,12 @@ unsafe fn update_principal_node_descendants(
             )
         };
         let content_visibility_hidden = host.content_visibility_is_hidden(update.style_node);
+        // Only a pass that can generate a pseudo-element box asks which ones exist.
+        let published_pseudo_records = if should_create_layout_node || update.update_pseudo_elements_in_place {
+            host.published_pseudo_records(update.style_node)
+        } else {
+            0
+        };
         // The document owns a child sequence of its own; every other node here is named by the
         // identity it carries.
         let dom_children_owner = if update.kind.is_document() {
@@ -1785,6 +1809,8 @@ unsafe fn update_principal_node_descendants(
                     host,
                     state,
                     dom_node,
+                    update.style_node,
+                    published_pseudo_records,
                     FfiPseudoElement::Before,
                     Some(FfiInsertionMode::Prepend),
                 );
@@ -1958,6 +1984,8 @@ unsafe fn update_principal_node_descendants(
                         host,
                         state,
                         dom_node,
+                        update.style_node,
+                        published_pseudo_records,
                         FfiPseudoElement::Marker,
                         Some(FfiInsertionMode::Prepend),
                     );
@@ -1967,6 +1995,8 @@ unsafe fn update_principal_node_descendants(
                     host,
                     state,
                     dom_node,
+                    update.style_node,
+                    published_pseudo_records,
                     FfiPseudoElement::After,
                     Some(FfiInsertionMode::Append),
                 );
@@ -1994,6 +2024,8 @@ unsafe fn update_principal_node_descendants(
                 host,
                 state,
                 dom_node,
+                update.style_node,
+                published_pseudo_records,
                 FfiPseudoElement::After,
                 Some(FfiInsertionMode::Append),
             );
@@ -2330,8 +2362,15 @@ fn update_principal_node_after_entry(
             } else {
                 Some(FfiInsertionMode::Append)
             };
-            let unplaced_backdrop =
-                create_pseudo_element(host, update.state, dom_node, FfiPseudoElement::Backdrop, insertion_mode);
+            let unplaced_backdrop = create_pseudo_element(
+                host,
+                update.state,
+                dom_node,
+                update.style_node,
+                0,
+                FfiPseudoElement::Backdrop,
+                insertion_mode,
+            );
             if let Some(backdrop) = unplaced_backdrop {
                 assert!(placement.may_replace_existing_layout_node);
                 let layout_host = host.layout();
@@ -2856,14 +2895,57 @@ pub(crate) fn pseudo_element_decision(facts: FfiPseudoElementFacts) -> FfiPseudo
     })
 }
 
+/// The pseudo-element kind the style store numbers this one by, for the kinds it settles a record
+/// for. `::backdrop` is deliberately not one of them, so nothing here can answer for it.
+fn published_pseudo_kind(pseudo_element: FfiPseudoElement) -> Option<u8> {
+    match pseudo_element {
+        FfiPseudoElement::After => Some(GENERATED_FOR_AFTER - 1),
+        FfiPseudoElement::Before => Some(GENERATED_FOR_BEFORE - 1),
+        FfiPseudoElement::Marker => Some(GENERATED_FOR_MARKER - 1),
+        FfiPseudoElement::Backdrop | FfiPseudoElement::Other | FfiPseudoElement::None => None,
+    }
+}
+
+/// Whether the walk has anything to do for one pseudo-element of the element `style_node` names.
+///
+/// A pseudo-element the style store settles no record for generates no box. It can still hold one
+/// from before its record went away, and the box has to be given up - so only a kind with neither
+/// is passed over entirely, without a frame ever being pushed for it.
+fn pseudo_element_may_need_a_box(
+    host: &DomTreeBuilderHost<'_>,
+    style_node: u32,
+    published_pseudo_records: u32,
+    pseudo_element: FfiPseudoElement,
+) -> bool {
+    let Some(pseudo_kind) = published_pseudo_kind(pseudo_element) else {
+        return true;
+    };
+    if published_pseudo_records & (1 << pseudo_kind) != 0 {
+        return true;
+    }
+    let Some(element) = StyleNodeID::from_raw(style_node) else {
+        return true;
+    };
+    let layout = host.layout();
+    !layout
+        .arena()
+        .bound_pseudo_element_row(element, pseudo_kind + 1)
+        .is_invalid()
+}
+
 fn create_pseudo_element(
     host: &DomTreeBuilderHost<'_>,
     state: &mut TreeBuilderState,
     element: *mut c_void,
+    style_node: u32,
+    published_pseudo_records: u32,
     pseudo_element: FfiPseudoElement,
     insertion_mode: Option<FfiInsertionMode>,
 ) -> Option<UnplacedLayoutNode> {
     assert!(!element.is_null());
+    if !pseudo_element_may_need_a_box(host, style_node, published_pseudo_records, pseudo_element) {
+        return None;
+    }
     let callbacks = &host.callbacks.pseudo;
     // SAFETY: The builder owns frame storage that remains live throughout the build.
     let frame = unsafe { (callbacks.push_frame)(callbacks.builder) };
