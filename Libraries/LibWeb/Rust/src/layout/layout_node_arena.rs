@@ -611,6 +611,7 @@ pub(crate) struct LayoutNodeArena {
     /// slot. A layout pass reads these once per SVG box, so the column is a dense index rather than
     /// a map, and only a row built for an SVG element holds a value.
     svg_attribute_facts: RefCell<Vec<Option<Box<FfiSvgAttributeFacts>>>>,
+    svg_points: RefCell<Vec<Option<std::rc::Rc<[super::svg_formatting_context::FfiFloatPoint]>>>>,
     run_used_records: RefCell<Vec<RunRecordSlot>>,
     next_run_nonce: Cell<u64>,
     live_run_nonces: RefCell<Vec<u64>>,
@@ -713,6 +714,7 @@ impl LayoutNodeArena {
             layer_image_paint_facts: RefCell::new(HashMap::default()),
             svg_paint_resources: crate::painting::svg_paint_resources::SvgPaintResources::default(),
             svg_attribute_facts: RefCell::new(Vec::new()),
+            svg_points: RefCell::new(Vec::new()),
             run_used_records: RefCell::new(Vec::new()),
             next_run_nonce: Cell::new(1),
             live_run_nonces: RefCell::new(Vec::new()),
@@ -1050,6 +1052,9 @@ impl LayoutNodeArena {
         self.layer_image_paint_facts.get_mut().remove(&id);
         self.svg_paint_resources.forget_slot(id);
         if let Some(slot) = self.svg_attribute_facts.get_mut().get_mut(index as usize) {
+            *slot = None;
+        }
+        if let Some(slot) = self.svg_points.get_mut().get_mut(index as usize) {
             *slot = None;
         }
         self.paint_state.get_mut().selection_pseudo_styles.remove(&id);
@@ -2382,6 +2387,35 @@ impl LayoutNodeArena {
         match self.svg_attribute_facts.borrow().get(id.slot_index() as usize) {
             Some(Some(facts)) => **facts,
             _ => FfiSvgAttributeFacts::default(),
+        }
+    }
+
+    /// The `points` list a <polyline> or <polygon> parsed, shared by every row its element has.
+    pub(crate) fn svg_points(
+        &self,
+        id: NodeSlotId,
+    ) -> Option<std::rc::Rc<[super::svg_formatting_context::FfiFloatPoint]>> {
+        self.svg_points
+            .borrow()
+            .get(id.slot_index() as usize)
+            .cloned()
+            .flatten()
+    }
+
+    pub(crate) fn set_svg_points(&self, id: NodeSlotId, points: &[super::svg_formatting_context::FfiFloatPoint]) {
+        self.assert_owner_thread();
+        if !self.slot_is_live(id) {
+            return;
+        }
+        let shared: Option<std::rc::Rc<[super::svg_formatting_context::FfiFloatPoint]>> =
+            (!points.is_empty()).then(|| points.into());
+        for row in self.rows_sharing_dom_node_with(id) {
+            let index = row.slot_index() as usize;
+            let mut column = self.svg_points.borrow_mut();
+            if column.len() <= index {
+                column.resize_with(index + 1, || None);
+            }
+            column[index] = shared.clone();
         }
     }
 
