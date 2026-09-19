@@ -1632,6 +1632,17 @@ impl LayoutNodeArena {
         }
     }
 
+    /// Whether the text node's data is nothing but ASCII whitespace. Anything that is not a text
+    /// node has no data and answers no.
+    pub(crate) fn text_is_ascii_whitespace(&self, style_node: Option<StyleNodeID>) -> bool {
+        match style_node {
+            Some(style_node) if style_node.is_text() => {
+                self.with_style_engine(|engine| engine.text_is_ascii_whitespace(style_node))
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn published_box_facts(&self, style_node: Option<StyleNodeID>) -> Option<PublishedBoxFacts> {
         let style_node = style_node?;
         style_node.element_index()?;

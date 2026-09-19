@@ -483,6 +483,17 @@ impl RetainedState {
         self.tree.clear_layout_tree_update_marks(node);
     }
 
+    /// Whether the text node's data is nothing but ASCII whitespace.
+    #[must_use]
+    pub fn text_is_ascii_whitespace(&self, node: StyleNodeID) -> bool {
+        self.tree.text_is_ascii_whitespace(node)
+    }
+
+    /// Record the text node's whitespace-only state, as its data now spells it.
+    pub fn set_text_is_ascii_whitespace(&mut self, node: StyleNodeID, value: bool) {
+        self.tree.set_text_is_ascii_whitespace(node, value, &mut self.memory);
+    }
+
     /// Fold one layout tree update mark into the node's, answering whether its own bit changed.
     pub fn merge_layout_tree_update_mark(&mut self, node: StyleNodeID, value: bool, reuse_reason: u8) -> bool {
         self.tree
