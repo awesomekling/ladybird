@@ -682,15 +682,20 @@ ErrorOr<void> apply_macos_sandbox(SeatbeltProfile const& options)
 #if defined(AK_OS_LINUX)
 ErrorOr<void> restrict_filesystem_with_landlock(ReadonlySpan<LandlockPath> paths)
 {
-#    if defined(__NR_landlock_create_ruleset) && defined(__NR_landlock_add_rule) && defined(__NR_landlock_restrict_self)
+    // Without Landlock, nothing limits the files a helper can open, so we refuse to go on. Running without it has to
+    // be a choice that the user makes with --disable-sandbox.
     auto landlock_abi = syscall(__NR_landlock_create_ruleset, nullptr, 0, LANDLOCK_CREATE_RULESET_VERSION);
-    if (landlock_abi < 0) {
-        if (errno == ENOSYS || errno == EOPNOTSUPP || errno == EINVAL)
-            return {};
+    if (landlock_abi < 0 && errno != ENOSYS && errno != EOPNOTSUPP)
         return Error::from_syscall("landlock_create_ruleset(LANDLOCK_CREATE_RULESET_VERSION)"sv, errno);
+    if (landlock_abi <= 0)
+        return Error::from_string_literal("Landlock is not available in this kernel, so the helper cannot be sandboxed (--disable-sandbox runs helpers without a sandbox)");
+
+    // Before ABI 3, Landlock does not handle truncation, so a helper can truncate any file that it can open.
+    static bool s_warned_about_truncation = false;
+    if (landlock_abi < 3 && !s_warned_about_truncation) {
+        s_warned_about_truncation = true;
+        warnln("Landlock ABI {} does not restrict file truncation. Linux 6.2 or later is needed for that.", landlock_abi);
     }
-    if (landlock_abi == 0)
-        return {};
 
     landlock_ruleset_attr ruleset_attributes {};
     ruleset_attributes.handled_access_fs = LANDLOCK_ACCESS_FS_EXECUTE
@@ -707,19 +712,19 @@ ErrorOr<void> restrict_filesystem_with_landlock(ReadonlySpan<LandlockPath> paths
         | LANDLOCK_ACCESS_FS_MAKE_BLOCK
         | LANDLOCK_ACCESS_FS_MAKE_SYM;
 
-#        ifdef LANDLOCK_ACCESS_FS_REFER
+#    ifdef LANDLOCK_ACCESS_FS_REFER
     if (landlock_abi >= 2)
         ruleset_attributes.handled_access_fs |= LANDLOCK_ACCESS_FS_REFER;
-#        endif
-#        ifdef LANDLOCK_ACCESS_FS_TRUNCATE
+#    endif
+#    ifdef LANDLOCK_ACCESS_FS_TRUNCATE
     if (landlock_abi >= 3)
         ruleset_attributes.handled_access_fs |= LANDLOCK_ACCESS_FS_TRUNCATE;
-#        endif
-#        if defined(LANDLOCK_ACCESS_NET_BIND_TCP) && defined(LANDLOCK_ACCESS_NET_CONNECT_TCP)
+#    endif
+#    if defined(LANDLOCK_ACCESS_NET_BIND_TCP) && defined(LANDLOCK_ACCESS_NET_CONNECT_TCP)
     auto ruleset_attributes_size = offsetof(landlock_ruleset_attr, handled_access_net);
-#        else
+#    else
     auto ruleset_attributes_size = sizeof(ruleset_attributes);
-#        endif
+#    endif
     auto ruleset_fd = syscall(__NR_landlock_create_ruleset, &ruleset_attributes, ruleset_attributes_size, 0);
     if (ruleset_fd < 0)
         return Error::from_syscall("landlock_create_ruleset"sv, errno);
@@ -756,10 +761,10 @@ ErrorOr<void> restrict_filesystem_with_landlock(ReadonlySpan<LandlockPath> paths
         case LandlockPath::Access::ReadWrite: {
             path_beneath.allowed_access = LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_WRITE_FILE;
 
-#        ifdef LANDLOCK_ACCESS_FS_TRUNCATE
+#    ifdef LANDLOCK_ACCESS_FS_TRUNCATE
             if (landlock_abi >= 3)
                 path_beneath.allowed_access |= LANDLOCK_ACCESS_FS_TRUNCATE;
-#        endif
+#    endif
 
             if (landlock_path.is_directory) {
                 path_beneath.allowed_access |= LANDLOCK_ACCESS_FS_READ_DIR
@@ -770,10 +775,10 @@ ErrorOr<void> restrict_filesystem_with_landlock(ReadonlySpan<LandlockPath> paths
                     | LANDLOCK_ACCESS_FS_MAKE_SOCK
                     | LANDLOCK_ACCESS_FS_MAKE_FIFO;
 
-#        ifdef LANDLOCK_ACCESS_FS_REFER
+#    ifdef LANDLOCK_ACCESS_FS_REFER
                 if (landlock_abi >= 2)
                     path_beneath.allowed_access |= LANDLOCK_ACCESS_FS_REFER;
-#        endif
+#    endif
             }
             break;
         }
@@ -785,9 +790,6 @@ ErrorOr<void> restrict_filesystem_with_landlock(ReadonlySpan<LandlockPath> paths
 
     if (syscall(__NR_landlock_restrict_self, ruleset_fd, 0) < 0)
         return Error::from_syscall("landlock_restrict_self"sv, errno);
-#    else
-    (void)paths;
-#    endif
 
     return {};
 }
