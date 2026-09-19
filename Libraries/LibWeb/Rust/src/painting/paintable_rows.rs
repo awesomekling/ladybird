@@ -189,6 +189,7 @@ pub(crate) struct PaintableRowStore {
     committed_fragment_links: RefCell<Vec<CommittedFragmentLinkSlot>>,
     chrome_state_callback: Cell<Option<ChromeStateCallback>>,
     paint_recording_in_progress: Cell<bool>,
+    layout_commit_generation: Cell<u64>,
 }
 
 pub(crate) struct PaintableRows<Arena> {
@@ -671,6 +672,18 @@ impl LayoutNodeArena {
 
     pub(crate) fn paintable_row_count(&self) -> usize {
         self.paintable_rows.side_data.borrow().len()
+    }
+
+    /// Counts the layout commits the arena has published. A main-side reader that remembers the
+    /// generation it read at can tell whether the committed geometry it saw is still the one
+    /// published, without asking what was dirty at the time.
+    pub(crate) fn layout_commit_generation(&self) -> u64 {
+        self.paintable_rows.layout_commit_generation.get()
+    }
+
+    pub(crate) fn note_layout_commit(&self) {
+        let generation = &self.paintable_rows.layout_commit_generation;
+        generation.set(generation.get().wrapping_add(1));
     }
 
     pub(crate) fn set_paint_recording_in_progress(&self, in_progress: bool) {

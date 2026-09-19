@@ -1533,6 +1533,7 @@ GC::Ref<JS::Object> Internals::join_counters_object() const
         object->define_direct_property("cleanReadNanoseconds"_utf16_fly_string, JS::Value(counters.clean_read_nanoseconds), JS::default_attributes);
         object->define_direct_property("maxNanoseconds"_utf16_fly_string, JS::Value(counters.max_nanoseconds), JS::default_attributes);
         object->define_direct_property("nanosecondsSinceMutation"_utf16_fly_string, JS::Value(counters.nanoseconds_since_mutation), JS::default_attributes);
+        object->define_direct_property("joinsThatPublishedNothing"_utf16_fly_string, JS::Value(counters.joins_that_published_nothing), JS::default_attributes);
         return object;
     };
 
@@ -1548,6 +1549,7 @@ GC::Ref<JS::Object> Internals::join_counters_object() const
         totals.clean_read_nanoseconds += counters.clean_read_nanoseconds;
         totals.max_nanoseconds = max(totals.max_nanoseconds, counters.max_nanoseconds);
         totals.nanoseconds_since_mutation += counters.nanoseconds_since_mutation;
+        totals.joins_that_published_nothing += counters.joins_that_published_nothing;
         if (counters.calls == 0)
             continue;
         auto name = Utf16FlyString::from_utf16(DOM::to_string(static_cast<DOM::UpdateLayoutReason>(reason)));
@@ -1557,6 +1559,10 @@ GC::Ref<JS::Object> Internals::join_counters_object() const
     auto object = JS::Object::create(realm, nullptr);
     object->define_direct_property("totals"_utf16_fly_string, counters_object(totals), JS::default_attributes);
     object->define_direct_property("byReason"_utf16_fly_string, by_reason, JS::default_attributes);
+    auto const& document = window().associated_document();
+    object->define_direct_property("layoutCommitGeneration"_utf16_fly_string, JS::Value(document.layout_commit_generation()), JS::default_attributes);
+    object->define_direct_property("styleTransactionVersion"_utf16_fly_string, JS::Value(document.style_computer().style_engine().published_transaction_version().transaction), JS::default_attributes);
+    object->define_direct_property("styleProgramVersion"_utf16_fly_string, JS::Value(document.style_computer().style_engine().published_transaction_version().program), JS::default_attributes);
     return object;
 }
 

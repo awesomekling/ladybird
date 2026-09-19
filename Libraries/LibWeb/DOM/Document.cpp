@@ -741,6 +741,13 @@ bool Document::is_clean_for_layout_geometry_read() const
         && !m_top_layer_needs_layout_zone_rebuild;
 }
 
+u64 Document::layout_commit_generation() const
+{
+    if (!m_layout_node_arena)
+        return 0;
+    return Layout::RustFFI::layout_arena_layout_commit_generation(m_layout_node_arena->handle());
+}
+
 Document::JoinScope::JoinScope(Document& document, UpdateLayoutReason reason)
     : m_document(document)
     , m_reason(reason)
@@ -763,6 +770,8 @@ Document::JoinScope::JoinScope(Document& document, UpdateLayoutReason reason)
     }
 
     ++counters.joins;
+    m_layout_commit_generation = m_document.layout_commit_generation();
+    m_style_transaction_version = m_document.style_computer().style_engine().published_transaction_version().transaction;
     // A document that has not been dirtied yet has no mutation to measure against.
     if (m_document.m_last_render_state_mutation_nanoseconds != 0)
         counters.nanoseconds_since_mutation += m_started_at_nanoseconds - m_document.m_last_render_state_mutation_nanoseconds;
@@ -777,8 +786,12 @@ Document::JoinScope::~JoinScope()
     auto elapsed = MonotonicTime::now().nanoseconds() - m_started_at_nanoseconds;
     auto& counters = m_document.m_join_counters[to_underlying(m_reason)];
     counters.total_nanoseconds += elapsed;
-    if (m_render_state_was_clean)
+    if (m_render_state_was_clean) {
         counters.clean_read_nanoseconds += elapsed;
+    } else if (m_document.layout_commit_generation() == m_layout_commit_generation
+        && m_document.style_computer().style_engine().published_transaction_version().transaction == m_style_transaction_version) {
+        ++counters.joins_that_published_nothing;
+    }
     counters.max_nanoseconds = max(counters.max_nanoseconds, elapsed);
 }
 
@@ -806,17 +819,19 @@ void Document::dump_join_counters() const
         totals.clean_read_nanoseconds += counters.clean_read_nanoseconds;
         totals.max_nanoseconds = max(totals.max_nanoseconds, counters.max_nanoseconds);
         totals.nanoseconds_since_mutation += counters.nanoseconds_since_mutation;
+        totals.joins_that_published_nothing += counters.joins_that_published_nothing;
     }
 
-    dbgln("Joins: {} calls, {} joins, {} clean reads, {} nested, {:.3f}ms blocked ({:.3f}ms of it on clean reads)",
-        totals.calls, totals.joins, totals.clean_reads, totals.nested,
+    dbgln("Joins: {} calls, {} joins ({} published nothing), {} clean reads, {} nested, {:.3f}ms blocked ({:.3f}ms of it on clean reads)",
+        totals.calls, totals.joins, totals.joins_that_published_nothing, totals.clean_reads, totals.nested,
         totals.total_nanoseconds / 1'000'000.0, totals.clean_read_nanoseconds / 1'000'000.0);
     for (auto reason : reasons) {
         auto const& counters = m_join_counters[reason];
-        dbgln("  {:>9.3f}ms ({:>8.3f}ms clean) {:>7} joins {:>7} clean {:>7} nested  max {:>8.3f}ms  since mutation {:>9.3f}ms  {}",
+        dbgln("  {:>9.3f}ms ({:>8.3f}ms clean) {:>7} joins ({:>7} idle) {:>7} clean {:>7} nested  max {:>8.3f}ms  since mutation {:>9.3f}ms  {}",
             counters.total_nanoseconds / 1'000'000.0,
             counters.clean_read_nanoseconds / 1'000'000.0,
             counters.joins,
+            counters.joins_that_published_nothing,
             counters.clean_reads,
             counters.nested,
             counters.max_nanoseconds / 1'000'000.0,

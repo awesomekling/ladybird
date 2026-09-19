@@ -110,7 +110,6 @@ static void apply_document_style_invalidation_after_style_change(DOM::Document& 
 // transaction's scope.
 struct StyleEngineTransaction {
     Vector<StyleEngine::PublishedStyleDelta> reactions;
-    Optional<StyleEngine::PublishedTransactionVersion> published_version;
     bool prefers_broad_matching_batch { false };
     // The transaction continues the style change whose reactions were applied last, one tree
     // generation further, rather than answering new inputs.
@@ -143,7 +142,7 @@ static StyleEngineTransaction take_style_engine_transaction(DOM::Document& docum
     document.style_invalidation_counters().style_update_submission_microseconds += published_transaction.submission_microseconds;
     document.style_invalidation_counters().style_update_bridge_microseconds += published_transaction.bridge_microseconds;
     if (!published_transaction.reactions.is_empty())
-        transaction.published_version = published_transaction.version;
+        style_computer.style_engine().note_published_transaction_version(published_transaction.version);
     for (auto const& answer : published_transaction.reactions) {
         // The complete answer remains in Rust transaction scratch under this node. The identity
         // names both the semantic reaction and the payload that consumes it.
