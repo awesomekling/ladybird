@@ -617,6 +617,10 @@ pub(crate) struct LayoutNodeArena {
     /// column by the element rather than by the box.
     svg_attribute_facts: RefCell<HashMap<StyleNodeID, Box<FfiSvgAttributeFacts>>>,
     svg_points: RefCell<HashMap<StyleNodeID, std::rc::Rc<[super::svg_formatting_context::FfiFloatPoint]>>>,
+    /// The counter styles each tree scope registers. The rule cache that settles them is C++'s,
+    /// and the document owns the result because a fallback chain is followed from the scope the
+    /// counter is used in, not from the scope the style was written in.
+    counter_styles: RefCell<crate::css::counter_representation::CounterStyleRegistry>,
     run_used_records: RefCell<Vec<RunRecordSlot>>,
     next_run_nonce: Cell<u64>,
     live_run_nonces: RefCell<Vec<u64>>,
@@ -720,6 +724,7 @@ impl LayoutNodeArena {
             svg_paint_resources: crate::painting::svg_paint_resources::SvgPaintResources::default(),
             svg_attribute_facts: RefCell::new(HashMap::default()),
             svg_points: RefCell::new(HashMap::default()),
+            counter_styles: RefCell::new(crate::css::counter_representation::CounterStyleRegistry::default()),
             run_used_records: RefCell::new(Vec::new()),
             next_run_nonce: Cell::new(1),
             live_run_nonces: RefCell::new(Vec::new()),
@@ -2449,6 +2454,25 @@ impl LayoutNodeArena {
         let retained = Self::published_reference_atoms(facts);
         drop(published);
         self.retain_published_reference_atoms(retained, replaced);
+    }
+
+    /// Replace what one tree scope registers. C++ rebuilds a scope's counter styles whole, so the
+    /// publication does too.
+    pub(crate) fn publish_counter_styles(
+        &self,
+        tree_scope: u32,
+        scope: crate::css::counter_representation::CounterStyleScope,
+    ) {
+        self.assert_owner_thread();
+        self.counter_styles.borrow_mut().publish_scope(tree_scope, scope);
+    }
+
+    pub(crate) fn with_counter_style_registry<T>(
+        &self,
+        callback: impl FnOnce(&crate::css::counter_representation::CounterStyleRegistry) -> T,
+    ) -> T {
+        self.assert_owner_thread();
+        callback(&self.counter_styles.borrow())
     }
 
     pub(crate) fn set_style_node_svg_attribute_facts(

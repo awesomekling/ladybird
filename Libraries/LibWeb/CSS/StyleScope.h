@@ -175,6 +175,9 @@ public:
     GC::Ref<DOM::Node> m_node;
 
 private:
+    [[nodiscard]] StyleScope* parent_counter_style_scope() const;
+    void publish_counter_styles() const;
+
     void add_sheet(StyleSheetState&, StyleEngineUpdate);
     void remove_sheet(StyleSheetState&, StyleEngineUpdate);
     void insert_sheet_in_tree_order(StyleSheetState&);
