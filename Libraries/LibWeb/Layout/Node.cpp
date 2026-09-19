@@ -98,7 +98,7 @@ Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind k
     , m_slot(m_arena->allocate(build_node_construction_facts(document, node, kind, this)))
     , m_kind(kind)
 {
-    update_has_scroll_offset_flag();
+    publish_scroll_offset();
 
     if (!node)
         return;
@@ -903,14 +903,39 @@ bool Node::dom_target_stores_scroll_offset() const
     return false;
 }
 
-void Node::update_has_scroll_offset_flag()
+// The same targets, plus the viewport: the navigable stores the viewport's offset, and the
+// viewport's box is where the render side looks for it. The flag above deliberately does not cover
+// the viewport, whose box the arena knows about without being told.
+CSSPixelPoint Node::dom_target_scroll_offset() const
 {
-    set_flag(RustFFI::NodeFlag::HasScrollOffset, dom_target_stores_scroll_offset());
+    if (is_viewport()) {
+        auto navigable = document().navigable();
+        return navigable ? navigable->viewport_scroll_offset() : CSSPixelPoint {};
+    }
+    if (auto pseudo_element = generated_for_pseudo_element(); pseudo_element.has_value()) {
+        auto generator = pseudo_element_generator();
+        if (!generator)
+            return {};
+        auto synthetic_pseudo_element = generator->get_synthetic_pseudo_element(*pseudo_element);
+        if (!synthetic_pseudo_element.has_value() || synthetic_pseudo_element->unsafe_layout_node() != this)
+            return {};
+        return synthetic_pseudo_element->scroll_offset();
+    }
+    if (auto const* element = as_if<DOM::Element>(dom_node()))
+        return element->scroll_offset({});
+    return {};
 }
 
-void Node::verify_has_scroll_offset_flag() const
+void Node::publish_scroll_offset()
+{
+    set_flag(RustFFI::NodeFlag::HasScrollOffset, dom_target_stores_scroll_offset());
+    RustFFI::layout_arena_publish_scroll_offset(m_arena->handle(), m_slot, dom_target_scroll_offset());
+}
+
+void Node::verify_published_scroll_offset() const
 {
     VERIFY(has_flag(RustFFI::NodeFlag::HasScrollOffset) == dom_target_stores_scroll_offset());
+    VERIFY(RustFFI::layout_arena_published_scroll_offset(m_arena->handle(), m_slot) == dom_target_scroll_offset());
 }
 
 DOM::Document& Node::document()

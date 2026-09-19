@@ -12,6 +12,9 @@ namespace Web::Layout {
 Viewport::Viewport(DOM::Document& document, CSS::LayoutStyle style)
     : Box(document, &document, style, RustFFI::NodeKind::Viewport)
 {
+    // The base constructor could not have asked for the navigable's offset: it does not yet know
+    // this box is the viewport's.
+    publish_scroll_offset();
 }
 
 Viewport::~Viewport() = default;

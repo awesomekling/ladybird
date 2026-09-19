@@ -2684,6 +2684,37 @@ pub unsafe extern "C" fn layout_arena_has_visual_context_tree(arena: *mut c_void
     paint_state.visual_context.tree.is_some()
 }
 
+/// Publishes the scroll offset a box holds, as the DOM stores it. Called wherever that stored
+/// offset can change: a box becoming the box of something that holds one, a write of the stored
+/// offset, and a move of the viewport's offset.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_publish_scroll_offset(
+    arena: *mut c_void,
+    slot: NodeSlotId,
+    offset: FfiCssPixelPoint,
+) {
+    unsafe { arena_from_handle(arena) }
+        .scroll_offsets()
+        .publish(slot, offset.into());
+}
+
+/// The scroll offset last published for a box, or zero for one that holds none.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_published_scroll_offset(
+    arena: *mut c_void,
+    slot: NodeSlotId,
+) -> FfiCssPixelPoint {
+    unsafe { arena_from_handle(arena) }.scroll_offsets().offset(slot).into()
+}
+
 /// The number of layout commits this arena has published. It does not say whether layout is up
 /// to date - a reader asks the arena that - but it does say whether the committed geometry a
 /// reader saw earlier is still the one published.

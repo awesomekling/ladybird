@@ -209,8 +209,12 @@ public:
     // The arena measures a box that holds a scroll offset eagerly after a full commit, so the box carries that fact
     // as a flag: it is set when a box becomes an element's or a pseudo-element's box, and again whenever the stored
     // offset changes, each time re-derived from the one place the offset is stored.
-    void update_has_scroll_offset_flag();
-    void verify_has_scroll_offset_flag() const;
+    // The offset is also published to the arena, so that the render side can read a box's scroll
+    // offset without asking the DOM where it is stored. Published from the same places, plus the
+    // viewport's box, whose offset the navigable stores.
+    void publish_scroll_offset();
+    void verify_published_scroll_offset() const;
+    [[nodiscard]] CSSPixelPoint dom_target_scroll_offset() const;
 
     // Any invalidation below a node must reach every ancestor's epoch: cached runs capture
     // subtree structure, and unlike intrinsic-size invalidation there is no absolutely-positioned

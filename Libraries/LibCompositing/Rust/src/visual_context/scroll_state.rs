@@ -8,6 +8,48 @@ use crate::css_pixels::CssPixelPoint;
 use crate::display_list::commands::{SpatialNodeIndex, VISUAL_VIEWPORT_NODE_INDEX};
 use crate::node_slot_id::NodeSlotId;
 use libgfx_rust::FloatPoint;
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+// Where a box's scroll offset is, as the render side sees it.
+//
+// The offset itself is still stored on the DOM - on the element, on the synthetic pseudo-element,
+// or on the navigable for the viewport - and this column is the copy the render side can read
+// without asking for it. It is kept in step at the three moments the stored offset can change:
+// a box becoming the box of something that holds an offset, a write of that stored offset, and a
+// move of the viewport's offset. A box whose offset is zero has no entry, which is the common
+// case by a long way.
+//
+// Keyed by the paintable row rather than by the DOM node, because that is the key the render side
+// has. A row's id carries the generation of the slot it came from, so an entry left behind by a
+// freed row names nothing a live row can ask for; a row built in a recycled slot publishes its own
+// offset as it is built.
+#[derive(Default)]
+pub struct ScrollOffsetColumn {
+    offsets: RefCell<HashMap<NodeSlotId, CssPixelPoint>>,
+}
+
+impl ScrollOffsetColumn {
+    pub fn offset(&self, slot: NodeSlotId) -> CssPixelPoint {
+        self.offsets.borrow().get(&slot).copied().unwrap_or_default()
+    }
+
+    pub fn publish(&self, slot: NodeSlotId, offset: CssPixelPoint) {
+        if slot.is_invalid() {
+            return;
+        }
+        let mut offsets = self.offsets.borrow_mut();
+        if offset == CssPixelPoint::default() {
+            offsets.remove(&slot);
+        } else {
+            offsets.insert(slot, offset);
+        }
+    }
+
+    pub fn forget(&self, slot: NodeSlotId) {
+        self.offsets.borrow_mut().remove(&slot);
+    }
+}
 
 pub type ScrollStateSlot = usize;
 // Position of a scroll or sticky node's entry in the ScrollState store. Slot 0 is the viewport's
