@@ -529,6 +529,13 @@ impl RetainedState {
             .is_some_and(crate::css::computed_value_views::ComputedValuesView::counter_reset_has_reversed_counter)
     }
 
+    /// Whether the element's published style record replaces its contents with a single image.
+    #[must_use]
+    pub fn element_content_is_single_image(&self, node: StyleNodeID) -> bool {
+        self.published_style_record_view(self.computed_group_sets.assigned_style_record(node))
+            .is_some_and(crate::css::computed_value_views::ComputedValuesView::content_is_single_image)
+    }
+
     /// What the element's published record for one pseudo-element kind says about its generated
     /// content. `None` while the element styles no such pseudo-element.
     #[must_use]

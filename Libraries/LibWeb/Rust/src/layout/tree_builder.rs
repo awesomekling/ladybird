@@ -107,8 +107,7 @@ pub struct FfiDomTreeBuilderCallbacks {
     pub request_layout_tree_rebuild: unsafe extern "C" fn(*mut c_void, u32),
     pub push_principal_frame: unsafe extern "C" fn(*mut c_void, u32) -> FfiPrincipalNodeFrame,
     pub pop_principal_frame: unsafe extern "C" fn(*mut c_void, *mut c_void),
-    pub prepare_principal_element:
-        unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, bool) -> FfiPreparedPrincipalElementFacts,
+    pub prepare_principal_element: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, bool),
     pub create_principal_element_layout:
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, FfiElementLayoutKind) -> NodeSlotId,
     pub create_principal_document_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
@@ -141,13 +140,6 @@ pub struct FfiPrincipalNodeFrame {
     /// The DOM node the walk's identity names. The walk navigates by identity and takes the pointer
     /// from here, so the node is resolved once per visit rather than once per payload callback.
     pub dom_node: *mut c_void,
-}
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiPreparedPrincipalElementFacts {
-    // Only meaningful when the element is about to get a fresh layout node.
-    pub has_content_replacement: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -1302,6 +1294,13 @@ impl DomTreeBuilderHost<'_> {
             .display
     }
 
+    /// Whether the element's published style record replaces its contents with a single image.
+    fn published_content_is_single_image(&self, style_node: u32) -> bool {
+        self.layout()
+            .arena()
+            .published_content_is_single_image(StyleNodeID::from_raw(style_node))
+    }
+
     /// Whether the element's published style record hides its content. Only an element has a
     /// record, so every other node answers no, as its `content-visibility` never applied.
     fn content_visibility_is_hidden(&self, style_node: u32) -> bool {
@@ -2141,13 +2140,13 @@ fn construct_principal_layout_node(
             }
         }
         // SAFETY: The frame, builder, and DOM element remain live throughout the call.
-        let prepared = unsafe {
+        unsafe {
             (host.callbacks.prepare_principal_element)(
                 host.callbacks.builder,
                 frame,
                 dom_node,
                 should_create_layout_node,
-            )
+            );
         };
         let display = host.published_display(update.style_node);
         let generation = principal_box_generation_decision(
@@ -2178,7 +2177,7 @@ fn construct_principal_layout_node(
         }
         if should_create_layout_node {
             let layout_kind = element_layout_kind(
-                prepared.has_content_replacement,
+                host.published_content_is_single_image(update.style_node),
                 element_type_facts,
                 context.layout_svg_mask_or_clip_path,
                 context.layout_svg_pattern,
