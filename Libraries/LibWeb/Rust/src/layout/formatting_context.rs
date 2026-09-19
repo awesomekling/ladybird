@@ -920,11 +920,6 @@ pub(crate) struct FlexLayoutData {
 #[repr(C)]
 pub struct FfiLayoutHostCallbacks {
     pub context: *mut c_void,
-    pub compute_svg_path: unsafe extern "C" fn(
-        *mut c_void,
-        *mut c_void,
-        svg_formatting_context::FfiSvgPathRequest,
-    ) -> svg_formatting_context::FfiSvgPathResult,
     /// The commit messages a finished commit leaves for the document, in the order it produced
     /// them.
     pub deliver_commit_messages: unsafe extern "C" fn(*mut c_void, *const commit::FfiCommitMessage, usize),
@@ -2364,7 +2359,6 @@ pub(crate) unsafe fn run_root_layout(
     }
     let callbacks = LayoutPass::new(
         arena,
-        &host,
         CssPixels::from_raw(viewport_inline_size_raw),
         CssPixels::from_raw(viewport_block_size_raw),
         document_in_quirks_mode,
@@ -2535,7 +2529,6 @@ pub(crate) unsafe fn compute_subtree_layout(
     arena.begin_active_layout_pass();
     let callbacks = LayoutPass::new(
         arena,
-        &host,
         CssPixels::from_raw(viewport_inline_size_raw),
         CssPixels::from_raw(viewport_block_size_raw),
         document_in_quirks_mode,

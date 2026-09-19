@@ -10,9 +10,8 @@
 #include <AK/Math.h>
 #include <AK/NeverDestroyed.h>
 #include <AK/NumericLimits.h>
-#include <AK/Utf16StringBuilder.h>
 #include <AK/Variant.h>
-#include <LibGfx/Path.h>
+#include <LibGfx/Point.h>
 #include <LibUnicode/CharacterTypes.h>
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/Display.h>
@@ -26,7 +25,6 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Node.h>
-#include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/AttributeNames.h>
 #include <LibWeb/HTML/HTMLBodyElement.h>
 #include <LibWeb/HTML/HTMLElement.h>
@@ -41,7 +39,6 @@
 #include <LibWeb/SVG/SVGCircleElement.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
 #include <LibWeb/SVG/SVGEllipseElement.h>
-#include <LibWeb/SVG/SVGGeometryElement.h>
 #include <LibWeb/SVG/SVGImageElement.h>
 #include <LibWeb/SVG/SVGLineElement.h>
 #include <LibWeb/SVG/SVGMaskElement.h>
@@ -257,79 +254,6 @@ void clear_svg_attribute_facts(DOM::Document& document, CSS::StyleNodeID style_n
         RustFFI::layout_arena_clear_style_node_svg_attribute_facts(arena->handle(), style_node.value());
 }
 
-static Utf16String rendered_svg_text_contents(SVG::SVGTextContentElement const& element)
-{
-    Utf16StringBuilder builder;
-    element.for_each_in_subtree_of_type<DOM::Text>([&](auto const& text_node) {
-        if (text_node.parent() && text_node.parent()->unsafe_layout_node()) {
-            if (auto content = text_node.text_content(); content.has_value())
-                builder.append(*content);
-        }
-        return TraversalDecision::Continue;
-    });
-    return builder.to_string().trim_ascii_whitespace();
-}
-
-static Gfx::Path compute_path_for_svg_text_path(Box const& text_path_box, CSSPixelSize viewport_size)
-{
-    auto const& text_path_element = as<SVG::SVGTextPathElement>(*text_path_box.dom_node());
-    auto path_or_shape = text_path_element.path_or_shape();
-    if (!path_or_shape)
-        return {};
-
-    auto text_contents = rendered_svg_text_contents(text_path_element);
-    auto glyph_runs = Gfx::shape_text({}, text_contents, text_path_box.font_list());
-
-    auto& shape_element = const_cast<SVG::SVGGeometryElement&>(*path_or_shape);
-    auto shape_path = shape_element.get_path(viewport_size, *shape_element.computed_style());
-    auto start_offset = text_path_element.start_offset_for_path_length(shape_path.length());
-
-    // FIXME: Take writing mode and text direction into account.
-    float total_advance = 0;
-    for (auto const& glyph_run : glyph_runs)
-        total_advance += glyph_run->width();
-    switch (text_path_element.text_anchor(text_path_box).value_or(SVG::TextAnchor::Start)) {
-    case SVG::TextAnchor::Start:
-        break;
-    case SVG::TextAnchor::Middle:
-        start_offset -= total_advance / 2;
-        break;
-    case SVG::TextAnchor::End:
-        start_offset -= total_advance;
-        break;
-    default:
-        VERIFY_NOT_REACHED();
-    }
-
-    return shape_path.place_glyph_runs_along(glyph_runs, start_offset);
-}
-
-static RustFFI::FfiSvgPathResult compute_svg_path(NodeWithStyle const& node, RustFFI::FfiSvgPathRequest const& request)
-{
-    auto const& graphics_box = as<Box>(node);
-    CSSPixelSize viewport_size {
-        request.viewport_width,
-        request.viewport_height,
-    };
-
-    Gfx::Path path;
-    if (graphics_box.kind() == RustFFI::NodeKind::SVGTextPathBox)
-        path = compute_path_for_svg_text_path(graphics_box, viewport_size);
-
-    auto bounding_box = path.bounding_box();
-    // Rust adopts this heap-allocated path and destroys it via ladybird_gfx_path_destroy().
-    auto* path_handle = new Gfx::Path(move(path));
-    return {
-        .path_handle = path_handle,
-        .bounding_box = {
-            .x = bounding_box.x(),
-            .y = bounding_box.y(),
-            .width = bounding_box.width(),
-            .height = bounding_box.height(),
-        },
-    };
-}
-
 static bool style_has_any_containment(CSS::ComputedValues::BoxValues const& values)
 {
     return values.size_containment || values.inline_size_containment || values.layout_containment || values.style_containment || values.paint_containment;
@@ -395,10 +319,6 @@ void register_layout_host(NodeArena& arena, DOM::Document& document)
     static_assert(to_underlying(SVG::SVGUnits::UserSpaceOnUse) == 1);
     RustFFI::FfiLayoutHostCallbacks callbacks {
         .context = &document,
-        .compute_svg_path = [](void*, void* node, RustFFI::FfiSvgPathRequest request) {
-            auto const* node_with_style = as_if<NodeWithStyle>(*static_cast<Node const*>(node));
-            VERIFY(node_with_style);
-            return compute_svg_path(*node_with_style, request); },
         .deliver_commit_messages = [](void* context, RustFFI::FfiCommitMessage const* messages, size_t count) {
             auto& document = *static_cast<DOM::Document*>(context);
             for (size_t index = 0; index < count; ++index)
