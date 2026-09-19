@@ -36,7 +36,13 @@ impl Default for FfiRootBackgroundSource {
 #[repr(C)]
 pub struct FfiGeometryHostCallbacks {
     pub context: *mut std::ffi::c_void,
-    pub clamp_scroll_offset_if_nonzero: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void),
+    /// Stores a scroll offset the render side settled on. Called after the pass that settled it,
+    /// never from inside one.
+    pub set_scroll_offset: unsafe extern "C" fn(
+        *mut std::ffi::c_void,
+        *mut std::ffi::c_void,
+        crate::layout::used_values::FfiCssPixelPoint,
+    ),
     pub layout_node_is_in_focused_text_control:
         unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> bool,
 }
@@ -51,10 +57,15 @@ impl FfiGeometryHostCallbacks {
     /// # Safety
     ///
     /// `layout_node_shell` must be a live layout node shell. The host re-enters geometry
-    /// queries, so no arena or cache borrow may be held across this call.
-    pub(crate) unsafe fn clamp_scroll_offset_if_nonzero(&self, layout_node_shell: *mut std::ffi::c_void) {
-        crate::painting::seal::note_host_call("clamp_scroll_offset_if_nonzero");
+    /// queries and writes the store the offset lives in, so no arena or cache borrow may be
+    /// held across this call and no pass may be running.
+    pub(crate) unsafe fn set_scroll_offset(
+        &self,
+        layout_node_shell: *mut std::ffi::c_void,
+        offset: crate::layout::used_values::FfiCssPixelPoint,
+    ) {
+        crate::painting::seal::note_host_call("set_scroll_offset");
         // SAFETY: The caller guarantees the shell is live and no borrow is held.
-        unsafe { (self.clamp_scroll_offset_if_nonzero)(self.context, layout_node_shell) };
+        unsafe { (self.set_scroll_offset)(self.context, layout_node_shell, offset) };
     }
 }
