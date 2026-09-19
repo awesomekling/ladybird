@@ -166,7 +166,6 @@ pub struct FfiDisplayContentsFacts {
 pub struct FfiTextLayoutFacts {
     pub has_style_parent: bool,
     pub parent_display_is_contents: bool,
-    pub text_is_ascii_whitespace: bool,
     pub parent_collapses_whitespace: bool,
     pub style_parent_style_record: u64,
 }
@@ -665,6 +664,13 @@ impl DomTreeBuilderHost<'_> {
             .arena()
             .published_box_facts(StyleNodeID::from_raw(style_node))
             .is_some_and(|facts| facts.content_visibility == crate::css::css_enums::content_visibility::HIDDEN)
+    }
+
+    /// Whether the text node `style_node` names holds nothing but ASCII whitespace.
+    fn text_is_ascii_whitespace(&self, style_node: u32) -> bool {
+        self.layout()
+            .arena()
+            .text_is_ascii_whitespace(StyleNodeID::from_raw(style_node))
     }
 
     /// Whether the style mirror holds a DOM child for the node `style_node` names.
@@ -1609,7 +1615,7 @@ fn construct_principal_layout_node(
             let needs_style_wrapper = display_contents_text_needs_style_wrapper(
                 facts.has_style_parent,
                 facts.parent_display_is_contents,
-                facts.text_is_ascii_whitespace,
+                host.text_is_ascii_whitespace(update.style_node),
                 facts.parent_collapses_whitespace,
             );
             // SAFETY: The frame and DOM text node remain live throughout construction.

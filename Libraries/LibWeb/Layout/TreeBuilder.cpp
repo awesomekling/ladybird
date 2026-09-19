@@ -1351,7 +1351,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             return {
                 .has_style_parent = style_parent_payloads != nullptr,
                 .parent_display_is_contents = style_parent_box_values && style_parent_box_values->display_value().is_contents(),
-                .text_is_ascii_whitespace = text.data().is_ascii_whitespace(),
                 .parent_collapses_whitespace = style_parent_text_values && first_is_one_of(style_parent_text_values->white_space_collapse_value(), CSS::WhiteSpaceCollapse::Collapse),
                 .style_parent_style_record = style_parent ? style_parent->style_record_identity().value() : 0,
             }; },
