@@ -23,9 +23,11 @@
 #include <LibWeb/ComputedValuesRustFFI.h>
 #include <LibWeb/DOM/AdoptedStyleSheets.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Loader/ContentBlocker.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
+#include <LibWeb/ValueParserRustFFI.h>
 
 namespace Web::CSS {
 
@@ -1020,6 +1022,64 @@ void StyleScope::build_counter_style_cache()
 
     m_is_doing_counter_style_cache_update = false;
     m_needs_counter_style_cache_update = false;
+
+    publish_counter_styles();
+}
+
+// The scope a counter style name this scope does not register is looked for in next, which is the
+// chain `dereference_global_tree_scoped_reference` walks.
+StyleScope* StyleScope::parent_counter_style_scope() const
+{
+    auto* shadow_root = as_if<DOM::ShadowRoot>(*m_node);
+    if (!shadow_root)
+        return nullptr;
+    auto* host = shadow_root->host();
+    if (!host)
+        return nullptr;
+    auto& root = host->root();
+    if (auto* host_shadow_root = as_if<DOM::ShadowRoot>(root)) {
+        if (host_shadow_root->uses_document_style_sheets())
+            return &root.document().style_scope();
+        return &host_shadow_root->style_scope();
+    }
+    if (auto* document = as_if<DOM::Document>(root))
+        return &document->style_scope();
+    // A detached host's node tree is rooted at an ordinary element, which carries no tree-scoped
+    // names of its own.
+    return nullptr;
+}
+
+void StyleScope::publish_counter_styles() const
+{
+    auto publish = [&](StyleScope const& scope) {
+        Vector<size_t> names;
+        Vector<Parser::ValueParserFFI::FfiRegisteredCounterStyle const*> counter_styles;
+        names.ensure_capacity(scope.m_registered_counter_styles.size());
+        counter_styles.ensure_capacity(scope.m_registered_counter_styles.size());
+        for (auto const& [name, counter_style] : scope.m_registered_counter_styles) {
+            names.unchecked_append(name.to_raw_leaked());
+            counter_styles.unchecked_append(counter_style->rust_counter_style());
+        }
+
+        auto* parent = scope.parent_counter_style_scope();
+        Parser::ValueParserFFI::rust_publish_counter_styles(
+            document().layout_node_arena().handle(),
+            scope.style_engine_tree_scope().value(),
+            parent ? parent->style_engine_tree_scope().value() : 0,
+            parent != nullptr,
+            names.data(),
+            counter_styles.data(),
+            names.size());
+    };
+
+    publish(*this);
+
+    // A scope whose cache has never settled registers nothing, and a name looked for in it passes
+    // straight to its own host's scope. Publishing it as empty is what puts that link in the chain
+    // the render side follows; building it here instead would run a rule cache update inside
+    // whatever pass asked for the representation.
+    for (auto* scope = parent_counter_style_scope(); scope && scope->m_needs_counter_style_cache_update; scope = scope->parent_counter_style_scope())
+        publish(*scope);
 }
 
 u64 StyleScope::counter_style_environment_identity() const
