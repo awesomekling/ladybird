@@ -297,11 +297,9 @@ void register_geometry_host(Layout::NodeArena& arena)
 {
     Layout::RustFFI::FfiGeometryHostCallbacks callbacks {
         .context = nullptr,
-        .clamp_scroll_offset_if_nonzero = [](void*, void* layout_node_shell) {
+        .set_scroll_offset = [](void*, void* layout_node_shell, CSSPixelPoint offset) {
             auto& box = *static_cast<Layout::Node*>(layout_node_shell);
-            auto offset = scroll_offset(box);
-            if (!offset.is_zero())
-                set_scroll_offset(box, offset); },
+            set_scroll_offset(box, offset); },
         .layout_node_is_in_focused_text_control = [](void*, void* layout_node_shell) -> bool {
             auto const& layout_node = *static_cast<Layout::Node const*>(layout_node_shell);
             auto const* dom_node = layout_node.dom_node();

@@ -5,7 +5,7 @@
  */
 
 use crate::css::css_enums::{flex_direction, flex_wrap, overflow, positioning, writing_mode};
-use crate::css::css_pixels::{CssPixelRect, CssPixels};
+use crate::css::css_pixels::{CssPixelPoint, CssPixelRect, CssPixels};
 use crate::css::display::FfiDisplay;
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
@@ -840,7 +840,7 @@ pub(crate) fn update_scrollable_overflow(arena: &LayoutNodeArena) {
     if (pending_boxes.is_empty() && !needs_full_recalculation) || !arena.paintable_row_is_populated(viewport) {
         return;
     }
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollableOverflow);
+    let pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollableOverflow);
     arena
         .scrollable_overflow
         .recalculations
@@ -899,15 +899,41 @@ pub(crate) fn update_scrollable_overflow(arena: &LayoutNodeArena) {
             }
         }
     }
+    // The new overflow can leave a stored scroll offset outside the range the box now allows.
+    // Decide that here, where the measurement is, and leave the writes for after the pass: the
+    // store is the document's, and the document is told what to put in it rather than asked
+    // where it is.
+    let mut clamped = Vec::new();
     for slot in roots {
         arena.ensure_scrollable_overflow(slot);
-        if let Some(host) = arena.scrollable_overflow.host.get() {
-            let shell = arena.shell_if_live(slot);
-            if !shell.is_null() {
-                // SAFETY: The registered host receives a live shell. No mutable arena or
-                // cache borrow is held while it re-enters geometry queries to clamp the offset.
-                unsafe { host.clamp_scroll_offset_if_nonzero(shell) };
-            }
+        let offset = arena.scroll_offsets().offset(slot);
+        if offset == CssPixelPoint::default() {
+            continue;
+        }
+        let Some((minimum, maximum)) =
+            crate::painting::chrome_geometry::scroll_offset_bounds(&arena.paintable_rows(), slot)
+        else {
+            continue;
+        };
+        let offset_in_range = CssPixelPoint::new(
+            offset.x.clamp(minimum.x, maximum.x),
+            offset.y.clamp(minimum.y, maximum.y),
+        );
+        if offset_in_range != offset {
+            clamped.push((slot, offset_in_range));
+        }
+    }
+    drop(pass);
+
+    let Some(host) = arena.scrollable_overflow.host.get() else {
+        return;
+    };
+    for (slot, offset) in clamped {
+        let shell = arena.shell_if_live(slot);
+        if !shell.is_null() {
+            // SAFETY: The registered host receives a live shell. No mutable arena or cache
+            // borrow is held while it re-enters geometry queries to store the offset.
+            unsafe { host.set_scroll_offset(shell, offset.into()) };
         }
     }
 }
