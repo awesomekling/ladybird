@@ -216,6 +216,13 @@ public:
     void verify_published_scroll_offset() const;
     [[nodiscard]] CSSPixelPoint dom_target_scroll_offset() const;
 
+    // The unique node id of what this box is the box of: an element, the element a pseudo-element
+    // was generated for, or the document for the viewport's box. It is the name the compositor
+    // scrolls and snaps by, so the render side needs it without asking which of the three it is.
+    // Published when a box is built, when it becomes a pseudo-element's box, and for the viewport.
+    void publish_unique_node_id();
+    [[nodiscard]] i64 dom_target_unique_node_id() const;
+
     // Any invalidation below a node must reach every ancestor's epoch: cached runs capture
     // subtree structure, and unlike intrinsic-size invalidation there is no absolutely-positioned
     // or SVG boundary — those descendants' fragments live in ancestor run trees. The arena runs

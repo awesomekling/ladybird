@@ -17,7 +17,7 @@ use super::refresh::compute_sticky_data;
 use super::scroll_state::ScrollState;
 use super::*;
 use crate::layout::node_data::{NodeKind, NodeSlotId};
-use crate::painting::host::{FfiVisualContextHostCallbacks, FfiVisualContextTreeInputs};
+use crate::painting::host::FfiVisualContextTreeInputs;
 use crate::painting::paint_order;
 use crate::painting::paintable_rows::PaintableRowsRead;
 use std::collections::{HashMap, HashSet};
@@ -379,7 +379,6 @@ fn take_next_deferred_anchor_positioned(
 
 pub(crate) fn update_visual_context_tree<Arena: PaintableRowsRead>(
     layout_arena: &Arena,
-    callbacks: &FfiVisualContextHostCallbacks,
     viewport: NodeSlotId,
     tree_inputs: FfiVisualContextTreeInputs,
     scope: VisualContextUpdateScope,
@@ -405,7 +404,6 @@ pub(crate) fn update_visual_context_tree<Arena: PaintableRowsRead>(
 
     let environment = BoxBuildEnvironment {
         layout_arena,
-        callbacks,
         pixel_ratio: tree_inputs.device_pixels_per_css_pixel,
     };
     let viewport_output = layout_arena

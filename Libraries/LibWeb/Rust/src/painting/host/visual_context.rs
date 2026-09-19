@@ -150,7 +150,6 @@ pub(crate) struct ResolvedSvgFilter {
 pub struct FfiVisualContextHostCallbacks {
     pub context: *mut c_void,
     pub tree_inputs: unsafe extern "C" fn(*mut c_void) -> FfiVisualContextTreeInputs,
-    pub node_identity: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i64,
 }
 
 impl FfiVisualContextHostCallbacks {
@@ -158,11 +157,6 @@ impl FfiVisualContextHostCallbacks {
         crate::painting::seal::note_host_call("tree_inputs");
         // SAFETY: The C++ host answers synchronously.
         unsafe { (self.tree_inputs)(self.context) }
-    }
-    pub(crate) fn node_identity(&self, layout_node_shell: *mut c_void) -> i64 {
-        crate::painting::seal::note_host_call("node_identity");
-        // SAFETY: The C++ host answers synchronously from a live layout node shell.
-        unsafe { (self.node_identity)(self.context, layout_node_shell) }
     }
 }
 

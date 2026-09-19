@@ -165,6 +165,53 @@ impl PaintableRowReset {
     }
 }
 
+// The unique node id of what each box is the box of, as the document names it: an element, the
+// element a pseudo-element was generated for, or the document itself for the viewport. It is the
+// name the compositor scrolls and snaps by, and it is not the style node id - it outlives a style
+// tree - so the document publishes it as a box is bound to what it is the box of.
+//
+// Dense by slot, because nearly every element box has one. Each entry names the row that published
+// it, so a slot that has been recycled since answers for the new row and not the old one.
+#[derive(Default)]
+pub(crate) struct UniqueNodeIdColumn {
+    ids: RefCell<Vec<(NodeSlotId, i64)>>,
+}
+
+impl UniqueNodeIdColumn {
+    pub(crate) fn id(&self, slot: NodeSlotId) -> i64 {
+        if slot.is_invalid() {
+            return 0;
+        }
+        match self.ids.borrow().get(slot.slot_index() as usize) {
+            Some(&(published_for, id)) if published_for == slot => id,
+            _ => 0,
+        }
+    }
+
+    pub(crate) fn publish(&self, slot: NodeSlotId, id: i64) {
+        if slot.is_invalid() {
+            return;
+        }
+        let index = slot.slot_index() as usize;
+        let mut ids = self.ids.borrow_mut();
+        if ids.len() <= index {
+            ids.resize(index + 1, (NodeSlotId::INVALID, 0));
+        }
+        ids[index] = (slot, id);
+    }
+
+    pub(crate) fn forget(&self, slot: NodeSlotId) {
+        if slot.is_invalid() {
+            return;
+        }
+        if let Some(entry) = self.ids.borrow_mut().get_mut(slot.slot_index() as usize)
+            && entry.0 == slot
+        {
+            *entry = (NodeSlotId::INVALID, 0);
+        }
+    }
+}
+
 #[derive(Default)]
 struct CommittedFragmentLinkSlot {
     layout_slot_generation: u8,
@@ -191,6 +238,7 @@ pub(crate) struct PaintableRowStore {
     paint_recording_in_progress: Cell<bool>,
     layout_commit_generation: Cell<u64>,
     scroll_offsets: crate::painting::visual_context::scroll_state::ScrollOffsetColumn,
+    unique_node_ids: UniqueNodeIdColumn,
 }
 
 pub(crate) struct PaintableRows<Arena> {
@@ -680,6 +728,11 @@ impl LayoutNodeArena {
         &self.paintable_rows.scroll_offsets
     }
 
+    /// The unique node id each box is the box of something with, as the document published it.
+    pub(crate) fn unique_node_ids(&self) -> &UniqueNodeIdColumn {
+        &self.paintable_rows.unique_node_ids
+    }
+
     /// Counts the layout commits the arena has published. A main-side reader that remembers the
     /// generation it read at can tell whether the committed geometry it saw is still the one
     /// published, without asking what was dirty at the time.
@@ -753,6 +806,7 @@ impl LayoutNodeArena {
         let id = reset.slot;
         if reset.kind == crate::painting::paintable_data::PaintableRowResetKind::Freed {
             self.paintable_rows.scroll_offsets.forget(id);
+            self.paintable_rows.unique_node_ids.forget(id);
         }
         self.note_committed_box_changed(id);
         if row_is_still_linked {
