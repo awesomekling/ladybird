@@ -94,7 +94,6 @@ pub enum FfiStaleSubtreeClearScope {
 pub struct FfiDomTreeBuilderCallbacks {
     pub builder: *mut c_void,
     pub clear_stale_layout_node: unsafe extern "C" fn(*mut c_void, u32),
-    pub display_contents_facts: unsafe extern "C" fn(*mut c_void, *mut c_void) -> FfiDisplayContentsFacts,
     pub clear_stale_subtree: unsafe extern "C" fn(*mut c_void, u32, FfiStaleSubtreeClearScope),
     pub resolve_counters: unsafe extern "C" fn(*mut c_void, FfiPseudoElement),
     pub principal_descendant_facts:
@@ -143,20 +142,7 @@ pub struct FfiPrincipalNodeFrame {
 
 #[derive(Clone, Copy)]
 #[repr(C)]
-pub struct FfiDisplayContentsFacts {
-    /// Whether the element hosts a shadow root, which is what makes its own DOM children
-    /// unrendered. A root that owns no child sequence is never named, so the identity below can be
-    /// zero while this is set.
-    pub has_shadow_root: bool,
-    pub shadow_root_style_node: u32,
-}
-
-#[derive(Clone, Copy)]
-#[repr(C)]
 pub struct FfiPrincipalDescendantFacts {
-    /// Whether the node hosts a shadow root. See `FfiDisplayContentsFacts::has_shadow_root`.
-    pub has_shadow_root: bool,
-    pub shadow_root_style_node: u32,
     pub svg_graphics_element: *mut c_void,
     pub svg_mask: FfiIdentifiedDomNode,
     pub svg_clip_path: FfiIdentifiedDomNode,
@@ -1307,6 +1293,12 @@ impl DomTreeBuilderHost<'_> {
             .text_is_ascii_whitespace(StyleNodeID::from_raw(style_node))
     }
 
+    /// The shadow root the style mirror holds for the element `style_node` names, or 0. A host that
+    /// has one renders that root's children in place of its own.
+    fn shadow_root_style_node(&self, style_node: u32) -> u32 {
+        raw_style_node(self.layout().arena().shadow_root_of(StyleNodeID::from_raw(style_node)))
+    }
+
     /// Whether the style mirror holds a DOM child for the node `style_node` names.
     fn has_dom_children(&self, style_node: u32) -> bool {
         self.layout()
@@ -1533,8 +1525,7 @@ unsafe fn update_layout_tree_for_display_contents(
 ) {
     abort_on_panic(|| {
         assert!(!element.is_null());
-        // SAFETY: The element remains live for the duration of the call.
-        let facts = unsafe { (host.callbacks.display_contents_facts)(host.callbacks.builder, element) };
+        let shadow_root_style_node = host.shadow_root_style_node(style_node);
         let content_visibility_hidden = host.content_visibility_is_hidden(style_node);
         // Only a pass that can generate a pseudo-element box asks which ones exist.
         let published_pseudo_records = if should_create_layout_node {
@@ -1579,11 +1570,11 @@ unsafe fn update_layout_tree_for_display_contents(
         if !content_visibility_hidden && (should_create_layout_node || host.child_needs_layout_tree_update(style_node))
         {
             let must_create_children = should_create_layout_node;
-            if facts.has_shadow_root {
+            if shadow_root_style_node != 0 {
                 update_layout_tree_for_shadow_root_children(
                     host,
                     state,
-                    facts.shadow_root_style_node,
+                    shadow_root_style_node,
                     context,
                     must_create_children,
                 );
@@ -1812,14 +1803,21 @@ unsafe fn update_principal_node_descendants(
             }
         }
 
-        if (should_create_layout_node || host.child_needs_layout_tree_update(dom_children_owner))
-            && (facts.has_shadow_root || lays_out_dom_children)
+        // Asked for only where the answer can change what the walk descends into: a host with a
+        // root renders that root's children in place of its own.
+        let descends = (should_create_layout_node || host.child_needs_layout_tree_update(dom_children_owner))
             && layout_node_can_have_children
-            && !content_visibility_hidden
-        {
+            && !content_visibility_hidden;
+        let shadow_root_style_node = if descends {
+            host.shadow_root_style_node(update.style_node)
+        } else {
+            0
+        };
+
+        if descends && (shadow_root_style_node != 0 || lays_out_dom_children) {
             state.ancestor_stack.push(layout_node);
 
-            if facts.has_shadow_root {
+            if shadow_root_style_node != 0 {
                 if layout_node_is_replaced_box_with_children {
                     // For replaced elements with shadow DOM children, wrap the children in an
                     // anonymous BlockContainer so that a BFC handles their layout.
@@ -1835,7 +1833,7 @@ unsafe fn update_principal_node_descendants(
                 update_layout_tree_for_shadow_root_children(
                     host,
                     state,
-                    facts.shadow_root_style_node,
+                    shadow_root_style_node,
                     context,
                     should_create_layout_node,
                 );

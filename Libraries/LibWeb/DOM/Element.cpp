@@ -2994,6 +2994,10 @@ void Element::set_shadow_root(GC::Ptr<ShadowRoot> shadow_root)
 
         m_shadow_root->set_host(this);
         m_shadow_root->set_is_connected(is_connected());
+        // The root is named the moment it is attached, before it owns a single child. A host with a
+        // root lays out no light children of its own, and that is a question the style mirror can
+        // only answer for a root it has a name for.
+        CSS::record_shadow_root_connected(*m_shadow_root);
         if (auto count = m_shadow_root->associated_animation_count_in_subtree())
             change_associated_animation_count_in_subtree(count);
     }

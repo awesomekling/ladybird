@@ -737,15 +737,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
             (void)builder.clear_stale_layout_node(builder.dom_node_for_style_node(style_node)); },
-        .display_contents_facts = [](void*, void* element_pointer) -> RustFFI::FfiDisplayContentsFacts {
-            VERIFY(element_pointer);
-            auto& element = *static_cast<DOM::Element*>(element_pointer);
-            auto shadow_root = element.shadow_root();
-            return {
-                .has_shadow_root = shadow_root != nullptr,
-                .shadow_root_style_node = shadow_root ? shadow_root->style_node_id().value() : 0,
-            };
-        },
         .clear_stale_subtree = [](void* builder_pointer, u32 style_node, RustFFI::FfiStaleSubtreeClearScope scope) {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
@@ -774,8 +765,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             VERIFY(node_pointer);
             VERIFY(layout_node_pointer);
             auto& node = *static_cast<DOM::Node*>(node_pointer);
-            auto* element = as_if<DOM::Element>(node);
-            auto shadow_root = element ? element->shadow_root() : nullptr;
             auto* graphics_element = as_if<SVG::SVGGraphicsElement>(node);
             GC::Ptr<SVG::SVGMaskElement const> mask;
             GC::Ptr<SVG::SVGClipPathElement const> clip_path;
@@ -789,8 +778,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
                 stroke_pattern = graphics_element->stroke_pattern(layout_node);
             }
             return {
-                .has_shadow_root = shadow_root != nullptr,
-                .shadow_root_style_node = shadow_root ? shadow_root->style_node_id().value() : 0,
                 .svg_graphics_element = graphics_element,
                 .svg_mask = identified_dom_node(mask.ptr()),
                 .svg_clip_path = identified_dom_node(clip_path.ptr()),
