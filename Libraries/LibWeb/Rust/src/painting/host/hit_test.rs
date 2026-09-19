@@ -25,6 +25,7 @@ pub struct FfiHitTestQueryCallbacks {
 
 impl FfiHitTestQueryCallbacks {
     pub(crate) fn shell_in_scope(&self, shell: *mut c_void) -> bool {
+        crate::painting::seal::note_host_call("shell_in_scope");
         // SAFETY: The C++ host answers synchronously.
         unsafe { (self.shell_in_scope)(self.context, shell) }
     }
@@ -50,25 +51,30 @@ pub struct FfiCaretPositionQueryCallbacks {
 
 impl FfiCaretPositionQueryCallbacks {
     pub(crate) fn shell_is_query_node(&self, shell: *mut c_void) -> bool {
+        crate::painting::seal::note_host_call("shell_is_query_node");
         // SAFETY: The C++ host compares the shell's DOM node synchronously.
         unsafe { (self.shell_is_query_node)(self.context, shell) }
     }
     pub(crate) fn query_boundary_precedes_shell(&self, shell: *mut c_void) -> bool {
+        crate::painting::seal::note_host_call("query_boundary_precedes_shell");
         // SAFETY: The C++ host compares the shell's DOM node synchronously.
         unsafe { (self.query_boundary_precedes_shell)(self.context, shell) }
     }
 
     pub(crate) fn query_boundary_descends_to_shell(&self, shell: *mut c_void) -> bool {
+        crate::painting::seal::note_host_call("query_boundary_descends_to_shell");
         // SAFETY: The C++ host walks the query boundary synchronously.
         unsafe { (self.query_boundary_descends_to_shell)(self.context, shell) }
     }
 
     pub(crate) fn query_boundary_follows_shell_end(&self, shell: *mut c_void, end_offset: usize) -> bool {
+        crate::painting::seal::note_host_call("query_boundary_follows_shell_end");
         // SAFETY: The C++ host compares the query boundary synchronously.
         unsafe { (self.query_boundary_follows_shell_end)(self.context, shell, end_offset) }
     }
 
     pub(crate) fn query_is_adjacent_to_shell(&self, shell: *mut c_void) -> bool {
+        crate::painting::seal::note_host_call("query_is_adjacent_to_shell");
         // SAFETY: The C++ host compares the query boundary synchronously.
         unsafe { (self.query_is_adjacent_to_shell)(self.context, shell) }
     }

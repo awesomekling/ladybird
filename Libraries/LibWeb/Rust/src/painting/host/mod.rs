@@ -43,7 +43,18 @@ pub struct FfiGeometryHostCallbacks {
 
 impl FfiGeometryHostCallbacks {
     pub(crate) fn layout_node_is_in_focused_text_control(&self, layout_node_shell: *mut std::ffi::c_void) -> bool {
+        crate::painting::seal::note_host_call("layout_node_is_in_focused_text_control");
         // SAFETY: The C++ host answers synchronously from a live layout node shell.
         unsafe { (self.layout_node_is_in_focused_text_control)(self.context, layout_node_shell) }
+    }
+
+    /// # Safety
+    ///
+    /// `layout_node_shell` must be a live layout node shell. The host re-enters geometry
+    /// queries, so no arena or cache borrow may be held across this call.
+    pub(crate) unsafe fn clamp_scroll_offset_if_nonzero(&self, layout_node_shell: *mut std::ffi::c_void) {
+        crate::painting::seal::note_host_call("clamp_scroll_offset_if_nonzero");
+        // SAFETY: The caller guarantees the shell is live and no borrow is held.
+        unsafe { (self.clamp_scroll_offset_if_nonzero)(self.context, layout_node_shell) };
     }
 }

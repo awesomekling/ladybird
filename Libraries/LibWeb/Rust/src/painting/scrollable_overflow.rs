@@ -840,6 +840,7 @@ pub(crate) fn update_scrollable_overflow(arena: &LayoutNodeArena) {
     if (pending_boxes.is_empty() && !needs_full_recalculation) || !arena.paintable_row_is_populated(viewport) {
         return;
     }
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollableOverflow);
     arena
         .scrollable_overflow
         .recalculations
@@ -905,7 +906,7 @@ pub(crate) fn update_scrollable_overflow(arena: &LayoutNodeArena) {
             if !shell.is_null() {
                 // SAFETY: The registered host receives a live shell. No mutable arena or
                 // cache borrow is held while it re-enters geometry queries to clamp the offset.
-                unsafe { (host.clamp_scroll_offset_if_nonzero)(host.context, shell) };
+                unsafe { host.clamp_scroll_offset_if_nonzero(shell) };
             }
         }
     }

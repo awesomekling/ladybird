@@ -157,14 +157,17 @@ pub struct FfiVisualContextHostCallbacks {
 
 impl FfiVisualContextHostCallbacks {
     pub(crate) fn tree_inputs(&self) -> FfiVisualContextTreeInputs {
+        crate::painting::seal::note_host_call("tree_inputs");
         // SAFETY: The C++ host answers synchronously.
         unsafe { (self.tree_inputs)(self.context) }
     }
     pub(crate) fn node_identity(&self, layout_node_shell: *mut c_void) -> i64 {
+        crate::painting::seal::note_host_call("node_identity");
         // SAFETY: The C++ host answers synchronously from a live layout node shell.
         unsafe { (self.node_identity)(self.context, layout_node_shell) }
     }
     pub(crate) fn scroll_offset(&self, layout_node_shell: *mut c_void) -> used_values::FfiCssPixelPoint {
+        crate::painting::seal::note_host_call("scroll_offset");
         // SAFETY: The C++ host answers synchronously from a live layout node shell.
         unsafe { (self.scroll_offset)(self.context, layout_node_shell) }
     }
