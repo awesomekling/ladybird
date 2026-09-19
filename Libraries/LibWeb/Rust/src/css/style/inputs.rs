@@ -103,6 +103,20 @@ impl RetainedState {
         self.atoms.intern_cpp_raw(raw)
     }
 
+    /// Keep the atom a render-side publication names live for as long as the publication does.
+    ///
+    /// A published SVG reference names an id that may name no element at all, and an atom nothing
+    /// answers to has no other owner: a sweep would reclaim it and hand its number to the next
+    /// name interned, which the publication would then read as the element it points at.
+    pub fn retain_published_atom(&mut self, atom: StyleAtomID) {
+        self.atoms.retain_published(atom);
+    }
+
+    /// Give up the retention `retain_published_atom` took, as a publication is cleared or replaced.
+    pub fn release_published_atom(&mut self, atom: StyleAtomID) {
+        self.atoms.release_published(atom);
+    }
+
     /// The document-local atom for a name qualified by a namespace.
     ///
     /// `[ns|x]` names an attribute that `[x]` does not, and one element can carry both. So the
