@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Vector.h>
+#include <LibWeb/DOM/HoverEventData.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/Export.h>
@@ -40,6 +41,11 @@ public:
     // A message a finished layout pass left for this document.
     void append(Layout::RustFFI::FfiCommitMessage const&);
 
+    // Which node the pointer ended up over once a scroll settled. The hit test that decided this
+    // ran on committed data and named the node by identity; the main side learns it here instead
+    // of from the code that ran the hit test.
+    void note_hover_target_after_scroll(NodeIdentity, Optional<HoverEventData>);
+
     // The node a rebuild escalates to, because the node that asked for it sits under an anonymous
     // parent and only the render side knows where the escalation stops.
     void note_needs_layout_tree_update(NodeIdentity, SetNeedsLayoutTreeUpdateReason);
@@ -51,6 +57,7 @@ private:
     enum class Kind : u8 {
         BoxPresence,
         ContentSizeChangedForContainerQueries,
+        HoverTargetAfterScroll,
         ListItemCounterValueRendered,
         NavigableContainerViewportCommitted,
         NeedsLayoutTreeUpdate,
@@ -68,6 +75,9 @@ private:
         bool has_committed_box { false };
         // Only the layout tree update trace reads this.
         SetNeedsLayoutTreeUpdateReason layout_tree_update_reason {};
+        // Where the pointer was, for the hover events the target change ends in. Only
+        // HoverTargetAfterScroll has one.
+        Optional<HoverEventData> hover_event_data {};
     };
 
     void apply(Message const&);

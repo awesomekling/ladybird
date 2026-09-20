@@ -11,8 +11,10 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/Dump.h>
+#include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/NodeArena.h>
+#include <LibWeb/Page/EventHandler.h>
 #include <LibWeb/SVG/SVGElement.h>
 
 namespace Web::DOM {
@@ -27,6 +29,19 @@ void CommitMessages::note_box_presence(NodeIdentity identity, bool has_layout_bo
     });
     // The bits answer `Node::is_rendered()`, which DOM code asks in the middle of a layout pass,
     // so they cannot wait for one of the drain points yet.
+    apply();
+}
+
+void CommitMessages::note_hover_target_after_scroll(NodeIdentity identity, Optional<HoverEventData> hover_event_data)
+{
+    m_messages.append(Message {
+        .identity = identity,
+        .kind = Kind::HoverTargetAfterScroll,
+        .hover_event_data = move(hover_event_data),
+    });
+    // The hover events a target change ends in are dispatched from whatever decided the target, so
+    // that they keep their order relative to the rendering opportunity's steps. That is sooner than
+    // any of the drain points, so this kind is applied where it is appended.
     apply();
 }
 
@@ -111,6 +126,12 @@ void CommitMessages::apply(Message const& message)
         // Only an element can be a query container; the viewport names the document, which is not.
         if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
             CSS::Invalidation::invalidate_descendant_styles_depending_on_size_container_query(*element);
+        return;
+    case Kind::HoverTargetAfterScroll:
+        // A node that has left the tree since the hit test named it is nothing to hover, which is
+        // also what the hit test naming nothing means.
+        if (auto navigable = m_document.navigable())
+            navigable->event_handler().apply_hover_target_after_scroll({}, message.identity.resolve(m_document), message.hover_event_data);
         return;
     case Kind::ListItemCounterValueRendered:
         if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))

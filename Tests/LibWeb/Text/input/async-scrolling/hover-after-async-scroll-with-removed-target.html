@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    body {
+        margin: 0;
+    }
+
+    #scroller {
+        overflow: scroll;
+        height: 200px;
+        width: 300px;
+    }
+
+    .item {
+        height: 200px;
+    }
+
+    .item:hover {
+        outline: 2px solid green;
+    }
+</style>
+<div id="scroller">
+    <div class="item" id="p">p</div>
+    <div class="item" id="q">q</div>
+    <div class="item" id="r">r</div>
+    <div class="item" id="s">s</div>
+</div>
+<script>
+    function hoverStates() {
+        let hovered = [];
+        for (const element of document.querySelectorAll(":hover"))
+            hovered.push(element.localName + (element.id ? `#${element.id}` : ""));
+        return `hovered=[${hovered.join(",")}] top=${scroller.scrollTop}`;
+    }
+
+    async function waitForHover(element) {
+        for (let i = 0; i < 60; ++i) {
+            if (element.matches(":hover"))
+                return;
+            await timeout(50);
+        }
+        println(`timed out waiting for ${element.id} to be hovered`);
+    }
+
+    promiseTest(async () => {
+        await animationFrame();
+        await animationFrame();
+
+        // Named access stops working once an element leaves the tree, so hold the two the scroll
+        // handlers remove.
+        const q = document.getElementById("q");
+        const r = document.getElementById("r");
+
+        let events = [];
+        document.addEventListener("mouseover", event => events.push(`over:${event.target.id || event.target.localName}`));
+        document.addEventListener("mouseout", event => events.push(`out:${event.target.id || event.target.localName}`));
+
+        internals.mouseMove(10, 10);
+        println(`initial ${hoverStates()}`);
+
+        // The box the scroll would have put under the pointer is gone before the deferred hover
+        // update runs, so the hit test never sees it and the box behind it is hovered instead.
+        events = [];
+        scroller.addEventListener("scroll", function removeIncoming() {
+            scroller.removeEventListener("scroll", removeIncoming);
+            q.remove();
+        });
+        await internals.wheel(10, 10, 0, 200);
+        await waitForHover(r);
+        println(`incoming target removed ${hoverStates()}`);
+        println(`incoming target removed events=${events.join(",")} q connected=${q.isConnected} q hovered=${q.matches(":hover")}`);
+
+        // Now the box that is hovered is the one the scroll handler removes. The hover it is losing
+        // still has to be reported to it, and the new target is named in a tree it has left.
+        events = [];
+        scroller.addEventListener("scroll", function removeHovered() {
+            scroller.removeEventListener("scroll", removeHovered);
+            r.remove();
+        });
+        await internals.wheel(10, 10, 0, 200);
+        await waitForHover(s);
+        println(`hovered target removed ${hoverStates()}`);
+        println(`hovered target removed events=${events.join(",")} r connected=${r.isConnected} r hovered=${r.matches(":hover")}`);
+    });
+</script>
