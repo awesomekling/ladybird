@@ -550,6 +550,11 @@ pub(crate) struct LayoutNodeArena {
     slot_metadata: Vec<SlotMetadata>,
     style_records: Vec<Cell<u64>>,
     style_records_pinned_by_arena: Vec<Cell<bool>>,
+    /// The style record a row's host has pinned for readers that outlive the row's place in the
+    /// tree - a detached box is read until its row is freed - or zero for a row with no such pin.
+    /// A pin is counted, so this is a pin of its own beside the arena's rather than a share of it,
+    /// and it names the record it took rather than whichever record the row holds when it goes.
+    style_records_pinned_by_host: Vec<Cell<u64>>,
     /// The StyleNodeID of the element or text node each row is bound to, or of the element it is
     /// generated for. Rows carrying one
     /// identity are chained through `next_rows_with_same_style_node` from
@@ -708,6 +713,7 @@ impl LayoutNodeArena {
             slot_metadata: Vec::new(),
             style_records: Vec::new(),
             style_records_pinned_by_arena: Vec::new(),
+            style_records_pinned_by_host: Vec::new(),
             style_nodes: Vec::new(),
             next_rows_with_same_style_node: Vec::new(),
             first_rows_by_style_node: RefCell::new(RowsByStyleNode::default()),
@@ -940,6 +946,7 @@ impl LayoutNodeArena {
             self.slot_metadata.push(SlotMetadata::default());
             self.style_records.push(Cell::new(0));
             self.style_records_pinned_by_arena.push(Cell::new(false));
+            self.style_records_pinned_by_host.push(Cell::new(0));
             self.style_nodes.push(Cell::new(None));
             self.next_rows_with_same_style_node.push(Cell::new(NodeSlotId::INVALID));
             self.next_rows_built_for_same_node.push(Cell::new(NodeSlotId::INVALID));
@@ -1011,6 +1018,10 @@ impl LayoutNodeArena {
             if self.style_records_pinned_by_arena[slot.slot_index() as usize].get() {
                 arena_pinned_style_records.push(self.style_records[slot.slot_index() as usize].get());
             }
+            let host_pinned_style_record = self.style_records_pinned_by_host[slot.slot_index() as usize].get();
+            if host_pinned_style_record != 0 {
+                arena_pinned_style_records.push(host_pinned_style_record);
+            }
             self.unlink_children_of_node_being_freed(slot);
             if let Some(reset) = self.free_unlinked_slot(slot) {
                 paintable_row_resets.push(reset);
@@ -1073,6 +1084,7 @@ impl LayoutNodeArena {
         self.set_node_style_node(id, None);
         self.style_records[index as usize].set(0);
         self.style_records_pinned_by_arena[index as usize].set(false);
+        self.style_records_pinned_by_host[index as usize].set(0);
 
         if let Some(slot) = self.intrinsic_size_caches.get_mut().get_mut(index as usize) {
             *slot = IntrinsicSizeCacheSlot::default();
@@ -1493,6 +1505,33 @@ impl LayoutNodeArena {
             "layout node arena read the style pin of a dead slot"
         );
         self.style_records_pinned_by_arena[id.slot_index() as usize].get()
+    }
+
+    /// Pin `record` for the host's readers of `slot`. A row holds at most one such pin; asking
+    /// again while one is held keeps the one it has, as the shell flag this replaces did.
+    pub(crate) fn pin_node_style_record_for_host(&self, id: NodeSlotId, record: u64) {
+        self.assert_owner_thread();
+        assert!(record != 0, "a row pinned a null style record for its host");
+        if self.style_records_pinned_by_host[id.slot_index() as usize].get() != 0 {
+            return;
+        }
+        self.style_records_pinned_by_host[id.slot_index() as usize].set(record);
+        self.with_style_engine(|engine| engine.pin_layout_style_record(record));
+    }
+
+    /// Release the pin the host holds on `slot`'s style record, if it holds one.
+    pub(crate) fn release_node_style_record_pin_for_host(&self, id: NodeSlotId) {
+        self.assert_owner_thread();
+        let record = self.style_records_pinned_by_host[id.slot_index() as usize].replace(0);
+        if record == 0 {
+            return;
+        }
+        self.with_style_engine(|engine| engine.unpin_layout_style_record(record));
+    }
+
+    /// The style record the host has pinned for `slot`, or zero.
+    pub(crate) fn node_style_record_pinned_by_host(&self, id: NodeSlotId) -> u64 {
+        self.style_records_pinned_by_host[id.slot_index() as usize].get()
     }
 
     pub(crate) fn set_style_record_host(&self, host: Option<FfiStyleRecordHostCallbacks>) {
@@ -5081,6 +5120,31 @@ pub unsafe extern "C" fn layout_arena_set_pseudo_element_scroll_offset(
     };
     // SAFETY: As above.
     unsafe { &*arena.cast::<LayoutNodeArena>() }.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset);
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_pin_node_style_record_for_host(
+    arena: *mut c_void,
+    slot: NodeSlotId,
+    record: u64,
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: The handle came from layout_arena_create and outlives this call.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.pin_node_style_record_for_host(slot, record);
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_release_node_style_record_pin_for_host(arena: *mut c_void, slot: NodeSlotId) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: The handle came from layout_arena_create and outlives this call.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.release_node_style_record_pin_for_host(slot);
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_node_style_record_pinned_by_host(arena: *mut c_void, slot: NodeSlotId) -> u64 {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: The handle came from layout_arena_create and outlives this call.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.node_style_record_pinned_by_host(slot)
 }
 
 #[unsafe(no_mangle)]
