@@ -1889,11 +1889,7 @@ impl StyleEngineState {
                 },
             ),
         }
-        let deferred_style_input_bytes =
-            (self.host.deferred_element_style_inputs.capacity() * size_of::<NormalizedInput>()) as u64;
-        self.host
-            .deferred_element_style_input_memory
-            .resize_required_to(&mut self.retained.memory, deferred_style_input_bytes);
+        self.settle_deferred_element_style_input_memory();
     }
 
     /// Release a drained transaction's scratch charge.

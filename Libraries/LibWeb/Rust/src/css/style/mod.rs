@@ -63,6 +63,7 @@ mod computed;
 mod counter_context;
 mod custom_property_cascade;
 mod custom_property_environments;
+mod deferred_pseudo;
 #[cfg(test)]
 mod differential_tests;
 pub mod exact_matcher;
@@ -792,6 +793,10 @@ pub struct RetainedState {
     /// points are `refresh_admission_facts`'s callers.
     admission: AdmissionFacts,
     deferred_pseudo_element: Option<tree::PseudoElementKind>,
+    /// The pseudo kind whose derived reactions remain dormant outside the current observability
+    /// interval, independently of whether its publication is globally deferred right now.
+    latent_deferred_pseudo_element: Option<tree::PseudoElementKind>,
+    deferred_pseudo_element_observable_nodes: Vec<StyleNodeID>,
     tree: StyleNodeTree,
     program: StyleSheetProgram,
     native_rules: native_rules::NativeRuleRegistry,
@@ -1019,6 +1024,9 @@ pub struct HostState {
     flushing_deferred_geometry_journal: bool,
     /// Exact element reactions retained across rootless flushes until a style root can consume them.
     deferred_element_style_inputs: Vec<NormalizedInput>,
+    /// Pseudo-only reactions held until their otherwise deferred pseudo becomes observable on the
+    /// node. Unlike rootless inputs, these do not keep the document's style update unsettled.
+    latent_deferred_pseudo_element_style_inputs: Vec<NormalizedInput>,
     /// Whether the deferred element style inputs are owed to the next transaction, as opposed to
     /// held back by a flush without a document root.
     deferred_element_style_inputs_are_pending: bool,
