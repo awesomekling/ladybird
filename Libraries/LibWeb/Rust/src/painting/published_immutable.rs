@@ -220,6 +220,23 @@ pub(crate) fn before_publication(arena: &LayoutNodeArena) {
     });
 }
 
+pub(crate) fn before_journal_publication(arena: &LayoutNodeArena) {
+    if !enabled() {
+        return;
+    }
+    verify(arena, "invalidation journal publication");
+    let key = arena as *const LayoutNodeArena as usize;
+    STATE.with(|state| {
+        if let Some(published) = state.borrow_mut().arenas.get_mut(&key) {
+            published.in_publication = true;
+        }
+    });
+}
+
+pub(crate) fn after_journal_publication(arena: &LayoutNodeArena) {
+    published(arena);
+}
+
 pub(crate) fn finish(arena: &LayoutNodeArena) {
     if !enabled() {
         return;
