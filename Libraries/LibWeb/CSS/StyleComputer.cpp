@@ -6212,6 +6212,23 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     consume_longhand_transaction_result(&native_context, transaction_result.drive_result);
     auto finalization_result = ComputedValuesFFI::rust_finalize_longhand_transaction(&input, transaction_result);
     native_context.state->working_set->did_apply_style_finalization_from_rust(finalization_result.invalidated_longhands);
+    if (finalization_result.animated_overlay) {
+        // The stage sampled this element's animations for itself, so what it produced is installed
+        // here rather than by a callback it made while it ran.
+        auto& computed_style = *native_context.state->working_set;
+        computed_style.install_animated_overlay_from_rust(Badge<StyleComputer> {}, finalization_result.animated_overlay);
+        if (finalization_result.depends_on_viewport_metrics)
+            computed_style.set_depends_on_viewport_metrics();
+        if (finalization_result.font_metrics_depend_on_viewport_metrics)
+            computed_style.set_font_metrics_depend_on_viewport_metrics();
+        if (finalization_result.keyframes_inherited_non_inherited_style_groups != 0) {
+            auto style_groups = finalization_result.keyframes_inherited_non_inherited_style_groups;
+            if (style_groups == NumericLimits<u32>::max())
+                style_groups = ComputedValues::all_style_groups;
+            m_keyframes_inherited_non_inherited_style_groups |= style_groups;
+        }
+        publish_animated_custom_properties(computed_style, abstract_element);
+    }
     finish_properties(&native_context, finalization_result.parent_style_in_display_none_subtree);
     return native_context.state->working_set;
 }

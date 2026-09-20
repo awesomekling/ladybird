@@ -7240,6 +7240,19 @@ pub unsafe extern "C" fn rust_animation_preparation_matches(
         .is_some_and(|preparation| unsafe { preparation.key.matches_ffi(key) })
 }
 
+/// Drops the resolved-declaration storage a resolve handed out without evaluating it, for a caller
+/// that resolved the declarations and then found the batch was not one it could compute.
+///
+/// # Safety
+/// `storage` must be the `storage` of an `FfiResolvedAnimationProperties` that was not passed to
+/// `rust_evaluate_animations`, and must not be used again.
+pub(crate) unsafe fn release_resolved_animation_declarations(storage: *mut std::ffi::c_void) {
+    if storage.is_null() {
+        return;
+    }
+    drop(unsafe { Box::from_raw(storage.cast::<ResolvedAnimationDeclarations>()) });
+}
+
 /// Complete the Rust-owned animation plan and compose every interval without
 /// consulting C++ or the DOM. On the first sample this consumes the Rust allocations produced by
 /// declaration resolution and keyframe longhand computation. Later samples can reuse that

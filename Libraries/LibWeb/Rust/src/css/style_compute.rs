@@ -2669,6 +2669,13 @@ pub struct FfiLonghandTransactionResult {
 pub struct FfiLonghandFinalizationResult {
     pub parent_style_in_display_none_subtree: bool,
     pub invalidated_longhands: u16,
+    // NB: Additive, and the only thing below this line: what the stage's own animation tail
+    //     produced, for the post-stage `finish_properties` to install. `animated_overlay` is null
+    //     wherever the host's `apply_animations` ran instead, and then the other three say nothing.
+    pub animated_overlay: *mut AnimatedOverlay,
+    pub depends_on_viewport_metrics: bool,
+    pub font_metrics_depend_on_viewport_metrics: bool,
+    pub keyframes_inherited_non_inherited_style_groups: u32,
 }
 
 /// The three length-resolution contexts a keyframe value is computed in.
@@ -2730,6 +2737,303 @@ impl FfiAnimationLengthContexts {
             self.remaining.root_font_metrics_depend_on_viewport_metrics = font_metrics_depend_on_viewport_metrics;
         }
     }
+}
+
+/// What the stage's own animation tail produced for an element it could sample without the host:
+/// the overlay it allocated and filled, and the three facts the post-stage `finish_properties`
+/// installs beside it.
+pub(crate) struct StageAnimationTail {
+    pub(crate) overlay: *mut AnimatedOverlay,
+    pub(crate) depends_on_viewport_metrics: bool,
+    pub(crate) font_metrics_depend_on_viewport_metrics: bool,
+    pub(crate) keyframes_inherited_non_inherited_style_groups: u32,
+}
+
+/// The effects of one of an element's animation lists that the stage would sample, taken from the
+/// published timing rows and effect descriptions alone.
+///
+/// A mirror of what `apply_animations` builds out of `get_animations_internal()` and what
+/// `collect_animation_effects_into()` then filters to its `active_effects`: the rows are published
+/// in composite order, so the walk takes them in order, skips the provisional duplicates the
+/// element's animation list does not hold, keeps the relevant ones, and drops the ones whose
+/// progress does not resolve or whose description has too few keyframes to interpolate between.
+/// `None` wherever the published facts decline to answer and the host has to be asked.
+fn published_active_effects(
+    style_engine: &crate::css::style::StyleEngine,
+    node: crate::css::style::tree::StyleNodeID,
+    slot: u8,
+) -> Option<(Vec<crate::css::animation::FfiAnimationPreparationEffect>, Vec<f64>)> {
+    use crate::css::style::animations;
+
+    let samples = style_engine.animation_timeline_samples();
+    let descriptions = style_engine.element_animation_effect_descriptions(node, slot);
+    let mut effects = Vec::new();
+    let mut current_keys = Vec::new();
+    for row in style_engine.element_animation_timing_rows(node, slot) {
+        if animations::row_is_not_associated(row) {
+            continue;
+        }
+        let timeline_time = animations::row_timeline_time(row, samples)?;
+        if !animations::row_is_relevant(row, timeline_time)? {
+            continue;
+        }
+        // The outer `None` is a row that declines to be decided; the inner one is a progress that
+        // did not resolve, which the host skips over.
+        let Some(current_key) = animations::row_current_key(row, timeline_time)? else {
+            continue;
+        };
+        let identity = row.effect_identity();
+        // An effect the host did not describe is one the stage cannot resolve declarations for.
+        let description = descriptions.iter().find(|effect| effect.identity == identity)?;
+        if !description.is_covered() {
+            return None;
+        }
+        if description.keyframes.len() < 2 {
+            continue;
+        }
+        effects.push(crate::css::animation::FfiAnimationPreparationEffect {
+            identity,
+            generation: description.generation,
+        });
+        current_keys.push(current_key);
+    }
+    Some((effects, current_keys))
+}
+
+/// The animation length-resolution context the animation core composes values in, which is the
+/// host's `Color` computation context - the one the drive kept as `remaining`.
+fn animation_length_resolution_context(
+    context: &FfiLengthResolutionContext,
+) -> crate::css::animation::FfiAnimationLengthResolutionContext {
+    let metrics = |metrics: &FfiFontMetrics| crate::css::animation::FfiAnimationFontMetrics {
+        font_size: metrics.font_size,
+        x_height: metrics.x_height,
+        cap_height: metrics.cap_height,
+        zero_advance: metrics.zero_advance,
+        line_height: metrics.line_height,
+    };
+    crate::css::animation::FfiAnimationLengthResolutionContext {
+        viewport_width: context.viewport_width,
+        viewport_height: context.viewport_height,
+        font_metrics: metrics(&context.font_metrics),
+        root_font_metrics: metrics(&context.root_font_metrics),
+        font_metrics_depend_on_viewport_metrics: context.font_metrics_depend_on_viewport_metrics,
+        root_font_metrics_depend_on_viewport_metrics: context.root_font_metrics_depend_on_viewport_metrics,
+    }
+}
+
+/// Samples the element's animations onto an overlay of the stage's own, for the elements whose
+/// whole animation state the published facts describe: no plan to apply, every effect described,
+/// and a batch whose values depend on nothing outside what the drive already resolved. `None`
+/// wherever any of that fails, and then the host's `apply_animations` runs as before.
+///
+/// # Safety
+/// Every pointer in `input` and `drive_input` must be live for the call, and `existing_overlay`
+/// must be the overlay the element's computation holds, or null.
+unsafe fn try_stage_animation_tail(
+    style_engine: &crate::css::style::StyleEngine,
+    input: &FfiComputePropertiesInput,
+    drive_input: &FfiLonghandTransactionInput,
+    length_contexts: &FfiAnimationLengthContexts,
+    existing_overlay: *const AnimatedOverlay,
+) -> Option<StageAnimationTail> {
+    use crate::css::animation as anim;
+
+    // Measuring the line height the finalization takes as input is a font-service read, so an
+    // element that needs one is left to the host.
+    if drive_input.check_input_line_height {
+        return None;
+    }
+    let node = crate::css::style::tree::StyleNodeID::from_raw(input.style_node)?;
+    let slot = animation_slot(input.pseudo_kind);
+    let (preparation_effects, current_keys) = published_active_effects(style_engine, node, slot)?;
+    // An element with nothing to sample has its overlay cleared rather than replaced, which is a
+    // different message to the host; it stays with the host for now.
+    if preparation_effects.is_empty() {
+        return None;
+    }
+
+    let table = unsafe { &*drive_input.longhand_table };
+    let preparation_key = anim::FfiAnimationPreparationKey {
+        effects: preparation_effects.as_ptr(),
+        effect_count: preparation_effects.len(),
+    };
+    // The overlay the stage fills is its own, so that installing it is a post-stage step; it starts
+    // as a copy of the one the computation holds, which is what the host would have mutated.
+    let overlay = match existing_overlay.is_null() {
+        true => crate::css::animated_overlay::rust_animated_overlay_create(),
+        false => unsafe { crate::css::animated_overlay::rust_animated_overlay_clone(existing_overlay) },
+    };
+    let mut context = anim::FfiAnimationContext {
+        allow_discrete: true,
+        current_color: table
+            .get(crate::css::property_metadata::property_id::COLOR)
+            .map_or(std::ptr::null(), |value| value.pointer().cast()),
+        has_length_resolution_context: true,
+        length_resolution_context: animation_length_resolution_context(&length_contexts.remaining),
+        has_transform_reference_box: false,
+        transform_reference_box_width: 0.0,
+        transform_reference_box_height: 0.0,
+    };
+    if let Some((width, height)) = style_engine.committed_transform_reference_box(node) {
+        context.has_transform_reference_box = true;
+        context.transform_reference_box_width = width;
+        context.transform_reference_box_height = height;
+    }
+
+    // A preparation the overlay already holds for exactly these effects needs no declarations and
+    // no keyframe longhands at all.
+    if unsafe { anim::rust_animation_preparation_matches(overlay.cast(), &raw const preparation_key) } {
+        let batch = anim::FfiComputedAnimationBatch {
+            context,
+            preparation_key: &raw const preparation_key,
+            current_keys: current_keys.as_ptr(),
+            current_key_count: current_keys.len(),
+            cache_preparation: true,
+            resolved_animation_storage: std::ptr::null_mut(),
+            computed_keyframe_storage: std::ptr::null_mut(),
+            underlying_longhand_table: (drive_input.longhand_table as *const ComputedLonghandTable).cast(),
+            overlay: overlay.cast(),
+            custom_underlying_values: std::ptr::null(),
+            custom_initial_values: std::ptr::null(),
+            custom_value_count: 0,
+            custom_results: std::ptr::null_mut(),
+            custom_result_count: std::ptr::null_mut(),
+        };
+        unsafe { anim::rust_evaluate_animations(&raw const batch) };
+        return Some(StageAnimationTail {
+            overlay,
+            depends_on_viewport_metrics: false,
+            font_metrics_depend_on_viewport_metrics: false,
+            keyframes_inherited_non_inherited_style_groups: 0,
+        });
+    }
+
+    let (writing_mode, direction) = computed_writing_mode_and_direction(table);
+    let importance = table.importance_bits();
+    let identities = preparation_effects
+        .iter()
+        .map(|effect| effect.identity)
+        .collect::<Vec<_>>();
+    let generations = preparation_effects
+        .iter()
+        .map(|effect| effect.generation)
+        .collect::<Vec<_>>();
+    let mut covered = false;
+    let sample = anim::FfiPublishedAnimationSample {
+        style_engine: std::ptr::from_ref(style_engine).cast(),
+        style_node: input.style_node,
+        slot,
+        identities: identities.as_ptr(),
+        generations: generations.as_ptr(),
+        current_keys: current_keys.as_ptr(),
+        effect_count: identities.len(),
+        underlying_longhand_table: (drive_input.longhand_table as *const ComputedLonghandTable).cast(),
+        writing_mode,
+        direction,
+        important_property_bitmap: importance.as_ptr(),
+        important_property_bitmap_length: importance.len(),
+        covered: &raw mut covered,
+    };
+    let resolved = unsafe { anim::rust_resolve_animation_declarations_from_published(&raw const sample) };
+    let give_up = |resolved: &anim::FfiResolvedAnimationProperties| {
+        unsafe { anim::release_resolved_animation_declarations(resolved.storage) };
+        unsafe { crate::css::animated_overlay::rust_animated_overlay_free(overlay) };
+    };
+    if !covered || resolved.count == 0 {
+        give_up(&resolved);
+        return None;
+    }
+    let properties = unsafe { std::slice::from_raw_parts(resolved.properties, resolved.count) };
+    // The same terms the host's `cache_preparation` uses: everything outside them needs an input
+    // the stage does not hold - a custom property to compute, the element's place among its
+    // siblings, a container's size, the document's base URL, a random base value.
+    let batch_is_fully_described = properties.iter().all(|property| property.custom_name_id == 0)
+        && !resolved.uses_tree_counting_function
+        && resolved.container_relative_length_unit_mask == 0
+        && !resolved.needs_document_base_url
+        && resolved.unfixed_random_sharing_count == 0;
+    if !batch_is_fully_described {
+        give_up(&resolved);
+        return None;
+    }
+
+    // A keyframe that inherits a non-inherited property leaves an invalidation mark on the parent,
+    // which the post-stage step installs.
+    let mut keyframes_inherited_non_inherited_style_groups = 0u32;
+    for property in properties {
+        if property.value_source != anim::FfiAnimationSpecifiedValueSource::Inherited {
+            continue;
+        }
+        if crate::css::property_metadata::property_is_inherited(property.source_longhand_id) {
+            continue;
+        }
+        keyframes_inherited_non_inherited_style_groups |=
+            match crate::css::property_metadata::property_style_group_index(property.source_longhand_id) {
+                Some(index) => 1u32 << index,
+                // A longhand with no single known group is treated conservatively; the host maps
+                // this sentinel onto its own `all_style_groups`.
+                None => u32::MAX,
+            };
+    }
+
+    let drive_environment = unsafe { &*drive_input.environment };
+    let environment = FfiStyleComputationEnvironment {
+        // The host builds the animation batch's environment with a value-initialized box type
+        // input, which the keyframe drive never reads; all-zero is exactly that.
+        box_type_input: unsafe { std::mem::zeroed() },
+        color_scheme_input: drive_environment.color_scheme_input,
+        is_th_element: false,
+        has_new_font_size: false,
+        has_tree_counting_context: false,
+        sibling_count: 0,
+        sibling_index: 0,
+        random_base_values: std::ptr::null(),
+        random_base_value_count: 0,
+        document_base_url: std::ptr::null(),
+        document_base_url_length: 0,
+        style_sheet_resource_contexts: std::ptr::null(),
+        style_sheet_resource_context_count: 0,
+        device_pixels_per_css_pixel: drive_environment.device_pixels_per_css_pixel,
+        initial_font_size_raw: drive_environment.initial_font_size_raw,
+        default_font_size_raw: drive_environment.default_font_size_raw,
+    };
+    let keyframe_input = FfiAnimationKeyframeLonghandInput {
+        underlying_longhand_table: drive_input.longhand_table,
+        style_engine: std::ptr::from_ref(style_engine).cast(),
+        inheritance_parent_style_record: retained_inheritance_parent_style_record(style_engine, input),
+        resolved_properties: resolved.properties.cast(),
+        property_count: resolved.count,
+        environment: &raw const environment,
+        font_length_resolution_context: &raw const length_contexts.font,
+        line_height_length_resolution_context: &raw const length_contexts.line_height,
+        remaining_length_resolution_context: &raw const length_contexts.remaining,
+        custom_property_values: std::ptr::null(),
+    };
+    let computed_keyframes = unsafe { rust_compute_animation_keyframe_longhands(&raw const keyframe_input) };
+    let batch = anim::FfiComputedAnimationBatch {
+        context,
+        preparation_key: &raw const preparation_key,
+        current_keys: current_keys.as_ptr(),
+        current_key_count: current_keys.len(),
+        cache_preparation: true,
+        resolved_animation_storage: resolved.storage,
+        computed_keyframe_storage: computed_keyframes.storage,
+        underlying_longhand_table: (drive_input.longhand_table as *const ComputedLonghandTable).cast(),
+        overlay: overlay.cast(),
+        custom_underlying_values: std::ptr::null(),
+        custom_initial_values: std::ptr::null(),
+        custom_value_count: 0,
+        custom_results: std::ptr::null_mut(),
+        custom_result_count: std::ptr::null_mut(),
+    };
+    unsafe { anim::rust_evaluate_animations(&raw const batch) };
+    Some(StageAnimationTail {
+        overlay,
+        depends_on_viewport_metrics: computed_keyframes.depends_on_viewport_metrics,
+        font_metrics_depend_on_viewport_metrics: computed_keyframes.font_metrics_depend_on_viewport_metrics,
+        keyframes_inherited_non_inherited_style_groups,
+    })
 }
 
 struct LonghandTransactionContinuation {
@@ -5649,6 +5953,10 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         return FfiLonghandFinalizationResult {
             parent_style_in_display_none_subtree: false,
             invalidated_longhands: 0,
+            animated_overlay: std::ptr::null_mut(),
+            depends_on_viewport_metrics: false,
+            font_metrics_depend_on_viewport_metrics: false,
+            keyframes_inherited_non_inherited_style_groups: 0,
         };
     }
     let mut invalidated_longhands = 0;
@@ -5724,21 +6032,46 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         let invalidated = unsafe { restore_post_compute_values(&mut *drive_input.longhand_table, false) };
         invalidated_longhands |= invalidated;
     }
+    let mut stage_animation_tail = None;
     if element_has_animation_state {
-        let mut animation_stage_sampled = false;
-        let overlay = unsafe {
-            crate::css::style::seal::note_host_call("computed_properties.apply_animations");
-            (input.apply_animations)(
-                input.callback_context,
-                in_display_none_subtree,
-                (&*drive_input.environment).box_type_input.check_input_line_height,
-                &raw mut finalization_line_height_metrics,
-                &raw const animation_length_contexts,
-                &raw mut animation_stage_sampled,
-            )
+        // An element with no plan to apply and whose whole animation state the host described is
+        // one the stage samples for itself, and then the host is never asked.
+        stage_animation_tail = match plan_has_work {
+            true => None,
+            false => unsafe {
+                try_stage_animation_tail(
+                    style_engine,
+                    input,
+                    drive_input,
+                    &animation_length_contexts,
+                    animated_overlay,
+                )
+            },
         };
-        if animation_stage_sampled {
-            animated_overlay = overlay;
+        if let Some(tail) = &stage_animation_tail {
+            animated_overlay = tail.overlay;
+            // The host measures the finalization's input line height after sampling; the tail only
+            // runs for an element that needs no measurement, where the host writes zeroes.
+            finalization_line_height_metrics = FfiInputLineHeightMetrics {
+                current_line_height: 0.0,
+                minimum_line_height: 0.0,
+            };
+        } else {
+            let mut animation_stage_sampled = false;
+            let overlay = unsafe {
+                crate::css::style::seal::note_host_call("computed_properties.apply_animations");
+                (input.apply_animations)(
+                    input.callback_context,
+                    in_display_none_subtree,
+                    (&*drive_input.environment).box_type_input.check_input_line_height,
+                    &raw mut finalization_line_height_metrics,
+                    &raw const animation_length_contexts,
+                    &raw mut animation_stage_sampled,
+                )
+            };
+            if animation_stage_sampled {
+                animated_overlay = overlay;
+            }
         }
         // The adjustments have been undone, so the finalization has to redo them whether or not the
         // stage found anything to sample.
@@ -5782,6 +6115,18 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
     FfiLonghandFinalizationResult {
         parent_style_in_display_none_subtree,
         invalidated_longhands,
+        animated_overlay: stage_animation_tail
+            .as_ref()
+            .map_or(std::ptr::null_mut(), |tail| tail.overlay),
+        depends_on_viewport_metrics: stage_animation_tail
+            .as_ref()
+            .is_some_and(|tail| tail.depends_on_viewport_metrics),
+        font_metrics_depend_on_viewport_metrics: stage_animation_tail
+            .as_ref()
+            .is_some_and(|tail| tail.font_metrics_depend_on_viewport_metrics),
+        keyframes_inherited_non_inherited_style_groups: stage_animation_tail
+            .as_ref()
+            .map_or(0, |tail| tail.keyframes_inherited_non_inherited_style_groups),
     }
 }
 

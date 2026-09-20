@@ -420,6 +420,20 @@ ComputedValuesFFI::AnimatedOverlay* ComputedStyleWorkingSet::prepare_animated_ov
     return const_cast<ComputedValuesFFI::AnimatedOverlay*>(animated_properties.overlay());
 }
 
+void AnimatedProperties::adopt_overlay(ComputedValuesFFI::AnimatedOverlay* overlay)
+{
+    VERIFY(overlay);
+    ComputedValuesFFI::rust_animated_overlay_free(m_overlay);
+    m_overlay = overlay;
+    m_wrapper_cache.clear();
+}
+
+void ComputedStyleWorkingSet::install_animated_overlay_from_rust(Badge<StyleComputer>, ComputedValuesFFI::AnimatedOverlay* overlay)
+{
+    mutable_animated_properties().adopt_overlay(overlay);
+    clear_computed_font_list_cache();
+}
+
 ComputedValuesFFI::AnimatedOverlay const* ComputedStyleWorkingSet::animated_overlay(Badge<StyleComputer>) const
 {
     return m_animated_properties ? m_animated_properties->overlay() : nullptr;

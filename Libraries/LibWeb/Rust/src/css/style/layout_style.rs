@@ -415,6 +415,16 @@ impl LayoutStyle {
 }
 
 impl StyleEngine {
+    /// The size of the element's transform reference box, as the last committed layout left it,
+    /// which a keyframe or transition resolves a percentage translation against.
+    #[must_use]
+    pub(crate) fn committed_transform_reference_box(&self, node: super::tree::StyleNodeID) -> Option<(f64, f64)> {
+        let arena = self.host.layout_arena?;
+        // SAFETY: The arena the document named outlives the engine, and this reads its committed
+        // paintable rows without touching the engine it can reach back into.
+        unsafe { super::animations::committed_transform_reference_box(arena.as_ptr(), node) }
+    }
+
     pub(crate) fn pin_layout_style_record(&mut self, record: u64) {
         self.pin_style_record(record);
         self.record_boundary_call(super::record_replay::EventKind::PinStyleRecord, |payload| {
