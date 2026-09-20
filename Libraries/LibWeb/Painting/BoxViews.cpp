@@ -86,6 +86,11 @@ Layout::Node* layout_node_for_committed_slot(Layout::NodeArena& arena, Compositi
     return static_cast<Layout::Node*>(Layout::RustFFI::layout_arena_paintable_layout_node_shell(arena.handle(), slot));
 }
 
+u64 committed_row_reset_version(Layout::NodeArena& arena, Layout::RustFFI::NodeSlotId slot)
+{
+    return Layout::RustFFI::layout_arena_paintable_row_reset_version(arena.handle(), slot);
+}
+
 static PixelBox pixel_box_from_ffi(Layout::RustFFI::FfiPixelBox const& box)
 {
     return { box.top, box.right, box.bottom, box.left };
