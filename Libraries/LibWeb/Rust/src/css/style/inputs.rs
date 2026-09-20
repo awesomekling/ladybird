@@ -920,6 +920,33 @@ impl RetainedState {
         self.animation_timing_rows.set(node, slot, words, &times);
     }
 
+    /// Describe the effects the host holds for one of an element's animation lists, in composite
+    /// order, so the animation stage can build its own batch instead of walking the host's keyframe
+    /// sets. Published beside the timing rows, at the same funnels.
+    ///
+    /// # Safety
+    /// Every declaration's value must be a live style value for the duration of the call.
+    pub unsafe fn set_element_animation_effect_descriptions(
+        &mut self,
+        node: StyleNodeID,
+        slot: animations::AnimationSlot,
+        published_buffers: animations::PublishedEffectBuffers<'_>,
+    ) {
+        unsafe {
+            self.animation_effect_descriptions.set(node, slot, published_buffers);
+        }
+    }
+
+    /// The effects the host described for one of an element's animation lists.
+    #[must_use]
+    pub(crate) fn element_animation_effect_descriptions(
+        &self,
+        node: StyleNodeID,
+        slot: animations::AnimationSlot,
+    ) -> &[animations::PublishedEffect] {
+        self.animation_effect_descriptions.effects(node, slot)
+    }
+
     /// The timing of the animations the host holds for one of an element's animation lists.
     #[must_use]
     pub(crate) fn element_animation_timing_rows(
@@ -1344,6 +1371,7 @@ impl StyleEngineState {
                 nodes_with_substituted_records: HashSet::default(),
                 css_defined_animations: Default::default(),
                 animation_timing_rows: Default::default(),
+                animation_effect_descriptions: Default::default(),
                 animation_timeline_samples: Default::default(),
                 animation_keyframes: Default::default(),
                 custom_property_registrations_changed: false,
@@ -2101,6 +2129,7 @@ impl StyleEngineState {
             }
             self.retained.css_defined_animations.retire(&retired_nodes);
             self.retained.animation_timing_rows.retire(&retired_nodes);
+            self.retained.animation_effect_descriptions.retire(&retired_nodes);
             self.retained
                 .deferred_pseudo_element_observable_nodes
                 .retain(|member| !retired_nodes.contains(member));

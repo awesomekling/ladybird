@@ -6,6 +6,9 @@
 
 #include <AK/QuickSort.h>
 #include <AK/SetUnion.h>
+#include <LibWeb/Animations/Animation.h>
+#include <LibWeb/Animations/KeyframeEffect.h>
+#include <LibWeb/CSS/CSSAnimation.h>
 #include <LibWeb/CSS/CSSPropertyRule.h>
 #include <LibWeb/CSS/CSSStyleRule.h>
 #include <LibWeb/CSS/Invalidation/LanguageInvalidator.h>
@@ -35,6 +38,7 @@
 #include <LibWeb/SVG/SVGMaskElement.h>
 #include <LibWeb/SVG/SVGPatternElement.h>
 #include <LibWeb/SVG/SVGSwitchElement.h>
+#include <LibWeb/StyleEngineRustFFI.h>
 
 namespace Web::CSS {
 
@@ -1186,6 +1190,162 @@ void record_element_animation_timing_rows(DOM::Element& element, u8 slot, Readon
         return;
 
     style_engine->set_element_animation_timing_rows(element.style_node_id(), slot, words, times);
+}
+
+// Mirrored by `effect_flag` in `Rust/src/css/style/animations.rs`; keep the two in step.
+static constexpr u32 published_effect_flag_is_transition = 1u << 0;
+static constexpr u32 published_effect_flag_not_covered = 1u << 1;
+static constexpr u32 published_effect_flag_has_resource_context = 1u << 2;
+static constexpr u32 published_effect_flag_resource_context_is_origin_clean = 1u << 3;
+
+// One effect's easing, spelled out for publication. A published `linear()` keeps its control points
+// in the shared buffer the keyframe names by range.
+static void describe_easing(EasingFunction const& easing, StyleEngineFFI::FfiPublishedAnimationKeyframe& keyframe, Vector<StyleEngineFFI::FfiPublishedLinearEasingPoint>& points)
+{
+    keyframe.first_linear_point = static_cast<u32>(points.size());
+    easing.visit(
+        [&](LinearEasingFunction const& linear) {
+            keyframe.easing_kind = 0;
+            for (auto const& point : linear.control_points)
+                points.append({ .input = point.input, .output = point.output });
+        },
+        [&](CubicBezierEasingFunction const& cubic_bezier) {
+            keyframe.easing_kind = 1;
+            keyframe.x1 = cubic_bezier.x1;
+            keyframe.y1 = cubic_bezier.y1;
+            keyframe.x2 = cubic_bezier.x2;
+            keyframe.y2 = cubic_bezier.y2;
+        },
+        [&](StepsEasingFunction const& steps) {
+            keyframe.easing_kind = 2;
+            keyframe.interval_count = steps.interval_count;
+            keyframe.step_position = static_cast<u8>(to_underlying(steps.position));
+        });
+    keyframe.linear_point_count = static_cast<u32>(points.size()) - keyframe.first_linear_point;
+}
+
+// Describe the effects one of an element's animation lists holds, in composite order.
+//
+// An input: the style stage builds the animation batch it interpolates from this rather than from
+// the host's keyframe sets. Everything a keyframe declares that does not depend on the element being
+// sampled is settled here; an effect that declares something that does - a custom property, a value
+// that still needs substitution, an easing that is itself a style value - is published as not
+// covered, and the stage collects it the way it always has.
+void record_element_animation_effect_descriptions(DOM::Element& element, u8 slot, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>> effects)
+{
+    auto* style_engine = style_engine_for(element);
+    if (!style_engine || element.style_node_id() == no_style_node)
+        return;
+
+    Vector<StyleEngineFFI::FfiPublishedAnimationEffect> ffi_effects;
+    Vector<StyleEngineFFI::FfiPublishedAnimationKeyframe> ffi_keyframes;
+    Vector<StyleEngineFFI::FfiPublishedAnimationDeclaration> ffi_declarations;
+    Vector<StyleEngineFFI::FfiPublishedLinearEasingPoint> ffi_points;
+    Vector<u8> base_url_bytes;
+
+    for (auto const& effect : effects) {
+        auto animation = effect->associated_animation();
+        u32 flags = 0;
+        if (animation && animation->is_css_transition())
+            flags |= published_effect_flag_is_transition;
+        if (!animation || !effect->key_frame_set())
+            flags |= published_effect_flag_not_covered;
+
+        auto base_url_offset = static_cast<u32>(base_url_bytes.size());
+        u32 base_url_length = 0;
+        auto first_keyframe = static_cast<u32>(ffi_keyframes.size());
+        if (auto const* key_frame_set = effect->key_frame_set()) {
+            if (key_frame_set->style_sheet_resource_context.has_value()) {
+                flags |= published_effect_flag_has_resource_context;
+                if (key_frame_set->style_sheet_resource_context->origin_clean)
+                    flags |= published_effect_flag_resource_context_is_origin_clean;
+                auto bytes = key_frame_set->style_sheet_resource_context->base_url.bytes();
+                base_url_bytes.append(bytes.data(), bytes.size());
+                base_url_length = static_cast<u32>(bytes.size());
+            }
+            auto default_easing = animation && animation->is_css_animation()
+                ? static_cast<CSSAnimation const&>(*animation).default_easing()
+                : EasingFunction::linear();
+            for (auto it = key_frame_set->keyframes_by_key.begin(); it != key_frame_set->keyframes_by_key.end(); ++it) {
+                StyleEngineFFI::FfiPublishedAnimationKeyframe ffi_keyframe {};
+                ffi_keyframe.key = static_cast<i64>(it.key());
+                auto easing = it->easing.visit(
+                    [&](Empty) -> Optional<EasingFunction> { return {}; },
+                    [](EasingFunction const& easing) -> Optional<EasingFunction> { return easing; },
+                    [&](RustStyleValueHandle const&) -> Optional<EasingFunction> {
+                        // Resolving one of these can need substitution against the element.
+                        flags |= published_effect_flag_not_covered;
+                        return {};
+                    });
+                describe_easing(easing.value_or(default_easing), ffi_keyframe, ffi_points);
+                ffi_keyframe.composite = static_cast<u8>(to_underlying([&] {
+                    switch (it->composite) {
+                    case Bindings::CompositeOperationOrAuto::Accumulate:
+                        return Bindings::CompositeOperation::Accumulate;
+                    case Bindings::CompositeOperationOrAuto::Add:
+                        return Bindings::CompositeOperation::Add;
+                    case Bindings::CompositeOperationOrAuto::Replace:
+                        return Bindings::CompositeOperation::Replace;
+                    case Bindings::CompositeOperationOrAuto::Auto:
+                        return effect->composite();
+                    }
+                    VERIFY_NOT_REACHED();
+                }()));
+                ffi_keyframe.first_declaration = static_cast<u32>(ffi_declarations.size());
+                for (auto const& [property, value] : it->properties) {
+                    if (property.is_custom_property()) {
+                        flags |= published_effect_flag_not_covered;
+                        continue;
+                    }
+                    bool use_initial = false;
+                    auto const* data = value.visit(
+                        [&](Animations::KeyframeEffect::KeyFrameSet::UseInitial) -> StyleValueFFI::StyleValueData const* {
+                            if (property_is_shorthand(property.id()))
+                                return nullptr;
+                            use_initial = true;
+                            return nullptr;
+                        },
+                        [](RustStyleValueHandle const& handle) -> StyleValueFFI::StyleValueData const* { return handle.data(); });
+                    if (!use_initial) {
+                        if (!data || data->tag == StyleValueFFI::StyleValueData::Tag::PendingSubstitution)
+                            continue;
+                        if (data->tag == StyleValueFFI::StyleValueData::Tag::Unresolved) {
+                            // Substitution runs against the element being sampled.
+                            flags |= published_effect_flag_not_covered;
+                            continue;
+                        }
+                        // https://drafts.csswg.org/css-values-5/#invalid-at-computed-value-time
+                        if (data->tag == StyleValueFFI::StyleValueData::Tag::GuaranteedInvalid)
+                            continue;
+                    }
+                    ffi_declarations.append({
+                        .property_id = to_underlying(property.id()),
+                        .use_initial = use_initial,
+                        .value = data,
+                    });
+                }
+                ffi_keyframe.declaration_count = static_cast<u32>(ffi_declarations.size()) - ffi_keyframe.first_declaration;
+                ffi_keyframes.append(ffi_keyframe);
+            }
+        }
+        ffi_effects.append({
+            .identity = effect->animation_preparation_identity(),
+            .generation = effect->animation_preparation_generation(),
+            .flags = flags,
+            .first_keyframe = first_keyframe,
+            .keyframe_count = static_cast<u32>(ffi_keyframes.size()) - first_keyframe,
+            .base_url_offset = base_url_offset,
+            .base_url_length = base_url_length,
+        });
+    }
+
+    StyleEngineFFI::style_engine_set_element_animation_effect_descriptions(
+        style_engine->rust_handle(), element.style_node_id().value(), slot,
+        ffi_effects.data(), ffi_effects.size(),
+        ffi_keyframes.data(), ffi_keyframes.size(),
+        ffi_declarations.data(), ffi_declarations.size(),
+        ffi_points.data(), ffi_points.size(),
+        base_url_bytes.data(), base_url_bytes.size());
 }
 
 // The current time each of the document's animation timelines was sampled at.

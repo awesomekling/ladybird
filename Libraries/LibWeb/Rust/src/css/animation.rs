@@ -6921,6 +6921,167 @@ pub unsafe extern "C" fn rust_resolve_animation_declarations(
     }
 }
 
+/// What the style stage knows about the effects it is sampling: which they are, in composite order,
+/// and how far along each one is. Everything else the batch needs - the keyframes, their easings and
+/// their declared values - comes from the description the host published for the element.
+#[repr(C)]
+pub struct FfiPublishedAnimationSample {
+    pub style_engine: *const std::ffi::c_void,
+    pub style_node: u32,
+    pub slot: u8,
+    pub identities: *const u64,
+    pub generations: *const u64,
+    pub current_keys: *const f64,
+    pub effect_count: usize,
+    pub underlying_longhand_table: *const std::ffi::c_void,
+    pub writing_mode: u8,
+    pub direction: u8,
+    pub important_property_bitmap: *const u8,
+    pub important_property_bitmap_length: usize,
+    /// Set when the published description covered every effect and the result stands. Where it is
+    /// left false the stage has to collect the effects from the host the way it always has.
+    pub covered: *mut bool,
+}
+
+#[must_use]
+fn no_resolved_animation_properties() -> FfiResolvedAnimationProperties {
+    FfiResolvedAnimationProperties {
+        properties: std::ptr::null(),
+        count: 0,
+        animation_value_count: 0,
+        uses_tree_counting_function: false,
+        container_relative_length_unit_mask: 0,
+        needs_document_base_url: false,
+        unfixed_random_sharings: std::ptr::null(),
+        unfixed_random_sharing_count: 0,
+        storage: std::ptr::null_mut(),
+    }
+}
+
+#[must_use]
+fn finish_resolved_animation_properties(resolved: ResolvedAnimationDeclarations) -> FfiResolvedAnimationProperties {
+    if resolved.properties.is_empty() {
+        return no_resolved_animation_properties();
+    }
+    let resolved = Box::new(resolved);
+    FfiResolvedAnimationProperties {
+        properties: resolved.properties.as_ptr(),
+        count: resolved.properties.len(),
+        animation_value_count: resolved.value_plans.len(),
+        uses_tree_counting_function: resolved.uses_tree_counting_function,
+        container_relative_length_unit_mask: resolved.container_relative_length_unit_mask,
+        needs_document_base_url: resolved.needs_document_base_url,
+        unfixed_random_sharings: resolved.unfixed_random_sharings.as_ptr(),
+        unfixed_random_sharing_count: resolved.unfixed_random_sharings.len(),
+        storage: Box::into_raw(resolved).cast(),
+    }
+}
+
+/// Resolve the animation declarations of an element's effects from the description the host
+/// published for them, instead of from a batch the stage assembled by walking the host's keyframe
+/// sets.
+///
+/// # Safety
+/// `input` must point to a live value whose buffers and style engine remain live for the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_resolve_animation_declarations_from_published(
+    input: *const FfiPublishedAnimationSample,
+) -> FfiResolvedAnimationProperties {
+    let input = unsafe { &*input };
+    unsafe { *input.covered = false };
+
+    let engine = unsafe { &*input.style_engine.cast::<crate::css::style::StyleEngine>() };
+    let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(input.style_node) else {
+        return no_resolved_animation_properties();
+    };
+    let published = engine.element_animation_effect_descriptions(node, input.slot);
+    let count = input.effect_count;
+    let identities = unsafe { std::slice::from_raw_parts(input.identities, count) };
+    let generations = unsafe { std::slice::from_raw_parts(input.generations, count) };
+    let current_keys = unsafe { std::slice::from_raw_parts(input.current_keys, count) };
+    let table = unsafe {
+        &*input
+            .underlying_longhand_table
+            .cast::<crate::css::computed_longhand_table::ComputedLonghandTable>()
+    };
+
+    // The stage hands the effects over in the composite order it samples them in, and a description
+    // is found by the effect's identity: the order the host happened to describe them in is its own.
+    // A generation that has moved since the description was published means it is not of what is
+    // being sampled, and the stage falls back to the host.
+    let mut selected = Vec::with_capacity(count);
+    for index in 0..count {
+        let Some(found) = published.iter().find(|effect| effect.identity == identities[index]) else {
+            return no_resolved_animation_properties();
+        };
+        if found.generation != generations[index] || !found.is_covered() || found.keyframes.len() < 2 {
+            return no_resolved_animation_properties();
+        }
+        selected.push(found);
+    }
+
+    let mut ffi_keyframes = Vec::new();
+    let mut ffi_declarations = Vec::new();
+    let mut ffi_effects = Vec::with_capacity(count);
+    for (index, effect) in selected.iter().enumerate() {
+        let first_keyframe_index = ffi_keyframes.len();
+        let style_sheet_resource_context = effect.resource_context();
+        let is_transition = effect.flags & crate::css::style::animations::effect_flag::IS_TRANSITION != 0;
+        for keyframe in &effect.keyframes {
+            let keyframe_index = ffi_keyframes.len();
+            ffi_keyframes.push(FfiAnimationKeyframe {
+                key: keyframe.key,
+                easing: keyframe.easing.descriptor(),
+                composite: match keyframe.composite {
+                    1 => FfiCompositeOperation::Add,
+                    2 => FfiCompositeOperation::Accumulate,
+                    _ => FfiCompositeOperation::Replace,
+                },
+            });
+            for declaration in effect.declarations_of(keyframe) {
+                let value = match declaration.use_initial {
+                    // The element's own computed value, which is not known until it is sampled.
+                    true => match table.get(declaration.property_id) {
+                        Some(value) => value.pointer(),
+                        None => return no_resolved_animation_properties(),
+                    },
+                    false => declaration.value.pointer(),
+                };
+                ffi_declarations.push(FfiAnimationDeclaration {
+                    keyframe_index,
+                    property_id: declaration.property_id,
+                    custom_name_id: 0,
+                    custom_is_inherited: false,
+                    custom_is_important: false,
+                    value,
+                    style_sheet_resource_context,
+                    use_initial: declaration.use_initial,
+                    is_transition,
+                });
+            }
+        }
+        ffi_effects.push(FfiAnimationEffect {
+            first_keyframe_index,
+            keyframe_count: ffi_keyframes.len() - first_keyframe_index,
+            current_key: current_keys[index],
+            result_of_transition: is_transition,
+        });
+    }
+
+    let important_property_bitmap =
+        unsafe { std::slice::from_raw_parts(input.important_property_bitmap, input.important_property_bitmap_length) };
+    let resolved = resolve_animation_declarations(
+        &ffi_declarations,
+        &ffi_effects,
+        &ffi_keyframes,
+        input.writing_mode,
+        input.direction,
+        important_property_bitmap,
+    );
+    unsafe { *input.covered = true };
+    finish_resolved_animation_properties(resolved)
+}
+
 struct AnimationPreparationKey {
     effects: Vec<FfiAnimationPreparationEffect>,
 }

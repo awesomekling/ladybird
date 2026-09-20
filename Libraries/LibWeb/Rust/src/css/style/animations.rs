@@ -549,6 +549,222 @@ pub(crate) fn any_row_is_relevant(rows: &[AnimationTimingRow], samples: &Animati
     Some(any)
 }
 
+/// Flags on a published animation effect.
+pub(crate) mod effect_flag {
+    /// The effect belongs to a CSS transition, which the interpolation treats differently.
+    pub(crate) const IS_TRANSITION: u32 = 1 << 0;
+    /// The host could not describe this effect for the stage - a keyframe value that still needs
+    /// substitution, a custom property, an easing that is itself a style value - so the stage has to
+    /// collect it the way it always has.
+    pub(crate) const NOT_COVERED: u32 = 1 << 1;
+    pub(crate) const HAS_RESOURCE_CONTEXT: u32 = 1 << 2;
+    pub(crate) const RESOURCE_CONTEXT_IS_ORIGIN_CLEAN: u32 = 1 << 3;
+}
+
+/// One easing function, as the host resolved it when it described the effect. The linear points are
+/// owned so a published keyframe can hand out an `FfiEasingDescriptor` that borrows them.
+#[derive(Clone)]
+pub(crate) struct PublishedEasing {
+    kind: u8,
+    linear_points: Box<[crate::css::animation::FfiLinearEasingPoint]>,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    interval_count: i32,
+    step_position: u8,
+}
+
+impl PublishedEasing {
+    #[must_use]
+    pub(crate) fn descriptor(&self) -> crate::css::animation::FfiEasingDescriptor {
+        use crate::css::animation::{FfiEasingDescriptor, FfiEasingKind};
+        FfiEasingDescriptor {
+            kind: match self.kind {
+                1 => FfiEasingKind::CubicBezier,
+                2 => FfiEasingKind::Steps,
+                _ => FfiEasingKind::Linear,
+            },
+            linear_points: self.linear_points.as_ptr(),
+            linear_point_count: self.linear_points.len(),
+            x1: self.x1,
+            y1: self.y1,
+            x2: self.x2,
+            y2: self.y2,
+            interval_count: self.interval_count,
+            step_position: self.step_position,
+        }
+    }
+}
+
+/// One keyframe of a published effect: its offset on the 0..100000 scale the host keys keyframes by,
+/// the easing that governs the interval starting at it, and the composite operation, already
+/// resolved against the effect's own where the keyframe said `auto`.
+pub(crate) struct PublishedKeyframe {
+    pub(crate) key: i64,
+    pub(crate) easing: PublishedEasing,
+    pub(crate) composite: u8,
+    declaration_range: std::ops::Range<usize>,
+}
+
+/// One property a published keyframe declares. `use_initial` marks the keyframe the host synthesized
+/// to hold the element's own value, whose value is not known until the element is sampled.
+pub(crate) struct PublishedDeclaration {
+    pub(crate) property_id: u16,
+    pub(crate) use_initial: bool,
+    pub(crate) value: crate::css::style_value::RetainedStyleValueData,
+}
+
+/// One of an element's animation effects, described for the style stage.
+pub(crate) struct PublishedEffect {
+    pub(crate) identity: u64,
+    pub(crate) generation: u64,
+    pub(crate) flags: u32,
+    pub(crate) base_url: Box<[u8]>,
+    pub(crate) keyframes: Box<[PublishedKeyframe]>,
+    pub(crate) declarations: Box<[PublishedDeclaration]>,
+}
+
+impl PublishedEffect {
+    #[must_use]
+    pub(crate) fn is_covered(&self) -> bool {
+        self.flags & effect_flag::NOT_COVERED == 0
+    }
+
+    #[must_use]
+    pub(crate) fn declarations_of(&self, keyframe: &PublishedKeyframe) -> &[PublishedDeclaration] {
+        &self.declarations[keyframe.declaration_range.clone()]
+    }
+
+    #[must_use]
+    pub(crate) fn resource_context(&self) -> crate::css::animation::FfiAnimationStyleSheetResourceContext {
+        crate::css::animation::FfiAnimationStyleSheetResourceContext {
+            base_url: self.base_url.as_ptr(),
+            base_url_length: self.base_url.len(),
+            has_value: self.flags & effect_flag::HAS_RESOURCE_CONTEXT != 0,
+            origin_clean: self.flags & effect_flag::RESOURCE_CONTEXT_IS_ORIGIN_CLEAN != 0,
+        }
+    }
+}
+
+/// The flat buffers one element's effect descriptions travel in.
+pub struct PublishedEffectBuffers<'a> {
+    pub effects: &'a [super::bridge::FfiPublishedAnimationEffect],
+    pub keyframes: &'a [super::bridge::FfiPublishedAnimationKeyframe],
+    pub declarations: &'a [super::bridge::FfiPublishedAnimationDeclaration],
+    pub linear_points: &'a [super::bridge::FfiPublishedLinearEasingPoint],
+    pub base_url_bytes: &'a [u8],
+}
+
+/// Per element and pseudo-element, the effects the host holds, in composite order, described well
+/// enough for the style stage to build the animation batch itself.
+#[derive(Default)]
+pub(crate) struct AnimationEffectDescriptions {
+    rows: HashMap<(StyleNodeID, AnimationSlot), Box<[PublishedEffect]>>,
+}
+
+impl AnimationEffectDescriptions {
+    /// Replace one list from the flat buffers the host packs it into. An empty list drops the row.
+    ///
+    /// # Safety
+    /// Every declaration's `value` must be a live style value the host holds a reference to for the
+    /// duration of the call.
+    pub(crate) unsafe fn set(
+        &mut self,
+        node: StyleNodeID,
+        slot: AnimationSlot,
+        published_buffers: PublishedEffectBuffers<'_>,
+    ) {
+        let PublishedEffectBuffers {
+            effects,
+            keyframes,
+            declarations,
+            linear_points,
+            base_url_bytes,
+        } = published_buffers;
+        if effects.is_empty() {
+            self.rows.remove(&(node, slot));
+            return;
+        }
+        let mut published = Vec::with_capacity(effects.len());
+        for effect in effects {
+            let keyframe_range =
+                effect.first_keyframe as usize..(effect.first_keyframe + effect.keyframe_count) as usize;
+            let mut published_keyframes = Vec::with_capacity(keyframe_range.len());
+            let mut published_declarations = Vec::new();
+            for keyframe in &keyframes[keyframe_range] {
+                let points = linear_points[keyframe.first_linear_point as usize..]
+                    [..keyframe.linear_point_count as usize]
+                    .iter()
+                    .map(|point| crate::css::animation::FfiLinearEasingPoint {
+                        input: point.input,
+                        output: point.output,
+                    })
+                    .collect::<Vec<_>>();
+                let first = published_declarations.len();
+                for declaration in
+                    &declarations[keyframe.first_declaration as usize..][..keyframe.declaration_count as usize]
+                {
+                    // SAFETY: the caller holds a reference to the value for the call, and
+                    //         `rust_style_value_retain` takes one of its own for the engine.
+                    let value = match declaration.value.is_null() {
+                        true => crate::css::style_value::RetainedStyleValueData::none(),
+                        false => unsafe {
+                            crate::css::style_value::RetainedStyleValueData::from_retained_pointer(
+                                crate::css::style_value::rust_style_value_retain(declaration.value.cast()),
+                            )
+                        },
+                    };
+                    published_declarations.push(PublishedDeclaration {
+                        property_id: declaration.property_id,
+                        use_initial: declaration.use_initial,
+                        value,
+                    });
+                }
+                published_keyframes.push(PublishedKeyframe {
+                    key: keyframe.key,
+                    easing: PublishedEasing {
+                        kind: keyframe.easing_kind,
+                        linear_points: points.into_boxed_slice(),
+                        x1: keyframe.x1,
+                        y1: keyframe.y1,
+                        x2: keyframe.x2,
+                        y2: keyframe.y2,
+                        interval_count: keyframe.interval_count,
+                        step_position: keyframe.step_position,
+                    },
+                    composite: keyframe.composite,
+                    declaration_range: first..published_declarations.len(),
+                });
+            }
+            published.push(PublishedEffect {
+                identity: effect.identity,
+                generation: effect.generation,
+                flags: effect.flags,
+                base_url: base_url_bytes[effect.base_url_offset as usize..][..effect.base_url_length as usize]
+                    .to_vec()
+                    .into_boxed_slice(),
+                keyframes: published_keyframes.into_boxed_slice(),
+                declarations: published_declarations.into_boxed_slice(),
+            });
+        }
+        self.rows.insert((node, slot), published.into_boxed_slice());
+    }
+
+    #[must_use]
+    pub(crate) fn effects(&self, node: StyleNodeID, slot: AnimationSlot) -> &[PublishedEffect] {
+        self.rows.get(&(node, slot)).map_or(&[][..], |effects| &effects[..])
+    }
+
+    /// Give up the rows of identities that have been retired, which can be minted again.
+    pub(crate) fn retire(&mut self, nodes: &[StyleNodeID]) {
+        if self.rows.is_empty() {
+            return;
+        }
+        self.rows.retain(|&(node, _), _| !nodes.contains(&node));
+    }
+}
+
 /// A `@keyframes` name as a hash key. `CssString` compares by content but implements no `Hash`,
 /// and a name is looked up once per animation definition, so the key hashes the code units.
 #[derive(PartialEq, Eq)]

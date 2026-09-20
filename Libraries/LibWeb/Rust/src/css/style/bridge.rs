@@ -1303,6 +1303,105 @@ pub unsafe extern "C" fn style_engine_set_tree_scope_animation_keyframes(
     );
 }
 
+/// How one effect's description travels across the boundary: a header naming the ranges of the flat
+/// keyframe and declaration buffers that belong to it.
+#[repr(C)]
+pub struct FfiPublishedAnimationEffect {
+    pub identity: u64,
+    pub generation: u64,
+    pub flags: u32,
+    pub first_keyframe: u32,
+    pub keyframe_count: u32,
+    pub base_url_offset: u32,
+    pub base_url_length: u32,
+}
+
+/// One published keyframe, with its easing spelled out and its declarations named by range.
+#[repr(C)]
+pub struct FfiPublishedAnimationKeyframe {
+    pub key: i64,
+    pub easing_kind: u8,
+    pub composite: u8,
+    pub step_position: u8,
+    pub interval_count: i32,
+    pub x1: f64,
+    pub y1: f64,
+    pub x2: f64,
+    pub y2: f64,
+    pub first_linear_point: u32,
+    pub linear_point_count: u32,
+    pub first_declaration: u32,
+    pub declaration_count: u32,
+}
+
+/// One control point of a published `linear()` easing.
+#[repr(C)]
+pub struct FfiPublishedLinearEasingPoint {
+    pub input: f64,
+    pub output: f64,
+}
+
+/// One published declaration. The value is a style value the host holds; the engine retains it, the
+/// way every published style payload is retained rather than borrowed.
+#[repr(C)]
+pub struct FfiPublishedAnimationDeclaration {
+    pub property_id: u16,
+    pub use_initial: bool,
+    pub value: *const std::ffi::c_void,
+}
+
+/// Describe one of an element's animation lists for the style stage.
+///
+/// Hand-written, like the `@keyframes` publication above, because a keyframe declaration carries a
+/// style value the host holds and a replayed engine could not be handed one.
+///
+/// # Safety
+/// `engine` must be live, every buffer must hold the count it is given, and every declaration's
+/// value must be a live style value for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_set_element_animation_effect_descriptions(
+    engine: *mut c_void,
+    node: u32,
+    slot: u8,
+    effects: *const FfiPublishedAnimationEffect,
+    effect_count: usize,
+    keyframes: *const FfiPublishedAnimationKeyframe,
+    keyframe_count: usize,
+    declarations: *const FfiPublishedAnimationDeclaration,
+    declaration_count: usize,
+    linear_points: *const FfiPublishedLinearEasingPoint,
+    linear_point_count: usize,
+    base_url_bytes: *const u8,
+    base_url_byte_count: usize,
+) {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return;
+    };
+    // SAFETY: each pointer is either null with a zero count or names that many elements.
+    unsafe {
+        macro_rules! slice {
+            ($pointer:expr, $count:expr) => {
+                match $count {
+                    0 => &[][..],
+                    count => std::slice::from_raw_parts($pointer, count),
+                }
+            };
+        }
+        engine.set_element_animation_effect_descriptions(
+            node,
+            slot,
+            crate::css::style::animations::PublishedEffectBuffers {
+                effects: slice!(effects, effect_count),
+                keyframes: slice!(keyframes, keyframe_count),
+                declarations: slice!(declarations, declaration_count),
+                linear_points: slice!(linear_points, linear_point_count),
+                base_url_bytes: slice!(base_url_bytes, base_url_byte_count),
+            },
+        );
+    }
+}
+
 /// The size of an element's transform reference box, as the last committed layout left it.
 #[repr(C)]
 pub struct FfiCommittedTransformReferenceBox {

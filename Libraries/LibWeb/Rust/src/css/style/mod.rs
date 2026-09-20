@@ -873,6 +873,9 @@ pub struct RetainedState {
     /// The timing of every animation the host holds a keyframe effect for, per element and
     /// pseudo-element, which the animation stage decides relevance from.
     animation_timing_rows: animations::AnimationTimingRows,
+    /// The effects the host holds for each element and pseudo-element, in composite order, described
+    /// well enough for the animation stage to build its own batch.
+    animation_effect_descriptions: animations::AnimationEffectDescriptions,
     /// The current time each of the document's animation timelines was sampled at when the style
     /// update began.
     animation_timeline_samples: animations::AnimationTimelineSamples,

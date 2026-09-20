@@ -73,6 +73,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         nodes_with_substituted_records,
         css_defined_animations,
         animation_timing_rows,
+        animation_effect_descriptions,
         animation_timeline_samples,
         animation_keyframes,
         custom_property_registrations_changed,
@@ -168,6 +169,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(nodes_with_substituted_records);
     assert_member_is_sync(css_defined_animations);
     assert_member_is_sync(animation_timing_rows);
+    assert_member_is_sync(animation_effect_descriptions);
     assert_member_is_sync(animation_timeline_samples);
     assert_member_is_sync(animation_keyframes);
     assert_member_is_sync(custom_property_registrations_changed);

@@ -193,7 +193,7 @@ public:
     void request_observation_sample();
     u64 animation_preparation_identity() const { return m_animation_preparation_identity; }
     u64 animation_preparation_generation() const { return m_animation_preparation_generation; }
-    void invalidate_animation_preparation() { ++m_animation_preparation_generation; }
+    void invalidate_animation_preparation();
     bool request_element_scoped_observation_sample(u64 task_generation)
     {
         if (m_last_element_scoped_observation_sample_task_generation == task_generation)
