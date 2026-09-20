@@ -35,6 +35,7 @@ public:
     void note_needs_layout_update(NodeIdentity, SetNeedsLayoutReason, Layout::LayoutUpdatePropagation);
     void note_needs_repaint(NodeIdentity, InvalidateDisplayList);
     void note_needs_layout_tree_update(NodeIdentity, SetNeedsLayoutTreeUpdateReason);
+    void note_dom_paint_facts(NodeIdentity, u8 facts);
 
     // Writes every entry through to the render side and empties the journal.
     void drain();
@@ -52,6 +53,8 @@ private:
         bool needs_layout_update { false };
         bool needs_repaint { false };
         bool needs_layout_tree_update { false };
+        bool has_dom_paint_facts { false };
+        u8 dom_paint_facts { 0 };
     };
 
     Entry& entry_for(NodeIdentity);
