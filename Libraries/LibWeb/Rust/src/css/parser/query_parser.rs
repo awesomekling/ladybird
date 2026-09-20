@@ -1494,6 +1494,30 @@ impl FfiQueryHandle {
         container_requirements(expression)
     }
 
+    pub(crate) fn evaluate_container(&self, facts: &FfiContainerFacts) -> MatchResult {
+        self.evaluate_container_with_tree_counting(facts, None)
+    }
+
+    pub(crate) fn evaluate_container_with_tree_counting(
+        &self,
+        facts: &FfiContainerFacts,
+        tree_counting: Option<(u64, u64)>,
+    ) -> MatchResult {
+        let QueryTree::Expression { expression, kind } = &self.tree else {
+            return MatchResult::Unknown;
+        };
+        if !matches!(kind, QueryKind::Size | QueryKind::Style) || !facts.container_available {
+            return MatchResult::Unknown;
+        }
+        let length_context = unsafe {
+            facts
+                .length_resolution_context
+                .cast::<FfiLengthResolutionContext>()
+                .as_ref()
+        };
+        evaluate_container_expression(expression, facts, length_context, tree_counting)
+    }
+
     pub(crate) fn matches_media(&self, environment: MediaEnvironment<'_>) -> bool {
         let QueryTree::MediaQuery(query) = &self.tree else {
             return false;
@@ -1948,6 +1972,45 @@ fn resolve_parsed_media_feature_value(
     }
 }
 
+fn absolutize_container_calculation(
+    value: StyleValueData,
+    length_context: Option<&FfiLengthResolutionContext>,
+    tree_counting: Option<(u64, u64)>,
+) -> StyleValueData {
+    let Some(length_context) = length_context else {
+        return value;
+    };
+    let Some(crate::css::calc::AbsolutizedCalculation::Value(value)) = crate::css::calc::absolutize_calculation_value(
+        &value,
+        std::ptr::from_ref(length_context).cast(),
+        tree_counting,
+        &[],
+    ) else {
+        return value;
+    };
+    value
+}
+
+fn resolve_parsed_container_feature_value(
+    value: StyleValueData,
+    length_context: Option<&FfiLengthResolutionContext>,
+    tree_counting: Option<(u64, u64)>,
+) -> Option<ResolvedFeatureValue> {
+    resolve_parsed_media_feature_value(
+        absolutize_container_calculation(value, length_context, tree_counting),
+        length_context,
+    )
+}
+
+fn resolve_container_number(
+    value: &StyleValueData,
+    length_context: Option<&FfiLengthResolutionContext>,
+    tree_counting: Option<(u64, u64)>,
+) -> Option<f64> {
+    let value = absolutize_container_calculation(value.clone(), length_context, tree_counting);
+    resolve_number(&value, length_context)
+}
+
 fn parse_media_feature_value(
     id: u8,
     value: &QueryFeatureValue,
@@ -2056,6 +2119,7 @@ fn parse_size_feature_value(
     id: u8,
     value: &QueryFeatureValue,
     length_context: Option<&FfiLengthResolutionContext>,
+    tree_counting: Option<(u64, u64)>,
 ) -> ResolvedFeatureValue {
     let components = trim_whitespace(&value.components);
     if id == 4
@@ -2090,7 +2154,8 @@ fn parse_size_feature_value(
                 NumericRange::INFINITE,
             )
         }) {
-            return resolve_parsed_media_feature_value(value, length_context).unwrap_or(ResolvedFeatureValue::Unknown);
+            return resolve_parsed_container_feature_value(value, length_context, tree_counting)
+                .unwrap_or(ResolvedFeatureValue::Unknown);
         }
         if let Some(value @ StyleValueData::Calculated { .. }) = parse_one_value_from_stream(components, |stream| {
             parse_number_from_stream(
@@ -2099,7 +2164,7 @@ fn parse_size_feature_value(
                 stream,
                 NumericRange::INFINITE,
             )
-        }) && resolve_number(&value, length_context) == Some(0.0)
+        }) && resolve_container_number(&value, length_context, tree_counting) == Some(0.0)
         {
             return ResolvedFeatureValue::Length(0.0);
         }
@@ -2112,7 +2177,8 @@ fn parse_size_feature_value(
         if let Some(value) =
             parse_ratio_value_with_context(&context, crate::css::property_metadata::property_id::CUSTOM, &values)
         {
-            return resolve_parsed_media_feature_value(value, length_context).unwrap_or(ResolvedFeatureValue::Unknown);
+            return resolve_parsed_container_feature_value(value, length_context, tree_counting)
+                .unwrap_or(ResolvedFeatureValue::Unknown);
         }
     }
     ResolvedFeatureValue::Unknown
@@ -2468,6 +2534,7 @@ fn evaluate_container_size_feature(
     feature: &QueryFeature,
     facts: &FfiContainerFacts,
     length_context: Option<&FfiLengthResolutionContext>,
+    tree_counting: Option<(u64, u64)>,
 ) -> MatchResult {
     let id = match feature {
         QueryFeature::Boolean { id } | QueryFeature::Plain { id, .. } | QueryFeature::Range { id, .. } => *id,
@@ -2495,7 +2562,7 @@ fn evaluate_container_size_feature(
             _ => MatchResult::False,
         },
         QueryFeature::Plain { name_type, value, .. } => {
-            let value = parse_size_feature_value(id, value, length_context);
+            let value = parse_size_feature_value(id, value, length_context, tree_counting);
             match name_type {
                 FeatureNameType::Normal => compare_feature_values(&value, FeatureComparison::Equal, &queried_value),
                 FeatureNameType::Min => {
@@ -2508,14 +2575,14 @@ fn evaluate_container_size_feature(
         }
         QueryFeature::Range { left, right, .. } => {
             if let Some((value, comparison)) = left {
-                let value = parse_size_feature_value(id, value, length_context);
+                let value = parse_size_feature_value(id, value, length_context, tree_counting);
                 let result = compare_feature_values(&value, *comparison, &queried_value);
                 if result != MatchResult::True {
                     return result;
                 }
             }
             if let Some((comparison, value)) = right {
-                let value = parse_size_feature_value(id, value, length_context);
+                let value = parse_size_feature_value(id, value, length_context, tree_counting);
                 let result = compare_feature_values(&queried_value, *comparison, &value);
                 if result != MatchResult::True {
                     return result;
@@ -2706,8 +2773,9 @@ fn evaluate_container_expression(
     expression: &Expression,
     facts: &FfiContainerFacts,
     length_context: Option<&FfiLengthResolutionContext>,
+    tree_counting: Option<(u64, u64)>,
 ) -> MatchResult {
-    evaluate_container_expression_in(expression, QueryKind::Size, facts, length_context)
+    evaluate_container_expression_in(expression, QueryKind::Size, facts, length_context, tree_counting)
 }
 
 fn evaluate_container_expression_in(
@@ -2715,10 +2783,11 @@ fn evaluate_container_expression_in(
     kind: QueryKind,
     facts: &FfiContainerFacts,
     length_context: Option<&FfiLengthResolutionContext>,
+    tree_counting: Option<(u64, u64)>,
 ) -> MatchResult {
     let evaluate_container_expression =
         |child: &Expression, facts: &FfiContainerFacts, length_context: Option<&FfiLengthResolutionContext>| {
-            evaluate_container_expression_in(child, kind, facts, length_context)
+            evaluate_container_expression_in(child, kind, facts, length_context, tree_counting)
         };
     match expression {
         Expression::Not(child) => match evaluate_container_expression(child, facts, length_context) {
@@ -2752,13 +2821,15 @@ fn evaluate_container_expression_in(
             evaluate_container_expression(child, facts, length_context)
         }
         Expression::ScrollStateFunction(child) => {
-            evaluate_container_expression_in(child, QueryKind::ScrollState, facts, length_context)
+            evaluate_container_expression_in(child, QueryKind::ScrollState, facts, length_context, tree_counting)
         }
         Expression::GeneralEnclosed { result, .. } | Expression::GeneralEnclosedValues { result, .. } => *result,
         Expression::QueryFeature(feature) if kind == QueryKind::ScrollState => {
             evaluate_container_scroll_state_feature(feature, facts)
         }
-        Expression::QueryFeature(feature) => evaluate_container_size_feature(feature, facts, length_context),
+        Expression::QueryFeature(feature) => {
+            evaluate_container_size_feature(feature, facts, length_context, tree_counting)
+        }
         Expression::StyleFeature(feature) => evaluate_container_style_feature(feature, facts),
         _ => MatchResult::Unknown,
     }
@@ -3127,22 +3198,7 @@ pub unsafe extern "C" fn css_query_evaluate_container(handle: *const FfiQueryHan
     let Some(handle) = (unsafe { handle.as_ref() }) else {
         return MatchResult::Unknown as u8;
     };
-    let QueryTree::Expression { expression, kind } = &handle.tree else {
-        return MatchResult::Unknown as u8;
-    };
-    if !matches!(kind, QueryKind::Size | QueryKind::Style) {
-        return MatchResult::Unknown as u8;
-    }
-    if !facts.container_available {
-        return MatchResult::Unknown as u8;
-    }
-    let length_context = unsafe {
-        facts
-            .length_resolution_context
-            .cast::<FfiLengthResolutionContext>()
-            .as_ref()
-    };
-    evaluate_container_expression(expression, &facts, length_context) as u8
+    handle.evaluate_container(&facts) as u8
 }
 
 /// Serializes a retained query condition without changing its UTF-16 representation.
@@ -3486,8 +3542,9 @@ mod tests {
             block_start_side: SCROLL_STATE_SIDE_LEFT,
             inline_start_side: SCROLL_STATE_SIDE_TOP,
         };
-        let evaluate =
-            |source: &[u8]| evaluate_container_expression(&parse_single_container_query(source).unwrap(), &facts, None);
+        let evaluate = |source: &[u8]| {
+            evaluate_container_expression(&parse_single_container_query(source).unwrap(), &facts, None, None)
+        };
         assert_eq!(evaluate(b"scroll-state(stuck)"), MatchResult::True);
         assert_eq!(evaluate(b"scroll-state(stuck: inline-end)"), MatchResult::True);
         assert_eq!(evaluate(b"scroll-state(stuck: block-end)"), MatchResult::False);

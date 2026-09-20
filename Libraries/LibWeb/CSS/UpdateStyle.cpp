@@ -795,8 +795,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             apply_element_style_invalidation_after_style_change(*element, invalidation);
             transaction_invalidation |= invalidation;
 
-            auto& style_engine = document.style_computer().style_engine();
             auto current_style_record = element->style_record_identity();
+            auto& style_engine = document.style_computer().style_engine();
             u32 facts = 0;
             // The environment moved: the element's descendants take it here, and the ones that read
             // a moved name are recorded for their own computation. The engine derives no reactions

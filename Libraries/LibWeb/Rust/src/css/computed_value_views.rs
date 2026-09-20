@@ -442,6 +442,7 @@ scalar_accessors! {
         font_ascent: f32 => font_ascent,
         font_descent: f32 => font_descent,
         font_x_height: f32 => font_x_height,
+        font_zero_advance: f32 => font_zero_advance,
     }
     alignment: {
         webkit_box_orient: u8 => webkit_box_orient,

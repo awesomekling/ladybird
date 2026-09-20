@@ -138,7 +138,13 @@ fn commit_subtree(
         paintables.schedule_scrollable_overflow_recalculation(node);
     }
 
-    paintables.arena().publish_layout_style_snapshot_geometry(node);
+    let writing_mode = crate::layout::node_facts::node_style_view(paintables.arena().data(node))
+        .map_or(crate::css::css_enums::writing_mode::HORIZONTAL_TB, |style| {
+            style.writing_mode()
+        });
+    paintables
+        .arena()
+        .publish_layout_style_snapshot_geometry(node, writing_mode);
 
     paintables.stamp_containing_block(node, entry);
     if reuses_committed_subtree {

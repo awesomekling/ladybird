@@ -27,6 +27,7 @@ pub(crate) struct LayoutStyleSnapshotRow {
     pub(crate) scrolled: u8,
     pub(crate) layout_commit_generation: u64,
     pub(crate) has_committed_box: bool,
+    pub(crate) writing_mode: u8,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -92,7 +93,13 @@ impl LayoutStyleSnapshotStore {
         *self.building.lock().unwrap() = Some(next);
     }
 
-    pub(crate) fn publish_geometry(&self, node: StyleNodeID, size: FfiCssPixelSize, has_committed_box: bool) {
+    pub(crate) fn publish_geometry(
+        &self,
+        node: StyleNodeID,
+        size: FfiCssPixelSize,
+        has_committed_box: bool,
+        writing_mode: u8,
+    ) {
         let mut building = self.building.lock().unwrap();
         let building = building
             .as_mut()
@@ -104,6 +111,7 @@ impl LayoutStyleSnapshotStore {
         row.content_height_raw = size.height.raw_value();
         row.layout_commit_generation = building.layout_commit_generation;
         row.has_committed_box = has_committed_box;
+        row.writing_mode = writing_mode;
     }
 
     pub(crate) fn finish_layout_commit(&self) {
@@ -160,7 +168,7 @@ impl LayoutNodeArena {
             .begin_layout_commit(self.layout_commit_generation());
     }
 
-    pub(crate) fn publish_layout_style_snapshot_geometry(&self, node: NodeSlotId) {
+    pub(crate) fn publish_layout_style_snapshot_geometry(&self, node: NodeSlotId, writing_mode: u8) {
         let Some(style_node) = self.node_style_node(node) else {
             return;
         };
@@ -175,7 +183,7 @@ impl LayoutNodeArena {
             FfiCssPixelSize::default()
         };
         self.layout_style_snapshots
-            .publish_geometry(style_node, size, has_committed_box);
+            .publish_geometry(style_node, size, has_committed_box, writing_mode);
     }
 
     pub(crate) fn finish_layout_style_snapshot_commit(&self) {
@@ -241,6 +249,7 @@ mod tests {
                 height: CssPixels::from_raw(13),
             },
             true,
+            crate::css::css_enums::writing_mode::HORIZONTAL_TB,
         );
         assert!(store.row(node).is_none());
         store.finish_layout_commit();
@@ -261,7 +270,12 @@ mod tests {
         let store = LayoutStyleSnapshotStore::default();
         let node = StyleNodeID::element(1);
         store.begin_layout_commit(3);
-        store.publish_geometry(node, FfiCssPixelSize::default(), true);
+        store.publish_geometry(
+            node,
+            FfiCssPixelSize::default(),
+            true,
+            crate::css::css_enums::writing_mode::HORIZONTAL_TB,
+        );
         store.finish_layout_commit();
         store.publish_scroll_states(&[FfiLayoutStyleScrollState {
             style_node: node.raw(),

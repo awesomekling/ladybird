@@ -538,6 +538,7 @@ public:
     [[nodiscard]] OwnPtr<CSS::StyleInputRecord> take_style_input_record();
     void record_style_query_custom_property_reference(Optional<CSS::PseudoElement>, Utf16FlyString const&);
     void finish_recording_style_dependencies();
+    void finish_recording_container_query_dependencies();
     void apply_style_substitution_usage(u8 usage);
 
     bool style_uses_attr_css_function() const { return m_style_uses_attr_css_function; }
