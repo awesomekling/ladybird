@@ -485,6 +485,18 @@ impl RetainedState {
         self.computed_group_sets.adjustment_facts(node)
     }
 
+    /// Replace the element facts a layout row built for the element records.
+    pub fn set_element_construction_facts(&mut self, node: StyleNodeID, facts: u32) {
+        self.computed_group_sets.set_construction_facts(node, facts);
+    }
+
+    /// The element facts the store holds, as `bridge::element_construction_fact` names them. A
+    /// text node and a retired identity hold none.
+    #[must_use]
+    pub fn element_construction_facts(&self, node: StyleNodeID) -> u32 {
+        self.computed_group_sets.construction_facts(node)
+    }
+
     /// Whether a flat-tree descendant of the node holds a layout tree update mark.
     #[must_use]
     pub fn child_needs_layout_tree_update(&self, node: StyleNodeID) -> bool {
@@ -2444,6 +2456,9 @@ impl StyleEngineState {
         self.retained
             .computed_group_sets
             .set_adjustment_facts(node, arrival.adjustment_facts);
+        self.retained
+            .computed_group_sets
+            .set_construction_facts(node, arrival.construction_facts);
         for &state in custom_states {
             self.record_batched_input(
                 InputKey::LocalFeature(node, LocalFeatureKey::CustomState(state)),

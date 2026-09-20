@@ -153,9 +153,25 @@ enum ElementStyleAdjustmentFact : u32 {
     // the element's lifetime, and every move is recorded where the top layer is maintained.
     RenderedInTopLayer = 1 << 29,
 };
+// What a layout row records about the element it is built for at the moment it is allocated. The
+// tree build reads these out of the mirror rather than out of the DOM node.
+// Mirrors Rust `element_construction_fact`.
+enum ElementConstructionFact : u32 {
+    IsHtmlInputElement = 1 << 0,
+    IsHtmlHtmlElement = 1 << 1,
+    IsInUserAgentShadowTree = 1 << 2,
+    UsesButtonLayout = 1 << 3,
+    IsEditingHost = 1 << 4,
+    IsBody = 1 << 5,
+    // Also an ElementStyleAdjustmentFact, which the style computation reads. A row is built out of
+    // this word alone, so the fact is published into both rather than read across two.
+    ConstructedAsDocumentElement = 1 << 6,
+};
+WEB_API u32 element_construction_facts(DOM::Element const&);
 WEB_API u32 element_style_adjustment_facts(DOM::Element const&);
 WEB_API u32 element_box_type_adjustment_facts(DOM::Element const&);
 WEB_API void record_element_adjustment_facts(DOM::Element&);
+WEB_API void record_element_construction_facts(DOM::Element&);
 WEB_API bool record_element_presentational_hint_properties(DOM::Element&, ReadonlySpan<StyleProperty>);
 WEB_API void record_element_animation_names(DOM::Element&, ReadonlySpan<Utf16FlyString>);
 WEB_API void record_element_custom_property_names(DOM::Element&, ReadonlySpan<Utf16FlyString>, bool uses_unnamed, bool uses_custom_functions);

@@ -16,12 +16,10 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/InvalidationJournal.h>
-#include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/Dump.h>
 #include <LibWeb/HTML/HTMLElement.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
-#include <LibWeb/HTML/HTMLInputElement.h>
 #include <LibWeb/HTML/HTMLTableCellElement.h>
 #include <LibWeb/HTML/HTMLTableColElement.h>
 #include <LibWeb/HTML/LocalNavigable.h>
@@ -70,19 +68,14 @@ CSS::StyleNodeID Node::style_node_of(DOM::Node const* node)
     return {};
 }
 
-static RustFFI::FfiNodeConstructionFacts build_node_construction_facts(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind kind, void* shell)
+// Every element fact a row is built with is published in the style mirror under the row's
+// identity; see `CSS::ElementConstructionFact`. The row reads them there rather than here.
+static RustFFI::FfiNodeConstructionFacts build_node_construction_facts(GC::Ptr<DOM::Node> node, RustFFI::NodeKind kind, void* shell)
 {
     return {
         .kind = kind,
         .shell = shell,
         .is_anonymous = node == nullptr,
-        .is_html_input_element = node && is<HTML::HTMLInputElement>(*node),
-        .is_html_html_element = node && node->is_html_html_element(),
-        .is_document_element = node && node.ptr() == document.document_element(),
-        .is_in_user_agent_shadow_tree = node && node->containing_shadow_root() && node->containing_shadow_root()->is_user_agent_internal(),
-        .uses_button_layout = node && is<HTML::HTMLElement>(*node) && static_cast<HTML::HTMLElement const&>(*node).uses_button_layout(),
-        .is_editing_host = node && node->is_editing_host(),
-        .is_body = node && node == GC::Ptr { document.body() },
         .dom_paint_facts = dom_paint_facts_of(node),
         .style_node = Node::style_node_of(node.ptr()).value(),
     };
@@ -97,7 +90,7 @@ void Node::refresh_dom_paint_facts(DOM::Node const& dom_node)
 
 Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind kind, AttachToDOMNode attach_to_dom_node)
     : m_arena(document.layout_node_arena())
-    , m_slot(m_arena->allocate(build_node_construction_facts(document, node, kind, this)))
+    , m_slot(m_arena->allocate(build_node_construction_facts(node, kind, this)))
     , m_kind(kind)
 {
     publish_own_scroll_offset();
