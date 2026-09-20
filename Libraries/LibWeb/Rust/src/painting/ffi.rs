@@ -2824,6 +2824,85 @@ pub unsafe extern "C" fn layout_arena_publish_scroll_offset(
         .publish(slot, offset.into());
 }
 
+/// One `<area>` of an image map, as the document hands it over: the style-tree identity to name as
+/// the hit target, the state of its `shape` attribute, and where its parsed `coords` sit in the
+/// flat array published beside it.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiImageMapArea {
+    pub style_node: u32,
+    pub shape: u8,
+    pub coords_offset: u32,
+    pub coords_count: u32,
+}
+
+/// Publishes the `<area>` elements of the image map an image is associated with, in tree order.
+/// The document publishes them when the image takes a box and whenever the association or the
+/// areas themselves can have changed, so a hit test reads the row instead of the DOM. Publishing
+/// no area is how an image with no image map is named.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread. `areas`
+/// must point at `area_count` areas and `coords` at `coords_count` values, and every area's
+/// coordinate range must lie within them.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_publish_image_map_areas(
+    arena: *mut c_void,
+    slot: NodeSlotId,
+    areas: *const FfiImageMapArea,
+    area_count: usize,
+    coords: *const f64,
+    coords_count: usize,
+) {
+    use crate::painting::image_map_areas::{AreaShape, PublishedImageMapArea};
+    let arena = unsafe { arena_from_handle(arena) };
+    let areas = if area_count == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(areas, area_count) }
+    };
+    let coords = if coords_count == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(coords, coords_count) }
+    };
+    let published = areas
+        .iter()
+        .map(|area| {
+            let start = area.coords_offset as usize;
+            let end = start + area.coords_count as usize;
+            PublishedImageMapArea {
+                style_node: area.style_node,
+                shape: AreaShape::from_raw(area.shape),
+                coords: coords[start..end].to_vec().into_boxed_slice(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .into_boxed_slice();
+    arena.image_map_areas().publish(slot, published);
+}
+
+/// The style-tree identity of the first `<area>` of the image's map, in tree order, whose shape
+/// covers the point. Zero when the image has no map, or when no shape covers the point.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_image_map_area_for_point(
+    arena: *mut c_void,
+    slot: NodeSlotId,
+    x: f32,
+    y: f32,
+    image_width: f32,
+    image_height: f32,
+) -> u32 {
+    unsafe { arena_from_handle(arena) }
+        .image_map_areas()
+        .area_for_point(slot, x, y, image_width, image_height)
+}
+
 /// Publishes what the render side needs to know about the viewport it draws into. The document
 /// publishes it before each pass that reads it, so no pass asks for it.
 ///

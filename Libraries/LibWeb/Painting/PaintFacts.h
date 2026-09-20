@@ -24,5 +24,7 @@ WEB_API void push_navigable_container_paint_facts(HTML::NavigableContainer const
 WEB_API void reconcile_navigable_container_paint_facts(DOM::Document const&);
 WEB_API bool push_replaced_image_paint_facts(Layout::ImageProvider const&, Layout::Node const&);
 WEB_API void push_video_paint_facts(HTML::HTMLVideoElement const&);
+WEB_API void push_image_map_area_facts(HTML::HTMLImageElement&);
+WEB_API void refresh_image_map_area_facts(DOM::Document&);
 
 }

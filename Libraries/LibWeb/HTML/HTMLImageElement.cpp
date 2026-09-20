@@ -49,6 +49,7 @@
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/Painting/PaintFacts.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWeb/Platform/ImageCodecPlugin.h>
 #include <LibWeb/SVG/SVGDecodedImageData.h>
@@ -311,6 +312,7 @@ void HTMLImageElement::form_associated_element_attribute_changed(Utf16FlyString 
     if (name == HTML::AttributeNames::usemap) {
         m_cached_associated_map_element = nullptr;
         m_cached_associated_map_element_dom_tree_version.clear();
+        Painting::push_image_map_area_facts(*this);
     }
 }
 

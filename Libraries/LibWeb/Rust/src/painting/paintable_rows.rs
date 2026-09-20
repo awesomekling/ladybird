@@ -264,6 +264,7 @@ pub(crate) struct PaintableRowStore {
     paint_recording_in_progress: Cell<bool>,
     layout_commit_generation: Cell<u64>,
     scroll_offsets: crate::painting::visual_context::scroll_state::ScrollOffsetColumn,
+    image_map_areas: crate::painting::image_map_areas::ImageMapAreaColumn,
     unique_node_ids: UniqueNodeIdColumn,
     visual_context_tree_inputs: Cell<crate::painting::host::FfiVisualContextTreeInputs>,
 }
@@ -771,6 +772,11 @@ impl LayoutNodeArena {
         &self.paintable_rows.scroll_offsets
     }
 
+    /// The areas of the image map each image is associated with, as the document published them.
+    pub(crate) fn image_map_areas(&self) -> &crate::painting::image_map_areas::ImageMapAreaColumn {
+        &self.paintable_rows.image_map_areas
+    }
+
     /// The unique node id each box is the box of something with, as the document published it.
     pub(crate) fn unique_node_ids(&self) -> &UniqueNodeIdColumn {
         &self.paintable_rows.unique_node_ids
@@ -861,6 +867,7 @@ impl LayoutNodeArena {
         if reset.kind == crate::painting::paintable_data::PaintableRowResetKind::Freed {
             self.paintable_rows.scroll_offsets.forget(id);
             self.paintable_rows.unique_node_ids.forget(id);
+            self.paintable_rows.image_map_areas.forget(id);
         }
         self.note_committed_box_changed(id);
         if row_is_still_linked {
