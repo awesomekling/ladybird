@@ -847,9 +847,6 @@ static void update_style(DOM::Document& document)
         //     intervals are disjoint; rounding each down leaves fractional time here too.
         timing_counters.style_update_remainder_microseconds += whole - measured;
     };
-    StyleValueFFI::rust_style_ffi_complete_style_update_begin();
-    ScopeGuard leave_complete_style_update = finish_complete_style_update;
-
     // NOTE: If our parent document needs a relayout, we must do that *first*. This is required as it may cause the
     // viewport to change which will can affect media query evaluation and the value of the `vw` unit.
     if (auto navigable = document.navigable(); navigable && navigable->container() && &navigable->container()->document() != &document)
@@ -893,6 +890,13 @@ static void update_style(DOM::Document& document)
     // a rule apply would not be the flush that recomputed the elements it applies to.
     if (document.needs_media_rule_evaluation())
         document.evaluate_media_rules_for_style_update();
+
+    // Publish the complete document environment while DOM and page state are still available. Variable
+    // substitution borrows this immutable snapshot for the rest of the update instead of calling back into
+    // the document after the style-stage seal has opened.
+    (void)document.style_computer().ensure_media_environment_for_style_update();
+    StyleValueFFI::rust_style_ffi_complete_style_update_begin();
+    ScopeGuard leave_complete_style_update = finish_complete_style_update;
 
     // The user-agent and user sheets have no author-sheet attachment event, so compare their
     // identities before deciding whether there is a transaction to take. Rendering opportunities
@@ -1203,8 +1207,12 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
         document.style_computer().end_style_record_view_epoch();
     };
 
-    StyleValueFFI::rust_style_ffi_complete_style_update_begin();
-    ScopeGuard leave_complete_style_update = finish_complete_style_update;
+    bool complete_style_update_started = false;
+    ScopeGuard leave_complete_style_update = [&] {
+        if (complete_style_update_started)
+            finish_complete_style_update();
+    };
+
     // Refresh computed properties for an abstract element. An ordinary read first consumes the complete exact
     // reaction batch. A reentrant layout read leaves that transaction untouched and walks the flat-tree inheritance
     // chain, re-cascading from the rootmost stale element on the path back down to the target. Normal mode also
@@ -1239,6 +1247,12 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
         if (document.needs_media_rule_evaluation())
             document.evaluate_media_rules_for_style_update();
 
+        // The embedding document has settled the viewport and media rules above. Snapshot the resulting
+        // environment before any style computation can enter the sealed stage.
+        (void)document.style_computer().ensure_media_environment_for_style_update();
+        StyleValueFFI::rust_style_ffi_complete_style_update_begin();
+        complete_style_update_started = true;
+
         auto const can_run_regular_style_update = !document.is_running_update_layout()
             && (!document.has_completed_style_update()
                 || document.style_computer().style_engine().has_pending_transaction());
@@ -1253,6 +1267,12 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
                 ran_regular_style_update = true;
             }
         }
+    }
+
+    if (!complete_style_update_started) {
+        (void)document.style_computer().ensure_media_environment_for_style_update();
+        StyleValueFFI::rust_style_ffi_complete_style_update_begin();
+        complete_style_update_started = true;
     }
 
     // Element-backed pseudo-elements read their computed style from the element that backs them (for example,
