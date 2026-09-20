@@ -244,6 +244,15 @@ StyleEngine::StyleRecordView StyleEngine::style_record_view(StyleRecordID style_
     return StyleEngineFFI::style_engine_style_record_view(m_impl, style_record.value());
 }
 
+double StyleEngine::ensure_random_base_value(StyleNodeID node, Utf16View name, bool element_shared)
+{
+    Vector<u16> code_units;
+    code_units.ensure_capacity(name.length_in_code_units());
+    for (size_t index = 0; index < name.length_in_code_units(); ++index)
+        code_units.unchecked_append(name.code_unit_at(index));
+    return bit_cast<double>(ensure_random_base_value(node, code_units.span(), element_shared));
+}
+
 void StyleEngine::decide_transitions(StyleRecordID before_style_record, void const* after_longhand_table, void const* after_animated_overlay, StyleValueFFI::FfiTransitionInput& input, StyleValueFFI::FfiTransitionAction* actions) const
 {
     StyleValueFFI::rust_decide_transitions(m_impl, before_style_record.value(), after_longhand_table, after_animated_overlay, &input, actions);

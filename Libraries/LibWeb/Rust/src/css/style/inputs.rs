@@ -1545,6 +1545,9 @@ impl StyleEngineState {
             },
             host: HostState {
                 font_resolver: None,
+                random_base_values: HashMap::default(),
+                random_state: std::collections::hash_map::RandomState::new(),
+                random_serial: 0,
                 #[cfg(feature = "style-recording")]
                 recording_id: None,
                 computed_record_verification_counters: None,
@@ -1578,6 +1581,20 @@ impl StyleEngineState {
                 layout_arena: None,
             },
         }
+    }
+
+    pub(crate) fn ensure_random_base_value(&mut self, node: StyleNodeID, name: &[u16], element_shared: bool) -> f64 {
+        use std::hash::BuildHasher;
+
+        let key = (name.to_vec(), (!element_shared).then_some(node));
+        if let Some(value) = self.host.random_base_values.get(&key) {
+            return *value;
+        }
+        self.host.random_serial = self.host.random_serial.wrapping_add(1);
+        let bits = self.host.random_state.hash_one((self.host.random_serial, &key));
+        let value = (bits >> 11) as f64 / ((1_u64 << 53) as f64);
+        self.host.random_base_values.insert(key, value);
+        value
     }
 
     pub(crate) fn begin_recording(&mut self, device_class: DeviceClass) {
@@ -2291,6 +2308,28 @@ impl StyleEngineState {
             .base_version
             .get_or_insert(self.retained.program.version());
         self.invalidate_scope_program(tree_scope);
+    }
+}
+
+#[cfg(test)]
+mod random_base_value_tests {
+    use super::*;
+
+    #[test]
+    fn random_base_value_scopes_are_retained_by_the_style_engine() {
+        let mut engine = StyleEngineState::new_for_replay(DeviceClass::ForegroundDesktop);
+        let first = StyleNodeID::from_raw(1).unwrap();
+        let second = StyleNodeID::from_raw(2).unwrap();
+        let name = "--shared".encode_utf16().collect::<Vec<_>>();
+
+        let document_value = engine.ensure_random_base_value(first, &name, true);
+        assert_eq!(document_value, engine.ensure_random_base_value(second, &name, true));
+        assert_eq!(engine.host.random_base_values.len(), 1);
+
+        let element_value = engine.ensure_random_base_value(first, &name, false);
+        assert_eq!(element_value, engine.ensure_random_base_value(first, &name, false));
+        engine.ensure_random_base_value(second, &name, false);
+        assert_eq!(engine.host.random_base_values.len(), 3);
     }
 }
 

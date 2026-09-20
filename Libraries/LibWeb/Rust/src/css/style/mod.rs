@@ -1037,6 +1037,11 @@ pub struct HostState {
     /// The host's synchronous font resolver. A step that misses the cache returns `NeedsInput`;
     /// the round outside the step calls this and the node is retried.
     font_resolver: Option<font_resolution::FontResolverHost>,
+    /// Random bases allocated while freezing style inputs. Named sharing scopes are document-wide;
+    /// `auto` scopes include the element. This is host preparation state, not part of a sealed step.
+    random_base_values: HashMap<(Vec<u16>, Option<StyleNodeID>), f64>,
+    random_state: std::collections::hash_map::RandomState,
+    random_serial: u64,
     /// The capture-local document identity, absent when record-replay is disabled.
     #[cfg(feature = "style-recording")]
     recording_id: Option<u64>,
