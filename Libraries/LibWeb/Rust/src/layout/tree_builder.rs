@@ -106,13 +106,10 @@ pub struct FfiDomTreeBuilderCallbacks {
     /// node once per visit rather than once per payload callback.
     pub principal_dom_node: unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void,
     pub prepare_principal_element: unsafe extern "C" fn(*mut c_void, *mut c_void, bool),
-    /// The box that replaces an element's contents with a single image. Its box owns the image,
-    /// so it is the one principal box the host still builds; every other one is stamped out of
-    /// the element's published box kind and style record.
-    pub create_principal_element_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
-    /// Attaches the image observers a box's style asks for. Principal and pseudo-element boxes
-    /// both go through this; nothing about it depends on which the box is.
-    pub attach_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId),
+    /// Attaches the image resources a box's style asks for. Principal and pseudo-element boxes
+    /// both go through this; nothing about it depends on which the box is. The flag says the box
+    /// replaces its element's contents with a single image, which it owns the provider for.
+    pub attach_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId, bool),
     pub layout: FfiTreeBuilderCallbacks,
     pub pseudo: FfiPseudoTreeBuilderCallbacks,
 }
@@ -2288,6 +2285,9 @@ struct PrincipalBoxConstruction {
     layout_node: LayoutNode,
     created_box: Option<UnplacedLayoutNode>,
     handled_display_contents: bool,
+    /// Whether the box just built replaces its element's contents with a single image, and so owns
+    /// the provider that answers for it. Only a box this visit built can.
+    owns_content_replacement_image: bool,
 }
 
 impl PrincipalBoxConstruction {
@@ -2296,6 +2296,7 @@ impl PrincipalBoxConstruction {
             layout_node: NodeSlotId::INVALID,
             created_box: None,
             handled_display_contents: false,
+            owns_content_replacement_image: false,
         }
     }
 }
@@ -2337,6 +2338,7 @@ fn construct_principal_layout_node(
 ) -> PrincipalBoxConstruction {
     let host = update.host;
     let mut created_box = None;
+    let mut owns_content_replacement_image = false;
     // The box this visit leaves the node with: the one it entered with when the node keeps it,
     // otherwise the one the host just built. Nothing between the entry and here rebinds the node.
     let mut layout_node = NodeSlotId::INVALID;
@@ -2411,8 +2413,11 @@ fn construct_principal_layout_node(
             let created = if box_kind == ElementBoxKind::NoBox {
                 NodeSlotId::INVALID
             } else if layout_kind == FfiElementLayoutKind::ContentReplacement {
-                // SAFETY: The builder and element remain live throughout construction.
-                unsafe { (host.callbacks.create_principal_element_layout)(host.callbacks.builder, dom_node) }
+                // The box replaces the element's contents with a single image, so its kind does not
+                // come from the display; the provider that answers for the image is attached with
+                // the rest of the style's image resources.
+                owns_content_replacement_image = true;
+                host.layout().create_element_box(update.style_node, NodeKind::ImageBox)
             } else {
                 match node_kind_for_element_layout_kind(
                     layout_kind,
@@ -2483,6 +2488,7 @@ fn construct_principal_layout_node(
         layout_node,
         created_box,
         handled_display_contents: false,
+        owns_content_replacement_image,
     }
 }
 
@@ -2535,7 +2541,13 @@ fn update_principal_node_after_entry(
         if update.kind.is_element() || update.kind.is_document() {
             // SAFETY: The builder remains live, and the box is a live NodeWithStyle for elements
             // and documents.
-            unsafe { (host.callbacks.attach_style_resources)(host.callbacks.builder, layout_node) };
+            unsafe {
+                (host.callbacks.attach_style_resources)(
+                    host.callbacks.builder,
+                    layout_node,
+                    construction.owns_content_replacement_image,
+                );
+            };
         }
 
         let starts_new_subtree = entry_decision.should_create_layout_node && update.state.new_subtree_root.is_invalid();
@@ -3324,7 +3336,7 @@ fn create_pseudo_element(
     }
 
     // SAFETY: The builder remains live, and the box the host just built is a live NodeWithStyle.
-    unsafe { (host.callbacks.attach_style_resources)(host.callbacks.builder, layout_node) };
+    unsafe { (host.callbacks.attach_style_resources)(host.callbacks.builder, layout_node, false) };
     if decision == FfiPseudoElementDecision::ContentReplacement {
         let adjustment = replaced_element_display_adjustment(&host.layout(), layout_node);
         if adjustment != FfiReplacedElementDisplayAdjustment::None {

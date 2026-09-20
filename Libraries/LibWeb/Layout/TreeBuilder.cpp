@@ -179,14 +179,20 @@ private:
     mutable OwnPtr<ImageClient> m_image_client;
 };
 
-static Box& create_content_image_box(DOM::Document& document, GC::Ptr<DOM::Element> element, CSS::LayoutStyle style, CSS::AbstractImageStyleValue& image)
+static void attach_owned_image_provider(Box& image_box, CSS::AbstractImageStyleValue& image)
 {
+    auto& document = image_box.document();
     image.load_any_resources(document);
     auto image_provider = GeneratedContentImageProvider::create(document, image);
     auto& image_provider_ref = *image_provider;
-    auto& image_box = allocate_layout_node<Box>(document, element, style, RustFFI::NodeKind::ImageBox);
     image_box.set_owned_image_provider(move(image_provider));
     image_provider_ref.set_layout_node(image_box);
+}
+
+static Box& create_content_image_box(DOM::Document& document, GC::Ptr<DOM::Element> element, CSS::LayoutStyle style, CSS::AbstractImageStyleValue& image)
+{
+    auto& image_box = allocate_layout_node<Box>(document, element, style, RustFFI::NodeKind::ImageBox);
+    attach_owned_image_provider(image_box, image);
     return image_box;
 }
 
@@ -198,6 +204,15 @@ static RefPtr<CSS::AbstractImageStyleValue const> content_replacement_image(CSS:
     if (items.size() != 1 || !items.first()->is_abstract_image())
         return nullptr;
     return &items.first()->as_abstract_image();
+}
+
+// The image a box replaces its element's contents with, named by the record the box was stamped
+// from - the same record the retired construction path read it out of.
+static void attach_content_replacement_image(Box& image_box)
+{
+    auto replacement_image = content_replacement_image(image_box.style_group<CSS::ComputedValues::ContentValues>().computed_content_value());
+    VERIFY(replacement_image);
+    attach_owned_image_provider(image_box, const_cast<CSS::AbstractImageStyleValue&>(*replacement_image));
 }
 
 struct FirstLetterTextSlices {
@@ -668,28 +683,17 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             auto style_record_identity = element.style_record_identity();
             VERIFY(style_record_identity);
             static_cast<LayoutTreeBuildBridge*>(builder_pointer)->pin_style_record_for_build(style_record_identity); },
-        // Only a content replacement is still built here: its box owns the image it replaces the
-        // element's contents with. Every other principal box is stamped out of the element's
-        // published kind and record, and materialised by the shell factory.
-        .create_principal_element_layout = [](void* builder_pointer, void* element_pointer) -> Compositing::RustFFI::NodeSlotId {
-            VERIFY(builder_pointer);
-            VERIFY(element_pointer);
-            auto& element = *static_cast<DOM::Element*>(element_pointer);
-            auto style_record_identity = element.style_record_identity();
-            VERIFY(style_record_identity);
-            CSS::LayoutStyle style { style_record_identity };
-            auto const* content_values = element.style_group<CSS::ComputedValues::ContentValues>();
-            VERIFY(content_values);
-            auto computed_content = content_values->computed_content_value();
-            auto replacement_image = content_replacement_image(computed_content);
-            VERIFY(replacement_image);
-            auto& layout_node = create_content_image_box(element.document(), element, style, const_cast<CSS::AbstractImageStyleValue&>(*replacement_image));
-            return Node::slot_id(&layout_node); },
-        .attach_style_resources = [](void* builder_pointer, Compositing::RustFFI::NodeSlotId slot) {
+        .attach_style_resources = [](void* builder_pointer, Compositing::RustFFI::NodeSlotId slot, bool owns_content_replacement_image) {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
             auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_node_shell_if_live(builder.m_document->layout_node_arena().handle(), slot));
             VERIFY(layout_node);
+            // A box that replaces its element's contents with a single image owns the provider that
+            // answers for it. The image is named by the same style record the box was stamped from,
+            // and it loads before the resources the rest of that style asks for, as it did when the
+            // box was built around it.
+            if (owns_content_replacement_image)
+                attach_content_replacement_image(as<Box>(*layout_node));
             as<NodeWithStyle>(*layout_node).attach_style_resources(); },
 
         .layout = make_ffi_tree_builder_callbacks(),
