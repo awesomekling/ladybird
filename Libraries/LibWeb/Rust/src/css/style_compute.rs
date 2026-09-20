@@ -2697,7 +2697,7 @@ impl FfiAnimationLengthContexts {
     fn settle(
         &mut self,
         root_font_metrics: crate::css::style::animations::RootElementFontMetrics,
-        is_html_html_element: bool,
+        is_document_element: bool,
         font_metrics_depend_on_viewport_metrics: bool,
     ) {
         let published = FfiFontMetrics {
@@ -2724,7 +2724,7 @@ impl FfiAnimationLengthContexts {
             context.root_font_metrics_depend_on_viewport_metrics = root_font_metrics.depends_on_viewport_metrics;
         }
         // The root element resolves its own `rem` against the font it is computing.
-        if is_html_html_element {
+        if is_document_element {
             self.line_height.root_font_metrics = self.line_height.font_metrics;
             self.line_height.root_font_metrics_depend_on_viewport_metrics = font_metrics_depend_on_viewport_metrics;
             self.remaining.root_font_metrics_depend_on_viewport_metrics = font_metrics_depend_on_viewport_metrics;
@@ -5637,8 +5637,8 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
     animation_length_contexts.settle(
         style_engine.root_element_font_metrics(),
         crate::css::style::tree::StyleNodeID::from_raw(input.style_node).is_some_and(|node| {
-            style_engine.element_construction_facts(node)
-                & crate::css::style::bridge::element_construction_fact::IS_HTML_HTML_ELEMENT
+            style_engine.element_adjustment_facts(node)
+                & crate::css::style::bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT
                 != 0
         }),
         drive_result.driver_results.font_metrics_depend_on_viewport_metrics,

@@ -96,7 +96,6 @@
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/HTML/AttributeNames.h>
 #include <LibWeb/HTML/HTMLBRElement.h>
-#include <LibWeb/HTML/HTMLHtmlElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
 #include <LibWeb/HTML/HTMLSlotElement.h>
@@ -3455,11 +3454,11 @@ ComputationContext StyleComputer::make_computation_context_for_property(Property
             .length_resolution_context = {
                 .viewport_rect = viewport_rect(),
                 .font_metrics = line_height_font_metrics,
-                .root_font_metrics = abstract_element.has_value() && abstract_element->element().is_html_html_element()
+                .root_font_metrics = abstract_element.has_value() && abstract_element->element().is_document_element()
                     ? line_height_font_metrics
                     : m_root_element_font_metrics,
                 .font_metrics_depend_on_viewport_metrics = style.font_metrics_depend_on_viewport_metrics(),
-                .root_font_metrics_depend_on_viewport_metrics = abstract_element.has_value() && abstract_element->element().is_html_html_element()
+                .root_font_metrics_depend_on_viewport_metrics = abstract_element.has_value() && abstract_element->element().is_document_element()
                     ? style.font_metrics_depend_on_viewport_metrics()
                     : m_root_element_font_metrics_depend_on_viewport_metrics,
                 .subject_inline_axis_is_horizontal = subject_inline_axis_is_horizontal,
@@ -3478,7 +3477,7 @@ ComputationContext StyleComputer::make_computation_context_for_property(Property
                     style.line_height(document().font_computer()) },
                 .root_font_metrics = m_root_element_font_metrics,
                 .font_metrics_depend_on_viewport_metrics = style.font_metrics_depend_on_viewport_metrics(),
-                .root_font_metrics_depend_on_viewport_metrics = abstract_element.has_value() && abstract_element->element().is_html_html_element() ? style.font_metrics_depend_on_viewport_metrics() : m_root_element_font_metrics_depend_on_viewport_metrics,
+                .root_font_metrics_depend_on_viewport_metrics = abstract_element.has_value() && abstract_element->element().is_document_element() ? style.font_metrics_depend_on_viewport_metrics() : m_root_element_font_metrics_depend_on_viewport_metrics,
                 .subject_inline_axis_is_horizontal = subject_inline_axis_is_horizontal,
                 .subject_element = abstract_element.has_value() ? &abstract_element->element() : nullptr,
             },
@@ -6067,7 +6066,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             if (context.explicitly_inherited_non_inherited_style_groups)
                 *context.explicitly_inherited_non_inherited_style_groups |= style_groups;
         }
-        if (!context.stop_after_longhand_drive && is<HTML::HTMLHtmlElement>(context.abstract_element.element())) {
+        if (!context.stop_after_longhand_drive && context.abstract_element.element().is_document_element()) {
             style_computer.set_root_element_font_metrics(
                 style_computer.calculate_root_element_font_metrics(computed_style),
                 computed_style.font_metrics_depend_on_viewport_metrics());
