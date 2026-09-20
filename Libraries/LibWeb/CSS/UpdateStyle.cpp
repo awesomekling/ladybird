@@ -903,6 +903,7 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
     // substitution borrows this immutable snapshot for the rest of the update instead of calling back into
     // the document after the style-stage seal has opened.
     (void)document.style_computer().ensure_media_environment_for_style_update();
+    (void)document.style_computer().ensure_document_environment_for_style_update();
     document.publish_animation_environment_for_style_update();
     StyleValueFFI::rust_style_ffi_complete_style_update_begin();
     ScopeGuard leave_complete_style_update = [&] { finish_complete_style_update(document); };
@@ -1273,6 +1274,7 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
         // The embedding document has settled the viewport and media rules above. Snapshot the resulting
         // environment before any style computation can enter the sealed stage.
         (void)document.style_computer().ensure_media_environment_for_style_update();
+        (void)document.style_computer().ensure_document_environment_for_style_update();
         document.publish_animation_environment_for_style_update();
         StyleValueFFI::rust_style_ffi_complete_style_update_begin();
         complete_style_update_started = true;
@@ -1295,6 +1297,7 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
 
     if (!complete_style_update_started) {
         (void)document.style_computer().ensure_media_environment_for_style_update();
+        (void)document.style_computer().ensure_document_environment_for_style_update();
         document.publish_animation_environment_for_style_update();
         StyleValueFFI::rust_style_ffi_complete_style_update_begin();
         complete_style_update_started = true;
