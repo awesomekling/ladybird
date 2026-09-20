@@ -76,6 +76,17 @@ void InvalidationJournal::note_canvas_paint_facts(NodeIdentity identity, bool ha
     drain_if_the_render_side_is_reading();
 }
 
+void InvalidationJournal::note_form_control_paint_facts(NodeIdentity identity, bool enabled, bool checked, bool indeterminate, bool being_activated)
+{
+    auto& entry = entry_for(identity);
+    entry.has_form_control_paint_facts = true;
+    entry.form_control_enabled = enabled;
+    entry.form_control_checked = checked;
+    entry.form_control_indeterminate = indeterminate;
+    entry.form_control_being_activated = being_activated;
+    drain_if_the_render_side_is_reading();
+}
+
 // A mark made from inside a layout update is one the render side is about to read, so it goes
 // through at once. Outside one, nothing reads what these marks change before the next drain.
 void InvalidationJournal::drain_if_the_render_side_is_reading()
@@ -100,7 +111,7 @@ void InvalidationJournal::drain()
                 node->apply_layout_tree_update_mark(entry.layout_tree_update_reason);
             }
 
-            if (!entry.needs_layout_update && !entry.needs_repaint && !entry.has_dom_paint_facts && !entry.has_canvas_paint_facts)
+            if (!entry.needs_layout_update && !entry.needs_repaint && !entry.has_dom_paint_facts && !entry.has_canvas_paint_facts && !entry.has_form_control_paint_facts)
                 continue;
             // A node whose box went away between the mark and here has nothing left to mark.
             auto* layout_node = arena ? entry.identity.bound_layout_node(*arena) : nullptr;
@@ -124,6 +135,17 @@ void InvalidationJournal::drain()
                 auto changed = Layout::RustFFI::layout_arena_set_canvas_paint_facts(layout_node->arena_handle(), Layout::Node::slot_id(layout_node), facts);
                 if (changed && Painting::has_committed_box(*layout_node))
                     Painting::invalidate_paint_cache(*layout_node);
+            }
+            if (entry.has_form_control_paint_facts) {
+                Layout::RustFFI::FfiFormControlPaintFacts facts {
+                    .enabled = entry.form_control_enabled,
+                    .checked = entry.form_control_checked,
+                    .indeterminate = entry.form_control_indeterminate,
+                    .being_activated = entry.form_control_being_activated,
+                };
+                auto changed = Layout::RustFFI::layout_arena_set_form_control_paint_facts(layout_node->arena_handle(), Layout::Node::slot_id(layout_node), facts);
+                if (changed && Painting::has_committed_box(*layout_node))
+                    Painting::set_needs_repaint(*layout_node, InvalidateDisplayList::PaintCommands);
             }
             if (entry.needs_repaint) {
                 if (auto* text_node = as_if<Layout::TextNode>(*layout_node))

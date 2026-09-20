@@ -48,7 +48,8 @@ void push_form_control_paint_facts(HTML::HTMLInputElement& input)
     auto const* layout_node = input.unsafe_layout_node();
     if (!layout_node || !paints_form_control_from_facts(*layout_node))
         return;
-    push_form_control_paint_facts_onto(input, *layout_node);
+    input.document().invalidation_journal().note_form_control_paint_facts(
+        DOM::NodeIdentity::of(input), input.enabled(), input.checked(), input.indeterminate(), input.is_being_activated());
 }
 
 static void push_canvas_paint_facts_onto(HTML::HTMLCanvasElement const& canvas, Layout::Node const& layout_node)
