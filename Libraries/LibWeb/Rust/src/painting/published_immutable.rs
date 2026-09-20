@@ -24,13 +24,28 @@ use std::sync::OnceLock;
 #[derive(Default)]
 struct PublishedArena {
     rows: HashMap<NodeSlotId, RowFingerprint>,
-    last_mutations: HashMap<NodeSlotId, &'static str>,
-    reported: HashSet<&'static str>,
+    last_mutations: HashMap<NodeSlotId, Mutation>,
+    reported: HashSet<(&'static str, &'static str)>,
     // A publication can open inside another: draining the invalidation journal marks nodes for
     // repaint, and a mark made from inside a layout update drains again on the spot. Only the
     // outermost window verifies and re-fingerprints; an inner one that did so would report the
     // rows the outer window has already stopped attributing.
     publication_depth: u32,
+    publication: Publication,
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+enum Publication {
+    #[default]
+    None,
+    Layout,
+    Journal,
+}
+
+#[derive(Clone, Copy)]
+struct Mutation {
+    call_site: &'static str,
+    writer: &'static str,
 }
 
 #[derive(Default)]
@@ -124,14 +139,14 @@ fn unclassified_mutation(
     fallback
 }
 
-fn report(call_site: &'static str, changed: &[NodeSlotId]) {
+fn report(call_site: &'static str, writer: &'static str, changed: &[NodeSlotId]) {
     let row_ids = changed
         .iter()
         .map(|row| format!("{}:{}", row.slot_index(), row.generation()))
         .collect::<Vec<_>>()
         .join(",");
     let report = format!(
-        "PUBLISHED IMMUTABLE: {call_site}: {} row(s) changed without publication: {row_ids}\n",
+        "PUBLISHED IMMUTABLE: writer={writer}: {call_site}: {} row(s) changed without publication: {row_ids}\n",
         changed.len()
     );
     match std::env::var_os("LIBWEB_VERIFY_PUBLISHED_IMMUTABLE_LOG") {
@@ -157,18 +172,22 @@ fn verify(arena: &LayoutNodeArena, call_site: &'static str) {
         if changed.is_empty() {
             return;
         }
-        let mut by_mutation = HashMap::<&'static str, Vec<NodeSlotId>>::new();
+        let mut by_mutation = HashMap::<(&'static str, &'static str), Vec<NodeSlotId>>::new();
         for row in changed {
             let unclassified = unclassified_mutation(published.rows.get(&row), current.get(&row), call_site);
+            let mutation = published.last_mutations.get(&row).copied().unwrap_or(Mutation {
+                call_site: unclassified,
+                writer: "main-side direct",
+            });
             by_mutation
-                .entry(published.last_mutations.get(&row).copied().unwrap_or(unclassified))
+                .entry((mutation.call_site, mutation.writer))
                 .or_default()
                 .push(row);
         }
         published.rows = current;
-        for (mutation, rows) in by_mutation {
-            if published.reported.insert(mutation) {
-                report(mutation, &rows);
+        for ((mutation, writer), rows) in by_mutation {
+            if published.reported.insert((mutation, writer)) {
+                report(mutation, writer, &rows);
             }
         }
     });
@@ -179,19 +198,33 @@ pub(crate) fn note_row_mutation(arena: &LayoutNodeArena, row: NodeSlotId, call_s
         return;
     }
     let key = arena as *const LayoutNodeArena as usize;
-    let in_publication = STATE.with(|state| {
+    let publication = STATE.with(|state| {
         state
             .borrow()
             .arenas
             .get(&key)
-            .is_some_and(|published| published.publication_depth != 0)
+            .map_or(Publication::None, |published| published.publication)
     });
-    if in_publication {
+    if publication == Publication::Layout {
         return;
     }
+    let writer = if publication == Publication::Journal {
+        "journal drain"
+    } else {
+        crate::painting::seal::current_pass_name().unwrap_or("main-side direct")
+    };
     STATE.with(|state| {
         if let Some(published) = state.borrow_mut().arenas.get_mut(&key) {
-            published.last_mutations.entry(row).or_insert(call_site);
+            if publication == Publication::Journal {
+                if published.reported.insert((call_site, writer)) {
+                    report(call_site, writer, &[row]);
+                }
+            } else {
+                published
+                    .last_mutations
+                    .entry(row)
+                    .or_insert(Mutation { call_site, writer });
+            }
         }
     });
 }
@@ -218,10 +251,11 @@ pub(crate) fn published(arena: &LayoutNodeArena) {
         let published = state.arenas.entry(key).or_default();
         published.rows = rows;
         published.last_mutations.clear();
+        published.publication = Publication::None;
     });
 }
 
-fn begin_publication(arena: &LayoutNodeArena, call_site: &'static str) {
+fn begin_publication(arena: &LayoutNodeArena, call_site: &'static str, publication: Publication) {
     let key = arena as *const LayoutNodeArena as usize;
     let already_publishing = STATE.with(|state| {
         state
@@ -236,6 +270,9 @@ fn begin_publication(arena: &LayoutNodeArena, call_site: &'static str) {
     STATE.with(|state| {
         if let Some(published) = state.borrow_mut().arenas.get_mut(&key) {
             published.publication_depth += 1;
+            if published.publication_depth == 1 {
+                published.publication = publication;
+            }
         }
     });
 }
@@ -244,14 +281,14 @@ pub(crate) fn before_publication(arena: &LayoutNodeArena) {
     if !enabled() {
         return;
     }
-    begin_publication(arena, "next publication");
+    begin_publication(arena, "next publication", Publication::Layout);
 }
 
 pub(crate) fn before_journal_publication(arena: &LayoutNodeArena) {
     if !enabled() {
         return;
     }
-    begin_publication(arena, "invalidation journal publication");
+    begin_publication(arena, "invalidation journal publication", Publication::Journal);
 }
 
 pub(crate) fn after_journal_publication(arena: &LayoutNodeArena) {
