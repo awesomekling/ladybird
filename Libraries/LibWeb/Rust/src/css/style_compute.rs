@@ -2660,6 +2660,22 @@ pub struct FfiLonghandDriveResult {
 }
 
 #[repr(C)]
+pub struct FfiLonghandTransactionResult {
+    pub drive_result: *const FfiLonghandDriveResult,
+    pub storage: *mut c_void,
+}
+
+struct LonghandTransactionContinuation {
+    drive_result: FfiLonghandDriveResult,
+    finalization_line_height_metrics: FfiInputLineHeightMetrics,
+    has_animation_definitions: bool,
+    a_definition_starts_an_animation: bool,
+    animated_overlay: *mut AnimatedOverlay,
+    animation_values_applied: bool,
+    parent_text_align_input_is_animated: bool,
+}
+
+#[repr(C)]
 pub struct FfiPreparedLonghandTransaction {
     pub requirements: crate::css::cascaded_properties::FfiStyleComputationRequirements,
     pub longhand_table: *mut ComputedLonghandTable,
@@ -2743,7 +2759,6 @@ pub struct FfiComputePropertiesInput {
     pub stop_after_longhand_drive: bool,
     pub transaction_input: *const FfiLonghandTransactionInput,
     pub callback_context: *mut c_void,
-    pub finish_longhand_drive: unsafe extern "C" fn(*mut c_void, *const FfiLonghandDriveResult),
     /// Reconciles the element's CSS animations against the plan the computation decided, collects
     /// the effects that remain and samples them into an animated overlay.
     ///
@@ -2755,7 +2770,6 @@ pub struct FfiComputePropertiesInput {
     pub apply_animations:
         unsafe extern "C" fn(*mut c_void, i8, bool, *mut FfiInputLineHeightMetrics, *mut bool) -> *mut AnimatedOverlay,
     pub did_mutate_post_compute: unsafe extern "C" fn(*mut c_void, u16),
-    pub finish_properties: unsafe extern "C" fn(*mut c_void, bool),
 }
 
 /// Document-level inputs to used color-scheme resolution. Scheme values use
@@ -5386,7 +5400,7 @@ pub unsafe extern "C" fn rust_prepare_longhand_transaction(
 pub unsafe extern "C" fn rust_compute_properties(
     input: *const FfiComputePropertiesInput,
     prepared: *const FfiPreparedLonghandTransaction,
-) {
+) -> FfiLonghandTransactionResult {
     crate::css::ffi_stats::bump(crate::css::ffi_stats::FfiOp::LonghandDriverEntry);
     let input = unsafe { &*input };
     let prepared = unsafe { &*prepared };
@@ -5413,7 +5427,7 @@ pub unsafe extern "C" fn rust_compute_properties(
         snapshot.has_animated_property(property_id::TEXT_ALIGN)
             || snapshot.has_animated_property(property_id::DIRECTION)
     });
-    let (mut result, mut finalization_line_height_metrics) =
+    let (mut result, finalization_line_height_metrics) =
         unsafe { compute_longhands(drive_input, parent_snapshot.as_ref(), highlight.as_ref()) };
     if !input.stop_after_longhand_drive {
         result.transitions = build_computed_transition_list(unsafe { &*drive_input.longhand_table });
@@ -5450,19 +5464,66 @@ pub unsafe extern "C" fn rust_compute_properties(
         && unsafe { std::slice::from_raw_parts(result.animations.animations, result.animations.count) }
             .iter()
             .any(|animation| animation.matched_existing_index == crate::css::style::animations::NO_MATCHED_ANIMATION);
-    let mut animated_overlay = drive_input.animated_overlay;
-    let mut animation_values_applied = unsafe { animated_overlay.as_ref() }.is_some_and(|overlay| !overlay.is_empty());
-    crate::css::style::seal::note_host_call("computed_properties.finish_longhand_drive");
-    unsafe { (input.finish_longhand_drive)(input.callback_context, &raw const result) };
-    unsafe { destroy_style_computation_result(&result) };
+    let animated_overlay = drive_input.animated_overlay;
+    let animation_values_applied = unsafe { animated_overlay.as_ref() }.is_some_and(|overlay| !overlay.is_empty());
     unsafe { crate::css::cascaded_properties::destroy_style_computation_requirements(prepared.requirements.storage) };
+    let continuation = Box::new(LonghandTransactionContinuation {
+        drive_result: result,
+        finalization_line_height_metrics,
+        has_animation_definitions,
+        a_definition_starts_an_animation,
+        animated_overlay,
+        animation_values_applied,
+        parent_text_align_input_is_animated,
+    });
+    let drive_result = &raw const continuation.drive_result;
+    let storage = Box::into_raw(continuation);
+    crate::css::style::seal::end_update();
+    FfiLonghandTransactionResult {
+        drive_result,
+        storage: storage.cast(),
+    }
+}
+
+/// Resumes the animation and finalization tail after native code has consumed
+/// the base longhand result.
+///
+/// # Safety
+/// `input` and `transaction.storage` must describe the same live transaction.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_finalize_longhand_transaction(
+    input: *const FfiComputePropertiesInput,
+    transaction: FfiLonghandTransactionResult,
+) -> bool {
+    let input = unsafe { &*input };
+    let drive_input = unsafe { &*input.transaction_input };
+    let style_engine = unsafe { &*input.style_engine.cast::<crate::css::style::StyleEngine>() };
+    let continuation = unsafe { Box::from_raw(transaction.storage.cast::<LonghandTransactionContinuation>()) };
+    let LonghandTransactionContinuation {
+        drive_result,
+        mut finalization_line_height_metrics,
+        has_animation_definitions,
+        a_definition_starts_an_animation,
+        mut animated_overlay,
+        mut animation_values_applied,
+        parent_text_align_input_is_animated,
+    } = *continuation;
+    unsafe { destroy_style_computation_result(&drive_result) };
+    crate::css::style::seal::begin_update();
     if input.stop_after_longhand_drive {
-        crate::css::style::seal::note_host_call("computed_properties.finish_properties");
-        unsafe { (input.finish_properties)(input.callback_context, false) };
         unsafe { &mut *drive_input.longhand_table }.freeze();
         crate::css::style::seal::end_update();
-        return;
+        return false;
     }
+    let parent_snapshot = if input.inheritance_parent_style_record != 0 {
+        Some(parent_snapshot_for_style_record(
+            style_engine,
+            input.inheritance_parent_style_record,
+            None,
+        ))
+    } else {
+        None
+    };
 
     // OPTIMIZATION: An element with no plan to apply and nothing relevant to sample has nothing for
     //               the animation stage to do. The published per-element fact answers the weaker
@@ -5570,10 +5631,9 @@ pub unsafe extern "C" fn rust_compute_properties(
     .is_none();
     unsafe { &mut *drive_input.longhand_table }
         .set_in_display_none_subtree(parent_style_in_display_none_subtree || display_is_none);
-    crate::css::style::seal::note_host_call("computed_properties.finish_properties");
-    unsafe { (input.finish_properties)(input.callback_context, parent_style_in_display_none_subtree) };
     unsafe { &mut *drive_input.longhand_table }.freeze();
     crate::css::style::seal::end_update();
+    parent_style_in_display_none_subtree
 }
 
 /// Creates the complete initial document longhand table. Unlike a normal
