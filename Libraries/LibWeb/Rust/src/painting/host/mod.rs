@@ -45,7 +45,26 @@ pub struct FfiGeometryHostCallbacks {
     ),
 }
 
-impl FfiGeometryHostCallbacks {
+#[derive(Clone, Copy)]
+pub(crate) struct GeometryHostCallbacks {
+    context: *mut std::ffi::c_void,
+    set_scroll_offset: unsafe extern "C" fn(
+        *mut std::ffi::c_void,
+        *mut std::ffi::c_void,
+        crate::layout::used_values::FfiCssPixelPoint,
+    ),
+}
+
+impl From<FfiGeometryHostCallbacks> for GeometryHostCallbacks {
+    fn from(host: FfiGeometryHostCallbacks) -> Self {
+        Self {
+            context: host.context,
+            set_scroll_offset: host.set_scroll_offset,
+        }
+    }
+}
+
+impl GeometryHostCallbacks {
     /// # Safety
     ///
     /// `layout_node_shell` must be a live layout node shell. The host re-enters geometry
