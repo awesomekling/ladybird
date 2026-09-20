@@ -90,6 +90,7 @@ pub unsafe extern "C" fn layout_arena_paintable_set_scrollbar_enlarged(
     direction: ScrollDirection,
     enlarged: bool,
 ) {
+    let _writer = crate::painting::published_immutable::enter_writer_if_unattributed("scrollbar interaction");
     let arena = unsafe { arena_from_handle_mut(arena) };
     let mut rows = arena.paintable_rows_mut();
     if !rows.paintable_row_is_populated(slot) {
@@ -1344,6 +1345,7 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
                 inputs.css_viewport_rect,
             );
             if canvas_rect != source.root_background_canvas_rect {
+                let _writer = crate::painting::published_immutable::enter_writer_if_unattributed("recording preflight");
                 arena.push_paint_damage(root, crate::painting::record::damage::PaintDamage::DRAW_BACKGROUND);
             }
         }
@@ -3391,6 +3393,8 @@ pub unsafe extern "C" fn layout_arena_sync_svg_paint_resources(
     resolve_paint_server: unsafe extern "C" fn(*mut c_void, bool, *mut c_void),
 ) -> bool {
     use crate::painting::svg_paint_resources::{PublishedSvgFilter, PublishedSvgPaintServer, SvgPaintResourceKind};
+    let _writer =
+        crate::painting::published_immutable::enter_writer_if_unattributed("SVG paint resource synchronization");
     let arena = unsafe { arena_from_handle(arena) };
     let resources = arena.svg_paint_resources();
     if !resources.take_needs_sync() {

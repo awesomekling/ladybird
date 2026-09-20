@@ -20,13 +20,14 @@ use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::panic::Location;
 use std::sync::OnceLock;
 
 #[derive(Default)]
 struct PublishedArena {
     rows: HashMap<NodeSlotId, RowFingerprint>,
     last_mutations: HashMap<NodeSlotId, Mutation>,
-    reported: HashSet<(&'static str, &'static str)>,
+    reported: HashSet<(&'static str, &'static str, &'static Location<'static>)>,
     // A publication can open inside another: draining the invalidation journal marks nodes for
     // repaint, and a mark made from inside a layout update drains again on the spot. Only the
     // outermost window verifies and re-fingerprints; an inner one that did so would report the
@@ -47,6 +48,7 @@ enum Publication {
 struct Mutation {
     call_site: &'static str,
     writer: &'static str,
+    caller: &'static Location<'static>,
 }
 
 #[derive(Default)]
@@ -69,6 +71,19 @@ impl Drop for WriterScope {
 
 pub(crate) fn enter_writer(writer: &'static str) -> WriterScope {
     WriterScope(CURRENT_WRITER.with(|current| current.replace(Some(writer))))
+}
+
+pub(crate) fn enter_writer_if_unattributed(writer: &'static str) -> WriterScope {
+    let writer = if crate::painting::seal::current_pass_name().is_none() {
+        Some(writer)
+    } else {
+        None
+    };
+    WriterScope(CURRENT_WRITER.with(|current| {
+        let previous = current.get();
+        current.set(previous.or(writer));
+        previous
+    }))
 }
 
 fn enabled() -> bool {
@@ -153,14 +168,15 @@ fn unclassified_mutation(
     fallback
 }
 
-fn report(call_site: &'static str, writer: &'static str, changed: &[NodeSlotId]) {
+fn report(call_site: &'static str, writer: &'static str, caller: Option<&Location<'_>>, changed: &[NodeSlotId]) {
     let row_ids = changed
         .iter()
         .map(|row| format!("{}:{}", row.slot_index(), row.generation()))
         .collect::<Vec<_>>()
         .join(",");
     let report = format!(
-        "PUBLISHED IMMUTABLE: writer={writer}: {call_site}: {} row(s) changed without publication: {row_ids}\n",
+        "PUBLISHED IMMUTABLE: writer={writer}: {call_site}: caller={}: {} row(s) changed without publication: {row_ids}\n",
+        caller.map_or("unknown".to_owned(), |caller| caller.to_string()),
         changed.len()
     );
     match std::env::var_os("LIBWEB_VERIFY_PUBLISHED_IMMUTABLE_LOG") {
@@ -186,31 +202,35 @@ fn verify(arena: &LayoutNodeArena, call_site: &'static str) {
         if changed.is_empty() {
             return;
         }
-        let mut by_mutation = HashMap::<(&'static str, &'static str), Vec<NodeSlotId>>::new();
+        let mut by_mutation =
+            HashMap::<(&'static str, &'static str, &'static Location<'static>), Vec<NodeSlotId>>::new();
         for row in changed {
             let unclassified = unclassified_mutation(published.rows.get(&row), current.get(&row), call_site);
             let mutation = published.last_mutations.get(&row).copied().unwrap_or(Mutation {
                 call_site: unclassified,
                 writer: "main-side direct",
+                caller: Location::caller(),
             });
             by_mutation
-                .entry((mutation.call_site, mutation.writer))
+                .entry((mutation.call_site, mutation.writer, mutation.caller))
                 .or_default()
                 .push(row);
         }
         published.rows = current;
-        for ((mutation, writer), rows) in by_mutation {
-            if published.reported.insert((mutation, writer)) {
-                report(mutation, writer, &rows);
+        for ((mutation, writer, caller), rows) in by_mutation {
+            if published.reported.insert((mutation, writer, caller)) {
+                report(mutation, writer, Some(caller), &rows);
             }
         }
     });
 }
 
+#[track_caller]
 pub(crate) fn note_row_mutation(arena: &LayoutNodeArena, row: NodeSlotId, call_site: &'static str) {
     note_row_mutation_impl(arena, row, call_site, None);
 }
 
+#[track_caller]
 pub(crate) fn note_row_mutation_with_writer(
     arena: &LayoutNodeArena,
     row: NodeSlotId,
@@ -220,12 +240,14 @@ pub(crate) fn note_row_mutation_with_writer(
     note_row_mutation_impl(arena, row, call_site, Some(writer));
 }
 
+#[track_caller]
 fn note_row_mutation_impl(
     arena: &LayoutNodeArena,
     row: NodeSlotId,
     call_site: &'static str,
     explicit_writer: Option<&'static str>,
 ) {
+    let caller = Location::caller();
     if !enabled() {
         return;
     }
@@ -251,14 +273,15 @@ fn note_row_mutation_impl(
     STATE.with(|state| {
         if let Some(published) = state.borrow_mut().arenas.get_mut(&key) {
             if publication == Publication::Journal {
-                if published.reported.insert((call_site, writer)) {
-                    report(call_site, writer, &[row]);
+                if published.reported.insert((call_site, writer, caller)) {
+                    report(call_site, writer, Some(caller), &[row]);
                 }
             } else {
-                published
-                    .last_mutations
-                    .entry(row)
-                    .or_insert(Mutation { call_site, writer });
+                published.last_mutations.entry(row).or_insert(Mutation {
+                    call_site,
+                    writer,
+                    caller,
+                });
             }
         }
     });

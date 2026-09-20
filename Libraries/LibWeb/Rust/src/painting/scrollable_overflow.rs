@@ -769,6 +769,8 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn ensure_scrollable_overflow(&self, slot: NodeSlotId) {
+        let _writer =
+            crate::painting::published_immutable::enter_writer_if_unattributed("lazy scrollable overflow measurement");
         if !self.paintable_row_is_populated(slot)
             || !self
                 .scrollable_overflow

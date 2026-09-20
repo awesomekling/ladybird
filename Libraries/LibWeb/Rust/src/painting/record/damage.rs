@@ -187,6 +187,7 @@ impl LayoutNodeArena {
         self.row_paint_state(row).damage()
     }
 
+    #[track_caller]
     pub(crate) fn push_paint_damage(&self, row: NodeSlotId, damage: PaintDamage) {
         crate::painting::published_immutable::note_row_mutation(self, row, "M12 LayoutNodeArena::push_paint_damage");
         self.debug_assert_not_recording();
@@ -211,6 +212,7 @@ impl LayoutNodeArena {
     // Producers that read descendants, such as an SVG root or a snap container's scroll
     // metadata, learn about damage below them from this hint. The walk stops at the first
     // ancestor already hinted.
+    #[track_caller]
     fn hint_descendant_readers_above(&self, row: NodeSlotId, stamp: u32, states: &[RowPaintState]) {
         let set = &self.paintable_rows.damage;
         let mut current = row;
@@ -255,6 +257,7 @@ impl LayoutNodeArena {
         None
     }
 
+    #[track_caller]
     pub(crate) fn push_paint_damage_to_paint_subtree(&self, root: NodeSlotId, damage: PaintDamage) {
         let rows = self.paintable_rows();
         paint_order::for_each_in_paint_subtree(&rows, root, |row| self.push_paint_damage(row, damage));
@@ -262,7 +265,9 @@ impl LayoutNodeArena {
 
     /// The fan-out of a style repaint: the row, the anonymous boxes it generated, and for an
     /// inline the ancestors up to the line root that paints its pieces.
+    #[track_caller]
     pub(crate) fn push_paint_damage_for_repaint(&self, row: NodeSlotId, damage: PaintDamage) {
+        let _writer = crate::painting::published_immutable::enter_writer_if_unattributed("layout repaint propagation");
         self.paintable_rows()
             .for_each_row_repainted_with(row, |repainted| self.push_paint_damage(repainted, damage));
     }
@@ -271,6 +276,7 @@ impl LayoutNodeArena {
     /// resolved now, while the links are intact, for rows about to appear, disappear or move.
     /// The ancestor's content changed below it as well.
     pub(crate) fn push_enclosing_paint_order_damage(&self, node: NodeSlotId) {
+        let _writer = crate::painting::published_immutable::enter_writer_if_unattributed("paint-order maintenance");
         if let Some(owner) = self.enclosing_paint_order_owner(node) {
             self.push_paint_damage(owner, PaintDamage::ORDER | PaintDamage::DESCENDANT_READERS);
             // A line's plan also places content nested inside ordinary inline boxes.
