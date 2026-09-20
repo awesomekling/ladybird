@@ -2861,17 +2861,18 @@ fn retained_inheritance_parent_style_record(
     style_engine: &crate::css::style::StyleEngine,
     input: &FfiComputePropertiesInput,
 ) -> u64 {
-    let retained = crate::css::style::tree::StyleNodeID::from_raw(input.style_node)
+    let style_node = crate::css::style::tree::StyleNodeID::from_raw(input.style_node);
+    let retained = style_node
         .and_then(|node| style_engine.retained_inheritance_parent_style_record(node, input.pseudo_kind))
         .map_or(0, |record| record.raw());
-    if input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT
-        && u16::from(input.pseudo_kind) > crate::css::style::bridge::LAST_SYNTHETIC_PSEUDO_ELEMENT_KIND
-    {
-        // Element-backed pseudo-element styles may carry an explicit inheritance override whose
-        // target is not the originating element. That target is not retained yet.
-        return input.inheritance_parent_style_record;
-    }
     if retained == 0 {
+        if style_node.is_some()
+            && (crate::css::style::bridge::FIRST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND
+                ..=crate::css::style::bridge::LAST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND)
+                .contains(&input.pseudo_kind)
+        {
+            return 0;
+        }
         return input.inheritance_parent_style_record;
     }
     retained

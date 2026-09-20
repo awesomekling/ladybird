@@ -378,6 +378,8 @@ struct PublishedComputedColumns {
     /// The element facts the style computation's adjustments read; see
     /// `bridge::element_adjustment_fact`.
     adjustment_facts: Vec<u32>,
+    /// One plus the element-reference pseudo kind this element represents, or zero.
+    associated_pseudo_kinds: Vec<u8>,
     /// The element facts a layout row built for the element records; see
     /// `bridge::element_construction_fact`.
     construction_facts: Vec<u32>,
@@ -408,6 +410,7 @@ impl PublishedComputedColumns {
         self.cascade_states.resize(len, 0);
         self.flags.resize(len, 0);
         self.adjustment_facts.resize(len, 0);
+        self.associated_pseudo_kinds.resize(len, 0);
         self.construction_facts.resize(len, 0);
         self.box_kinds.resize(len, 0);
     }
@@ -2819,6 +2822,21 @@ impl ComputedGroupSets {
         self.columns.adjustment_facts[index] = facts;
     }
 
+    pub fn set_associated_pseudo_kind(&mut self, node: StyleNodeID, pseudo_kind_plus_one: u8) {
+        let Some(index) = node.element_index().map(|index| index as usize) else {
+            return;
+        };
+        self.columns.ensure(index);
+        self.columns.associated_pseudo_kinds[index] = pseudo_kind_plus_one;
+    }
+
+    pub fn associated_pseudo_kind(&self, node: StyleNodeID) -> Option<u8> {
+        node.element_index()
+            .and_then(|index| self.columns.associated_pseudo_kinds.get(index as usize))
+            .copied()
+            .and_then(|kind| kind.checked_sub(1))
+    }
+
     pub fn set_construction_facts(&mut self, node: StyleNodeID, facts: u32, box_kind: u8) {
         let Some(index) = node.element_index().map(|index| index as usize) else {
             return;
@@ -2996,7 +3014,12 @@ impl ComputedGroupSets {
     #[must_use]
     pub fn custom_property_environment_capacity_bytes(&self) -> u64 {
         capacity_bytes! {
-            shallow [self.custom_property_environments, self.columns.custom_properties, self.columns.adjustment_facts];
+            shallow [
+                self.custom_property_environments,
+                self.columns.custom_properties,
+                self.columns.adjustment_facts,
+                self.columns.associated_pseudo_kinds,
+            ];
             cached [];
             nested [];
             skip [];

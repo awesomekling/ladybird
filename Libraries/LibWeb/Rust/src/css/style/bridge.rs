@@ -555,7 +555,8 @@ pub struct FfiElementArrival {
     pub is_slot: bool,
     /// The element's `FfiElementBoxKind`: which principal box it asks for.
     pub box_kind: u8,
-    pub reserved: u8,
+    /// One plus the element-reference pseudo kind represented by this element, or zero.
+    pub associated_pseudo_kind_plus_one: u8,
     /// The element's `ElementStyleAdjustmentFact` bits: what the box-type transformation and the
     /// element style adjustments read of the DOM. Mirrors the C++ enum.
     pub adjustment_facts: u32,
@@ -567,6 +568,8 @@ pub struct FfiElementArrival {
 /// it are the bits a style record's pseudo-element mask carries. Mirrors the C++
 /// `last_synthetic_pseudo_element`.
 pub const LAST_SYNTHETIC_PSEUDO_ELEMENT_KIND: u16 = 7;
+pub const FIRST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND: u8 = 8;
+pub const LAST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND: u8 = 13;
 
 /// What C++ reports about a style reaction it applied, for the engine to derive the reactions of
 /// the element's children. Mirrors C++ `StyleReactionAppliedFact`.
@@ -4694,7 +4697,7 @@ mod tests {
                 heading_level: 4,
                 is_slot: true,
                 box_kind: 0,
-                reserved: 0,
+                associated_pseudo_kind_plus_one: 0,
             },
             FfiElementArrival {
                 node: nodes[1],
@@ -4708,7 +4711,7 @@ mod tests {
                 heading_level: 0,
                 is_slot: false,
                 box_kind: 0,
-                reserved: 0,
+                associated_pseudo_kind_plus_one: 0,
             },
         ];
         engine.apply_transaction_batch(&tree, (&arrivals, &[31, 32, 33]), &[], &[], &[], &[]);
@@ -4740,7 +4743,7 @@ mod tests {
             heading_level: 0,
             is_slot: false,
             box_kind: 0,
-            reserved: 0,
+            associated_pseudo_kind_plus_one: 0,
         }
     }
 
