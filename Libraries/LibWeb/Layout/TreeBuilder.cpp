@@ -398,11 +398,10 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
 {
     return {
         .builder = this,
-        .create_layout_node = [](void* builder_pointer, void* element_pointer, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiPseudoElementDecision decision, RustFFI::NodeSlotId originating_list_box_slot) -> RustFFI::NodeSlotId {
+        .create_layout_node = [](void* builder_pointer, u32 style_node, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiPseudoElementDecision decision, RustFFI::NodeSlotId originating_list_box_slot) -> RustFFI::NodeSlotId {
             VERIFY(builder_pointer);
-            VERIFY(element_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
-            auto& element = *static_cast<DOM::Element*>(element_pointer);
+            auto& element = as<DOM::Element>(dom_node_for_style_node(*builder.m_document, style_node));
             auto pseudo_element = css_pseudo_element(ffi_pseudo);
             auto style_record_identity = element.style_record_identity(pseudo_element);
             VERIFY(style_record_identity);
@@ -439,9 +438,10 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
             if (layout_node)
                 publish_generated_content({ element, pseudo_element }, *layout_node, originating_list_box);
             return Node::slot_id(layout_node); },
-        .create_nested_list_marker = [](void* element_pointer, RustFFI::FfiPseudoElement originating_pseudo, Compositing::RustFFI::NodeSlotId pseudo_element_box_slot) -> Compositing::RustFFI::NodeSlotId {
-            VERIFY(element_pointer);
-            auto& element = *static_cast<DOM::Element*>(element_pointer);
+        .create_nested_list_marker = [](void* builder_pointer, u32 style_node, RustFFI::FfiPseudoElement originating_pseudo, Compositing::RustFFI::NodeSlotId pseudo_element_box_slot) -> Compositing::RustFFI::NodeSlotId {
+            VERIFY(builder_pointer);
+            auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
+            auto& element = as<DOM::Element>(dom_node_for_style_node(*builder.m_document, style_node));
             auto& list_item_box = as<BlockContainer>(*pseudo_element_build_node(element.document(), pseudo_element_box_slot));
             auto marker_style = [&] {
                 // NB: Republishing the element's own ::marker style can retire its animation record while the
@@ -457,9 +457,10 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
             list_item_marker.set_generated_for(css_pseudo_element(originating_pseudo), element);
             list_item_marker.set_content_counter_style_dependencies(publish_normal_marker_content({ element, css_pseudo_element(originating_pseudo) }, list_item_box, list_item_marker));
             return Node::slot_id(&list_item_marker); },
-        .create_content_item = [](void* element_pointer, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiGeneratedContentItem item, Compositing::RustFFI::NodeSlotId pseudo_element_box_slot) -> Compositing::RustFFI::NodeSlotId {
-            VERIFY(element_pointer);
-            auto& element = *static_cast<DOM::Element*>(element_pointer);
+        .create_content_item = [](void* builder_pointer, u32 style_node, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiGeneratedContentItem item, Compositing::RustFFI::NodeSlotId pseudo_element_box_slot) -> Compositing::RustFFI::NodeSlotId {
+            VERIFY(builder_pointer);
+            auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
+            auto& element = as<DOM::Element>(dom_node_for_style_node(*builder.m_document, style_node));
             auto& pseudo_element_box = *pseudo_element_build_node(element.document(), pseudo_element_box_slot);
             // The marker a list-item pseudo-element nests takes its content's style from itself.
             BlockContainer* nested_marker = nullptr;
@@ -550,17 +551,14 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
             return svg_resource_box_survives(*builder.m_document, slot, cleared_subtree_root); },
-        .create_first_letter_nodes = [](void*, void* element_pointer, RustFFI::FfiFirstLetterTarget target) -> RustFFI::FfiFirstLetterNodes {
-            VERIFY(element_pointer);
-            return create_first_letter_nodes(*static_cast<DOM::Element*>(element_pointer), target); },
-        .principal_dom_node = [](void* builder_pointer, u32 style_node) -> void* {
+        .create_first_letter_nodes = [](void* builder_pointer, u32 style_node, RustFFI::FfiFirstLetterTarget target) -> RustFFI::FfiFirstLetterNodes {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
-            return &dom_node_for_style_node(*builder.m_document, style_node); },
-        .prepare_principal_element = [](void* builder_pointer, void* element_pointer, bool should_create_layout_node) {
+            return create_first_letter_nodes(as<DOM::Element>(dom_node_for_style_node(*builder.m_document, style_node)), target); },
+        .prepare_principal_element = [](void* builder_pointer, u32 style_node, bool should_create_layout_node) {
             VERIFY(builder_pointer);
-            VERIFY(element_pointer);
-            auto& element = *static_cast<DOM::Element*>(element_pointer);
+            auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
+            auto& element = as<DOM::Element>(dom_node_for_style_node(*builder.m_document, style_node));
             element.update_inside_blocking_wheel_event_handler_state();
             if (should_create_layout_node) {
                 LayoutTreeBuilderAccess::clear_synthetic_pseudo_element_layout_nodes(element);
