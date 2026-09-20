@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<script src="include.js"></script>
+<style>
+    * { font-size: 20px; margin: 0; padding: 0; border: 0; }
+    .row { height: 40px; }
+    button, input, select, textarea, span, my-control, my-late { display: block; width: 300px; height: 40px; }
+</style>
+<div id="tree">
+    <div class="row"><button id="plain">plain</button></div>
+    <div class="row"><button id="off" disabled>disabled button</button></div>
+    <fieldset disabled>
+        <legend><button id="in-legend">first legend</button></legend>
+        <div class="row"><button id="in-fieldset">in fieldset</button></div>
+        <fieldset disabled>
+            <legend><span id="in-nested-legend">nested legend</span></legend>
+        </fieldset>
+        <div class="row"><div id="shadow-host"></div></div>
+    </fieldset>
+    <fieldset>
+        <legend><button id="in-enabled-legend">enabled legend</button></legend>
+    </fieldset>
+    <div class="row"><select id="live-select"><optgroup disabled label="g"><option>o</option></optgroup></select></div>
+    <div class="row"><select id="off-select" disabled><optgroup label="g"><option>o</option></optgroup></select></div>
+    <div class="row"><my-control id="custom"><span id="in-custom">custom</span></my-control></div>
+    <div class="row"><textarea id="area">area</textarea></div>
+</div>
+<script>
+    class MyControl extends HTMLElement {
+        static formAssociated = true;
+        constructor() {
+            super();
+            this.attachInternals();
+        }
+    }
+    customElements.define("my-control", MyControl);
+
+    test(() => {
+        const seen = [];
+        document.addEventListener("click", event => seen.push(event.target.id || event.target.localName), true);
+
+        const clickAt = (rect, label) => {
+            seen.length = 0;
+            internals.click(Math.floor(rect.x + rect.width / 2), Math.floor(rect.y + rect.height / 2));
+            println(`${label}: ${seen.length ? seen.join(",") : "no click"}`);
+        };
+        const clickOn = id => clickAt(document.getElementById(id).getBoundingClientRect(), id);
+
+        for (const id of ["plain", "off", "in-legend", "in-fieldset", "in-nested-legend", "in-enabled-legend", "live-select", "off-select", "in-custom", "area"])
+            clickOn(id);
+
+        // A disabled host does not reach into the shadow tree it holds: the walk from a node in that
+        // tree stops at the shadow root, so only what the host itself is written under matters.
+        const root = document.getElementById("shadow-host").attachShadow({ mode: "open" });
+        root.innerHTML = `<span id="shadow-child" style="display:block;width:300px;height:40px">shadow</span>`;
+        clickAt(root.querySelector("#shadow-child").getBoundingClientRect(), "shadow-child");
+        clickOn("shadow-host");
+
+        // The same elements answer differently once the attributes move.
+        document.getElementById("off").disabled = false;
+        document.querySelector("fieldset").disabled = false;
+        document.getElementById("custom").setAttribute("disabled", "");
+        document.getElementById("area").disabled = true;
+        println("--- after toggling ---");
+        for (const id of ["off", "in-legend", "in-fieldset", "in-nested-legend", "in-custom", "area"])
+            clickOn(id);
+
+        // An element that arrives already disabled is answered for from the moment it connects.
+        const late = document.createElement("button");
+        late.id = "late";
+        late.disabled = true;
+        late.textContent = "late";
+        document.getElementById("tree").appendChild(late);
+        println("--- late arrival ---");
+        clickOn("late");
+        late.disabled = false;
+        clickOn("late");
+
+        // Only a form-associated custom element is disabled by the attribute, so the answer moves
+        // when the definition it upgrades to arrives.
+        const upgraded = document.createElement("my-late");
+        upgraded.id = "upgraded";
+        upgraded.setAttribute("disabled", "");
+        upgraded.textContent = "upgraded";
+        document.getElementById("tree").appendChild(upgraded);
+        println("--- upgrade ---");
+        clickOn("upgraded");
+        customElements.define("my-late", class extends HTMLElement {
+            static formAssociated = true;
+            constructor() {
+                super();
+                this.attachInternals();
+            }
+        });
+        clickOn("upgraded");
+    });
+</script>

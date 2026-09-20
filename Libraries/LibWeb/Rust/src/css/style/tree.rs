@@ -37,6 +37,13 @@ use super::memory::MemoryCategory;
 use super::memory::MemoryController;
 use super::transaction::TreeRelations;
 
+/// The element is a button, input, select, textarea or form-associated custom element carrying a
+/// `disabled` attribute. Such an element is disabled, and so is everything written under it.
+pub const DISABLED_FORM_CONTROL: u8 = 1 << 0;
+/// The element is a `<fieldset>` carrying a `disabled` attribute. The fieldset itself stays
+/// enabled; everything written under it, its first `<legend>` included, does not.
+pub const DISABLED_FIELD_SET: u8 = 1 << 1;
+
 /// Document-local identity of an element or a text node.
 ///
 /// The top bit says which kind of node it names, and the rest is a dense index into that kind's own
@@ -588,6 +595,12 @@ pub struct StyleNodeTree {
     /// build climbs to reach a node it has to rebuild. Only an element, a shadow root and the
     /// document ever carry one, so this needs no place in the text index space.
     child_needs_layout_tree_update: BitColumn,
+    /// Whether the element is a form control its `disabled` attribute disables. See
+    /// [`StyleNodeTree::event_dispatch_is_disabled`].
+    disabled_form_control: BitColumn,
+    /// Whether the element disables what is written under it: a disabled form control does, and so
+    /// does a `<fieldset disabled>`, which is not itself disabled.
+    disables_descendants: BitColumn,
     /// The layout tree update mark elements hold. Text nodes hold one too, in `text.marks`.
     marks: LayoutTreeUpdateMarks,
     connected_element_count: u32,
@@ -643,6 +656,8 @@ impl StyleNodeTree {
             live: BitColumn::default(),
             relation_only: BitColumn::default(),
             child_needs_layout_tree_update: BitColumn::default(),
+            disabled_form_control: BitColumn::default(),
+            disables_descendants: BitColumn::default(),
             marks: LayoutTreeUpdateMarks::default(),
             connected_element_count: 0,
             pending_reuse: Vec::new(),
@@ -835,6 +850,8 @@ impl StyleNodeTree {
         self.live.set(index as usize, true);
         self.relation_only.set(index as usize, false);
         self.child_needs_layout_tree_update.set(index as usize, false);
+        self.disabled_form_control.set(index as usize, false);
+        self.disables_descendants.set(index as usize, false);
         self.marks.clear(index as usize);
         if let Some(capacity_before_growth) = capacity_before_growth {
             let current = self.identity_capacity_bytes();
@@ -872,6 +889,8 @@ impl StyleNodeTree {
                 self.connected_element_count -= 1;
             }
             self.child_needs_layout_tree_update.set(index as usize, false);
+            self.disabled_form_control.set(index as usize, false);
+            self.disables_descendants.set(index as usize, false);
             self.marks.clear(index as usize);
             self.parent[index as usize] = None;
             self.first_element_child[index as usize] = None;
@@ -967,6 +986,66 @@ impl StyleNodeTree {
         self.text.is_ascii_whitespace.set(index as usize, value);
         let current = self.text_capacity_bytes();
         self.record_capacity_change(memory, before, current);
+    }
+
+    // -- Disabled form controls --------------------------------------------------------------
+
+    /// Record what the element's `disabled` attribute makes of it: whether the element is itself a
+    /// disabled form control, and whether it disables the elements written under it. See
+    /// [`Self::event_dispatch_is_disabled`].
+    pub fn set_form_control_disabled_facts(&mut self, node: StyleNodeID, facts: u8, memory: &mut MemoryController) {
+        let Some(index) = node.element_index() else {
+            return;
+        };
+        let before = self.identity_capacity_bytes();
+        self.disabled_form_control
+            .set(index as usize, facts & DISABLED_FORM_CONTROL != 0);
+        self.disables_descendants.set(
+            index as usize,
+            facts & (DISABLED_FORM_CONTROL | DISABLED_FIELD_SET) != 0,
+        );
+        let current = self.identity_capacity_bytes();
+        self.record_capacity_change(memory, before, current);
+    }
+
+    /// Whether an event aimed at `node` reaches a disabled form control on its way out: the node
+    /// itself is one, or one of the nodes it is written under is.
+    ///
+    /// This is the DOM tree and not the flat tree, and the climb stops where a DOM parent walk
+    /// stops - at a shadow root, whose host stands in another tree - so that a host's `disabled`
+    /// attribute does not reach into the shadow tree it holds.
+    #[must_use]
+    pub fn event_dispatch_is_disabled(&self, node: StyleNodeID) -> bool {
+        // A text node is no form control, and it is not written under itself either: the answer for
+        // it is the answer for the element it is written under.
+        let mut candidate = match node.is_text() {
+            true => match self.text_parent(node) {
+                Some(parent) => parent,
+                None => return false,
+            },
+            false => node,
+        };
+        // The element itself counts only as a disabled control. What a `<fieldset disabled>` does to
+        // the elements under it, it does not do to itself.
+        if let Some(index) = candidate.element_index()
+            && self.disabled_form_control.contains(index as usize)
+        {
+            return true;
+        }
+        loop {
+            if self.host_of(candidate).is_some() {
+                return false;
+            }
+            let Some(parent) = self.parent(candidate) else {
+                return false;
+            };
+            if let Some(index) = parent.element_index()
+                && self.disables_descendants.contains(index as usize)
+            {
+                return true;
+            }
+            candidate = parent;
+        }
     }
 
     // -- DOM child sequence ------------------------------------------------------------------
@@ -1763,6 +1842,8 @@ impl StyleNodeTree {
                 self.live.capacity_bytes(),
                 self.relation_only.capacity_bytes(),
                 self.child_needs_layout_tree_update.capacity_bytes(),
+                self.disabled_form_control.capacity_bytes(),
+                self.disables_descendants.capacity_bytes(),
                 self.marks.capacity_bytes(),
             ];
             skip [];

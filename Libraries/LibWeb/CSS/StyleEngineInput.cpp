@@ -23,9 +23,13 @@
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/CustomElements/CustomStateSet.h>
 #include <LibWeb/HTML/HTMLBRElement.h>
+#include <LibWeb/HTML/HTMLButtonElement.h>
+#include <LibWeb/HTML/HTMLFieldSetElement.h>
 #include <LibWeb/HTML/HTMLHeadingElement.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/HTMLSelectElement.h>
 #include <LibWeb/HTML/HTMLSlotElement.h>
+#include <LibWeb/HTML/HTMLTextAreaElement.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
 #include <LibWeb/SVG/SVGElement.h>
 #include <LibWeb/SVG/SVGMaskElement.h>
@@ -680,6 +684,38 @@ void record_element_adjustment_facts(DOM::Element& element)
     style_engine->set_element_construction_facts(element.style_node_id(), element_construction_facts(element), to_underlying(element.box_kind()));
 }
 
+// What the element's `disabled` attribute makes of it. Only the element's own type and attribute
+// are read: what a disabled ancestor does to it follows from the published facts of that ancestor,
+// and is resolved where the question is asked. See `event_dispatch_is_disabled`.
+u8 element_form_control_disabled_facts(DOM::Element const& element)
+{
+    auto const* html_element = as_if<HTML::HTMLElement>(element);
+    if (!html_element || !element.has_attribute(HTML::AttributeNames::disabled))
+        return 0;
+    // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#concept-fe-disabled
+    if (is<HTML::HTMLButtonElement>(*html_element) || is<HTML::HTMLInputElement>(*html_element) || is<HTML::HTMLSelectElement>(*html_element) || is<HTML::HTMLTextAreaElement>(*html_element) || html_element->is_form_associated_custom_element())
+        return DisabledFormControl;
+    if (is<HTML::HTMLFieldSetElement>(*html_element))
+        return DisabledFieldSet;
+    return 0;
+}
+
+void record_element_form_control_disabled_facts(DOM::Element& element)
+{
+    auto* style_engine = style_engine_for(element);
+    if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
+        return;
+    style_engine->set_element_form_control_disabled_facts(element.style_node_id(), element_form_control_disabled_facts(element));
+}
+
+bool event_dispatch_is_disabled(DOM::Document& document, DOM::NodeIdentity identity)
+{
+    auto style_node = identity.style_node();
+    if (style_node == no_style_node)
+        return false;
+    return document.style_computer().style_engine().event_dispatch_is_disabled(style_node);
+}
+
 void record_element_construction_facts(DOM::Element& element)
 {
     auto* style_engine = style_engine_for(element);
@@ -865,6 +901,9 @@ static void record_element_initial_features(DOM::Element& element)
 
     if (auto const& id = element.id(); id.has_value())
         style_engine->set_element_id_name(element.style_node_id(), style_engine->intern_atom(*id));
+
+    if (auto facts = element_form_control_disabled_facts(element); facts != 0)
+        style_engine->set_element_form_control_disabled_facts(element.style_node_id(), facts);
 
     if (!element.part_names().is_empty())
         record_element_parts_changed(element);
@@ -2248,6 +2287,10 @@ void record_element_attribute_changed(DOM::Element& element, Utf16FlyString cons
     // editing host and whether it renders its alternative text instead of its image.
     else if (name == HTML::AttributeNames::contenteditable || name == HTML::AttributeNames::alt)
         record_element_construction_facts(element);
+
+    // Whether an event aimed at this element, or at anything written under it, is dispatched at all.
+    if (name == HTML::AttributeNames::disabled)
+        record_element_form_control_disabled_facts(element);
 
     // Both values cross as atoms. Their text is recorded once per distinct value only when a
     // compiled selector for this attribute uses an operator that cannot compare atom identities.

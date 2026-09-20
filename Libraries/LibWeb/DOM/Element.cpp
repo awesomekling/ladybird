@@ -5005,8 +5005,12 @@ void Element::set_custom_element_definition(GC::Ptr<HTML::CustomElementDefinitio
         ensure_element_rare_data().custom_element_definition = definition;
     }
 
-    if (was_form_associated != is_form_associated)
+    if (was_form_associated != is_form_associated) {
         document().bump_form_controls_version();
+        // Only a form-associated custom element is disabled by its `disabled` attribute, so the
+        // definition arriving is what makes the attribute mean anything.
+        CSS::record_element_form_control_disabled_facts(*this);
+    }
 }
 
 GC::Ptr<HTML::CustomElementRegistry> Element::custom_element_registry() const
