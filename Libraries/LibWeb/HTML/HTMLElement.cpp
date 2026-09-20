@@ -32,6 +32,7 @@
 #include <LibWeb/HTML/ElementInternals.h>
 #include <LibWeb/HTML/EventHandler.h>
 #include <LibWeb/HTML/HTMLAnchorElement.h>
+#include <LibWeb/HTML/HTMLAreaElement.h>
 #include <LibWeb/HTML/HTMLBRElement.h>
 #include <LibWeb/HTML/HTMLBaseElement.h>
 #include <LibWeb/HTML/HTMLBodyElement.h>
@@ -904,10 +905,16 @@ void HTMLElement::set_subtree_inertness(bool is_inert)
         if (layout_node)
             layout_node->refresh_dom_paint_facts(node);
     };
+    // An inert node is never editable, and an <area> has no row to carry that fact, so a flip here
+    // has to reach the areas its image publishes. The walk below skips a subtree that was already
+    // inert, whose areas therefore did not change.
+    bool reached_an_image_map_area = false;
     auto update_inertness = [&](HTMLElement& element) {
         if (element.is_inert() == is_inert)
             return;
         element.set_inert(is_inert);
+        if (is<HTMLAreaElement>(element))
+            reached_an_image_map_area = true;
         repaint_if_inertness_reaches_painted_output(element);
     };
 
@@ -924,6 +931,8 @@ void HTMLElement::set_subtree_inertness(bool is_inert)
         update_inertness(*html_element);
         return TraversalDecision::Continue;
     });
+    if (reached_an_image_map_area)
+        Painting::refresh_image_map_area_facts(document());
     document().page().keyboard_scroll_editability_changed(document());
 }
 

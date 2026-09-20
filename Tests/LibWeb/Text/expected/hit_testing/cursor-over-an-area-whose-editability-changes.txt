@@ -1,0 +1,7 @@
+before the ancestor is editable: Arrow
+while the ancestor is editable: IBeam
+after the ancestor stops being editable: Arrow
+after the attribute is gone: Arrow
+editable and not inert: IBeam
+editable but inert: Arrow
+editable and not inert again: IBeam

@@ -63,6 +63,7 @@
 #include <LibWeb/HTML/CustomElements/CustomElementReactionNames.h>
 #include <LibWeb/HTML/CustomElements/CustomElementRegistry.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
+#include <LibWeb/HTML/HTMLAreaElement.h>
 #include <LibWeb/HTML/HTMLDocument.h>
 #include <LibWeb/HTML/HTMLFieldSetElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
@@ -92,6 +93,7 @@
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/Painting/PaintFacts.h>
 #include <LibWeb/SVG/SVGElement.h>
 #include <LibWeb/SVG/SVGTitleElement.h>
 #include <LibWeb/XLink/AttributeNames.h>
@@ -2325,7 +2327,13 @@ bool Node::recompute_editable_subtree_flag()
 
 void Node::recompute_editable_subtree_flags_and_repaint()
 {
-    for_each_in_inclusive_subtree([](Node& node) {
+    // An <area> is never rendered, so its editability rides on the areas its image publishes
+    // rather than on a row of its own. This walk is where that fact can flip without the map or
+    // the image being touched, so it is also where the areas have to be published again.
+    bool reached_an_image_map_area = false;
+    for_each_in_inclusive_subtree([&](Node& node) {
+        if (is<HTML::HTMLAreaElement>(node))
+            reached_an_image_map_area = true;
         // Editability determines each node's empty-editable caret target in the hit-test
         // display list, so a flip must invalidate the recorded output.
         if (node.recompute_editable_subtree_flag())
@@ -2355,6 +2363,8 @@ void Node::recompute_editable_subtree_flags_and_repaint()
         }
         return TraversalDecision::Continue;
     });
+    if (reached_an_image_map_area)
+        Painting::refresh_image_map_area_facts(document());
     document().page().keyboard_scroll_editability_changed(document());
 }
 

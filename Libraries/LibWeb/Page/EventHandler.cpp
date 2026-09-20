@@ -3931,14 +3931,14 @@ static Gfx::Cursor resolve_cursor(Layout::NodeWithStyle const& layout_node, Layo
 }
 
 // Whether the node the hit named is editable or an editing host. A node publishes that onto its
-// row, so the answer costs no walk out of the node. An element hit without a row of its own -
-// an image map's area is the only one - published nothing, and is asked directly.
-static bool host_is_editable_or_editing_host(Layout::NodeArena& arena, DOM::NodeIdentity host, Layout::Node const* host_layout_node)
+// row, so the answer costs no walk out of the node. An element hit without a row of its own - an
+// image map's area is the only one - publishes it onto the areas of the image it lays over, which
+// is the row the hit came through.
+static bool host_is_editable_or_editing_host(Layout::NodeArena& arena, Layout::Node const* host_layout_node, i8 area_editability)
 {
     if (host_layout_node)
         return Layout::RustFFI::layout_arena_node_is_editable_or_editing_host(arena.handle(), Layout::Node::slot_id(host_layout_node));
-    auto host_node = host.resolve(*arena.document());
-    return host_node && host_node->is_editable_or_editing_host();
+    return area_editability > 0;
 }
 
 void EventHandler::update_cursor(Layout::Node const* layout_node, DOM::NodeIdentity host,
@@ -3963,7 +3963,11 @@ void EventHandler::update_cursor(Layout::Node const* layout_node, DOM::NodeIdent
                 && host_layout_node
                 && host_layout_node->user_select_used_value() != CSS::UserSelect::None;
 
-            if (is_selectable_text_fragment || host_is_editable_or_editing_host(arena, host, host_layout_node)) {
+            // An <area> has no row, so the row the hit came through - the image the map lays over -
+            // answers for it. A negative answer means this identity names no area of that image.
+            auto area_editability = host_layout_node ? -1 : Layout::RustFFI::layout_arena_image_map_area_editability(arena.handle(), Layout::Node::slot_id(layout_node), host.style_node().value());
+
+            if (is_selectable_text_fragment || host_is_editable_or_editing_host(arena, host_layout_node, area_editability)) {
                 if (host_node_with_style)
                     return resolve_cursor(*host_node_with_style, cursor_values_owner, cursor_data, Gfx::StandardCursor::IBeam);
                 return resolve_cursor(*node_with_style.parent(), cursor_values_owner, cursor_data, Gfx::StandardCursor::IBeam);
@@ -3974,7 +3978,9 @@ void EventHandler::update_cursor(Layout::Node const* layout_node, DOM::NodeIdent
             // AD-HOC: Area elements are never rendered, so they have no layout node of their own to resolve a cursor
             //         from. Resolve the cursor from the area's computed values instead, falling back to the layout
             //         node of the image that renders the area's image map for image cursors.
-            // NB: The area is the one hit target with no row, so it is also the one the DOM still answers for.
+            // NB: The area's own computed values are the one thing here the DOM is still asked for. The
+            //     mirror holds a record for its identity, but that one is the base record while the element
+            //     holds an animation overlay, so it is not the same answer.
             if (auto const* area_element = as_if<HTML::HTMLAreaElement>(host.resolve(*arena.document()).ptr())) {
                 if (auto area_computed_values = area_element->computed_style(); area_computed_values)
                     return resolve_cursor(node_with_style, nullptr, area_computed_values->cursor(), Gfx::StandardCursor::Arrow);
