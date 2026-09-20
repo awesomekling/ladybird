@@ -5785,8 +5785,17 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         if (published_adjustment_fact_row >> 32)
             published_adjustment_facts = static_cast<u32>(published_adjustment_fact_row);
         state.box_type_input = make_box_type_transformation_input(abstract_element, {}, published_adjustment_facts);
-        if (computation_requirements->uses_tree_counting_function)
-            state.tree_counting_context = abstract_element.tree_counting_function_resolution_context();
+        if (computation_requirements->uses_tree_counting_function) {
+            auto tree_counting_inputs = style_computer.style_engine().element_tree_counting_inputs(abstract_element.element().style_node_id());
+            if (tree_counting_inputs != 0) {
+                state.tree_counting_context = DOM::AbstractElement::TreeCountingFunctionResolutionContext {
+                    .sibling_count = static_cast<size_t>(tree_counting_inputs >> 32),
+                    .sibling_index = static_cast<u32>(tree_counting_inputs),
+                };
+            } else {
+                state.tree_counting_context = abstract_element.tree_counting_function_resolution_context();
+            }
+        }
         state.random_base_values.ensure_capacity(computation_requirements->unfixed_random_sharing_count);
         for (auto const& sharing : ReadonlySpan<ComputedValuesFFI::FfiUnfixedRandomSharing> { computation_requirements->unfixed_random_sharings, computation_requirements->unfixed_random_sharing_count }) {
             VERIFY(sharing.name);
