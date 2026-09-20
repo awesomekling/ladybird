@@ -133,6 +133,8 @@
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/XMLSerializer.h>
 #include <LibWeb/IntersectionObserver/IntersectionObserver.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
+#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Layout/TreeBuilder.h>
 #include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Loader/ContentBlocker.h>
@@ -3434,6 +3436,12 @@ void Element::set_rendered_in_top_layer(bool rendered_in_top_layer)
 
 Layout::NodeWithStyle* Element::pseudo_element_layout_node(CSS::PseudoElement pseudo_element) const
 {
+    if (CSS::is_synthetic_pseudo_element(pseudo_element)) {
+        auto* layout_node = pseudo_element_unsafe_layout_node(pseudo_element);
+        if (layout_node && !document().layout_is_up_to_date())
+            dbgln("FIXME: Element::pseudo_element_layout_node() read a layout row while layout was stale");
+        return layout_node;
+    }
     if (auto element_data = get_pseudo_element(pseudo_element); element_data.has_value())
         return element_data->layout_node();
     return nullptr;
@@ -3441,6 +3449,16 @@ Layout::NodeWithStyle* Element::pseudo_element_layout_node(CSS::PseudoElement ps
 
 Layout::NodeWithStyle* Element::pseudo_element_unsafe_layout_node(CSS::PseudoElement pseudo_element) const
 {
+    // A synthetic pseudo-element's box is the row the arena binds to this element's identity and the
+    // pseudo-element's type. Ask the arena for it, rather than the DOM-side cell that only mirrors
+    // that binding. An element-reference pseudo-element has no box of its own and still has to be
+    // asked for the element it stands in for.
+    if (CSS::is_synthetic_pseudo_element(pseudo_element)) {
+        auto* arena = const_cast<Document&>(document()).layout_node_arena_if_created();
+        if (!arena)
+            return nullptr;
+        return static_cast<Layout::NodeWithStyle*>(Layout::RustFFI::layout_arena_bound_pseudo_element_shell(arena->handle(), style_node_id().value(), Layout::Node::encode_generated_for(pseudo_element)));
+    }
     if (auto element_data = get_pseudo_element(pseudo_element); element_data.has_value())
         return element_data->unsafe_layout_node();
     return nullptr;
