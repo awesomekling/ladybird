@@ -5422,7 +5422,6 @@ pub unsafe extern "C" fn rust_compute_properties(
         snapshot: (input.highlight_parent_style_record != 0)
             .then(|| parent_snapshot_for_style_record(style_engine, input.highlight_parent_style_record, None)),
     });
-    crate::css::style::seal::begin_update();
     let parent_text_align_input_is_animated = parent_snapshot.as_ref().is_some_and(|snapshot| {
         snapshot.has_animated_property(property_id::TEXT_ALIGN)
             || snapshot.has_animated_property(property_id::DIRECTION)
@@ -5478,7 +5477,6 @@ pub unsafe extern "C" fn rust_compute_properties(
     });
     let drive_result = &raw const continuation.drive_result;
     let storage = Box::into_raw(continuation);
-    crate::css::style::seal::end_update();
     FfiLonghandTransactionResult {
         drive_result,
         storage: storage.cast(),
@@ -5509,10 +5507,8 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         parent_text_align_input_is_animated,
     } = *continuation;
     unsafe { destroy_style_computation_result(&drive_result) };
-    crate::css::style::seal::begin_update();
     if input.stop_after_longhand_drive {
         unsafe { &mut *drive_input.longhand_table }.freeze();
-        crate::css::style::seal::end_update();
         return false;
     }
     let parent_snapshot = if input.inheritance_parent_style_record != 0 {
@@ -5632,7 +5628,6 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
     unsafe { &mut *drive_input.longhand_table }
         .set_in_display_none_subtree(parent_style_in_display_none_subtree || display_is_none);
     unsafe { &mut *drive_input.longhand_table }.freeze();
-    crate::css::style::seal::end_update();
     parent_style_in_display_none_subtree
 }
 

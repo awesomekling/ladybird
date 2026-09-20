@@ -672,7 +672,7 @@ void StyleScope::publish_animation_keyframes()
 
     Vector<u32> name_lengths;
     Vector<u16> name_units;
-    Vector<FlatPtr> keyframe_sets;
+    Vector<size_t> keyframe_sets;
     Vector<NonnullRefPtr<Animations::KeyframeEffect::KeyFrameSet const>> published;
     name_lengths.ensure_capacity(rule_cache.rules_by_animation_keyframes.size());
     keyframe_sets.ensure_capacity(rule_cache.rules_by_animation_keyframes.size());
@@ -683,7 +683,7 @@ void StyleScope::publish_animation_keyframes()
         name_units.ensure_capacity(name_units.size() + view.length_in_code_units());
         for (size_t index = 0; index < view.length_in_code_units(); ++index)
             name_units.unchecked_append(static_cast<u16>(view.code_unit_at(index)));
-        keyframe_sets.unchecked_append(bit_cast<FlatPtr>(keyframe_set.ptr()));
+        keyframe_sets.unchecked_append(bit_cast<size_t>(keyframe_set.ptr()));
         published.unchecked_append(*keyframe_set);
     }
 
