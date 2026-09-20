@@ -104,7 +104,6 @@ fn engine_resolution_context(
         callback_context: std::ptr::null_mut(),
         install_custom_properties: None,
         evaluate_style_query: None,
-        note_substitution: None,
     }
 }
 

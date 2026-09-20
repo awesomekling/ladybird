@@ -57,6 +57,29 @@ void CommitMessages::note_needs_layout_tree_update(NodeIdentity identity, SetNee
     apply();
 }
 
+void CommitMessages::note_style_substitution_usage(NodeIdentity identity, u8 usage)
+{
+    m_style_messages.append(Message {
+        .identity = identity,
+        .kind = Kind::StyleSubstitutionUsage,
+        .style_substitution_usage = usage,
+    });
+}
+
+void CommitMessages::apply_style_messages()
+{
+    if (m_applying)
+        return;
+    m_applying = true;
+    ScopeGuard done = [&] { m_applying = false; };
+
+    while (!m_style_messages.is_empty()) {
+        auto messages = move(m_style_messages);
+        for (auto const& message : messages)
+            apply(message);
+    }
+}
+
 // A message from the render side names its node by the style node the style tree gave it, with 0
 // for the document.
 void CommitMessages::append(Layout::RustFFI::FfiCommitMessage const& message)
@@ -158,6 +181,10 @@ void CommitMessages::apply(Message const& message)
             resource->register_resource_box_referencing_element({}, *referencing_element);
         return;
     }
+    case Kind::StyleSubstitutionUsage:
+        if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
+            element->apply_style_substitution_usage(message.style_substitution_usage);
+        return;
     case Kind::TopLayerZoneRebuildNeeded:
         m_document.set_top_layer_needs_layout_zone_rebuild();
         return;

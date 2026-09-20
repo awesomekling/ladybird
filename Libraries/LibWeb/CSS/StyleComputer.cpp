@@ -89,6 +89,7 @@
 #include <LibWeb/CSS/StyleValues/TransformationStyleValue.h>
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
 #include <LibWeb/DOM/Attr.h>
+#include <LibWeb/DOM/CommitMessages.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/SelectorQuery.h>
@@ -268,6 +269,25 @@ static u8 evaluate_style_query_for_substitution(AbstractOrHypotheticalElement el
     prepare_for_style_query_evaluation();
     auto matches = evaluate_style_query(*query, element) == MatchResult::True;
     return style_query_cycle_detected() ? 3 : matches;
+}
+
+static constexpr u8 substitution_uses_var = 1 << 0;
+static constexpr u8 substitution_uses_attr = 1 << 1;
+static constexpr u8 substitution_uses_if = 1 << 2;
+static constexpr u8 substitution_uses_inherit = 1 << 3;
+static constexpr u8 substitution_uses_custom_function = 1 << 4;
+
+static void report_substitution_usage(DOM::Element& element, ComputedValuesFFI::FfiSubstitutionUsage const& usage, u8* accumulated_usage = nullptr)
+{
+    u8 bits = (usage.uses_var ? substitution_uses_var : 0)
+        | (usage.uses_attr ? substitution_uses_attr : 0)
+        | (usage.uses_if ? substitution_uses_if : 0)
+        | (usage.uses_inherit ? substitution_uses_inherit : 0)
+        | (usage.uses_custom_function ? substitution_uses_custom_function : 0);
+    if (accumulated_usage)
+        *accumulated_usage |= bits;
+    if (bits != 0)
+        element.document().commit_messages().note_style_substitution_usage(DOM::NodeIdentity::of(element), bits);
 }
 
 class Fnv1a64 {
@@ -2944,7 +2964,7 @@ void StyleComputer::sweep_custom_property_environments() const
     m_engine_custom_property_environments.remove_all_matching([](auto&, NonnullRefPtr<CustomPropertyData const> const& data) { return data->ref_count() == 1; });
 }
 
-NonnullRefPtr<CascadedProperties> StyleComputer::compute_cascaded_values(DOM::AbstractElement abstract_element, CascadeInput const& cascade_input, IncludeInlineStyle include_inline_style, StyleSharingCandidate* sharing, Vector<StyleProperty> const* precomputed_presentational_hints) const
+NonnullRefPtr<CascadedProperties> StyleComputer::compute_cascaded_values(DOM::AbstractElement abstract_element, CascadeInput const& cascade_input, IncludeInlineStyle include_inline_style, StyleSharingCandidate* sharing, Vector<StyleProperty> const* precomputed_presentational_hints, u8* substitution_usage) const
 {
     begin_style_update();
     ScopeGuard end_style_update = [&] { this->end_style_update(); };
@@ -3191,20 +3211,6 @@ NonnullRefPtr<CascadedProperties> StyleComputer::compute_cascaded_values(DOM::Ab
             auto& bulk_context = *static_cast<BulkCascadeContext*>(context);
             return evaluate_style_query_for_substitution(bulk_context.abstract_element, source);
         },
-        .note_substitution = [](void* context, void const* unresolved_data) {
-            auto& bulk_context = *static_cast<BulkCascadeContext*>(context);
-            auto unresolved = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
-                static_cast<StyleValueFFI::StyleValueData const*>(unresolved_data)));
-            if (unresolved->as_unresolved().includes_var_function())
-                bulk_context.abstract_element.element().set_style_uses_var_css_function();
-            if (unresolved->as_unresolved().includes_attr_function())
-                bulk_context.abstract_element.element().set_style_uses_attr_css_function();
-            if (unresolved->as_unresolved().includes_if_function())
-                bulk_context.abstract_element.element().set_style_uses_if_css_function();
-            if (unresolved->as_unresolved().includes_inherit_function())
-                bulk_context.abstract_element.element().set_style_uses_inherit_css_function();
-            if (unresolved->as_unresolved().includes_dashed_function())
-                bulk_context.abstract_element.element().set_style_uses_custom_function(); },
     };
 
     auto assign_source_slots = [&](ComputedValuesFFI::FfiSourceSlotAssignment const* assignments, size_t count) {
@@ -3238,6 +3244,7 @@ NonnullRefPtr<CascadedProperties> StyleComputer::compute_cascaded_values(DOM::Ab
         ComputedValuesFFI::rust_cascade_result_destroy(cascade_result.storage, cascade_result.source_slot_assignment_count);
     };
     assign_source_slots(cascade_result.source_slot_assignments, cascade_result.source_slot_assignment_count);
+    report_substitution_usage(abstract_element.element(), cascade_result.substitution_usage, substitution_usage);
 
     // Transition declarations [css-transitions-1]
     // Note that we have to do these after finishing computing the style,
@@ -3902,8 +3909,11 @@ NonnullRefPtr<ComputedValues const> StyleComputer::build_and_share_computed_valu
     bool const computation_read_only_the_record = !element.has_relevant_animations_other_than_transitions()
         && !element.has_css_defined_animations()
         && !element.style_uses_attr_css_function()
+        && !(sharing.substitution_usage & substitution_uses_attr)
         && !element.style_uses_if_css_function()
+        && !(sharing.substitution_usage & substitution_uses_if)
         && !element.style_uses_custom_function()
+        && !(sharing.substitution_usage & substitution_uses_custom_function)
         && !element.style_uses_tree_counting_function()
         && !element.style_depends_on_viewport_metrics()
         && !element.style_depends_on_size_container_query()
@@ -3916,8 +3926,8 @@ NonnullRefPtr<ComputedValues const> StyleComputer::build_and_share_computed_valu
         VERIFY(record);
         record->read_beyond_the_record = !computation_read_only_the_record;
         record->style_reads_resource_context = sharing.computation_reads_resource_context;
-        record->style_uses_var_css_function = element.style_uses_var_css_function();
-        record->style_uses_inherit_css_function = element.style_uses_inherit_css_function();
+        record->style_uses_var_css_function = element.style_uses_var_css_function() || (sharing.substitution_usage & substitution_uses_var);
+        record->style_uses_inherit_css_function = element.style_uses_inherit_css_function() || (sharing.substitution_usage & substitution_uses_inherit);
         record->explicitly_inherited_non_inherited_style_groups = sharing.explicitly_inherited_non_inherited_style_groups;
     }
     if (sharing.is_candidate && sharing.may_reuse_or_publish_shared_style) {
@@ -3949,8 +3959,8 @@ NonnullRefPtr<ComputedValues const> StyleComputer::build_and_share_computed_valu
                 .style_record_identity = {},
                 .read_beyond_the_record = !computation_read_only_the_record,
                 .style_reads_resource_context = sharing.computation_reads_resource_context,
-                .style_uses_var_css_function = element.style_uses_var_css_function(),
-                .style_uses_inherit_css_function = element.style_uses_inherit_css_function(),
+                .style_uses_var_css_function = element.style_uses_var_css_function() || (sharing.substitution_usage & substitution_uses_var),
+                .style_uses_inherit_css_function = element.style_uses_inherit_css_function() || (sharing.substitution_usage & substitution_uses_inherit),
             });
             sharing.new_style_sharing_entry_hash = key_hash;
             ++m_style_sharing_cache_entry_count;
@@ -5169,7 +5179,8 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
         cascade_input,
         include_inline_style,
         sharing && sharing->is_candidate && !has_complete_sharing_key ? sharing : nullptr,
-        collected_presentational_hints ? &presentational_hint_properties : nullptr);
+        collected_presentational_hints ? &presentational_hint_properties : nullptr,
+        sharing ? &sharing->substitution_usage : nullptr);
     document().style_invalidation_counters().style_cascade_microseconds += (MonotonicTime::now() - cascade_started_at).to_microseconds();
 
     // The inherited custom property environment is named only now, because only the collection above
@@ -5350,7 +5361,8 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
         use_retained_style_computation_selection, false, &computed_group_mask,
         sharing ? &sharing->computation_reads_unkeyed_context : nullptr,
         sharing ? &sharing->computation_reads_resource_context : nullptr,
-        highlight_parent_style_record);
+        highlight_parent_style_record,
+        sharing ? &sharing->substitution_usage : nullptr);
     if (new_style_input_record)
         new_style_input_record->bind_next_published_style = true;
     static bool const verify_computed_closure = getenv("LIBWEB_VERIFY_COMPUTED_CLOSURE") != nullptr;
@@ -5514,7 +5526,7 @@ void StyleComputer::ensure_style_metadata_tables_installed()
     (void)installed;
 }
 
-NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::AbstractElement abstract_element, CascadedProperties& cascaded_properties, u64 matching_pseudo_element_styles, u32* explicitly_inherited_non_inherited_style_groups, StyleRecordID previous_style_record, u32 initial_computed_group_mask, bool use_retained_style_computation_selection, bool stop_after_longhand_drive, u32* selected_computed_group_mask, bool* computation_reads_unkeyed_context, bool* computation_reads_resource_context, Optional<StyleRecordID> highlight_parent_style_record) const
+NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::AbstractElement abstract_element, CascadedProperties& cascaded_properties, u64 matching_pseudo_element_styles, u32* explicitly_inherited_non_inherited_style_groups, StyleRecordID previous_style_record, u32 initial_computed_group_mask, bool use_retained_style_computation_selection, bool stop_after_longhand_drive, u32* selected_computed_group_mask, bool* computation_reads_unkeyed_context, bool* computation_reads_resource_context, Optional<StyleRecordID> highlight_parent_style_record, u8* substitution_usage) const
 {
     begin_style_update();
     ScopeGuard end_style_update = [&] { this->end_style_update(); };
@@ -5597,6 +5609,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         u32* selected_computed_group_mask;
         bool* computation_reads_unkeyed_context;
         bool* computation_reads_resource_context;
+        u8* substitution_usage;
         PreparePhaseContext prepare_phase_context;
         OwnPtr<NativeLonghandState> state;
     };
@@ -5668,6 +5681,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         .selected_computed_group_mask = selected_computed_group_mask,
         .computation_reads_unkeyed_context = computation_reads_unkeyed_context,
         .computation_reads_resource_context = computation_reads_resource_context,
+        .substitution_usage = substitution_usage,
         .prepare_phase_context = prepare_phase_context,
         .state = nullptr,
     };
@@ -5829,21 +5843,6 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                         .evaluate_style_query = [](void* context, ComputedValuesFFI::FfiUtf16View source) -> u8 {
                             return evaluate_style_query_for_substitution(*static_cast<AbstractOrHypotheticalElement*>(context), source);
                         },
-                        .note_substitution = [](void* context, void const* unresolved_data) {
-                            auto& element = *static_cast<AbstractOrHypotheticalElement*>(context);
-                            auto& dom_element = element.abstract_element().element();
-                            auto unresolved = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
-                                static_cast<StyleValueFFI::StyleValueData const*>(unresolved_data)));
-                            if (unresolved->as_unresolved().includes_var_function())
-                                dom_element.set_style_uses_var_css_function();
-                            if (unresolved->as_unresolved().includes_attr_function())
-                                dom_element.set_style_uses_attr_css_function();
-                            if (unresolved->as_unresolved().includes_if_function())
-                                dom_element.set_style_uses_if_css_function();
-                            if (unresolved->as_unresolved().includes_inherit_function())
-                                dom_element.set_style_uses_inherit_css_function();
-                            if (unresolved->as_unresolved().includes_dashed_function())
-                                dom_element.set_style_uses_custom_function(); },
                     };
                 }
             }
@@ -5887,9 +5886,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 }
 
                 auto& element = context.abstract_element.element();
-                bool resolution_read_only_the_environment = !element.style_uses_attr_css_function()
-                    && !element.style_uses_if_css_function()
-                    && !element.style_uses_custom_function()
+                report_substitution_usage(element, resolution.stats.substitution_usage, context.substitution_usage);
+                bool resolution_read_only_the_environment = !resolution.stats.substitution_usage.uses_attr
+                    && !resolution.stats.substitution_usage.uses_if
+                    && !resolution.stats.substitution_usage.uses_custom_function
                     && !element.style_uses_tree_counting_function();
                 RefPtr<CustomPropertyData const> resolved;
                 if (resolved_own.is_empty() && resolution_state.parent_data) {
@@ -6137,7 +6137,6 @@ NonnullRefPtr<StyleValue const> StyleComputer::resolve_unresolved_style_value(Ab
             auto& element = *static_cast<AbstractOrHypotheticalElement*>(context);
             return evaluate_style_query_for_substitution(element, source);
         },
-        .note_substitution = nullptr,
     };
     ComputedValuesFFI::FfiUnresolvedStyleValue input {
         .property_id = to_underlying(property.id()),
