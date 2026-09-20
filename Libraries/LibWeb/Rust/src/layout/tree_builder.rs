@@ -102,11 +102,12 @@ pub struct FfiDomTreeBuilderCallbacks {
     pub clear_stale_layout_node: unsafe extern "C" fn(*mut c_void, u32, u32) -> bool,
     pub create_first_letter_nodes:
         unsafe extern "C" fn(*mut c_void, *mut c_void, FfiFirstLetterTarget) -> FfiFirstLetterNodes,
-    pub push_principal_frame: unsafe extern "C" fn(*mut c_void, u32) -> FfiPrincipalNodeFrame,
-    pub pop_principal_frame: unsafe extern "C" fn(*mut c_void, *mut c_void),
-    pub prepare_principal_element: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, bool),
+    /// The DOM node the walk's identity names. The walk navigates by identity and resolves the
+    /// node once per visit rather than once per payload callback.
+    pub principal_dom_node: unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void,
+    pub prepare_principal_element: unsafe extern "C" fn(*mut c_void, *mut c_void, bool),
     pub create_principal_element_layout:
-        unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, FfiElementLayoutKind) -> NodeSlotId,
+        unsafe extern "C" fn(*mut c_void, *mut c_void, FfiElementLayoutKind) -> NodeSlotId,
     pub create_principal_document_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
     pub create_principal_text_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
     /// Attaches the image observers a box's style asks for. Principal and pseudo-element boxes
@@ -114,17 +115,6 @@ pub struct FfiDomTreeBuilderCallbacks {
     pub attach_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId),
     pub layout: FfiTreeBuilderCallbacks,
     pub pseudo: FfiPseudoTreeBuilderCallbacks,
-}
-
-/// The C++ frame that retains a principal node's old and new layout boxes, paired with the old
-/// box's arena slot so Rust can reason about in-place replacement.
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiPrincipalNodeFrame {
-    pub frame: *mut c_void,
-    /// The DOM node the walk's identity names. The walk navigates by identity and takes the pointer
-    /// from here, so the node is resolved once per visit rather than once per payload callback.
-    pub dom_node: *mut c_void,
 }
 
 /// What the build knows about a node when it enters it: what its marks ask for, and what layout
@@ -2157,7 +2147,6 @@ struct PrincipalNodeUpdate<'host, 'callbacks, 'state, 'context> {
     reuse: LayoutNodeReuse,
     host: &'host DomTreeBuilderHost<'callbacks>,
     state: &'state mut TreeBuilderState,
-    frame: *mut c_void,
     old_layout_node: LayoutNode,
     dom_node: *mut c_void,
     style_node: u32,
@@ -2223,7 +2212,6 @@ fn construct_principal_layout_node(
     // The box this visit leaves the node with: the one it entered with when the node keeps it,
     // otherwise the one the host just built. Nothing between the entry and here rebinds the node.
     let mut layout_node = NodeSlotId::INVALID;
-    let frame = update.frame;
     let dom_node = update.dom_node;
     let old_layout_node = update.old_layout_node;
     let must_create_subtree = update.must_create_subtree;
@@ -2245,14 +2233,9 @@ fn construct_principal_layout_node(
                 layout_host.free_subtree(old_backdrop);
             }
         }
-        // SAFETY: The frame, builder, and DOM element remain live throughout the call.
+        // SAFETY: The builder and DOM element remain live throughout the call.
         unsafe {
-            (host.callbacks.prepare_principal_element)(
-                host.callbacks.builder,
-                frame,
-                dom_node,
-                should_create_layout_node,
-            );
+            (host.callbacks.prepare_principal_element)(host.callbacks.builder, dom_node, should_create_layout_node);
         };
         let display = host.published_display(update.style_node);
         let generation = principal_box_generation_decision(
@@ -2288,9 +2271,9 @@ fn construct_principal_layout_node(
                 context.layout_svg_mask_or_clip_path,
                 context.layout_svg_pattern,
             );
-            // SAFETY: The builder, frame, and element remain live throughout construction.
+            // SAFETY: The builder and element remain live throughout construction.
             let created = unsafe {
-                (host.callbacks.create_principal_element_layout)(host.callbacks.builder, frame, dom_node, layout_kind)
+                (host.callbacks.create_principal_element_layout)(host.callbacks.builder, dom_node, layout_kind)
             };
             layout_node = created;
             if !created.is_invalid() {
@@ -2311,8 +2294,9 @@ fn construct_principal_layout_node(
         }
     } else if should_create_layout_node {
         if update.kind.is_document() {
-            // SAFETY: The frame and DOM document remain live throughout construction.
-            let created = unsafe { (host.callbacks.create_principal_document_layout)(frame, dom_node) };
+            // SAFETY: The builder and DOM document remain live throughout construction.
+            let created =
+                unsafe { (host.callbacks.create_principal_document_layout)(host.callbacks.builder, dom_node) };
             layout_node = created;
             created_box = Some(host.layout().created(created));
         } else if update.kind.is_text() {
@@ -2326,8 +2310,9 @@ fn construct_principal_layout_node(
                 host.text_is_ascii_whitespace(update.style_node),
                 facts.parent_collapses_whitespace,
             );
-            // SAFETY: The frame and DOM text node remain live throughout construction.
-            let text_layout_node = unsafe { (host.callbacks.create_principal_text_layout)(frame, dom_node) };
+            // SAFETY: The builder and DOM text node remain live throughout construction.
+            let text_layout_node =
+                unsafe { (host.callbacks.create_principal_text_layout)(host.callbacks.builder, dom_node) };
             let layout_host = host.layout();
             if needs_style_wrapper {
                 let wrapper = layout_host.create_anonymous_box_from_style_record(
@@ -2421,7 +2406,7 @@ fn update_principal_node_after_entry(
         }
         let adjustment = replaced_element_display_adjustment(&host.layout(), layout_node);
         if adjustment != FfiReplacedElementDisplayAdjustment::None {
-            // SAFETY: The frame owns a live NodeWithStyle.
+            // SAFETY: The box the host just built is a live NodeWithStyle.
             apply_replaced_display_adjustment(host.layout().arena(), layout_node, adjustment);
         }
 
@@ -2530,7 +2515,7 @@ fn update_principal_node_after_entry(
                     arena.set_committed_fragment_link(new_data, link, None);
                 }
                 transfer_fragments_to_replacement_box(arena, old_layout_node, layout_node);
-                // SAFETY: The frame retains the attached old layout node.
+                // SAFETY: The old layout node is still attached and still has its shell.
                 unsafe {
                     (layout_host.callbacks.prepare_subtree_for_detach)(
                         layout_host.callbacks.context,
@@ -2643,13 +2628,8 @@ fn update_layout_tree_from(
         let payload_style_node = if is_document_root { 0 } else { style_node };
         let kind = PrincipalNodeKind::of(payload_style_node, is_document_root);
 
-        // The pointer rides back on the frame push the walk already makes, so the node is resolved
-        // once per visit rather than once per payload callback.
-        // SAFETY: The builder remains live, the identity names a live DOM node, and the callback
-        // retains frame-owned C++ objects.
-        let pushed_frame = unsafe { (host.callbacks.push_principal_frame)(host.callbacks.builder, style_node) };
-        assert!(!pushed_frame.frame.is_null());
-        let dom_node = pushed_frame.dom_node;
+        // SAFETY: The builder remains live and the identity names a live DOM node.
+        let dom_node = unsafe { (host.callbacks.principal_dom_node)(host.callbacks.builder, style_node) };
         assert!(!dom_node.is_null());
         // The box the node already has is the row the arena binds to its identity; the document is
         // named by the viewport row instead, since it has no identity of its own there.
@@ -2685,8 +2665,6 @@ fn update_layout_tree_from(
                     kind: crate::layout::commit::FfiCommitMessageKind::TopLayerZoneRebuildNeeded,
                 });
             }
-            // SAFETY: `frame` is the most recently pushed principal frame and is no longer used by Rust.
-            unsafe { (host.callbacks.pop_principal_frame)(host.callbacks.builder, pushed_frame.frame) };
             return;
         }
 
@@ -2705,7 +2683,6 @@ fn update_layout_tree_from(
             reuse,
             host,
             state,
-            frame: pushed_frame.frame,
             old_layout_node,
             dom_node,
             style_node: payload_style_node,
@@ -2715,8 +2692,6 @@ fn update_layout_tree_from(
             insertion_mode,
         };
         update_principal_node_after_entry(&mut update, entry_facts, entry_decision);
-        // SAFETY: `frame` is the most recently pushed principal frame and is no longer used by Rust.
-        unsafe { (host.callbacks.pop_principal_frame)(host.callbacks.builder, pushed_frame.frame) };
     });
 }
 
@@ -2926,6 +2901,9 @@ pub struct FfiPseudoElementFacts {
     pub display_is_none: bool,
     pub display_is_contents: bool,
     pub display_is_list_item: bool,
+    /// Whether the pseudo-element's box is an ordinary inline box, which is the one kind whose
+    /// empty generated text still has to exist.
+    pub display_is_inline_flow: bool,
     pub has_content_replacement: bool,
     /// The originating element's box when it is a list item box, for a ::marker.
     pub originating_list_box: NodeSlotId,
@@ -2959,13 +2937,10 @@ pub struct FfiGeneratedContentItem {
 #[repr(C)]
 pub struct FfiPseudoTreeBuilderCallbacks {
     pub builder: *mut c_void,
-    pub push_frame: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
-    pub pop_frame: unsafe extern "C" fn(*mut c_void, *mut c_void),
     pub initialize: unsafe extern "C" fn(*mut c_void, *mut c_void, FfiPseudoElement) -> FfiPseudoElementFacts,
     /// The last argument is the list-item box a `::marker` belongs to, or an invalid slot when the
     /// pseudo-element is not a marker.
     pub create_layout_node: unsafe extern "C" fn(
-        *mut c_void,
         *mut c_void,
         *mut c_void,
         FfiPseudoElement,
@@ -2973,16 +2948,11 @@ pub struct FfiPseudoTreeBuilderCallbacks {
         NodeSlotId,
     ) -> NodeSlotId,
     /// The last argument of each of these is the pseudo-element's own box, which the build tracks
-    /// by slot; the frame carries no box of its own.
+    /// by slot.
     pub create_nested_list_marker: unsafe extern "C" fn(*mut c_void, FfiPseudoElement, NodeSlotId) -> NodeSlotId,
     pub configure_layout_node: unsafe extern "C" fn(*mut c_void, FfiPseudoElement, NodeSlotId),
-    pub create_content_item: unsafe extern "C" fn(
-        *mut c_void,
-        *mut c_void,
-        FfiPseudoElement,
-        FfiGeneratedContentItem,
-        NodeSlotId,
-    ) -> NodeSlotId,
+    pub create_content_item:
+        unsafe extern "C" fn(*mut c_void, FfiPseudoElement, FfiGeneratedContentItem, NodeSlotId) -> NodeSlotId,
 }
 
 pub(crate) fn pseudo_element_decision(facts: FfiPseudoElementFacts) -> FfiPseudoElementDecision {
@@ -3070,7 +3040,7 @@ fn published_pseudo_kind(pseudo_element: FfiPseudoElement) -> Option<u8> {
 ///
 /// A pseudo-element the style store settles no record for generates no box. It can still hold one
 /// from before its record went away, and the box has to be given up - so only a kind with neither
-/// is passed over entirely, without a frame ever being pushed for it.
+/// is passed over entirely.
 fn pseudo_element_may_need_a_box(
     host: &DomTreeBuilderHost<'_>,
     style_node: u32,
@@ -3174,38 +3144,17 @@ fn create_pseudo_element(
         return None;
     }
     let callbacks = &host.callbacks.pseudo;
-    // SAFETY: The builder owns frame storage that remains live throughout the build.
-    let frame = unsafe { (callbacks.push_frame)(callbacks.builder) };
-    assert!(!frame.is_null());
-    let unplaced_box =
-        create_pseudo_element_with_frame(host, state, frame, element, style_node, pseudo_element, insertion_mode);
-    // SAFETY: `frame` is the most recently pushed pseudo-element frame and Rust no longer uses it.
-    unsafe { (callbacks.pop_frame)(callbacks.builder, frame) };
-    unplaced_box
-}
-
-fn create_pseudo_element_with_frame(
-    host: &DomTreeBuilderHost<'_>,
-    state: &mut TreeBuilderState,
-    frame: *mut c_void,
-    element: *mut c_void,
-    style_node: u32,
-    pseudo_element: FfiPseudoElement,
-    insertion_mode: Option<FfiInsertionMode>,
-) -> Option<UnplacedLayoutNode> {
-    let callbacks = &host.callbacks.pseudo;
-    // SAFETY: The frame and element remain live throughout initialization.
-    let facts = unsafe { (callbacks.initialize)(frame, element, pseudo_element) };
+    // SAFETY: The builder and element remain live throughout initialization.
+    let facts = unsafe { (callbacks.initialize)(callbacks.builder, element, pseudo_element) };
     let decision = pseudo_element_decision(facts);
     if decision == FfiPseudoElementDecision::None {
         return None;
     }
 
-    // SAFETY: The builder, frame, and element remain live throughout construction.
+    // SAFETY: The builder and element remain live throughout construction.
     let layout_node = unsafe {
         (callbacks.create_layout_node)(
             callbacks.builder,
-            frame,
             element,
             pseudo_element,
             decision,
@@ -3235,7 +3184,7 @@ fn create_pseudo_element_with_frame(
     if decision == FfiPseudoElementDecision::ContentReplacement {
         let adjustment = replaced_element_display_adjustment(&host.layout(), layout_node);
         if adjustment != FfiReplacedElementDisplayAdjustment::None {
-            // SAFETY: The frame owns a live NodeWithStyle.
+            // SAFETY: The box the host just built is a live NodeWithStyle.
             apply_replaced_display_adjustment(layout_host.arena(), layout_node, adjustment);
         }
     }
@@ -3274,10 +3223,9 @@ fn create_pseudo_element_with_frame(
             crate::layout::generated_content::resolve_nested_marker_content(layout_host.arena(), owner);
         report_list_item_counter_rendering(state, owner, &marker_content);
         for item in marker_content.items {
-            // SAFETY: The frame and element remain live throughout content creation.
+            // SAFETY: The element remains live throughout content creation.
             let content = unsafe {
                 (callbacks.create_content_item)(
-                    frame,
                     element,
                     pseudo_element,
                     generated_content_item(item, marker_slot),
@@ -3305,10 +3253,18 @@ fn create_pseudo_element_with_frame(
     if resolved_content.is_list && decision != FfiPseudoElementDecision::ContentReplacement {
         state.ancestor_stack.push(layout_node);
         for item in resolved_content.items {
-            // SAFETY: The frame and element remain live throughout content creation.
+            // An empty generated text node carries the inline fragment of an ordinary inline
+            // pseudo-element. Other pseudo-element boxes exist independently of their contents, so
+            // avoid giving them a zero-length child that would force layout to measure an
+            // otherwise empty box.
+            if !facts.display_is_inline_flow
+                && matches!(&item, crate::layout::generated_content::ContentItem::Text(text) if text.is_empty())
+            {
+                continue;
+            }
+            // SAFETY: The element remains live throughout content creation.
             let content_item = unsafe {
                 (callbacks.create_content_item)(
-                    frame,
                     element,
                     pseudo_element,
                     generated_content_item(item, NodeSlotId::INVALID),
@@ -5328,6 +5284,7 @@ mod tests {
                 display_is_none,
                 display_is_contents,
                 display_is_list_item,
+                display_is_inline_flow: false,
                 has_content_replacement,
                 originating_list_box: if originating_layout_node_is_list_item {
                     NodeSlotId::new(1, 1)
