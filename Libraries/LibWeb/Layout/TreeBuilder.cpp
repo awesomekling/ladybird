@@ -383,14 +383,6 @@ static CSS::PseudoElement css_pseudo_element(RustFFI::FfiPseudoElement pseudo_el
     VERIFY_NOT_REACHED();
 }
 
-static RustFFI::FfiComputedContentType ffi_computed_content_type(CSS::StyleValue const& content)
-{
-    if (content.is_keyword())
-        return content.to_keyword() == CSS::Keyword::None ? RustFFI::FfiComputedContentType::None : RustFFI::FfiComputedContentType::Normal;
-    VERIFY(content.is_content());
-    return RustFFI::FfiComputedContentType::List;
-}
-
 // A box the build produced for a pseudo-element, named by its arena row. The build hands these
 // back by slot rather than keeping a pointer to them, so the frame carries no box of its own.
 static NodeWithStyle* pseudo_element_build_node(DOM::Document& document, RustFFI::NodeSlotId slot)
@@ -406,63 +398,15 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
 {
     return {
         .builder = this,
-        .initialize = [](void* builder_pointer, void* element_pointer, RustFFI::FfiPseudoElement ffi_pseudo) -> RustFFI::FfiPseudoElementFacts {
+        .create_layout_node = [](void* builder_pointer, void* element_pointer, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiPseudoElementDecision decision, RustFFI::NodeSlotId originating_list_box_slot) -> RustFFI::NodeSlotId {
             VERIFY(builder_pointer);
             VERIFY(element_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
             auto& element = *static_cast<DOM::Element*>(element_pointer);
             auto pseudo_element = css_pseudo_element(ffi_pseudo);
-            if (auto existing_pseudo = element.get_synthetic_pseudo_element(pseudo_element); existing_pseudo.has_value() && existing_pseudo->layout_node())
-                existing_pseudo->set_layout_node(nullptr);
-            auto style_record_identity = element.style_record_identity(pseudo_element);
-            if (!!style_record_identity)
-                builder.pin_style_record_for_build(style_record_identity);
-            auto const* pseudo_payloads = element.style_record_payloads(pseudo_element);
-            if (!pseudo_payloads) {
-                return {
-                    .has_style = false,
-                    .pseudo_element = ffi_pseudo,
-                    .content_type = RustFFI::FfiComputedContentType::None,
-                    .display_is_none = false,
-                    .display_is_contents = false,
-                    .display_is_list_item = false,
-                    .display_is_inline_flow = false,
-                    .has_content_replacement = false,
-                    .originating_list_box = Node::slot_id(nullptr),
-                    .normal_marker_has_content = false,
-                    .marker_position_is_inside = false,
-                };
-            }
-            auto const display = CSS::style_group_from_payloads<CSS::ComputedValues::BoxValues>(pseudo_payloads)->display_value();
-            auto const computed_content = CSS::style_group_from_payloads<CSS::ComputedValues::ContentValues>(pseudo_payloads)->computed_content_value();
-            auto const computed_content_type = ffi_computed_content_type(computed_content);
-            auto const replacement_image = content_replacement_image(computed_content);
-            BlockContainer* originating_list_box = nullptr;
-            if (pseudo_element == CSS::PseudoElement::Marker)
-                originating_list_box = element.unsafe_layout_node()->is_list_item_box() ? static_cast<Box*>(element.unsafe_layout_node()) : nullptr;
-            auto const normal_marker_has_content = originating_list_box
-                && (!originating_list_box->list_style_type().has<Empty>() || originating_list_box->list_style_image());
-            return {
-                .has_style = true,
-                .pseudo_element = ffi_pseudo,
-                .content_type = computed_content_type,
-                .display_is_none = display.is_none(),
-                .display_is_contents = display.is_contents(),
-                .display_is_list_item = display.is_list_item(),
-                .display_is_inline_flow = display.is_inline_outside() && display.is_flow_inside(),
-                .has_content_replacement = replacement_image != nullptr,
-                .originating_list_box = Node::slot_id(originating_list_box),
-                .normal_marker_has_content = normal_marker_has_content,
-                .marker_position_is_inside = originating_list_box
-                    && originating_list_box->list_style_position() == CSS::ListStylePosition::Inside,
-            }; },
-        .create_layout_node = [](void* builder_pointer, void* element_pointer, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiPseudoElementDecision decision, Compositing::RustFFI::NodeSlotId originating_list_box_slot) -> Compositing::RustFFI::NodeSlotId {
-            VERIFY(builder_pointer);
-            VERIFY(element_pointer);
-            auto& element = *static_cast<DOM::Element*>(element_pointer);
-            auto pseudo_element = css_pseudo_element(ffi_pseudo);
             auto style_record_identity = element.style_record_identity(pseudo_element);
             VERIFY(style_record_identity);
+            builder.pin_style_record_for_build(style_record_identity);
             auto const* pseudo_payloads = element.style_record_payloads(pseudo_element);
             VERIFY(pseudo_payloads);
             auto const display = CSS::style_group_from_payloads<CSS::ComputedValues::BoxValues>(pseudo_payloads)->display_value();

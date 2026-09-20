@@ -656,6 +656,46 @@ impl<'a> ComputedValuesView<'a> {
             .all(|item| matches!(item.optional_data(), Some(StyleValueData::String { .. })))
     }
 
+    /// Whether `content` computes to the keyword `none`. The property takes exactly two keywords,
+    /// so a keyword that is not `none` is `normal`.
+    pub(crate) fn content_keyword_is_none(self) -> bool {
+        use crate::css::style_compute::keyword;
+        matches!(
+            self.content().content.data(),
+            Some(StyleValueData::Keyword { keyword }) if *keyword == keyword::NONE
+        )
+    }
+
+    /// Whether `list-style-type` computes to `none`, which is the marker that renders nothing.
+    pub(crate) fn list_style_type_is_none(self) -> bool {
+        use crate::css::style_compute::keyword;
+        matches!(
+            self.inherited_list().list_style_type.data(),
+            Some(StyleValueData::Keyword { keyword }) if *keyword == keyword::NONE
+        )
+    }
+
+    /// Whether `list-style-image` computes to an image, which a marker renders in place of its
+    /// counter representation.
+    pub(crate) fn list_style_image_is_set(self) -> bool {
+        matches!(
+            self.inherited_list().list_style_image.data(),
+            Some(
+                StyleValueData::Image { .. }
+                    | StyleValueData::ImageSet { .. }
+                    | StyleValueData::LinearGradient { .. }
+                    | StyleValueData::ConicGradient { .. }
+                    | StyleValueData::RadialGradient { .. }
+            )
+        )
+    }
+
+    /// Whether `list-style-position` computes to `inside`, which puts the marker box in the
+    /// principal block box rather than outside it.
+    pub(crate) fn list_style_position_is_inside(self) -> bool {
+        self.inherited_list().list_style_position == crate::css::css_enums::list_style_position::INSIDE
+    }
+
     /// Whether `content` is a single image, which is what makes the element a replaced element
     /// whose box renders that image instead of its children.
     pub(crate) fn content_is_single_image(self) -> bool {

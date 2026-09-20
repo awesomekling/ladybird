@@ -3034,11 +3034,9 @@ pub enum FfiPseudoElement {
     None,
 }
 
+/// What a record's `content` computes to: one of the two keywords the property takes, or a list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-// NB: `List` is constructed by C++ through the FFI.
-#[allow(dead_code)]
-pub enum FfiComputedContentType {
+pub enum ComputedContentType {
     Normal,
     None,
     List,
@@ -3053,12 +3051,12 @@ pub enum FfiPseudoElementDecision {
     Box,
 }
 
+/// What the build knows about a pseudo-element when it decides whether it gets a box.
 #[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiPseudoElementFacts {
+pub struct PseudoElementFacts {
     pub has_style: bool,
     pub pseudo_element: FfiPseudoElement,
-    pub content_type: FfiComputedContentType,
+    pub content_type: ComputedContentType,
     pub display_is_none: bool,
     pub display_is_contents: bool,
     pub display_is_list_item: bool,
@@ -3098,7 +3096,6 @@ pub struct FfiGeneratedContentItem {
 #[repr(C)]
 pub struct FfiPseudoTreeBuilderCallbacks {
     pub builder: *mut c_void,
-    pub initialize: unsafe extern "C" fn(*mut c_void, *mut c_void, FfiPseudoElement) -> FfiPseudoElementFacts,
     /// The last argument is the list-item box a `::marker` belongs to, or an invalid slot when the
     /// pseudo-element is not a marker.
     pub create_layout_node: unsafe extern "C" fn(
@@ -3115,7 +3112,7 @@ pub struct FfiPseudoTreeBuilderCallbacks {
         unsafe extern "C" fn(*mut c_void, FfiPseudoElement, FfiGeneratedContentItem, NodeSlotId) -> NodeSlotId,
 }
 
-pub(crate) fn pseudo_element_decision(facts: FfiPseudoElementFacts) -> FfiPseudoElementDecision {
+pub(crate) fn pseudo_element_decision(facts: PseudoElementFacts) -> FfiPseudoElementDecision {
     abort_on_panic(|| {
         if !facts.has_style {
             return FfiPseudoElementDecision::None;
@@ -3131,19 +3128,19 @@ pub(crate) fn pseudo_element_decision(facts: FfiPseudoElementFacts) -> FfiPseudo
         if matches!(facts.pseudo_element, FfiPseudoElement::Before | FfiPseudoElement::After)
             && matches!(
                 facts.content_type,
-                FfiComputedContentType::Normal | FfiComputedContentType::None
+                ComputedContentType::Normal | ComputedContentType::None
             )
         {
             return FfiPseudoElementDecision::None;
         }
 
         // For ::marker with content 'none' -- do nothing.
-        if facts.pseudo_element == FfiPseudoElement::Marker && facts.content_type == FfiComputedContentType::None {
+        if facts.pseudo_element == FfiPseudoElement::Marker && facts.content_type == ComputedContentType::None {
             return FfiPseudoElementDecision::None;
         }
 
         if facts.pseudo_element == FfiPseudoElement::Marker
-            && facts.content_type == FfiComputedContentType::Normal
+            && facts.content_type == ComputedContentType::Normal
             && !facts.originating_list_box.is_invalid()
         {
             // https://www.w3.org/TR/css-lists-3/#content-property
@@ -3295,6 +3292,74 @@ fn generated_content_item(
     }
 }
 
+/// Everything the build needs to decide a pseudo-element's box, read from the style mirror and the
+/// arena by identity rather than from the element the pseudo-element hangs off.
+fn published_pseudo_element_facts(
+    host: &DomTreeBuilderHost<'_>,
+    element: StyleNodeID,
+    pseudo_element: FfiPseudoElement,
+) -> PseudoElementFacts {
+    // What a pseudo-element the mirror settles nothing for answers, and the base the published
+    // record fills in.
+    let facts = PseudoElementFacts {
+        has_style: false,
+        pseudo_element,
+        content_type: ComputedContentType::None,
+        display_is_none: false,
+        display_is_contents: false,
+        display_is_list_item: false,
+        display_is_inline_flow: false,
+        has_content_replacement: false,
+        originating_list_box: NodeSlotId::INVALID,
+        normal_marker_has_content: false,
+        marker_position_is_inside: false,
+    };
+    let layout = host.layout();
+    let pseudo_kind = generated_for_of(pseudo_element) - 1;
+    let published = layout.arena().with_style_store(|engine| {
+        engine.published_style_view(element, Some(pseudo_kind)).map(|view| {
+            let display = view.display();
+            PseudoElementFacts {
+                has_style: true,
+                display_is_none: display.is_none(),
+                display_is_contents: display.is_contents(),
+                display_is_list_item: display.is_list_item(),
+                display_is_inline_flow: display.is_inline_outside() && display.is_flow_inside(),
+                content_type: if view.content_is_keyword() {
+                    if view.content_keyword_is_none() {
+                        ComputedContentType::None
+                    } else {
+                        ComputedContentType::Normal
+                    }
+                } else {
+                    ComputedContentType::List
+                },
+                has_content_replacement: view.content_is_single_image(),
+                ..facts
+            }
+        })
+    });
+    // A pseudo-element the mirror settles no record for generates nothing.
+    let Some(mut facts) = published else {
+        return facts;
+    };
+
+    // A ::marker belongs to the list item box its originating element was built as, and takes its
+    // own position and default content from that box's style.
+    if pseudo_element == FfiPseudoElement::Marker {
+        let originating_box = layout.arena().bound_row(element);
+        if !originating_box.is_invalid() && layout.data(originating_box).kind.get() == NodeKind::ListItemBox {
+            facts.originating_list_box = originating_box;
+            if let Some(list_style) = layout.style(originating_box) {
+                facts.normal_marker_has_content =
+                    !list_style.list_style_type_is_none() || list_style.list_style_image_is_set();
+                facts.marker_position_is_inside = list_style.list_style_position_is_inside();
+            }
+        }
+    }
+    facts
+}
+
 fn create_pseudo_element(
     host: &DomTreeBuilderHost<'_>,
     state: &mut TreeBuilderState,
@@ -3309,9 +3374,13 @@ fn create_pseudo_element(
         return None;
     }
     let callbacks = &host.callbacks.pseudo;
-    super::tree_build_seal::note_host_call("pseudo.initialize");
-    // SAFETY: The builder and element remain live throughout initialization.
-    let facts = unsafe { (callbacks.initialize)(callbacks.builder, element, pseudo_element) };
+    let element_identity = StyleNodeID::from_raw(style_node).expect("a pseudo-element names its generator");
+    // The pseudo-element gives up the box it holds from an earlier build before the walk decides
+    // whether it gets a new one.
+    host.layout()
+        .arena()
+        .clear_pseudo_element_box(element_identity, generated_for_of(pseudo_element));
+    let facts = published_pseudo_element_facts(host, element_identity, pseudo_element);
     let decision = pseudo_element_decision(facts);
     if decision == FfiPseudoElementDecision::None {
         return None;
@@ -5374,10 +5443,10 @@ mod tests {
     use crate::css::style::bridge::element_adjustment_fact;
     use crate::layout::node_data::NodeSlotId;
     use crate::layout::tree_builder::{
-        FfiCodePointCategoryFacts, FfiComputedContentType, FfiElementLayoutKind, FfiPrincipalBoxPlacement,
-        FfiPseudoElement, FfiPseudoElementDecision, FfiPseudoElementFacts, FfiReplacedElementDisplayAdjustment,
-        LayoutNodeReuse, PrincipalBoxGenerationDecision, PrincipalBoxPlacementFacts, PrincipalNodeEntryFacts,
-        PrincipalNodeKind, SvgEntryDecision, TopLayerEntryDecision, TreeBuilderContext,
+        ComputedContentType, FfiCodePointCategoryFacts, FfiElementLayoutKind, FfiPrincipalBoxPlacement,
+        FfiPseudoElement, FfiPseudoElementDecision, FfiReplacedElementDisplayAdjustment, LayoutNodeReuse,
+        PrincipalBoxGenerationDecision, PrincipalBoxPlacementFacts, PrincipalNodeEntryFacts, PrincipalNodeKind,
+        PseudoElementFacts, SvgEntryDecision, TopLayerEntryDecision, TreeBuilderContext,
         adjusted_table_display_for_replaced_element, display_contents_text_needs_style_wrapper, element_layout_kind,
         find_first_letter_in_text, principal_box_generation_decision, principal_box_placement_decision,
         principal_node_entry_decision, pseudo_element_decision,
@@ -5503,7 +5572,7 @@ mod tests {
                       has_content_replacement,
                       originating_layout_node_is_list_item: bool,
                       normal_marker_has_content| {
-            pseudo_element_decision(FfiPseudoElementFacts {
+            pseudo_element_decision(PseudoElementFacts {
                 has_style: true,
                 pseudo_element,
                 content_type,
@@ -5525,7 +5594,7 @@ mod tests {
         assert_eq!(
             decide(
                 FfiPseudoElement::Before,
-                FfiComputedContentType::Normal,
+                ComputedContentType::Normal,
                 false,
                 false,
                 false,
@@ -5538,7 +5607,7 @@ mod tests {
         assert_eq!(
             decide(
                 FfiPseudoElement::Marker,
-                FfiComputedContentType::Normal,
+                ComputedContentType::Normal,
                 false,
                 false,
                 false,
@@ -5551,7 +5620,7 @@ mod tests {
         assert_eq!(
             decide(
                 FfiPseudoElement::Other,
-                FfiComputedContentType::List,
+                ComputedContentType::List,
                 false,
                 false,
                 false,
@@ -5564,7 +5633,7 @@ mod tests {
         assert_eq!(
             decide(
                 FfiPseudoElement::Other,
-                FfiComputedContentType::List,
+                ComputedContentType::List,
                 false,
                 true,
                 false,
@@ -5577,7 +5646,7 @@ mod tests {
         assert_eq!(
             decide(
                 FfiPseudoElement::Other,
-                FfiComputedContentType::List,
+                ComputedContentType::List,
                 false,
                 false,
                 true,
