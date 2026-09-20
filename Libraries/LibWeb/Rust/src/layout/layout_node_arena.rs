@@ -2300,6 +2300,20 @@ impl LayoutNodeArena {
         self.enroll_node_for_replaced_content_facts_sync_if_eligible(slot);
     }
 
+    /// Stamp a row the build allocated for an element. Beyond what `stamp_dom_row` records, the
+    /// row takes the style record the mirror published under the element's identity, so the kind
+    /// the row is built with and the style it is built from come out of the same published answer.
+    pub(crate) fn stamp_dom_element_row(&self, slot: NodeSlotId, kind: NodeKind, style_node: StyleNodeID) {
+        self.stamp_dom_row(slot, kind, Some(style_node));
+        let (record, payloads) = self
+            .with_style_engine(|engine| engine.element_published_style_record(style_node))
+            .expect("an element whose box is built has published its style");
+        if self.set_node_style(slot, record, payloads) {
+            self.refresh_style_flags(slot);
+        }
+        self.enroll_node_for_svg_paint_resources_sync(slot);
+    }
+
     /// The paint facts a row is built with, answered by the shell a prepared row was materialised
     /// into. A row being built is not a published row, so this is the plain write `bind_shell`
     /// performs rather than the change funnel a live row's facts move through.

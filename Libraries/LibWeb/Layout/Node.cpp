@@ -375,6 +375,17 @@ NodeWithStyle::NodeWithStyle(DOM::Document& document, BindToPreparedArenaSlot bi
     adopt_style(document, dom_node(), move(style));
 }
 
+// A row stamped for an element already carries the style record the mirror published for it, so
+// the shell adopts that record rather than writing one back to the row. What remains is what
+// adopting a style tells the rest of the document about it.
+void NodeWithStyle::initialize_stamped_style_record()
+{
+    VERIFY(m_style_record_identity);
+    VERIFY(m_style_payloads);
+    did_update_style_record();
+    synchronize_table_span_data();
+}
+
 void NodeWithStyle::initialize_from_style_record()
 {
     publish_style_record_to_node_data();

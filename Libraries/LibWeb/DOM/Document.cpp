@@ -687,15 +687,37 @@ Layout::NodeArena& Document::layout_node_arena()
         });
         Layout::RustFFI::layout_arena_set_shell_factory(m_layout_node_arena->handle(), this, [](void* context, Compositing::RustFFI::NodeSlotId slot, Layout::RustFFI::NodeKind kind) {
             auto& document = *static_cast<Document*>(context);
+            Layout::NodeWithStyle* node = nullptr;
             switch (kind) {
             case Layout::RustFFI::NodeKind::BlockContainer:
+            case Layout::RustFFI::NodeKind::FieldSetBox:
+            case Layout::RustFFI::NodeKind::LegendBox:
+            case Layout::RustFFI::NodeKind::ListItemBox:
+            case Layout::RustFFI::NodeKind::RangeInputBox:
+            case Layout::RustFFI::NodeKind::SVGForeignObjectBox:
             case Layout::RustFFI::NodeKind::TableWrapper:
             case Layout::RustFFI::NodeKind::Box:
-                Layout::allocate_layout_node<Layout::Box>(document, Layout::BindToPreparedArenaSlot::Yes, slot, kind);
-                return;
+            case Layout::RustFFI::NodeKind::CanvasBox:
+            case Layout::RustFFI::NodeKind::CheckBox:
+            case Layout::RustFFI::NodeKind::ImageBox:
+            case Layout::RustFFI::NodeKind::NavigableContainerViewport:
+            case Layout::RustFFI::NodeKind::RadioButton:
+            case Layout::RustFFI::NodeKind::SVGClipBox:
+            case Layout::RustFFI::NodeKind::SVGGeometryBox:
+            case Layout::RustFFI::NodeKind::SVGGraphicsBox:
+            case Layout::RustFFI::NodeKind::SVGImageBox:
+            case Layout::RustFFI::NodeKind::SVGMaskBox:
+            case Layout::RustFFI::NodeKind::SVGPatternBox:
+            case Layout::RustFFI::NodeKind::SVGSVGBox:
+            case Layout::RustFFI::NodeKind::SVGTextBox:
+            case Layout::RustFFI::NodeKind::SVGTextPathBox:
+            case Layout::RustFFI::NodeKind::VideoBox:
+                node = &Layout::allocate_layout_node<Layout::Box>(document, Layout::BindToPreparedArenaSlot::Yes, slot, kind);
+                break;
+            case Layout::RustFFI::NodeKind::BreakNode:
             case Layout::RustFFI::NodeKind::InlineNode:
-                Layout::allocate_layout_node<Layout::NodeWithStyle>(document, Layout::BindToPreparedArenaSlot::Yes, slot, kind).attach_style_resources();
-                return;
+                node = &Layout::allocate_layout_node<Layout::NodeWithStyle>(document, Layout::BindToPreparedArenaSlot::Yes, slot, kind);
+                break;
             case Layout::RustFFI::NodeKind::TextNode:
                 Layout::allocate_layout_node<Layout::TextNode>(document, Layout::BindToPreparedArenaSlot::Yes, slot, kind);
                 return;
@@ -704,6 +726,31 @@ Layout::NodeArena& Document::layout_node_arena()
                 return;
             default:
                 VERIFY_NOT_REACHED();
+            }
+            // An anonymous row's style is derived by the arena, which has already told the shell
+            // everything about it. A row stamped for an element carries the record the mirror
+            // published, and adopting it is what the element's box tells the document about.
+            auto* element = as_if<Element>(node->dom_node());
+            if (!element) {
+                if (kind == Layout::RustFFI::NodeKind::InlineNode)
+                    node->attach_style_resources();
+                return;
+            }
+            node->initialize_stamped_style_record();
+            switch (kind) {
+            case Layout::RustFFI::NodeKind::FieldSetBox:
+                // https://html.spec.whatwg.org/multipage/rendering.html#the-fieldset-and-legend-elements
+                // If the computed outer display type is inline, the fieldset is expected to behave as inline-block.
+                // Otherwise, it is expected to behave as flow-root. This does not change the computed value.
+                if (node->display().is_flow_inside())
+                    node->set_display(CSS::Display { node->display().outside(), CSS::DisplayInside::FlowRoot });
+                return;
+            case Layout::RustFFI::NodeKind::AudioBox:
+            case Layout::RustFFI::NodeKind::VideoBox:
+                static_cast<Layout::Box*>(node)->set_replaced_box_can_have_children(element->shadow_root() != nullptr);
+                return;
+            default:
+                return;
             }
         });
         Layout::RustFFI::layout_arena_set_chrome_state_callback(

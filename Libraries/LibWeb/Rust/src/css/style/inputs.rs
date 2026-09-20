@@ -577,6 +577,16 @@ impl RetainedState {
         self.published_box_facts(self.computed_group_sets.assigned_style_record(node))
     }
 
+    /// The style record the mirror published for the element, with the payload pointer a row is
+    /// built from. `None` while the element has no record: a retired identity, or a style that has
+    /// not reached the element yet.
+    #[must_use]
+    pub fn element_published_style_record(&self, node: StyleNodeID) -> Option<(u64, *const std::ffi::c_void)> {
+        let record = self.computed_group_sets.assigned_style_record(node)?.raw();
+        let payloads = self.computed_group_sets.style_record_payloads(record)?;
+        Some((record, payloads.as_ptr().cast()))
+    }
+
     /// The box facts the element's published record for one pseudo-element kind holds. `None`
     /// while the element styles no such pseudo-element.
     #[must_use]
