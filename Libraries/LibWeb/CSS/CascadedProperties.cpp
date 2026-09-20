@@ -49,6 +49,10 @@ void CascadedProperties::assign_source_slot(u32 slot, RefPtr<StyleSheetState con
         };
     }
     m_source_slots[slot] = SourcePair { source.ptr(), source_shadow_root.ptr(), move(resource_context) };
+    auto const* published = m_source_slots[slot].resource_context.ptr();
+    auto bytes = published ? published->serialized_base_url.bytes() : ReadonlyBytes {};
+    ComputedValuesFFI::rust_cascaded_properties_set_source_resource_context(
+        m_store, slot, bytes.data(), bytes.size(), published != nullptr, published ? published->origin_clean : false);
 }
 
 RefPtr<StyleSheetState const> CascadedProperties::source_for_slot(u32 slot) const
