@@ -711,6 +711,7 @@ pub(crate) struct LayoutNodeArena {
     nodes_enrolled_for_replaced_content_facts_sync: RefCell<Vec<NodeSlotId>>,
     /// What the running pass has to tell the document, waiting for the commit that delivers it.
     messages_reported_during_pass: RefCell<Vec<super::commit::FfiCommitMessage>>,
+    pub(crate) layout_style_snapshots: std::sync::Arc<super::style_snapshot::LayoutStyleSnapshotStore>,
     owner_thread: thread::ThreadId,
 }
 
@@ -807,6 +808,7 @@ impl LayoutNodeArena {
             text_nodes_enrolled_for_content_sync: RefCell::new(HashSet::default()),
             nodes_enrolled_for_replaced_content_facts_sync: RefCell::new(Vec::new()),
             messages_reported_during_pass: RefCell::new(Vec::new()),
+            layout_style_snapshots: Default::default(),
             owner_thread: thread::current().id(),
         }
     }
@@ -1643,6 +1645,12 @@ impl LayoutNodeArena {
 
     pub(crate) fn set_style_record_host(&self, host: Option<FfiStyleRecordHostCallbacks>) {
         self.style_record_host.set(host);
+        if let Some(host) = host {
+            assert!(!host.style_engine.is_null());
+            // SAFETY: The registered style engine outlives this arena's live nodes.
+            unsafe { &mut *host.style_engine.cast::<StyleEngine>() }
+                .install_layout_style_snapshots(self.layout_style_snapshots.clone());
+        }
     }
 
     pub(crate) fn set_layout_host(&self, host: Option<FfiLayoutHostCallbacks>) {
