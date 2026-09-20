@@ -511,7 +511,9 @@ static void publish_element_selector_features(StyleEngine& style_engine, DOM::El
                                             .heading_level = heading_level,
                                             .is_slot = is_slot,
                                             .box_kind = to_underlying(element.box_kind()),
-                                            .reserved = 0,
+                                            .associated_pseudo_kind_plus_one = static_cast<u8>(element.associated_shadow_host_pseudo_element().has_value()
+                                                    ? to_underlying(*element.associated_shadow_host_pseudo_element()) + 1
+                                                    : 0),
                                             .adjustment_facts = element_style_adjustment_facts(element),
                                             .construction_facts = element_construction_facts(element),
                                         },
@@ -700,6 +702,10 @@ void record_element_adjustment_facts(DOM::Element& element)
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
     style_engine->set_element_adjustment_facts(element.style_node_id(), element_style_adjustment_facts(element));
+    auto associated_pseudo_kind_plus_one = element.associated_shadow_host_pseudo_element().has_value()
+        ? static_cast<u8>(to_underlying(*element.associated_shadow_host_pseudo_element()) + 1)
+        : 0;
+    style_engine->set_element_associated_pseudo_kind(element.style_node_id(), associated_pseudo_kind_plus_one);
     style_engine->set_element_construction_facts(element.style_node_id(), element_construction_facts(element), to_underlying(element.box_kind()));
 }
 

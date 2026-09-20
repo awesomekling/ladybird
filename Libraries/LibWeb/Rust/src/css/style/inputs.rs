@@ -550,6 +550,12 @@ impl RetainedState {
         self.computed_group_sets.set_adjustment_facts(node, facts);
     }
 
+    /// Record the element-reference pseudo kind represented by an internal shadow-tree element.
+    pub fn set_element_associated_pseudo_kind(&mut self, node: StyleNodeID, pseudo_kind_plus_one: u8) {
+        self.computed_group_sets
+            .set_associated_pseudo_kind(node, pseudo_kind_plus_one);
+    }
+
     /// The element facts the store holds, as `bridge::element_adjustment_fact` names them. A text
     /// node and a retired identity hold none.
     #[must_use]
@@ -2774,6 +2780,9 @@ impl StyleEngineState {
         self.retained
             .computed_group_sets
             .set_adjustment_facts(node, arrival.adjustment_facts);
+        self.retained
+            .computed_group_sets
+            .set_associated_pseudo_kind(node, arrival.associated_pseudo_kind_plus_one);
         self.retained
             .computed_group_sets
             .set_construction_facts(node, arrival.construction_facts, arrival.box_kind);

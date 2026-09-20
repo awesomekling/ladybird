@@ -558,7 +558,8 @@ pub struct FfiElementArrival {
     pub is_slot: bool,
     /// The element's `FfiElementBoxKind`: which principal box it asks for.
     pub box_kind: u8,
-    pub reserved: u8,
+    /// One plus the element-reference pseudo kind represented by this element, or zero.
+    pub associated_pseudo_kind_plus_one: u8,
     /// The element's `ElementStyleAdjustmentFact` bits: what the box-type transformation and the
     /// element style adjustments read of the DOM. Mirrors the C++ enum.
     pub adjustment_facts: u32,
@@ -4702,7 +4703,7 @@ mod tests {
                 heading_level: 4,
                 is_slot: true,
                 box_kind: 0,
-                reserved: 0,
+                associated_pseudo_kind_plus_one: 0,
             },
             FfiElementArrival {
                 node: nodes[1],
@@ -4716,7 +4717,7 @@ mod tests {
                 heading_level: 0,
                 is_slot: false,
                 box_kind: 0,
-                reserved: 0,
+                associated_pseudo_kind_plus_one: 0,
             },
         ];
         engine.apply_transaction_batch(&tree, (&arrivals, &[31, 32, 33]), &[], &[], &[], &[]);
@@ -4748,7 +4749,7 @@ mod tests {
             heading_level: 0,
             is_slot: false,
             box_kind: 0,
-            reserved: 0,
+            associated_pseudo_kind_plus_one: 0,
         }
     }
 

@@ -71,6 +71,27 @@ impl RetainedState {
     ) -> Option<computed::FinalStyleRecordID> {
         let parent = if pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT {
             self.tree.flat_tree_parent(node)?
+        } else if (bridge::FIRST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND
+            ..=bridge::LAST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND)
+            .contains(&pseudo_kind)
+        {
+            let Some(shadow_root) = self.tree.shadow_root_of(node) else {
+                return self.computed_group_sets.assigned_style_record(node);
+            };
+            let mut pending = self.tree.dom_children(shadow_root).collect::<Vec<_>>();
+            let represented_element = loop {
+                let Some(candidate) = pending.pop() else {
+                    break None;
+                };
+                if self.computed_group_sets.associated_pseudo_kind(candidate) == Some(pseudo_kind) {
+                    break Some(candidate);
+                }
+                pending.extend(self.tree.dom_children(candidate));
+            };
+            match represented_element.and_then(|represented_element| self.tree.parent(represented_element)) {
+                Some(parent) if parent != shadow_root => parent,
+                _ => node,
+            }
         } else {
             node
         };
@@ -4436,12 +4457,23 @@ mod tests {
     }
 
     #[test]
-    fn retained_inheritance_parent_uses_flat_tree_and_originating_element_records() {
+    fn retained_inheritance_parent_uses_tree_and_element_backed_pseudo_records() {
         let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
-        let mut raw_nodes = [0; 2];
+        let mut raw_nodes = [0; 6];
         engine.allocate_style_nodes(&mut raw_nodes);
-        let [parent, child] = raw_nodes.map(|node| StyleNodeID::from_raw(node).unwrap());
+        let [parent, child, host, shadow_root, wrapper, represented] =
+            raw_nodes.map(|node| StyleNodeID::from_raw(node).unwrap());
         engine.tree.set_parent(child, Some(parent));
+        engine.tree.set_parent(wrapper, Some(shadow_root));
+        engine.tree.set_parent(represented, Some(wrapper));
+        engine
+            .state
+            .retained
+            .tree
+            .set_shadow_root(host, shadow_root, &mut engine.state.retained.memory);
+        engine
+            .computed_group_sets
+            .set_associated_pseudo_kind(represented, bridge::FIRST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND + 1);
         let publish = |engine: &mut StyleEngine, node| {
             engine
                 .publish_computed_groups(
@@ -4463,6 +4495,8 @@ mod tests {
         };
         let parent_record = publish(&mut engine, parent);
         let child_record = publish(&mut engine, child);
+        publish(&mut engine, host);
+        let wrapper_record = publish(&mut engine, wrapper);
 
         assert_eq!(
             engine.retained_inheritance_parent_style_record(child, u8::MAX),
@@ -4471,6 +4505,10 @@ mod tests {
         assert_eq!(
             engine.retained_inheritance_parent_style_record(child, 0),
             Some(child_record)
+        );
+        assert_eq!(
+            engine.retained_inheritance_parent_style_record(host, bridge::FIRST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND,),
+            Some(wrapper_record)
         );
     }
 
