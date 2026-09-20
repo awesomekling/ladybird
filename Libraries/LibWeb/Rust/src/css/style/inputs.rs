@@ -8,6 +8,12 @@ use smallvec::SmallVec;
 
 use super::*;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct FrozenLonghandInputRow {
+    pub(crate) adjustment_facts: u32,
+    pub(crate) tree_counting_inputs: u64,
+}
+
 impl StyleEngine {
     pub(crate) fn install_layout_style_snapshots(
         &mut self,
@@ -25,6 +31,51 @@ impl StyleEngine {
 }
 
 impl RetainedState {
+    pub(crate) fn element_tree_counting_inputs(&self, node: StyleNodeID) -> u64 {
+        if !self.tree().is_live(node) {
+            return 0;
+        }
+        let Some(parent) = self
+            .tree()
+            .parent(node)
+            .filter(|parent| self.tree().tree_scope(*parent) == self.tree().tree_scope(node))
+        else {
+            return (1_u64 << 32) | 1;
+        };
+        let mut count = 0_u64;
+        let mut index = 0_u64;
+        for child in self.tree().dom_children(parent).filter(|child| !child.is_text()) {
+            count += 1;
+            if child == node {
+                index = count;
+            }
+        }
+        (count << 32) | index
+    }
+
+    pub(crate) fn freeze_longhand_inputs(&mut self, nodes: &[StyleNodeID]) {
+        self.frozen_longhand_inputs.clear();
+        self.frozen_longhand_inputs.reserve(nodes.len());
+        for &node in nodes {
+            if self.frozen_longhand_inputs.contains_key(&node) || !self.tree().is_live(node) {
+                continue;
+            }
+            let adjustment_facts = self.element_adjustment_facts(node);
+            let tree_counting_inputs = self.element_tree_counting_inputs(node);
+            self.frozen_longhand_inputs.insert(
+                node,
+                FrozenLonghandInputRow {
+                    adjustment_facts,
+                    tree_counting_inputs,
+                },
+            );
+        }
+    }
+
+    pub(crate) fn frozen_longhand_input(&self, node: StyleNodeID) -> Option<FrozenLonghandInputRow> {
+        self.frozen_longhand_inputs.get(&node).copied()
+    }
+
     pub(crate) fn resolved_font(&self, request: bridge::FfiFontResolutionRequest) -> Option<bridge::FfiResolvedFont> {
         self.font_resolution.as_ref()?.lookup(request)
     }
@@ -1474,6 +1525,7 @@ impl StyleEngineState {
                 next_style_transaction_version: StyleTransactionVersion(1),
                 document_style_computation_inputs: None,
                 custom_property_registry: None,
+                frozen_longhand_inputs: HashMap::default(),
                 font_resolution: None,
                 layout_style_snapshots: Default::default(),
                 container_query_inputs: Default::default(),

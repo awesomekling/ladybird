@@ -1061,6 +1061,14 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
             // ready before its descendants, this lets a parent's derived reaction merge into an
             // unconsumed child reaction in the same batch.
             document.style_computer().style_engine().sort_style_deltas_for_direct_application(applicable_style_engine_reactions);
+            Vector<StyleNodeID> frozen_input_nodes;
+            frozen_input_nodes.ensure_capacity(applicable_style_engine_reactions.size());
+            for (auto const& reaction : applicable_style_engine_reactions)
+                frozen_input_nodes.unchecked_append(StyleNodeID { reaction.style_node });
+            document.style_computer().style_engine().freeze_longhand_inputs(frozen_input_nodes);
+            ScopeGuard clear_frozen_longhand_inputs = [&] {
+                document.style_computer().style_engine().freeze_longhand_inputs({});
+            };
             auto& counters = document.style_invalidation_counters();
             if (published_reaction_count > 0) {
                 ++counters.style_engine_reaction_batch_runs;

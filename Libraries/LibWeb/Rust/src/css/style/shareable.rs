@@ -64,6 +64,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         next_style_transaction_version,
         document_style_computation_inputs,
         custom_property_registry,
+        frozen_longhand_inputs,
         font_resolution,
         layout_style_snapshots,
         container_query_inputs,
@@ -167,6 +168,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(next_style_transaction_version);
     assert_member_is_sync(document_style_computation_inputs);
     assert_member_is_sync(custom_property_registry);
+    assert_member_is_sync(frozen_longhand_inputs);
     assert_member_is_sync(layout_style_snapshots);
     assert_member_is_sync(container_query_inputs);
     assert_member_is_sync(layer_topology_version);
