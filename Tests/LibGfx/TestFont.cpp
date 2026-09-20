@@ -17,6 +17,7 @@
 #include <LibIPC/Decoder.h>
 #include <LibIPC/Encoder.h>
 #include <LibTest/TestCase.h>
+#include <LibThreading/Thread.h>
 #include <core/SkStream.h>
 #include <core/SkTypeface.h>
 #include <harfbuzz/hb.h>
@@ -391,4 +392,32 @@ TEST_CASE(shaping_cache_preserves_positions_spacing_and_trailing_whitespace)
 
     auto without_spacing = Gfx::shape_text({}, 0, 0, u"abc "sv, font, Gfx::GlyphRun::TextType::Common);
     EXPECT_APPROXIMATE(origin->width() - without_spacing->width(), 11.f);
+}
+
+// Only ThreadSanitizer can catch a cache race here, since every thread computes the same glyph IDs.
+TEST_CASE(glyph_pages_can_be_populated_on_several_threads)
+{
+    auto font = load_text_font(16);
+    NonnullRefPtr<Gfx::Typeface const> typeface { font->typeface() };
+    IGNORE_USE_IN_ESCAPING_LAMBDA Array<u32, 4> code_points { 'A', 0x3a9, 0x4e00, 0x1f600 };
+    Array<u32, 4> expected_glyph_ids;
+    for (size_t i = 0; i < code_points.size(); ++i)
+        expected_glyph_ids[i] = typeface->glyph_id_for_code_point(code_points[i]);
+
+    IGNORE_USE_IN_ESCAPING_LAMBDA Array<Array<u32, 4>, 8> glyph_ids;
+    Vector<NonnullRefPtr<Threading::Thread>> threads;
+    for (size_t thread_index = 0; thread_index < glyph_ids.size(); ++thread_index) {
+        auto thread = Threading::Thread::construct("GlyphPageCache"sv, [typeface, &code_points, &glyph_ids, thread_index]() {
+            for (size_t code_point_index = 0; code_point_index < code_points.size(); ++code_point_index)
+                glyph_ids[thread_index][code_point_index] = typeface->glyph_id_for_code_point(code_points[code_point_index]);
+            return 0;
+        });
+        thread->start();
+        threads.append(move(thread));
+    }
+    for (auto& thread : threads)
+        (void)thread->join();
+
+    for (auto const& thread_glyph_ids : glyph_ids)
+        EXPECT_EQ(thread_glyph_ids, expected_glyph_ids);
 }
