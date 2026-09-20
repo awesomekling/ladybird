@@ -595,6 +595,10 @@ pub(crate) struct LayoutNodeArena {
     /// rather than off the element. Zero is the absence of an entry, which is nearly every
     /// element; a text identity never publishes one, and so reads zero.
     element_scroll_offsets: RefCell<HashMap<StyleNodeID, FfiCssPixelPoint>>,
+    /// The identities sitting in the user agent shadow tree of the focused text control, which is
+    /// what a caret and a selection are painted inside. At most one control is focused, so this
+    /// holds one control's shadow tree and is empty the rest of the time.
+    identities_in_focused_text_control: RefCell<HashSet<StyleNodeID>>,
     /// The image provider a row owns, for a row whose image comes from its style rather than from a
     /// DOM element. The provider is made for the row and is of no use without it, so the arena holds
     /// it against the row and deletes it when the row is freed, rather than leaving it on a shell
@@ -749,6 +753,7 @@ impl LayoutNodeArena {
             bound_pseudo_element_rows: RefCell::new(HashMap::default()),
             pseudo_element_scroll_offsets: RefCell::new(HashMap::default()),
             element_scroll_offsets: RefCell::new(HashMap::default()),
+            identities_in_focused_text_control: RefCell::new(HashSet::default()),
             owned_image_providers: RefCell::new(HashMap::default()),
             image_observer_sets: RefCell::new(HashMap::default()),
             shadow_including_parent_elements: RefCell::new(Vec::new()),
@@ -1590,6 +1595,7 @@ impl LayoutNodeArena {
             .borrow_mut()
             .retain(|&(generator, _), _| generator != style_node);
         self.element_scroll_offsets.borrow_mut().remove(&style_node);
+        self.identities_in_focused_text_control.borrow_mut().remove(&style_node);
         loop {
             let row = self.first_rows_by_style_node.borrow().head(style_node);
             if row.is_invalid() {
@@ -2546,6 +2552,13 @@ impl LayoutNodeArena {
             scroll_offset != FfiCssPixelPoint::default(),
         );
         self.scroll_offsets().publish(slot, scroll_offset.into());
+        // Only a row in a user agent shadow tree can be in a text control's, which the
+        // construction flags already answered, so this asks for almost no row at all.
+        if crate::layout::node_facts::has_flag(self.data(slot), NodeFlag::IsInUserAgentShadowTree) {
+            let in_focused_text_control =
+                style_node.is_some_and(|style_node| self.is_identity_in_focused_text_control(style_node));
+            self.set_node_flag(slot, NodeFlag::IsInFocusedTextControl, in_focused_text_control);
+        }
         self.enroll_node_for_replaced_content_facts_sync_if_eligible(slot);
     }
 
@@ -2560,6 +2573,21 @@ impl LayoutNodeArena {
             .get(&(generator, pseudo_kind))
             .copied()
             .unwrap_or_default()
+    }
+
+    /// Whether the node sits in the user agent shadow tree of the focused text control.
+    pub(crate) fn is_identity_in_focused_text_control(&self, node: StyleNodeID) -> bool {
+        self.identities_in_focused_text_control.borrow().contains(&node)
+    }
+
+    /// Record whether the node sits in the user agent shadow tree of the focused text control.
+    pub(crate) fn set_identity_in_focused_text_control(&self, node: StyleNodeID, value: bool) {
+        let mut identities = self.identities_in_focused_text_control.borrow_mut();
+        if value {
+            identities.insert(node);
+        } else {
+            identities.remove(&node);
+        }
     }
 
     /// What the element has scrolled to. Zero while nothing has scrolled it.
@@ -5444,6 +5472,19 @@ pub unsafe extern "C" fn layout_arena_set_pseudo_element_scroll_offset(
     };
     // SAFETY: As above.
     unsafe { &*arena.cast::<LayoutNodeArena>() }.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset);
+}
+
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_identity_in_focused_text_control(arena: *mut c_void, node: u32, value: bool) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return;
+    };
+    // SAFETY: As above.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_identity_in_focused_text_control(node, value);
 }
 
 /// # Safety

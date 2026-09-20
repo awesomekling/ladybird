@@ -2731,6 +2731,12 @@ void Node::inserted()
     // somewhere new holds whatever its new place gives it. The identity it publishes under was
     // taken just above.
     Layout::publish_dom_paint_facts(*this);
+
+    // A node can also arrive in the shadow tree of a text control that is already focused, which
+    // is the one other inherited state a row is built with. No node holds it unless a text control
+    // is focused at all.
+    if (is<HTML::FormAssociatedTextControlElement>(document().focused_area().ptr()))
+        Layout::publish_is_in_focused_text_control(*this);
 }
 
 void Node::removed_from(IsSubtreeRoot, Node* old_parent, Node&)

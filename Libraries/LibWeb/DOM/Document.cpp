@@ -3897,8 +3897,7 @@ static void publish_focused_text_control_rows(GC::Ptr<Node> area)
     if (!shadow_root || !shadow_root->is_user_agent_internal())
         return;
     shadow_root->for_each_in_inclusive_subtree([](Node& node) {
-        if (auto* layout_node = node.unsafe_layout_node())
-            layout_node->publish_is_in_focused_text_control();
+        Layout::publish_is_in_focused_text_control(node);
         return TraversalDecision::Continue;
     });
 }
