@@ -109,9 +109,12 @@ void HTMLBodyElement::attribute_changed(Utf16FlyString const& name, Optional<Utf
     // The link colors are presentational hints on every link of the document, which the style
     // engine has to know each link carries.
     auto refresh_link_style_facts = [&] {
-        auto links = document().links();
-        for (size_t index = 0; index < links->length(); ++index)
-            CSS::record_element_adjustment_facts(*links->item(index));
+        document().for_each_shadow_including_inclusive_descendant([](DOM::Node& node) {
+            auto* element = as_if<DOM::Element>(node);
+            if (element && (element->matches_link_pseudo_class() || element->matches_visited_pseudo_class()))
+                CSS::record_element_adjustment_facts(*element);
+            return TraversalDecision::Continue;
+        });
     };
     if (name == HTML::AttributeNames::link) {
         // https://html.spec.whatwg.org/multipage/rendering.html#the-page:rules-for-parsing-a-legacy-colour-value-3
