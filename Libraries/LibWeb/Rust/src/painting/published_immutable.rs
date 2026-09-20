@@ -26,7 +26,11 @@ struct PublishedArena {
     rows: HashMap<NodeSlotId, RowFingerprint>,
     last_mutations: HashMap<NodeSlotId, &'static str>,
     reported: HashSet<&'static str>,
-    in_publication: bool,
+    // A publication can open inside another: draining the invalidation journal marks nodes for
+    // repaint, and a mark made from inside a layout update drains again on the spot. Only the
+    // outermost window verifies and re-fingerprints; an inner one that did so would report the
+    // rows the outer window has already stopped attributing.
+    publication_depth: u32,
 }
 
 #[derive(Default)]
@@ -180,7 +184,7 @@ pub(crate) fn note_row_mutation(arena: &LayoutNodeArena, row: NodeSlotId, call_s
             .borrow()
             .arenas
             .get(&key)
-            .is_some_and(|published| published.in_publication)
+            .is_some_and(|published| published.publication_depth != 0)
     });
     if in_publication {
         return;
@@ -197,13 +201,42 @@ pub(crate) fn published(arena: &LayoutNodeArena) {
         return;
     }
     let key = arena as *const LayoutNodeArena as usize;
+    let closes_the_window = STATE.with(|state| match state.borrow_mut().arenas.get_mut(&key) {
+        Some(published) => {
+            published.publication_depth = published.publication_depth.saturating_sub(1);
+            published.publication_depth == 0
+        }
+        // The first publication of an arena is what establishes its baseline.
+        None => true,
+    });
+    if !closes_the_window {
+        return;
+    }
     let rows = fingerprints(arena);
     STATE.with(|state| {
         let mut state = state.borrow_mut();
         let published = state.arenas.entry(key).or_default();
         published.rows = rows;
         published.last_mutations.clear();
-        published.in_publication = false;
+    });
+}
+
+fn begin_publication(arena: &LayoutNodeArena, call_site: &'static str) {
+    let key = arena as *const LayoutNodeArena as usize;
+    let already_publishing = STATE.with(|state| {
+        state
+            .borrow()
+            .arenas
+            .get(&key)
+            .is_some_and(|published| published.publication_depth != 0)
+    });
+    if !already_publishing {
+        verify(arena, call_site);
+    }
+    STATE.with(|state| {
+        if let Some(published) = state.borrow_mut().arenas.get_mut(&key) {
+            published.publication_depth += 1;
+        }
     });
 }
 
@@ -211,26 +244,14 @@ pub(crate) fn before_publication(arena: &LayoutNodeArena) {
     if !enabled() {
         return;
     }
-    verify(arena, "next publication");
-    let key = arena as *const LayoutNodeArena as usize;
-    STATE.with(|state| {
-        if let Some(published) = state.borrow_mut().arenas.get_mut(&key) {
-            published.in_publication = true;
-        }
-    });
+    begin_publication(arena, "next publication");
 }
 
 pub(crate) fn before_journal_publication(arena: &LayoutNodeArena) {
     if !enabled() {
         return;
     }
-    verify(arena, "invalidation journal publication");
-    let key = arena as *const LayoutNodeArena as usize;
-    STATE.with(|state| {
-        if let Some(published) = state.borrow_mut().arenas.get_mut(&key) {
-            published.in_publication = true;
-        }
-    });
+    begin_publication(arena, "invalidation journal publication");
 }
 
 pub(crate) fn after_journal_publication(arena: &LayoutNodeArena) {
