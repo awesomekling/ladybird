@@ -6,8 +6,8 @@
 
 use super::abspos_inputs::AbsposLayoutInputs;
 use super::formatting_context::DerivedBaselines;
-use super::formatting_context::FfiLayoutHostCallbacks;
 use super::formatting_context::LayoutMode;
+use super::formatting_context::{FfiLayoutHostCallbacks, LayoutHost};
 use super::geometry::AvailableSize;
 use super::geometry::AvailableSpace;
 use super::rendered_text::{FfiTextSource, FfiTextSourceRange, RenderedTextBoundary, TextContent, TextFragments};
@@ -16,7 +16,7 @@ use super::svg_formatting_context::FfiSvgAttributeFacts;
 /// How many interned names one SVG element's publication can name.
 const PUBLISHED_REFERENCE_ATOM_COUNT: usize = 5;
 use super::tree_builder::FfiLayoutTreeBuildOutcome;
-use super::update_layout::{FfiLayoutTreeBuildStats, FfiLayoutUpdateHostCallbacks};
+use super::update_layout::{FfiLayoutTreeBuildStats, LayoutUpdateHost};
 use super::used_values::SizeConstraint;
 use super::used_values::UsedValues;
 use crate::css::style::bridge::ElementBoxKind;
@@ -628,7 +628,7 @@ pub(crate) struct LayoutNodeArena {
     /// them.
     pending_rebuilt_subtree_roots: RefCell<Vec<NodeSlotId>>,
     pending_layout_tree_update_escaped_rebuild_roots: Cell<bool>,
-    layout_update_host: Cell<Option<FfiLayoutUpdateHostCallbacks>>,
+    layout_update_host: Cell<Option<LayoutUpdateHost>>,
     update_layout_running: Cell<bool>,
     /// Every box must be recreated by the next layout tree build; set when the tree is torn down
     /// or a build finds a box it cannot place among rebuilt roots, cleared by the full pass.
@@ -1667,6 +1667,10 @@ impl LayoutNodeArena {
         self.layout_host.get().expect("layout node arena has no layout host")
     }
 
+    pub(crate) fn guarded_layout_host(&self) -> LayoutHost {
+        self.layout_host().into()
+    }
+
     pub(crate) fn set_document_is_decoded_svg(&self, is_decoded_svg: bool) {
         self.document_is_decoded_svg.set(is_decoded_svg);
     }
@@ -1740,11 +1744,11 @@ impl LayoutNodeArena {
         self.pending_layout_tree_update_escaped_rebuild_roots.set(false);
     }
 
-    pub(crate) fn set_layout_update_host(&self, host: Option<FfiLayoutUpdateHostCallbacks>) {
+    pub(crate) fn set_layout_update_host(&self, host: Option<LayoutUpdateHost>) {
         self.layout_update_host.set(host);
     }
 
-    pub(crate) fn layout_update_host(&self) -> FfiLayoutUpdateHostCallbacks {
+    pub(crate) fn layout_update_host(&self) -> LayoutUpdateHost {
         self.layout_update_host
             .get()
             .expect("layout node arena has no layout update host")
@@ -5648,7 +5652,7 @@ pub(crate) unsafe fn sync_enrolled_content_for_layout(main_thread: &crate::stage
     if unsafe { &*arena.cast::<LayoutNodeArena>() }.layout_pass_is_running() {
         return;
     }
-    let host = unsafe { &*arena.cast::<LayoutNodeArena>() }.layout_host();
+    let host = unsafe { &*arena.cast::<LayoutNodeArena>() }.guarded_layout_host();
     let enrolled_text_nodes = unsafe { &*arena.cast::<LayoutNodeArena>() }.pending_text_nodes_for_content_sync();
     for node in enrolled_text_nodes {
         let shell = unsafe { &*arena.cast::<LayoutNodeArena>() }.shell_if_live(node);

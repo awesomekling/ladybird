@@ -13,6 +13,12 @@ use crate::painting::style_queries;
 use std::ffi::c_void;
 use std::fmt::Write;
 
+pub(crate) struct MainThreadFfiEntry {
+    _private: (),
+}
+
+const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
+
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiStackingContextDumpCallbacks {
@@ -22,18 +28,29 @@ pub struct FfiStackingContextDumpCallbacks {
     pub append_text: unsafe extern "C" fn(context: *mut c_void, bytes: *const u8, byte_count: usize),
 }
 
-impl FfiStackingContextDumpCallbacks {
+struct StackingContextDumpHost<'a> {
+    callbacks: FfiStackingContextDumpCallbacks,
+    _main_thread: &'a crate::stage::MainThread,
+}
+
+impl StackingContextDumpHost<'_> {
     fn debug_description(&self, layout_node_shell: *mut c_void) -> String {
         let mut description = Vec::new();
         // SAFETY: The C++ host fills the description sink synchronously through the exported push
         // function.
-        unsafe { (self.debug_description)(self.context, layout_node_shell, (&raw mut description).cast()) };
+        unsafe {
+            (self.callbacks.debug_description)(
+                self.callbacks.context,
+                layout_node_shell,
+                (&raw mut description).cast(),
+            );
+        };
         String::from_utf8_lossy(&description).into_owned()
     }
 
     fn append_text(&self, text: &str) {
         // SAFETY: The C++ sink copies the completed dump synchronously.
-        unsafe { (self.append_text)(self.context, text.as_ptr(), text.len()) };
+        unsafe { (self.callbacks.append_text)(self.callbacks.context, text.as_ptr(), text.len()) };
     }
 }
 
@@ -48,6 +65,11 @@ pub unsafe extern "C" fn layout_arena_dump_stacking_context_tree(
     viewport: NodeSlotId,
     callbacks: FfiStackingContextDumpCallbacks,
 ) {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let callbacks = StackingContextDumpHost {
+        callbacks,
+        _main_thread: &main_thread,
+    };
     // SAFETY: The caller guarantees a live arena handle borrowed for this call.
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     if arena.stacking_context_entries(viewport).is_none() {
@@ -63,7 +85,7 @@ fn visit(
     arena: &LayoutNodeArena,
     root: NodeSlotId,
     depth: usize,
-    callbacks: &FfiStackingContextDumpCallbacks,
+    callbacks: &StackingContextDumpHost<'_>,
 ) {
     output.extend(std::iter::repeat_n(' ', depth));
     if !arena.slot_is_live(root) {

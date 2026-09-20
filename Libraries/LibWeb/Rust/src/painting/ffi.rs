@@ -1696,6 +1696,7 @@ pub unsafe extern "C" fn layout_arena_publish_recording(
     let Some(pending) = arena.paint_state().borrow_mut().pending_recording.take() else {
         return 0;
     };
+    let publish = crate::painting::host::RecordingPublishHost::from(publish);
     crate::painting::published_immutable::before_publication(arena);
     let sequence = crate::painting::record::publish::publish_recording(arena, pending, &main_thread, &publish);
     crate::painting::published_immutable::published(arena);

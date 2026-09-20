@@ -54,7 +54,7 @@ impl CommitNotifications {
     ///
     /// The host must keep the document and node shells alive until these synchronous
     /// notifications return. No mutable arena borrow may be active.
-    pub(crate) unsafe fn notify_host(self, main_thread: &crate::stage::MainThread, host: &FfiLayoutHostCallbacks) {
+    pub(crate) unsafe fn notify_host(self, main_thread: &crate::stage::MainThread, host: &LayoutHost) {
         for reset in self.row_resets {
             super::tree_build_seal::note_host_call("paintable_row_reset");
             reset.invoke_callback_on_main_thread(main_thread);

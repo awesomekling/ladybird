@@ -936,7 +936,33 @@ pub struct FfiLayoutHostCallbacks {
         unsafe extern "C" fn(*mut c_void) -> viewport_propagation::FfiViewportPropagationFacts,
 }
 
-impl FfiLayoutHostCallbacks {
+#[derive(Clone, Copy)]
+/// The layout host is callable only from code that holds the main-thread capability.
+///
+/// ```compile_fail
+/// fn layout_stage(host: &libweb_rust::layout::formatting_context::LayoutHost) {
+///     host.viewport_propagation_facts();
+/// }
+/// ```
+pub(crate) struct LayoutHost {
+    context: *mut c_void,
+    deliver_commit_messages: unsafe extern "C" fn(*mut c_void, *const commit::FfiCommitMessage, usize),
+    build_replaced_content_facts: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut FfiReplacedContentFacts),
+    viewport_propagation_facts: unsafe extern "C" fn(*mut c_void) -> viewport_propagation::FfiViewportPropagationFacts,
+}
+
+impl From<FfiLayoutHostCallbacks> for LayoutHost {
+    fn from(host: FfiLayoutHostCallbacks) -> Self {
+        Self {
+            context: host.context,
+            deliver_commit_messages: host.deliver_commit_messages,
+            build_replaced_content_facts: host.build_replaced_content_facts,
+            viewport_propagation_facts: host.viewport_propagation_facts,
+        }
+    }
+}
+
+impl LayoutHost {
     fn viewport_propagation_facts(
         &self,
         _: &crate::stage::MainThread,
@@ -2490,7 +2516,7 @@ pub(crate) unsafe fn run_root_layout(
     assert!(!root.is_invalid());
     // SAFETY: The caller keeps the arena alive for this synchronous call. The host table is
     // copied out so no arena borrow spans a host callback.
-    let host = unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_host();
+    let host = unsafe { LayoutNodeArena::from_handle(arena_handle) }.guarded_layout_host();
     seal::note_host_call(
         unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_pass_is_running(),
         "viewport_propagation_facts",
@@ -2558,7 +2584,7 @@ fn finish_entry_pass(
 unsafe fn commit_entry_pass<'a>(
     main_thread: &crate::stage::MainThread,
     arena_handle: *mut c_void,
-    host: &FfiLayoutHostCallbacks,
+    host: &LayoutHost,
     commit_root: NodeSlotId,
     pass_fragments: &fragment_tree::CompletedPassFragments,
 ) -> &'a LayoutNodeArena {
@@ -2682,7 +2708,7 @@ pub(crate) unsafe fn compute_subtree_layout(
     assert!(!root.is_invalid());
     // SAFETY: The caller keeps the arena alive for this synchronous call. The host table is
     // copied out so no arena borrow spans a host callback.
-    let host = unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_host();
+    let host = unsafe { LayoutNodeArena::from_handle(arena_handle) }.guarded_layout_host();
     // SAFETY: The host keeps the arena and its published inputs alive and unchanged for the
     // synchronous stage run.
     let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
