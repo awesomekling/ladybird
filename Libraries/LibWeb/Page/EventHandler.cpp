@@ -248,6 +248,20 @@ static CSS::UserSelect user_select_used_value_for_caret_position(Painting::Caret
     return CSS::UserSelect::Auto;
 }
 
+// The navigable an event over a navigable container's viewport goes to. The container publishes the
+// navigable hosting its content whenever that navigable changes, so the hit names it without the
+// DOM. Content hosted by another process has no local navigable here; the UI process dispatches
+// events over it to the process hosting it, so the event is dropped either way.
+static GC::Ptr<HTML::LocalNavigable> local_content_navigable_of(Layout::Node const& layout_node)
+{
+    auto published = Layout::RustFFI::layout_arena_navigable_container_local_content_navigable(
+        layout_node.arena_handle(), Layout::Node::slot_id(&layout_node));
+    HTML::CrossProcessId content_navigable { .namespace_id = published.namespace_id, .local_id = published.local_id };
+    if (content_navigable == HTML::CrossProcessId {})
+        return {};
+    return HTML::local_navigable_with_id(content_navigable);
+}
+
 // An event over content another process hosts is that process's to handle, at the position in the content's viewport.
 // It is recorded for a caller that can forward it, and dropped for one that cannot.
 static Optional<EventResult> dispatch_event_to_nested_navigable(Layout::Node const& layout_node, GC::Ptr<DOM::Node> node, CSSPixelPoint viewport_position, Optional<RemoteInputEventTarget>* remote_target, Function<EventResult(EventHandler&, CSSPixelPoint)> dispatch)
@@ -257,11 +271,10 @@ static Optional<EventResult> dispatch_event_to_nested_navigable(Layout::Node con
 
     if (Painting::is_navigable_container_viewport_paintable(layout_node)) {
         auto position = Painting::transform_to_local_coordinates(layout_node, viewport_position) - Painting::absolute_rect(layout_node).location();
-        if (auto content_navigable = as_if<HTML::NavigableContainer>(*node)->content_navigable()) {
-            if (auto* local_navigable = as_if<HTML::LocalNavigable>(*content_navigable))
-                return dispatch(local_navigable->event_handler(), position);
-            if (!remote_target)
-                return EventResult::Dropped;
+        if (auto local_navigable = local_content_navigable_of(layout_node))
+            return dispatch(local_navigable->event_handler(), position);
+        // Content hosted by another process has no published local navigable; the container names the remote one.
+        if (auto content_navigable = as_if<HTML::NavigableContainer>(*node)->content_navigable(); content_navigable && remote_target) {
             *remote_target = RemoteInputEventTarget { content_navigable->id(), position };
             return EventResult::Handled;
         }

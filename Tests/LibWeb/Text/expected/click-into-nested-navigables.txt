@@ -1,0 +1,5 @@
+click into a new iframe: first document
+click after the iframe navigated: second document
+click after the iframe was reinserted: third document
+click into a nested iframe: inner document
+click beside the nested iframe: outer document

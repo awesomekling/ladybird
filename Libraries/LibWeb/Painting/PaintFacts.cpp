@@ -98,6 +98,32 @@ static Optional<u64> composited_context_id_for_navigable_container(HTML::Navigab
     return context_id->value();
 }
 
+static void push_navigable_container_paint_facts_onto(HTML::NavigableContainer const& navigable_container, Layout::Node const& layout_node)
+{
+    Layout::RustFFI::FfiNavigableContainerPaintFacts facts {};
+    if (auto context_id = composited_context_id_for_navigable_container(navigable_container); context_id.has_value()) {
+        facts.has_composited_context = true;
+        facts.composited_context_id = *context_id;
+    }
+    // Only a navigable this process hosts: an event over content hosted elsewhere goes to the
+    // process hosting it, and a local navigable standing in for that content carries the same id.
+    if (auto content_navigable = navigable_container.content_navigable(); content_navigable && (is<HTML::LocalNavigable>(*content_navigable))) {
+        facts.local_content_navigable.namespace_id = content_navigable->id().namespace_id;
+        facts.local_content_navigable.local_id = content_navigable->id().local_id;
+    }
+    bool changed = Layout::RustFFI::layout_arena_set_navigable_container_paint_facts(layout_node.arena_handle(), Layout::Node::slot_id(&layout_node), facts);
+    if (changed && has_committed_box(layout_node))
+        invalidate_paint_cache(layout_node);
+}
+
+void push_navigable_container_paint_facts(HTML::NavigableContainer const& navigable_container)
+{
+    auto const* layout_node = navigable_container.unsafe_layout_node();
+    if (!layout_node || layout_node->kind() != Layout::RustFFI::NodeKind::NavigableContainerViewport)
+        return;
+    push_navigable_container_paint_facts_onto(navigable_container, *layout_node);
+}
+
 void reconcile_navigable_container_paint_facts(DOM::Document const& document)
 {
     for (auto const* navigable_container : HTML::NavigableContainer::all_instances()) {
@@ -106,14 +132,7 @@ void reconcile_navigable_container_paint_facts(DOM::Document const& document)
         auto const* layout_node = navigable_container->layout_node();
         if (!layout_node || !is_navigable_container_viewport_paintable(*layout_node))
             continue;
-        Layout::RustFFI::FfiNavigableContainerPaintFacts facts {};
-        if (auto context_id = composited_context_id_for_navigable_container(*navigable_container); context_id.has_value()) {
-            facts.has_composited_context = true;
-            facts.composited_context_id = *context_id;
-        }
-        bool changed = Layout::RustFFI::layout_arena_set_navigable_container_paint_facts(layout_node->arena_handle(), Layout::Node::slot_id(layout_node), facts);
-        if (changed)
-            invalidate_paint_cache(*layout_node);
+        push_navigable_container_paint_facts_onto(*navigable_container, *layout_node);
     }
 }
 
@@ -267,6 +286,8 @@ void push_paint_facts_after_style_attach(Layout::NodeWithStyle& layout_node, Sty
         push_replaced_image_paint_facts(as<SVG::SVGImageElement>(*layout_node.dom_node()), layout_node);
     else if (layout_node.kind() == Layout::RustFFI::NodeKind::VideoBox)
         push_video_paint_facts_onto(as<HTML::HTMLVideoElement>(*layout_node.dom_node()), layout_node);
+    else if (layout_node.kind() == Layout::RustFFI::NodeKind::NavigableContainerViewport)
+        push_navigable_container_paint_facts_onto(as<HTML::NavigableContainer>(*layout_node.dom_node()), layout_node);
 }
 
 }
