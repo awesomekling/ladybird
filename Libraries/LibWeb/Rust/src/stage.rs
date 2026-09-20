@@ -45,6 +45,13 @@ impl MainThread {
 /// struct StageEntry;
 /// impl libweb_rust::stage::FfiEntry for StageEntry {}
 /// ```
+///
+/// ```compile_fail
+/// fn move_to_worker(_: impl Send) {}
+/// fn main_thread_entry(token: libweb_rust::stage::MainThread) {
+///     move_to_worker(token);
+/// }
+/// ```
 pub(crate) unsafe fn from_ffi_entry(_: &impl FfiEntry) -> MainThread {
     // SAFETY: Implementations are restricted below to marker types whose values can only be
     // constructed in their designated FFI entry module.
@@ -61,7 +68,10 @@ macro_rules! ffi_entry {
 ffi_entry!(crate::layout::formatting_context::MainThreadFfiEntry);
 ffi_entry!(crate::layout::ArenaMainThreadFfiEntry);
 ffi_entry!(crate::layout::UpdateMainThreadFfiEntry);
+ffi_entry!(crate::painting::display_list::dump::MainThreadFfiEntry);
 ffi_entry!(crate::painting::ffi::MainThreadFfiEntry);
+ffi_entry!(crate::painting::layout_tree_dump::MainThreadFfiEntry);
+ffi_entry!(crate::painting::stacking_context::dump::MainThreadFfiEntry);
 
 const _: () = assert!(size_of::<MainThread>() == 0);
 

@@ -6,7 +6,7 @@
 
 use crate::layout::LayoutNodeArena;
 use crate::painting::display_list::commands::{DisplayListCommandType, DisplayListResourceId, PaintNestedDisplayList};
-use crate::painting::host::FfiRecordingPublishCallbacks;
+use crate::painting::host::RecordingPublishHost;
 use crate::painting::paint_state::PendingRecording;
 use crate::painting::record::resources::RecordingResourceManifest;
 use crate::painting::record::vector_images::{
@@ -18,7 +18,7 @@ fn resolve_vector_image_placeholders(
     output: &mut RecordingOutput,
     requests: &[VectorImageRenderRequest],
     main_thread: &crate::stage::MainThread,
-    publish: &FfiRecordingPublishCallbacks,
+    publish: &RecordingPublishHost,
 ) {
     if requests.is_empty() {
         return;
@@ -56,7 +56,7 @@ pub(crate) fn publish_recording(
     arena: &LayoutNodeArena,
     pending: PendingRecording,
     main_thread: &crate::stage::MainThread,
-    publish: &FfiRecordingPublishCallbacks,
+    publish: &RecordingPublishHost,
 ) -> u64 {
     let PendingRecording {
         recording: RecordingResult { mut output, resources },

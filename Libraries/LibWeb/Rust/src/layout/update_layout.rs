@@ -90,7 +90,47 @@ pub struct FfiLayoutTreeBuildStats {
     pub last_build_escaped_rebuild_roots: bool,
 }
 
-impl FfiLayoutUpdateHostCallbacks {
+#[derive(Clone, Copy)]
+pub(crate) struct LayoutUpdateHost {
+    context: *mut c_void,
+    connected_element_count: unsafe extern "C" fn(*mut c_void) -> u32,
+    update_style: unsafe extern "C" fn(*mut c_void),
+    process_pending_list_item_renumbers: unsafe extern "C" fn(*mut c_void),
+    process_pending_top_layer_layout_changes: unsafe extern "C" fn(*mut c_void),
+    document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
+    needs_style_update_after_layout: unsafe extern "C" fn(*mut c_void) -> bool,
+    prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
+    build_layout_tree: unsafe extern "C" fn(*mut c_void) -> FfiLayoutTreeBuildOutcome,
+    reconcile_stale_list_item_counters_after_tree_build: unsafe extern "C" fn(*mut c_void) -> bool,
+    after_layout_commit: unsafe extern "C" fn(*mut c_void, bool),
+    note_full_layout_performed: unsafe extern "C" fn(*mut c_void),
+    evaluate_pending_container_queries: unsafe extern "C" fn(*mut c_void),
+    record_stabilization_bound_failure: unsafe extern "C" fn(*mut c_void),
+}
+
+impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
+    fn from(host: FfiLayoutUpdateHostCallbacks) -> Self {
+        Self {
+            context: host.context,
+            connected_element_count: host.connected_element_count,
+            update_style: host.update_style,
+            process_pending_list_item_renumbers: host.process_pending_list_item_renumbers,
+            process_pending_top_layer_layout_changes: host.process_pending_top_layer_layout_changes,
+            document_facts: host.document_facts,
+            needs_style_update_after_layout: host.needs_style_update_after_layout,
+            prepare_for_rendering: host.prepare_for_rendering,
+            build_layout_tree: host.build_layout_tree,
+            reconcile_stale_list_item_counters_after_tree_build: host
+                .reconcile_stale_list_item_counters_after_tree_build,
+            after_layout_commit: host.after_layout_commit,
+            note_full_layout_performed: host.note_full_layout_performed,
+            evaluate_pending_container_queries: host.evaluate_pending_container_queries,
+            record_stabilization_bound_failure: host.record_stabilization_bound_failure,
+        }
+    }
+}
+
+impl LayoutUpdateHost {
     // SAFETY (for every call below): The C++ host answers synchronously from its live document.
     fn connected_element_count(&self, _: &crate::stage::MainThread) -> u32 {
         unsafe { (self.connected_element_count)(self.context) }
@@ -224,7 +264,7 @@ unsafe fn arena<'a>(arena_handle: *mut c_void) -> &'a LayoutNodeArena {
 unsafe fn try_partial_relayout(
     main_thread: &crate::stage::MainThread,
     arena_handle: *mut c_void,
-    host: &FfiLayoutUpdateHostCallbacks,
+    host: &LayoutUpdateHost,
     facts: &FfiLayoutUpdateDocumentFacts,
     registered_partial_relayout_roots: &mut Vec<NodeSlotId>,
     needs_layout_tree_rebuild: &mut bool,
@@ -447,7 +487,7 @@ pub unsafe extern "C" fn layout_arena_set_layout_update_host_callbacks(
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_layout_update_host(Some(callbacks));
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_layout_update_host(Some(callbacks.into()));
 }
 
 /// # Safety

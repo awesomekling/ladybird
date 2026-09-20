@@ -76,7 +76,7 @@ use crate::layout::node_data::NodeSlotId;
 pub use crate::layout::node_data::STYLE_GROUP_COUNT;
 pub(crate) use abspos_inputs::{AbsposAlignment, StaticPositionAlignment};
 pub(crate) use formatting_context::{
-    ChildLayoutOutcome, DerivedBaselines, FfiLayoutHostCallbacks, FormattingContextRun, LayoutMode, Node, SizingAxis,
+    ChildLayoutOutcome, DerivedBaselines, FormattingContextRun, LayoutHost, LayoutMode, Node, SizingAxis,
     SizingProperty,
 };
 pub(crate) use fragment_tree::FragmentLink;

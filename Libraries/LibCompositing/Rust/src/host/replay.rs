@@ -27,59 +27,75 @@ pub struct FfiDisplayListReplayCallbacks {
     pub execute_run: unsafe extern "C" fn(*mut c_void, usize),
 }
 
-impl ReplayPainter for FfiDisplayListReplayCallbacks {
+pub(crate) struct DisplayListReplayHost<'a> {
+    callbacks: FfiDisplayListReplayCallbacks,
+    _main_thread: &'a crate::stage::MainThread,
+}
+
+impl<'a> DisplayListReplayHost<'a> {
+    pub(crate) fn new(callbacks: FfiDisplayListReplayCallbacks, main_thread: &'a crate::stage::MainThread) -> Self {
+        Self {
+            callbacks,
+            _main_thread: main_thread,
+        }
+    }
+}
+
+impl ReplayPainter for DisplayListReplayHost<'_> {
     fn canvas_matrix(&mut self) -> FloatMatrix4x4 {
         // SAFETY: The C++ painter answers synchronously.
-        unsafe { (self.canvas_matrix)(self.context) }
+        unsafe { (self.callbacks.canvas_matrix)(self.callbacks.context) }
     }
 
     fn set_matrix(&mut self, matrix: &FloatMatrix4x4) {
         // SAFETY: The C++ painter reads the matrix synchronously.
-        unsafe { (self.set_matrix)(self.context, matrix) };
+        unsafe { (self.callbacks.set_matrix)(self.callbacks.context, matrix) };
     }
 
     fn would_be_fully_clipped_by_painter(&mut self, rect: IntRect) -> bool {
         // SAFETY: The C++ painter answers synchronously.
-        unsafe { (self.would_be_fully_clipped_by_painter)(self.context, rect) }
+        unsafe { (self.callbacks.would_be_fully_clipped_by_painter)(self.callbacks.context, rect) }
     }
 
     fn push_clip(&mut self, clip: &ReplayClip) {
         // SAFETY: The C++ painter reads the clip synchronously.
-        unsafe { (self.push_clip)(self.context, clip) };
+        unsafe { (self.callbacks.push_clip)(self.callbacks.context, clip) };
     }
 
     fn push_clip_path(&mut self, path: &OwnedPath, winding_rule: WindingRule) {
         // SAFETY: The C++ painter reads the Gfx::Path synchronously; the tree keeps it alive.
-        unsafe { (self.push_clip_path)(self.context, path.as_raw(), winding_rule) };
+        unsafe { (self.callbacks.push_clip_path)(self.callbacks.context, path.as_raw(), winding_rule) };
     }
 
     fn push_layer(&mut self, layer: &ReplayLayer) {
         // SAFETY: The C++ painter reads the layer and its filter bytes synchronously; the tree keeps them alive.
-        unsafe { (self.push_layer)(self.context, layer) };
+        unsafe { (self.callbacks.push_layer)(self.callbacks.context, layer) };
     }
 
     fn push_mask(&mut self, mask: &ReplayMask) {
         // SAFETY: The C++ painter reads the mask synchronously.
-        unsafe { (self.push_mask)(self.context, mask) };
+        unsafe { (self.callbacks.push_mask)(self.callbacks.context, mask) };
     }
 
     fn pop_mask(&mut self, mask: &ReplayMask, effect: EffectNodeIndex) {
         // SAFETY: The C++ painter reads the mask synchronously.
-        unsafe { (self.pop_mask)(self.context, mask, effect) };
+        unsafe { (self.callbacks.pop_mask)(self.callbacks.context, mask, effect) };
     }
 
     fn pop(&mut self) {
         // SAFETY: The C++ painter pops synchronously.
-        unsafe { (self.pop)(self.context) };
+        unsafe { (self.callbacks.pop)(self.callbacks.context) };
     }
 
     fn push_device_space_plane_clip(&mut self, vertices: &[FloatVector3]) {
         // SAFETY: The C++ painter reads the vertices synchronously.
-        unsafe { (self.push_device_space_plane_clip)(self.context, vertices.as_ptr(), vertices.len()) };
+        unsafe {
+            (self.callbacks.push_device_space_plane_clip)(self.callbacks.context, vertices.as_ptr(), vertices.len());
+        };
     }
 
     fn execute_run(&mut self, run_index: usize) {
         // SAFETY: The C++ painter plays the run's commands synchronously.
-        unsafe { (self.execute_run)(self.context, run_index) };
+        unsafe { (self.callbacks.execute_run)(self.callbacks.context, run_index) };
     }
 }

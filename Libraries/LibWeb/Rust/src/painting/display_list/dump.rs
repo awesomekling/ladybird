@@ -27,6 +27,12 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::fmt::Write;
 
+pub(crate) struct MainThreadFfiEntry {
+    _private: (),
+}
+
+const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
+
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiPaintingDumpCallbacks {
@@ -39,12 +45,23 @@ pub struct FfiPaintingDumpCallbacks {
     pub append_text: unsafe extern "C" fn(context: *mut c_void, bytes: *const u8, byte_count: usize),
 }
 
-impl FfiPaintingDumpCallbacks {
+struct PaintingDumpHost<'a> {
+    callbacks: FfiPaintingDumpCallbacks,
+    _main_thread: &'a crate::stage::MainThread,
+}
+
+impl PaintingDumpHost<'_> {
     fn debug_description(&self, layout_node_shell: *mut c_void) -> String {
         let mut description = Vec::new();
         // SAFETY: The C++ host fills the description sink synchronously through the exported push
         // function.
-        unsafe { (self.debug_description)(self.context, layout_node_shell, (&raw mut description).cast()) };
+        unsafe {
+            (self.callbacks.debug_description)(
+                self.callbacks.context,
+                layout_node_shell,
+                (&raw mut description).cast(),
+            );
+        };
         String::from_utf8_lossy(&description).into_owned()
     }
 
@@ -52,7 +69,8 @@ impl FfiPaintingDumpCallbacks {
         let mut byte_count = 0;
         // SAFETY: The host owns the display list for the duration of the dump and returns a span
         // that stays live for this call.
-        let bytes = unsafe { (self.command_bytes)(self.context, display_list, &raw mut byte_count) };
+        let bytes =
+            unsafe { (self.callbacks.command_bytes)(self.callbacks.context, display_list, &raw mut byte_count) };
         if byte_count == 0 {
             return &[];
         }
@@ -63,14 +81,14 @@ impl FfiPaintingDumpCallbacks {
 
     fn nested_display_list(&self, display_list_id: DisplayListResourceId) -> *const c_void {
         // SAFETY: Nested ids come from records the host produced, so they resolve in its storage.
-        let display_list = unsafe { (self.nested_display_list)(self.context, display_list_id.0) };
+        let display_list = unsafe { (self.callbacks.nested_display_list)(self.callbacks.context, display_list_id.0) };
         assert!(!display_list.is_null());
         display_list
     }
 
     fn append_text(&self, text: &str) {
         // SAFETY: The C++ sink copies the completed dump synchronously.
-        unsafe { (self.append_text)(self.context, text.as_ptr(), text.len()) };
+        unsafe { (self.callbacks.append_text)(self.callbacks.context, text.as_ptr(), text.len()) };
     }
 }
 
@@ -142,6 +160,11 @@ pub unsafe extern "C" fn painting_dump(
     display_list: *const c_void,
     callbacks: FfiPaintingDumpCallbacks,
 ) {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let callbacks = PaintingDumpHost {
+        callbacks,
+        _main_thread: &main_thread,
+    };
     assert!(!display_list.is_null());
     let arena = unsafe { crate::painting::ffi::arena_from_handle(arena) };
     let visual_context_tree = unsafe { libcompositing_rust::ffi::tree_from_handle(visual_context_tree) };
@@ -162,19 +185,14 @@ fn push_indent(output: &mut String, indent: usize) {
 
 fn dump_commands(
     output: &mut String,
-    callbacks: &FfiPaintingDumpCallbacks,
+    callbacks: &PaintingDumpHost<'_>,
     display_list: *const c_void,
     base_indent: usize,
 ) {
     dump_command_bytes(output, callbacks, callbacks.command_bytes(display_list), base_indent);
 }
 
-fn dump_command_bytes(
-    output: &mut String,
-    callbacks: &FfiPaintingDumpCallbacks,
-    command_bytes: &[u8],
-    base_indent: usize,
-) {
+fn dump_command_bytes(output: &mut String, callbacks: &PaintingDumpHost<'_>, command_bytes: &[u8], base_indent: usize) {
     for_each_command(command_bytes, |header, _, payload| {
         push_indent(output, base_indent);
         write!(output, "{}@", header.command_type.name()).unwrap();
@@ -217,7 +235,7 @@ fn nested_display_lists(command_type: DisplayListCommandType, payload: &[u8]) ->
 
 fn dump_records_inside(
     output: &mut String,
-    callbacks: &FfiPaintingDumpCallbacks,
+    callbacks: &PaintingDumpHost<'_>,
     command_type: DisplayListCommandType,
     payload: &[u8],
     indent: usize,

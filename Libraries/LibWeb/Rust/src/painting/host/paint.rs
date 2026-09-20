@@ -556,7 +556,28 @@ pub struct FfiRecordingPublishCallbacks {
     pub add_video_sink: unsafe extern "C" fn(*mut c_void, u64, u64),
 }
 
-impl FfiRecordingPublishCallbacks {
+#[derive(Clone, Copy)]
+pub(crate) struct RecordingPublishHost {
+    context: *mut c_void,
+    add_font: unsafe extern "C" fn(*mut c_void, *const c_void),
+    add_image_frame: unsafe extern "C" fn(*mut c_void, *const c_void),
+    resolve_vector_image_display_list: unsafe extern "C" fn(*mut c_void, *const FfiVectorImageRenderRequest) -> u64,
+    add_video_sink: unsafe extern "C" fn(*mut c_void, u64, u64),
+}
+
+impl From<FfiRecordingPublishCallbacks> for RecordingPublishHost {
+    fn from(host: FfiRecordingPublishCallbacks) -> Self {
+        Self {
+            context: host.context,
+            add_font: host.add_font,
+            add_image_frame: host.add_image_frame,
+            resolve_vector_image_display_list: host.resolve_vector_image_display_list,
+            add_video_sink: host.add_video_sink,
+        }
+    }
+}
+
+impl RecordingPublishHost {
     pub(crate) fn add_font(&self, _: &crate::stage::MainThread, font: &libgfx_rust::font::FontHandle) {
         // SAFETY: The C++ host registers the live font synchronously.
         unsafe { (self.add_font)(self.context, font.as_raw()) };
