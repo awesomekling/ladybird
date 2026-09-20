@@ -29,6 +29,7 @@
 #include <LibWeb/HTML/HTMLBodyElement.h>
 #include <LibWeb/HTML/HTMLElement.h>
 #include <LibWeb/Layout/Box.h>
+#include <LibWeb/Layout/ImageProvider.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/NodeArena.h>
@@ -466,4 +467,9 @@ extern "C" WEB_API Web::Layout::RustFFI::FfiCodePointCategoryFacts ladybird_layo
 extern "C" WEB_API void ladybird_layout_node_shell_destroy(void* shell)
 {
     Web::Layout::Node::delete_arena_owned_shell(*static_cast<Web::Layout::Node*>(shell));
+}
+
+extern "C" WEB_API void ladybird_layout_owned_image_provider_destroy(void* image_provider)
+{
+    delete static_cast<Web::Layout::ImageProvider*>(image_provider);
 }

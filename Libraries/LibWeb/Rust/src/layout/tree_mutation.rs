@@ -10,6 +10,7 @@ use std::ffi::c_void;
 
 unsafe extern "C" {
     fn ladybird_layout_node_shell_destroy(shell: *mut c_void);
+    fn ladybird_layout_owned_image_provider_destroy(provider: *mut c_void);
 }
 
 pub(crate) fn destroy_shell(shell: *mut c_void) {
@@ -19,6 +20,18 @@ pub(crate) fn destroy_shell(shell: *mut c_void) {
     // SAFETY: The arena has already freed the shell's slot, and destroying a shell never
     // re-enters the arena.
     unsafe { ladybird_layout_node_shell_destroy(shell) };
+}
+
+/// An image provider a row owns outlives no row: the arena hands it back when the row is freed and
+/// the host deletes it. Deleting one never reads a layout node, so the order against the shells is
+/// free.
+pub(crate) fn destroy_owned_image_provider(provider: *mut c_void) {
+    if provider.is_null() {
+        return;
+    }
+    // SAFETY: The arena has already freed the provider's row, and deleting a provider never
+    // re-enters the arena.
+    unsafe { ladybird_layout_owned_image_provider_destroy(provider) };
 }
 
 pub(crate) fn free_subtree_and_destroy_shells(arena: *mut LayoutNodeArena, root: NodeSlotId) {
@@ -115,6 +128,9 @@ impl LayoutNodeArena {
 mod ffi_test_stubs {
     #[unsafe(no_mangle)]
     extern "C" fn ladybird_layout_node_shell_destroy(_shell: *mut std::ffi::c_void) {}
+
+    #[unsafe(no_mangle)]
+    extern "C" fn ladybird_layout_owned_image_provider_destroy(_provider: *mut std::ffi::c_void) {}
 }
 
 #[cfg(test)]
