@@ -16,7 +16,9 @@
 //! keyframes, cancelling what no definition claimed - it does from the list it already holds.
 
 use super::tree::StyleNodeID;
+use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::css_string::CssString;
+use crate::css::host_shared::SharedPayload;
 use std::collections::HashMap;
 
 /// Which of an element's animation lists a row belongs to, in the host's own numbering: zero for
@@ -85,6 +87,57 @@ pub(crate) fn match_existing_animations(existing: &[CssString], definition_names
         }
     }
     matches
+}
+
+/// Whether an element's published style record computed `display: none`, as the value stood before
+/// any animation overlay was layered on it. The base payloads are exactly what
+/// `ComputedValues::base_values()` exposes, so an element animating its own `display` answers with
+/// the value its animations are running against.
+#[must_use]
+fn published_base_display_is_none(engine: &super::StyleEngine, node: StyleNodeID) -> bool {
+    // No record names a node that is not an element - a shadow root, the document - and one whose
+    // identity has been retired or whose style has not reached it yet.
+    let Some((record, _)) = engine.element_published_style_record(node) else {
+        return false;
+    };
+    let Some(view) = engine.style_record_view(record) else {
+        return false;
+    };
+    let payloads = match view.base_payloads.is_empty() {
+        true => view.payloads,
+        false => view.base_payloads,
+    };
+    if payloads.is_empty() {
+        return false;
+    }
+    ComputedValuesView::new(SharedPayload::as_pointer_slice(payloads))
+        .display()
+        .is_none()
+}
+
+/// Whether `node` or one of its inclusive ancestors is `display: none`, ignoring animations.
+///
+/// A mirror of `Node::has_inclusive_ancestor_with_display_none_ignoring_animations()`. The walk
+/// climbs `parent_or_shadow_host()`, which is the tree the element is *in*: a slotted element
+/// continues through its light-DOM parent, not through the slot it is assigned to, and a shadow
+/// root continues through its host. Nodes that are not elements hold no record and are skipped,
+/// the way the host's walk skips them.
+#[must_use]
+pub(crate) fn has_inclusive_ancestor_with_display_none_ignoring_animations(
+    engine: &super::StyleEngine,
+    node: StyleNodeID,
+) -> bool {
+    let mut current = Some(node);
+    while let Some(ancestor) = current {
+        if published_base_display_is_none(engine, ancestor) {
+            return true;
+        }
+        current = engine
+            .tree()
+            .parent(ancestor)
+            .or_else(|| engine.tree().host_of(ancestor));
+    }
+    false
 }
 
 #[cfg(test)]
