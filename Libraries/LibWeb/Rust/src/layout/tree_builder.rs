@@ -115,10 +115,6 @@ pub(crate) enum StaleSubtreeClearScope {
 pub struct FfiDomTreeBuilderCallbacks {
     pub builder: *mut c_void,
     pub create_first_letter_nodes: unsafe extern "C" fn(*mut c_void, u32, FfiFirstLetterTarget) -> FfiFirstLetterNodes,
-    /// Computes the style of an element the walk reached through a bypass path without one. The
-    /// style stage settles every element it walks; a top-layer, slot-projection or SVG-reference
-    /// bypass can reach one it did not.
-    pub restyle_bypass_path_element: unsafe extern "C" fn(*mut c_void, u32),
     /// Attaches the image resources a box's style asks for. Principal and pseudo-element boxes
     /// both go through this; nothing about it depends on which the box is. The flag says the box
     /// replaces its element's contents with a single image, which it owns the provider for.
@@ -2430,21 +2426,6 @@ fn construct_principal_layout_node(
             if host.layout().first_child(box_kept).is_invalid() {
                 host.layout().set_children_are_inline(box_kept, false);
             }
-        }
-        // Nothing published a style for the element, so a bypass path reached it without the
-        // style stage settling it. The host is the only thing that can compute one, and the pin
-        // below needs the record it leaves.
-        let element_has_published_style = host
-            .layout()
-            .arena()
-            .with_style_store(|engine| engine.element_published_style_record(element_identity))
-            .is_some();
-        if should_create_layout_node && !element_has_published_style {
-            super::tree_build_seal::note_host_call("restyle_bypass_path_element");
-            // SAFETY: The builder remains live, and the identity names a live element.
-            unsafe {
-                (host.callbacks.restyle_bypass_path_element)(host.callbacks.builder, update.style_node);
-            };
         }
         // The record the box is built from is held for the whole build, taken after the host has
         // had its chance to compute a style the element arrived here without.
