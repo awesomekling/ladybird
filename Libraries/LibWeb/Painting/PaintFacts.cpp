@@ -281,7 +281,17 @@ static bool push_video_paint_facts_onto(HTML::HTMLVideoElement const& video_elem
         facts.representation = Layout::RustFFI::FfiVideoRepresentation::TransparentBlack;
         break;
     }
-    return Layout::RustFFI::layout_arena_set_video_paint_facts(layout_node.arena_handle(), Layout::Node::slot_id(&layout_node), facts);
+    auto identity = layout_node.dom_node_identity();
+    if (!identity)
+        return Layout::RustFFI::layout_arena_set_video_paint_facts(layout_node.arena_handle(), Layout::Node::slot_id(&layout_node), facts);
+    const_cast<DOM::Document&>(layout_node.document()).invalidation_journal().note_paint_facts(identity, DOM::PaintFactsFamily::Video, [facts, poster_frame_handle = move(poster_frame_handle)](Layout::Node const& current_layout_node) {
+        (void)poster_frame_handle;
+        if (current_layout_node.kind() != Layout::RustFFI::NodeKind::VideoBox)
+            return;
+        if (Layout::RustFFI::layout_arena_set_video_paint_facts(current_layout_node.arena_handle(), Layout::Node::slot_id(&current_layout_node), facts))
+            set_needs_repaint(current_layout_node, InvalidateDisplayList::PaintCommands);
+    });
+    return false;
 }
 
 void push_video_paint_facts(HTML::HTMLVideoElement const& video_element)
