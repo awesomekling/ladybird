@@ -334,12 +334,77 @@ pub unsafe extern "C" fn rust_should_preserve_svg_resource_layout_node(
 
 #[repr(C)]
 pub struct FfiTopLayerDetachCallbacks {
-    pub element_layout_node: unsafe extern "C" fn(*mut c_void) -> NodeSlotId,
+    /// Answers `clear_stale_layout_node`, which is the only thing the stale-subtree walk asks of
+    /// the main side.
+    pub context: *mut c_void,
     pub prepare_subtree_for_detach: unsafe extern "C" fn(*mut c_void),
-    pub clear_stale_subtree: unsafe extern "C" fn(*mut c_void),
-    pub slot_element: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
-    pub assigned_node_count: unsafe extern "C" fn(*mut c_void) -> usize,
-    pub assigned_node_at: unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void,
+    pub clear_stale_layout_node: unsafe extern "C" fn(*mut c_void, u32, u32) -> bool,
+}
+
+/// What the shadow-including walk that clears stale layout boxes needs. The navigation is the
+/// style mirror's, read out of the arena by identity; clearing one node's box is the main side's.
+/// The build and the top-layer detach path both walk this way, with different hosts behind the
+/// one callback.
+#[derive(Clone, Copy)]
+pub(crate) struct StaleSubtreeHost {
+    arena: *mut LayoutNodeArena,
+    context: *mut c_void,
+    clear_stale_layout_node: unsafe extern "C" fn(*mut c_void, u32, u32) -> bool,
+}
+
+impl StaleSubtreeHost {
+    fn arena(&self) -> &LayoutNodeArena {
+        // SAFETY: The arena outlives every walk over it.
+        unsafe { &*self.arena }
+    }
+
+    /// The first node in the DOM child sequence the style mirror holds for `style_node`, or 0.
+    fn first_dom_child(&self, style_node: u32) -> u32 {
+        raw_style_node(self.arena().first_dom_child(StyleNodeID::from_raw(style_node)))
+    }
+
+    /// The node after `style_node` in the DOM child sequence its parent holds, or 0.
+    fn next_dom_sibling(&self, style_node: u32) -> u32 {
+        let Some(style_node) = StyleNodeID::from_raw(style_node) else {
+            return 0;
+        };
+        raw_style_node(self.arena().next_dom_sibling(style_node))
+    }
+
+    /// The shadow root the style mirror holds for the element `style_node` names, or 0.
+    fn shadow_root_style_node(&self, style_node: u32) -> u32 {
+        raw_style_node(self.arena().shadow_root_of(StyleNodeID::from_raw(style_node)))
+    }
+
+    /// How many nodes the style mirror holds assigned to the slot `style_node` names. A node that
+    /// is not a slot, and a slot rendering its fallback content, answer zero.
+    fn assigned_node_count(&self, style_node: u32) -> usize {
+        self.arena().assigned_node_count(StyleNodeID::from_raw(style_node))
+    }
+
+    /// The node the style mirror holds assigned to the slot `style_node` names at `index`.
+    fn assigned_node_at(&self, style_node: u32, index: usize) -> u32 {
+        self.arena()
+            .assigned_node_at(
+                StyleNodeID::from_raw(style_node).expect("a slot with assigned nodes is named"),
+                index,
+            )
+            .raw()
+    }
+
+    /// Whether the style store holds the element in the top layer.
+    fn rendered_in_top_layer(&self, style_node: u32) -> bool {
+        self.arena().element_adjustment_facts(StyleNodeID::from_raw(style_node))
+            & element_adjustment_fact::RENDERED_IN_TOP_LAYER
+            != 0
+    }
+
+    /// Clears the stale layout box of the node `style_node` names, answering whether its subtree
+    /// survives with it.
+    fn clear_stale_layout_node(&self, style_node: u32, cleared_subtree_root: u32) -> bool {
+        // SAFETY: The host remains live throughout the walk, and the identity names a live node.
+        unsafe { (self.clear_stale_layout_node)(self.context, style_node, cleared_subtree_root) }
+    }
 }
 
 /// Finds the box to detach for a top-layer element: the element's own box, or the outermost
@@ -375,16 +440,25 @@ fn topmost_layout_node_of_top_layer_placement(arena: *mut LayoutNodeArena, layou
 pub unsafe extern "C" fn rust_detach_top_layer_element_layout_subtree(
     callbacks: *const FfiTopLayerDetachCallbacks,
     arena: *mut c_void,
-    element: *mut c_void,
+    style_node: u32,
 ) {
     assert!(!callbacks.is_null());
     assert!(!arena.is_null());
-    assert!(!element.is_null());
     // SAFETY: Guaranteed by the entry point's contract.
     let callbacks = unsafe { &*callbacks };
     let arena = arena.cast::<LayoutNodeArena>();
-    // SAFETY: The element remains live throughout the call.
-    let element_layout_node = unsafe { (callbacks.element_layout_node)(element) };
+    let host = StaleSubtreeHost {
+        arena,
+        context: callbacks.context,
+        clear_stale_layout_node: callbacks.clear_stale_layout_node,
+    };
+    // A top-layer member the style engine no longer tracks has left the DOM. Nothing of it is in
+    // the mirror, and nothing of it is bound to a row, so there is nothing to detach or clear.
+    let Some(element_identity) = StyleNodeID::from_raw(style_node) else {
+        return;
+    };
+    // NB: Called at DOM mutation processing time, outside layout tree construction.
+    let element_layout_node = host.arena().bound_row(element_identity);
     if !element_layout_node.is_invalid() {
         let topmost = topmost_layout_node_of_top_layer_placement(arena, element_layout_node);
         let layout_node_to_detach = if topmost.is_invalid() {
@@ -401,21 +475,8 @@ pub unsafe extern "C" fn rust_detach_top_layer_element_layout_subtree(
         }
     }
 
-    // SAFETY: The element remains live throughout subtree cleanup.
-    unsafe { (callbacks.clear_stale_subtree)(element) };
-    // SAFETY: The callback returns the element's adjusted HTMLSlotElement pointer, if any.
-    let slot_element = unsafe { (callbacks.slot_element)(element) };
-    if !slot_element.is_null() {
-        // SAFETY: `slot_element` is a live HTMLSlotElement holding a stable assigned-node list.
-        let count = unsafe { (callbacks.assigned_node_count)(slot_element) };
-        for index in 0..count {
-            // SAFETY: `index` is below the count reported for this unchanged assigned-node list.
-            let root = unsafe { (callbacks.assigned_node_at)(slot_element, index) };
-            assert!(!root.is_null());
-            // SAFETY: `root` is a live DOM node projected into the slot.
-            unsafe { (callbacks.clear_stale_subtree)(root) };
-        }
-    }
+    clear_stale_subtree(host, style_node, StaleSubtreeClearScope::InclusiveBoundedToRoot);
+    clear_stale_assigned_slottables(host, style_node);
 }
 
 /// Clears every stale layout node in the shadow-including subtree `root` names.
@@ -424,7 +485,7 @@ pub unsafe extern "C" fn rust_detach_top_layer_element_layout_subtree(
 /// children, and did nothing at all for a node the style mirror has not named: such a node holds
 /// no tree update mark and can have no box. So navigating the mirror's DOM child sequence reaches
 /// everything the DOM walk had work for, in the same order.
-fn clear_stale_subtree(host: &DomTreeBuilderHost<'_>, root: u32, scope: StaleSubtreeClearScope) {
+fn clear_stale_subtree(host: StaleSubtreeHost, root: u32, scope: StaleSubtreeClearScope) {
     let cleared_subtree_root = match scope {
         StaleSubtreeClearScope::Inclusive => 0,
         _ => root,
@@ -436,27 +497,19 @@ fn clear_stale_subtree(host: &DomTreeBuilderHost<'_>, root: u32, scope: StaleSub
     }
 }
 
-fn clear_stale_node(host: &DomTreeBuilderHost<'_>, node: u32, subtree_root: u32, cleared_subtree_root: u32) {
+fn clear_stale_node(host: StaleSubtreeHost, node: u32, subtree_root: u32, cleared_subtree_root: u32) {
     // A top layer member lays out as a sibling of the root element, so its boxes are not this
     // subtree's to clear.
     if node != subtree_root && host.rendered_in_top_layer(node) {
         return;
     }
-    // SAFETY: The builder remains live, and the identity names a live DOM node.
-    let subtree_survives =
-        unsafe { (host.callbacks.clear_stale_layout_node)(host.callbacks.builder, node, cleared_subtree_root) };
-    if subtree_survives {
+    if host.clear_stale_layout_node(node, cleared_subtree_root) {
         return;
     }
     clear_stale_subtree_descendants(host, node, subtree_root, cleared_subtree_root);
 }
 
-fn clear_stale_subtree_descendants(
-    host: &DomTreeBuilderHost<'_>,
-    node: u32,
-    subtree_root: u32,
-    cleared_subtree_root: u32,
-) {
+fn clear_stale_subtree_descendants(host: StaleSubtreeHost, node: u32, subtree_root: u32, cleared_subtree_root: u32) {
     let shadow_root = host.shadow_root_style_node(node);
     if shadow_root != 0 {
         clear_stale_node(host, shadow_root, subtree_root, cleared_subtree_root);
@@ -470,7 +523,7 @@ fn clear_stale_subtree_descendants(
 
 /// Removes the stale layout subtree of every node a slot projects, for a slot whose own box hides
 /// its content.
-fn clear_stale_assigned_slottables(host: &DomTreeBuilderHost<'_>, slot_style_node: u32) {
+fn clear_stale_assigned_slottables(host: StaleSubtreeHost, slot_style_node: u32) {
     for index in 0..host.assigned_node_count(slot_style_node) {
         clear_stale_subtree(
             host,
@@ -1370,6 +1423,15 @@ impl DomTreeBuilderHost<'_> {
             arena: self.arena,
         }
     }
+
+    /// The build's own view of the stale-subtree walk.
+    fn stale(&self) -> StaleSubtreeHost {
+        StaleSubtreeHost {
+            arena: self.arena,
+            context: self.callbacks.builder,
+            clear_stale_layout_node: self.callbacks.clear_stale_layout_node,
+        }
+    }
 }
 
 /// Whether a flat-tree ancestor of the element keeps it out of the rendered tree.
@@ -1567,7 +1629,7 @@ unsafe fn update_layout_tree_for_display_contents(
         }
 
         if should_create_layout_node {
-            clear_stale_subtree(host, style_node, StaleSubtreeClearScope::Inclusive);
+            clear_stale_subtree(host.stale(), style_node, StaleSubtreeClearScope::Inclusive);
             resolve_counters(host, style_node, FfiPseudoElement::None);
         }
 
@@ -1617,7 +1679,7 @@ unsafe fn update_layout_tree_for_display_contents(
                     must_create_subtree || should_create_layout_node,
                 );
             } else {
-                clear_stale_assigned_slottables(host, style_node);
+                clear_stale_assigned_slottables(host.stale(), style_node);
             }
         }
 
@@ -1840,7 +1902,7 @@ unsafe fn update_principal_node_descendants(
 
         if content_visibility_hidden {
             clear_stale_subtree(
-                host,
+                host.stale(),
                 update.style_node,
                 StaleSubtreeClearScope::DescendantsBoundedToRoot,
             );
@@ -1915,7 +1977,7 @@ unsafe fn update_principal_node_descendants(
                         continue;
                     }
                     if has_unrendered_flat_tree_ancestor(host, member) {
-                        clear_stale_subtree(host, member, StaleSubtreeClearScope::InclusiveBoundedToRoot);
+                        clear_stale_subtree(host.stale(), member, StaleSubtreeClearScope::InclusiveBoundedToRoot);
                         continue;
                     }
                     update_layout_tree(
@@ -1945,7 +2007,7 @@ unsafe fn update_principal_node_descendants(
                 );
                 assert!(state.ancestor_stack.pop().is_some());
             } else {
-                clear_stale_assigned_slottables(host, dom_children_owner);
+                clear_stale_assigned_slottables(host.stale(), dom_children_owner);
             }
         }
 
@@ -2532,7 +2594,7 @@ fn update_principal_node_after_entry(
             }
         }
         // If no layout node was created, remove every stale layout and paint node from the shadow-including subtree.
-        clear_stale_subtree(host, update.style_node, StaleSubtreeClearScope::Inclusive);
+        clear_stale_subtree(host.stale(), update.style_node, StaleSubtreeClearScope::Inclusive);
     }
 
     if matches!(
