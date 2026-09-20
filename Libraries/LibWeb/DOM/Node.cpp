@@ -2703,6 +2703,10 @@ void Node::inserted()
         // a root that connects only when this walk reaches it, so no subtree arrival covered it.
         if (element->style_node_id() == 0)
             CSS::record_element_connected(*element);
+        // The element brings what it has scrolled to into its new place, under the identity it
+        // publishes it against, which it may have taken only just now.
+        if (!element->scroll_offset({}).is_zero())
+            Layout::publish_element_scroll_offset(*element);
         if (is<HTML::HTMLSlotElement>(*element)) {
             if (auto parent = element->parent_element())
                 CSS::Invalidation::invalidate_style_after_text_change_under(*parent);

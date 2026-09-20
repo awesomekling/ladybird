@@ -590,6 +590,11 @@ pub(crate) struct LayoutNodeArena {
     /// subtree is rebuilt, so the offset is held against the pair that outlives both, and a newly
     /// bound box reads it here instead of asking the DOM cell that used to store it.
     pseudo_element_scroll_offsets: RefCell<HashMap<(StyleNodeID, u8), FfiCssPixelPoint>>,
+    /// The scroll offset each element holds, keyed by its identity. The element's own box is
+    /// replaced whenever its subtree is rebuilt, so a newly stamped row reads the offset here
+    /// rather than off the element. Zero is the absence of an entry, which is nearly every
+    /// element; a text identity never publishes one, and so reads zero.
+    element_scroll_offsets: RefCell<HashMap<StyleNodeID, FfiCssPixelPoint>>,
     /// The image provider a row owns, for a row whose image comes from its style rather than from a
     /// DOM element. The provider is made for the row and is of no use without it, so the arena holds
     /// it against the row and deletes it when the row is freed, rather than leaving it on a shell
@@ -743,6 +748,7 @@ impl LayoutNodeArena {
             bound_rows_by_style_node: RefCell::new(RowsByStyleNode::default()),
             bound_pseudo_element_rows: RefCell::new(HashMap::default()),
             pseudo_element_scroll_offsets: RefCell::new(HashMap::default()),
+            element_scroll_offsets: RefCell::new(HashMap::default()),
             owned_image_providers: RefCell::new(HashMap::default()),
             image_observer_sets: RefCell::new(HashMap::default()),
             shadow_including_parent_elements: RefCell::new(Vec::new()),
@@ -1583,6 +1589,7 @@ impl LayoutNodeArena {
         self.pseudo_element_scroll_offsets
             .borrow_mut()
             .retain(|&(generator, _), _| generator != style_node);
+        self.element_scroll_offsets.borrow_mut().remove(&style_node);
         loop {
             let row = self.first_rows_by_style_node.borrow().head(style_node);
             if row.is_invalid() {
@@ -2526,10 +2533,19 @@ impl LayoutNodeArena {
         // What a row built for the node is painted and hit-tested with, published under the node's
         // identity by the DOM steps that derive it. The document's row takes its own, as with the
         // name it answers by.
-        if let Some(style_node) = style_node {
+        let scroll_offset = style_node.map_or_else(FfiCssPixelPoint::default, |style_node| {
             let facts = self.with_style_store(|engine| engine.node_dom_paint_facts(style_node));
             self.data(slot).dom_paint_facts.set(facts);
-        }
+            // What the element has scrolled to, which its own box carries. The viewport's row
+            // takes the navigable's offset instead, and a text node's row never scrolls.
+            self.element_scroll_offset(style_node)
+        });
+        self.set_node_flag(
+            slot,
+            NodeFlag::HasScrollOffset,
+            scroll_offset != FfiCssPixelPoint::default(),
+        );
+        self.scroll_offsets().publish(slot, scroll_offset.into());
         self.enroll_node_for_replaced_content_facts_sync_if_eligible(slot);
     }
 
@@ -2544,6 +2560,26 @@ impl LayoutNodeArena {
             .get(&(generator, pseudo_kind))
             .copied()
             .unwrap_or_default()
+    }
+
+    /// What the element has scrolled to. Zero while nothing has scrolled it.
+    pub(crate) fn element_scroll_offset(&self, element: StyleNodeID) -> FfiCssPixelPoint {
+        self.element_scroll_offsets
+            .borrow()
+            .get(&element)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Record what the element has scrolled to. A zero offset is the absence of one, as for a
+    /// pseudo-element.
+    pub(crate) fn set_element_scroll_offset(&self, element: StyleNodeID, offset: FfiCssPixelPoint) {
+        let mut offsets = self.element_scroll_offsets.borrow_mut();
+        if offset == FfiCssPixelPoint::default() {
+            offsets.remove(&element);
+        } else {
+            offsets.insert(element, offset);
+        }
     }
 
     /// Record what the pseudo-element has scrolled to. A zero offset is the absence of one, which
@@ -5408,6 +5444,23 @@ pub unsafe extern "C" fn layout_arena_set_pseudo_element_scroll_offset(
     };
     // SAFETY: As above.
     unsafe { &*arena.cast::<LayoutNodeArena>() }.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset);
+}
+
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_element_scroll_offset(
+    arena: *mut c_void,
+    element: u32,
+    offset: FfiCssPixelPoint,
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(element) = StyleNodeID::from_raw(element) else {
+        return;
+    };
+    // SAFETY: As above.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_element_scroll_offset(element, offset);
 }
 
 #[unsafe(no_mangle)]
