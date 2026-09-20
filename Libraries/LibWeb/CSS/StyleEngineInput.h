@@ -225,6 +225,7 @@ WEB_API bool record_element_presentational_hint_properties(DOM::Element&, Readon
 WEB_API void record_element_animation_names(DOM::Element&, ReadonlySpan<Utf16FlyString>);
 WEB_API void record_element_css_defined_animations(DOM::Element&, u8 slot, ReadonlySpan<Utf16FlyString> names);
 WEB_API void record_element_animation_timing_rows(DOM::Element&, u8 slot, ReadonlySpan<u32> words, ReadonlySpan<u64> times);
+WEB_API void record_element_animation_effect_descriptions(DOM::Element&, u8 slot, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>);
 WEB_API void record_animation_timeline_samples(DOM::Document&, ReadonlySpan<u32> identities, ReadonlySpan<u32> words, ReadonlySpan<u64> times);
 WEB_API void record_element_custom_property_names(DOM::Element&, ReadonlySpan<Utf16FlyString>, bool uses_unnamed, bool uses_custom_functions);
 

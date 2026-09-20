@@ -506,27 +506,34 @@ void Animatable::publish_animation_timing_rows()
 
     Vector<u32> words;
     Vector<u64> times;
+    Vector<GC::Ref<KeyframeEffect>> effects_in_order;
     for (auto slot : slots_with_rows) {
         words.clear_with_capacity();
         times.clear_with_capacity();
+        effects_in_order.clear_with_capacity();
         for (auto const& animation : m_impl->associated_animations) {
             auto effect = animation->effect();
             if (!effect || !is<KeyframeEffect>(*effect))
                 continue;
-            if (slot_of(static_cast<KeyframeEffect const&>(*effect)) != slot)
+            auto& keyframe_effect = static_cast<KeyframeEffect&>(*effect);
+            if (slot_of(keyframe_effect) != slot)
                 continue;
             auto row = animation->style_timing_row();
             words.append(row.flags);
             words.append(row.timeline_identity);
             for (auto time : row.times)
                 times.append(bit_cast<u64>(time));
+            effects_in_order.append(keyframe_effect);
         }
         CSS::record_element_animation_timing_rows(*element, slot, words, times);
+        CSS::record_element_animation_effect_descriptions(*element, slot, effects_in_order);
     }
 
     for (auto slot : m_impl->published_timing_row_slots) {
-        if (!slots_with_rows.contains_slow(slot))
+        if (!slots_with_rows.contains_slow(slot)) {
             CSS::record_element_animation_timing_rows(*element, slot, {}, {});
+            CSS::record_element_animation_effect_descriptions(*element, slot, {});
+        }
     }
     m_impl->published_timing_row_slots = move(slots_with_rows);
 }

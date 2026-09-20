@@ -934,7 +934,43 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
         return;
     }
 
+    // The table's importance bitmap already uses the byte layout the animation core expects.
+    Vector<u8> important_property_bitmap;
+    important_property_bitmap.append(computed_properties.property_importance_bitmap().data(), computed_properties.property_importance_bitmap().size());
+
+    // Everything a keyframe declares that does not depend on the element being sampled was settled
+    // when the host described the effect, so the stage resolves the declarations from that
+    // description rather than walking the host's keyframe sets. An effect the description does not
+    // cover - a custom property, a value that still needs substitution - falls back to the walk.
+    Vector<u64> effect_identities;
+    Vector<u64> effect_generations;
+    effect_identities.ensure_capacity(active_effects.size());
+    effect_generations.ensure_capacity(active_effects.size());
     for (auto const& active_effect : active_effects) {
+        effect_identities.unchecked_append(active_effect.effect->animation_preparation_identity());
+        effect_generations.unchecked_append(active_effect.effect->animation_preparation_generation());
+    }
+    bool published_description_covers_effects = false;
+    StyleValueFFI::FfiPublishedAnimationSample published_sample {
+        .style_engine = m_style_engine.rust_handle(),
+        .style_node = abstract_element.element().style_node_id().value(),
+        .slot = abstract_element.pseudo_element().has_value() ? static_cast<u8>(to_underlying(*abstract_element.pseudo_element()) + 1) : static_cast<u8>(0),
+        .identities = effect_identities.data(),
+        .generations = effect_generations.data(),
+        .current_keys = current_keys.data(),
+        .effect_count = active_effects.size(),
+        .underlying_longhand_table = computed_properties.computed_longhand_table(),
+        .writing_mode = to_underlying(computed_properties.writing_mode()),
+        .direction = to_underlying(computed_properties.direction()),
+        .important_property_bitmap = important_property_bitmap.data(),
+        .important_property_bitmap_length = important_property_bitmap.size(),
+        .covered = &published_description_covers_effects,
+    };
+    auto resolved_properties = StyleValueFFI::rust_resolve_animation_declarations_from_published(&published_sample);
+    // Only where the description did not cover every effect does the stage still walk the host's
+    // keyframe sets for itself.
+    for (size_t active_effect_index = 0; !published_description_covers_effects && active_effect_index < active_effects.size(); ++active_effect_index) {
+        auto const& active_effect = active_effects[active_effect_index];
         auto effect = active_effect.effect;
         auto animation = active_effect.animation;
         auto const& key_frame_set = *effect->key_frame_set();
@@ -995,7 +1031,12 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
                         if (property_is_shorthand(property.id()))
                             return {};
                         is_use_initial = true;
-                        return RustStyleValueHandle::retained(computed_properties.property(property.id(), ComputedStyleWorkingSet::WithAnimationsApplied::No).rust_style_value_data());
+                        // The value this keyframe stands in for is the one the interpolation
+                        // composes over, which is the longhand table's: a minted wrapper can still
+                        // hold the value a post-compute adjustment left before it was restored.
+                        auto effective = ComputedValuesFFI::rust_computed_longhand_table_effective_value(
+                            computed_properties.computed_longhand_table(), nullptr, to_underlying(property.id()), false);
+                        return RustStyleValueHandle::retained(static_cast<StyleValueFFI::StyleValueData const*>(effective.value));
                     },
                     [](RustStyleValueHandle const& value) -> RustStyleValueHandle { return value; });
                 if (!style_value || style_value->tag == StyleValueFFI::StyleValueData::Tag::PendingSubstitution)
@@ -1032,7 +1073,7 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
         });
     }
 
-    if (keyframe_declarations.is_empty()) {
+    if (keyframe_declarations.is_empty() && !published_description_covers_effects) {
         return;
     }
 
@@ -1094,9 +1135,6 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
             .is_transition = declaration.is_transition,
         });
     }
-    // The table's importance bitmap already uses the byte layout the animation core expects.
-    Vector<u8> important_property_bitmap;
-    important_property_bitmap.append(computed_properties.property_importance_bitmap().data(), computed_properties.property_importance_bitmap().size());
 
     Vector<NonnullRefPtr<StyleValue const>> custom_animation_value_storage;
     Vector<StyleValueFFI::StyleValueData const*> custom_underlying_values;
@@ -1291,7 +1329,8 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
         .important_property_bitmap = important_property_bitmap.data(),
         .important_property_bitmap_length = important_property_bitmap.size(),
     };
-    auto resolved_properties = StyleValueFFI::rust_resolve_animation_declarations(&batch);
+    if (!published_description_covers_effects)
+        resolved_properties = StyleValueFFI::rust_resolve_animation_declarations(&batch);
     if (resolved_properties.count == 0)
         return;
     auto computed_batch = compute_animation_values(ReadonlySpan<StyleValueFFI::FfiResolvedAnimationProperty> {

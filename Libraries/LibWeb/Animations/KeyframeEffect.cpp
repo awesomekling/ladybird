@@ -905,6 +905,16 @@ Optional<CSS::PseudoElement> KeyframeEffect::pseudo_element_type() const
     return m_target_pseudo_selector->type();
 }
 
+// Everything that invalidates an effect's preparation - its keyframes, its composite operation, the
+// animation or the element it belongs to - is also what makes the description the style stage holds
+// for it stale, so this is the one funnel that republishes it.
+void KeyframeEffect::invalidate_animation_preparation()
+{
+    ++m_animation_preparation_generation;
+    if (m_target_element)
+        m_target_element->publish_animation_timing_rows();
+}
+
 void KeyframeEffect::set_composite(Bindings::CompositeOperation value)
 {
     m_composite = value;
