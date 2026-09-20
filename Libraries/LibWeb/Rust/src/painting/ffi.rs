@@ -27,7 +27,15 @@ use std::rc::Rc;
 
 /// SAFETY: `arena` must be a live handle from `layout_arena_create`, borrowed for this call on
 /// the document thread.
+#[track_caller]
 pub(crate) unsafe fn arena_from_handle<'a>(arena: *mut c_void) -> &'a LayoutNodeArena {
+    crate::painting::seal::note_main_side_read(std::panic::Location::caller());
+    unsafe { LayoutNodeArena::from_handle(arena) }
+}
+
+/// SAFETY: Same as [`arena_from_handle`], but for helper calls made after an FFI entry point has
+/// already entered a render-owned pass. These are render-side accesses, not C++ re-entry.
+unsafe fn arena_from_handle_inside_render_pass<'a>(arena: *mut c_void) -> &'a LayoutNodeArena {
     unsafe { LayoutNodeArena::from_handle(arena) }
 }
 
@@ -981,7 +989,7 @@ fn fresh_visual_context_tree_build(
         IncrementalUpdateResult, debug_assert_every_live_node_is_owned, update_visual_context_tree,
     };
     let fresh_tree = {
-        let arena = unsafe { arena_from_handle(arena) };
+        let arena = unsafe { arena_from_handle_inside_render_pass(arena) };
         let paintable_rows = arena.paintable_rows();
         let mut fresh_tree = crate::painting::visual_context::build::create_fresh_tree_with_viewport_nodes(
             &paintable_rows,
@@ -1001,7 +1009,7 @@ fn fresh_visual_context_tree_build(
     state.dirty_boxes.clear();
     state.build_count += 1;
     let mut outcome = {
-        let arena = unsafe { arena_from_handle(arena) };
+        let arena = unsafe { arena_from_handle_inside_render_pass(arena) };
         let paintable_rows = arena.paintable_rows();
         match update_visual_context_tree(
             &paintable_rows,
@@ -1144,7 +1152,7 @@ pub unsafe extern "C" fn layout_arena_update_accumulated_visual_contexts(
     state.last_full_build_reason = reason;
     let outcome = fresh_visual_context_tree_build(arena, viewport, inputs, &mut state);
     state.last_tree_inputs = Some(inputs);
-    let arena_ref = unsafe { arena_from_handle(arena) };
+    let arena_ref = unsafe { arena_from_handle_inside_render_pass(arena) };
     arena_ref.paint_state().borrow_mut().visual_context = state;
     outcome
 }
