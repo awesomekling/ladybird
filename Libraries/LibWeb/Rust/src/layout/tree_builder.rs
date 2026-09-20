@@ -42,6 +42,10 @@ pub(crate) struct TreeBuilderState {
     /// What the build found out that the document has to be told, in the order it found it out.
     /// Delivered when the build ends: nothing inside the build reads any of it back.
     reports: Vec<crate::layout::commit::FfiCommitMessage>,
+    /// Every style record a box is built from, held for the whole build. Letting go of a record
+    /// the build has stopped looking at buys nothing before the build ends, and holding them all
+    /// in one place is what lets a visit carry no frame of its own.
+    pinned_style_records: Vec<u64>,
 }
 
 impl Default for TreeBuilderState {
@@ -50,6 +54,7 @@ impl Default for TreeBuilderState {
             ancestor_stack: Vec::new(),
             quote_nesting_level: 0,
             current_rebuild_root: NodeSlotId::INVALID,
+            pinned_style_records: Vec::new(),
             rebuilt_subtree_roots: Vec::new(),
             reused_child_list_update_roots: Vec::new(),
             additional_table_fixup_roots: Vec::new(),
@@ -75,6 +80,19 @@ pub(crate) struct TreeBuilderContext {
 }
 
 impl TreeBuilderState {
+    /// Holds the record the element's box is built from for the rest of the build, so that a
+    /// restyle later in the same build cannot take it away from a box that names it.
+    fn pin_style_record_for_build(&mut self, host: &DomTreeBuilderHost<'_>, element: StyleNodeID) {
+        let record = host
+            .layout()
+            .arena()
+            .with_style_store(|engine| engine.element_published_style_record(element))
+            .expect("an element the walk prepares has published its style")
+            .0;
+        host.layout().arena().pin_style_record_for_build(record);
+        self.pinned_style_records.push(record);
+    }
+
     pub(crate) fn current_parent(&self) -> LayoutNode {
         *self
             .ancestor_stack
@@ -506,28 +524,36 @@ fn clear_stale_layout_node(
 /// kind above the synthetic ones is ever bound to a box.
 fn clear_synthetic_pseudo_element_boxes(arena: *mut LayoutNodeArena, node: StyleNodeID) {
     // SAFETY: The arena outlives every walk over it.
-    let arena_ref = unsafe { &*arena };
-    if !arena_ref.has_pseudo_element_boxes() {
+    if !unsafe { &*arena }.has_pseudo_element_boxes() {
         return;
     }
     for generated_for in 1..=crate::layout::node_data::GENERATED_FOR_LAST_SYNTHETIC {
-        let row = arena_ref.bound_pseudo_element_row(node, generated_for);
-        if row.is_invalid() {
-            continue;
-        }
-        let mut rows = Vec::new();
-        arena_ref.for_each_node_in_layout_subtree_in_pre_order(row, |row| rows.push(row));
-        // SAFETY: The arena handle is the one this walk was given, and each of these borrows the
-        // arena for itself.
-        unsafe {
-            for row in rows {
-                crate::painting::ffi::layout_arena_paintable_cleared_from_node(arena.cast(), row);
-            }
-            super::layout_node_arena::layout_arena_prepare_subtree_for_detach(arena.cast(), row);
-            super::layout_node_arena::layout_arena_detach_and_free_subtree(arena.cast(), row);
-        }
-        arena_ref.clear_pseudo_element_box(node, generated_for);
+        free_pseudo_element_box(arena, node, generated_for);
     }
+}
+
+/// The pseudo-element of kind `generated_for` gives up its box, subtree and all. Answers whether
+/// the box was attached under a parent, which a box a build is regenerating always is.
+fn free_pseudo_element_box(arena: *mut LayoutNodeArena, node: StyleNodeID, generated_for: u8) -> bool {
+    // SAFETY: The arena outlives every walk over it.
+    let arena_ref = unsafe { &*arena };
+    let row = arena_ref.bound_pseudo_element_row(node, generated_for);
+    if row.is_invalid() {
+        return false;
+    }
+    let mut rows = Vec::new();
+    arena_ref.for_each_node_in_layout_subtree_in_pre_order(row, |row| rows.push(row));
+    // SAFETY: The arena handle is the one this walk was given, and each of these borrows the arena
+    // for itself.
+    let was_attached = unsafe {
+        for row in rows {
+            crate::painting::ffi::layout_arena_paintable_cleared_from_node(arena.cast(), row);
+        }
+        super::layout_node_arena::layout_arena_prepare_subtree_for_detach(arena.cast(), row);
+        super::layout_node_arena::layout_arena_detach_and_free_subtree(arena.cast(), row)
+    };
+    arena_ref.clear_pseudo_element_box(node, generated_for);
+    was_attached
 }
 
 /// Finds the box to detach for a top-layer element: the element's own box, or the outermost
@@ -2393,8 +2419,35 @@ fn construct_principal_layout_node(
                 layout_host.free_subtree(old_backdrop);
             }
         }
+        let element_identity = StyleNodeID::from_raw(update.style_node).expect("an element the walk prepares is named");
+        let arena_pointer = std::ptr::from_ref(host.layout().arena()).cast_mut();
+        if should_create_layout_node {
+            // The box is built again from scratch, so every pseudo-element box it holds goes.
+            clear_synthetic_pseudo_element_boxes(arena_pointer, element_identity);
+        } else if host.layout().arena().layout_tree_update_reuse_reasons(element_identity)
+            & layout_tree_update_reuse_reason::PSEUDO_ELEMENT_CHANGE
+            != 0
+        {
+            // The box stays and only its generated content is regenerated, which is the ::before
+            // and ::after boxes and nothing else.
+            for generated_for in [GENERATED_FOR_BEFORE, GENERATED_FOR_AFTER] {
+                assert!(
+                    free_pseudo_element_box(arena_pointer, element_identity, generated_for)
+                        || host
+                            .layout()
+                            .arena()
+                            .bound_pseudo_element_row(element_identity, generated_for)
+                            .is_invalid(),
+                    "a regenerated pseudo-element's box was not attached"
+                );
+            }
+            let box_kept = host.layout().arena().bound_row(element_identity);
+            if host.layout().first_child(box_kept).is_invalid() {
+                host.layout().set_children_are_inline(box_kept, false);
+            }
+        }
         super::tree_build_seal::note_host_call("prepare_principal_element");
-        // SAFETY: The builder and DOM element remain live throughout the call.
+        // SAFETY: The builder remains live, and the identity names a live element.
         unsafe {
             (host.callbacks.prepare_principal_element)(
                 host.callbacks.builder,
@@ -2402,6 +2455,9 @@ fn construct_principal_layout_node(
                 should_create_layout_node,
             );
         };
+        // The record the box is built from is held for the whole build, taken after the host has
+        // had its chance to compute a style the element arrived here without.
+        update.state.pin_style_record_for_build(host, element_identity);
         let display = host.published_display(update.style_node);
         let generation = principal_box_generation_decision(
             true,
@@ -3029,6 +3085,10 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     );
     let viewport = arena.layout_root();
     assert!(!viewport.is_invalid(), "a layout tree build places the viewport");
+
+    for record in state.pinned_style_records {
+        arena.release_style_record_pinned_for_build(record);
+    }
 
     super::tree_build_seal::end_build();
     FfiLayoutTreeBuildOutcome {

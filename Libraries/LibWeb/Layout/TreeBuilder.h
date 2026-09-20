@@ -18,8 +18,6 @@ class LayoutTreeBuilderAccess {
     friend class LayoutTreeBuildBridge;
 
 private:
-    static void clear_synthetic_pseudo_element_layout_nodes(DOM::Element&);
-    static void detach_layout_node(DOM::Node&);
     static void set_synthetic_pseudo_element_node(DOM::Element&, CSS::PseudoElement, Layout::NodeWithStyle*);
 };
 
