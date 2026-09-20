@@ -181,6 +181,7 @@ public:
     // element inherits, which must be the environment the engine resolved it over. Nothing when
     // the identity is no engine environment or was resolved over another.
     [[nodiscard]] RefPtr<CustomPropertyData const> engine_custom_property_environment(u64 identity, RefPtr<CustomPropertyData const> const& inherited) const;
+    static void flush_custom_property_install_verifier();
 
     // Whether the collection refreshes a previously published style outside the drive; a refresh
     // re-runs the animated element style adjustments and leaves the non-inherited-property
@@ -442,19 +443,6 @@ private:
     mutable HashMap<u64, Vector<NonnullRefPtr<CustomPropertyData const>>> m_custom_property_environments;
     // The environments the style engine resolved, by the identity it minted, materialized once.
     mutable HashMap<u64, NonnullRefPtr<CustomPropertyData const>> m_engine_custom_property_environments;
-
-    // What one element's cascaded custom property declarations resolved to. A rule that declares
-    // custom properties on every element - which is how utility frameworks carry their theme - hands
-    // the same list to every element it matches, and the environment that list produces depends on
-    // nothing but the list and the environment it inherits.
-    struct CascadedCustomPropertyEnvironment {
-        Vector<u64> key;
-        RefPtr<CustomPropertyData const> parent;
-        RefPtr<CustomPropertyData const> result;
-    };
-    mutable HashMap<u64, Vector<CascadedCustomPropertyEnvironment>> m_cascaded_custom_property_environments;
-
-    mutable Vector<u64> m_cascaded_custom_property_key_scratch;
 
     // What one final value parses to against one registration's syntax: a pure function of the
     // value, the syntax, and the registration generation, unlike the computed-value step after it,
