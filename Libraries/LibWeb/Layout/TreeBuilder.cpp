@@ -524,12 +524,6 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
             if (frame.layout_node)
                 publish_generated_content({ element, css_pseudo_element(ffi_pseudo) }, *frame.layout_node, frame.originating_list_box);
             return Node::slot_id(frame.layout_node); },
-        .attach_style_resources = [](void* frame_pointer) {
-            VERIFY(frame_pointer);
-            auto& frame = *static_cast<PseudoElementFrame*>(frame_pointer);
-            VERIFY(frame.layout_node);
-            frame.layout_node->attach_style_resources(); },
-
         .create_nested_list_marker = [](void* frame_pointer, void* element_pointer, RustFFI::FfiPseudoElement originating_pseudo) -> Compositing::RustFFI::NodeSlotId {
             VERIFY(frame_pointer);
             VERIFY(element_pointer);
@@ -843,7 +837,7 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
         .create_principal_text_layout = [](void*, void* text_pointer) -> Compositing::RustFFI::NodeSlotId {
             VERIFY(text_pointer);
             return create_layout_node_for_text(*static_cast<DOM::Text*>(text_pointer)); },
-        .attach_principal_style_resources = [](void* builder_pointer, Compositing::RustFFI::NodeSlotId slot) {
+        .attach_style_resources = [](void* builder_pointer, Compositing::RustFFI::NodeSlotId slot) {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
             auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_node_shell_if_live(builder.m_document->layout_node_arena().handle(), slot));

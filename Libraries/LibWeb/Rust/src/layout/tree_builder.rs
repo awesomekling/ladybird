@@ -109,7 +109,9 @@ pub struct FfiDomTreeBuilderCallbacks {
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, FfiElementLayoutKind) -> NodeSlotId,
     pub create_principal_document_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
     pub create_principal_text_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
-    pub attach_principal_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId),
+    /// Attaches the image observers a box's style asks for. Principal and pseudo-element boxes
+    /// both go through this; nothing about it depends on which the box is.
+    pub attach_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId),
     pub document_element_layout_node: unsafe extern "C" fn(*mut c_void) -> NodeSlotId,
     pub layout: FfiTreeBuilderCallbacks,
     pub pseudo: FfiPseudoTreeBuilderCallbacks,
@@ -2341,7 +2343,7 @@ fn update_principal_node_after_entry(
         if update.kind.is_element() || update.kind.is_document() {
             // SAFETY: The builder remains live, and the box is a live NodeWithStyle for elements
             // and documents.
-            unsafe { (host.callbacks.attach_principal_style_resources)(host.callbacks.builder, layout_node) };
+            unsafe { (host.callbacks.attach_style_resources)(host.callbacks.builder, layout_node) };
         }
 
         let starts_new_subtree = entry_decision.should_create_layout_node && update.state.new_subtree_root.is_invalid();
@@ -2895,7 +2897,6 @@ pub struct FfiPseudoTreeBuilderCallbacks {
         FfiPseudoElement,
         FfiPseudoElementDecision,
     ) -> NodeSlotId,
-    pub attach_style_resources: unsafe extern "C" fn(*mut c_void),
     pub create_nested_list_marker: unsafe extern "C" fn(*mut c_void, *mut c_void, FfiPseudoElement) -> NodeSlotId,
     pub configure_layout_node: unsafe extern "C" fn(*mut c_void, *mut c_void, FfiPseudoElement),
     pub create_content_item:
@@ -3139,8 +3140,8 @@ fn create_pseudo_element_with_frame(
         layout_host.attach_child(list_item_box, unplaced_box.take().expect("the marker box"), first_child);
     }
 
-    // SAFETY: The frame owns a live pseudo-element layout node.
-    unsafe { (callbacks.attach_style_resources)(frame) };
+    // SAFETY: The builder remains live, and the box the host just built is a live NodeWithStyle.
+    unsafe { (host.callbacks.attach_style_resources)(host.callbacks.builder, layout_node) };
     if decision == FfiPseudoElementDecision::ContentReplacement {
         let adjustment = replaced_element_display_adjustment(&host.layout(), layout_node);
         if adjustment != FfiReplacedElementDisplayAdjustment::None {
