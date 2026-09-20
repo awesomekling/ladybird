@@ -238,7 +238,17 @@ bool push_replaced_image_paint_facts(Layout::ImageProvider const& image_provider
         .natural = natural_size_facts(image_provider.intrinsic_width(), image_provider.intrinsic_height(), image_provider.intrinsic_aspect_ratio()),
         .content = image_content_facts(image_provider.decoded_image_data(), current_frame_handle),
     };
-    return Layout::RustFFI::layout_arena_set_replaced_image_paint_facts(layout_node.arena_handle(), Layout::Node::slot_id(&layout_node), facts);
+    auto identity = layout_node.dom_node_identity();
+    if (!identity)
+        return Layout::RustFFI::layout_arena_set_replaced_image_paint_facts(layout_node.arena_handle(), Layout::Node::slot_id(&layout_node), facts);
+    const_cast<DOM::Document&>(layout_node.document()).invalidation_journal().note_paint_facts(identity, DOM::PaintFactsFamily::ReplacedImage, [facts, current_frame_handle = move(current_frame_handle)](Layout::Node const& current_layout_node) {
+        (void)current_frame_handle;
+        if (current_layout_node.kind() != Layout::RustFFI::NodeKind::ImageBox && current_layout_node.kind() != Layout::RustFFI::NodeKind::SVGImageBox)
+            return;
+        if (Layout::RustFFI::layout_arena_set_replaced_image_paint_facts(current_layout_node.arena_handle(), Layout::Node::slot_id(&current_layout_node), facts))
+            set_needs_repaint(current_layout_node, InvalidateDisplayList::PaintCommands);
+    });
+    return false;
 }
 
 static bool push_video_paint_facts_onto(HTML::HTMLVideoElement const& video_element, Layout::Node const& layout_node)
