@@ -5716,7 +5716,6 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         ComputedValuesFFI::FfiEffectiveColorSchemeInput effective_color_scheme_input {};
         ComputedValuesFFI::FfiBoxTypeTransformationInput box_type_input {};
         Optional<DOM::AbstractElement::TreeCountingFunctionResolutionContext> tree_counting_context;
-        Vector<ComputedValuesFFI::FfiRandomBaseValue> random_base_values;
         Vector<String> style_sheet_base_urls;
         Vector<ComputedValuesFFI::FfiStyleSheetResourceContext> style_sheet_resource_contexts;
         ComputedValuesFFI::FfiStyleComputationEnvironment computation_environment {};
@@ -5836,12 +5835,6 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 state.tree_counting_context = abstract_element.tree_counting_function_resolution_context();
             }
         }
-        state.random_base_values.ensure_capacity(computation_requirements->unfixed_random_sharing_count);
-        for (auto const& sharing : ReadonlySpan<ComputedValuesFFI::FfiUnfixedRandomSharing> { computation_requirements->unfixed_random_sharings, computation_requirements->unfixed_random_sharing_count }) {
-            VERIFY(sharing.name);
-            auto name = css_string_from_rust(sharing.name);
-            state.random_base_values.empend(sharing.source, const_cast<StyleEngine&>(style_computer.style_engine()).ensure_random_base_value(abstract_element.element().style_node_id(), name.view(), sharing.element_shared));
-        }
         if (computation_requirements->environment_requirements & ComputedValuesFFI::CASCADED_ENVIRONMENT_NEEDS_STYLE_SHEET_CONTEXT) {
             state.style_sheet_base_urls.resize(context.cascaded_properties.source_slot_count());
             state.style_sheet_resource_contexts.resize(context.cascaded_properties.source_slot_count());
@@ -5875,8 +5868,8 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             .has_tree_counting_context = state.tree_counting_context.has_value(),
             .sibling_count = state.tree_counting_context.has_value() ? static_cast<u64>(state.tree_counting_context->sibling_count) : 0,
             .sibling_index = state.tree_counting_context.has_value() ? static_cast<u64>(state.tree_counting_context->sibling_index) : 0,
-            .random_base_values = state.random_base_values.data(),
-            .random_base_value_count = state.random_base_values.size(),
+            .random_base_values = nullptr,
+            .random_base_value_count = 0,
             .document_base_url = document_base_url_bytes.data(),
             .document_base_url_length = document_base_url_bytes.size(),
             .style_sheet_resource_contexts = state.style_sheet_resource_contexts.data(),
@@ -6216,8 +6209,6 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     u8 late_freeze_reasons = WorkingSet;
     if (prepared_transaction.requirements.has_monospace_font_family)
         late_freeze_reasons |= MonospaceRecascade;
-    if (prepared_transaction.requirements.unfixed_random_sharing_count != 0)
-        late_freeze_reasons |= RandomBaseRows;
     if (prepared_transaction.requirements.environment_requirements & ComputedValuesFFI::CASCADED_ENVIRONMENT_NEEDS_STYLE_SHEET_CONTEXT)
         late_freeze_reasons |= StylesheetSourceWrappers;
     if (native_context.state->custom_property_resolution)
