@@ -655,6 +655,10 @@ pub(crate) struct LayoutNodeArena {
     pub(super) searchable_text: Option<Vec<super::text_queries::MappedText>>,
     replaced_content_facts: Vec<ReplacedContentFactsSlot>,
     raw_table_column_spans: HashMap<NodeSlotId, u32>,
+    /// Rows whose last style attach loaded the `<image>` values its style holds. Only such a row
+    /// keeps image observers and cursor style values on its shell, so only such a row has anything
+    /// for a later attach to clear. Nearly no row is ever in here.
+    style_image_resources_attached: RefCell<HashSet<NodeSlotId>>,
     replaced_paint_facts: RefCell<HashMap<NodeSlotId, crate::painting::replaced_paint_facts::ReplacedPaintFacts>>,
     layer_image_paint_facts:
         RefCell<HashMap<NodeSlotId, Vec<crate::painting::layer_image_paint_facts::LayerImagePaintFactsEntry>>>,
@@ -776,6 +780,7 @@ impl LayoutNodeArena {
             searchable_text: None,
             replaced_content_facts: Vec::new(),
             raw_table_column_spans: HashMap::default(),
+            style_image_resources_attached: RefCell::new(HashSet::default()),
             replaced_paint_facts: RefCell::new(HashMap::default()),
             layer_image_paint_facts: RefCell::new(HashMap::default()),
             svg_paint_resources: crate::painting::svg_paint_resources::SvgPaintResources::default(),
@@ -1137,6 +1142,7 @@ impl LayoutNodeArena {
         self.fc_run_cache_store.remove_entry(index);
         self.remove_layout_update_flag_node(id);
         self.raw_table_column_spans.remove(&id);
+        self.style_image_resources_attached.get_mut().remove(&id);
         self.replaced_paint_facts.get_mut().remove(&id);
         self.layer_image_paint_facts.get_mut().remove(&id);
         self.svg_paint_resources.forget_slot(id);
@@ -2726,6 +2732,56 @@ impl LayoutNodeArena {
             "layout node arena attached a second shell to a slot"
         );
         data.shell.set(shell);
+    }
+
+    /// Record whether attaching the row's style resources loaded any image, which is what decides
+    /// whether the row has anything for a later attach to take away.
+    pub(crate) fn note_style_image_resources_attached(&self, id: NodeSlotId, attached: bool) {
+        let mut rows = self.style_image_resources_attached.borrow_mut();
+        if attached {
+            rows.insert(id);
+        } else {
+            rows.remove(&id);
+        }
+    }
+
+    /// Whether attaching a row's style resources could change anything the row holds. Nearly every
+    /// box has a style with no `<image>` anywhere in it, holds nothing a style that had one left
+    /// behind, and carries no paint facts of its own; for those the attach republishes exactly
+    /// what the row already has, so the build need not ask the document for it.
+    pub(crate) fn style_resources_attach_can_change_anything(&self, id: NodeSlotId) -> bool {
+        if self.style_image_resources_attached.borrow().contains(&id) {
+            return true;
+        }
+        let data = self.data(id);
+        // The kinds whose paint facts are read off the element the box was built for, and the
+        // image element, whose row answers for its map whatever box it ended up with.
+        if matches!(
+            data.kind.get(),
+            NodeKind::CheckBox
+                | NodeKind::RadioButton
+                | NodeKind::CanvasBox
+                | NodeKind::ImageBox
+                | NodeKind::SVGImageBox
+                | NodeKind::VideoBox
+                | NodeKind::NavigableContainerViewport
+        ) {
+            return true;
+        }
+        let style_node = self.node_style_node(id);
+        if self.element_construction_facts(style_node)
+            & crate::css::style::bridge::element_construction_fact::IS_HTML_IMAGE_ELEMENT
+            != 0
+        {
+            return true;
+        }
+        // A row that carries layer image facts loses them when its style stops holding images.
+        if self.layer_image_paint_facts.borrow().contains_key(&id) {
+            return true;
+        }
+        let record = self.node_style_record(id);
+        self.with_style_store(|engine| engine.style_record_dependency_flags(record))
+            .is_some_and(|flags| flags & crate::css::style::HOLDS_IMAGE_VALUES != 0)
     }
 
     pub(crate) fn replaced_paint_facts(
@@ -4694,6 +4750,21 @@ pub(crate) struct NodeAllocation {
 #[unsafe(no_mangle)]
 pub extern "C" fn layout_arena_create() -> *mut c_void {
     Box::into_raw(Box::new(LayoutNodeArena::new())).cast()
+}
+
+/// Records whether attaching a row's style resources loaded any image.
+///
+/// # Safety
+///
+/// The arena must be live on the document thread and `slot` must name a live row.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_note_style_image_resources_attached(
+    arena: *mut c_void,
+    slot: NodeSlotId,
+    attached: bool,
+) {
+    // SAFETY: The C++ wrapper keeps the arena alive for this call.
+    unsafe { LayoutNodeArena::from_handle(arena) }.note_style_image_resources_attached(slot, attached);
 }
 
 #[unsafe(no_mangle)]

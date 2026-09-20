@@ -29,6 +29,7 @@
 #include <LibWeb/HTML/HTMLButtonElement.h>
 #include <LibWeb/HTML/HTMLFieldSetElement.h>
 #include <LibWeb/HTML/HTMLHeadingElement.h>
+#include <LibWeb/HTML/HTMLImageElement.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
 #include <LibWeb/HTML/HTMLSelectElement.h>
 #include <LibWeb/HTML/HTMLSlotElement.h>
@@ -687,6 +688,7 @@ u32 element_construction_facts(DOM::Element const& element)
     set(element.is_editing_host(), ElementConstructionFact::IsEditingHost);
     set(&element == element.document().body(), ElementConstructionFact::IsBody);
     set(element.is_document_element(), ElementConstructionFact::ConstructedAsDocumentElement);
+    set(is<HTML::HTMLImageElement>(element), ElementConstructionFact::IsHtmlImageElement);
     return facts;
 }
 

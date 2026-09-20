@@ -535,6 +535,9 @@ void NodeWithStyle::attach_style_resources()
     if (!style_record_holds_image_values(document().style_computer().style_engine(), m_style_record_identity)) {
         m_cursor_style_values.clear();
         clear_image_observers();
+        // The row keeps nothing a later attach would have to take away, which is what lets the
+        // tree build skip asking for one at all.
+        RustFFI::layout_arena_note_style_image_resources_attached(arena_handle(), slot_id(this), false);
         Painting::push_paint_facts_after_style_attach(*this, Painting::StyleHoldsImageValues::No);
         return;
     }
@@ -560,6 +563,7 @@ void NodeWithStyle::attach_style_resources()
     load_image(list_style_image());
 
     rebuild_image_observers();
+    RustFFI::layout_arena_note_style_image_resources_attached(arena_handle(), slot_id(this), true);
     Painting::push_paint_facts_after_style_attach(*this, Painting::StyleHoldsImageValues::Yes);
 }
 

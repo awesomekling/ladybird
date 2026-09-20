@@ -192,6 +192,7 @@ use instrumentation::Counters;
 use exact_matcher::ExactMatchContext;
 use exact_matcher::ExactMatcher;
 
+pub use computed::HOLDS_IMAGE_VALUES;
 pub use counter_context::StyleEngine;
 pub use inputs::{PublishedBoxFacts, PublishedTextSource, TextStyleParentFacts};
 
