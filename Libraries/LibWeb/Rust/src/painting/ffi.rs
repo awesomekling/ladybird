@@ -1568,6 +1568,18 @@ pub unsafe extern "C" fn layout_arena_set_navigable_container_paint_facts(
     )
 }
 
+/// Whether the row's DOM node published itself as editable or as an editing host. A row that no
+/// DOM node ever bound answers no, the way a node that is neither does.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_node_is_editable_or_editing_host(arena: *mut c_void, slot: NodeSlotId) -> bool {
+    let arena = unsafe { arena_from_handle(arena) };
+    arena.node_has_dom_paint_fact(slot, crate::layout::node_data::DomPaintFact::EditableOrEditingHost)
+}
+
 /// The locally hosted content navigable a navigable container's row last published. A zero id names
 /// none, which is also what a row carrying no navigable container facts answers.
 ///
