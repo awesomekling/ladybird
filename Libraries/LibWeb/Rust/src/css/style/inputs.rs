@@ -724,6 +724,18 @@ impl RetainedState {
 
     /// Record what the element's `disabled` attribute makes of it, as `DISABLED_FORM_CONTROL` and
     /// `DISABLED_FIELD_SET`.
+    /// Record the unique node id the document names the element by. It arrives with the identity
+    /// and never changes while the element holds it.
+    pub fn set_element_unique_node_id(&mut self, node: StyleNodeID, unique_node_id: i64) {
+        self.tree.set_unique_node_id(node, unique_node_id, &mut self.memory);
+    }
+
+    /// The unique node id the document names the element by, or zero for anything else.
+    #[must_use]
+    pub fn element_unique_node_id(&self, node: StyleNodeID) -> i64 {
+        self.tree.unique_node_id(node)
+    }
+
     pub fn set_element_form_control_disabled_facts(&mut self, node: StyleNodeID, facts: u8) {
         self.tree.set_form_control_disabled_facts(node, facts, &mut self.memory);
     }
