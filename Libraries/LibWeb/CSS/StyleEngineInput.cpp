@@ -1174,6 +1174,33 @@ void record_element_css_defined_animations(DOM::Element& element, u8 slot, Reado
     style_engine->set_element_css_defined_animations(element.style_node_id(), slot, lengths, units);
 }
 
+// The timing of the animations the element holds a keyframe effect for, in one of its per-pseudo-element
+// lists.
+//
+// An input: the animation stage decides which of them are relevant, which is a pure function of this
+// and of the current time its timeline was sampled at.
+void record_element_animation_timing_rows(DOM::Element& element, u8 slot, ReadonlySpan<u32> words, ReadonlySpan<u64> times)
+{
+    auto* style_engine = style_engine_for(element);
+    if (!style_engine || element.style_node_id() == no_style_node)
+        return;
+
+    style_engine->set_element_animation_timing_rows(element.style_node_id(), slot, words, times);
+}
+
+// The current time each of the document's animation timelines was sampled at.
+//
+// A timeline's current time is a cached value the rendering loop moves, never a style update, so one
+// sample taken at the update's begin boundary serves every computation in it.
+void record_animation_timeline_samples(DOM::Document& document, ReadonlySpan<u32> identities, ReadonlySpan<u32> words, ReadonlySpan<u64> times)
+{
+    auto* style_engine = style_engine_for(document);
+    if (!style_engine)
+        return;
+
+    style_engine->set_animation_timeline_samples(identities, words, times);
+}
+
 // The custom properties an element declares or references.
 //
 // Also an index rather than an input, and for the same reason as the animation names: what it answers

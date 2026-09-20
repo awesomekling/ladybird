@@ -1268,6 +1268,65 @@ void Animation::effect_timing_changed(Badge<AnimationEffect>)
     update_finished_state(DidSeek::No, SynchronouslyNotify::Yes);
 }
 
+// The style stage decides which of an element's animations are relevant from its own inputs, so
+// what `is_relevant()` reads is published rather than asked for. Only the timing is published: the
+// phase computation is a pure function of it and of the timeline's sampled current time.
+Animation::StyleTimingRow Animation::style_timing_row() const
+{
+    StyleTimingRow row;
+
+    auto record_time = [&](StyleTimingRow::Time index, TimeValue const& time, u32 percentage_flag) {
+        row.times[index] = time.value;
+        if (time.type == TimeValue::Type::Percentage)
+            row.flags |= percentage_flag;
+    };
+
+    if (m_start_time.has_value()) {
+        row.flags |= StyleTimingRow::has_start_time;
+        record_time(StyleTimingRow::StartTime, *m_start_time, StyleTimingRow::start_time_is_percentage);
+    }
+    if (m_hold_time.has_value()) {
+        row.flags |= StyleTimingRow::has_hold_time;
+        record_time(StyleTimingRow::HoldTime, *m_hold_time, StyleTimingRow::hold_time_is_percentage);
+    }
+    row.times[StyleTimingRow::PlaybackRate] = m_playback_rate;
+    if (m_pending_playback_rate.has_value()) {
+        row.flags |= StyleTimingRow::has_pending_playback_rate;
+        row.times[StyleTimingRow::PendingPlaybackRate] = *m_pending_playback_rate;
+    }
+    if (m_pending_play_task == TaskState::Scheduled)
+        row.flags |= StyleTimingRow::has_pending_play_task;
+    if (m_pending_pause_task == TaskState::Scheduled)
+        row.flags |= StyleTimingRow::has_pending_pause_task;
+    if (m_is_finished)
+        row.flags |= StyleTimingRow::is_finished_flag;
+    if (m_replace_state == AnimationReplaceState::Removed)
+        row.flags |= StyleTimingRow::replace_state_is_removed;
+    if (m_timeline) {
+        row.flags |= StyleTimingRow::has_timeline;
+        if (m_timeline->is_monotonically_increasing())
+            row.flags |= StyleTimingRow::timeline_is_monotonically_increasing;
+        if (m_timeline->is_progress_based())
+            row.flags |= StyleTimingRow::timeline_is_progress_based;
+        row.timeline_identity = m_timeline->style_engine_identity();
+    }
+
+    // An effect whose local time is overridden for observation is not describing the time the style
+    // stage samples at, and an animation with no effect is never relevant.
+    if (!m_effect || m_effect->has_local_time_override_for_observation()) {
+        row.flags |= StyleTimingRow::undecidable;
+        return row;
+    }
+
+    record_time(StyleTimingRow::StartDelay, m_effect->start_delay(), StyleTimingRow::start_delay_is_percentage);
+    record_time(StyleTimingRow::EndDelay, m_effect->end_delay(), StyleTimingRow::end_delay_is_percentage);
+    record_time(StyleTimingRow::IterationDuration, m_effect->iteration_duration(), StyleTimingRow::iteration_duration_is_percentage);
+    row.times[StyleTimingRow::IterationCount] = m_effect->iteration_count();
+    row.flags |= static_cast<u32>(to_underlying(m_effect->fill_mode())) << StyleTimingRow::fill_mode_shift;
+
+    return row;
+}
+
 // https://www.w3.org/TR/web-animations-1/#associated-effect-end
 TimeValue Animation::associated_effect_end() const
 {

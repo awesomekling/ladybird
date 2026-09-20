@@ -34,6 +34,47 @@ class Animation : public DOM::EventTarget {
     GC_DECLARE_ALLOCATOR(Animation);
 
 public:
+    // Everything the style stage needs to decide, without touching the GC heap, whether this
+    // animation is relevant: the timing of the animation and of its effect, packed into two words
+    // of presence and kind flags and eight raw times. The layout is mirrored by
+    // `Rust/src/css/style/animations.rs`; keep the two in step.
+    struct StyleTimingRow {
+        static constexpr u32 has_start_time = 1u << 0;
+        static constexpr u32 start_time_is_percentage = 1u << 1;
+        static constexpr u32 has_hold_time = 1u << 2;
+        static constexpr u32 hold_time_is_percentage = 1u << 3;
+        static constexpr u32 start_delay_is_percentage = 1u << 4;
+        static constexpr u32 end_delay_is_percentage = 1u << 5;
+        static constexpr u32 iteration_duration_is_percentage = 1u << 6;
+        static constexpr u32 has_pending_playback_rate = 1u << 7;
+        static constexpr u32 has_pending_play_task = 1u << 8;
+        static constexpr u32 has_pending_pause_task = 1u << 9;
+        static constexpr u32 is_finished_flag = 1u << 10;
+        static constexpr u32 replace_state_is_removed = 1u << 11;
+        static constexpr u32 has_timeline = 1u << 12;
+        static constexpr u32 timeline_is_monotonically_increasing = 1u << 13;
+        static constexpr u32 timeline_is_progress_based = 1u << 14;
+        static constexpr u32 fill_mode_shift = 15;
+        static constexpr u32 undecidable = 1u << 18;
+
+        enum Time : size_t {
+            StartTime,
+            HoldTime,
+            StartDelay,
+            EndDelay,
+            IterationDuration,
+            PlaybackRate,
+            PendingPlaybackRate,
+            IterationCount,
+            TimeCount,
+        };
+
+        u32 flags { 0 };
+        u32 timeline_identity { 0 };
+        double times[TimeCount] {};
+    };
+    StyleTimingRow style_timing_row() const;
+
     static constexpr size_t effect_offset() { return offsetof(Animation, m_effect); }
     enum class ShouldInvalidate {
         Yes,

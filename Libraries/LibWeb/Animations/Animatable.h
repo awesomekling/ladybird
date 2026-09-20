@@ -67,6 +67,11 @@ public:
     void on_document_changed(DOM::Document& old_document, DOM::Document& new_document);
     void cancel_css_animations_and_transitions();
 
+    // The timing of every animation this element holds a keyframe effect for, which is what the
+    // style stage decides relevance from. Published whole per animation list, since any of it can
+    // have moved by the time the stage looks.
+    void publish_animation_timing_rows();
+
     bool has_css_defined_animations() const;
     bool has_css_animations_or_transitions() const;
     Vector<GC::Ref<CSS::CSSAnimation>> const* css_defined_animations(Optional<CSS::PseudoElement>);
@@ -93,6 +98,9 @@ private:
         AK_ALLOC_WITH_KMALLOC;
 
         Vector<GC::Ref<Animation>> associated_animations;
+        // The animation lists the element last published timing rows for, so a list that empties
+        // can be cleared without walking every pseudo-element's slot.
+        Vector<u8> published_timing_row_slots;
         bool is_sorted_by_composite_order { true };
         bool has_css_defined_animations { false };
 

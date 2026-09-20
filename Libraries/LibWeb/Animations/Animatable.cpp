@@ -228,6 +228,8 @@ void Animatable::associate_with_animation(GC::Ref<Animation> animation)
 
     as<DOM::Element>(*this).document().associate_with_animation(animation);
     animation->did_associate_with_target();
+
+    publish_animation_timing_rows();
 }
 
 void Animatable::disassociate_with_animation(GC::Ref<Animation> animation)
@@ -241,6 +243,8 @@ void Animatable::disassociate_with_animation(GC::Ref<Animation> animation)
         as<DOM::Element>(*this).change_associated_animation_count_in_subtree(-1);
 
     as<DOM::Element>(*this).document().disassociate_with_animation(animation);
+
+    publish_animation_timing_rows();
 }
 
 void Animatable::on_document_changed(DOM::Document& old_document, DOM::Document& new_document)
@@ -284,6 +288,8 @@ void Animatable::cancel_css_animations_and_transitions()
 
     for (auto& animation : animations_to_cancel)
         animation->cancel(Animation::ShouldInvalidate::No);
+
+    publish_animation_timing_rows();
 }
 
 void Animatable::add_transitioned_properties(Optional<CSS::PseudoElement> pseudo_element, Vector<CSS::TransitionProperties> const& transitions)
@@ -472,6 +478,57 @@ void Animatable::publish_css_defined_animations(size_t index)
             names.unchecked_append(animation->animation_name());
     }
     CSS::record_element_css_defined_animations(*element, static_cast<u8>(index), names);
+}
+
+// Which of the animations an element holds are relevant is a question about the WAAPI timing
+// model, not about the GC heap: it is answered from the animation's own timing and the current time
+// of its timeline. Publish the timing, once per list, so the style stage can answer it itself.
+void Animatable::publish_animation_timing_rows()
+{
+    auto* element = as_if<DOM::Element>(*this);
+    if (!element || !m_impl)
+        return;
+
+    auto slot_of = [](KeyframeEffect const& effect) {
+        auto pseudo_element = effect.pseudo_element_type();
+        return pseudo_element.has_value() ? static_cast<u8>(to_underlying(*pseudo_element) + 1) : static_cast<u8>(0);
+    };
+
+    Vector<u8> slots_with_rows;
+    for (auto const& animation : m_impl->associated_animations) {
+        auto effect = animation->effect();
+        if (!effect || !is<KeyframeEffect>(*effect))
+            continue;
+        auto slot = slot_of(static_cast<KeyframeEffect const&>(*effect));
+        if (!slots_with_rows.contains_slow(slot))
+            slots_with_rows.append(slot);
+    }
+
+    Vector<u32> words;
+    Vector<u64> times;
+    for (auto slot : slots_with_rows) {
+        words.clear_with_capacity();
+        times.clear_with_capacity();
+        for (auto const& animation : m_impl->associated_animations) {
+            auto effect = animation->effect();
+            if (!effect || !is<KeyframeEffect>(*effect))
+                continue;
+            if (slot_of(static_cast<KeyframeEffect const&>(*effect)) != slot)
+                continue;
+            auto row = animation->style_timing_row();
+            words.append(row.flags);
+            words.append(row.timeline_identity);
+            for (auto time : row.times)
+                times.append(bit_cast<u64>(time));
+        }
+        CSS::record_element_animation_timing_rows(*element, slot, words, times);
+    }
+
+    for (auto slot : m_impl->published_timing_row_slots) {
+        if (!slots_with_rows.contains_slow(slot))
+            CSS::record_element_animation_timing_rows(*element, slot, {}, {});
+    }
+    m_impl->published_timing_row_slots = move(slots_with_rows);
 }
 
 Animatable::Impl& Animatable::ensure_impl() const

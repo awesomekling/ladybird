@@ -5325,11 +5325,10 @@ pub unsafe extern "C" fn rust_compute_properties(input: *const FfiComputePropert
         return;
     }
 
-    // OPTIMIZATION: An element that declares no animation, owns no CSS-defined animation and has no
-    //               animation associated with it has nothing for the animation stage to do:
-    //               reconciling the definitions reconciles two empty lists, and collecting the
-    //               effects to sample finds none. Every part of that question is already published,
-    //               so the answer costs a mirror read instead of two host calls.
+    // OPTIMIZATION: An element with no plan to apply and nothing relevant to sample has nothing for
+    //               the animation stage to do. The published per-element fact answers the weaker
+    //               question of whether the element has any animation at all, and stands in
+    //               wherever the timing rows decline to answer the exact one.
     let element_has_associated_animations = match crate::css::style::tree::StyleNodeID::from_raw(input.style_node) {
         Some(node) => {
             style_engine.element_adjustment_facts(node)
@@ -5339,8 +5338,25 @@ pub unsafe extern "C" fn rust_compute_properties(input: *const FfiComputePropert
         // An element the mirror does not name is one nothing is published about, so it asks the host.
         None => true,
     };
+    // The plan has to reach the host's objects whenever it has any work: a definition to retime or
+    // to start, or an animation no definition claimed and that must therefore be cancelled.
+    let plan_has_work = has_animation_definitions || input.has_css_defined_animations;
+    // What is left is whether the element has anything to sample, which is a question about the
+    // WAAPI timing model: an animation is relevant when its effect is current or in effect. Both
+    // are pure functions of the animation's timing and of the current time its timeline was sampled
+    // at when this style update began, and both are published, so the mirror answers it. `None`
+    // where a row declines to be decided, and then the published fact decides as before.
+    let element_has_relevant_effects = match plan_has_work {
+        true => None,
+        false => crate::css::style::tree::StyleNodeID::from_raw(input.style_node).and_then(|node| {
+            crate::css::style::animations::any_row_is_relevant(
+                style_engine.element_animation_timing_rows(node, animation_slot(input.pseudo_kind)),
+                style_engine.animation_timeline_samples(),
+            )
+        }),
+    };
     let element_has_animation_state =
-        has_animation_definitions || input.has_css_defined_animations || element_has_associated_animations;
+        plan_has_work || element_has_relevant_effects.unwrap_or(element_has_associated_animations);
     let has_animations = if element_has_animation_state {
         crate::css::style::seal::note_host_call("computed_properties.prepare_animations");
         unsafe {

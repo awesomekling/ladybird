@@ -105,6 +105,7 @@ public:
     Optional<TimeValue> active_time_using_fill(Bindings::FillMode) const;
 
     bool is_current() const;
+    bool has_local_time_override_for_observation() const { return m_has_local_time_override_for_observation; }
     bool is_in_effect() const;
 
     TimeValue before_active_boundary_time() const;

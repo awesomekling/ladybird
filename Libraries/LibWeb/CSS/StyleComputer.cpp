@@ -1454,6 +1454,10 @@ void StyleComputer::apply_animation_definitions(ComputedStyleWorkingSet const& c
     new_animations.reverse();
 
     abstract_element.set_css_defined_animations(move(new_animations));
+
+    // The plan just created, retimed and cancelled animations of this element. Republish their
+    // timing so the rest of this style update reads what they are now, not what they were.
+    abstract_element.element().publish_animation_timing_rows();
 }
 
 static void collect_dimension_attribute(Vector<StyleProperty>& properties, DOM::Element const& element, Utf16FlyString const& attribute_name, CSS::PropertyID property_id)
@@ -6018,8 +6022,11 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             compute_transitioned_properties(move(context.state->transitions), context.state->transition_delay_and_duration_are_single_zero, context.abstract_element);
             if (auto previous_style = context.abstract_element.computed_style()) {
                 // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
-                if (!previous_style->in_display_none_subtree() && !parent_style_in_display_none_subtree)
+                if (!previous_style->in_display_none_subtree() && !parent_style_in_display_none_subtree) {
                     style_computer.start_needed_transitions(computed_style, context.abstract_element);
+                    // Starting a transition associates a new animation with the element.
+                    context.abstract_element.element().publish_animation_timing_rows();
+                }
             }
 
             if (style_computer.m_keyframes_inherited_non_inherited_style_groups != 0) {
