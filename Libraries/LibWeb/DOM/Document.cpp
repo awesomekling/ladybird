@@ -7292,6 +7292,15 @@ GC::Ref<Animations::DocumentTimeline> Document::timeline()
 // current for the whole of one; what the stage itself changes it republishes as it goes.
 void Document::publish_animation_environment_for_style_update()
 {
+    // Resolving an animation's `@keyframes` is a lookup in what each style scope published, and a
+    // scope publishes when its rule cache is built. Building one is parsing the user sheet and
+    // evaluating the user-agent sheet's media queries, which the style stage must not do, so every
+    // scope's cache is settled here instead. A cache that is already valid costs two comparisons.
+    style_scope().build_rule_cache_if_needed();
+    for_each_shadow_root([](DOM::ShadowRoot& shadow_root) {
+        shadow_root.style_scope().build_rule_cache_if_needed();
+    });
+
     Vector<u32> identities;
     Vector<u32> words;
     Vector<u64> times;
@@ -9322,6 +9331,10 @@ void Document::register_shadow_root(Badge<DOM::ShadowRoot>, DOM::ShadowRoot& sha
 void Document::unregister_shadow_root(Badge<DOM::ShadowRoot>, DOM::ShadowRoot& shadow_root)
 {
     m_shadow_roots.remove(shadow_root);
+    // The style computation resolves an animation's keyframes from what each scope published, by
+    // pointer. This scope is leaving the document, so it gives up what it published before the
+    // keyframe sets it named can go away with it.
+    shadow_root.style_scope().unpublish_animation_keyframes();
 }
 
 // https://drafts.csswg.org/css-position-4/#add-an-element-to-the-top-layer

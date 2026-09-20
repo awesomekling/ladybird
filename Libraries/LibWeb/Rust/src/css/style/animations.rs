@@ -15,7 +15,7 @@
 //! host does once a definition has found its animation - applying the timing, resolving the
 //! keyframes, cancelling what no definition claimed - it does from the list it already holds.
 
-use super::tree::StyleNodeID;
+use super::tree::{StyleNodeID, TreeScopeID};
 use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::css_string::CssString;
 use crate::css::host_shared::SharedPayload;
@@ -547,6 +547,121 @@ pub(crate) fn any_row_is_relevant(rows: &[AnimationTimingRow], samples: &Animati
         any |= row_is_relevant(row, timeline_time)?;
     }
     Some(any)
+}
+
+/// A `@keyframes` name as a hash key. `CssString` compares by content but implements no `Hash`,
+/// and a name is looked up once per animation definition, so the key hashes the code units.
+#[derive(PartialEq, Eq)]
+struct KeyframesName(CssString);
+
+impl std::hash::Hash for KeyframesName {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::hash::Hash::hash(self.0.units(), state);
+    }
+}
+
+/// The `@keyframes` every style scope of the document defines, as each scope's rule cache resolved
+/// them.
+///
+/// Resolving an animation's keyframes used to build the scope's rule cache inside the style stage -
+/// parsing the user sheet, evaluating the user-agent sheet's media queries and allocating the cache
+/// on the spot - and then walk the live tree for the scopes to look in. The host builds every
+/// scope's cache at the style update's begin boundary instead and publishes what came out, so the
+/// stage's answer is a lookup in this table.
+///
+/// The keyframe set is the host's own refcounted object, borrowed: the host holds a reference to
+/// each published scope's cache for as long as the table names it, and replaces a scope's whole row
+/// when that scope's rule cache is rebuilt. A replayed engine is never published to and resolves
+/// nothing, the way it reads no layout arena.
+#[derive(Default)]
+pub(crate) struct AnimationKeyframes {
+    scopes: HashMap<TreeScopeID, HashMap<KeyframesName, usize>>,
+    /// Which scope a shadow root's host-side pointer identity names. The cascade attributes the
+    /// winning `animation-name` declaration to a shadow root by that identity, and the scope it
+    /// names is where the declaration's `@keyframes` are looked for first.
+    scope_by_shadow_root: HashMap<usize, TreeScopeID>,
+}
+
+impl AnimationKeyframes {
+    /// Replace one scope's row. The names arrive packed into one buffer of code units with a length
+    /// each, the way an element's animation names do.
+    pub(crate) fn set(
+        &mut self,
+        tree_scope: TreeScopeID,
+        shadow_root_identity: usize,
+        name_lengths: &[u32],
+        name_units: &[u16],
+        keyframe_sets: &[usize],
+    ) {
+        assert!(
+            name_lengths.len() == keyframe_sets.len(),
+            "a published @keyframes name must come with its keyframe set"
+        );
+        if name_lengths.is_empty() {
+            self.scopes.remove(&tree_scope);
+            // A scope that defines nothing and a scope with no row answer alike, so the identity
+            // may as well stop naming it: giving the row up is how a shadow root on its way out
+            // takes its address out of the table before another root can be allocated there.
+            self.scope_by_shadow_root.remove(&shadow_root_identity);
+            return;
+        }
+        if shadow_root_identity != 0 {
+            self.scope_by_shadow_root.insert(shadow_root_identity, tree_scope);
+        }
+        let mut sets = HashMap::with_capacity(name_lengths.len());
+        let mut offset = 0usize;
+        for (index, &length) in name_lengths.iter().enumerate() {
+            let end = offset + length as usize;
+            assert!(end <= name_units.len(), "@keyframes name lengths overrun their buffer");
+            sets.insert(
+                KeyframesName(CssString::from_utf16(&name_units[offset..end])),
+                keyframe_sets[index],
+            );
+            offset = end;
+        }
+        self.scopes.insert(tree_scope, sets);
+    }
+
+    #[must_use]
+    fn in_scope(&self, tree_scope: TreeScopeID, name: &KeyframesName) -> Option<usize> {
+        self.scopes.get(&tree_scope)?.get(name).copied()
+    }
+
+    /// The keyframe set an animation of this name runs, or zero where no scope in its chain defines
+    /// one and the host makes an effect with no keyframes.
+    ///
+    /// The chain is the one the host walked: the tree scope of the winning `animation-name`
+    /// declaration first, because that declaration can come from a shadow-root rule - `:host()` and
+    /// `::slotted()` - while the element it styles is outside that subtree, and a same-named
+    /// document rule must not win over it; then the scope the element itself is in; then the
+    /// document.
+    #[must_use]
+    pub(crate) fn resolve(
+        &self,
+        declaration_shadow_root_identity: usize,
+        element_tree_scope: TreeScopeID,
+        name: &CssString,
+    ) -> usize {
+        if self.scopes.is_empty() {
+            return 0;
+        }
+        let name = KeyframesName(name.clone());
+        if declaration_shadow_root_identity != 0
+            && let Some(scope) = self
+                .scope_by_shadow_root
+                .get(&declaration_shadow_root_identity)
+                .copied()
+            && let Some(set) = self.in_scope(scope, &name)
+        {
+            return set;
+        }
+        if element_tree_scope != TreeScopeID::DOCUMENT
+            && let Some(set) = self.in_scope(element_tree_scope, &name)
+        {
+            return set;
+        }
+        self.in_scope(TreeScopeID::DOCUMENT, &name).unwrap_or(0)
+    }
 }
 
 /// The transform reference box the last committed layout left for an element, in CSS pixels, which

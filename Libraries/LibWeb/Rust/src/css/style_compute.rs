@@ -2705,6 +2705,9 @@ pub struct FfiComputedAnimation {
     /// The index, in the list of CSS animations the host already holds for this element and
     /// pseudo-element, of the animation this definition claims, or -1 where it asks for a new one.
     pub matched_existing_index: i32,
+    /// The host's keyframe set for this definition's name, taken from the published `@keyframes`
+    /// of the scopes the name resolves in, or null where no scope in the chain defines it.
+    pub keyframe_set: *const c_void,
 }
 
 #[repr(C)]
@@ -5079,6 +5082,9 @@ fn in_display_none_subtree_for_animations(
 fn build_computed_animation_list(
     table: &ComputedLonghandTable,
     existing_animation_names: &[crate::css::css_string::CssString],
+    keyframes: &crate::css::style::animations::AnimationKeyframes,
+    declaration_shadow_root_identity: usize,
+    element_tree_scope: crate::css::style::tree::TreeScopeID,
 ) -> FfiComputedAnimationList {
     use crate::css::property_metadata::property_id as prop;
 
@@ -5137,6 +5143,8 @@ fn build_computed_animation_list(
             scroll_scroller,
             scroll_axis,
             matched_existing_index: crate::css::style::animations::NO_MATCHED_ANIMATION,
+            keyframe_set: keyframes.resolve(declaration_shadow_root_identity, element_tree_scope, name_string)
+                as *const c_void,
         });
     }
 
@@ -5314,8 +5322,22 @@ pub unsafe extern "C" fn rust_compute_properties(input: *const FfiComputePropert
                 .unwrap_or_default(),
             false => &[],
         };
-        result.animations =
-            build_computed_animation_list(unsafe { &*drive_input.longhand_table }, existing_animation_names);
+        // The scope chain an animation's `@keyframes` are looked for in: the tree scope the winning
+        // `animation-name` declaration was written in, then the one the element is in, then the
+        // document. All three are answered from what the host published before the stage began.
+        let declaration_shadow_root_identity =
+            unsafe { &*input.store }.winning_source_shadow_root_identity(property_id::ANIMATION_NAME);
+        let element_tree_scope = crate::css::style::tree::StyleNodeID::from_raw(input.style_node)
+            .map_or(crate::css::style::tree::TreeScopeID::DOCUMENT, |node| {
+                style_engine.tree().tree_scope(node)
+            });
+        result.animations = build_computed_animation_list(
+            unsafe { &*drive_input.longhand_table },
+            existing_animation_names,
+            style_engine.animation_keyframes(),
+            declaration_shadow_root_identity,
+            element_tree_scope,
+        );
     }
     let has_animation_definitions = result.animations.count != 0;
     // Whether the element is in a `display: none` subtree only decides whether a definition that
