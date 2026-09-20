@@ -2336,47 +2336,47 @@ pub unsafe extern "C" fn layout_arena_run_root_layout(
     }
 }
 
-/// Lays the document out from its viewport: propagates the root and body styles the viewport
-/// takes over, syncs enrolled content, computes and commits fragments, and notifies the host.
-///
-/// # Safety
-///
-/// `arena_handle` must be a live handle with a registered layout host, used on the document
-/// thread, and `root` must be its live viewport box.
-pub(crate) unsafe fn run_root_layout(
-    main_thread: &crate::stage::MainThread,
-    arena_handle: *mut c_void,
+struct LayoutStageInput<'a> {
+    arena: &'a LayoutNodeArena,
     root: NodeSlotId,
+    viewport: NodeSlotId,
     viewport_inline_size_raw: i32,
     viewport_block_size_raw: i32,
     document_in_quirks_mode: bool,
     should_collect_devtools_layout_data: bool,
-) {
-    assert!(!arena_handle.is_null(), "layout node arena handle is null");
-    assert!(!root.is_invalid());
-    // SAFETY: The caller keeps the arena alive for this synchronous call. The host table is
-    // copied out so no arena borrow spans a host callback.
-    let host = unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_host();
-    seal::note_host_call(
-        unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_pass_is_running(),
-        "viewport_propagation_facts",
-    );
-    crate::layout::tree_build_seal::note_host_call("viewport_propagation_facts");
-    // SAFETY: The document answers from its elements' style records without entering the arena.
-    let propagation_facts = host.viewport_propagation_facts(main_thread);
-    // The style rewrites enroll the affected boxes' text children for content sync, so the sync
-    // follows them, and both precede the pass, which caches decoded style.
-    // SAFETY: As above; the propagation borrows the arena only for its own call.
-    viewport_propagation::propagate_root_styles_to_viewport(
-        unsafe { LayoutNodeArena::from_handle(arena_handle) },
+}
+
+// SAFETY: DEBT: Layout still reads and mutates the document-owned arena through Cell and RefCell.
+// The FFI caller gives the stage exclusive logical ownership for this synchronous run. Split the
+// immutable layout-tree input and per-run scratch from the arena before moving layout to a thread.
+unsafe impl Sync for LayoutStageInput<'_> {}
+
+struct LayoutStageOutput(fragment_tree::CompletedPassFragments);
+
+// SAFETY: DEBT: Completed fragments still own Rc-backed fragments, paths, and layout metadata.
+// This private output is consumed on the document thread immediately after the stage returns.
+// Replace those owners with Arc-backed or uniquely owned values before transferring the output.
+unsafe impl Send for LayoutStageOutput {}
+
+const _: () = {
+    const fn assert_sync<T: Sync>() {}
+    const fn assert_send<T: Send>() {}
+    assert_sync::<LayoutStageInput<'static>>();
+    assert_send::<LayoutStageOutput>();
+};
+
+/// The host-free full layout stage. Host callbacks require a `MainThread` capability, which this
+/// function neither receives nor stores in its input.
+fn run_root_layout_stage(stage: LayoutStageInput<'_>) -> LayoutStageOutput {
+    let LayoutStageInput {
+        arena,
         root,
-        &propagation_facts,
-    );
-    // SAFETY: As above.
-    unsafe { super::layout_node_arena::sync_enrolled_content_for_layout(main_thread, arena_handle) };
-    // SAFETY: The host keeps the document's layout inputs alive and unchanged
-    // while computing fragments. Nested measurements only mutate side caches.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+        viewport: _,
+        viewport_inline_size_raw,
+        viewport_block_size_raw,
+        document_in_quirks_mode,
+        should_collect_devtools_layout_data,
+    } = stage;
     arena.begin_active_layout_pass();
     // NB: The tree builder derives the facts of rebuilt subtrees. Unclassified invalidations
     // require deriving them for the entire tree instead.
@@ -2461,6 +2461,59 @@ pub(crate) unsafe fn run_root_layout(
             should_collect_devtools_layout_data,
         )
     });
+    LayoutStageOutput(pass_fragments)
+}
+
+/// Lays the document out from its viewport: propagates the root and body styles the viewport
+/// takes over, syncs enrolled content, computes and commits fragments, and notifies the host.
+///
+/// # Safety
+///
+/// `arena_handle` must be a live handle with a registered layout host, used on the document
+/// thread, and `root` must be its live viewport box.
+pub(crate) unsafe fn run_root_layout(
+    main_thread: &crate::stage::MainThread,
+    arena_handle: *mut c_void,
+    root: NodeSlotId,
+    viewport_inline_size_raw: i32,
+    viewport_block_size_raw: i32,
+    document_in_quirks_mode: bool,
+    should_collect_devtools_layout_data: bool,
+) {
+    assert!(!arena_handle.is_null(), "layout node arena handle is null");
+    assert!(!root.is_invalid());
+    // SAFETY: The caller keeps the arena alive for this synchronous call. The host table is
+    // copied out so no arena borrow spans a host callback.
+    let host = unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_host();
+    seal::note_host_call(
+        unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_pass_is_running(),
+        "viewport_propagation_facts",
+    );
+    crate::layout::tree_build_seal::note_host_call("viewport_propagation_facts");
+    // SAFETY: The document answers from its elements' style records without entering the arena.
+    let propagation_facts = host.viewport_propagation_facts(main_thread);
+    // The style rewrites enroll the affected boxes' text children for content sync, so the sync
+    // follows them, and both precede the pass, which caches decoded style.
+    // SAFETY: As above; the propagation borrows the arena only for its own call.
+    viewport_propagation::propagate_root_styles_to_viewport(
+        unsafe { LayoutNodeArena::from_handle(arena_handle) },
+        root,
+        &propagation_facts,
+    );
+    // SAFETY: As above.
+    unsafe { super::layout_node_arena::sync_enrolled_content_for_layout(main_thread, arena_handle) };
+    // SAFETY: The host keeps the arena and its published inputs alive and unchanged for the
+    // synchronous stage run.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+    let LayoutStageOutput(pass_fragments) = run_root_layout_stage(LayoutStageInput {
+        arena,
+        root,
+        viewport: root,
+        viewport_inline_size_raw,
+        viewport_block_size_raw,
+        document_in_quirks_mode,
+        should_collect_devtools_layout_data,
+    });
     // SAFETY: Computation has finished and its input borrows are no longer used.
     let arena = unsafe { commit_entry_pass(main_thread, arena_handle, &host, root, &pass_fragments) };
     arena.did_commit_full_layout(root);
@@ -2538,28 +2591,17 @@ pub unsafe extern "C" fn layout_arena_compute_subtree_layout(
     }
 }
 
-/// Lays out one partial relayout boundary in place and commits its fragments. Enrolled content
-/// is not synced here: the caller syncs once ahead of a batch of boundaries.
-///
-/// # Safety
-///
-/// `arena_handle` must be a live handle with a registered layout host, used on the document
-/// thread, and `root` must be a live partial relayout boundary.
-pub(crate) unsafe fn compute_subtree_layout(
-    main_thread: &crate::stage::MainThread,
-    arena_handle: *mut c_void,
-    root: NodeSlotId,
-    viewport_inline_size_raw: i32,
-    document_in_quirks_mode: bool,
-) {
-    assert!(!arena_handle.is_null(), "layout node arena handle is null");
-    assert!(!root.is_invalid());
-    // SAFETY: The caller keeps the arena alive for this synchronous call. The host table is
-    // copied out so no arena borrow spans a host callback.
-    let host = unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_host();
-    // SAFETY: The host keeps the document's layout inputs alive and unchanged
-    // while computing fragments. Nested measurements only mutate side caches.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+/// The host-free partial layout stage. Its input carries no host table or main-thread capability.
+fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>) -> LayoutStageOutput {
+    let LayoutStageInput {
+        arena,
+        root,
+        viewport,
+        viewport_inline_size_raw,
+        viewport_block_size_raw,
+        document_in_quirks_mode,
+        should_collect_devtools_layout_data: _,
+    } = stage;
     arena.begin_active_layout_pass();
     let callbacks = LayoutPass::new(
         arena,
@@ -2611,6 +2653,42 @@ pub(crate) unsafe fn compute_subtree_layout(
         finish_entry_pass(entry_records, &entry_fragments, &callbacks, false)
     });
     drop(read_scope);
+    LayoutStageOutput(pass_fragments)
+}
+
+/// Lays out one partial relayout boundary in place and commits its fragments. Enrolled content
+/// is not synced here: the caller syncs once ahead of a batch of boundaries.
+///
+/// # Safety
+///
+/// `arena_handle` must be a live handle with a registered layout host, used on the document
+/// thread; `root` must be a live partial relayout boundary and `viewport` the live viewport box.
+pub(crate) unsafe fn compute_subtree_layout(
+    main_thread: &crate::stage::MainThread,
+    arena_handle: *mut c_void,
+    root: NodeSlotId,
+    viewport: NodeSlotId,
+    viewport_inline_size_raw: i32,
+    viewport_block_size_raw: i32,
+    document_in_quirks_mode: bool,
+) {
+    assert!(!arena_handle.is_null(), "layout node arena handle is null");
+    assert!(!root.is_invalid());
+    // SAFETY: The caller keeps the arena alive for this synchronous call. The host table is
+    // copied out so no arena borrow spans a host callback.
+    let host = unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_host();
+    // SAFETY: The host keeps the arena and its published inputs alive and unchanged for the
+    // synchronous stage run.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+    let LayoutStageOutput(pass_fragments) = compute_subtree_layout_stage(LayoutStageInput {
+        arena,
+        root,
+        viewport,
+        viewport_inline_size_raw,
+        viewport_block_size_raw,
+        document_in_quirks_mode,
+        should_collect_devtools_layout_data: false,
+    });
     // SAFETY: Computation has finished and its input borrows are no longer used.
     let arena = unsafe { commit_entry_pass(main_thread, arena_handle, &host, root, &pass_fragments) };
     // Commit reset the subtree's rows, and its new size may affect ancestor scrollable overflow.
