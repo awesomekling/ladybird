@@ -103,7 +103,9 @@ fn current_writer() -> &'static str {
         .unwrap_or("main-side direct")
 }
 
-fn enabled() -> bool {
+/// Whether the verifier is on. A caller that has to build a fingerprint before it can report
+/// anything asks this first, so nothing is hashed for a run that reports nothing.
+pub(crate) fn enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
         !matches!(
