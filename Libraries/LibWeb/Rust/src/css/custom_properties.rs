@@ -503,6 +503,7 @@ impl ASFResolutionContext<'_> {
             && let Some(load_media_environment) = self.load_media_environment
         {
             crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::MediaEnvironmentCallback);
+            crate::css::style::seal::note_host_call("substitution.load_media_environment");
             self.media_environment = unsafe {
                 load_media_environment(self.callback_context)
                     .cast::<FfiMediaEnvironment>()
@@ -1585,6 +1586,7 @@ fn evaluate_style_feature(
         };
         let source = serialize_tokens(tokens);
         crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::EvaluateConditionCallback);
+        crate::css::style::seal::note_host_call("substitution.evaluate_style_query");
         return match unsafe {
             evaluate(
                 context.callback_context,
@@ -1641,6 +1643,7 @@ fn evaluate_style_feature(
     {
         let source = serialize_tokens(tokens);
         crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::EvaluateConditionCallback);
+        crate::css::style::seal::note_host_call("substitution.evaluate_style_query");
         return match unsafe {
             evaluate(
                 context.callback_context,
@@ -2145,6 +2148,7 @@ fn replace_a_dashed_function(
         })
         .unwrap_or(functions.caller_scope_identity);
     let resolved_identity = context.resolve_custom_function.map(|resolve| unsafe {
+        crate::css::style::seal::note_host_call("substitution.resolve_custom_function");
         resolve(
             caller_scope_identity,
             FfiUtf16View {

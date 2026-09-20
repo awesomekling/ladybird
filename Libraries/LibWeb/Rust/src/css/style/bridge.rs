@@ -1270,6 +1270,7 @@ pub extern "C" fn style_engine_verification_gate_bits() -> u8 {
 /// `engine` must be a pointer returned by `style_engine_create` and not yet destroyed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_destroy(engine: *mut c_void) {
+    super::seal::flush_census();
     let mut engine = unsafe { Box::from_raw(engine.cast::<StyleEngine>()) };
     engine.end_recording();
 }
@@ -3390,6 +3391,7 @@ pub unsafe extern "C" fn style_engine_native_rule_declarations_changed(
         };
         (id, rule.cascade_declarations())
     };
+    super::seal::note_host_call("native_rule_declarations_changed.notify");
     unsafe { notify(context, id.0 + 1) };
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     engine.native_rules.targets.get_mut(&id).unwrap().declarations = declarations.clone();
@@ -3445,10 +3447,12 @@ pub unsafe extern "C" fn style_engine_remove_native_rule(
     let has_counter_style = removed
         .iter()
         .any(|rule| RuleRef::Materialized(rule).rule_type() == NativeRuleType::CounterStyle);
+    super::seal::note_host_call("remove_native_rule.begin");
     unsafe { begin(context, changes_environment, has_counter_style) };
     for rule in removed {
         let declares_layer = mutation::declares_layer(&rule);
         let id = unsafe { &*engine.cast::<StyleEngine>() }.native_rule_id(RuleRef::Materialized(&rule).identity());
+        super::seal::note_host_call("remove_native_rule.notify");
         unsafe { notify(context, id.map_or(0, |id| id.0 + 1), declares_layer) };
         if let Some(id) = id {
             operations::remove_rule(unsafe { &mut *engine.cast::<StyleEngine>() }, id.0 + 1);
@@ -3537,6 +3541,7 @@ pub unsafe extern "C" fn style_engine_native_rule_matches_containers(
             })
         })
     });
+    super::seal::note_host_call("native_rule_matches_containers.mark_dependencies");
     unsafe { mark_dependencies(context, size, style) };
     containers.iter().all(|conditions| {
         conditions.conditions.iter().any(|condition| {
@@ -3545,6 +3550,7 @@ pub unsafe extern "C" fn style_engine_native_rule_matches_containers(
                 .query
                 .as_ref()
                 .map_or(std::ptr::null(), |query| std::sync::Arc::as_ptr(query).cast());
+            super::seal::note_host_call("native_rule_matches_containers.evaluate");
             unsafe { evaluate(context, query, name.as_ptr(), name.len()) }
         })
     })
