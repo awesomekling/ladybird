@@ -549,6 +549,34 @@ pub(crate) fn any_row_is_relevant(rows: &[AnimationTimingRow], samples: &Animati
     Some(any)
 }
 
+/// The transform reference box the last committed layout left for an element, in CSS pixels, which
+/// a keyframe or transition resolves a percentage translation against. `None` where the element
+/// has no committed box, which is the host's own condition for having no reference box.
+///
+/// This is a read of an earlier stage's committed output rather than of the element: the box is
+/// taken from the layout arena's paintable rows by style-node identity, so the stage never follows
+/// the element's layout-node pointer into the DOM. Publishing a box per node at commit time
+/// instead would mean resolving every committed row's absolute rect on every layout, which layout
+/// does lazily today and only for the rows that are painted.
+///
+/// # Safety
+/// `arena` must be the document's live layout arena.
+#[must_use]
+pub(crate) unsafe fn committed_transform_reference_box(
+    arena: *mut std::ffi::c_void,
+    node: StyleNodeID,
+) -> Option<(f64, f64)> {
+    let arena = unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() };
+    let row = arena.bound_row(node);
+    if row.is_invalid() || !arena.paintable_row_is_populated(row) {
+        return None;
+    }
+    let style = arena.node_style_if_live(row)?;
+    let paintable_rows = arena.paintable_rows();
+    let rect = crate::painting::visual_context::node_values::transform_reference_box(style, &paintable_rows, row);
+    Some((rect.width.to_double(), rect.height.to_double()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1266,6 +1266,57 @@ pub extern "C" fn style_engine_verification_gate_bits() -> u8 {
     super::verification_gate_bits()
 }
 
+/// The size of an element's transform reference box, as the last committed layout left it.
+#[repr(C)]
+pub struct FfiCommittedTransformReferenceBox {
+    pub has_box: bool,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Names the layout arena whose committed boxes the style stage may read. The document calls this
+/// once, when it builds its arena; the engine only ever reads through the handle.
+///
+/// # Safety
+/// `engine` must be live, and `arena` must be the document's layout arena, which outlives it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_set_layout_arena(engine: *mut c_void, arena: *mut c_void) {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    engine.host.layout_arena = std::ptr::NonNull::new(arena);
+}
+
+/// The transform reference box the last committed layout left for `node`, which the animation
+/// stage resolves percentage translations against. An element with no committed box, and every
+/// element while the document has no layout arena, has none.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_committed_transform_reference_box(
+    engine: *mut c_void,
+    node: u32,
+) -> FfiCommittedTransformReferenceBox {
+    let none = FfiCommittedTransformReferenceBox {
+        has_box: false,
+        width: 0.0,
+        height: 0.0,
+    };
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    let (Some(arena), Some(node)) = (engine.host.layout_arena, StyleNodeID::from_raw(node)) else {
+        return none;
+    };
+    // SAFETY: The arena the document named outlives the engine, and this reads its committed
+    // paintable rows without touching the engine it can reach back into.
+    match unsafe { super::animations::committed_transform_reference_box(arena.as_ptr(), node) } {
+        Some((width, height)) => FfiCommittedTransformReferenceBox {
+            has_box: true,
+            width,
+            height,
+        },
+        None => none,
+    }
+}
+
 /// # Safety
 /// `engine` must be a pointer returned by `style_engine_create` and not yet destroyed.
 #[unsafe(no_mangle)]

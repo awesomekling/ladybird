@@ -675,6 +675,9 @@ Layout::NodeArena& Document::layout_node_arena()
             },
         };
         Layout::RustFFI::layout_arena_set_style_record_host_callbacks(m_layout_node_arena->handle(), style_record_host_callbacks);
+        // The style stage resolves percentage transforms against the box the last layout committed,
+        // which it reads from the arena by identity rather than from a layout node.
+        CSS::StyleEngineFFI::style_engine_set_layout_arena(style_computer().style_engine().rust_handle(), m_layout_node_arena->handle());
         // The render side says which nodes have a box and which of those boxes layout committed, so
         // that DOM code reads a bit instead of looking up the node's row.
         Layout::RustFFI::layout_arena_set_box_presence_host(m_layout_node_arena->handle(), this, [](void* context, u32 style_node, u8 bits) {
