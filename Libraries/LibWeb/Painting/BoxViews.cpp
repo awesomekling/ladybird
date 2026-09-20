@@ -8,6 +8,7 @@
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/DOM/Position.h>
 #include <LibWeb/DOM/ShadowRoot.h>
@@ -850,7 +851,31 @@ void set_needs_repaint_in_subtree(Layout::Node const& node)
 
 void invalidate_paint_cache(Layout::Node const& node)
 {
-    mirror_rust_invalidate_paint_cache(node);
+    auto identity = node.dom_node_identity();
+    if (!identity) {
+        // Anonymous rows have no stable DOM identity to put in the journal. Their owning layout
+        // operation keeps the row alive, so applying this mark directly cannot target a new row.
+        apply_paint_cache_invalidation(node, PaintCacheInvalidation::PaintAndHitTest, PaintCacheInvalidationStage::AnonymousRow);
+        return;
+    }
+    const_cast<DOM::Document&>(node.document()).invalidation_journal().note_paint_cache_invalidation(identity, PaintCacheInvalidation::PaintAndHitTest);
+}
+
+void invalidate_propagated_text_decoration_caches(Layout::Node const& node)
+{
+    auto identity = node.dom_node_identity();
+    if (!identity) {
+        // See invalidate_paint_cache(): an anonymous row cannot be resolved from a journal entry.
+        apply_paint_cache_invalidation(node, PaintCacheInvalidation::PropagatedTextDecorations, PaintCacheInvalidationStage::AnonymousRow);
+        return;
+    }
+    const_cast<DOM::Document&>(node.document()).invalidation_journal().note_paint_cache_invalidation(identity, PaintCacheInvalidation::PropagatedTextDecorations);
+}
+
+void apply_paint_cache_invalidation(Layout::Node const& node, PaintCacheInvalidation invalidation, PaintCacheInvalidationStage stage)
+{
+    Layout::RustFFI::layout_arena_paintable_invalidate_paint_cache(
+        node.arena_handle(), committed_row_slot(node), invalidation == PaintCacheInvalidation::PropagatedTextDecorations, to_underlying(stage));
 }
 
 void repaint_after_style_change(Layout::Node const& node, CSS::RequiredInvalidationAfterStyleChange const& invalidation)
@@ -858,7 +883,7 @@ void repaint_after_style_change(Layout::Node const& node, CSS::RequiredInvalidat
     if (invalidation.needs_repaint())
         set_needs_repaint(node, invalidation.invalidates_hit_test_display_list() ? InvalidateDisplayList::PaintCommandsAndHitTestList : InvalidateDisplayList::PaintCommands);
     if (invalidation.repaint_propagated_text_decorations)
-        rust_invalidate_propagated_text_decoration_caches(node);
+        invalidate_propagated_text_decoration_caches(node);
     if (invalidation.needs_stacking_context_tree_rebuild()) {
         auto& document = const_cast<DOM::Document&>(node.document());
         document.schedule_accumulated_visual_context_update(node, DOM::Document::AccumulatedVisualContextUpdateScope::Structure);

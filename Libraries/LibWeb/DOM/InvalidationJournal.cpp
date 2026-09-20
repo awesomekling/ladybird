@@ -109,6 +109,20 @@ void InvalidationJournal::note_paint_facts(NodeIdentity identity, PaintFactsFami
     drain_if_the_render_side_is_reading();
 }
 
+void InvalidationJournal::note_paint_cache_invalidation(NodeIdentity identity, Painting::PaintCacheInvalidation invalidation)
+{
+    auto& entry = entry_for(identity);
+    switch (invalidation) {
+    case Painting::PaintCacheInvalidation::PaintAndHitTest:
+        entry.invalidate_paint_and_hit_test_cache = true;
+        break;
+    case Painting::PaintCacheInvalidation::PropagatedTextDecorations:
+        entry.invalidate_propagated_text_decoration_caches = true;
+        break;
+    }
+    drain_if_the_render_side_is_reading();
+}
+
 // A mark made from inside a layout update is one the render side is about to read, so it goes
 // through at once. Outside one, nothing reads what these marks change before the next drain.
 void InvalidationJournal::drain_if_the_render_side_is_reading()
@@ -144,7 +158,7 @@ void InvalidationJournal::drain()
                 node->apply_layout_tree_update_mark(entry.layout_tree_update_reason);
             }
 
-            if (!entry.needs_layout_update && !entry.needs_repaint && !entry.has_dom_paint_facts && !entry.has_canvas_paint_facts && !entry.has_form_control_paint_facts && !entry.layer_image_paint_facts_update && !entry.replaced_image_paint_facts_update && !entry.video_paint_facts_update)
+            if (!entry.needs_layout_update && !entry.needs_repaint && !entry.has_dom_paint_facts && !entry.has_canvas_paint_facts && !entry.has_form_control_paint_facts && !entry.invalidate_paint_and_hit_test_cache && !entry.invalidate_propagated_text_decoration_caches && !entry.layer_image_paint_facts_update && !entry.replaced_image_paint_facts_update && !entry.video_paint_facts_update)
                 continue;
             // A node whose box went away between the mark and here has nothing left to mark.
             auto* layout_node = arena ? entry.identity.bound_layout_node(*arena) : nullptr;
@@ -167,7 +181,7 @@ void InvalidationJournal::drain()
                 };
                 auto changed = Layout::RustFFI::layout_arena_set_canvas_paint_facts(layout_node->arena_handle(), Layout::Node::slot_id(layout_node), facts);
                 if (changed && Painting::has_committed_box(*layout_node))
-                    Painting::invalidate_paint_cache(*layout_node);
+                    Painting::apply_paint_cache_invalidation(*layout_node, Painting::PaintCacheInvalidation::PaintAndHitTest, Painting::PaintCacheInvalidationStage::JournalDrain);
             }
             if (entry.has_form_control_paint_facts) {
                 Layout::RustFFI::FfiFormControlPaintFacts facts {
@@ -186,6 +200,10 @@ void InvalidationJournal::drain()
                 entry.replaced_image_paint_facts_update(*layout_node);
             if (entry.video_paint_facts_update)
                 entry.video_paint_facts_update(*layout_node);
+            if (entry.invalidate_paint_and_hit_test_cache)
+                Painting::apply_paint_cache_invalidation(*layout_node, Painting::PaintCacheInvalidation::PaintAndHitTest, Painting::PaintCacheInvalidationStage::JournalDrain);
+            if (entry.invalidate_propagated_text_decoration_caches)
+                Painting::apply_paint_cache_invalidation(*layout_node, Painting::PaintCacheInvalidation::PropagatedTextDecorations, Painting::PaintCacheInvalidationStage::JournalDrain);
             if (entry.needs_repaint) {
                 if (auto* text_node = as_if<Layout::TextNode>(*layout_node))
                     text_node->set_needs_repaint(entry.invalidate_display_list);

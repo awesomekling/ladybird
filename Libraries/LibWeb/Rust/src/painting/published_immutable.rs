@@ -194,6 +194,24 @@ fn verify(arena: &LayoutNodeArena, call_site: &'static str) {
 }
 
 pub(crate) fn note_row_mutation(arena: &LayoutNodeArena, row: NodeSlotId, call_site: &'static str) {
+    note_row_mutation_impl(arena, row, call_site, None);
+}
+
+pub(crate) fn note_row_mutation_with_writer(
+    arena: &LayoutNodeArena,
+    row: NodeSlotId,
+    call_site: &'static str,
+    writer: &'static str,
+) {
+    note_row_mutation_impl(arena, row, call_site, Some(writer));
+}
+
+fn note_row_mutation_impl(
+    arena: &LayoutNodeArena,
+    row: NodeSlotId,
+    call_site: &'static str,
+    explicit_writer: Option<&'static str>,
+) {
     if !enabled() {
         return;
     }
@@ -211,7 +229,9 @@ pub(crate) fn note_row_mutation(arena: &LayoutNodeArena, row: NodeSlotId, call_s
     let writer = if publication == Publication::Journal {
         "journal drain"
     } else {
-        crate::painting::seal::current_pass_name().unwrap_or("main-side direct")
+        explicit_writer
+            .or_else(crate::painting::seal::current_pass_name)
+            .unwrap_or("main-side direct")
     };
     STATE.with(|state| {
         if let Some(published) = state.borrow_mut().arenas.get_mut(&key) {

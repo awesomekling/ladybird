@@ -247,7 +247,9 @@ void Node::pin_style_record_for_detachment()
 void Node::prepare_for_detach_from_layout_tree()
 {
     pin_style_record_for_detachment();
-    Painting::invalidate_paint_cache(*this);
+    // Detachment must clean the row being removed. A journal entry would instead resolve the
+    // identity after a replacement row had been bound, so this apply-only path is intentional.
+    Painting::apply_paint_cache_invalidation(*this, Painting::PaintCacheInvalidation::PaintAndHitTest, Painting::PaintCacheInvalidationStage::DetachCleanup);
     if (auto* node_with_style = as_if<NodeWithStyle>(*this))
         node_with_style->clear_image_observers();
     if (kind() == RustFFI::NodeKind::ImageBox)
