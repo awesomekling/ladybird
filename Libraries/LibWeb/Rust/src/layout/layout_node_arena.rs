@@ -1276,6 +1276,50 @@ impl LayoutNodeArena {
         self.bound_viewport_row.get()
     }
 
+    /// Everything the host did as it configured a pseudo-element's principal box: what the box is
+    /// generated for, the unique node id it answers for, and the binding that makes it the
+    /// pseudo-element's box rather than one of its own contents.
+    ///
+    /// The box was built out of the pseudo-element's own style record and has published it
+    /// already, so nothing rebinds the record here.
+    pub(crate) fn stamp_pseudo_element_box(&self, slot: NodeSlotId, generator: StyleNodeID, generated_for: u8) {
+        self.set_node_generated_for(slot, generated_for, Some(generator));
+        // A pseudo-element's box answers for its generator, which the mirror publishes the
+        // document's name for. Reading it from the generator's own box would answer nothing for a
+        // `display: contents` element, which has no box and still has pseudo-elements.
+        let generator_unique_node_id = self.with_style_store(|engine| engine.element_unique_node_id(generator));
+        self.unique_node_ids().publish(slot, generator_unique_node_id);
+
+        let previously_bound = self.bound_pseudo_element_row(generator, generated_for);
+        if !previously_bound.is_invalid() && previously_bound != slot {
+            // The outgoing box keeps its style readable for as long as the host holds it.
+            if super::tree_builder::node_kind_is_node_with_style(self.data(previously_bound).kind.get()) {
+                let style_record = self.style_records[previously_bound.slot_index() as usize].get();
+                if style_record != 0 {
+                    self.pin_node_style_record_for_host(previously_bound, style_record);
+                }
+            }
+            self.set_node_flag(previously_bound, NodeFlag::IsPseudoElementPrincipalBox, false);
+            self.unbind_row(previously_bound);
+        }
+        self.set_node_flag(slot, NodeFlag::IsPseudoElementPrincipalBox, true);
+        self.bind_row(slot);
+        // The box becomes the pseudo-element's box here, which is when it starts holding the
+        // offset the pseudo-element has been scrolled to.
+        let is_the_pseudo_elements_box = self.bound_pseudo_element_row(generator, generated_for) == slot;
+        let scroll_offset = if is_the_pseudo_elements_box {
+            self.pseudo_element_scroll_offset(generator, generated_for)
+        } else {
+            FfiCssPixelPoint::default()
+        };
+        self.set_node_flag(
+            slot,
+            NodeFlag::HasScrollOffset,
+            is_the_pseudo_elements_box && scroll_offset != FfiCssPixelPoint::default(),
+        );
+        self.scroll_offsets().publish(slot, scroll_offset.into());
+    }
+
     /// The row the pseudo-element of kind `generated_for` on the element with `generator` is bound
     /// to, if any.
     pub(crate) fn bound_pseudo_element_row(&self, generator: StyleNodeID, generated_for: u8) -> NodeSlotId {

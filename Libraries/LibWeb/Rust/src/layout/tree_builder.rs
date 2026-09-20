@@ -3111,7 +3111,6 @@ pub struct FfiPseudoTreeBuilderCallbacks {
     /// The last argument of each of these is the pseudo-element's own box, which the build tracks
     /// by slot.
     pub create_nested_list_marker: unsafe extern "C" fn(*mut c_void, FfiPseudoElement, NodeSlotId) -> NodeSlotId,
-    pub configure_layout_node: unsafe extern "C" fn(*mut c_void, FfiPseudoElement, NodeSlotId),
     pub create_content_item:
         unsafe extern "C" fn(*mut c_void, FfiPseudoElement, FfiGeneratedContentItem, NodeSlotId) -> NodeSlotId,
 }
@@ -3188,6 +3187,18 @@ pub(crate) fn pseudo_element_decision(facts: FfiPseudoElementFacts) -> FfiPseudo
 
 /// The pseudo-element kind the style store numbers this one by, for the kinds it settles a record
 /// for. `::backdrop` is deliberately not one of them, so nothing here can answer for it.
+/// How the arena names the pseudo-element a box is generated for.
+fn generated_for_of(pseudo_element: FfiPseudoElement) -> u8 {
+    match pseudo_element {
+        FfiPseudoElement::None => 0,
+        FfiPseudoElement::Before => GENERATED_FOR_BEFORE,
+        FfiPseudoElement::After => GENERATED_FOR_AFTER,
+        FfiPseudoElement::Marker => GENERATED_FOR_MARKER,
+        FfiPseudoElement::Backdrop => GENERATED_FOR_BACKDROP,
+        FfiPseudoElement::Other => unreachable!("only a box-generating pseudo-element has a box"),
+    }
+}
+
 fn published_pseudo_kind(pseudo_element: FfiPseudoElement) -> Option<u8> {
     match pseudo_element {
         FfiPseudoElement::After => Some(GENERATED_FOR_AFTER - 1),
@@ -3233,14 +3244,7 @@ fn resolve_counters(
 ) -> crate::layout::counters::CounterOwner {
     let element_style_node =
         StyleNodeID::from_raw(style_node).expect("an element that resolves counters has an identity");
-    let generated_for = match pseudo_element {
-        FfiPseudoElement::None => 0,
-        FfiPseudoElement::Before => GENERATED_FOR_BEFORE,
-        FfiPseudoElement::After => GENERATED_FOR_AFTER,
-        FfiPseudoElement::Marker => GENERATED_FOR_MARKER,
-        FfiPseudoElement::Backdrop => GENERATED_FOR_BACKDROP,
-        FfiPseudoElement::Other => unreachable!("only a box-generating pseudo-element resolves counters"),
-    };
+    let generated_for = generated_for_of(pseudo_element);
     let owner = crate::layout::counters::CounterOwner {
         element: element_style_node,
         generated_for,
@@ -3354,9 +3358,11 @@ fn create_pseudo_element(
     }
 
     let initial_quote_nesting_level = state.quote_nesting_level;
-    super::tree_build_seal::note_host_call("pseudo.configure_layout_node");
-    // SAFETY: The element remains live, and the box the host just built is a live NodeWithStyle.
-    unsafe { (callbacks.configure_layout_node)(element, pseudo_element, layout_node) };
+    layout_host.arena().stamp_pseudo_element_box(
+        layout_node,
+        StyleNodeID::from_raw(style_node).expect("a pseudo-element names its generator"),
+        generated_for_of(pseudo_element),
+    );
     let layout_node_kind = layout_host.data(layout_node).kind.get();
     let is_outside_marker = layout_node_kind == NodeKind::ListItemMarkerBox && !facts.marker_position_is_inside;
     if let Some(insertion_mode) = insertion_mode

@@ -513,13 +513,6 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
             list_item_marker.set_generated_for(css_pseudo_element(originating_pseudo), element);
             list_item_marker.set_content_counter_style_dependencies(publish_normal_marker_content({ element, css_pseudo_element(originating_pseudo) }, list_item_box, list_item_marker));
             return Node::slot_id(&list_item_marker); },
-        .configure_layout_node = [](void* element_pointer, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::NodeSlotId pseudo_element_box_slot) {
-            VERIFY(element_pointer);
-            auto& element = *static_cast<DOM::Element*>(element_pointer);
-            auto pseudo_element = css_pseudo_element(ffi_pseudo);
-            auto* layout_node = pseudo_element_build_node(element.document(), pseudo_element_box_slot);
-            layout_node->set_generated_for(pseudo_element, element);
-            LayoutTreeBuilderAccess::set_synthetic_pseudo_element_node(element, pseudo_element, layout_node); },
         .create_content_item = [](void* element_pointer, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiGeneratedContentItem item, Compositing::RustFFI::NodeSlotId pseudo_element_box_slot) -> Compositing::RustFFI::NodeSlotId {
             VERIFY(element_pointer);
             auto& element = *static_cast<DOM::Element*>(element_pointer);

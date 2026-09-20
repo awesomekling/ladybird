@@ -601,6 +601,11 @@ pub struct StyleNodeTree {
     /// Whether the element disables what is written under it: a disabled form control does, and so
     /// does a `<fieldset disabled>`, which is not itself disabled.
     disables_descendants: BitColumn,
+    /// The unique node id the document names the element by, published where the identity arrives
+    /// and constant for as long as the element lives. A box built for the element answers by it,
+    /// and so does a box built for one of the element's pseudo-elements - which is why the render
+    /// side needs it for an element that has no box of its own.
+    unique_node_ids: Vec<i64>,
     /// The layout tree update mark elements hold. Text nodes hold one too, in `text.marks`.
     marks: LayoutTreeUpdateMarks,
     connected_element_count: u32,
@@ -658,6 +663,7 @@ impl StyleNodeTree {
             child_needs_layout_tree_update: BitColumn::default(),
             disabled_form_control: BitColumn::default(),
             disables_descendants: BitColumn::default(),
+            unique_node_ids: Vec::new(),
             marks: LayoutTreeUpdateMarks::default(),
             connected_element_count: 0,
             pending_reuse: Vec::new(),
@@ -852,6 +858,7 @@ impl StyleNodeTree {
         self.child_needs_layout_tree_update.set(index as usize, false);
         self.disabled_form_control.set(index as usize, false);
         self.disables_descendants.set(index as usize, false);
+        self.set_unique_node_id_at(index, 0);
         self.marks.clear(index as usize);
         if let Some(capacity_before_growth) = capacity_before_growth {
             let current = self.identity_capacity_bytes();
@@ -891,6 +898,7 @@ impl StyleNodeTree {
             self.child_needs_layout_tree_update.set(index as usize, false);
             self.disabled_form_control.set(index as usize, false);
             self.disables_descendants.set(index as usize, false);
+            self.set_unique_node_id_at(index, 0);
             self.marks.clear(index as usize);
             self.parent[index as usize] = None;
             self.first_element_child[index as usize] = None;
@@ -1012,6 +1020,38 @@ impl StyleNodeTree {
         self.text.is_in_user_agent_shadow_tree.set(index as usize, value);
         let current = self.text_capacity_bytes();
         self.record_capacity_change(memory, before, current);
+    }
+
+    // -- Unique node ids -----------------------------------------------------------------------
+
+    fn set_unique_node_id_at(&mut self, index: u32, unique_node_id: i64) {
+        if self.unique_node_ids.len() <= index as usize {
+            if unique_node_id == 0 {
+                return;
+            }
+            self.unique_node_ids.resize(index as usize + 1, 0);
+        }
+        self.unique_node_ids[index as usize] = unique_node_id;
+    }
+
+    /// Record the unique node id the document names the element by.
+    pub fn set_unique_node_id(&mut self, node: StyleNodeID, unique_node_id: i64, memory: &mut MemoryController) {
+        let Some(index) = node.element_index() else {
+            return;
+        };
+        let before = self.identity_capacity_bytes();
+        self.set_unique_node_id_at(index, unique_node_id);
+        let current = self.identity_capacity_bytes();
+        self.record_capacity_change(memory, before, current);
+    }
+
+    /// The unique node id the document names the element by, or zero for anything else.
+    #[must_use]
+    pub fn unique_node_id(&self, node: StyleNodeID) -> i64 {
+        let Some(index) = node.element_index() else {
+            return 0;
+        };
+        self.unique_node_ids.get(index as usize).copied().unwrap_or(0)
     }
 
     // -- Disabled form controls --------------------------------------------------------------
@@ -1868,6 +1908,7 @@ impl StyleNodeTree {
                 self.live.capacity_bytes(),
                 self.relation_only.capacity_bytes(),
                 self.child_needs_layout_tree_update.capacity_bytes(),
+                self.unique_node_ids.capacity() as u64 * size_of::<i64>() as u64,
                 self.disabled_form_control.capacity_bytes(),
                 self.disables_descendants.capacity_bytes(),
                 self.marks.capacity_bytes(),

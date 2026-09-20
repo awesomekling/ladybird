@@ -23,30 +23,30 @@
 //! matters as much as the name, because a route a full suite takes twice is a different problem
 //! from one it takes a hundred thousand times.
 //!
-//! What the whole suite took when the gate was added, by `during_build` count. Six of these are
-//! not tree builder callback slots at all, which is what the gate was for:
+//! What the whole suite takes, by `during_build` count, as of the commit that stamped a
+//! pseudo-element's box in the arena. Six of these are not tree builder callback slots at all,
+//! which is what the gate was for:
 //!
 //! | route | during build | note |
 //! |---|---|---|
-//! | `principal_dom_node` | 5070980 | slot |
-//! | `layout_node_shell_factory` | 3997238 | **not a slot**: the arena materialising a shell |
-//! | `prepare_principal_element` | 2053831 | slot |
-//! | `attach_style_resources` | 1885223 | slot |
-//! | `clear_stale_layout_node` | 1547191 | slot |
-//! | `shell_style_changed` | 81605 | **not a slot**: a row's style reaching its shell |
-//! | `text_source` | 64189 | **not a slot**: a text row's characters, synced mid-build |
-//! | `pseudo.initialize` | 50402 | slot |
-//! | `pseudo.create_content_item` | 44290 | slot |
-//! | `pseudo.configure_layout_node` | 43795 | slot |
-//! | `pseudo.create_layout_node` | 43795 | slot |
+//! | `principal_dom_node` | 4975955 | slot |
+//! | `layout_node_shell_factory` | 3921068 | **not a slot**: the arena materialising a shell |
+//! | `prepare_principal_element` | 2003330 | slot |
+//! | `attach_style_resources` | 1839704 | slot |
+//! | `clear_stale_layout_node` | 1518643 | slot |
+//! | `shell_style_changed` | 79996 | **not a slot**: a row's style reaching its shell |
+//! | `text_source` | 60001 | **not a slot**: a text row's characters, synced mid-build |
+//! | `pseudo.initialize` | 49532 | slot |
+//! | `pseudo.create_content_item` | 43414 | slot |
+//! | `pseudo.create_layout_node` | 42928 | slot |
 //! | `pseudo.create_nested_list_marker` | 1532 | slot |
-//! | `create_first_letter_nodes` | 239 | slot |
+//! | `create_first_letter_nodes` | 235 | slot |
 //! | `svg_resource.layout_dom_node` | 10 | **not a slot**: nested in `clear_stale_layout_node` |
 //! | `svg_resource.dom_is_shadow_including_inclusive_descendant` | 10 | as above |
 //! | `owned_image_provider_notify_detach` | 1 | **not a slot**: a detaching row's provider |
 //!
-//! `build_replaced_content_facts` and `viewport_propagation_facts` are counted too and were never
-//! taken during a build: they belong to the layout entry that follows it.
+//! `build_replaced_content_facts` and `viewport_propagation_facts` are counted too and have never
+//! been taken during a build: they belong to the layout entry that follows it.
 //!
 //! # The allow-list
 //!
