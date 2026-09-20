@@ -50,6 +50,12 @@ public:
     // parent and only the render side knows where the escalation stops.
     void note_needs_layout_tree_update(NodeIdentity, SetNeedsLayoutTreeUpdateReason);
 
+    // Substitution dependencies produced by a finished style computation.
+    void note_style_substitution_usage(NodeIdentity, u8 usage);
+
+    // Applies only style-stage reports, leaving layout and event messages at their existing drains.
+    void apply_style_messages();
+
     // Applies every message in order and empties the list.
     void apply();
 
@@ -62,6 +68,7 @@ private:
         NavigableContainerViewportCommitted,
         NeedsLayoutTreeUpdate,
         SvgResourceReferenced,
+        StyleSubstitutionUsage,
         TopLayerZoneRebuildNeeded,
         UnexpectedFragmentedInline,
     };
@@ -73,6 +80,7 @@ private:
         Kind kind;
         bool has_layout_box { false };
         bool has_committed_box { false };
+        u8 style_substitution_usage { 0 };
         // Only the layout tree update trace reads this.
         SetNeedsLayoutTreeUpdateReason layout_tree_update_reason {};
         // Where the pointer was, for the hover events the target change ends in. Only
@@ -84,6 +92,7 @@ private:
 
     Document& m_document;
     Vector<Message> m_messages;
+    Vector<Message> m_style_messages;
     bool m_applying { false };
 };
 

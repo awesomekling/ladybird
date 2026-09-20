@@ -2136,6 +2136,22 @@ void Element::finish_recording_style_dependencies()
     m_style_input_record->style_depends_on_style_container_query = m_style_depends_on_style_container_query;
 }
 
+void Element::apply_style_substitution_usage(u8 usage)
+{
+    if (usage & (1 << 0))
+        set_style_uses_var_css_function();
+    if (usage & (1 << 1))
+        set_style_uses_attr_css_function();
+    if (usage & (1 << 2))
+        set_style_uses_if_css_function();
+    if (usage & (1 << 3))
+        set_style_uses_inherit_css_function();
+    if (usage & (1 << 4))
+        set_style_uses_custom_function();
+    finish_recording_style_dependencies();
+    publish_custom_property_names();
+}
+
 void Element::publish_custom_property_names()
 {
     PublishedCustomPropertyNames published_names {

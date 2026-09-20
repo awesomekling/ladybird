@@ -4755,6 +4755,7 @@ unsafe fn compute_longhands(
                 final_value_hits: 0,
                 final_value_misses: 0,
                 cycle_participants: 0,
+                substitution_usage: Default::default(),
             },
             storage: std::ptr::null_mut(),
         }

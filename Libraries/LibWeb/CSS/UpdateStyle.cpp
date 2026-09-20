@@ -16,6 +16,7 @@
 #include <LibWeb/CSS/StyleInputRecord.h>
 #include <LibWeb/CSS/StyleInvalidation.h>
 #include <LibWeb/DOM/AbstractElement.h>
+#include <LibWeb/DOM/CommitMessages.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Node.h>
@@ -35,12 +36,13 @@ using StyleUpdateMode = DOM::Document::StyleUpdateMode;
 
 extern "C" void ladybird_utf16_fly_string_unref(size_t);
 
-static void finish_complete_style_update()
+static void finish_complete_style_update(DOM::Document& document)
 {
     auto releases = StyleValueFFI::rust_style_ffi_complete_style_update_end();
     ScopeGuard clear_releases = StyleValueFFI::rust_deferred_cpp_releases_clear;
     for (size_t i = 0; i < releases.fly_string_count; ++i)
         ladybird_utf16_fly_string_unref(releases.fly_strings[i]);
+    document.commit_messages().apply_style_messages();
 }
 
 static void update_style(DOM::Document&);
@@ -897,7 +899,7 @@ static void update_style(DOM::Document& document)
     (void)document.style_computer().ensure_media_environment_for_style_update();
     document.publish_animation_environment_for_style_update();
     StyleValueFFI::rust_style_ffi_complete_style_update_begin();
-    ScopeGuard leave_complete_style_update = finish_complete_style_update;
+    ScopeGuard leave_complete_style_update = [&] { finish_complete_style_update(document); };
 
     // The user-agent and user sheets have no author-sheet attachment event, so compare their
     // identities before deciding whether there is a transaction to take. Rendering opportunities
@@ -1211,7 +1213,7 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
     bool complete_style_update_started = false;
     ScopeGuard leave_complete_style_update = [&] {
         if (complete_style_update_started)
-            finish_complete_style_update();
+            finish_complete_style_update(document);
     };
 
     // Refresh computed properties for an abstract element. An ordinary read first consumes the complete exact

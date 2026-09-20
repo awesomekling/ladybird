@@ -1188,7 +1188,103 @@ pub struct FfiCascadeResolutionContext {
         unsafe extern "C" fn(*mut c_void, *const FfiCascadedCustomProperty, usize, *mut *const c_void) -> *const c_void,
     >,
     pub evaluate_style_query: Option<unsafe extern "C" fn(*mut c_void, FfiUtf16View) -> u8>,
-    pub note_substitution: Option<unsafe extern "C" fn(*mut c_void, *const c_void)>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FfiSubstitutionUsage {
+    pub uses_var: bool,
+    pub uses_attr: bool,
+    pub uses_if: bool,
+    pub uses_inherit: bool,
+    pub uses_custom_function: bool,
+}
+
+impl FfiSubstitutionUsage {
+    fn include(&mut self, value: &StyleValueData) {
+        let StyleValueData::Unresolved {
+            presence_var,
+            presence_attr,
+            presence_if,
+            presence_inherit,
+            presence_dashed_function,
+            ..
+        } = value
+        else {
+            return;
+        };
+        self.uses_var |= *presence_var;
+        self.uses_attr |= *presence_attr;
+        self.uses_if |= *presence_if;
+        self.uses_inherit |= *presence_inherit;
+        self.uses_custom_function |= *presence_dashed_function;
+    }
+}
+
+thread_local! {
+    static SUBSTITUTION_USAGE_COMPARISONS: Cell<u64> = const { Cell::new(0) };
+    static SUBSTITUTION_USAGE_MISMATCHES: Cell<u64> = const { Cell::new(0) };
+}
+
+fn reported_substitution_usage(expected: FfiSubstitutionUsage) -> FfiSubstitutionUsage {
+    if std::env::var_os("LIBWEB_VERIFY_SUBSTITUTION_USAGE_LOG").is_none() {
+        return expected;
+    }
+    let mut reported = expected;
+    if std::env::var_os("LIBWEB_CORRUPT_SUBSTITUTION_USAGE").is_some() {
+        reported.uses_var = !reported.uses_var;
+    }
+    let expected = [
+        expected.uses_var,
+        expected.uses_attr,
+        expected.uses_if,
+        expected.uses_inherit,
+        expected.uses_custom_function,
+    ];
+    let reported = [
+        reported.uses_var,
+        reported.uses_attr,
+        reported.uses_if,
+        reported.uses_inherit,
+        reported.uses_custom_function,
+    ];
+    SUBSTITUTION_USAGE_COMPARISONS.with(|count| count.set(count.get().wrapping_add(expected.len() as u64)));
+    SUBSTITUTION_USAGE_MISMATCHES.with(|count| {
+        count.set(
+            count.get().wrapping_add(
+                expected
+                    .iter()
+                    .zip(reported)
+                    .filter(|(expected, reported)| **expected != *reported)
+                    .count() as u64,
+            ),
+        );
+    });
+    FfiSubstitutionUsage {
+        uses_var: reported[0],
+        uses_attr: reported[1],
+        uses_if: reported[2],
+        uses_inherit: reported[3],
+        uses_custom_function: reported[4],
+    }
+}
+
+pub(crate) fn flush_substitution_usage_verifier() {
+    let Some(path) = std::env::var_os("LIBWEB_VERIFY_SUBSTITUTION_USAGE_LOG") else {
+        return;
+    };
+    let comparisons = SUBSTITUTION_USAGE_COMPARISONS.with(|count| count.replace(0));
+    let mismatches = SUBSTITUTION_USAGE_MISMATCHES.with(|count| count.replace(0));
+    if comparisons == 0 {
+        return;
+    }
+    use std::io::Write;
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(
+            file,
+            "SUBSTITUTION USAGE SUMMARY: comparisons={comparisons} mismatches={mismatches}"
+        );
+    }
 }
 
 /// One unresolved value submitted to the bulk substitution resolver.
@@ -1211,6 +1307,7 @@ pub struct FfiCustomPropertyResolutionStats {
     pub final_value_hits: u64,
     pub final_value_misses: u64,
     pub cycle_participants: u64,
+    pub substitution_usage: FfiSubstitutionUsage,
 }
 
 #[repr(C)]
@@ -1395,6 +1492,7 @@ pub struct FfiCascadeResult {
     pub source_slot_assignments: *const FfiSourceSlotAssignment,
     pub source_slot_assignment_count: usize,
     pub storage: *mut c_void,
+    pub substitution_usage: FfiSubstitutionUsage,
 }
 
 /// Sentinel passed when cascading for an element rather than a pseudo-element.
@@ -1655,11 +1753,6 @@ pub(crate) fn resolve_cascade_value(
         },
         None => crate::css::custom_properties::NativeVarResolution::NotHandled,
     };
-    if let Some(note_substitution) = resolution_context.note_substitution {
-        crate::css::style::seal::note_host_call("substitution.note_substitution");
-        unsafe { note_substitution(resolution_context.callback_context, unresolved_data) };
-    }
-
     let parsed = match native_resolution {
         crate::css::custom_properties::NativeVarResolution::Resolved {
             source,
@@ -1847,10 +1940,12 @@ pub unsafe extern "C" fn rust_resolve_unresolved_style_values(
         ((0..input_count as u32).map(|index| vec![index]).collect(), 0, false)
     };
     let mut final_custom_properties = HashMap::new();
+    let mut substitution_usage = FfiSubstitutionUsage::default();
     for mut component in components {
         component.sort_unstable();
         for &member in &component {
             let input = &inputs[member as usize];
+            substitution_usage.include(unsafe { &*input.data.cast::<StyleValueData>() });
             if !input.resolve_substitutions {
                 outputs[member as usize].data =
                     unsafe { crate::css::style_value::retain_style_value(input.data.cast::<StyleValueData>()).cast() };
@@ -1894,6 +1989,7 @@ pub unsafe extern "C" fn rust_resolve_unresolved_style_values(
             .as_ref()
             .map_or(0, |environment| environment.final_value_misses()),
         cycle_participants,
+        substitution_usage: reported_substitution_usage(substitution_usage),
     }
 }
 
@@ -1962,6 +2058,7 @@ pub unsafe extern "C" fn rust_cascade_matched_blocks(
     }
 
     let mut resolution_environment = None;
+    let mut substitution_usage = FfiSubstitutionUsage::default();
 
     let application_order = cascade_application_order(blocks, author_context_count);
     let has_pseudo_element = pseudo_element != NO_PSEUDO_ELEMENT;
@@ -1997,6 +2094,7 @@ pub unsafe extern "C" fn rust_cascade_matched_blocks(
             unset_data,
             &is_property_disallowed,
             &mut |_style_engine_rule_id, property_id, unresolved_data, has_style_sheet_context| {
+                substitution_usage.include(unsafe { &*unresolved_data.cast::<StyleValueData>() });
                 let resolution_environment = resolution_environment.get_or_insert_with(|| unsafe {
                     crate::css::custom_properties::prepare_var_resolution_environment(
                         resolution_context.attributes,
@@ -2036,6 +2134,7 @@ pub unsafe extern "C" fn rust_cascade_matched_blocks(
             source_slot_assignments: std::ptr::null(),
             source_slot_assignment_count: 0,
             storage: std::ptr::null_mut(),
+            substitution_usage: reported_substitution_usage(substitution_usage),
         };
     }
     let source_slot_assignments = source_slot_assignments.into_boxed_slice();
@@ -2045,6 +2144,7 @@ pub unsafe extern "C" fn rust_cascade_matched_blocks(
         source_slot_assignments: storage.cast::<FfiSourceSlotAssignment>(),
         source_slot_assignment_count,
         storage: storage.cast(),
+        substitution_usage: reported_substitution_usage(substitution_usage),
     }
 }
 
