@@ -1172,6 +1172,8 @@ pub struct FfiCascadeResolutionContext {
     pub media_environment: *const c_void,
     pub load_media_environment: Option<unsafe extern "C" fn(*mut c_void) -> *const c_void>,
     pub custom_property_store: *const c_void,
+    pub animated_custom_property_store: *const c_void,
+    pub animated_custom_property_base_store: *const c_void,
     pub inheritance_custom_property_store: *const c_void,
     pub custom_property_registry: *const c_void,
     pub root_custom_property_name: FfiUtf16View,
@@ -1184,10 +1186,7 @@ pub struct FfiCascadeResolutionContext {
     pub custom_function_visibilities: *const crate::css::custom_properties::FfiSubstitutionFunctionVisibility,
     pub custom_function_visibility_count: usize,
     pub callback_context: *mut c_void,
-    pub install_custom_properties: Option<
-        unsafe extern "C" fn(*mut c_void, *const FfiCascadedCustomProperty, usize, *mut *const c_void) -> *const c_void,
-    >,
-    pub evaluate_style_query: Option<unsafe extern "C" fn(*mut c_void, FfiUtf16View) -> u8>,
+    pub evaluate_style_query: Option<unsafe extern "C" fn(*mut c_void, *const c_void, FfiUtf16View) -> u8>,
 }
 
 #[repr(C)]
@@ -1492,6 +1491,9 @@ pub struct FfiCascadeResult {
     pub source_slot_assignments: *const FfiSourceSlotAssignment,
     pub source_slot_assignment_count: usize,
     pub storage: *mut c_void,
+    /// Transfers one strong custom-property store reference to C++.
+    pub custom_property_store: *const c_void,
+    pub custom_properties_apply: bool,
     pub substitution_usage: FfiSubstitutionUsage,
 }
 
@@ -2032,7 +2034,7 @@ pub unsafe extern "C" fn rust_cascade_matched_blocks(
     let resolution_context = unsafe { &*resolution_context };
 
     let mut retained_custom_property_names = Vec::new();
-    let (custom_properties_apply, custom_properties, mut unadopted_custom_property_store) = cascade_custom_properties(
+    let (custom_properties_apply, _custom_properties, custom_property_store) = cascade_custom_properties(
         blocks,
         author_context_count,
         pseudo_element,
@@ -2040,21 +2042,27 @@ pub unsafe extern "C" fn rust_cascade_matched_blocks(
         &mut retained_custom_property_names,
     );
     let mut resolution_context = *resolution_context;
+    let mut temporary_animated_store = None;
     if custom_properties_apply {
-        crate::css::style::seal::note_host_call("cascade.install_custom_properties");
-        resolution_context.custom_property_store = unsafe {
-            (resolution_context
-                .install_custom_properties
-                .expect("missing custom property installer"))(
-                resolution_context.callback_context,
-                custom_properties.as_ptr(),
-                custom_properties.len(),
-                &raw mut unadopted_custom_property_store,
-            )
+        let base_store = if custom_property_store.is_null() {
+            resolution_context.custom_property_store
+        } else {
+            custom_property_store
         };
-    }
-    if !unadopted_custom_property_store.is_null() {
-        drop(unsafe { std::sync::Arc::from_raw(unadopted_custom_property_store.cast::<CustomPropertyStore>()) });
+        resolution_context.custom_property_store = base_store;
+        if !resolution_context.animated_custom_property_store.is_null() {
+            if base_store == resolution_context.animated_custom_property_base_store {
+                resolution_context.custom_property_store = resolution_context.animated_custom_property_store;
+            } else {
+                resolution_context.custom_property_store = unsafe {
+                    CustomPropertyStore::copy_declared_own_over(
+                        resolution_context.animated_custom_property_store,
+                        base_store,
+                    )
+                };
+                temporary_animated_store = Some(resolution_context.custom_property_store);
+            }
+        }
     }
 
     let mut resolution_environment = None;
@@ -2128,12 +2136,17 @@ pub unsafe extern "C" fn rust_cascade_matched_blocks(
     for &(block_index, important, use_layer_name) in &application_order {
         apply(block_index, important, use_layer_name);
     }
+    if let Some(store) = temporary_animated_store {
+        drop(unsafe { std::sync::Arc::from_raw(store.cast::<CustomPropertyStore>()) });
+    }
 
     if source_slot_assignments.is_empty() {
         return FfiCascadeResult {
             source_slot_assignments: std::ptr::null(),
             source_slot_assignment_count: 0,
             storage: std::ptr::null_mut(),
+            custom_property_store,
+            custom_properties_apply,
             substitution_usage: reported_substitution_usage(substitution_usage),
         };
     }
@@ -2144,6 +2157,8 @@ pub unsafe extern "C" fn rust_cascade_matched_blocks(
         source_slot_assignments: storage.cast::<FfiSourceSlotAssignment>(),
         source_slot_assignment_count,
         storage: storage.cast(),
+        custom_property_store,
+        custom_properties_apply,
         substitution_usage: reported_substitution_usage(substitution_usage),
     }
 }

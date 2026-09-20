@@ -86,6 +86,8 @@ fn engine_resolution_context(
         media_environment: std::ptr::null(),
         load_media_environment: None,
         custom_property_store: store,
+        animated_custom_property_store: std::ptr::null(),
+        animated_custom_property_base_store: std::ptr::null(),
         inheritance_custom_property_store: inheritance_store,
         custom_property_registry: registry,
         root_custom_property_name: FfiUtf16View {
@@ -102,7 +104,6 @@ fn engine_resolution_context(
         custom_function_visibilities: std::ptr::null(),
         custom_function_visibility_count: 0,
         callback_context: std::ptr::null_mut(),
-        install_custom_properties: None,
         evaluate_style_query: None,
     }
 }

@@ -378,6 +378,26 @@ impl CustomPropertyStore {
             .collect();
         Self::child(unsafe { Self::retained_parent(parent) }, entries)
     }
+
+    /// Copy the values declared by `source` over `parent`.
+    ///
+    /// # Safety
+    /// `source` must be a live store and `parent` must be null or a live store.
+    pub(crate) unsafe fn copy_declared_own_over(source: *const c_void, parent: *const c_void) -> *const c_void {
+        let source = unsafe { &*source.cast::<CustomPropertyStore>() };
+        let entries = source
+            .declared_names
+            .iter()
+            .map(|name_raw| {
+                let entry = source
+                    .own_values
+                    .get(name_raw)
+                    .expect("declared custom property must be an own value");
+                (*name_raw, entry.clone())
+            })
+            .collect();
+        Self::child(unsafe { Self::retained_parent(parent) }, entries)
+    }
 }
 
 const MAX_SUBSTITUTED_TOKEN_COUNT: usize = 16384;
@@ -496,7 +516,7 @@ struct ASFResolutionContext<'a> {
     media_environment: Option<&'a FfiMediaEnvironment>,
     load_media_environment: Option<unsafe extern "C" fn(*mut c_void) -> *const c_void>,
     callback_context: *mut c_void,
-    evaluate_style_query: Option<unsafe extern "C" fn(*mut c_void, FfiUtf16View) -> u8>,
+    evaluate_style_query: Option<unsafe extern "C" fn(*mut c_void, *const c_void, FfiUtf16View) -> u8>,
     final_custom_properties: Option<&'a HashMap<Vec<u16>, *const c_void>>,
     function_local_scopes: Vec<FunctionLocalScope>,
     token_cache: Option<&'a mut CustomPropertyTokenCache>,
@@ -1625,6 +1645,7 @@ fn evaluate_style_feature(
         return match unsafe {
             evaluate(
                 context.callback_context,
+                store.map_or(std::ptr::null(), |store| std::ptr::from_ref(store).cast()),
                 FfiUtf16View {
                     ascii: std::ptr::null(),
                     utf16: source.as_ptr(),
@@ -1682,6 +1703,7 @@ fn evaluate_style_feature(
         return match unsafe {
             evaluate(
                 context.callback_context,
+                store.map_or(std::ptr::null(), |store| std::ptr::from_ref(store).cast()),
                 FfiUtf16View {
                     ascii: std::ptr::null(),
                     utf16: source.as_ptr(),
@@ -2673,7 +2695,7 @@ pub(crate) unsafe fn resolve_vars(
     environment: &mut VarResolutionEnvironment,
     attribute_names_are_ascii_case_insensitive: bool,
     callback_context: *mut c_void,
-    evaluate_style_query: Option<unsafe extern "C" fn(*mut c_void, FfiUtf16View) -> u8>,
+    evaluate_style_query: Option<unsafe extern "C" fn(*mut c_void, *const c_void, FfiUtf16View) -> u8>,
     final_custom_properties: Option<&HashMap<Vec<u16>, *const c_void>>,
 ) -> NativeVarResolution {
     let store = if store.is_null() {
@@ -3217,6 +3239,39 @@ pub unsafe extern "C" fn rust_custom_property_store_create_animation_overlay(
 pub unsafe extern "C" fn rust_custom_property_store_destroy(store: *const c_void) {
     crate::css::ffi_stats::bump(crate::css::ffi_stats::FfiOp::CustomPropertyStoreLifecycleEntry);
     drop(unsafe { Arc::from_raw(store.cast::<CustomPropertyStore>()) });
+}
+
+/// Retains one strong reference to a custom-property store.
+///
+/// # Safety
+/// `store` must be a live store pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_custom_property_store_retain(store: *const c_void) -> *const c_void {
+    unsafe { Arc::increment_strong_count(store.cast::<CustomPropertyStore>()) };
+    store
+}
+
+/// Hands every effective custom property to `callback`, with nearer entries shadowing ancestors.
+///
+/// # Safety
+/// `store` must be a live store pointer, and `callback` must not retain a value past the call
+/// without retaining it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_custom_property_store_for_each_effective_entry(
+    store: *const c_void,
+    context: *mut c_void,
+    callback: unsafe extern "C" fn(*mut c_void, usize, bool, *const c_void),
+) {
+    let mut seen = std::collections::HashSet::new();
+    let mut current = Some(unsafe { &*store.cast::<CustomPropertyStore>() });
+    while let Some(store) = current {
+        for (&name_raw, entry) in &store.own_values {
+            if seen.insert(name_raw) {
+                unsafe { callback(context, name_raw, entry.important, entry.value.pointer().cast()) };
+            }
+        }
+        current = store.parent.as_deref();
+    }
 }
 
 /// Hands every custom property a store declares itself to `callback`, in declaration order, with
