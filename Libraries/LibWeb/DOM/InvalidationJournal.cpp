@@ -77,6 +77,9 @@ void InvalidationJournal::note_dom_paint_facts(NodeIdentity identity, u8 facts)
     auto& entry = entry_for(identity);
     entry.has_dom_paint_facts = true;
     entry.dom_paint_facts = facts;
+    // Applying changed DOM paint facts requests a repaint. Keep the request at mark time so the
+    // rendering update that drains the facts cannot wait for the repaint decision in that drain.
+    m_document.request_frame_for_journalled_repaint({});
     drain_if_the_render_side_is_reading();
 }
 
@@ -112,9 +115,13 @@ void InvalidationJournal::note_paint_facts(NodeIdentity identity, PaintFactsFami
         break;
     case PaintFactsFamily::ReplacedImage:
         entry.replaced_image_paint_facts_update = move(update);
+        // Applying changed replaced-image facts requests a repaint; see note_dom_paint_facts().
+        m_document.request_frame_for_journalled_repaint({});
         break;
     case PaintFactsFamily::Video:
         entry.video_paint_facts_update = move(update);
+        // Applying changed video facts requests a repaint; see note_dom_paint_facts().
+        m_document.request_frame_for_journalled_repaint({});
         break;
     }
     drain_if_the_render_side_is_reading();
