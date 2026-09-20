@@ -1399,6 +1399,8 @@ public:
         set_needs_repaint(should_invalidate_display_list);
     }
 
+    void request_frame_for_journalled_repaint(Badge<InvalidationJournal>);
+
     RefPtr<Compositing::DisplayList> record_display_list(HTML::PaintConfig, Compositing::DisplayListResourceStorage&, Painting::PaintCommandCacheMode);
     Painting::HitTestDisplayList const* hit_test_display_list() const { return m_hit_test_display_list.ptr(); }
     Painting::HitTestDisplayList const* ensure_hit_test_display_list();
@@ -1599,6 +1601,7 @@ private:
     GC::Ref<WebIDL::ObservableArray> adopted_style_sheets() const;
 
     void set_needs_repaint(InvalidateDisplayList = InvalidateDisplayList::PaintCommandsAndHitTestList);
+    void request_frame_for_pending_repaint();
 
     // ^JS::Object
     virtual bool is_dom_document() const final { return true; }
