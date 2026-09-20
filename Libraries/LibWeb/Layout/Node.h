@@ -432,10 +432,22 @@ public:
         NonnullRefPtr<CSS::ImageStyleValue const> m_image;
     };
 
+    // The set a node's style asks for belongs to the arena, which deletes it with the node's row.
+    struct ImageObserverSlots {
+        AK_ALLOC_WITH_KMALLOC;
+
+        Vector<OwnPtr<ImageObserver>> background_layers;
+        Vector<OwnPtr<ImageObserver>> mask_layers;
+        Vector<OwnPtr<ImageObserver>> cursors;
+        OwnPtr<ImageObserver> border_image_source;
+        OwnPtr<ImageObserver> list_style_image;
+    };
+    static void delete_arena_owned_image_observers(ImageObserverSlots&);
+
     ImageObserver const* background_image_observer(size_t layer_index) const;
     ImageObserver const* mask_image_observer(size_t layer_index) const;
     ImageObserver const* cursor_image_observer(size_t cursor_index) const;
-    ImageObserver const* border_image_source_observer() const { return m_image_observers.border_image_source.ptr(); }
+    ImageObserver const* border_image_source_observer() const;
 
     NonnullRefPtr<CSS::ComputedValues const> copy_computed_values() const;
     CSS::StyleRecordID style_record_identity() const { return m_style_record_identity; }
@@ -734,14 +746,7 @@ private:
     void const* m_style_payloads { nullptr };
     bool has_layout_derived_style() const;
     CSS::StyleRecordID m_style_record_identity;
-    struct ImageObserverSlots {
-        Vector<OwnPtr<ImageObserver>> background_layers;
-        Vector<OwnPtr<ImageObserver>> mask_layers;
-        Vector<OwnPtr<ImageObserver>> cursors;
-        OwnPtr<ImageObserver> border_image_source;
-        OwnPtr<ImageObserver> list_style_image;
-    };
-    ImageObserverSlots m_image_observers;
+    ImageObserverSlots* image_observers() const;
     Vector<RefPtr<CSS::CursorStyleValue const>> m_cursor_style_values;
     mutable Optional<Vector<CSS::BackgroundLayerData>> m_background_layers;
     mutable Optional<Vector<CSS::BackgroundLayerData>> m_mask_layers;

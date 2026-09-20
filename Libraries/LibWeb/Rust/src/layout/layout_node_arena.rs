@@ -436,6 +436,7 @@ fn style_payloads_equal_in_layout_affecting_groups(a: *const c_void, b: *const c
 pub(crate) struct FreedSubtree {
     shells: Vec<*mut c_void>,
     owned_image_providers: Vec<*mut c_void>,
+    image_observer_sets: Vec<*mut c_void>,
     paintable_row_resets: Vec<crate::painting::paintable_rows::PaintableRowReset>,
     arena_pinned_style_records: Vec<u64>,
     style_record_host: Option<FfiStyleRecordHostCallbacks>,
@@ -480,6 +481,9 @@ impl FreedSubtree {
         }
         for provider in self.owned_image_providers {
             crate::layout::tree_mutation::destroy_owned_image_provider(provider);
+        }
+        for observers in self.image_observer_sets {
+            crate::layout::tree_mutation::destroy_image_observers(observers);
         }
         for reset in self.paintable_row_resets {
             reset.invoke_callback();
@@ -580,6 +584,10 @@ pub(crate) struct LayoutNodeArena {
     /// it against the row and deletes it when the row is freed, rather than leaving it on a shell
     /// that the arena materialises and destroys on its own schedule.
     owned_image_providers: RefCell<HashMap<NodeSlotId, *mut c_void>>,
+    /// The set of image observers a row's style asks for. Like the provider a row owns, the set is
+    /// made for the row and is of no use without it, so the arena holds it against the row and
+    /// deletes it when the row is freed.
+    image_observer_sets: RefCell<HashMap<NodeSlotId, *mut c_void>>,
     /// Where each element sits in the shadow-including tree, as the tree build last saw it, indexed
     /// by the element's dense index. An element's DOM parent only changes when it is inserted or
     /// removed, and either one makes the tree build visit it again, so the fact keeps up with the
@@ -721,6 +729,7 @@ impl LayoutNodeArena {
             bound_pseudo_element_rows: RefCell::new(HashMap::default()),
             pseudo_element_scroll_offsets: RefCell::new(HashMap::default()),
             owned_image_providers: RefCell::new(HashMap::default()),
+            image_observer_sets: RefCell::new(HashMap::default()),
             shadow_including_parent_elements: RefCell::new(Vec::new()),
             anchor_name_elements: RefCell::new(HashMap::default()),
             bound_viewport_row: Cell::new(NodeSlotId::INVALID),
@@ -1008,12 +1017,16 @@ impl LayoutNodeArena {
 
         let mut shells = Vec::with_capacity(slots_in_pre_order.len());
         let mut owned_image_providers = Vec::new();
+        let mut image_observer_sets = Vec::new();
         let mut paintable_row_resets = Vec::new();
         let mut arena_pinned_style_records = Vec::new();
         for slot in slots_in_pre_order {
             shells.push(self.data(slot).shell.get());
             if let Some(provider) = self.owned_image_providers.get_mut().remove(&slot) {
                 owned_image_providers.push(provider);
+            }
+            if let Some(observers) = self.image_observer_sets.get_mut().remove(&slot) {
+                image_observer_sets.push(observers);
             }
             if self.style_records_pinned_by_arena[slot.slot_index() as usize].get() {
                 arena_pinned_style_records.push(self.style_records[slot.slot_index() as usize].get());
@@ -1030,6 +1043,7 @@ impl LayoutNodeArena {
         FreedSubtree {
             shells,
             owned_image_providers,
+            image_observer_sets,
             paintable_row_resets,
             arena_pinned_style_records,
             style_record_host: self.style_record_host.get(),
@@ -2445,6 +2459,29 @@ impl LayoutNodeArena {
     /// The image provider `slot` owns, or null for a row whose image comes from its DOM element.
     pub(crate) fn owned_image_provider(&self, slot: NodeSlotId) -> *mut c_void {
         self.owned_image_providers
+            .borrow()
+            .get(&slot)
+            .copied()
+            .unwrap_or(std::ptr::null_mut())
+    }
+
+    /// Give `slot` the image observer set its style asks for, and hand back the set it held. The
+    /// caller deletes the old set after this returns, so a resource both sets observe is never
+    /// dropped and refetched between them.
+    pub(crate) fn replace_image_observers(&self, slot: NodeSlotId, observers: *mut c_void) -> *mut c_void {
+        self.assert_owner_thread();
+        let mut sets = self.image_observer_sets.borrow_mut();
+        let previous = if observers.is_null() {
+            sets.remove(&slot)
+        } else {
+            sets.insert(slot, observers)
+        };
+        previous.unwrap_or(std::ptr::null_mut())
+    }
+
+    /// The image observer set `slot` holds, or null for a row whose style asks for none.
+    pub(crate) fn image_observers(&self, slot: NodeSlotId) -> *mut c_void {
+        self.image_observer_sets
             .borrow()
             .get(&slot)
             .copied()
@@ -5145,6 +5182,24 @@ pub unsafe extern "C" fn layout_arena_node_style_record_pinned_by_host(arena: *m
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The handle came from layout_arena_create and outlives this call.
     unsafe { &*arena.cast::<LayoutNodeArena>() }.node_style_record_pinned_by_host(slot)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_replace_image_observers(
+    arena: *mut c_void,
+    slot: NodeSlotId,
+    observers: *mut c_void,
+) -> *mut c_void {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: The handle came from layout_arena_create and outlives this call.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.replace_image_observers(slot, observers)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_image_observers(arena: *mut c_void, slot: NodeSlotId) -> *mut c_void {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: The handle came from layout_arena_create and outlives this call.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.image_observers(slot)
 }
 
 #[unsafe(no_mangle)]
