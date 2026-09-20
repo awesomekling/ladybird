@@ -2358,6 +2358,10 @@ impl LayoutNodeArena {
             .map(|entry| entry.facts.clone())
     }
 
+    pub(crate) fn layer_image_paint_facts_for_verification(&self, id: NodeSlotId) -> String {
+        format!("{:?}", self.layer_image_paint_facts.borrow().get(&id))
+    }
+
     pub(crate) fn set_layer_image_paint_facts(
         &self,
         id: NodeSlotId,
@@ -2623,8 +2627,13 @@ impl LayoutNodeArena {
         self.data(id).dom_paint_facts.get() & fact as u8 != 0
     }
 
+    pub(crate) fn node_dom_paint_facts(&self, id: NodeSlotId) -> u8 {
+        self.data(id).dom_paint_facts.get()
+    }
+
     pub(crate) fn set_node_dom_paint_facts(&self, id: NodeSlotId, facts: u8) -> bool {
         self.assert_owner_thread();
+        crate::painting::published_immutable::before_mutation(self, "M5 layout_arena_set_node_dom_paint_facts");
         let mut any_changed = false;
         for row in self.rows_sharing_dom_node_with(id) {
             let data = self.data(row);
@@ -4264,6 +4273,7 @@ pub unsafe extern "C" fn layout_arena_destroy(arena: *mut c_void) {
     let arena = unsafe { Box::from_raw(arena.cast::<LayoutNodeArena>()) };
     arena.assert_owner_thread();
     assert_eq!(arena.live_count, 0, "layout node arena destroyed with live slots");
+    crate::painting::published_immutable::finish(&arena);
 }
 
 #[unsafe(no_mangle)]

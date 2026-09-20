@@ -724,6 +724,15 @@ impl LayoutNodeArena {
         self.paintable_rows.side_data.borrow().len()
     }
 
+    pub(crate) fn published_paintable_rows(&self) -> Vec<NodeSlotId> {
+        (0..self.paintable_row_count() as u32)
+            .filter_map(|index| {
+                let generation = self.paintable_data_by_index(index).slot_generation;
+                (generation != 0).then(|| NodeSlotId::new(index, generation))
+            })
+            .collect()
+    }
+
     /// The scroll offset each box holds, as published by the one place the DOM stores it.
     pub(crate) fn scroll_offsets(&self) -> &crate::painting::visual_context::scroll_state::ScrollOffsetColumn {
         &self.paintable_rows.scroll_offsets
@@ -1010,6 +1019,7 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn paintable_row_freed(&mut self, reset: PaintableRowReset) {
+        crate::painting::published_immutable::before_mutation(self, "M1b paintable_row_freed");
         self.reset_paintable_row(false, reset);
     }
 
