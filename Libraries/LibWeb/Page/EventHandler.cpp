@@ -557,7 +557,7 @@ EventResult EventHandler::handle_mousemove(CSSPixelPoint visual_viewport_positio
     }
 
     ArmedScopeGuard clear_cursor = [&] {
-        update_cursor(nullptr, nullptr, nullptr);
+        update_cursor(nullptr, {}, nullptr);
     };
 
     if (target.has_value()) {
@@ -588,7 +588,7 @@ EventResult EventHandler::handle_mousemove(CSSPixelPoint visual_viewport_positio
         bool found_parent_element = parent_element_for_event_dispatch(*target_layout_node, node, layout_node);
 
         if (found_parent_element) {
-            update_cursor(target_layout_node, *node, chrome_widget, hit_text_fragment);
+            update_cursor(target_layout_node, DOM::NodeIdentity::of(*node), chrome_widget, hit_text_fragment);
             clear_cursor.disarm();
 
             auto coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *layout_node);
@@ -1172,7 +1172,7 @@ EventResult EventHandler::handle_mouseleave()
         return EventResult::Dropped;
 
     update_hovered_chrome_widget(nullptr);
-    update_cursor(nullptr, nullptr, nullptr);
+    update_cursor(nullptr, {}, nullptr);
     m_last_known_mouse_visual_viewport_position.clear();
 
     if (!m_mousedown_target)
@@ -1223,7 +1223,7 @@ void EventHandler::update_hover_after_scroll(CSSPixelPoint visual_viewport_posit
 
     ArmedScopeGuard clear_hover = [&] {
         update_hovered_chrome_widget(nullptr);
-        update_cursor(nullptr, nullptr, nullptr);
+        update_cursor(nullptr, {}, nullptr);
         report_hover_target(nullptr, {});
     };
 
@@ -1251,7 +1251,7 @@ void EventHandler::update_hover_after_scroll(CSSPixelPoint visual_viewport_posit
         return;
 
     update_hovered_chrome_widget(chrome_widget);
-    update_cursor(target_layout_node, *node, chrome_widget, hit_text_fragment);
+    update_cursor(target_layout_node, DOM::NodeIdentity::of(*node), chrome_widget, hit_text_fragment);
 
     auto coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *layout_node);
     report_hover_target(node, DOM::HoverEventData {
@@ -3930,7 +3930,18 @@ static Gfx::Cursor resolve_cursor(Layout::NodeWithStyle const& layout_node, Layo
     return Gfx::StandardCursor::None;
 }
 
-void EventHandler::update_cursor(Layout::Node const* layout_node, GC::Ptr<DOM::Node> host_element,
+// Whether the node the hit named is editable or an editing host. A node publishes that onto its
+// row, so the answer costs no walk out of the node. An element hit without a row of its own -
+// an image map's area is the only one - published nothing, and is asked directly.
+static bool host_is_editable_or_editing_host(Layout::NodeArena& arena, DOM::NodeIdentity host, Layout::Node const* host_layout_node)
+{
+    if (host_layout_node)
+        return Layout::RustFFI::layout_arena_node_is_editable_or_editing_host(arena.handle(), Layout::Node::slot_id(host_layout_node));
+    auto host_node = host.resolve(*arena.document());
+    return host_node && host_node->is_editable_or_editing_host();
+}
+
+void EventHandler::update_cursor(Layout::Node const* layout_node, DOM::NodeIdentity host,
     RefPtr<Painting::ChromeWidget> chrome_widget, bool hit_text_fragment)
 {
     // AD-HOC: Update the cursor image based on the CSS rules before the steps terminate if the target hasn't changed.
@@ -3941,7 +3952,8 @@ void EventHandler::update_cursor(Layout::Node const* layout_node, GC::Ptr<DOM::N
         }
 
         if (layout_node) {
-            auto* host_layout_node = host_element ? host_element->layout_node() : nullptr;
+            auto& arena = layout_node->node_arena();
+            auto* host_layout_node = host.bound_layout_node(arena);
             auto const& node_with_style = as<Layout::NodeWithStyle>(*layout_node);
             auto const* cursor_values_owner = &node_with_style;
             auto cursor_data = cursor_values_owner->cursor();
@@ -3951,18 +3963,19 @@ void EventHandler::update_cursor(Layout::Node const* layout_node, GC::Ptr<DOM::N
                 && host_layout_node
                 && host_layout_node->user_select_used_value() != CSS::UserSelect::None;
 
-            if (is_selectable_text_fragment || host_element->is_editable_or_editing_host()) {
+            if (is_selectable_text_fragment || host_is_editable_or_editing_host(arena, host, host_layout_node)) {
                 if (host_node_with_style)
                     return resolve_cursor(*host_node_with_style, cursor_values_owner, cursor_data, Gfx::StandardCursor::IBeam);
                 return resolve_cursor(*node_with_style.parent(), cursor_values_owner, cursor_data, Gfx::StandardCursor::IBeam);
             }
-            if (host_element && host_element->is_element() && host_node_with_style)
+            if (identity_names_element(host) && host_node_with_style)
                 return resolve_cursor(*host_node_with_style, cursor_values_owner, cursor_data, Gfx::StandardCursor::Arrow);
 
             // AD-HOC: Area elements are never rendered, so they have no layout node of their own to resolve a cursor
             //         from. Resolve the cursor from the area's computed values instead, falling back to the layout
             //         node of the image that renders the area's image map for image cursors.
-            if (auto const* area_element = as_if<HTML::HTMLAreaElement>(host_element.ptr())) {
+            // NB: The area is the one hit target with no row, so it is also the one the DOM still answers for.
+            if (auto const* area_element = as_if<HTML::HTMLAreaElement>(host.resolve(*arena.document()).ptr())) {
                 if (auto area_computed_values = area_element->computed_style(); area_computed_values)
                     return resolve_cursor(node_with_style, nullptr, area_computed_values->cursor(), Gfx::StandardCursor::Arrow);
             }
