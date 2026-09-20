@@ -2523,6 +2523,13 @@ impl LayoutNodeArena {
             self.with_style_store(|engine| engine.element_unique_node_id(style_node))
         });
         self.unique_node_ids().publish(slot, unique_node_id);
+        // What a row built for the node is painted and hit-tested with, published under the node's
+        // identity by the DOM steps that derive it. The document's row takes its own, as with the
+        // name it answers by.
+        if let Some(style_node) = style_node {
+            let facts = self.with_style_store(|engine| engine.node_dom_paint_facts(style_node));
+            self.data(slot).dom_paint_facts.set(facts);
+        }
         self.enroll_node_for_replaced_content_facts_sync_if_eligible(slot);
     }
 
@@ -5189,18 +5196,6 @@ pub unsafe extern "C" fn layout_arena_set_anchor_name_elements(
     };
     // SAFETY: The C++ wrapper keeps the arena alive for this call.
     unsafe { &*arena.cast::<LayoutNodeArena>() }.set_anchor_name_elements(scope_host, anchor_name, &elements);
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_set_constructed_row_dom_paint_facts(
-    arena: *mut c_void,
-    id: NodeSlotId,
-    facts: u8,
-) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_constructed_row_dom_paint_facts(id, facts);
 }
 
 #[unsafe(no_mangle)]

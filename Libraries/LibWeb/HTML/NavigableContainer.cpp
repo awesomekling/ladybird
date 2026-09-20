@@ -109,8 +109,7 @@ void NavigableContainer::create_new_child_navigable()
     m_reported_content_navigable_viewport = {};
     navigable->set_container({}, this);
 
-    if (auto* layout_node = unsafe_layout_node())
-        layout_node->refresh_dom_paint_facts(*this);
+    Layout::publish_dom_paint_facts(*this);
     Painting::push_navigable_container_paint_facts(*this);
     set_needs_repaint();
 
@@ -312,8 +311,7 @@ void NavigableContainer::destroy_the_child_navigable()
     m_reported_content_navigable_viewport = {};
     navigable->set_container({}, nullptr);
     document().schedule_html_parser_end_check();
-    if (auto* layout_node = unsafe_layout_node())
-        layout_node->refresh_dom_paint_facts(*this);
+    Layout::publish_dom_paint_facts(*this);
     Painting::push_navigable_container_paint_facts(*this);
     set_needs_repaint();
 
@@ -435,8 +433,7 @@ void NavigableContainer::swap_content_navigable_to_remote(Badge<Page>, Replicate
         window_proxy->set_window(remote_navigable->active_window());
     }
     m_content_navigable = remote_navigable;
-    if (auto* layout_node = unsafe_layout_node())
-        layout_node->refresh_dom_paint_facts(*this);
+    Layout::publish_dom_paint_facts(*this);
     Painting::push_navigable_container_paint_facts(*this);
     set_needs_repaint();
 
@@ -456,8 +453,7 @@ void NavigableContainer::swap_content_navigable_to_local(Badge<Page>, LocalNavig
     VERIFY(remote_navigable.provisional_navigable().ptr() == &navigable);
 
     m_content_navigable = navigable;
-    if (auto* layout_node = unsafe_layout_node())
-        layout_node->refresh_dom_paint_facts(*this);
+    Layout::publish_dom_paint_facts(*this);
     Painting::push_navigable_container_paint_facts(*this);
     set_needs_repaint();
 

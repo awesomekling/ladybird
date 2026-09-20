@@ -901,9 +901,7 @@ void HTMLElement::attribute_changed(Utf16FlyString const& name, Optional<Utf16St
 void HTMLElement::set_subtree_inertness(bool is_inert)
 {
     auto repaint_if_inertness_reaches_painted_output = [](DOM::Node& node) {
-        auto* layout_node = node.unsafe_layout_node();
-        if (layout_node)
-            layout_node->refresh_dom_paint_facts(node);
+        Layout::publish_dom_paint_facts(node);
     };
     // An inert node is never editable, and an <area> has no row to carry that fact, so a flip here
     // has to reach the areas its image publishes. The walk below skips a subtree that was already

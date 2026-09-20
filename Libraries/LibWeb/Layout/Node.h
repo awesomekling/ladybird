@@ -343,7 +343,6 @@ public:
 
     bool is_editing_host() const { return has_flag(RustFFI::NodeFlag::IsEditingHost); }
     void set_is_editing_host(bool value) { set_flag(RustFFI::NodeFlag::IsEditingHost, value); }
-    void refresh_dom_paint_facts(DOM::Node const&);
 
     // https://drafts.csswg.org/css-ui/#propdef-user-select
     CSS::UserSelect user_select_used_value() const;
@@ -791,5 +790,7 @@ inline Gfx::Font const& NodeWithStyle::first_available_font() const
 }
 
 bool overflow_value_makes_box_a_scroll_container(CSS::Overflow overflow);
+
+void publish_dom_paint_facts(DOM::Node const&);
 
 }

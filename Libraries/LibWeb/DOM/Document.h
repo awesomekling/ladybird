@@ -1314,6 +1314,11 @@ public:
     void set_may_have_blocking_wheel_event_listener() { m_may_have_blocking_wheel_event_listener = true; }
     [[nodiscard]] bool may_have_blocking_wheel_event_listener() const { return m_may_have_blocking_wheel_event_listener; }
 
+    // Whether any node in this document has ever published a paint fact. It never goes back to
+    // false: a node that lost its last fact still has to publish that it did.
+    void set_may_have_dom_paint_facts() { m_may_have_dom_paint_facts = true; }
+    [[nodiscard]] bool may_have_dom_paint_facts() const { return m_may_have_dom_paint_facts; }
+
     void register_scroll_snap_container(Layout::Node const&);
     [[nodiscard]] Vector<Layout::RustFFI::NodeSlotId> collect_scroll_snap_containers();
 
@@ -2046,6 +2051,7 @@ private:
     bool m_needs_scroll_container_resnap { false };
     bool m_may_have_scroll_snap_areas { false };
     bool m_may_have_blocking_wheel_event_listener { false };
+    bool m_may_have_dom_paint_facts { false };
 
     HashTable<GC::Ref<Element>> m_list_owners_pending_item_renumber;
     HashTable<GC::Ref<Element>> m_list_owners_with_stale_item_counters;
