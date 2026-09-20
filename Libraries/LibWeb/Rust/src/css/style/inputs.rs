@@ -846,6 +846,38 @@ impl RetainedState {
         self.facts.set_animation_names(node, names, &mut self.memory);
     }
 
+    /// Record the names of the CSS animations the host holds for one of an element's animation
+    /// lists, in the order it holds them. The names arrive packed into one buffer because a list is
+    /// almost always a single name, and a length per name is cheaper than a handle per name.
+    pub fn set_element_css_defined_animations(
+        &mut self,
+        node: StyleNodeID,
+        slot: animations::AnimationSlot,
+        name_lengths: &[u32],
+        name_units: &[u16],
+    ) {
+        let mut names = Vec::with_capacity(name_lengths.len());
+        let mut offset = 0usize;
+        for &length in name_lengths {
+            let length = length as usize;
+            let end = offset + length;
+            assert!(end <= name_units.len(), "animation name lengths overrun their buffer");
+            names.push(crate::css::css_string::CssString::from_utf16(&name_units[offset..end]));
+            offset = end;
+        }
+        self.css_defined_animations.set(node, slot, names.into_boxed_slice());
+    }
+
+    /// The names of the CSS animations the host holds for one of an element's animation lists.
+    #[must_use]
+    pub(crate) fn element_css_defined_animations(
+        &self,
+        node: StyleNodeID,
+        slot: animations::AnimationSlot,
+    ) -> &[crate::css::css_string::CssString] {
+        self.css_defined_animations.names(node, slot)
+    }
+
     /// Record the custom properties an element declares or references. Also an index rather than an
     /// input, and for the same reason: it answers which elements an `@property` registration reaches.
     pub fn set_element_custom_property_names(
@@ -1246,6 +1278,7 @@ impl StyleEngineState {
                 computed_group_sets: ComputedGroupSets::default(),
                 custom_property_environments: Default::default(),
                 nodes_with_substituted_records: HashSet::default(),
+                css_defined_animations: Default::default(),
                 custom_property_registrations_changed: false,
                 pending_element_style_computation_selections: HashMap::default(),
                 pending_pseudo_style_computation_selections: HashMap::default(),
@@ -1982,6 +2015,7 @@ impl StyleEngineState {
                     .top_layer_elements
                     .retain(|member| !retired_nodes.contains(member));
             }
+            self.retained.css_defined_animations.retire(&retired_nodes);
             self.retained
                 .deferred_pseudo_element_observable_nodes
                 .retain(|member| !retired_nodes.contains(member));

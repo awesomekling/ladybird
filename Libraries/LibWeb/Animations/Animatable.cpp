@@ -260,12 +260,16 @@ void Animatable::cancel_css_animations_and_transitions()
         return;
 
     GC::RootVector<GC::Ref<Animation>> animations_to_cancel;
-    for (auto& animations : m_impl->css_defined_animations) {
+    for (size_t index = 0; index < m_impl->css_defined_animations.size(); ++index) {
+        auto& animations = m_impl->css_defined_animations[index];
         if (!animations)
+            continue;
+        if (animations->is_empty())
             continue;
         for (auto& animation : *animations)
             animations_to_cancel.append(animation);
         animations->clear();
+        publish_css_defined_animations(index);
     }
     for (auto& transition : m_impl->transitions) {
         if (!transition)
@@ -450,6 +454,24 @@ void Animatable::set_css_defined_animations(Optional<CSS::PseudoElement> pseudo_
     if (!animations.is_empty())
         impl.has_css_defined_animations = true;
     impl.css_defined_animations[index] = make<Vector<GC::Ref<CSS::CSSAnimation>>>(move(animations));
+    publish_css_defined_animations(index);
+}
+
+// The style stage decides which animation each of an element's animation definitions claims, so the
+// names of the animations it already has are an input to it rather than something it asks for.
+void Animatable::publish_css_defined_animations(size_t index)
+{
+    auto* element = as_if<DOM::Element>(*this);
+    if (!element)
+        return;
+
+    Vector<Utf16FlyString> names;
+    if (auto const& animations = m_impl->css_defined_animations[index]) {
+        names.ensure_capacity(animations->size());
+        for (auto const& animation : *animations)
+            names.unchecked_append(animation->animation_name());
+    }
+    CSS::record_element_css_defined_animations(*element, static_cast<u8>(index), names);
 }
 
 Animatable::Impl& Animatable::ensure_impl() const

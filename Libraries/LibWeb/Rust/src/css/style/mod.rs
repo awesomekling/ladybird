@@ -50,6 +50,7 @@ macro_rules! define_id {
     };
 }
 
+pub(crate) mod animations;
 mod atoms;
 pub mod batch_matcher;
 pub mod bridge;
@@ -866,6 +867,9 @@ pub struct RetainedState {
     /// The nodes whose engine-computed record substituted a custom property into a winner: what
     /// C++ notes as reading custom properties when it installs the record.
     nodes_with_substituted_records: HashSet<StyleNodeID>,
+    /// The names of the CSS animations the host holds for each element, which the animation stage
+    /// matches its newly computed definitions against.
+    css_defined_animations: animations::CssDefinedAnimations,
     /// Whether the registrations used by this transaction differ from the preceding one. A
     /// previously substituted record must then be recomputed by C++, which implements registered
     /// custom properties, even when its cascade winners did not move.

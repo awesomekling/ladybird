@@ -85,6 +85,8 @@ protected:
     void visit_edges(JS::Cell::Visitor&);
 
 private:
+    void publish_css_defined_animations(size_t index);
+
     struct Transition;
 
     struct Impl {
