@@ -1181,11 +1181,12 @@ pub struct FfiCascadeResolutionContext {
     pub custom_functions: *const crate::css::custom_properties::FfiSubstitutionFunctionDefinition,
     pub custom_function_count: usize,
     pub custom_function_scope_identity: usize,
+    pub custom_function_visibilities: *const crate::css::custom_properties::FfiSubstitutionFunctionVisibility,
+    pub custom_function_visibility_count: usize,
     pub callback_context: *mut c_void,
     pub install_custom_properties: Option<
         unsafe extern "C" fn(*mut c_void, *const FfiCascadedCustomProperty, usize, *mut *const c_void) -> *const c_void,
     >,
-    pub resolve_custom_function: Option<unsafe extern "C" fn(usize, FfiUtf16View) -> u64>,
     pub evaluate_style_query: Option<unsafe extern "C" fn(*mut c_void, FfiUtf16View) -> u8>,
     pub note_substitution: Option<unsafe extern "C" fn(*mut c_void, *const c_void)>,
 }
@@ -1647,7 +1648,6 @@ pub(crate) fn resolve_cascade_value(
                 unresolved_data,
                 resolution_environment,
                 resolution_context.attribute_names_are_ascii_case_insensitive,
-                resolution_context.resolve_custom_function,
                 resolution_context.callback_context,
                 resolution_context.evaluate_style_query,
                 final_custom_properties,
@@ -1837,6 +1837,8 @@ pub unsafe extern "C" fn rust_resolve_unresolved_style_values(
             resolution_context.custom_functions,
             resolution_context.custom_function_count,
             resolution_context.custom_function_scope_identity,
+            resolution_context.custom_function_visibilities,
+            resolution_context.custom_function_visibility_count,
         )
     };
     let (components, cycle_participants, use_final_custom_properties) = if finalize_component.is_some() {
@@ -2002,6 +2004,8 @@ pub unsafe extern "C" fn rust_cascade_matched_blocks(
                         resolution_context.custom_functions,
                         resolution_context.custom_function_count,
                         resolution_context.custom_function_scope_identity,
+                        resolution_context.custom_function_visibilities,
+                        resolution_context.custom_function_visibility_count,
                     )
                 });
                 resolve_cascade_value(
