@@ -1325,7 +1325,7 @@ void StyleComputer::invalidate_animated_custom_property_readers(DOM::AbstractEle
     }
 }
 
-void StyleComputer::apply_animation_definitions(ComputedStyleWorkingSet const& computed_properties, CascadedProperties const& cascaded_properties, DOM::AbstractElement& abstract_element, ReadonlySpan<AnimationProperties> animation_definitions, ReadonlySpan<i32> definition_matches, Optional<bool> computed_in_display_none_subtree) const
+void StyleComputer::apply_animation_definitions(CascadedProperties const& cascaded_properties, DOM::AbstractElement& abstract_element, ReadonlySpan<AnimationProperties> animation_definitions, ReadonlySpan<i32> definition_matches, Optional<bool> computed_in_display_none_subtree) const
 {
     auto& document = abstract_element.document();
 
@@ -1345,18 +1345,17 @@ void StyleComputer::apply_animation_definitions(ComputedStyleWorkingSet const& c
     //     Termination of running animations when display becomes none is handled by
     //     Element::play_or_cancel_animations_after_display_property_change().
     // NB: The style computation answers this from the published records where it can, since the walk it
-    //     otherwise takes reads the live tree. Where it has not, the answer is still computed lazily: it is
-    //     only needed on the path that starts a brand new animation.
+    //     otherwise takes reads the live tree. Where it has not, only the ancestor walk is left to do: the
+    //     computation decides the element's own display before it can decide that a definition would start
+    //     an animation, which is the only path that asks this question at all.
     Optional<bool> in_display_none_subtree = computed_in_display_none_subtree;
     auto is_in_display_none_subtree = [&] {
         if (!in_display_none_subtree.has_value()) {
-            bool result = computed_properties.display().is_none();
-            if (!result) {
-                if (abstract_element.pseudo_element().has_value())
-                    result = abstract_element.element().has_inclusive_ancestor_with_display_none_ignoring_animations();
-                else if (auto* parent = abstract_element.element().parent_or_shadow_host())
-                    result = parent->has_inclusive_ancestor_with_display_none_ignoring_animations();
-            }
+            bool result = false;
+            if (abstract_element.pseudo_element().has_value())
+                result = abstract_element.element().has_inclusive_ancestor_with_display_none_ignoring_animations();
+            else if (auto* parent = abstract_element.element().parent_or_shadow_host())
+                result = parent->has_inclusive_ancestor_with_display_none_ignoring_animations();
             in_display_none_subtree = result;
         }
         return in_display_none_subtree.value();
@@ -5983,20 +5982,21 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             //     than after the definitions lets an element without animations skip that step.
             style_computer.m_keyframes_inherited_non_inherited_style_groups = 0;
             style_computer.clear_computation_context_caches(); },
-        .prepare_animations = [](void* context_pointer, i8 in_display_none_subtree) -> bool {
+        .apply_animations = [](void* context_pointer, i8 in_display_none_subtree, bool should_measure_line_height, ComputedValuesFFI::FfiInputLineHeightMetrics* line_height_metrics, bool* did_sample) -> ComputedValuesFFI::AnimatedOverlay* {
             auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
+            *did_sample = false;
             // Applying the plan the style computation decided has to happen before the effects are
             // collected, since an animation it starts composes into this very computation.
             Optional<bool> computed_in_display_none_subtree;
             if (in_display_none_subtree >= 0)
                 computed_in_display_none_subtree = in_display_none_subtree != 0;
-            context.style_computer->apply_animation_definitions(*context.state->working_set, context.cascaded_properties, context.abstract_element, context.state->animation_definitions.span(), context.state->animation_definition_matches.span(), computed_in_display_none_subtree);
+            context.style_computer->apply_animation_definitions(context.cascaded_properties, context.abstract_element, context.state->animation_definitions.span(), context.state->animation_definition_matches.span(), computed_in_display_none_subtree);
             auto animations = context.abstract_element.element().get_animations_internal(
                 Animations::Animatable::GetAnimationsSorted::Yes,
                 Animations::Animatable::GetAnimationsOptions { .subtree = false, .pseudo_element = {} });
             if (animations.is_exception()) {
                 dbgln("Error getting animations for element {}", context.abstract_element.debug_description());
-                return false;
+                return nullptr;
             }
             for (auto& animation : animations.value()) {
                 if (auto effect = animation->effect(); effect && effect->is_keyframe_effect()) {
@@ -6005,10 +6005,11 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                         context.state->animation_effects.append(keyframe_effect);
                 }
             }
-            return !context.state->animation_effects.is_empty();
-        },
-        .apply_animations = [](void* context_pointer, bool should_measure_line_height, ComputedValuesFFI::FfiInputLineHeightMetrics* line_height_metrics) -> ComputedValuesFFI::AnimatedOverlay* {
-            auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
+            // Nothing the plan left behind is relevant to this element, so there is nothing to sample
+            // and the computation keeps the overlay and the line height metrics it already had.
+            if (context.state->animation_effects.is_empty())
+                return nullptr;
+            *did_sample = true;
             auto& computed_style = *context.state->working_set;
             context.style_computer->collect_animations_into(context.abstract_element, context.state->animation_effects.span(), computed_style, AnimationRefresh::No);
             *line_height_metrics = input_line_height_metrics(computed_style, context.abstract_element, should_measure_line_height);

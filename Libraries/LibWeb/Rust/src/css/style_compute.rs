@@ -2739,14 +2739,16 @@ pub struct FfiComputePropertiesInput {
         *mut FfiLonghandDriveInput,
     ),
     pub finish_longhand_drive: unsafe extern "C" fn(*mut c_void, *const FfiLonghandDriveResult),
-    /// Reconciles the element's CSS animations against the plan the computation decided and
-    /// collects the effects to sample. The second argument answers whether the element is in a
-    /// `display: none` subtree, which decides whether an animation may start at all: `0` or `1`
-    /// for an answer the mirror could give, and a negative value where it could not and the host
-    /// has to walk the tree itself.
-    pub prepare_animations: unsafe extern "C" fn(*mut c_void, i8) -> bool,
+    /// Reconciles the element's CSS animations against the plan the computation decided, collects
+    /// the effects that remain and samples them into an animated overlay.
+    ///
+    /// The second argument answers whether the element is in a `display: none` subtree, which
+    /// decides whether an animation may start at all: `0` or `1` for an answer the mirror could
+    /// give, and a negative value where it could not and the host has to walk the ancestors
+    /// itself. The last argument reports whether anything was sampled; where nothing was, the
+    /// overlay and the line height metrics the computation already holds stand.
     pub apply_animations:
-        unsafe extern "C" fn(*mut c_void, bool, *mut FfiInputLineHeightMetrics) -> *mut AnimatedOverlay,
+        unsafe extern "C" fn(*mut c_void, i8, bool, *mut FfiInputLineHeightMetrics, *mut bool) -> *mut AnimatedOverlay,
     pub did_mutate_post_compute: unsafe extern "C" fn(*mut c_void, u16),
     pub finish_properties: unsafe extern "C" fn(*mut c_void, bool),
 }
@@ -5357,37 +5359,42 @@ pub unsafe extern "C" fn rust_compute_properties(input: *const FfiComputePropert
     };
     let element_has_animation_state =
         plan_has_work || element_has_relevant_effects.unwrap_or(element_has_associated_animations);
-    let has_animations = if element_has_animation_state {
-        crate::css::style::seal::note_host_call("computed_properties.prepare_animations");
-        unsafe {
-            (input.prepare_animations)(
-                input.callback_context,
-                in_display_none_subtree_for_animations(
-                    input,
-                    &drive_input,
-                    animated_overlay,
-                    a_definition_starts_an_animation,
-                    style_engine,
-                ),
-            )
-        }
-    } else {
-        false
+    // Whether a definition may start an animation is asked before the post-compute adjustments are
+    // undone, since the element's own display is one of the values such an adjustment can change.
+    let in_display_none_subtree = match element_has_animation_state {
+        true => in_display_none_subtree_for_animations(
+            input,
+            &drive_input,
+            animated_overlay,
+            a_definition_starts_an_animation,
+            style_engine,
+        ),
+        false => -1,
     };
-    if animation_values_applied || has_animations {
+    // The values an animation composes over are the ones the drive computed before its post-compute
+    // adjustments, so the adjustments are undone here and redone by the finalization below.
+    if animation_values_applied || element_has_animation_state {
         let invalidated = unsafe { restore_post_compute_values(&mut *drive_input.longhand_table, false) };
         crate::css::style::seal::note_host_call("computed_properties.did_mutate_post_compute");
         unsafe { (input.did_mutate_post_compute)(input.callback_context, invalidated) };
     }
-    if has_animations {
-        animated_overlay = unsafe {
+    if element_has_animation_state {
+        let mut animation_stage_sampled = false;
+        let overlay = unsafe {
             crate::css::style::seal::note_host_call("computed_properties.apply_animations");
             (input.apply_animations)(
                 input.callback_context,
+                in_display_none_subtree,
                 (&*drive_input.environment).box_type_input.check_input_line_height,
                 &raw mut finalization_line_height_metrics,
+                &raw mut animation_stage_sampled,
             )
         };
+        if animation_stage_sampled {
+            animated_overlay = overlay;
+        }
+        // The adjustments have been undone, so the finalization has to redo them whether or not the
+        // stage found anything to sample.
         animation_values_applied = true;
     }
 
