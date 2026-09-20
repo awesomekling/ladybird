@@ -5623,8 +5623,9 @@ pub unsafe extern "C" fn layout_arena_for_each_pending_rebuilt_subtree_root(
 /// `arena` must be a live handle with a registered layout host, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_sync_enrolled_content_for_layout(arena: *mut c_void) {
+    let main_thread = unsafe { crate::stage::MainThread::from_ffi_entry() };
     // SAFETY: Guaranteed by the entry point's contract.
-    unsafe { sync_enrolled_content_for_layout(arena) }
+    unsafe { sync_enrolled_content_for_layout(&main_thread, arena) }
 }
 
 /// Refreshes the text content and replaced-content facts of every node enrolled since the last
@@ -5634,7 +5635,7 @@ pub unsafe extern "C" fn layout_arena_sync_enrolled_content_for_layout(arena: *m
 /// # Safety
 ///
 /// `arena` must be a live handle with a registered layout host, used on the document thread.
-pub(crate) unsafe fn sync_enrolled_content_for_layout(arena: *mut c_void) {
+pub(crate) unsafe fn sync_enrolled_content_for_layout(main_thread: &crate::stage::MainThread, arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY (for every derive below): the caller keeps the arena alive for this call and
     // serializes all access on the document thread; no shared borrow outlives a callback.
@@ -5675,7 +5676,7 @@ pub(crate) unsafe fn sync_enrolled_content_for_layout(arena: *mut c_void) {
         );
         super::tree_build_seal::note_host_call("build_replaced_content_facts");
         // SAFETY: The callback receives a live shell and a valid out-pointer.
-        unsafe { (host.build_replaced_content_facts)(host.context, shell, &raw mut facts) };
+        unsafe { host.build_replaced_content_facts(main_thread, shell, &raw mut facts) };
         // Changed facts invalidate cached formatting-context runs regardless of which
         // channel produced the change, including sources with no invalidation of their own.
         // SAFETY: As above; the shared borrows ended with their statements.

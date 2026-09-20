@@ -86,55 +86,55 @@ pub struct FfiLayoutTreeBuildStats {
 
 impl FfiLayoutUpdateHostCallbacks {
     // SAFETY (for every call below): The C++ host answers synchronously from its live document.
-    fn connected_element_count(&self) -> u32 {
+    fn connected_element_count(&self, _: &crate::stage::MainThread) -> u32 {
         unsafe { (self.connected_element_count)(self.context) }
     }
 
-    fn update_style(&self) {
+    fn update_style(&self, _: &crate::stage::MainThread) {
         unsafe { (self.update_style)(self.context) }
     }
 
-    fn process_pending_list_item_renumbers(&self) {
+    fn process_pending_list_item_renumbers(&self, _: &crate::stage::MainThread) {
         unsafe { (self.process_pending_list_item_renumbers)(self.context) }
     }
 
-    fn process_pending_top_layer_layout_changes(&self) {
+    fn process_pending_top_layer_layout_changes(&self, _: &crate::stage::MainThread) {
         unsafe { (self.process_pending_top_layer_layout_changes)(self.context) }
     }
 
-    fn document_facts(&self) -> FfiLayoutUpdateDocumentFacts {
+    fn document_facts(&self, _: &crate::stage::MainThread) -> FfiLayoutUpdateDocumentFacts {
         unsafe { (self.document_facts)(self.context) }
     }
 
-    fn needs_style_update_after_layout(&self) -> bool {
+    fn needs_style_update_after_layout(&self, _: &crate::stage::MainThread) -> bool {
         unsafe { (self.needs_style_update_after_layout)(self.context) }
     }
 
-    fn prepare_for_rendering(&self) {
+    fn prepare_for_rendering(&self, _: &crate::stage::MainThread) {
         unsafe { (self.prepare_for_rendering)(self.context) }
     }
 
-    fn build_layout_tree(&self) -> FfiLayoutTreeBuildOutcome {
+    fn build_layout_tree(&self, _: &crate::stage::MainThread) -> FfiLayoutTreeBuildOutcome {
         unsafe { (self.build_layout_tree)(self.context) }
     }
 
-    fn reconcile_stale_list_item_counters_after_tree_build(&self) -> bool {
+    fn reconcile_stale_list_item_counters_after_tree_build(&self, _: &crate::stage::MainThread) -> bool {
         unsafe { (self.reconcile_stale_list_item_counters_after_tree_build)(self.context) }
     }
 
-    fn after_layout_commit(&self, layout_tree_changed: bool) {
+    fn after_layout_commit(&self, _: &crate::stage::MainThread, layout_tree_changed: bool) {
         unsafe { (self.after_layout_commit)(self.context, layout_tree_changed) }
     }
 
-    fn note_full_layout_performed(&self) {
+    fn note_full_layout_performed(&self, _: &crate::stage::MainThread) {
         unsafe { (self.note_full_layout_performed)(self.context) }
     }
 
-    fn evaluate_pending_container_queries(&self) {
+    fn evaluate_pending_container_queries(&self, _: &crate::stage::MainThread) {
         unsafe { (self.evaluate_pending_container_queries)(self.context) }
     }
 
-    fn record_stabilization_bound_failure(&self) {
+    fn record_stabilization_bound_failure(&self, _: &crate::stage::MainThread) {
         unsafe { (self.record_stabilization_bound_failure)(self.context) }
     }
 }
@@ -216,6 +216,7 @@ unsafe fn arena<'a>(arena_handle: *mut c_void) -> &'a LayoutNodeArena {
 ///
 /// As for [`arena`].
 unsafe fn try_partial_relayout(
+    main_thread: &crate::stage::MainThread,
     arena_handle: *mut c_void,
     host: &FfiLayoutUpdateHostCallbacks,
     facts: &FfiLayoutUpdateDocumentFacts,
@@ -239,10 +240,10 @@ unsafe fn try_partial_relayout(
     let mut layout_tree_was_built_in_partial_branch = false;
     if *needs_layout_tree_rebuild {
         let tree_build_started = trace.now();
-        let outcome = host.build_layout_tree();
+        let outcome = host.build_layout_tree(main_thread);
         unsafe { arena(arena_handle) }.record_layout_tree_build(&outcome);
         *needs_layout_tree_rebuild = false;
-        if host.reconcile_stale_list_item_counters_after_tree_build() || outcome.needs_another_build_pass {
+        if host.reconcile_stale_list_item_counters_after_tree_build(main_thread) || outcome.needs_another_build_pass {
             return PartialRelayout::NeedsAnotherLayoutPass;
         }
         layout_tree_was_built_in_partial_branch = true;
@@ -267,11 +268,12 @@ unsafe fn try_partial_relayout(
     }
 
     // The build may have resized this document's viewport through its embedding document.
-    let facts = host.document_facts();
-    unsafe { sync_enrolled_content_for_layout(arena_handle) };
+    let facts = host.document_facts(main_thread);
+    unsafe { sync_enrolled_content_for_layout(main_thread, arena_handle) };
     for &root in &partial_relayout_roots {
         unsafe {
             compute_subtree_layout(
+                main_thread,
                 arena_handle,
                 root,
                 facts.viewport_inline_size_raw,
@@ -282,9 +284,9 @@ unsafe fn try_partial_relayout(
 
     unsafe { arena(arena_handle) }.note_partial_layout();
 
-    host.after_layout_commit(layout_tree_was_built_in_partial_branch);
-    if host.needs_style_update_after_layout()
-        || !layout_is_up_to_date(unsafe { arena(arena_handle) }, &host.document_facts())
+    host.after_layout_commit(main_thread, layout_tree_was_built_in_partial_branch);
+    if host.needs_style_update_after_layout(main_thread)
+        || !layout_is_up_to_date(unsafe { arena(arena_handle) }, &host.document_facts(main_thread))
     {
         return PartialRelayout::NeedsAnotherLayoutPass;
     }
@@ -294,7 +296,11 @@ unsafe fn try_partial_relayout(
 /// # Safety
 ///
 /// As for [`arena`], and `inputs` must satisfy [`UpdateLayoutTrace::new`]'s requirements.
-unsafe fn update_layout(arena_handle: *mut c_void, inputs: &FfiLayoutUpdateInputs) {
+unsafe fn update_layout(
+    main_thread: &crate::stage::MainThread,
+    arena_handle: *mut c_void,
+    inputs: &FfiLayoutUpdateInputs,
+) {
     // SAFETY (for every derive below): Guaranteed by the caller; no borrow spans a host call.
     let host = unsafe { arena(arena_handle) }.layout_update_host();
     assert!(
@@ -309,19 +315,19 @@ unsafe fn update_layout(arena_handle: *mut c_void, inputs: &FfiLayoutUpdateInput
     // Recompute it after each pass because an initial style update can enroll the elements of a
     // freshly parsed document after the layout update has already started.
     let mut layout_pass: u64 = 0;
-    while layout_pass < ORDINARY_STABILIZATION_ROUND_LIMIT + u64::from(host.connected_element_count()) + 1 {
+    while layout_pass < ORDINARY_STABILIZATION_ROUND_LIMIT + u64::from(host.connected_element_count(main_thread)) + 1 {
         layout_pass += 1;
 
-        host.update_style();
-        host.process_pending_list_item_renumbers();
-        host.process_pending_top_layer_layout_changes();
+        host.update_style(main_thread);
+        host.process_pending_list_item_renumbers(main_thread);
+        host.process_pending_top_layer_layout_changes(main_thread);
 
-        let facts = host.document_facts();
+        let facts = host.document_facts(main_thread);
         let force_devtools_layout_data_collection =
             facts.should_collect_devtools_layout_data && inputs.reason_is_inspect_devtools_layout_data;
 
         if layout_is_up_to_date(unsafe { arena(arena_handle) }, &facts) && !force_devtools_layout_data_collection {
-            host.prepare_for_rendering();
+            host.prepare_for_rendering(main_thread);
             return;
         }
 
@@ -339,6 +345,7 @@ unsafe fn update_layout(arena_handle: *mut c_void, inputs: &FfiLayoutUpdateInput
 
         match unsafe {
             try_partial_relayout(
+                main_thread,
                 arena_handle,
                 &host,
                 &facts,
@@ -355,11 +362,11 @@ unsafe fn update_layout(arena_handle: *mut c_void, inputs: &FfiLayoutUpdateInput
 
         // A build in the partial branch may have resized this document's viewport through its
         // embedding document.
-        let facts = host.document_facts();
+        let facts = host.document_facts(main_thread);
         let layout_started = trace.now();
 
         if needs_layout_tree_rebuild {
-            let outcome = host.build_layout_tree();
+            let outcome = host.build_layout_tree(main_thread);
             unsafe { arena(arena_handle) }.record_layout_tree_build(&outcome);
 
             if outcome.needs_another_build_pass {
@@ -372,7 +379,7 @@ unsafe fn update_layout(arena_handle: *mut c_void, inputs: &FfiLayoutUpdateInput
             unsafe { arena(arena_handle) }.set_needs_full_layout_tree_update(false);
             trace.tree_build(layout_started);
 
-            if host.reconcile_stale_list_item_counters_after_tree_build() {
+            if host.reconcile_stale_list_item_counters_after_tree_build(main_thread) {
                 continue;
             }
         }
@@ -381,6 +388,7 @@ unsafe fn update_layout(arena_handle: *mut c_void, inputs: &FfiLayoutUpdateInput
         assert!(!layout_root.is_invalid(), "a full layout pass needs a layout root");
         unsafe {
             run_root_layout(
+                main_thread,
                 arena_handle,
                 layout_root,
                 facts.viewport_inline_size_raw,
@@ -390,19 +398,19 @@ unsafe fn update_layout(arena_handle: *mut c_void, inputs: &FfiLayoutUpdateInput
             );
         }
 
-        host.note_full_layout_performed();
+        host.note_full_layout_performed(main_thread);
         unsafe { arena(arena_handle) }.note_full_layout();
 
-        host.after_layout_commit(true);
+        host.after_layout_commit(main_thread, true);
         trace.layout(layout_started);
 
-        host.evaluate_pending_container_queries();
+        host.evaluate_pending_container_queries(main_thread);
 
-        if host.needs_style_update_after_layout() {
+        if host.needs_style_update_after_layout(main_thread) {
             continue;
         }
 
-        let facts = host.document_facts();
+        let facts = host.document_facts(main_thread);
         // A zone rebuild requested during layout tree construction runs as another pass.
         if facts.top_layer_work_pending {
             continue;
@@ -414,10 +422,10 @@ unsafe fn update_layout(arena_handle: *mut c_void, inputs: &FfiLayoutUpdateInput
         }
     }
 
-    if host.needs_style_update_after_layout()
-        || !layout_is_up_to_date(unsafe { arena(arena_handle) }, &host.document_facts())
+    if host.needs_style_update_after_layout(main_thread)
+        || !layout_is_up_to_date(unsafe { arena(arena_handle) }, &host.document_facts(main_thread))
     {
-        host.record_stabilization_bound_failure();
+        host.record_stabilization_bound_failure(main_thread);
         unreachable!("the layout update did not stabilize within its exact bound");
     }
 }
@@ -489,9 +497,10 @@ pub unsafe extern "C" fn layout_arena_update_layout_is_running(arena: *mut c_voi
 pub unsafe extern "C" fn layout_arena_update_layout(arena: *mut c_void, inputs: *const FfiLayoutUpdateInputs) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     assert!(!inputs.is_null());
+    let main_thread = unsafe { crate::stage::MainThread::from_ffi_entry() };
     abort_on_panic(|| {
         // SAFETY: Guaranteed by the entry point's contract.
-        unsafe { update_layout(arena, &*inputs) };
+        unsafe { update_layout(&main_thread, arena, &*inputs) };
     });
 }
 

@@ -188,6 +188,10 @@ impl PaintableRowReset {
             unsafe { callback(context, self.slot, self.kind) };
         }
     }
+
+    pub(crate) fn invoke_callback_on_main_thread(self, _: &crate::stage::MainThread) {
+        self.invoke_callback();
+    }
 }
 
 // The unique node id of what each box is the box of, as the document names it: an element, the
