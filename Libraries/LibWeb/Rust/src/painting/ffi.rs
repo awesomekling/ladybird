@@ -426,7 +426,11 @@ pub unsafe extern "C" fn layout_arena_paintable_row(arena: *mut c_void, slot: No
 pub unsafe extern "C" fn layout_arena_paintable_cleared_from_node(arena: *mut c_void, layout_node: NodeSlotId) {
     let reset = {
         let arena = unsafe { arena_from_handle(arena) };
-        crate::painting::published_immutable::before_mutation(arena, "M1 layout_arena_paintable_cleared_from_node");
+        crate::painting::published_immutable::note_row_mutation(
+            arena,
+            layout_node,
+            "M1 layout_arena_paintable_cleared_from_node",
+        );
         arena.clear_committed_fragment_link(layout_node);
         arena.prepare_paintable_row_cleared_reset(layout_node)
     };
@@ -1402,7 +1406,11 @@ pub unsafe extern "C" fn layout_arena_set_form_control_paint_facts(
     facts: crate::painting::host::FfiFormControlPaintFacts,
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::published_immutable::before_mutation(arena, "M6 layout_arena_set_form_control_paint_facts");
+    crate::painting::published_immutable::note_row_mutation(
+        arena,
+        slot,
+        "M6 layout_arena_set_form_control_paint_facts",
+    );
     arena.set_replaced_paint_facts(
         slot,
         crate::painting::replaced_paint_facts::ReplacedPaintFacts::FormControl(facts),
@@ -1419,7 +1427,7 @@ pub unsafe extern "C" fn layout_arena_set_canvas_paint_facts(
     facts: crate::painting::host::FfiCanvasPaintFacts,
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::published_immutable::before_mutation(arena, "M6 layout_arena_set_canvas_paint_facts");
+    crate::painting::published_immutable::note_row_mutation(arena, slot, "M6 layout_arena_set_canvas_paint_facts");
     arena.set_replaced_paint_facts(
         slot,
         crate::painting::replaced_paint_facts::ReplacedPaintFacts::Canvas(facts),
@@ -1438,7 +1446,7 @@ pub unsafe extern "C" fn layout_arena_set_layer_image_paint_facts(
     count: usize,
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::published_immutable::before_mutation(arena, "M6 layout_arena_set_layer_image_paint_facts");
+    crate::painting::published_immutable::note_row_mutation(arena, slot, "M6 layout_arena_set_layer_image_paint_facts");
     let entries = if count == 0 {
         Vec::new()
     } else {
@@ -1469,7 +1477,11 @@ pub unsafe extern "C" fn layout_arena_set_replaced_image_paint_facts(
     facts: crate::painting::host::FfiReplacedImagePaintFacts,
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::published_immutable::before_mutation(arena, "M6 layout_arena_set_replaced_image_paint_facts");
+    crate::painting::published_immutable::note_row_mutation(
+        arena,
+        slot,
+        "M6 layout_arena_set_replaced_image_paint_facts",
+    );
     let facts = unsafe { crate::painting::replaced_paint_facts::ImagePaintFacts::from_ffi(&facts) };
     arena.set_replaced_paint_facts(
         slot,
@@ -1488,7 +1500,7 @@ pub unsafe extern "C" fn layout_arena_set_video_paint_facts(
     facts: crate::painting::host::FfiVideoPaintFacts,
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::published_immutable::before_mutation(arena, "M6 layout_arena_set_video_paint_facts");
+    crate::painting::published_immutable::note_row_mutation(arena, slot, "M6 layout_arena_set_video_paint_facts");
     let facts = unsafe { crate::painting::replaced_paint_facts::VideoPaintFacts::from_ffi(&facts) };
     arena.set_replaced_paint_facts(
         slot,
@@ -1506,7 +1518,11 @@ pub unsafe extern "C" fn layout_arena_set_navigable_container_paint_facts(
     facts: crate::painting::host::FfiNavigableContainerPaintFacts,
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::published_immutable::before_mutation(arena, "M7 layout_arena_set_navigable_container_paint_facts");
+    crate::painting::published_immutable::note_row_mutation(
+        arena,
+        slot,
+        "M7 layout_arena_set_navigable_container_paint_facts",
+    );
     arena.set_replaced_paint_facts(
         slot,
         crate::painting::replaced_paint_facts::ReplacedPaintFacts::NavigableContainer(facts),
@@ -1845,7 +1861,11 @@ pub unsafe extern "C" fn layout_arena_paintable_invalidate_paint_cache(
 ) {
     use crate::painting::record::damage::PaintDamage;
     let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::published_immutable::before_mutation(arena, "M12 layout_arena_paintable_invalidate_paint_cache");
+    crate::painting::published_immutable::note_row_mutation(
+        arena,
+        paintable,
+        "M12 layout_arena_paintable_invalidate_paint_cache",
+    );
     if propagated_text_decorations {
         arena.push_propagated_text_decoration_damage(paintable);
     } else {
