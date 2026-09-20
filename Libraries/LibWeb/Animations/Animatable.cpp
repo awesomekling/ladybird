@@ -12,6 +12,7 @@
 #include <LibWeb/CSS/CSSAnimation.h>
 #include <LibWeb/CSS/CSSAnimationProperties.h>
 #include <LibWeb/CSS/CSSTransition.h>
+#include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
@@ -486,7 +487,7 @@ void Animatable::publish_css_defined_animations(size_t index)
 void Animatable::publish_animation_timing_rows()
 {
     auto* element = as_if<DOM::Element>(*this);
-    if (!element || !m_impl)
+    if (!element)
         return;
 
     auto slot_of = [](KeyframeEffect const& effect) {
@@ -494,52 +495,82 @@ void Animatable::publish_animation_timing_rows()
         return pseudo_element.has_value() ? static_cast<u8>(to_underlying(*pseudo_element) + 1) : static_cast<u8>(0);
     };
 
+    // A transition the style computation has provisionally started is sampled by the pass that
+    // started it, and by every animated style update until the stabilization epoch commits, but it
+    // is not associated with the element yet. Publish its timing too, or the one computation that
+    // samples it has nothing to sample it from.
+    GC::ConservativeVector<GC::Ref<KeyframeEffect>> provisional_effects;
+    element->document().style_computer().for_each_provisional_transition_effect_on_element(*element, [&](KeyframeEffect& effect) {
+        provisional_effects.append(effect);
+    });
+    // An element whose only animation is a provisionally started transition has no animation state
+    // of its own yet, and one with neither has nothing to publish and nothing published.
+    if (!m_impl && provisional_effects.is_empty())
+        return;
+    auto& impl = ensure_impl();
+
     Vector<u8> slots_with_rows;
-    for (auto const& animation : m_impl->associated_animations) {
+    auto note_slot_of = [&](KeyframeEffect const& effect) {
+        auto slot = slot_of(effect);
+        if (!slots_with_rows.contains_slow(slot))
+            slots_with_rows.append(slot);
+    };
+    for (auto const& effect : provisional_effects)
+        note_slot_of(*effect);
+    for (auto const& animation : impl.associated_animations) {
         auto effect = animation->effect();
         if (!effect || !is<KeyframeEffect>(*effect))
             continue;
-        auto slot = slot_of(static_cast<KeyframeEffect const&>(*effect));
-        if (!slots_with_rows.contains_slow(slot))
-            slots_with_rows.append(slot);
+        note_slot_of(static_cast<KeyframeEffect const&>(*effect));
     }
 
     Vector<u32> words;
     Vector<u64> times;
     Vector<GC::Ref<KeyframeEffect>> effects_in_order;
+    auto append_row = [&](KeyframeEffect& keyframe_effect, Animation& animation, u32 extra_flags) {
+        auto row = animation.style_timing_row();
+        row.effect_identity = keyframe_effect.animation_preparation_identity();
+        words.append(row.flags | extra_flags);
+        words.append(row.timeline_identity);
+        words.append(bit_cast<u32>(row.easing_interval_count));
+        words.append(static_cast<u32>(row.effect_identity));
+        words.append(static_cast<u32>(row.effect_identity >> 32));
+        for (auto time : row.times)
+            times.append(bit_cast<u64>(time));
+        effects_in_order.append(keyframe_effect);
+    };
     for (auto slot : slots_with_rows) {
         words.clear_with_capacity();
         times.clear_with_capacity();
         effects_in_order.clear_with_capacity();
-        for (auto const& animation : m_impl->associated_animations) {
+        // A provisional transition composes below every associated effect, which is also the order
+        // the animated style update collects the two lists in.
+        for (auto& effect : provisional_effects) {
+            if (slot_of(*effect) != slot)
+                continue;
+            if (auto animation = effect->associated_animation())
+                append_row(*effect, *animation, Animation::StyleTimingRow::not_associated);
+        }
+        for (auto const& animation : impl.associated_animations) {
             auto effect = animation->effect();
             if (!effect || !is<KeyframeEffect>(*effect))
                 continue;
             auto& keyframe_effect = static_cast<KeyframeEffect&>(*effect);
             if (slot_of(keyframe_effect) != slot)
                 continue;
-            auto row = animation->style_timing_row();
-            row.effect_identity = keyframe_effect.animation_preparation_identity();
-            words.append(row.flags);
-            words.append(row.timeline_identity);
-            words.append(bit_cast<u32>(row.easing_interval_count));
-            words.append(static_cast<u32>(row.effect_identity));
-            words.append(static_cast<u32>(row.effect_identity >> 32));
-            for (auto time : row.times)
-                times.append(bit_cast<u64>(time));
-            effects_in_order.append(keyframe_effect);
+            append_row(keyframe_effect, *animation, 0);
         }
         CSS::record_element_animation_timing_rows(*element, slot, words, times);
         CSS::record_element_animation_effect_descriptions(*element, slot, effects_in_order);
     }
 
-    for (auto slot : m_impl->published_timing_row_slots) {
+    for (auto slot : impl.published_timing_row_slots) {
         if (!slots_with_rows.contains_slow(slot)) {
             CSS::record_element_animation_timing_rows(*element, slot, {}, {});
             CSS::record_element_animation_effect_descriptions(*element, slot, {});
         }
     }
-    m_impl->published_timing_row_slots = move(slots_with_rows);
+    impl.published_timing_row_slots = move(slots_with_rows);
 }
 
 Animatable::Impl& Animatable::ensure_impl() const

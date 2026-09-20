@@ -235,6 +235,7 @@ public:
     void record_transition_stabilization_baseline(DOM::AbstractElement) const;
     void commit_transition_stabilization_epoch();
     void for_each_provisional_transition_effect(DOM::AbstractElement const&, Function<void(Animations::KeyframeEffect&)> const&) const;
+    void for_each_provisional_transition_effect_on_element(DOM::Element const&, Function<void(Animations::KeyframeEffect&)> const&) const;
 
 private:
     virtual void finalize() override;
