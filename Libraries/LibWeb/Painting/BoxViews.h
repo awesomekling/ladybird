@@ -30,6 +30,7 @@ Layout::RustFFI::PaintableData const* committed_row(Layout::Node const&);
 
 WEB_API bool has_committed_box(Layout::Node const&);
 WEB_API Layout::Node* layout_node_for_committed_slot(Layout::NodeArena&, Compositing::RustFFI::NodeSlotId);
+WEB_API u64 committed_row_reset_version(Layout::NodeArena&, Compositing::RustFFI::NodeSlotId);
 
 WEB_API CSSPixelRect absolute_rect(Layout::Node const&);
 WEB_API CSSPixelRect absolute_padding_box_rect(Layout::Node const&);

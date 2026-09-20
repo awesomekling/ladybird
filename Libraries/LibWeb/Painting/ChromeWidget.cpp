@@ -29,13 +29,18 @@ RefPtr<Scrollbar> ChromeWidgetRegistry::scrollbar(Compositing::RustFFI::NodeSlot
     auto entry = m_entries.find(slot.index);
     if (entry == m_entries.end())
         return nullptr;
-    return direction == ScrollDirection::Horizontal ? entry->value.horizontal_scrollbar : entry->value.vertical_scrollbar;
+    auto scrollbar = direction == ScrollDirection::Horizontal ? entry->value.horizontal_scrollbar : entry->value.vertical_scrollbar;
+    return scrollbar && scrollbar->is_current() ? scrollbar : nullptr;
 }
 
 NonnullRefPtr<Scrollbar> ChromeWidgetRegistry::get_or_create_scrollbar(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot, ScrollDirection direction)
 {
     auto& entry = m_entries.ensure(slot.index);
     auto& scrollbar = direction == ScrollDirection::Horizontal ? entry.horizontal_scrollbar : entry.vertical_scrollbar;
+    if (scrollbar && !scrollbar->is_current()) {
+        scrollbar->detach({});
+        scrollbar = nullptr;
+    }
     if (!scrollbar)
         scrollbar = Scrollbar::create(arena, slot, direction);
     return *scrollbar;
@@ -46,12 +51,16 @@ RefPtr<ResizeHandle> ChromeWidgetRegistry::resize_handle(Compositing::RustFFI::N
     auto entry = m_entries.find(slot.index);
     if (entry == m_entries.end())
         return nullptr;
-    return entry->value.resize_handle;
+    return entry->value.resize_handle && entry->value.resize_handle->is_current() ? entry->value.resize_handle : nullptr;
 }
 
 NonnullRefPtr<ResizeHandle> ChromeWidgetRegistry::get_or_create_resize_handle(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot)
 {
     auto& entry = m_entries.ensure(slot.index);
+    if (entry.resize_handle && !entry.resize_handle->is_current()) {
+        entry.resize_handle->detach({});
+        entry.resize_handle = nullptr;
+    }
     if (!entry.resize_handle)
         entry.resize_handle = ResizeHandle::create(arena, slot);
     return *entry.resize_handle;
@@ -86,12 +95,25 @@ void ChromeWidgetRegistry::clear()
 ChromeWidget::ChromeWidget(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot)
     : m_arena(arena)
     , m_slot(slot)
+    , m_row_reset_version(committed_row_reset_version(arena, slot))
 {
 }
 
 Layout::Node* ChromeWidget::layout_node() const
 {
+    if (!is_current())
+        return nullptr;
     return layout_node_for_committed_slot(*m_arena, m_slot);
+}
+
+bool ChromeWidget::is_current() const
+{
+    if (m_slot.index == Layout::RustFFI::INVALID_NODE_SLOT_INDEX)
+        return false;
+    auto current_version = committed_row_reset_version(*m_arena, m_slot);
+    if (current_version == m_row_reset_version)
+        return true;
+    return false;
 }
 
 void ChromeWidget::detach(Badge<ChromeWidgetRegistry>)

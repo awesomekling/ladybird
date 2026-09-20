@@ -1945,6 +1945,15 @@ pub unsafe extern "C" fn layout_arena_paintable_invalidate_paint_cache(
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_paintable_row_reset_version(arena: *mut c_void, paintable: NodeSlotId) -> u64 {
+    let arena = unsafe { arena_from_handle(arena) };
+    arena.paintable_rows().paintable_row_reset_version(paintable)
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_paintable_invalidate_for_repaint(
     arena: *mut c_void,
     paintable: NodeSlotId,

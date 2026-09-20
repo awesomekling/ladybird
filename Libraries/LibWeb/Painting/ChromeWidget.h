@@ -110,10 +110,12 @@ private:
     friend class ChromeWidgetRegistry;
 
     void detach(Badge<ChromeWidgetRegistry>);
+    bool is_current() const;
     virtual void did_detach() { }
 
     NonnullRefPtr<Layout::NodeArena> m_arena;
     Compositing::RustFFI::NodeSlotId m_slot;
+    u64 m_row_reset_version;
 };
 
 }
