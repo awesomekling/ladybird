@@ -2338,8 +2338,7 @@ void Node::recompute_editable_subtree_flags_and_repaint()
         // (an editing host gains a minimum block size, an empty editable text node gains
         // a zero-width fragment), so the affected node also needs a relayout.
         if (auto* layout_node = node.unsafe_layout_node()) {
-            if (layout_node->refresh_dom_paint_facts(node))
-                node.set_needs_repaint();
+            layout_node->refresh_dom_paint_facts(node);
             auto is_editing_host = node.is_editing_host();
             if (layout_node->is_editing_host() != is_editing_host) {
                 layout_node->set_is_editing_host(is_editing_host);

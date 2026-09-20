@@ -15,6 +15,7 @@
 #include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/Dump.h>
@@ -87,10 +88,11 @@ static RustFFI::FfiNodeConstructionFacts build_node_construction_facts(DOM::Docu
     };
 }
 
-bool Node::refresh_dom_paint_facts(DOM::Node const& dom_node)
+void Node::refresh_dom_paint_facts(DOM::Node const& dom_node)
 {
     VERIFY(this->dom_node() == &dom_node);
-    return RustFFI::layout_arena_set_node_dom_paint_facts(m_arena->handle(), m_slot, dom_paint_facts_of(&dom_node));
+    auto facts = dom_paint_facts_of(&dom_node);
+    const_cast<DOM::Document&>(dom_node.document()).invalidation_journal().note_dom_paint_facts(DOM::NodeIdentity::of(dom_node), facts);
 }
 
 Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind kind, AttachToDOMNode attach_to_dom_node)
