@@ -406,6 +406,26 @@ pub unsafe extern "C" fn layout_arena_invalidate_nearest_self_painting_inline_pa
     }
 }
 
+/// The committed row of the document element, as the last rendering preparation published it, or
+/// an invalid slot when the document has no root element or the root holds no row.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_published_root_element_row(arena: *mut c_void) -> NodeSlotId {
+    let arena = unsafe { arena_from_handle(arena) };
+    let slot = arena
+        .paint_state()
+        .borrow()
+        .root_background_source
+        .map_or(NodeSlotId::INVALID, |source| source.root_layout_node);
+    if !arena.paintable_rows().paintable_row_is_populated(slot) {
+        return NodeSlotId::INVALID;
+    }
+    slot
+}
+
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
