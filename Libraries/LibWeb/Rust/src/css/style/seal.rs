@@ -6,8 +6,8 @@
 
 //! Sealed mode for the style stage.
 //!
-//! The style stage is the complete C++-orchestrated update bracketed by
-//! `rust_style_ffi_complete_style_update_begin` and `rust_style_ffi_complete_style_update_end`.
+//! The style stage begins after a legacy transaction has frozen its native inputs and ends before
+//! its outputs are committed. Engine-native transactions use the same computation boundary.
 //! `LIBWEB_SEAL_STYLE_STAGE` turns this gate on. Unset or `0`, it costs only the mode check. `1`
 //! reports each callback site once; `abort` makes the first callback fatal. Reports and census
 //! totals go to stderr or to the file named by `LIBWEB_SEAL_STYLE_STAGE_LOG`.
@@ -127,8 +127,8 @@ pub(crate) fn between_pass_font_service<T>(requests: u64, service: impl FnOnce()
     result
 }
 
-/// Record one Rust-to-C++ call. Calls outside the complete style update are part of input
-/// publication or CSSOM mutation, not the style stage, but remain in the census.
+/// Record one Rust-to-C++ call. Calls outside sealed computation are input preparation, output
+/// commit, resource publication, or CSSOM mutation, but remain in the census.
 pub(crate) fn note_host_call(callback: &'static str) {
     let mode = mode();
     if mode == Mode::Off {
