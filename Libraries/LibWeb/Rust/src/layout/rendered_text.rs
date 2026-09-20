@@ -303,6 +303,7 @@ pub(super) unsafe fn text_source_for_node(arena: *mut LayoutNodeArena, id: NodeS
     };
     // SAFETY: The caller owns the live arena on the document thread.
     super::seal::note_host_call(unsafe { &*arena }.layout_pass_is_running(), "text_source");
+    super::tree_build_seal::note_host_call("text_source");
     // SAFETY: The source callback only reads DOM facts. No arena borrow crosses it.
     unsafe { callback(shell) }
 }

@@ -56,9 +56,11 @@ impl CommitNotifications {
     /// notifications return. No mutable arena borrow may be active.
     pub(crate) unsafe fn notify_host(self, host: &FfiLayoutHostCallbacks) {
         for reset in self.row_resets {
+            super::tree_build_seal::note_host_call("paintable_row_reset");
             reset.invoke_callback();
         }
         if !self.messages.is_empty() {
+            super::tree_build_seal::note_host_call("deliver_commit_messages");
             unsafe { (host.deliver_commit_messages)(host.context, self.messages.as_ptr(), self.messages.len()) };
         }
     }

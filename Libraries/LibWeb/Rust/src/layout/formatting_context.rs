@@ -2331,6 +2331,7 @@ pub(crate) unsafe fn run_root_layout(
         unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_pass_is_running(),
         "viewport_propagation_facts",
     );
+    crate::layout::tree_build_seal::note_host_call("viewport_propagation_facts");
     // SAFETY: The document answers from its elements' style records without entering the arena.
     let propagation_facts = unsafe { (host.viewport_propagation_facts)(host.context) };
     // The style rewrites enroll the affected boxes' text children for content sync, so the sync

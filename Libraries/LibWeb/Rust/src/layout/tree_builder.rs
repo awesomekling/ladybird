@@ -420,11 +420,13 @@ pub unsafe extern "C" fn rust_should_preserve_svg_resource_layout_node(
             ancestor = parent;
             continue;
         }
+        super::tree_build_seal::note_host_call("svg_resource.layout_dom_node");
         let dom_node = unsafe { (callbacks.layout_dom_node)(data.shell.get()) };
-        // SAFETY: Both DOM pointers remain live throughout cleanup.
-        if !dom_node.is_null()
-            && unsafe { (callbacks.dom_is_shadow_including_inclusive_descendant)(dom_node, cleared_subtree_root) }
-        {
+        if !dom_node.is_null() && {
+            super::tree_build_seal::note_host_call("svg_resource.dom_is_shadow_including_inclusive_descendant");
+            // SAFETY: Both DOM pointers remain live throughout cleanup.
+            unsafe { (callbacks.dom_is_shadow_including_inclusive_descendant)(dom_node, cleared_subtree_root) }
+        } {
             return false;
         }
         ancestor = parent;
@@ -482,6 +484,7 @@ impl StaleSubtreeHost {
     /// Clears the stale layout box of the node `style_node` names, answering whether its subtree
     /// survives with it.
     fn clear_stale_layout_node(&self, style_node: u32, cleared_subtree_root: u32) -> bool {
+        super::tree_build_seal::note_host_call("clear_stale_layout_node");
         // SAFETY: The host remains live throughout the walk, and the identity names a live node.
         unsafe { (self.clear_stale_layout_node)(self.context, style_node, cleared_subtree_root) }
     }
@@ -1685,6 +1688,7 @@ fn update_layout_tree_for_svg_switch_children(
         let mut child = host.first_dom_child(switch_element);
         while child != 0 {
             if child != rendered_child {
+                super::tree_build_seal::note_host_call("clear_stale_layout_node");
                 // SAFETY: The builder remains live, and `child` names a live DOM node.
                 unsafe {
                     (host.callbacks.clear_stale_layout_node)(host.callbacks.builder, child, 0);
@@ -2357,6 +2361,7 @@ fn construct_principal_layout_node(
                 layout_host.free_subtree(old_backdrop);
             }
         }
+        super::tree_build_seal::note_host_call("prepare_principal_element");
         // SAFETY: The builder and DOM element remain live throughout the call.
         unsafe {
             (host.callbacks.prepare_principal_element)(host.callbacks.builder, dom_node, should_create_layout_node);
@@ -2533,6 +2538,7 @@ fn update_principal_node_after_entry(
     if !construction.layout_node.is_invalid() {
         let layout_node = construction.layout_node;
         if update.kind.is_element() || update.kind.is_document() {
+            super::tree_build_seal::note_host_call("attach_style_resources");
             // SAFETY: The builder remains live, and the box is a live NodeWithStyle for elements
             // and documents.
             unsafe {
@@ -2779,6 +2785,7 @@ fn update_layout_tree_from(
         let payload_style_node = if is_document_root { 0 } else { style_node };
         let kind = PrincipalNodeKind::of(payload_style_node, is_document_root);
 
+        super::tree_build_seal::note_host_call("principal_dom_node");
         // SAFETY: The builder remains live and the identity names a live DOM node.
         let dom_node = unsafe { (host.callbacks.principal_dom_node)(host.callbacks.builder, style_node) };
         assert!(!dom_node.is_null());
@@ -2873,6 +2880,7 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     assert!(!document.is_null());
     // SAFETY: Guaranteed by the entry point's contract.
     let host = unsafe { dom_tree_builder_host(callbacks, arena) };
+    super::tree_build_seal::begin_build();
     let mut state = TreeBuilderState::default();
     let mut context = TreeBuilderContext {
         document_style_node,
@@ -2954,6 +2962,7 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     // clear a DOM update flag again, in the order the build found it out.
     if !state.reports.is_empty() {
         let layout_host = host.layout().arena().layout_host();
+        super::tree_build_seal::note_host_call("deliver_commit_messages");
         // SAFETY: The document outlives the build, and no arena borrow is held here.
         unsafe {
             (layout_host.deliver_commit_messages)(layout_host.context, state.reports.as_ptr(), state.reports.len());
@@ -2994,6 +3003,7 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     let viewport = arena.layout_root();
     assert!(!viewport.is_invalid(), "a layout tree build places the viewport");
 
+    super::tree_build_seal::end_build();
     FfiLayoutTreeBuildOutcome {
         viewport,
         rebuilt_subtree_root_count,
@@ -3295,6 +3305,7 @@ fn create_pseudo_element(
         return None;
     }
     let callbacks = &host.callbacks.pseudo;
+    super::tree_build_seal::note_host_call("pseudo.initialize");
     // SAFETY: The builder and element remain live throughout initialization.
     let facts = unsafe { (callbacks.initialize)(callbacks.builder, element, pseudo_element) };
     let decision = pseudo_element_decision(facts);
@@ -3302,6 +3313,7 @@ fn create_pseudo_element(
         return None;
     }
 
+    super::tree_build_seal::note_host_call("pseudo.create_layout_node");
     // SAFETY: The builder and element remain live throughout construction.
     let layout_node = unsafe {
         (callbacks.create_layout_node)(
@@ -3330,6 +3342,7 @@ fn create_pseudo_element(
         layout_host.attach_child(list_item_box, unplaced_box.take().expect("the marker box"), first_child);
     }
 
+    super::tree_build_seal::note_host_call("attach_style_resources");
     // SAFETY: The builder remains live, and the box the host just built is a live NodeWithStyle.
     unsafe { (host.callbacks.attach_style_resources)(host.callbacks.builder, layout_node, false) };
     if decision == FfiPseudoElementDecision::ContentReplacement {
@@ -3341,6 +3354,7 @@ fn create_pseudo_element(
     }
 
     let initial_quote_nesting_level = state.quote_nesting_level;
+    super::tree_build_seal::note_host_call("pseudo.configure_layout_node");
     // SAFETY: The element remains live, and the box the host just built is a live NodeWithStyle.
     unsafe { (callbacks.configure_layout_node)(element, pseudo_element, layout_node) };
     let layout_node_kind = layout_host.data(layout_node).kind.get();
@@ -3364,6 +3378,7 @@ fn create_pseudo_element(
 
     // FIXME: This code actually computes style for element::marker, and shouldn't for element::pseudo::marker.
     if layout_node_kind == NodeKind::ListItemBox {
+        super::tree_build_seal::note_host_call("pseudo.create_nested_list_marker");
         // SAFETY: The element remains live, and the box the host just built is a live BlockContainer.
         let marker =
             layout_host.created(unsafe { (callbacks.create_nested_list_marker)(element, pseudo_element, layout_node) });
@@ -3374,6 +3389,7 @@ fn create_pseudo_element(
             crate::layout::generated_content::resolve_nested_marker_content(layout_host.arena(), owner);
         report_list_item_counter_rendering(state, owner, &marker_content);
         for item in marker_content.items {
+            super::tree_build_seal::note_host_call("pseudo.create_content_item");
             // SAFETY: The element remains live throughout content creation.
             let content = unsafe {
                 (callbacks.create_content_item)(
@@ -3413,6 +3429,7 @@ fn create_pseudo_element(
             {
                 continue;
             }
+            super::tree_build_seal::note_host_call("pseudo.create_content_item");
             // SAFETY: The element remains live throughout content creation.
             let content_item = unsafe {
                 (callbacks.create_content_item)(
@@ -4524,6 +4541,7 @@ fn find_first_letter_in_layout_text(host: &TreeBuilderHost, node: LayoutNode) ->
 
 fn create_first_letter_boxes(host: &DomTreeBuilderHost<'_>, element: *mut c_void, target: FfiFirstLetterTarget) {
     let layout_host = host.layout();
+    super::tree_build_seal::note_host_call("create_first_letter_nodes");
     // SAFETY: `element` is a live Element and `target` identifies a live descendant text node.
     let nodes = unsafe { (host.callbacks.create_first_letter_nodes)(host.callbacks.builder, element, target) };
     let first_letter_slice = layout_host.created(nodes.first_letter_slice);
