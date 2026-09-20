@@ -622,6 +622,7 @@ impl LayoutNodeArena {
     // A row whose ordering decisions changed is placed differently by its ancestors' plans and
     // may plan its own descendants differently.
     pub(crate) fn note_paint_order_changed(&self, row: NodeSlotId) {
+        let _writer = crate::painting::published_immutable::enter_writer_if_unattributed("paint-order maintenance");
         self.push_paint_damage(row, PaintDamage::ORDER);
         self.push_enclosing_paint_order_damage(row);
     }
@@ -629,6 +630,7 @@ impl LayoutNodeArena {
     // The entry tables decide how a stacking context composes its hoisted content, so a table
     // change reorders the context's own painting even when no row changed its own decisions.
     pub(crate) fn note_stacking_context_composition_changed(&self, context_root: NodeSlotId) {
+        let _writer = crate::painting::published_immutable::enter_writer_if_unattributed("paint-order maintenance");
         self.push_paint_damage(context_root, PaintDamage::CONTEXT_ORDER);
     }
 
@@ -1101,6 +1103,7 @@ impl LayoutNodeArena {
         old_node: NodeSlotId,
         new_node: NodeSlotId,
     ) {
+        let _writer = crate::painting::published_immutable::enter_writer_if_unattributed("layout node replacement");
         if !self.paintable_row_is_populated(containing_block) {
             return;
         }
