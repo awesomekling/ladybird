@@ -124,6 +124,8 @@ public:
     [[nodiscard]] bool has_valid_rule_cache() const { return m_style_cache && m_style_cache->rule_cache; }
     void invalidate_style_cache();
     void publish_cascade_layer_order(StyleSheetState* pending_attachment = nullptr);
+    void publish_animation_keyframes();
+    void unpublish_animation_keyframes();
     void invalidate_user_style_sheet();
 
     void for_each_stylesheet(CascadeOrigin, Function<void(CSS::StyleSheetState&)> const&) const;
@@ -162,6 +164,13 @@ public:
     StyleCache& ensure_style_cache() const;
 
     RefPtr<StyleCache> m_style_cache;
+
+    // The keyframe sets this scope last published. The style computation reads them by pointer, so
+    // the publication holds them alive even after the rule cache they came from has been
+    // invalidated and before the next style update rebuilds it. A reference to the whole cache
+    // would do as well, but it would also keep a shared sheet-set cache from being evicted once no
+    // scope uses it anymore.
+    Vector<NonnullRefPtr<Animations::KeyframeEffect::KeyFrameSet const>> m_published_keyframe_sets;
 
     RefPtr<StyleSheetState> m_user_style_sheet;
 

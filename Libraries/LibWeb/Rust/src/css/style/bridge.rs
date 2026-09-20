@@ -1259,6 +1259,50 @@ pub extern "C" fn style_engine_verification_gate_bits() -> u8 {
     super::verification_gate_bits()
 }
 
+/// Publishes the `@keyframes` one style scope defines, by name, with the host's keyframe set for
+/// each. The names travel packed into one buffer of code units with a length each, the way an
+/// element's animation names do.
+///
+/// The host publishes every scope at the style update's begin boundary, once per rebuild of that
+/// scope's rule cache, and holds a reference to what it published for as long as the table names
+/// it. This is not a recorded boundary event: a keyframe set is a host pointer, which a replayed
+/// engine could not be handed, and which it never asks for.
+///
+/// # Safety
+/// `engine` must be live, and each buffer must hold the count it is given.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_set_tree_scope_animation_keyframes(
+    engine: *mut c_void,
+    tree_scope: u32,
+    shadow_root_identity: usize,
+    name_lengths: *const u32,
+    name_units: *const u16,
+    name_unit_count: usize,
+    keyframe_sets: *const usize,
+    count: usize,
+) {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    let name_lengths = match count {
+        0 => &[][..],
+        _ => unsafe { std::slice::from_raw_parts(name_lengths, count) },
+    };
+    let name_units = match name_unit_count {
+        0 => &[][..],
+        _ => unsafe { std::slice::from_raw_parts(name_units, name_unit_count) },
+    };
+    let keyframe_sets = match count {
+        0 => &[][..],
+        _ => unsafe { std::slice::from_raw_parts(keyframe_sets, count) },
+    };
+    engine.set_tree_scope_animation_keyframes(
+        TreeScopeID(tree_scope),
+        shadow_root_identity,
+        name_lengths,
+        name_units,
+        keyframe_sets,
+    );
+}
+
 /// The size of an element's transform reference box, as the last committed layout left it.
 #[repr(C)]
 pub struct FfiCommittedTransformReferenceBox {

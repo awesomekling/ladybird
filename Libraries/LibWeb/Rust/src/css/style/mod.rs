@@ -876,6 +876,9 @@ pub struct RetainedState {
     /// The current time each of the document's animation timelines was sampled at when the style
     /// update began.
     animation_timeline_samples: animations::AnimationTimelineSamples,
+    /// The `@keyframes` each of the document's style scopes defines, as the host's rule caches
+    /// resolved them when the style update began.
+    animation_keyframes: animations::AnimationKeyframes,
     /// Whether the registrations used by this transaction differ from the preceding one. A
     /// previously substituted record must then be recomputed by C++, which implements registered
     /// custom properties, even when its cascade winners did not move.

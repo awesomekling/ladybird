@@ -878,6 +878,32 @@ impl RetainedState {
         self.css_defined_animations.names(node, slot)
     }
 
+    /// Record the `@keyframes` one style scope defines, as the host's rule cache for that scope
+    /// resolved them. Published at the style update's begin boundary, before any element's
+    /// animation definitions are matched against them.
+    pub fn set_tree_scope_animation_keyframes(
+        &mut self,
+        tree_scope: TreeScopeID,
+        shadow_root_identity: usize,
+        name_lengths: &[u32],
+        name_units: &[u16],
+        keyframe_sets: &[usize],
+    ) {
+        self.animation_keyframes.set(
+            tree_scope,
+            shadow_root_identity,
+            name_lengths,
+            name_units,
+            keyframe_sets,
+        );
+    }
+
+    /// The `@keyframes` the document's style scopes define.
+    #[must_use]
+    pub(crate) fn animation_keyframes(&self) -> &animations::AnimationKeyframes {
+        &self.animation_keyframes
+    }
+
     /// Record the timing of the animations the host holds for one of an element's animation lists.
     ///
     /// The times travel as raw `f64` bits beside a word of presence and kind flags, eight times and
@@ -1319,6 +1345,7 @@ impl StyleEngineState {
                 css_defined_animations: Default::default(),
                 animation_timing_rows: Default::default(),
                 animation_timeline_samples: Default::default(),
+                animation_keyframes: Default::default(),
                 custom_property_registrations_changed: false,
                 pending_element_style_computation_selections: HashMap::default(),
                 pending_pseudo_style_computation_selections: HashMap::default(),

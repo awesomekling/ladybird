@@ -345,6 +345,7 @@ void StyleScope::build_rule_cache()
     // this cache generation into that slot once.
     if (m_published_layer_order_generation != style_cache.rule_cache_generation) {
         publish_cascade_layer_order();
+        publish_animation_keyframes();
         m_published_layer_order_generation = style_cache.rule_cache_generation;
     }
 }
@@ -658,6 +659,59 @@ void StyleScope::publish_cascade_layer_order(StyleSheetState* pending_attachment
         sheets.data(), sheets.size(), document().style_computer().style_engine().rust_handle(),
         style_engine_tree_scope().value(), m_has_published_named_layer_order, &document(),
         [](void* document) { static_cast<DOM::Document*>(document)->flush_deferred_style_change_event(); });
+}
+
+// The `@keyframes` this scope defines, as the rule cache just built resolved them.
+//
+// The style computation resolves an animation's keyframes from these rather than reaching into the
+// rule cache itself, which it could only do by building the cache on the spot - parsing the user
+// sheet, evaluating the user-agent sheet's media queries - inside the sealed stage.
+void StyleScope::publish_animation_keyframes()
+{
+    auto const& rule_cache = *m_style_cache->rule_cache;
+
+    Vector<u32> name_lengths;
+    Vector<u16> name_units;
+    Vector<FlatPtr> keyframe_sets;
+    Vector<NonnullRefPtr<Animations::KeyframeEffect::KeyFrameSet const>> published;
+    name_lengths.ensure_capacity(rule_cache.rules_by_animation_keyframes.size());
+    keyframe_sets.ensure_capacity(rule_cache.rules_by_animation_keyframes.size());
+    published.ensure_capacity(rule_cache.rules_by_animation_keyframes.size());
+    for (auto const& [name, keyframe_set] : rule_cache.rules_by_animation_keyframes) {
+        auto view = name.view();
+        name_lengths.unchecked_append(static_cast<u32>(view.length_in_code_units()));
+        name_units.ensure_capacity(name_units.size() + view.length_in_code_units());
+        for (size_t index = 0; index < view.length_in_code_units(); ++index)
+            name_units.unchecked_append(static_cast<u16>(view.code_unit_at(index)));
+        keyframe_sets.unchecked_append(bit_cast<FlatPtr>(keyframe_set.ptr()));
+        published.unchecked_append(*keyframe_set);
+    }
+
+    StyleEngineFFI::style_engine_set_tree_scope_animation_keyframes(
+        document().style_computer().style_engine().rust_handle(),
+        style_engine_tree_scope().value(),
+        bit_cast<FlatPtr>(as_if<DOM::ShadowRoot>(*m_node)),
+        name_lengths.data(), name_units.data(), name_units.size(),
+        keyframe_sets.data(), name_lengths.size());
+    m_published_keyframe_sets = move(published);
+}
+
+// A shadow root's scope stops existing when the root does, and another root can be allocated at the
+// same address. Give up the row before that can happen, so neither the keyframe sets it named nor
+// the identity the cascade attributes a declaration to outlives the scope.
+void StyleScope::unpublish_animation_keyframes()
+{
+    auto* shadow_root = as_if<DOM::ShadowRoot>(*m_node);
+    if (!shadow_root || shadow_root->style_engine_tree_scope().value() == 0)
+        return;
+    if (!document().style_engine_tracks_tree())
+        return;
+    StyleEngineFFI::style_engine_set_tree_scope_animation_keyframes(
+        document().style_computer().style_engine().rust_handle(),
+        shadow_root->style_engine_tree_scope().value(),
+        bit_cast<FlatPtr>(shadow_root),
+        nullptr, nullptr, 0, nullptr, 0);
+    m_published_keyframe_sets.clear();
 }
 
 TreeScopeID StyleScope::style_engine_tree_scope() const

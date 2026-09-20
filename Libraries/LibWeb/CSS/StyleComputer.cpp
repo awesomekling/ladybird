@@ -1375,7 +1375,7 @@ void StyleComputer::invalidate_animated_custom_property_readers(DOM::AbstractEle
     }
 }
 
-void StyleComputer::apply_animation_definitions(CascadedProperties const& cascaded_properties, DOM::AbstractElement& abstract_element, ReadonlySpan<AnimationProperties> animation_definitions, ReadonlySpan<i32> definition_matches, Optional<bool> computed_in_display_none_subtree) const
+void StyleComputer::apply_animation_definitions(DOM::AbstractElement& abstract_element, ReadonlySpan<AnimationProperties> animation_definitions, ReadonlySpan<i32> definition_matches, ReadonlySpan<RefPtr<Animations::KeyframeEffect::KeyFrameSet const>> definition_keyframe_sets, Optional<bool> computed_in_display_none_subtree) const
 {
     auto& document = abstract_element.document();
 
@@ -1418,6 +1418,7 @@ void StyleComputer::apply_animation_definitions(CascadedProperties const& cascad
     // definition has taken, so updating animation-name from 'a' to 'a, a' makes the existing
     // animation the second of the two and creates the first.
     VERIFY(definition_matches.size() == animation_definitions.size());
+    VERIFY(definition_keyframe_sets.size() == animation_definitions.size());
 
     auto existing_animations = *element_animations;
     Vector<bool> existing_animation_was_claimed;
@@ -1426,32 +1427,6 @@ void StyleComputer::apply_animation_definitions(CascadedProperties const& cascad
 
     for (size_t i = animation_definitions.size(); i-- > 0;) {
         auto const& animation_properties = animation_definitions[i];
-        auto const& animation_name = animation_properties.name;
-
-        auto find_keyframes = [&](GC::Ptr<DOM::ShadowRoot const> shadow_root) -> RefPtr<Animations::KeyframeEffect::KeyFrameSet const> {
-            auto& style_scope = shadow_root ? shadow_root->style_scope() : m_document->style_scope();
-            style_scope.build_rule_cache_if_needed();
-            if (auto keyframe_set = style_scope.rule_cache().rules_by_animation_keyframes.get(animation_name); keyframe_set.has_value())
-                return keyframe_set.value();
-            return {};
-        };
-
-        auto resolve_keyframes = [&]() -> RefPtr<Animations::KeyframeEffect::KeyFrameSet const> {
-            if (auto animation_name_source_shadow_root = cascaded_properties.property_source_shadow_root(PropertyID::AnimationName)) {
-                // The winning animation-name declaration can come from a shadow-root rule even when the animated
-                // element itself is outside that subtree, most notably for :host(...) and ::slotted(...). Resolve
-                // @keyframes in the declaration's scope first so same-named document rules do not win.
-                if (auto keyframe_set = find_keyframes(animation_name_source_shadow_root))
-                    return keyframe_set;
-            }
-
-            if (auto shadow_root = as_if<DOM::ShadowRoot>(abstract_element.element().root())) {
-                if (auto keyframe_set = find_keyframes(shadow_root))
-                    return keyframe_set;
-            }
-
-            return find_keyframes(nullptr);
-        };
 
         auto matched_index = definition_matches[i];
         VERIFY(matched_index < static_cast<i32>(existing_animations.size()));
@@ -1462,7 +1437,7 @@ void StyleComputer::apply_animation_definitions(CascadedProperties const& cascad
             existing_animation_was_claimed[matched_index] = true;
 
             if (auto effect = existing_animation->effect()) {
-                as<Animations::KeyframeEffect>(*effect).set_key_frame_set(resolve_keyframes());
+                as<Animations::KeyframeEffect>(*effect).set_key_frame_set(definition_keyframe_sets[i]);
                 existing_animation->apply_css_properties(animation_properties, abstract_element);
             }
             existing_animation->set_animation_name_index(i);
@@ -1485,7 +1460,7 @@ void StyleComputer::apply_animation_definitions(CascadedProperties const& cascad
         animation->apply_css_properties(animation_properties, abstract_element);
         animation->set_animation_name_index(i);
 
-        effect->set_key_frame_set(resolve_keyframes());
+        effect->set_key_frame_set(definition_keyframe_sets[i]);
 
         effect->set_target(abstract_element);
         new_animations.append(animation);
@@ -5592,6 +5567,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         // holds, or -1 where the style computation asks for a new one. Decided in Rust from the
         // published animation names, applied by the animation stage below.
         Vector<i32> animation_definition_matches;
+        // Per definition, the keyframes its name resolved to in the scope chain the style
+        // computation walked, taken from the `@keyframes` every style scope published before the
+        // update began. Null where no scope in the chain defines the name.
+        Vector<RefPtr<Animations::KeyframeEffect::KeyFrameSet const>> animation_definition_keyframe_sets;
         Vector<TransitionProperties> transitions;
         bool transition_delay_and_duration_are_single_zero { false };
         u64 container_relative_length_unit_mask { 0 };
@@ -5920,8 +5899,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             state.transition_delay_and_duration_are_single_zero = longhand_result->transitions.delay_and_duration_are_single_zero;
             state.animation_definitions.ensure_capacity(longhand_result->animations.count);
             state.animation_definition_matches.ensure_capacity(longhand_result->animations.count);
+            state.animation_definition_keyframe_sets.ensure_capacity(longhand_result->animations.count);
             for (auto const& animation : ReadonlySpan<ComputedValuesFFI::FfiComputedAnimation> { longhand_result->animations.animations, longhand_result->animations.count }) {
                 state.animation_definition_matches.unchecked_append(animation.matched_existing_index);
+                state.animation_definition_keyframe_sets.unchecked_append(static_cast<Animations::KeyframeEffect::KeyFrameSet const*>(animation.keyframe_set));
                 Variant<double, Utf16String> duration { animation.duration };
                 if (animation.duration_is_auto)
                     duration = "auto"_utf16;
@@ -5988,7 +5969,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             Optional<bool> computed_in_display_none_subtree;
             if (in_display_none_subtree >= 0)
                 computed_in_display_none_subtree = in_display_none_subtree != 0;
-            context.style_computer->apply_animation_definitions(context.cascaded_properties, context.abstract_element, context.state->animation_definitions.span(), context.state->animation_definition_matches.span(), computed_in_display_none_subtree);
+            context.style_computer->apply_animation_definitions(context.abstract_element, context.state->animation_definitions.span(), context.state->animation_definition_matches.span(), context.state->animation_definition_keyframe_sets.span(), computed_in_display_none_subtree);
             auto animations = context.abstract_element.element().get_animations_internal(
                 Animations::Animatable::GetAnimationsSorted::Yes,
                 Animations::Animatable::GetAnimationsOptions { .subtree = false, .pseudo_element = {} });
