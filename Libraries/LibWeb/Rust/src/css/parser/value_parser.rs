@@ -1052,6 +1052,7 @@ pub(crate) fn parse_syntax_numeric_value(
     let value_type = match syntax_type {
         SyntaxType::Angle => VALUE_TYPE_ANGLE,
         SyntaxType::Integer => VALUE_TYPE_INTEGER,
+        SyntaxType::Frequency => VALUE_TYPE_FREQUENCY,
         SyntaxType::Length | SyntaxType::LengthPercentage => VALUE_TYPE_LENGTH,
         SyntaxType::Number => VALUE_TYPE_NUMBER,
         SyntaxType::Percentage => VALUE_TYPE_PERCENTAGE,
@@ -1080,6 +1081,7 @@ pub(crate) fn parse_syntax_numeric_value(
     match syntax_type {
         SyntaxType::Angle => parse_angle_value(context, value, NumericRange::INFINITE),
         SyntaxType::Integer => parse_integer_value(value, NumericRange::INFINITE),
+        SyntaxType::Frequency => parse_frequency_value(value, NumericRange::INFINITE),
         SyntaxType::Length => parse_length_value(context, property_id::CUSTOM, value, NumericRange::INFINITE),
         SyntaxType::LengthPercentage => parse_length_percentage_value(
             context,

@@ -103,8 +103,9 @@ fn engine_resolution_context(
         custom_function_scope_identity: 0,
         custom_function_visibilities: std::ptr::null(),
         custom_function_visibility_count: 0,
+        style_query_length_resolution_context: std::ptr::null(),
+        style_query_dependencies: std::ptr::null_mut(),
         callback_context: std::ptr::null_mut(),
-        evaluate_style_query: None,
     }
 }
 
@@ -632,7 +633,8 @@ impl RetainedState {
                 &mut resolution_environment,
                 false,
                 std::ptr::null_mut(),
-                None,
+                std::ptr::null(),
+                std::ptr::null_mut(),
                 None,
             )
         };

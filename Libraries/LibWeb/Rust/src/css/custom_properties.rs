@@ -24,7 +24,7 @@ use crate::css::function_signature::FunctionSignature;
 use crate::css::parser::query_parser::{
     FfiMediaEnvironment, MatchResult, parse_and_evaluate_media_if_condition, parse_and_evaluate_supports_if_condition,
 };
-use crate::css::parser::syntax::{SyntaxNode, clone_syntax_handle, parse_syntax, parse_with_syntax};
+use crate::css::parser::syntax::{SyntaxNode, SyntaxType, clone_syntax_handle, parse_syntax, parse_with_syntax};
 use crate::css::parser::value_parser::{FfiValueParsingContext, FfiValueParsingContextKind, ParseContext};
 use crate::css::retained_fly_string::RetainedUtf16FlyString;
 use crate::css::style_value::RetainedStyleValueData;
@@ -484,13 +484,6 @@ impl GuardedSubstitutionContexts {
         true
     }
 
-    fn contains_property(&self, name: &[u16], custom_function: Option<CustomFunctionIdentity>) -> bool {
-        self.contexts
-            .borrow()
-            .iter()
-            .any(|context| context.dependency.is_property(name, custom_function))
-    }
-
     fn innermost_function(&self) -> Option<CustomFunctionIdentity> {
         self.contexts
             .borrow()
@@ -516,7 +509,8 @@ struct ASFResolutionContext<'a> {
     media_environment: Option<&'a FfiMediaEnvironment>,
     load_media_environment: Option<unsafe extern "C" fn(*mut c_void) -> *const c_void>,
     callback_context: *mut c_void,
-    evaluate_style_query: Option<unsafe extern "C" fn(*mut c_void, *const c_void, FfiUtf16View) -> u8>,
+    style_query_length_resolution_context: Option<&'a crate::css::style_compute::FfiLengthResolutionContext>,
+    style_query_dependencies: Option<&'a mut crate::css::cascaded_properties::StyleQueryDependencies>,
     final_custom_properties: Option<&'a HashMap<Vec<u16>, *const c_void>>,
     function_local_scopes: Vec<FunctionLocalScope>,
     token_cache: Option<&'a mut CustomPropertyTokenCache>,
@@ -1575,6 +1569,7 @@ fn registered_style_query_values_are_equal(
     syntax: &SyntaxNode,
     computed_tokens: &[OwnedToken],
     query_tokens: &[OwnedToken],
+    length_resolution_context: Option<&crate::css::style_compute::FfiLengthResolutionContext>,
 ) -> bool {
     let mut random_function_index = 0;
     let context = registry.parse_context(&mut random_function_index);
@@ -1589,11 +1584,300 @@ fn registered_style_query_values_are_equal(
     if computed_color.is_some() || query_color.is_some() {
         return computed_color.is_some() && computed_color == query_color;
     }
+    if let (Some(computed), Some(query)) = (
+        style_value_range_comparable(&computed, length_resolution_context),
+        style_value_range_comparable(&query, length_resolution_context),
+    ) {
+        return computed.kind == query.kind && computed.value == query.value;
+    }
     computed == query
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StyleRangeComparison {
+    Equal,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StyleRangeNumericType {
+    Number,
+    Percentage,
+    Length,
+    Angle,
+    Time,
+    Frequency,
+    Resolution,
+}
+
+#[derive(Clone, Copy)]
+struct StyleRangeComparableValue {
+    kind: StyleRangeNumericType,
+    value: f64,
+}
+
+fn style_value_range_comparable(
+    parsed: &StyleValueData,
+    length_resolution_context: Option<&crate::css::style_compute::FfiLengthResolutionContext>,
+) -> Option<StyleRangeComparableValue> {
+    let length_resolution = crate::css::calc::LengthResolution {
+        context: length_resolution_context,
+        fallback: None,
+    };
+    let comparable = match parsed {
+        StyleValueData::Number { value } => StyleRangeComparableValue {
+            kind: StyleRangeNumericType::Number,
+            value: *value,
+        },
+        StyleValueData::Integer { value } => StyleRangeComparableValue {
+            kind: StyleRangeNumericType::Number,
+            value: f64::from(*value),
+        },
+        StyleValueData::Length { value, unit } => StyleRangeComparableValue {
+            kind: StyleRangeNumericType::Length,
+            value: crate::css::calc::CalcNumericValue::Length {
+                value: *value,
+                unit: *unit,
+            }
+            .to_canonical_number(length_resolution),
+        },
+        StyleValueData::Percentage { value } => StyleRangeComparableValue {
+            kind: StyleRangeNumericType::Percentage,
+            value: *value,
+        },
+        StyleValueData::Angle { value, unit } => StyleRangeComparableValue {
+            kind: StyleRangeNumericType::Angle,
+            value: crate::css::calc::CalcNumericValue::Angle {
+                value: *value,
+                unit: *unit,
+            }
+            .to_canonical_number(length_resolution),
+        },
+        StyleValueData::Time { value, unit } => StyleRangeComparableValue {
+            kind: StyleRangeNumericType::Time,
+            value: crate::css::calc::CalcNumericValue::Time {
+                value: *value,
+                unit: *unit,
+            }
+            .to_canonical_number(length_resolution),
+        },
+        StyleValueData::Frequency { value, unit } => StyleRangeComparableValue {
+            kind: StyleRangeNumericType::Frequency,
+            value: crate::css::calc::CalcNumericValue::Frequency {
+                value: *value,
+                unit: *unit,
+            }
+            .to_canonical_number(length_resolution),
+        },
+        StyleValueData::Resolution { value, unit } => StyleRangeComparableValue {
+            kind: StyleRangeNumericType::Resolution,
+            value: crate::css::calc::CalcNumericValue::Resolution {
+                value: *value,
+                unit: *unit,
+            }
+            .to_canonical_number(length_resolution),
+        },
+        calculated @ StyleValueData::Calculated { .. } => {
+            let (kind, value) =
+                crate::css::calc::resolve_calculated_style_range_value(calculated, length_resolution_context)?;
+            StyleRangeComparableValue {
+                kind: match kind {
+                    0 => StyleRangeNumericType::Number,
+                    1 => StyleRangeNumericType::Percentage,
+                    2 => StyleRangeNumericType::Length,
+                    3 => StyleRangeNumericType::Angle,
+                    4 => StyleRangeNumericType::Time,
+                    5 => StyleRangeNumericType::Frequency,
+                    6 => StyleRangeNumericType::Resolution,
+                    _ => return None,
+                },
+                value,
+            }
+        }
+        _ => return None,
+    };
+    comparable.value.is_finite().then_some(comparable)
+}
+
+fn style_range_comparisons(tokens: &[OwnedToken]) -> Option<Vec<(usize, usize, StyleRangeComparison)>> {
+    let mut comparisons = Vec::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        if matching_close(&tokens[index].kind).is_some() {
+            index = find_matching_close(tokens, index)? + 1;
+            continue;
+        }
+        let comparison = if tokens[index].source.equals_ascii(b"=") {
+            Some((1, StyleRangeComparison::Equal))
+        } else if tokens[index].source.equals_ascii(b"<") {
+            if tokens
+                .get(index + 1)
+                .is_some_and(|token| token.source.equals_ascii(b"="))
+            {
+                Some((2, StyleRangeComparison::LessThanOrEqual))
+            } else {
+                Some((1, StyleRangeComparison::LessThan))
+            }
+        } else if tokens[index].source.equals_ascii(b">") {
+            if tokens
+                .get(index + 1)
+                .is_some_and(|token| token.source.equals_ascii(b"="))
+            {
+                Some((2, StyleRangeComparison::GreaterThanOrEqual))
+            } else {
+                Some((1, StyleRangeComparison::GreaterThan))
+            }
+        } else {
+            None
+        };
+        if let Some((length, comparison)) = comparison {
+            comparisons.push((index, length, comparison));
+            index += length;
+        } else {
+            index += 1;
+        }
+    }
+    (comparisons.len() <= 2).then_some(comparisons)
+}
+
+fn style_range_comparable_value(
+    registry: Option<&CustomPropertyRegistry>,
+    tokens: &[OwnedToken],
+    context: &ASFResolutionContext,
+) -> Option<StyleRangeComparableValue> {
+    let source = serialize_tokens(tokens);
+    let mut random_function_index = 0;
+    let owned_parse_context;
+    let parse_context = if let Some(parse_context) = context.parse_context {
+        parse_context
+    } else {
+        owned_parse_context = registry?.parse_context(&mut random_function_index);
+        &owned_parse_context
+    };
+    let syntax_types = [
+        SyntaxType::Number,
+        SyntaxType::Length,
+        SyntaxType::Percentage,
+        SyntaxType::Angle,
+        SyntaxType::Time,
+        SyntaxType::Frequency,
+        SyntaxType::Resolution,
+    ];
+    let parsed = syntax_types
+        .into_iter()
+        .find_map(|syntax_type| parse_with_syntax(parse_context, &source, &SyntaxNode::Type(syntax_type)))?;
+    style_value_range_comparable(&parsed, context.style_query_length_resolution_context)
+}
+
+fn compare_style_range_values(
+    left: StyleRangeComparableValue,
+    comparison: StyleRangeComparison,
+    right: StyleRangeComparableValue,
+) -> bool {
+    let dimension = |kind| !matches!(kind, StyleRangeNumericType::Number | StyleRangeNumericType::Percentage);
+    if left.kind != right.kind
+        && !(left.kind == StyleRangeNumericType::Number && left.value == 0.0 && dimension(right.kind))
+        && !(right.kind == StyleRangeNumericType::Number && right.value == 0.0 && dimension(left.kind))
+    {
+        return false;
+    }
+    match comparison {
+        StyleRangeComparison::Equal => left.value == right.value,
+        StyleRangeComparison::LessThan => left.value < right.value,
+        StyleRangeComparison::LessThanOrEqual => left.value <= right.value,
+        StyleRangeComparison::GreaterThan => left.value > right.value,
+        StyleRangeComparison::GreaterThanOrEqual => left.value >= right.value,
+    }
+}
+
+fn evaluate_style_range_value(
+    store: Option<&CustomPropertyStore>,
+    registry: Option<&CustomPropertyRegistry>,
+    tokens: &[OwnedToken],
+    context: &mut ASFResolutionContext,
+    recursion_depth: u32,
+) -> Result<Option<StyleRangeComparableValue>, ConditionEvaluation> {
+    let tokens = trim_whitespace(tokens);
+    let resolved = if let [
+        OwnedToken {
+            kind: OwnedTokenKind::Ident(name),
+            ..
+        },
+    ] = tokens
+        && name.starts_with_ascii("--")
+    {
+        if let Some(dependencies) = context.style_query_dependencies.as_deref_mut() {
+            dependencies.note(name);
+        }
+        match resolve_custom_property(store, registry, name, context, recursion_depth + 1) {
+            TokenResolution::Resolved(tokens) => tokens,
+            TokenResolution::Invalid => return Ok(None),
+            TokenResolution::Cyclic => return Err(ConditionEvaluation::Cyclic),
+            TokenResolution::NotHandled => return Err(ConditionEvaluation::NotHandled),
+        }
+    } else {
+        match substitute_arbitrary_substitution_functions(store, registry, tokens, context, recursion_depth + 1, None) {
+            TokenResolution::Resolved(tokens) => tokens,
+            TokenResolution::Invalid => return Ok(None),
+            TokenResolution::Cyclic => return Err(ConditionEvaluation::Cyclic),
+            TokenResolution::NotHandled => return Err(ConditionEvaluation::NotHandled),
+        }
+    };
+    Ok(style_range_comparable_value(registry, &resolved, context))
+}
+
+fn evaluate_style_range(
+    store: Option<&CustomPropertyStore>,
+    registry: Option<&CustomPropertyRegistry>,
+    tokens: &[OwnedToken],
+    comparisons: &[(usize, usize, StyleRangeComparison)],
+    context: &mut ASFResolutionContext,
+    recursion_depth: u32,
+) -> ConditionEvaluation {
+    if comparisons.is_empty() || comparisons.len() > 2 {
+        return ConditionEvaluation::Invalid;
+    }
+    let (first_index, first_length, first_comparison) = comparisons[0];
+    let middle_end = comparisons.get(1).map_or(tokens.len(), |comparison| comparison.0);
+    let values = [
+        &tokens[..first_index],
+        &tokens[first_index + first_length..middle_end],
+        comparisons
+            .get(1)
+            .map_or(&tokens[tokens.len()..], |(index, length, _)| &tokens[index + length..]),
+    ];
+    let left = match evaluate_style_range_value(store, registry, values[0], context, recursion_depth + 1) {
+        Ok(Some(value)) => value,
+        Ok(None) => return ConditionEvaluation::Match(false),
+        Err(result) => return result,
+    };
+    let middle = match evaluate_style_range_value(store, registry, values[1], context, recursion_depth + 1) {
+        Ok(Some(value)) => value,
+        Ok(None) => return ConditionEvaluation::Match(false),
+        Err(result) => return result,
+    };
+    if !compare_style_range_values(left, first_comparison, middle) {
+        return ConditionEvaluation::Match(false);
+    }
+    let Some((_, _, second_comparison)) = comparisons.get(1).copied() else {
+        return ConditionEvaluation::Match(true);
+    };
+    let right = match evaluate_style_range_value(store, registry, values[2], context, recursion_depth + 1) {
+        Ok(Some(value)) => value,
+        Ok(None) => return ConditionEvaluation::Match(false),
+        Err(result) => return result,
+    };
+    ConditionEvaluation::Match(compare_style_range_values(middle, second_comparison, right))
 }
 
 fn validate_style_feature(tokens: &[OwnedToken]) -> ConditionValidation {
     let tokens = trim_whitespace(tokens);
+    if find_top_level_source(tokens, b"!").is_some() {
+        return ConditionValidation::Invalid;
+    }
     if tokens.iter().any(|token| {
         token.source.equals_ascii(b"<") || token.source.equals_ascii(b">") || token.source.equals_ascii(b"=")
     }) {
@@ -1629,36 +1913,16 @@ fn evaluate_style_feature(
     recursion_depth: u32,
 ) -> ConditionEvaluation {
     let tokens = trim_whitespace(tokens);
-    if tokens.iter().any(|token| {
-        token.source.equals_ascii(b"<") || token.source.equals_ascii(b">") || token.source.equals_ascii(b"=")
-    }) {
-        // FIXME: Range style queries are evaluated in C++ without access to the Rust guarded-context stack. The cyclic
-        //        result does not identify the context that began the cycle, so marking the innermost context could mark
-        //        a caller outside the cycle and cannot mark the complete cycle suffix. Share the guarded contexts across
-        //        the callback instead.
-        let Some(evaluate) = context.evaluate_style_query else {
-            return ConditionEvaluation::NotHandled;
-        };
-        let source = serialize_tokens(tokens);
-        crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::EvaluateConditionCallback);
-        crate::css::style::seal::note_host_call("substitution.evaluate_style_query");
-        return match unsafe {
-            evaluate(
-                context.callback_context,
-                store.map_or(std::ptr::null(), |store| std::ptr::from_ref(store).cast()),
-                FfiUtf16View {
-                    ascii: std::ptr::null(),
-                    utf16: source.as_ptr(),
-                    length: source.len(),
-                },
-            )
-        } {
-            0 => ConditionEvaluation::Match(false),
-            1 => ConditionEvaluation::Match(true),
-            2 => ConditionEvaluation::Invalid,
-            3 => ConditionEvaluation::Cyclic,
-            _ => ConditionEvaluation::NotHandled,
-        };
+    let comparisons = style_range_comparisons(tokens);
+    if comparisons.as_ref().is_some_and(|comparisons| !comparisons.is_empty()) {
+        return evaluate_style_range(
+            store,
+            registry,
+            tokens,
+            comparisons.as_ref().expect("checked non-empty comparisons"),
+            context,
+            recursion_depth + 1,
+        );
     }
     let colon = find_top_level_source(tokens, b":");
     let name_tokens = trim_whitespace(&tokens[..colon.unwrap_or(tokens.len())]);
@@ -1685,39 +1949,15 @@ fn evaluate_style_feature(
         .is_empty()
         .then(|| registry.and_then(|registry| registry.registrations.get(name)))
         .flatten();
+    if let Some(dependencies) = context.style_query_dependencies.as_deref_mut() {
+        dependencies.note(name);
+    }
     let computed = resolve_custom_property(store, registry, name, context, recursion_depth + 1);
     let computed = match computed {
         TokenResolution::Resolved(tokens) => Some(tokens),
         TokenResolution::Invalid | TokenResolution::Cyclic => None,
         TokenResolution::NotHandled => return ConditionEvaluation::NotHandled,
     };
-    if registration.is_some()
-        // NB: `registration` is only populated when there is no function-local scope, so this property context has no
-        //     custom function identity.
-        && !context.guarded_contexts.contains_property(name, None)
-        && let Some(evaluate) = context.evaluate_style_query
-    {
-        let source = serialize_tokens(tokens);
-        crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::EvaluateConditionCallback);
-        crate::css::style::seal::note_host_call("substitution.evaluate_style_query");
-        return match unsafe {
-            evaluate(
-                context.callback_context,
-                store.map_or(std::ptr::null(), |store| std::ptr::from_ref(store).cast()),
-                FfiUtf16View {
-                    ascii: std::ptr::null(),
-                    utf16: source.as_ptr(),
-                    length: source.len(),
-                },
-            )
-        } {
-            0 => ConditionEvaluation::Match(false),
-            1 => ConditionEvaluation::Match(true),
-            2 => ConditionEvaluation::Invalid,
-            3 => ConditionEvaluation::Cyclic,
-            _ => ConditionEvaluation::NotHandled,
-        };
-    }
     let Some(colon) = colon else {
         return ConditionEvaluation::Match(computed.is_some());
     };
@@ -1763,6 +2003,7 @@ fn evaluate_style_feature(
                         .unwrap_or_else(|| &registration.expect("registered property").syntax),
                     &computed,
                     &expected,
+                    context.style_query_length_resolution_context,
                 )
             }
             (Some(computed), Some(expected)) => trim_whitespace(&computed) == trim_whitespace(&expected),
@@ -1781,7 +2022,11 @@ fn evaluate_style_feature(
             .or_else(|| registration.map(|registration| &registration.syntax)),
     ) {
         return ConditionEvaluation::Match(registered_style_query_values_are_equal(
-            registry, syntax, &computed, query,
+            registry,
+            syntax,
+            &computed,
+            query,
+            context.style_query_length_resolution_context,
         ));
     }
     ConditionEvaluation::Match(serialize_tokens(trim_whitespace(&computed)) == serialize_tokens(query))
@@ -2695,7 +2940,8 @@ pub(crate) unsafe fn resolve_vars(
     environment: &mut VarResolutionEnvironment,
     attribute_names_are_ascii_case_insensitive: bool,
     callback_context: *mut c_void,
-    evaluate_style_query: Option<unsafe extern "C" fn(*mut c_void, *const c_void, FfiUtf16View) -> u8>,
+    style_query_length_resolution_context: *const crate::css::style_compute::FfiLengthResolutionContext,
+    style_query_dependencies: *mut c_void,
     final_custom_properties: Option<&HashMap<Vec<u16>, *const c_void>>,
 ) -> NativeVarResolution {
     let store = if store.is_null() {
@@ -2742,7 +2988,12 @@ pub(crate) unsafe fn resolve_vars(
         media_environment,
         load_media_environment,
         callback_context,
-        evaluate_style_query,
+        style_query_length_resolution_context: unsafe { style_query_length_resolution_context.as_ref() },
+        style_query_dependencies: unsafe {
+            style_query_dependencies
+                .cast::<crate::css::cascaded_properties::StyleQueryDependencies>()
+                .as_mut()
+        },
         final_custom_properties,
         token_cache: Some(token_cache),
         resolution_stats: Some(resolution_stats),

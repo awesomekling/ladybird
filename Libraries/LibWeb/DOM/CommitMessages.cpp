@@ -26,6 +26,8 @@ void CommitMessages::note_box_presence(NodeIdentity identity, bool has_layout_bo
         .kind = Kind::BoxPresence,
         .has_layout_box = has_layout_box,
         .has_committed_box = has_committed_box,
+        .pseudo_element = {},
+        .custom_property_name = {},
     });
     // The bits answer `Node::is_rendered()`, which DOM code asks in the middle of a layout pass,
     // so they cannot wait for one of the drain points yet.
@@ -37,7 +39,10 @@ void CommitMessages::note_hover_target_after_scroll(NodeIdentity identity, Optio
     m_messages.append(Message {
         .identity = identity,
         .kind = Kind::HoverTargetAfterScroll,
+        .layout_tree_update_reason = {},
         .hover_event_data = move(hover_event_data),
+        .pseudo_element = {},
+        .custom_property_name = {},
     });
     // The hover events a target change ends in are dispatched from whatever decided the target, so
     // that they keep their order relative to the rendering opportunity's steps. That is sooner than
@@ -51,6 +56,9 @@ void CommitMessages::note_needs_layout_tree_update(NodeIdentity identity, SetNee
         .identity = identity,
         .kind = Kind::NeedsLayoutTreeUpdate,
         .layout_tree_update_reason = reason,
+        .hover_event_data = {},
+        .pseudo_element = {},
+        .custom_property_name = {},
     });
     // The mark decides what the next tree build does, and the DOM side reads that back as soon as
     // the mutation that made it returns.
@@ -63,6 +71,20 @@ void CommitMessages::note_style_substitution_usage(NodeIdentity identity, u8 usa
         .identity = identity,
         .kind = Kind::StyleSubstitutionUsage,
         .style_substitution_usage = usage,
+        .layout_tree_update_reason = {},
+        .hover_event_data = {},
+        .pseudo_element = {},
+        .custom_property_name = {},
+    });
+}
+
+void CommitMessages::note_style_query_custom_property_reference(NodeIdentity identity, Optional<CSS::PseudoElement> pseudo_element, Utf16FlyString name)
+{
+    m_style_messages.append(Message {
+        .identity = identity,
+        .kind = Kind::StyleQueryCustomPropertyReference,
+        .pseudo_element = pseudo_element,
+        .custom_property_name = move(name),
     });
 }
 
@@ -89,32 +111,37 @@ void CommitMessages::append(Layout::RustFFI::FfiCommitMessage const& message)
         : NodeIdentity::of_style_node(CSS::StyleNodeID { message.style_node });
     switch (message.kind) {
     case Layout::RustFFI::FfiCommitMessageKind::ContentSizeChangedForContainerQueries:
-        m_messages.append(Message { .identity = identity, .kind = Kind::ContentSizeChangedForContainerQueries });
+        m_messages.append(Message { .identity = identity, .kind = Kind::ContentSizeChangedForContainerQueries, .pseudo_element = {}, .custom_property_name = {} });
         return;
     case Layout::RustFFI::FfiCommitMessageKind::NavigableContainerViewportCommitted:
-        m_messages.append(Message { .identity = identity, .kind = Kind::NavigableContainerViewportCommitted });
+        m_messages.append(Message { .identity = identity, .kind = Kind::NavigableContainerViewportCommitted, .pseudo_element = {}, .custom_property_name = {} });
         return;
     case Layout::RustFFI::FfiCommitMessageKind::UnexpectedFragmentedInline:
-        m_messages.append(Message { .identity = identity, .kind = Kind::UnexpectedFragmentedInline });
+        m_messages.append(Message { .identity = identity, .kind = Kind::UnexpectedFragmentedInline, .pseudo_element = {}, .custom_property_name = {} });
         return;
     case Layout::RustFFI::FfiCommitMessageKind::LayoutTreeRebuildRequested:
         m_messages.append(Message {
             .identity = identity,
             .kind = Kind::NeedsLayoutTreeUpdate,
             .layout_tree_update_reason = SetNeedsLayoutTreeUpdateReason::PseudoElementBoxEscapedRebuildRoot,
+            .hover_event_data = {},
+            .pseudo_element = {},
+            .custom_property_name = {},
         });
         return;
     case Layout::RustFFI::FfiCommitMessageKind::TopLayerZoneRebuildNeeded:
-        m_messages.append(Message { .identity = identity, .kind = Kind::TopLayerZoneRebuildNeeded });
+        m_messages.append(Message { .identity = identity, .kind = Kind::TopLayerZoneRebuildNeeded, .pseudo_element = {}, .custom_property_name = {} });
         return;
     case Layout::RustFFI::FfiCommitMessageKind::ListItemCounterValueRendered:
-        m_messages.append(Message { .identity = identity, .kind = Kind::ListItemCounterValueRendered });
+        m_messages.append(Message { .identity = identity, .kind = Kind::ListItemCounterValueRendered, .pseudo_element = {}, .custom_property_name = {} });
         return;
     case Layout::RustFFI::FfiCommitMessageKind::SvgResourceReferenced:
         m_messages.append(Message {
             .identity = identity,
             .other_identity = NodeIdentity::of_style_node(CSS::StyleNodeID { message.other_style_node }),
             .kind = Kind::SvgResourceReferenced,
+            .pseudo_element = {},
+            .custom_property_name = {},
         });
         return;
     }
@@ -184,6 +211,10 @@ void CommitMessages::apply(Message const& message)
     case Kind::StyleSubstitutionUsage:
         if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
             element->apply_style_substitution_usage(message.style_substitution_usage);
+        return;
+    case Kind::StyleQueryCustomPropertyReference:
+        if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
+            element->record_style_query_custom_property_reference(message.pseudo_element, message.custom_property_name);
         return;
     case Kind::TopLayerZoneRebuildNeeded:
         m_document.set_top_layer_needs_layout_zone_rebuild();

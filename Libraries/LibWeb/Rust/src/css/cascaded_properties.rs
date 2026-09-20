@@ -1185,8 +1185,53 @@ pub struct FfiCascadeResolutionContext {
     pub custom_function_scope_identity: usize,
     pub custom_function_visibilities: *const crate::css::custom_properties::FfiSubstitutionFunctionVisibility,
     pub custom_function_visibility_count: usize,
+    pub style_query_length_resolution_context: *const crate::css::style_compute::FfiLengthResolutionContext,
+    pub style_query_dependencies: *mut c_void,
     pub callback_context: *mut c_void,
-    pub evaluate_style_query: Option<unsafe extern "C" fn(*mut c_void, *const c_void, FfiUtf16View) -> u8>,
+}
+
+#[derive(Default)]
+pub(crate) struct StyleQueryDependencies(Vec<Vec<u16>>);
+
+impl StyleQueryDependencies {
+    pub(crate) fn note(&mut self, name: &[u16]) {
+        self.0.push(name.to_vec());
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_style_query_dependencies_create() -> *mut c_void {
+    Box::into_raw(Box::new(StyleQueryDependencies::default())).cast()
+}
+
+/// # Safety
+/// `dependencies` must be a live handle returned by `rust_style_query_dependencies_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_style_query_dependencies_for_each(
+    dependencies: *const c_void,
+    context: *mut c_void,
+    visit: unsafe extern "C" fn(*mut c_void, FfiUtf16View),
+) {
+    for name in &unsafe { &*dependencies.cast::<StyleQueryDependencies>() }.0 {
+        unsafe {
+            visit(
+                context,
+                FfiUtf16View {
+                    ascii: std::ptr::null(),
+                    utf16: name.as_ptr(),
+                    length: name.len(),
+                },
+            );
+        };
+    }
+}
+
+/// # Safety
+/// `dependencies` must be a live handle returned by `rust_style_query_dependencies_create`, and
+/// ownership must not already have been released.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_style_query_dependencies_destroy(dependencies: *mut c_void) {
+    drop(unsafe { Box::from_raw(dependencies.cast::<StyleQueryDependencies>()) });
 }
 
 #[repr(C)]
@@ -1749,7 +1794,8 @@ pub(crate) fn resolve_cascade_value(
                 resolution_environment,
                 resolution_context.attribute_names_are_ascii_case_insensitive,
                 resolution_context.callback_context,
-                resolution_context.evaluate_style_query,
+                resolution_context.style_query_length_resolution_context,
+                resolution_context.style_query_dependencies,
                 final_custom_properties,
             )
         },
