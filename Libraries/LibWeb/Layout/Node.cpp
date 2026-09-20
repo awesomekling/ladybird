@@ -102,6 +102,31 @@ void publish_dom_paint_facts(DOM::Node const& dom_node)
     document.invalidation_journal().note_dom_paint_facts(DOM::NodeIdentity::of(dom_node), facts);
 }
 
+// Whether a row built for the node sits in the user agent shadow tree of the focused text
+// control, which is what a caret and a selection are painted inside. The answer moves only when
+// the focused area does, and a node in no user agent shadow tree can never hold it, so the
+// published set holds one control's shadow tree at a time.
+void publish_is_in_focused_text_control(DOM::Node const& node)
+{
+    auto& document = const_cast<DOM::Document&>(node.document());
+    auto shadow_root = node.containing_shadow_root();
+    auto value = shadow_root
+        && shadow_root->is_user_agent_internal()
+        && is<HTML::FormAssociatedTextControlElement>(shadow_root->host())
+        && shadow_root->host()->is_focused();
+    auto* arena = document.layout_node_arena_if_created();
+    if (!arena) {
+        if (!value)
+            return;
+        arena = &document.layout_node_arena();
+    }
+    auto identity = Node::style_node_of(&node);
+    if (identity.value() != 0)
+        RustFFI::layout_arena_set_identity_in_focused_text_control(arena->handle(), identity.value(), value);
+    if (auto* layout_node = const_cast<DOM::Node&>(node).unsafe_layout_node())
+        layout_node->publish_is_in_focused_text_control();
+}
+
 // What a row built for the element is scrolled to. The element's box is replaced whenever its
 // subtree is rebuilt, so the offset is held against the identity that outlives it and a row the
 // build stamps reads it there, the way a pseudo-element's box already does. The rows the element
@@ -170,18 +195,12 @@ Node::Node(DOM::Document& document, BindToPreparedArenaSlot, Compositing::RustFF
     , m_kind(kind)
 {
     RustFFI::layout_arena_attach_shell(m_arena->handle(), m_slot, this);
-    auto* node = dom_node();
-    if (has_flag(RustFFI::NodeFlag::IsInUserAgentShadowTree))
-        publish_own_is_in_focused_text_control();
-    if (node) {
-        // A <pattern> inherits the attributes it does not carry from the pattern its `href` names,
-        // so its published facts are not a pure function of its own attributes and its own change
-        // steps cannot keep them fresh. Republishing as a box is built covers the case, since a
-        // pattern is read through a box. Every other SVG element published once, when it was
-        // registered.
-        if (auto* pattern_element = as_if<SVG::SVGPatternElement>(node))
-            pattern_element->publish_svg_attribute_facts();
-    }
+    // A <pattern> inherits the attributes it does not carry from the pattern its `href` names, so
+    // its published facts are not a pure function of its own attributes and its own change steps
+    // cannot keep them fresh. Republishing as a box is built covers the case, since a pattern is
+    // read through a box. Every other SVG element published once, when it was registered.
+    if (auto* pattern_element = as_if<SVG::SVGPatternElement>(dom_node()))
+        pattern_element->publish_svg_attribute_facts();
 }
 
 Node::~Node()
