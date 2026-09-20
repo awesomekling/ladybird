@@ -20,15 +20,14 @@ pub struct FfiHitTestQueryCallbacks {
     pub chrome_metrics: crate::painting::ffi::FfiChromeMetrics,
     pub viewport_wheel_overflow_x: u8,
     pub viewport_wheel_overflow_y: u8,
-    pub shell_in_scope: unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool,
+    /// The node a scoped caret line search is confined to, or 0 for an unscoped one. A line is in
+    /// scope when one of its caret items stands for this node or for a node below it.
+    pub scope: u32,
+    /// The node the document's own children belong to, which a scope naming the document is.
+    pub document: u32,
 }
 
 impl FfiHitTestQueryCallbacks {
-    pub(crate) fn shell_in_scope(&self, shell: *mut c_void) -> bool {
-        crate::painting::seal::note_host_call("shell_in_scope");
-        // SAFETY: The C++ host answers synchronously.
-        unsafe { (self.shell_in_scope)(self.context, shell) }
-    }
     pub(crate) fn scroll_offsets(&self) -> &[libgfx_rust::FloatPoint] {
         if self.scroll_offsets.is_null() {
             return &[];

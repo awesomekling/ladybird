@@ -29,6 +29,21 @@ pub(crate) fn row_dom_style_node(arena: &LayoutNodeArena, slot: NodeSlotId) -> u
     arena.node_style_node(slot).map_or(0, |style_node| style_node.raw())
 }
 
+/// Whether the node a row stands for is `scope` or lies below it in the DOM tree. The scope is a
+/// node the host named before the query, and the answer is read out of the style mirror, which
+/// carries the DOM child sequence the test walks.
+pub(crate) fn row_is_in_scope(arena: &LayoutNodeArena, scope: u32, document: u32, slot: NodeSlotId) -> bool {
+    use crate::css::style::tree::StyleNodeID;
+    let (Some(scope), Some(document), Some(node)) = (
+        StyleNodeID::from_raw(scope),
+        StyleNodeID::from_raw(document),
+        StyleNodeID::from_raw(row_dom_style_node(arena, slot)),
+    ) else {
+        return false;
+    };
+    arena.with_style_store(|engine| engine.tree().is_in_dom_subtree_of(node, scope, document))
+}
+
 impl HitTestList {
     pub(crate) fn item_target_slot(&self, arena: &LayoutNodeArena, item_index: usize) -> Option<NodeSlotId> {
         let item = &self.items[item_index];
