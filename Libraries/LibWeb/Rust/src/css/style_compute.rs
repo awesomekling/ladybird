@@ -5110,6 +5110,7 @@ pub(crate) fn is_required_driver_input(property_id: u16) -> bool {
 
 unsafe fn compute_longhands(
     input: &FfiLonghandTransactionInput,
+    environment: &FfiStyleComputationEnvironment,
     parent_snapshot: Option<&ParentSnapshot<'_>>,
     highlight: Option<&HighlightInheritance<'_>>,
 ) -> (
@@ -5128,7 +5129,7 @@ unsafe fn compute_longhands(
                 &*input.store,
                 parent_snapshot,
                 highlight,
-                input.environment,
+                environment,
                 input.computed_group_mask,
                 input.computed_property_words,
                 phase,
@@ -5269,7 +5270,7 @@ unsafe fn compute_longhands(
         resolved_parent_store: input.resolved_parent_custom_property_store,
         reuse_resolved_parent_if_empty: input.reuse_resolved_parent_custom_property_store_if_empty,
         resolution_context: &raw const custom_property_resolution_context,
-        finalization_environment: input.environment,
+        finalization_environment: environment,
         finalization_color_scheme: unsafe { &*input.longhand_table }.effective_color_scheme() as u8,
     };
     let custom_properties = if !input.has_custom_property_resolution {
@@ -5827,6 +5828,30 @@ pub unsafe extern "C" fn rust_compute_properties(
     let input = unsafe { &*input };
     let prepared = unsafe { &*prepared };
     let drive_input = unsafe { &*input.transaction_input };
+    let random_base_values = {
+        let node = crate::css::style::tree::StyleNodeID::from_raw(input.style_node);
+        let sharings = match prepared.requirements.unfixed_random_sharing_count {
+            0 => &[][..],
+            count => unsafe { std::slice::from_raw_parts(prepared.requirements.unfixed_random_sharings, count) },
+        };
+        let style_engine = unsafe { &mut *input.style_engine.cast_mut().cast::<crate::css::style::StyleEngine>() };
+        sharings
+            .iter()
+            .map(|sharing| {
+                let name = unsafe { sharing.name.cast::<crate::css::css_string::CssString>().as_ref() }
+                    .map_or(&[][..], |name| name.units());
+                FfiRandomBaseValue {
+                    source: sharing.source,
+                    value: node.map_or(0.0, |node| {
+                        style_engine.ensure_random_base_value(node, name, sharing.element_shared)
+                    }),
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut environment = unsafe { *drive_input.environment };
+    environment.random_base_values = random_base_values.as_ptr();
+    environment.random_base_value_count = random_base_values.len();
     let style_engine = unsafe { &*input.style_engine.cast::<crate::css::style::StyleEngine>() };
     let inheritance_parent_style_record = retained_inheritance_parent_style_record(style_engine, input);
     let parent_snapshot = if inheritance_parent_style_record != 0 {
@@ -5852,7 +5877,7 @@ pub unsafe extern "C" fn rust_compute_properties(
             || snapshot.has_animated_property(property_id::DIRECTION)
     });
     let (mut result, finalization_line_height_metrics, animation_length_contexts) =
-        unsafe { compute_longhands(drive_input, parent_snapshot.as_ref(), highlight.as_ref()) };
+        unsafe { compute_longhands(drive_input, &environment, parent_snapshot.as_ref(), highlight.as_ref()) };
 
     if !input.stop_after_longhand_drive {
         result.transitions = build_computed_transition_list(unsafe { &*drive_input.longhand_table });
