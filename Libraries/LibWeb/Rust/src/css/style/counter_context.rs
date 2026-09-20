@@ -34,6 +34,14 @@ impl std::ops::DerefMut for StyleEngine {
 }
 
 impl StyleEngine {
+    pub(crate) fn box_type_parent_display(
+        &self,
+        node: StyleNodeID,
+        is_pseudo_element: bool,
+    ) -> Option<crate::css::display::FfiDisplay> {
+        self.state.box_type_parent_display_for_target(node, is_pseudo_element)
+    }
+
     pub(crate) fn resolve_font_for_legacy_drive(
         &mut self,
         request: bridge::FfiFontResolutionRequest,
