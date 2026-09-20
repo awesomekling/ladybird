@@ -273,6 +273,8 @@ public:
         // Which synthetic pseudo-elements some rule decides for, as a bit per pseudo-element. The
         // element's own style carries it so a consumer knows which pseudo-elements to materialize.
         u64 matching_pseudo_element_styles { 0 };
+        bool depends_on_size_container_query { false };
+        bool depends_on_style_container_query { false };
         // A traversal-local exact identity for the complete rule-match input. Present only when
         // StyleEngine proved the result reusable from the element's ancestry context.
         Optional<u32> match_signature;
@@ -306,6 +308,8 @@ public:
         // winner record retained by value does not.
         bool computation_reads_resource_context { true };
         u8 substitution_usage { 0 };
+        bool depends_on_size_container_query { false };
+        bool depends_on_style_container_query { false };
         RefPtr<CustomPropertyData const> pinned_parent_custom_property_data;
         // The style groups whose values the computation read from the inherited style's
         // non-inherited half, which the key does not name.

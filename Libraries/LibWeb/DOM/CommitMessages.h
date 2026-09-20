@@ -53,6 +53,7 @@ public:
     // Substitution dependencies produced by a finished style computation.
     void note_style_substitution_usage(NodeIdentity, u8 usage);
     void note_style_query_custom_property_reference(NodeIdentity, Optional<CSS::PseudoElement>, Utf16FlyString);
+    void note_style_container_query_dependencies(NodeIdentity, u8 dependencies);
 
     // Applies only style-stage reports, leaving layout and event messages at their existing drains.
     void apply_style_messages();
@@ -71,6 +72,7 @@ private:
         SvgResourceReferenced,
         StyleSubstitutionUsage,
         StyleQueryCustomPropertyReference,
+        StyleContainerQueryDependencies,
         TopLayerZoneRebuildNeeded,
         UnexpectedFragmentedInline,
     };
@@ -83,6 +85,7 @@ private:
         bool has_layout_box { false };
         bool has_committed_box { false };
         u8 style_substitution_usage { 0 };
+        u8 style_container_query_dependencies { 0 };
         // Only the layout tree update trace reads this.
         SetNeedsLayoutTreeUpdateReason layout_tree_update_reason {};
         // Where the pointer was, for the hover events the target change ends in. Only
