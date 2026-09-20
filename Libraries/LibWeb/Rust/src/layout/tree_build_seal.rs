@@ -23,22 +23,28 @@
 //! matters as much as the name, because a route a full suite takes twice is a different problem
 //! from one it takes a hundred thousand times.
 //!
-//! What the whole suite takes, by `during_build` count, as of the commit that derived a node's
-//! wheel-handler state where the tree changes. Three of these are not tree builder callback slots
-//! at all, which is what the gate was for:
+//! What the whole suite takes, by `during_build` count, as of the commit that asked the host for a
+//! style only where the walk found none. Three of these are not tree builder callback slots at
+//! all, which is what the gate was for:
 //!
 //! | route | during build | note |
 //! |---|---|---|
-//! | `layout_node_shell_factory` | 3507492 | **not a slot**: the arena materialising a shell |
-//! | `restyle_bypass_path_element` | 1042302 | slot |
-//! | `attach_style_resources` | 1898182 | slot |
-//! | `shell_style_changed` | 81817 | **not a slot**: a row's style reaching its shell |
-//! | `text_source` | 63902 | **not a slot**: a text row's characters, synced mid-build |
-//! | `pseudo.create_content_item` | 44380 | slot |
-//! | `pseudo.create_layout_node` | 43895 | slot |
-//! | `pseudo.create_nested_list_marker` | 1532 | slot |
-//! | `create_first_letter_nodes` | 239 | slot |
-//! | `svg_resource_box_survives` | 13 | slot |
+//! | `layout_node_shell_factory` | 4003054 | **not a slot**: the arena materialising a shell |
+//! | `attach_style_resources` | 1893085 | slot |
+//! | `shell_style_changed` | 81525 | **not a slot**: a row's style reaching its shell |
+//! | `text_source` | 64085 | **not a slot**: a text row's characters, synced mid-build |
+//! | `pseudo.create_content_item` | 44560 | slot |
+//! | `pseudo.create_layout_node` | 44077 | slot |
+//! | `pseudo.create_nested_list_marker` | 1531 | slot |
+//! | `create_first_letter_nodes` | 244 | slot |
+//! | `restyle_bypass_path_element` | 33 | slot |
+//! | `svg_resource_box_survives` | 14 | slot |
+//!
+//! `restyle_bypass_path_element` is now a gap in the stage before this one rather than a route the
+//! build takes by design: all 33 are elements that `Document::update_style()` left without a
+//! published style record, in seven `css/style-engine/*` tests. Skipping the call makes those
+//! seven abort in `pin_style_record_for_build`, so the style stage has to settle them before the
+//! slot can go.
 //!
 //! `build_replaced_content_facts` and `viewport_propagation_facts` are counted too and have never
 //! been taken during a build: they belong to the layout entry that follows it.
