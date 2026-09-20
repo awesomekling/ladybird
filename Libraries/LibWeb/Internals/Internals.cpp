@@ -1792,16 +1792,28 @@ GC::Ref<JS::Object> Internals::style_engine_transaction_reactions()
 
     auto tags = MUST(JS::Array::create(realm, 0));
     u32 index = 0;
+    Vector<GC::Root<DOM::Element>> reacted_elements;
     Function<void(ReadonlySpan<CSS::StyleNodeID>)> consume = [&](ReadonlySpan<CSS::StyleNodeID> style_node_ids) {
         for (auto style_node_id : style_node_ids) {
             auto element = style_computer.element_for_style_node(style_node_id);
             if (!element)
                 continue;
+            reacted_elements.append(GC::make_root(*element));
             auto identity = element->id().has_value() ? *element->id() : element->local_name();
             MUST(tags->create_data_property_or_throw(index++, JS::PrimitiveString::create(vm(), identity)));
         }
     };
     auto transaction_is_scoped = style_computer.style_engine().take_diagnostic_style_transaction(root->style_node_id(), move(consume));
+
+    // Reading the transaction consumed the engine's pending work and threw the styles it computed
+    // away, so every element the transaction reacted for is now one the document believes is
+    // settled and has no published style. Settle exactly those here, so that the layout tree build
+    // is never the thing that discovers a missing style.
+    for (auto const& element : reacted_elements) {
+        if (element->is_connected() && !element->has_style())
+            document.update_style_for_element({ *element });
+    }
+
     object->define_direct_property("wholeDocument"_utf16_fly_string, JS::Value(!transaction_is_scoped), JS::default_attributes);
     object->define_direct_property("elements"_utf16_fly_string, tags, JS::default_attributes);
     return object;
