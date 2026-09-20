@@ -48,6 +48,7 @@ pub(crate) mod text_chunker;
 mod text_queries;
 mod text_transform;
 mod trace;
+mod tree_build_seal;
 mod tree_builder;
 mod tree_mutation;
 mod update_layout;

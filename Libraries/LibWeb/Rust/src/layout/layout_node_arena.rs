@@ -486,6 +486,7 @@ impl FreedSubtree {
             crate::layout::tree_mutation::destroy_image_observers(observers);
         }
         for reset in self.paintable_row_resets {
+            super::tree_build_seal::note_host_call("paintable_row_reset");
             reset.invoke_callback();
         }
         if let Some(host) = self.style_record_host {
@@ -2092,6 +2093,7 @@ impl LayoutNodeArena {
         let shell = self.data(slot).shell.get();
         if !shell.is_null() {
             let host = self.style_record_host();
+            super::tree_build_seal::note_host_call("shell_style_changed");
             // SAFETY: The engine and shell remain live. Native style-store mutation has
             // finished before the host can reenter Rust through its resource consumers.
             unsafe {
@@ -2522,6 +2524,7 @@ impl LayoutNodeArena {
             BoundNode::Document => (0, self.bound_viewport_row()),
             BoundNode::PseudoElement(..) => return,
         };
+        super::tree_build_seal::note_host_call("notify_box_presence");
         // SAFETY: Registration and unregistration keep the host context live, and the host does
         // not reenter the arena.
         unsafe { callback(context, style_node, self.box_presence_bits(row)) };
@@ -2563,6 +2566,7 @@ impl LayoutNodeArena {
         if data.kind.get() == NodeKind::Unset {
             return std::ptr::null_mut();
         }
+        super::tree_build_seal::note_host_call("layout_node_shell_factory");
         // SAFETY: Registration and unregistration keep the factory context live; the factory binds a
         // shell to this live slot and writes nothing but the slot's shell cell.
         unsafe { factory(context, id, data.kind.get()) };
@@ -4549,6 +4553,7 @@ pub unsafe extern "C" fn layout_arena_destroy(arena: *mut c_void) {
     arena.assert_owner_thread();
     assert_eq!(arena.live_count, 0, "layout node arena destroyed with live slots");
     crate::painting::published_immutable::finish(&arena);
+    super::tree_build_seal::flush_census();
 }
 
 #[unsafe(no_mangle)]
@@ -5568,6 +5573,7 @@ pub(crate) unsafe fn sync_enrolled_content_for_layout(arena: *mut c_void) {
             unsafe { &*arena.cast::<LayoutNodeArena>() }.layout_pass_is_running(),
             "build_replaced_content_facts",
         );
+        super::tree_build_seal::note_host_call("build_replaced_content_facts");
         // SAFETY: The callback receives a live shell and a valid out-pointer.
         unsafe { (host.build_replaced_content_facts)(host.context, shell, &raw mut facts) };
         // Changed facts invalidate cached formatting-context runs regardless of which
