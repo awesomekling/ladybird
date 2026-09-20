@@ -23,22 +23,21 @@
 //! matters as much as the name, because a route a full suite takes twice is a different problem
 //! from one it takes a hundred thousand times.
 //!
-//! What the whole suite takes, by `during_build` count, as of the commit that cleared a stale
-//! layout node in the arena. Six of these are not tree builder callback slots at all, which is
-//! what the gate was for:
+//! What the whole suite takes, by `during_build` count, as of the commit that named the element a
+//! tree builder callback is about by its identity. Five of these are not tree builder callback
+//! slots at all, which is what the gate was for:
 //!
 //! | route | during build | note |
 //! |---|---|---|
-//! | `principal_dom_node` | 5094171 | slot |
-//! | `layout_node_shell_factory` | 4009795 | **not a slot**: the arena materialising a shell |
-//! | `prepare_principal_element` | 2064229 | slot |
-//! | `attach_style_resources` | 1896086 | slot |
-//! | `shell_style_changed` | 81809 | **not a slot**: a row's style reaching its shell |
-//! | `text_source` | 64211 | **not a slot**: a text row's characters, synced mid-build |
-//! | `pseudo.create_content_item` | 44541 | slot |
-//! | `pseudo.create_layout_node` | 44042 | slot |
+//! | `layout_node_shell_factory` | 3935878 | **not a slot**: the arena materialising a shell |
+//! | `prepare_principal_element` | 2023722 | slot |
+//! | `attach_style_resources` | 1855907 | slot |
+//! | `shell_style_changed` | 80489 | **not a slot**: a row's style reaching its shell |
+//! | `text_source` | 63094 | **not a slot**: a text row's characters, synced mid-build |
+//! | `pseudo.create_content_item` | 43048 | slot |
+//! | `pseudo.create_layout_node` | 42547 | slot |
 //! | `pseudo.create_nested_list_marker` | 1532 | slot |
-//! | `create_first_letter_nodes` | 236 | slot |
+//! | `create_first_letter_nodes` | 241 | slot |
 //! | `svg_resource_box_survives` | 14 | slot |
 //! | `svg_resource.layout_dom_node` | 10 | **not a slot**: nested in `svg_resource_box_survives` |
 //! | `svg_resource.dom_is_shadow_including_inclusive_descendant` | 10 | as above |
