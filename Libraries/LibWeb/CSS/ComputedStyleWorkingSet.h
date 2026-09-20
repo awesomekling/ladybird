@@ -114,6 +114,10 @@ public:
     ComputedValuesFFI::AnimatedOverlay* prepare_animated_overlay_for_rust_mutation(Badge<StyleComputer>);
     ComputedValuesFFI::AnimatedOverlay* prepare_animated_overlay_for_rust_finalization(Badge<StyleComputer>, CreateAnimatedOverlay);
     ComputedValuesFFI::AnimatedOverlay const* animated_overlay(Badge<StyleComputer>) const;
+    // Installs the overlay the style stage sampled for itself, which is allocated and filled
+    // before the stage's result reaches the host and takes the place of whatever the computation
+    // was holding. Ownership of the overlay transfers here.
+    void install_animated_overlay_from_rust(Badge<StyleComputer>, ComputedValuesFFI::AnimatedOverlay*);
     void finish_animated_overlay_rust_mutation(Badge<StyleComputer>);
     void did_apply_style_finalization_from_rust(u16 invalidated_longhands);
     bool requires_animated_post_compute_adjustments() const;
@@ -258,6 +262,8 @@ public:
 
     void set_property(PropertyID, NonnullRefPtr<StyleValue const>, AnimatedPropertyResultOfTransition, ComputedStyleWorkingSet::Inherited);
     void clear_wrapper_cache() { m_wrapper_cache.clear(); }
+    // Takes ownership of an overlay the style stage allocated and filled, dropping this one.
+    void adopt_overlay(ComputedValuesFFI::AnimatedOverlay*);
 
 private:
     ComputedValuesFFI::FfiAnimatedOverlayEntry const* entry(PropertyID) const;

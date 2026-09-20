@@ -893,6 +893,14 @@ pub(crate) fn any_row_is_relevant(rows: &[AnimationTimingRow], samples: &Animati
     Some(any)
 }
 
+/// Whether the row describes an effect that belongs to no animation the element holds - §19.2's
+/// provisional transition duplicate. The host's own effect list has no such effect, so every walk
+/// of the published rows has to skip them.
+#[must_use]
+pub(crate) fn row_is_not_associated(row: &AnimationTimingRow) -> bool {
+    row.has(timing_row_flag::NOT_ASSOCIATED)
+}
+
 /// The current time of the timeline a row names, as the host sampled it when this style update
 /// began. `None` where the host published no sample for that timeline.
 #[must_use]
