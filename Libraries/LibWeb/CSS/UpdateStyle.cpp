@@ -1381,6 +1381,7 @@ void Document::update_selection_style_observability()
 
     auto record_element = [&](Node& node) {
         if (auto* element = as_if<Element>(node); element && element->has_style()) {
+            style_computer().style_engine().make_deferred_pseudo_element_style_observable(element->style_node_id());
             style_computer().style_engine().record_element_style_input_change(element->style_node_id(),
                 CSS::StyleEngine::PseudoInputsMayHaveChanged);
         }

@@ -32,6 +32,7 @@
         println(`formatting preserved: ${getComputedStyle(selection.anchorNode.parentElement).fontWeight}`);
         println(`selection query: ${getComputedStyle(editor, "::selection").color}`);
 
+        const beforeSelection = internals.styleEngineCounters().computedPseudoAssignmentsPublished;
         editor.addEventListener("input", () => {
             selection.selectAllChildren(editor);
             internals.updateStyle();
@@ -39,5 +40,7 @@
         }, { once: true });
         internals.sendText(editor, "d");
         println(`input handler leaves a selection: ${!selection.isCollapsed}`);
+        const activated = internals.styleEngineCounters().computedPseudoAssignmentsPublished - beforeSelection;
+        println(`selection styles activated locally: ${activated > 0 && activated < 16}`);
     });
 </script>

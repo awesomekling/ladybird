@@ -1153,6 +1153,8 @@ impl StyleEngineState {
                 memory,
                 admission: AdmissionFacts::default(),
                 deferred_pseudo_element: None,
+                latent_deferred_pseudo_element: None,
+                deferred_pseudo_element_observable_nodes: Vec::new(),
                 tree,
                 program: StyleSheetProgram::new(),
                 native_rules: Default::default(),
@@ -1252,6 +1254,7 @@ impl StyleEngineState {
                 deferred_geometry_journal: NormalizationJournal::new(),
                 flushing_deferred_geometry_journal: false,
                 deferred_element_style_inputs: Vec::new(),
+                latent_deferred_pseudo_element_style_inputs: Vec::new(),
                 deferred_element_style_inputs_are_pending: false,
                 externally_recorded_style_input_nodes: HashSet::default(),
                 deferred_element_style_input_memory: MemoryLease::new(MemoryCategory::NormalizationJournal),
@@ -1934,6 +1937,13 @@ impl StyleEngineState {
                     .top_layer_elements
                     .retain(|member| !retired_nodes.contains(member));
             }
+            self.retained
+                .deferred_pseudo_element_observable_nodes
+                .retain(|member| !retired_nodes.contains(member));
+            self.host
+                .latent_deferred_pseudo_element_style_inputs
+                .retain(|input| input.key.style_node().is_none_or(|node| !retired_nodes.contains(&node)));
+            self.settle_deferred_element_style_input_memory();
             let live_animation_overlays_after = self.retained.computed_group_sets.live_animation_overlay_records();
             self.settle_computed_memory();
             counters.add(
@@ -2126,7 +2136,14 @@ impl StyleEngineState {
         let mut descendants = Vec::new();
         self.for_each_flat_tree_descendant(root, |node| descendants.push(node));
         for node in descendants {
-            self.record_element_style_input(node, reaction, inherited_style_groups);
+            if reaction
+                == transaction::STYLE_REACTION_RECOMPUTE_STYLE
+                    | transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED
+            {
+                self.record_deferred_pseudo_element_style_input(node);
+            } else {
+                self.record_element_style_input(node, reaction, inherited_style_groups);
+            }
         }
     }
 

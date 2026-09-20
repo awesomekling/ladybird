@@ -39,6 +39,8 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         memory,
         admission,
         deferred_pseudo_element,
+        latent_deferred_pseudo_element,
+        deferred_pseudo_element_observable_nodes,
         tree,
         program,
         native_rules,
@@ -131,6 +133,8 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(memory);
     assert_member_is_sync(admission);
     assert_member_is_sync(deferred_pseudo_element);
+    assert_member_is_sync(latent_deferred_pseudo_element);
+    assert_member_is_sync(deferred_pseudo_element_observable_nodes);
     assert_member_is_sync(tree);
     assert_member_is_sync(program);
     assert_member_is_sync(native_rules);

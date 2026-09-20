@@ -203,9 +203,7 @@ impl StyleEngineState {
                 && self.host.tree_staging.is_empty()
                 && !self.host.program_staging.is_dirty()
                 && self.host.sheet_rule_replacement.is_none();
-        for input in std::mem::take(&mut self.host.deferred_element_style_inputs) {
-            self.record_input(input.key, input.old, input.new, counters);
-        }
+        self.flush_deferred_element_style_inputs(counters);
         self.host.deferred_element_style_inputs_are_pending = false;
         self.host.externally_recorded_style_input_nodes.clear();
         // The nodes whose style input the C++ computation has to settle this transaction.
