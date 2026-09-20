@@ -106,11 +106,10 @@ pub struct FfiDomTreeBuilderCallbacks {
     /// node once per visit rather than once per payload callback.
     pub principal_dom_node: unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void,
     pub prepare_principal_element: unsafe extern "C" fn(*mut c_void, *mut c_void, bool),
-    /// The last argument is the raw byte of a `CSS::ElementBoxKind`: the box kind the element
-    /// asked for, resolved against its computed appearance. It is `FromDisplay` for every layout
-    /// kind but `Normal`, and the build never asks for a box the element says it has none of.
-    pub create_principal_element_layout:
-        unsafe extern "C" fn(*mut c_void, *mut c_void, FfiElementLayoutKind, u8) -> NodeSlotId,
+    /// The box that replaces an element's contents with a single image. Its box owns the image,
+    /// so it is the one principal box the host still builds; every other one is stamped out of
+    /// the element's published box kind and style record.
+    pub create_principal_element_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
     /// Attaches the image observers a box's style asks for. Principal and pseudo-element boxes
     /// both go through this; nothing about it depends on which the box is.
     pub attach_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId),
@@ -145,6 +144,111 @@ pub(crate) fn resolved_element_box_kind(box_kind: ElementBoxKind, appearance_is_
         return ElementBoxKind::FromDisplay;
     }
     box_kind
+}
+
+/// Port of `Element::create_layout_node_for_display_type`: the kind of box a computed display
+/// asks for. `None` for a display that generates no box; the build decides that before it asks.
+pub(crate) fn node_kind_for_display(display: FfiDisplay) -> Option<NodeKind> {
+    if display.is_none() || display.is_contents() {
+        return None;
+    }
+    if display.is_table_inside()
+        || display.is_table_row_group()
+        || display.is_table_header_group()
+        || display.is_table_footer_group()
+        || display.is_table_row()
+    {
+        return Some(NodeKind::Box);
+    }
+    if display.is_list_item() {
+        return Some(NodeKind::ListItemBox);
+    }
+    if display.is_table_cell() {
+        return Some(NodeKind::BlockContainer);
+    }
+    if display.is_table_column() || display.is_table_column_group() || display.is_table_caption() {
+        // FIXME: This is just an incorrect placeholder until we improve table layout support.
+        return Some(NodeKind::BlockContainer);
+    }
+    if display.is_math_inside() {
+        // https://w3c.github.io/mathml-core/#new-display-math-value
+        // MathML elements with a computed display value equal to block math or inline math control box generation
+        // and layout according to their tag name, as described in the relevant sections.
+        // FIXME: Figure out what kind of node we should make for them. For now, we'll stick with a generic Box.
+        return Some(NodeKind::BlockContainer);
+    }
+    if display.is_inline_outside() {
+        if display.is_flow_root_inside() {
+            return Some(NodeKind::BlockContainer);
+        }
+        if display.is_flow_inside() {
+            return Some(NodeKind::InlineNode);
+        }
+        if display.is_flex_inside() || display.is_grid_inside() {
+            return Some(NodeKind::Box);
+        }
+        return Some(NodeKind::InlineNode);
+    }
+    if display.is_flex_inside() || display.is_grid_inside() {
+        return Some(NodeKind::Box);
+    }
+    if display.is_flow_inside() || display.is_flow_root_inside() {
+        return Some(NodeKind::BlockContainer);
+    }
+    eprintln!("FIXME: CSS display {display:?} not implemented yet.");
+    // FIXME: We don't actually support `display: block ruby`, this is just a hack to prevent a crash
+    if display.is_ruby_inside() {
+        return Some(NodeKind::BlockContainer);
+    }
+    Some(NodeKind::InlineNode)
+}
+
+/// The kind of principal box an element asks for. The element's own type and state decided the
+/// box kind at style time; the display mapping answers for the ones that leave the choice to
+/// their display.
+pub(crate) fn node_kind_for_element_box_kind(box_kind: ElementBoxKind, display: FfiDisplay) -> Option<NodeKind> {
+    Some(match box_kind {
+        // The build does not ask for a box it was told does not exist.
+        ElementBoxKind::NoBox => unreachable!("asked for the box of an element that generates none"),
+        ElementBoxKind::FromDisplay => return node_kind_for_display(display),
+        ElementBoxKind::Break => NodeKind::BreakNode,
+        ElementBoxKind::FieldSet => NodeKind::FieldSetBox,
+        ElementBoxKind::Legend => NodeKind::LegendBox,
+        ElementBoxKind::Audio => NodeKind::AudioBox,
+        ElementBoxKind::Video => NodeKind::VideoBox,
+        ElementBoxKind::Canvas => NodeKind::CanvasBox,
+        ElementBoxKind::NavigableContainerViewport => NodeKind::NavigableContainerViewport,
+        ElementBoxKind::TextArea => NodeKind::TextAreaBox,
+        ElementBoxKind::Image => NodeKind::ImageBox,
+        ElementBoxKind::SvgGraphics => NodeKind::SVGGraphicsBox,
+        ElementBoxKind::SvgSvg => NodeKind::SVGSVGBox,
+        ElementBoxKind::SvgText => NodeKind::SVGTextBox,
+        ElementBoxKind::SvgTextPath => NodeKind::SVGTextPathBox,
+        ElementBoxKind::SvgForeignObject => NodeKind::SVGForeignObjectBox,
+        ElementBoxKind::SvgImage => NodeKind::SVGImageBox,
+        ElementBoxKind::SvgGeometry => NodeKind::SVGGeometryBox,
+        ElementBoxKind::InputButton => NodeKind::BlockContainer,
+        ElementBoxKind::InputCheckBox => NodeKind::CheckBox,
+        ElementBoxKind::InputRadioButton => NodeKind::RadioButton,
+        ElementBoxKind::InputRange => NodeKind::RangeInputBox,
+        ElementBoxKind::InputText => NodeKind::TextInputBox,
+    })
+}
+
+/// The kind of box a construction mode other than the normal one builds. Only a content
+/// replacement still asks the host, since its box owns the image it replaces the element with.
+fn node_kind_for_element_layout_kind(
+    layout_kind: FfiElementLayoutKind,
+    box_kind: ElementBoxKind,
+    display: FfiDisplay,
+) -> Option<NodeKind> {
+    match layout_kind {
+        FfiElementLayoutKind::Normal => node_kind_for_element_box_kind(box_kind, display),
+        FfiElementLayoutKind::SvgMask => Some(NodeKind::SVGMaskBox),
+        FfiElementLayoutKind::SvgClipPath => Some(NodeKind::SVGClipBox),
+        FfiElementLayoutKind::SvgPattern => Some(NodeKind::SVGPatternBox),
+        FfiElementLayoutKind::ContentReplacement => unreachable!("a content replacement box is built by the host"),
+    }
 }
 
 fn apply_replaced_display_adjustment(
@@ -2306,15 +2410,17 @@ fn construct_principal_layout_node(
             };
             let created = if box_kind == ElementBoxKind::NoBox {
                 NodeSlotId::INVALID
-            } else {
+            } else if layout_kind == FfiElementLayoutKind::ContentReplacement {
                 // SAFETY: The builder and element remain live throughout construction.
-                unsafe {
-                    (host.callbacks.create_principal_element_layout)(
-                        host.callbacks.builder,
-                        dom_node,
-                        layout_kind,
-                        box_kind as u8,
-                    )
+                unsafe { (host.callbacks.create_principal_element_layout)(host.callbacks.builder, dom_node) }
+            } else {
+                match node_kind_for_element_layout_kind(
+                    layout_kind,
+                    box_kind,
+                    host.published_display(update.style_node),
+                ) {
+                    Some(node_kind) => host.layout().create_element_box(update.style_node, node_kind),
+                    None => NodeSlotId::INVALID,
                 }
             };
             layout_node = created;
@@ -3718,6 +3824,19 @@ impl TreeBuilderHost<'_> {
     /// the style computer for the document's style.
     fn create_document_box(&self) -> NodeSlotId {
         self.create_dom_box(NodeKind::Viewport, None)
+    }
+
+    /// The row an element's principal box is built in. The row is stamped out of the element's
+    /// identity: the kind the mirror's published display asks for, and the record the mirror
+    /// published beside it.
+    fn create_element_box(&self, style_node: u32, kind: NodeKind) -> NodeSlotId {
+        let style_node = StyleNodeID::from_raw(style_node).expect("an element's box is built for its identity");
+        // SAFETY: Entry points guarantee that the arena remains live, and callers hold no reference
+        // derived from it across the allocation.
+        let slot = unsafe { &mut *self.arena }.allocate_unbound();
+        self.arena().stamp_dom_element_row(slot, kind, style_node);
+        assert!(!self.arena().node_shell(slot).is_null());
+        slot
     }
 
     fn create_dom_box(&self, kind: NodeKind, style_node: Option<StyleNodeID>) -> NodeSlotId {

@@ -715,6 +715,8 @@ public:
     void set_display(CSS::Display);
     void set_content_counter_style_dependencies(Vector<ValueComparingRefPtr<CSS::CounterStyle const>>);
 
+    void initialize_stamped_style_record();
+
 private:
     CSS::ComputedStyleRecordView computed_style_record_view() const;
 
