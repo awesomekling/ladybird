@@ -322,6 +322,8 @@ void record_text_connected(DOM::Text& text)
     text.document().style_computer().register_style_node(identity, text);
     style_engine->set_text_is_ascii_whitespace(identity, text.data().is_ascii_whitespace());
     style_engine->set_text_is_in_user_agent_shadow_tree(identity, text_is_in_user_agent_shadow_tree(text));
+    style_engine->set_text_is_password_input(identity, text.is_password_input());
+    style_engine->set_text_data(identity, text.data());
     ensure_dom_order_parent_identity(text.parent(), *style_engine);
 
     Vector<u32, 192> links;
@@ -336,6 +338,17 @@ void record_text_whitespace_state_changed(DOM::Text& text)
     if (!style_engine || text.style_node_id() == no_style_node)
         return;
     style_engine->set_text_is_ascii_whitespace(text.style_node_id(), text.data().is_ascii_whitespace());
+}
+
+// The characters a text node holds are what its box renders, so the layout tree build reads them
+// from the mirror rather than from the node. Data only ever arrives with the node or is replaced
+// wholesale, so those are the two places it is published from.
+void record_text_data_changed(DOM::Text& text)
+{
+    auto* style_engine = style_engine_for(text);
+    if (!style_engine || text.style_node_id() == no_style_node)
+        return;
+    style_engine->set_text_data(text.style_node_id(), text.data());
 }
 
 // The document's identity, minted before anything connects under it.
@@ -419,6 +432,8 @@ void record_subtree_connecting(DOM::Node& root)
             style_computer.register_style_node(identities[i], text_arrivals[i]);
             style_engine.set_text_is_ascii_whitespace(identities[i], text_arrivals[i]->data().is_ascii_whitespace());
             style_engine.set_text_is_in_user_agent_shadow_tree(identities[i], text_is_in_user_agent_shadow_tree(*text_arrivals[i]));
+            style_engine.set_text_is_password_input(identities[i], text_arrivals[i]->is_password_input());
+            style_engine.set_text_data(identities[i], text_arrivals[i]->data());
         }
     }
 
@@ -486,6 +501,12 @@ static void publish_element_selector_features(StyleEngine& style_engine, DOM::El
             style_engine.record_state_delta({ .node = node.value(), .fact = *fact, .new_value = true });
     }
 
+    // An element arriving somewhere new inherits the language of its new ancestors, and a cached
+    // tag it kept from where it used to be says nothing about where it is now: a subtree that
+    // moves while detached is never reached by the walk a `lang` change runs. Recompute before
+    // publishing, so the mirror records what the element resolves to here.
+    if (invalidate_language_cache == InvalidateLanguageCache::Yes)
+        element.invalidate_lang_value();
     auto const language = element.lang_view();
     auto language_atom = language.has_value() ? style_engine.intern_language_atom(*language) : StyleAtomID {};
     auto const directionality = element.directionality() == DOM::Element::Directionality::Rtl ? "rtl"_utf16_fly_string : "ltr"_utf16_fly_string;

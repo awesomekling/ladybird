@@ -454,6 +454,11 @@ void StyleEngine::set_element_language(StyleNodeID node, StyleAtomID language, U
     StyleEngineFFI::style_engine_set_element_language(m_impl, node.value(), language.value(), code_units.data(), code_units.size());
 }
 
+void StyleEngine::set_text_data(StyleNodeID node, Utf16String const& data)
+{
+    StyleEngineFFI::style_engine_set_text_data(m_impl, node.value(), data.to_raw_leaked());
+}
+
 // Recording input gives the next rendering update style work to do, but touches no layout tree
 // and no paintable, so nothing else asks the page for a frame. On a quiet document a change made
 // from a timer would otherwise sit unflushed indefinitely, and a transition it should start would

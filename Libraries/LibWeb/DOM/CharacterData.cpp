@@ -178,6 +178,7 @@ WebIDL::ExceptionOr<void> CharacterData::replace_data(size_t offset, size_t coun
 
     // NB: Called during DOM text mutation, layout is stale.
     if (is<Text>(*this)) {
+        CSS::record_text_data_changed(as<Text>(*this));
         if (auto* parent = this->parent()) {
             if (auto* first_letter_owner = parent->first_letter_owner_for_layout_subtree_from(*parent))
                 first_letter_owner->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::CharacterDataReplaceData);

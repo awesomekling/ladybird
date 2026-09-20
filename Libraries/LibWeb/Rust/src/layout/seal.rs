@@ -40,11 +40,11 @@
 //!   `PaintableRowReset::invoke_callback`.
 //!
 //! **Inputs synced before a pass, never during one.** These are host calls, and they are the
-//! three `note_host_call` sites that remain; each passes `layout_pass_is_running()`, so a call
-//! from inside a pass would still be reported. None has ever fired inside one:
+//! two `note_host_call` sites that remain; each passes `layout_pass_is_running()`, so a call
+//! from inside a pass would still be reported. Neither has ever fired inside one:
 //!
-//! - `text_source` - a text row's character data, synced into the arena ahead of the pass.
-//! - `build_replaced_content_facts` - the intrinsic size of an enrolled replaced box, likewise.
+//! - `build_replaced_content_facts` - the intrinsic size of an enrolled replaced box, synced into
+//!   the arena ahead of the pass.
 //! - `viewport_propagation_facts` - the document element and body facts the viewport propagation
 //!   decides from, read once at the layout entry before the pass begins.
 //!

@@ -3338,18 +3338,37 @@ fn report_list_item_counter_rendering(
     }
 }
 
+/// A generated text row renders from the characters the build resolved rather than from the host
+/// object that was allocated around them, so they are stamped on the row as it arrives.
+fn stamp_generated_text(host: &TreeBuilderHost, node: NodeSlotId, text: Option<ak::Utf16String>) {
+    let Some(text) = text else {
+        return;
+    };
+    // SAFETY: The host callback has returned and no arena borrow survives it.
+    unsafe { &mut *host.arena }.set_generated_text(node, text);
+}
+
+/// The item as the host allocates it, beside the characters a text item spells. The row the host
+/// allocates renders from what the build resolved rather than from the object it allocated, so the
+/// build keeps a reference to the same string it handed over.
 fn generated_content_item(
     item: crate::layout::generated_content::ContentItem,
     nested_marker: NodeSlotId,
-) -> FfiGeneratedContentItem {
+) -> (FfiGeneratedContentItem, Option<ak::Utf16String>) {
     use crate::layout::generated_content::ContentItem;
-    match item {
-        ContentItem::Text(text) => FfiGeneratedContentItem {
-            kind: FfiGeneratedContentItemKind::Text,
-            text: ak::Utf16String::from_utf16(&text).into_raw(),
-            content_index: 0,
-            nested_marker,
-        },
+    let item = match item {
+        ContentItem::Text(text) => {
+            let text = ak::Utf16String::from_utf16(&text);
+            return (
+                FfiGeneratedContentItem {
+                    kind: FfiGeneratedContentItemKind::Text,
+                    text: text.clone().into_raw(),
+                    content_index: 0,
+                    nested_marker,
+                },
+                Some(text),
+            );
+        }
         ContentItem::Image(content_index) => FfiGeneratedContentItem {
             kind: FfiGeneratedContentItemKind::ContentImage,
             text: 0,
@@ -3362,7 +3381,8 @@ fn generated_content_item(
             content_index: 0,
             nested_marker,
         },
-    }
+    };
+    (item, None)
 }
 
 /// Everything the build needs to decide a pseudo-element's box, read from the style mirror and the
@@ -3536,18 +3556,14 @@ fn create_pseudo_element(
             crate::layout::generated_content::resolve_nested_marker_content(layout_host.arena(), owner);
         report_list_item_counter_rendering(state, owner, &marker_content);
         for item in marker_content.items {
+            let (item, text) = generated_content_item(item, marker_slot);
             super::tree_build_seal::note_host_call("pseudo.create_content_item");
             // SAFETY: The builder remains live throughout content creation.
             let content = unsafe {
-                (callbacks.create_content_item)(
-                    callbacks.builder,
-                    style_node,
-                    pseudo_element,
-                    generated_content_item(item, marker_slot),
-                    layout_node,
-                )
+                (callbacks.create_content_item)(callbacks.builder, style_node, pseudo_element, item, layout_node)
             };
             if !content.is_invalid() {
+                stamp_generated_text(&layout_host, content, text);
                 layout_host.attach_child(marker_slot, layout_host.created(content), NodeSlotId::INVALID);
             }
         }
@@ -3577,20 +3593,16 @@ fn create_pseudo_element(
             {
                 continue;
             }
+            let (item, text) = generated_content_item(item, NodeSlotId::INVALID);
             super::tree_build_seal::note_host_call("pseudo.create_content_item");
             // SAFETY: The builder remains live throughout content creation.
             let content_item = unsafe {
-                (callbacks.create_content_item)(
-                    callbacks.builder,
-                    style_node,
-                    pseudo_element,
-                    generated_content_item(item, NodeSlotId::INVALID),
-                    layout_node,
-                )
+                (callbacks.create_content_item)(callbacks.builder, style_node, pseudo_element, item, layout_node)
             };
             if content_item.is_invalid() {
                 continue;
             }
+            stamp_generated_text(&layout_host, content_item, text);
             let current_parent = state.current_parent();
             let is_inline_outside = node_is_inline_outside(&layout_host, content_item);
             insert_node_into_inline_or_block_ancestor(
@@ -4659,11 +4671,10 @@ pub(crate) fn find_first_letter_in_text(
 }
 
 fn find_first_letter_in_layout_text(host: &TreeBuilderHost, node: LayoutNode) -> FfiFirstLetterTarget {
-    // SAFETY: Tree building owns the arena, and no borrow crosses the source callback.
-    let source = unsafe { super::rendered_text::text_source_for_node(host.arena, node) };
-    // SAFETY: Copy the raw source before any further host call. First-letter
-    // matching determines source ranges before text transforms are applied.
-    let text = unsafe { source.text.to_utf16() }.expect("first-letter source carries no storage");
+    // First-letter matching determines source ranges before text transforms are applied, so it
+    // reads the published characters rather than the rendered ones.
+    let source = host.arena().published_text_source(node, false);
+    let text = source.data.to_utf16();
     let segmenter = GraphemeSegmenter::new(&text);
     let preserves_segment_breaks = matches!(
         host.style(host.parent(node))
@@ -4709,6 +4720,25 @@ fn create_first_letter_boxes(host: &DomTreeBuilderHost<'_>, style_node: u32, tar
             nodes.remainder_slice,
             target.letter_end,
             target.source_length,
+        );
+    } else {
+        // A `::first-letter` over generated content slices the characters the build resolved
+        // rather than a DOM text node's data, so each slice renders the whole of its own share
+        // and neither carries a source range.
+        let published = layout_host
+            .arena()
+            .published_text_source(target.text_layout_node, false);
+        let source = published.data.to_utf16();
+        let letter_end = target.letter_end.min(source.len());
+        stamp_generated_text(
+            &layout_host,
+            nodes.first_letter_slice,
+            Some(ak::Utf16String::from_utf16(&source[..letter_end])),
+        );
+        stamp_generated_text(
+            &layout_host,
+            nodes.remainder_slice,
+            Some(ak::Utf16String::from_utf16(&source[letter_end..])),
         );
     }
     let wrapper = layout_host.created(nodes.wrapper);

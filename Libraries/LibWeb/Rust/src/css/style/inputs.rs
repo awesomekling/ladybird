@@ -152,6 +152,17 @@ pub struct TextStyleParentFacts {
     pub style_record: u64,
 }
 
+/// What the style mirror publishes about a text node's characters. The characters are shared with
+/// the document rather than copied; the language tag is the one the text node's DOM parent element
+/// resolves to, and is resolved only where the row's transform reads one, since a tag the document
+/// never consulted must not reach the rendering key.
+#[derive(Default)]
+pub struct PublishedTextSource {
+    pub data: ak::Utf16String,
+    pub locale: Option<Vec<u16>>,
+    pub is_password_input: bool,
+}
+
 /// What a published record says about the content a box is generated from.
 pub struct PublishedContentFacts {
     pub counters_are_none: bool,
@@ -682,6 +693,60 @@ impl RetainedState {
     /// Record the text node's whitespace-only state, as its data now spells it.
     pub fn set_text_is_ascii_whitespace(&mut self, node: StyleNodeID, value: bool) {
         self.tree.set_text_is_ascii_whitespace(node, value, &mut self.memory);
+    }
+
+    /// Everything a text node's box renders from, taken in one borrow of the mirror.
+    #[must_use]
+    pub fn published_text_source(&self, node: StyleNodeID, uses_locale: bool) -> PublishedTextSource {
+        let Some(data) = self.tree.text_data(node) else {
+            return PublishedTextSource::default();
+        };
+        PublishedTextSource {
+            data: data.clone(),
+            locale: uses_locale
+                .then(|| self.text_language_tag(node).to_vec())
+                .filter(|tag| !tag.is_empty()),
+            is_password_input: self.tree.text_is_password_input(node),
+        }
+    }
+
+    /// The element's resolved language tag, empty where it has none.
+    #[must_use]
+    pub fn element_language_tag(&self, node: StyleNodeID) -> &[u16] {
+        self.facts.language_tag_of(node)
+    }
+
+    /// The language tag a text node's transform reads: the one its DOM parent element resolves to.
+    /// A text node under a shadow root or the document has no element above it and reads none, the
+    /// same answer the document gives for a text node whose parent is not an element.
+    #[must_use]
+    pub fn text_language_tag(&self, node: StyleNodeID) -> &[u16] {
+        self.tree
+            .text_parent(node)
+            .filter(|parent| self.tree.host_of(*parent).is_none() && !self.tree.is_relation_only(*parent))
+            .map_or(&[][..], |parent| self.facts.language_tag_of(parent))
+    }
+
+    /// Whether the text node holds the value of a password input.
+    #[must_use]
+    pub fn text_is_password_input(&self, node: StyleNodeID) -> bool {
+        self.tree.text_is_password_input(node)
+    }
+
+    /// Record whether the text node holds the value of a password input.
+    pub fn set_text_is_password_input(&mut self, node: StyleNodeID, value: bool) {
+        self.tree.set_text_is_password_input(node, value, &mut self.memory);
+    }
+
+    /// The characters the text node holds.
+    #[must_use]
+    pub fn text_data(&self, node: StyleNodeID) -> Option<&ak::Utf16String> {
+        self.tree.text_data(node)
+    }
+
+    /// Record the characters the text node now holds.
+    pub fn set_text_data(&mut self, node: StyleNodeID, data: ak::Utf16String) {
+        self.tree.set_text_data(node, data, &mut self.memory);
     }
 
     /// Record which kind of tree the text node arrived in.

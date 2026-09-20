@@ -732,6 +732,7 @@ impl StyleNodeTree {
         tree.text.parent.push(None);
         tree.text.next_sibling.push(None);
         tree.text.previous_sibling.push(None);
+        tree.text.data.push(ak::Utf16String::default());
         tree.capacity_bytes = tree.recompute_capacity_bytes();
         memory.reserve_required(MemoryCategory::RelationColumns, tree.capacity_bytes);
         tree
@@ -982,6 +983,7 @@ impl StyleNodeTree {
                 self.text.parent.push(None);
                 self.text.next_sibling.push(None);
                 self.text.previous_sibling.push(None);
+                self.text.data.push(ak::Utf16String::default());
                 index
             }
         };
@@ -989,6 +991,8 @@ impl StyleNodeTree {
         self.text.marks.clear(index as usize);
         self.text.is_ascii_whitespace.set(index as usize, false);
         self.text.is_in_user_agent_shadow_tree.set(index as usize, false);
+        self.text.is_password_input.set(index as usize, false);
+        self.text.data[index as usize] = ak::Utf16String::default();
         let current = self.text_capacity_bytes();
         self.record_capacity_change(memory, before, current);
         StyleNodeID::text(index)
@@ -1009,6 +1013,8 @@ impl StyleNodeTree {
             self.text.marks.clear(index as usize);
             self.text.is_ascii_whitespace.set(index as usize, false);
             self.text.is_in_user_agent_shadow_tree.set(index as usize, false);
+            self.text.is_password_input.set(index as usize, false);
+            self.text.data[index as usize] = ak::Utf16String::default();
             self.text.parent[index as usize] = None;
             self.text.next_sibling[index as usize] = None;
             self.text.previous_sibling[index as usize] = None;
@@ -1046,6 +1052,44 @@ impl StyleNodeTree {
     pub fn text_is_in_user_agent_shadow_tree(&self, node: StyleNodeID) -> bool {
         node.text_index()
             .is_some_and(|index| self.text.is_in_user_agent_shadow_tree.contains(index as usize))
+    }
+
+    /// Whether the text node holds the value of a password input. Only a text node is asked;
+    /// every other identity answers no.
+    #[must_use]
+    pub fn text_is_password_input(&self, node: StyleNodeID) -> bool {
+        node.text_index()
+            .is_some_and(|index| self.text.is_password_input.contains(index as usize))
+    }
+
+    /// Record that the text node holds the value of a password input.
+    pub fn set_text_is_password_input(&mut self, node: StyleNodeID, value: bool, memory: &mut MemoryController) {
+        let Some(index) = node.text_index() else {
+            return;
+        };
+        let before = self.text_capacity_bytes();
+        self.text.is_password_input.set(index as usize, value);
+        let current = self.text_capacity_bytes();
+        self.record_capacity_change(memory, before, current);
+    }
+
+    /// The characters the text node holds, or none for any other identity.
+    #[must_use]
+    pub fn text_data(&self, node: StyleNodeID) -> Option<&ak::Utf16String> {
+        let index = node.text_index()?;
+        self.text.data.get(index as usize)
+    }
+
+    /// Record the characters the text node now holds. The string is shared with the document
+    /// rather than copied, so this costs one reference.
+    pub fn set_text_data(&mut self, node: StyleNodeID, data: ak::Utf16String, memory: &mut MemoryController) {
+        let Some(index) = node.text_index() else {
+            return;
+        };
+        let before = self.text_capacity_bytes();
+        self.text.data[index as usize] = data;
+        let current = self.text_capacity_bytes();
+        self.record_capacity_change(memory, before, current);
     }
 
     /// Record which kind of tree the text node arrived in.
@@ -2161,6 +2205,13 @@ struct TextRows {
     /// Whether the node sits in a user agent shadow tree. An element records the same fact among
     /// its construction facts; a text node has no element columns, so it records it here.
     is_in_user_agent_shadow_tree: BitColumn,
+    /// Whether the node is the text of a password input, which decides whether the layout tree
+    /// build renders it as the replacement character rather than as itself.
+    is_password_input: BitColumn,
+    /// The characters the node holds, as the document spells them. The layout tree build reads
+    /// them to render a text box, so they are published where the data arrives and wherever it is
+    /// replaced. The column shares the document's storage rather than copying it.
+    data: Vec<ak::Utf16String>,
     pending_reuse: Vec<u32>,
     free_indexes: Vec<u32>,
 }
@@ -2168,13 +2219,14 @@ struct TextRows {
 impl TextRows {
     fn capacity_bytes(&self) -> u64 {
         capacity_bytes! {
-            shallow [self.parent, self.next_sibling, self.previous_sibling];
+            shallow [self.parent, self.next_sibling, self.previous_sibling, self.data];
             cached [];
             nested [
                 self.live.capacity_bytes(),
                 self.marks.capacity_bytes(),
                 self.is_ascii_whitespace.capacity_bytes(),
                 self.is_in_user_agent_shadow_tree.capacity_bytes(),
+                self.is_password_input.capacity_bytes(),
             ];
             skip [self.pending_reuse, self.free_indexes];
         }
