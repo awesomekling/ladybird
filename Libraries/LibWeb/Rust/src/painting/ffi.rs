@@ -1439,6 +1439,25 @@ pub unsafe extern "C" fn layout_arena_set_form_control_paint_facts(
 
 /// # Safety
 ///
+/// `arena` must be a live handle used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_before_invalidation_journal_drain(arena: *mut c_void) {
+    let arena = unsafe { arena_from_handle(arena) };
+    crate::painting::published_immutable::before_journal_publication(arena);
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle used on the document thread and must have had a matching
+/// `layout_arena_before_invalidation_journal_drain` call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_after_invalidation_journal_drain(arena: *mut c_void) {
+    let arena = unsafe { arena_from_handle(arena) };
+    crate::painting::published_immutable::after_journal_publication(arena);
+}
+
+/// # Safety
+///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_canvas_paint_facts(
