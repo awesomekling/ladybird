@@ -138,6 +138,8 @@ fn commit_subtree(
         paintables.schedule_scrollable_overflow_recalculation(node);
     }
 
+    paintables.arena().publish_layout_style_snapshot_geometry(node);
+
     paintables.stamp_containing_block(node, entry);
     if reuses_committed_subtree {
         return;
@@ -193,6 +195,7 @@ pub(crate) fn commit_replacing(
     let links_by_slot = pass_fragments.links_by_slot();
     crate::painting::published_immutable::before_publication(arena);
     arena.note_layout_commit();
+    arena.begin_layout_style_snapshot_commit();
     let mut paintables = crate::painting::paintable_build::PaintableCommit::new(arena, root);
     paintables.begin_commit();
     // What the pass itself found out comes before what committing it finds out.
@@ -216,6 +219,7 @@ pub(crate) fn commit_replacing(
         }
     }
     crate::painting::published_immutable::published(paintables.arena());
+    paintables.arena().finish_layout_style_snapshot_commit();
     CommitNotifications {
         row_resets: paintables.take_row_reset_notifications(),
         messages,

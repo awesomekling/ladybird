@@ -41,6 +41,7 @@ mod replaced_with_children_formatting_context;
 pub(crate) mod run_records;
 pub(crate) mod seal;
 pub(crate) mod sizing_context;
+pub mod style_snapshot;
 pub(crate) mod style_values;
 pub mod svg_formatting_context;
 pub mod table_formatting_context;

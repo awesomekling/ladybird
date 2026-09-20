@@ -3177,6 +3177,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         &[
             manifest_dir.join("src/layout/used_values.rs"),
             manifest_dir.join("src/layout/commit.rs"),
+            manifest_dir.join("src/layout/style_snapshot.rs"),
             manifest_dir.join("src/layout/geometry.rs"),
             manifest_dir.join("src/layout/style_values.rs"),
             manifest_dir.join("src/layout/node_facts.rs"),

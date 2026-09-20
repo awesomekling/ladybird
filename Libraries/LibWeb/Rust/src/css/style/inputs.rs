@@ -8,6 +8,22 @@ use smallvec::SmallVec;
 
 use super::*;
 
+impl StyleEngine {
+    pub(crate) fn install_layout_style_snapshots(
+        &mut self,
+        snapshots: std::sync::Arc<crate::layout::style_snapshot::LayoutStyleSnapshotStore>,
+    ) {
+        self.retained.layout_style_snapshots = snapshots;
+    }
+
+    pub(crate) fn layout_style_snapshot(
+        &self,
+        node: StyleNodeID,
+    ) -> Option<crate::layout::style_snapshot::LayoutStyleSnapshotRow> {
+        self.retained.layout_style_snapshots.row(node)
+    }
+}
+
 /// What an element's published style record says about the box it asks for. The layout tree build
 /// reads this for an element that has no box yet, where the arena has nothing to answer from.
 #[derive(Clone, Copy)]
@@ -790,6 +806,7 @@ impl RetainedState {
 
     /// Retire text identities as their nodes disconnect.
     pub fn retire_text_style_nodes(&mut self, nodes: &[StyleNodeID]) {
+        self.layout_style_snapshots.retire(nodes);
         self.tree.retire_texts(nodes, &mut self.memory);
     }
 
@@ -1374,6 +1391,7 @@ impl StyleEngineState {
                 next_style_transaction_version: StyleTransactionVersion(1),
                 document_style_computation_inputs: None,
                 font_resolution: None,
+                layout_style_snapshots: Default::default(),
                 layer_topology_version: 0,
                 sheet_order_version: 0,
                 specified_values: SpecifiedValues::new(),
@@ -2129,6 +2147,7 @@ impl StyleEngineState {
             retired_nodes.push(node);
         }
         if !retired_nodes.is_empty() {
+            self.retained.layout_style_snapshots.retire(&retired_nodes);
             self.retained
                 .tree
                 .retire_elements(&retired_nodes, &mut self.retained.memory);

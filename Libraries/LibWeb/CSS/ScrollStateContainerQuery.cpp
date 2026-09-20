@@ -12,6 +12,7 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/Layout/Box.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
@@ -21,6 +22,11 @@
 namespace Web::CSS {
 
 using namespace Parser::ValueParserFFI;
+
+static void publish_scroll_state_snapshots(DOM::Document& document, ReadonlySpan<Layout::RustFFI::FfiLayoutStyleScrollState> snapshots)
+{
+    Layout::RustFFI::layout_arena_publish_style_snapshot_scroll_states(document.layout_node_arena().handle(), snapshots.data(), snapshots.size());
+}
 
 static bool is_scroll_state_container(DOM::Element const& element)
 {
@@ -119,7 +125,18 @@ static u8 snapped_axes(DOM::Document& document, DOM::Element& element, Layout::N
 
 ScrollStateSnapshot ScrollStateQueryContainers::snapshot_for_query(DOM::Element& container)
 {
-    return m_containers.ensure(container).snapshot;
+    if (auto it = m_containers.find(container); it != m_containers.end())
+        return it->value.snapshot;
+    auto& state = m_containers.ensure(container);
+    Layout::RustFFI::FfiLayoutStyleScrollState snapshot {
+        .style_node = container.style_node_id().value(),
+        .stuck = 0,
+        .snapped = 0,
+        .scrollable = 0,
+        .scrolled = 0,
+    };
+    publish_scroll_state_snapshots(container.document(), { &snapshot, 1 });
+    return state.snapshot;
 }
 
 void ScrollStateQueryContainers::did_scroll_relatively(Layout::Node const& scrolling_box, CSSPixelPoint delta)
@@ -161,6 +178,7 @@ bool ScrollStateQueryContainers::snapshot_post_layout_state(DOM::Document& docum
     document.update_paint_and_hit_testing_properties_if_needed();
 
     Vector<GC::Ref<DOM::Element>> containers_to_forget;
+    Vector<Layout::RustFFI::FfiLayoutStyleScrollState> published_snapshots;
     bool any_state_changed = false;
     for (auto& [element, container] : m_containers) {
         if (which == Snapshot::NewContainersOnly && container.has_been_snapshotted)
@@ -181,11 +199,18 @@ bool ScrollStateQueryContainers::snapshot_post_layout_state(DOM::Document& docum
             snapshot.scrolled = scrolling_box->is_viewport() ? m_viewport_last_relative_scroll_direction : element->last_relative_scroll_direction();
         }
 
-        if (snapshot == container.snapshot)
-            continue;
-        container.snapshot = snapshot;
-        any_state_changed = true;
-        Invalidation::invalidate_descendant_styles_depending_on_size_container_query(element);
+        if (snapshot != container.snapshot) {
+            container.snapshot = snapshot;
+            any_state_changed = true;
+            Invalidation::invalidate_descendant_styles_depending_on_size_container_query(element);
+        }
+        published_snapshots.append({
+            .style_node = element->style_node_id().value(),
+            .stuck = snapshot.stuck,
+            .snapped = snapshot.snapped,
+            .scrollable = snapshot.scrollable,
+            .scrolled = snapshot.scrolled,
+        });
     }
 
     for (auto& element : containers_to_forget) {
@@ -195,7 +220,15 @@ bool ScrollStateQueryContainers::snapshot_post_layout_state(DOM::Document& docum
             any_state_changed = true;
             Invalidation::invalidate_descendant_styles_depending_on_size_container_query(element);
         }
+        published_snapshots.append({
+            .style_node = element->style_node_id().value(),
+            .stuck = 0,
+            .snapped = 0,
+            .scrollable = 0,
+            .scrolled = 0,
+        });
     }
+    publish_scroll_state_snapshots(document, published_snapshots.span());
     return any_state_changed;
 }
 
@@ -203,6 +236,37 @@ void ScrollStateQueryContainers::visit_edges(GC::Cell::Visitor& visitor)
 {
     for (auto& it : m_containers)
         visitor.visit(it.key);
+}
+
+void ScrollStateQueryContainers::verify_published_style_snapshots(DOM::Document& document) const
+{
+    auto const* path = getenv("LIBWEB_VERIFY_LAYOUT_STYLE_SNAPSHOT_LOG");
+    if (!path)
+        return;
+    u64 comparisons = 0;
+    u64 mismatches = 0;
+    for (auto const& [element, container] : m_containers) {
+        auto row = Layout::RustFFI::layout_arena_style_snapshot_row(document.layout_node_arena().handle(), element->style_node_id().value());
+        ++comparisons;
+        mismatches += row.has_row ? 0 : 1;
+        if (auto* layout_node = element->unsafe_layout_node(); layout_node && Painting::has_committed_box(*layout_node)) {
+            comparisons += 3;
+            mismatches += row.has_committed_box ? 0 : 1;
+            mismatches += row.content_width_raw == Painting::content_width(*layout_node).raw_value() ? 0 : 1;
+            mismatches += row.content_height_raw == Painting::content_height(*layout_node).raw_value() ? 0 : 1;
+        }
+        comparisons += 4;
+        mismatches += row.stuck == container.snapshot.stuck ? 0 : 1;
+        mismatches += row.snapped == container.snapshot.snapped ? 0 : 1;
+        mismatches += row.scrollable == container.snapshot.scrollable ? 0 : 1;
+        mismatches += row.scrolled == container.snapshot.scrolled ? 0 : 1;
+    }
+    if (comparisons == 0)
+        return;
+    if (auto* file = fopen(path, "a")) {
+        fprintf(file, "LAYOUT STYLE SNAPSHOT SUMMARY: comparisons=%llu mismatches=%llu\n", comparisons, mismatches);
+        fclose(file);
+    }
 }
 
 }
