@@ -843,6 +843,41 @@ impl AnimationTimelineSamples {
     }
 }
 
+/// The font metrics a `rem` resolves against, as the host last left them.
+///
+/// The host keeps these in a member it refreshes only while the document element itself is
+/// computed, so a document whose root was never recomputed still resolves every `rem` against the
+/// default font. The row is therefore published at each of the host's writes rather than derived
+/// from the root element's committed style: a stage that read the committed style would disagree
+/// with the host wherever the member is stale.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct RootElementFontMetrics {
+    pub(crate) font_size: f64,
+    pub(crate) x_height: f64,
+    pub(crate) cap_height: f64,
+    pub(crate) zero_advance: f64,
+    pub(crate) line_height: f64,
+    pub(crate) depends_on_viewport_metrics: bool,
+}
+
+impl RootElementFontMetrics {
+    /// The five metrics arrive as the bit patterns of their doubles, the way the style record's
+    /// cache key already packs them.
+    pub(crate) const WORDS: usize = 5;
+
+    pub(crate) fn from_words(words: &[u64], depends_on_viewport_metrics: bool) -> Self {
+        assert!(words.len() == Self::WORDS);
+        Self {
+            font_size: f64::from_bits(words[0]),
+            x_height: f64::from_bits(words[1]),
+            cap_height: f64::from_bits(words[2]),
+            zero_advance: f64::from_bits(words[3]),
+            line_height: f64::from_bits(words[4]),
+            depends_on_viewport_metrics,
+        }
+    }
+}
+
 /// Whether any of an element's animations for one pseudo-element is relevant, which is what
 /// `Element::get_animations_internal()` filters its list by. `None` where any single row declines
 /// to answer, since an unanswered row could be the relevant one.

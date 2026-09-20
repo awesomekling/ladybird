@@ -1062,6 +1062,19 @@ impl RetainedState {
         &self.animation_timeline_samples
     }
 
+    /// Record the font metrics a `rem` resolves against. Published at every one of the host's
+    /// writes, since the host refreshes them while the document element is computed and a style
+    /// update can therefore cross one.
+    pub fn set_root_element_font_metrics(&mut self, words: &[u64], depends_on_viewport_metrics: bool) {
+        self.root_element_font_metrics =
+            animations::RootElementFontMetrics::from_words(words, depends_on_viewport_metrics);
+    }
+
+    #[must_use]
+    pub(crate) fn root_element_font_metrics(&self) -> animations::RootElementFontMetrics {
+        self.root_element_font_metrics
+    }
+
     /// Record the custom properties an element declares or references. Also an index rather than an
     /// input, and for the same reason: it answers which elements an `@property` registration reaches.
     pub fn set_element_custom_property_names(
@@ -1469,6 +1482,7 @@ impl StyleEngineState {
                 animation_timing_rows: Default::default(),
                 animation_effect_descriptions: Default::default(),
                 animation_timeline_samples: Default::default(),
+                root_element_font_metrics: Default::default(),
                 animation_keyframes: Default::default(),
                 custom_property_registrations_changed: false,
                 pending_element_style_computation_selections: HashMap::default(),
