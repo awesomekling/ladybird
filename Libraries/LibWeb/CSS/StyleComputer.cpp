@@ -3538,7 +3538,7 @@ ComputationContext const& StyleComputer::get_computation_context_for_property(Pr
 }
 
 static ComputedValuesFFI::FfiBoxTypeTransformationInput make_box_type_transformation_input(
-    DOM::AbstractElement abstract_element, Optional<Display> known_parent_display = {})
+    DOM::AbstractElement abstract_element, Optional<Display> known_parent_display = {}, Optional<u32> published_adjustment_facts = {})
 {
     auto& element = abstract_element.element();
 
@@ -3562,7 +3562,7 @@ static ComputedValuesFFI::FfiBoxTypeTransformationInput make_box_type_transforma
     }
 
     return ComputedValuesFFI::rust_box_type_transformation_input(
-        element_box_type_adjustment_facts(element),
+        published_adjustment_facts.value_or_lazy_evaluated([&] { return element_box_type_adjustment_facts(element); }),
         abstract_element.pseudo_element().has_value()
             ? ComputedValuesFFI::FfiStyleAdjustmentTarget::PseudoElement
             : ComputedValuesFFI::FfiStyleAdjustmentTarget::Element,
@@ -5681,14 +5681,12 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
 
         NonnullRefPtr<ComputedStyleWorkingSet> working_set;
         RefPtr<StyleValue const> new_font_size;
-        Vector<u8> document_supported_color_scheme_codes;
         ComputedValuesFFI::FfiEffectiveColorSchemeInput effective_color_scheme_input {};
         ComputedValuesFFI::FfiBoxTypeTransformationInput box_type_input {};
         Optional<DOM::AbstractElement::TreeCountingFunctionResolutionContext> tree_counting_context;
         Vector<ComputedValuesFFI::FfiRandomBaseValue> random_base_values;
         Vector<String> style_sheet_base_urls;
         Vector<ComputedValuesFFI::FfiStyleSheetResourceContext> style_sheet_resource_contexts;
-        String document_base_url;
         ComputedValuesFFI::FfiStyleComputationEnvironment computation_environment {};
         OwnPtr<CustomPropertyResolutionState> custom_property_resolution;
         GC::RootVector<GC::Ref<Animations::KeyframeEffect>> animation_effects;
@@ -5773,21 +5771,20 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         }
 
         auto inheritance_parent = abstract_element.element_to_inherit_style_from();
-        auto document_supported_color_schemes = style_computer.document().supported_color_schemes();
-        if (document_supported_color_schemes.has_value()) {
-            state.document_supported_color_scheme_codes.ensure_capacity(document_supported_color_schemes->size());
-            for (auto const& scheme : *document_supported_color_schemes)
-                state.document_supported_color_scheme_codes.unchecked_append(to_underlying(preferred_color_scheme_from_string(scheme)));
-        }
+        auto const& document_environment = style_computer.ensure_document_environment_for_style_update();
         state.effective_color_scheme_input = {
-            .preferred_color_scheme = static_cast<u8>(to_underlying(style_computer.document().page().preferred_color_scheme())),
-            .has_document_supported_schemes = document_supported_color_schemes.has_value(),
-            .document_supported_scheme_codes = state.document_supported_color_scheme_codes.data(),
-            .document_supported_scheme_count = state.document_supported_color_scheme_codes.size(),
+            .preferred_color_scheme = document_environment.preferred_color_scheme,
+            .has_document_supported_schemes = document_environment.has_supported_color_schemes,
+            .document_supported_scheme_codes = document_environment.supported_color_scheme_codes.data(),
+            .document_supported_scheme_count = document_environment.supported_color_scheme_codes.size(),
         };
         computed_style.clear_effective_color_scheme();
 
-        state.box_type_input = make_box_type_transformation_input(abstract_element);
+        auto published_adjustment_fact_row = style_computer.style_engine().element_adjustment_facts(abstract_element.element().style_node_id());
+        Optional<u32> published_adjustment_facts;
+        if (published_adjustment_fact_row >> 32)
+            published_adjustment_facts = static_cast<u32>(published_adjustment_fact_row);
+        state.box_type_input = make_box_type_transformation_input(abstract_element, {}, published_adjustment_facts);
         if (computation_requirements->uses_tree_counting_function)
             state.tree_counting_context = abstract_element.tree_counting_function_resolution_context();
         state.random_base_values.ensure_capacity(computation_requirements->unfixed_random_sharing_count);
@@ -5823,9 +5820,9 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 state.style_sheet_resource_contexts[slot].base_url_length = bytes.size();
             }
         }
-        if (computation_requirements->environment_requirements & ComputedValuesFFI::CASCADED_ENVIRONMENT_NEEDS_DOCUMENT_BASE_URL)
-            state.document_base_url = abstract_element.document().serialized_base_url();
-        auto document_base_url_bytes = state.document_base_url.bytes();
+        auto document_base_url_bytes = computation_requirements->environment_requirements & ComputedValuesFFI::CASCADED_ENVIRONMENT_NEEDS_DOCUMENT_BASE_URL
+            ? document_environment.serialized_base_url.bytes()
+            : ReadonlyBytes {};
         state.computation_environment = {
             .box_type_input = state.box_type_input,
             .color_scheme_input = state.effective_color_scheme_input,
@@ -5840,7 +5837,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             .document_base_url_length = document_base_url_bytes.size(),
             .style_sheet_resource_contexts = state.style_sheet_resource_contexts.data(),
             .style_sheet_resource_context_count = state.style_sheet_resource_contexts.size(),
-            .device_pixels_per_css_pixel = style_computer.m_document->page().client().device_pixels_per_css_pixel(),
+            .device_pixels_per_css_pixel = document_environment.device_pixels_per_css_pixel,
             .initial_font_size_raw = InitialValues::font_size().raw_value(),
             .default_font_size_raw = style_computer.default_user_font_size().raw_value(),
         };
