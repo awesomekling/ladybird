@@ -2667,6 +2667,17 @@ void Node::post_connection()
 {
 }
 
+// Whether a node sits inside a blocking wheel event handler is inherited from its parents, so a
+// node that arrives somewhere new has to derive it again. Both walks that bring a node somewhere
+// new visit shadow-including inclusive descendants in tree order, so each node's parent has
+// already settled by the time this runs for it and one step per node is enough.
+static void derive_inside_blocking_wheel_event_handler_state_after_tree_change(Node& node)
+{
+    if (!node.document().may_have_blocking_wheel_event_listener())
+        return;
+    (void)node.update_inside_blocking_wheel_event_handler_state();
+}
+
 void Node::inserted()
 {
     // NB: The DOM insertion steps visit shadow-including inclusive descendants in tree order,
@@ -2680,6 +2691,7 @@ void Node::inserted()
     if (is_connected())
         document().page().keyboard_scroll_dom_tree_changed(*this);
     recompute_editable_subtree_flag();
+    derive_inside_blocking_wheel_event_handler_state_after_tree_change(*this);
 
     // Text an element clones into its shadow tree from its own insertion steps is not covered by a
     // subtree arrival, so it takes its identity here.
@@ -2737,6 +2749,7 @@ void Node::moved_from(IsSubtreeRoot, GC::Ptr<Node>)
     if (is_html_body_element() || is_html_frameset_element())
         document().page().keyboard_scroll_dom_tree_changed(*this);
     recompute_editable_subtree_flag();
+    derive_inside_blocking_wheel_event_handler_state_after_tree_change(*this);
 }
 
 static bool is_root_wheel_event_target(Node const& node)

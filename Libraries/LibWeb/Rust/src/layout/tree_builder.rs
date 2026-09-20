@@ -119,7 +119,10 @@ pub struct FfiDomTreeBuilderCallbacks {
     /// identity is the root of that subtree, or 0 when the clear is not bounded to one.
     pub svg_resource_box_survives: unsafe extern "C" fn(*mut c_void, NodeSlotId, u32) -> bool,
     pub create_first_letter_nodes: unsafe extern "C" fn(*mut c_void, u32, FfiFirstLetterTarget) -> FfiFirstLetterNodes,
-    pub prepare_principal_element: unsafe extern "C" fn(*mut c_void, u32, bool),
+    /// Computes the style of an element the walk reached through a bypass path without one. The
+    /// style stage settles every element it walks; a top-layer, slot-projection or SVG-reference
+    /// bypass can reach one it did not.
+    pub restyle_bypass_path_element: unsafe extern "C" fn(*mut c_void, u32),
     /// Attaches the image resources a box's style asks for. Principal and pseudo-element boxes
     /// both go through this; nothing about it depends on which the box is. The flag says the box
     /// replaces its element's contents with a single image, which it owns the provider for.
@@ -2446,15 +2449,13 @@ fn construct_principal_layout_node(
                 host.layout().set_children_are_inline(box_kept, false);
             }
         }
-        super::tree_build_seal::note_host_call("prepare_principal_element");
-        // SAFETY: The builder remains live, and the identity names a live element.
-        unsafe {
-            (host.callbacks.prepare_principal_element)(
-                host.callbacks.builder,
-                update.style_node,
-                should_create_layout_node,
-            );
-        };
+        if should_create_layout_node {
+            super::tree_build_seal::note_host_call("restyle_bypass_path_element");
+            // SAFETY: The builder remains live, and the identity names a live element.
+            unsafe {
+                (host.callbacks.restyle_bypass_path_element)(host.callbacks.builder, update.style_node);
+            };
+        }
         // The record the box is built from is held for the whole build, taken after the host has
         // had its chance to compute a style the element arrived here without.
         update.state.pin_style_record_for_build(host, element_identity);

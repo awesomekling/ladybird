@@ -541,13 +541,10 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
             return create_first_letter_nodes(as<DOM::Element>(dom_node_for_style_node(*builder.m_document, style_node)), target); },
-        .prepare_principal_element = [](void* builder_pointer, u32 style_node, bool should_create_layout_node) {
+        .restyle_bypass_path_element = [](void* builder_pointer, u32 style_node) {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
-            auto& element = as<DOM::Element>(dom_node_for_style_node(*builder.m_document, style_node));
-            element.update_inside_blocking_wheel_event_handler_state();
-            if (should_create_layout_node)
-                update_style_if_needed_for_layout_tree_bypass_path(element); },
+            update_style_if_needed_for_layout_tree_bypass_path(as<DOM::Element>(dom_node_for_style_node(*builder.m_document, style_node))); },
         .attach_style_resources = [](void* builder_pointer, Compositing::RustFFI::NodeSlotId slot, bool owns_content_replacement_image) {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
