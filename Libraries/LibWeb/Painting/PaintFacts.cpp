@@ -135,6 +135,7 @@ static Layout::RustFFI::FfiImageContent image_content_facts(GC::Ptr<HTML::Decode
     if (auto const* svg_image_data = as_if<SVG::SVGDecodedImageData>(*decoded_image_data)) {
         content.kind = Layout::RustFFI::FfiImageContentKind::Vector;
         content.vector_content_identity = svg_image_data->vector_content_identity();
+        content.vector_image_identity = svg_image_data->vector_image_identity();
         content.vector_has_active_view_box = svg_image_data->has_active_view_box();
         return content;
     }

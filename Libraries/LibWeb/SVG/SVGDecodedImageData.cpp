@@ -167,13 +167,28 @@ ErrorOr<GC::Ref<SVGDecodedImageData>> SVGDecodedImageData::create(GC::Ref<Page> 
     return svg_image_data;
 }
 
+// Images a display list can still name. The identity never repeats, so a request naming a
+// collected image finds nothing rather than another image.
+static HashMap<u64, SVGDecodedImageData*>& images_by_vector_image_identity()
+{
+    static NeverDestroyed<HashMap<u64, SVGDecodedImageData*>> images;
+    return *images;
+}
+
+SVGDecodedImageData* SVGDecodedImageData::with_vector_image_identity(u64 identity)
+{
+    return images_by_vector_image_identity().get(identity).value_or(nullptr);
+}
+
 SVGDecodedImageData::SVGDecodedImageData(GC::Ref<Page> page, GC::Ref<SVGPageClient> page_client, GC::Ref<DOM::Document> document, GC::Ref<SVG::SVGSVGElement> root_element)
     : m_page(page)
     , m_page_client(page_client)
     , m_document(document)
     , m_root_element(root_element)
     , m_vector_content_identity(next_vector_content_identity())
+    , m_vector_image_identity(next_vector_image_identity())
 {
+    images_by_vector_image_identity().set(m_vector_image_identity, this);
 }
 
 u64 SVGDecodedImageData::next_vector_content_identity()
@@ -182,11 +197,18 @@ u64 SVGDecodedImageData::next_vector_content_identity()
     return s_next_vector_content_identity++;
 }
 
+u64 SVGDecodedImageData::next_vector_image_identity()
+{
+    static u64 s_next_vector_image_identity = 1;
+    return s_next_vector_image_identity++;
+}
+
 SVGDecodedImageData::~SVGDecodedImageData() = default;
 
 void SVGDecodedImageData::finalize()
 {
     Base::finalize();
+    images_by_vector_image_identity().remove(m_vector_image_identity);
     m_document->tear_down_layout_tree_for_svg_image_document({});
 }
 

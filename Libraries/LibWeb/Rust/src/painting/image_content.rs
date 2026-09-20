@@ -14,6 +14,7 @@ pub(crate) enum ImageContent {
     Raster(Option<ImageFrameHandle>),
     Vector {
         content_identity: u64,
+        image_identity: u64,
         has_active_view_box: bool,
     },
 }
@@ -30,6 +31,7 @@ impl ImageContent {
             }
             FfiImageContentKind::Vector => Self::Vector {
                 content_identity: content.vector_content_identity,
+                image_identity: content.vector_image_identity,
                 has_active_view_box: content.vector_has_active_view_box,
             },
         }

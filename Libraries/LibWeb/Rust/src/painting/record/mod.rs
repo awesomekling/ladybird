@@ -168,9 +168,29 @@ impl<O: Observer> PaintRecorder<'_, O> {
         self.resources.note_video_sink(resource_id, sink_handle)
     }
 
+    /// The scheme an SVG-as-image referenced by `owner` answers `prefers-color-scheme` with.
+    /// Its used `color-scheme` counts only when the element or the document declared a scheme the
+    /// image can answer with; otherwise, like Firefox, the preferred scheme wins.
+    pub(crate) fn image_color_scheme(&self, owner: crate::layout::node_data::NodeSlotId) -> u8 {
+        let inputs = self.inputs;
+        self.layout_arena
+            .node_style_if_live(owner)
+            .map_or(inputs.image_color_scheme_fallback, |style| {
+                let ui = style.inherited_ui();
+                if vector_images::declares_light_or_dark_color_scheme(&ui.color_schemes)
+                    || inputs.document_declares_light_or_dark_color_scheme
+                {
+                    ui.color_scheme
+                } else {
+                    inputs.image_color_scheme_fallback
+                }
+            })
+    }
+
     pub(crate) fn paint_vector_image(
         &mut self,
-        source: vector_images::VectorImageSource,
+        image_identity: u64,
+        color_scheme: u8,
         has_active_view_box: bool,
         dest_rect: libgfx_rust::FloatRect,
         accumulated_scale: libgfx_rust::FloatSize,
@@ -181,7 +201,8 @@ impl<O: Observer> PaintRecorder<'_, O> {
         let display_list_id = self
             .resources
             .vector_image_placeholder(vector_images::VectorImageRenderRequest::new(
-                source,
+                image_identity,
+                color_scheme,
                 geometry.css_width,
                 geometry.css_height,
                 geometry.raster_scale,

@@ -5,9 +5,9 @@
  */
 
 use crate::css::css_pixels::CssPixels;
-use crate::layout::node_data::NodeSlotId;
+use crate::css::retained_fly_string::{RetainedUtf16FlyString, RetainedUtf16FlyStringList};
 use crate::painting::display_list::commands::DisplayListResourceId;
-use crate::painting::host::{FfiLayerImageList, FfiVectorImageRenderRequest};
+use crate::painting::host::FfiVectorImageRenderRequest;
 use libgfx_rust::{FloatRect, FloatSize, IntSize};
 
 pub(crate) const VECTOR_IMAGE_PLACEHOLDER_TAG: u64 = 1 << 63;
@@ -20,21 +20,35 @@ pub(crate) fn vector_image_placeholder_index(id: DisplayListResourceId) -> usize
     (id.0 & !VECTOR_IMAGE_PLACEHOLDER_TAG) as usize
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum VectorImageSource {
-    Layer {
-        owner: NodeSlotId,
-        list: FfiLayerImageList,
-        computed_index: u32,
-    },
-    ReplacedContent {
-        owner: NodeSlotId,
-    },
+/// The published half of a `color-scheme` declaration an SVG-as-image can answer with.
+pub(crate) fn declares_light_or_dark_color_scheme(schemes: &RetainedUtf16FlyStringList) -> bool {
+    fn keyword_raws() -> (usize, usize) {
+        thread_local! {
+            // Fly strings are interned, so equal raw words mean equal strings. These two are
+            // CSS keywords and live as long as the process does; leak one reference each rather
+            // than interning them per layer.
+            static RAWS: (usize, usize) = {
+                let light = RetainedUtf16FlyString::from_utf16(&[b'l'.into(), b'i'.into(), b'g'.into(), b'h'.into(), b't'.into()]);
+                let dark = RetainedUtf16FlyString::from_utf16(&[b'd'.into(), b'a'.into(), b'r'.into(), b'k'.into()]);
+                let raws = (light.raw(), dark.raw());
+                std::mem::forget(light);
+                std::mem::forget(dark);
+                raws
+            };
+        }
+        RAWS.with(|raws| *raws)
+    }
+    let (light, dark) = keyword_raws();
+    schemes
+        .as_slice()
+        .iter()
+        .any(|scheme| scheme.raw() == light || scheme.raw() == dark)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct VectorImageRenderRequest {
-    pub source: VectorImageSource,
+    image_identity: u64,
+    color_scheme: u8,
     css_width_raw: i32,
     css_height_raw: i32,
     raster_scale_bits: u32,
@@ -42,13 +56,15 @@ pub(crate) struct VectorImageRenderRequest {
 
 impl VectorImageRenderRequest {
     pub(crate) fn new(
-        source: VectorImageSource,
+        image_identity: u64,
+        color_scheme: u8,
         css_width: CssPixels,
         css_height: CssPixels,
         raster_scale: f32,
     ) -> Self {
         Self {
-            source,
+            image_identity,
+            color_scheme,
             css_width_raw: css_width.raw_value(),
             css_height_raw: css_height.raw_value(),
             raster_scale_bits: raster_scale.to_bits(),
@@ -60,19 +76,9 @@ impl VectorImageRenderRequest {
     }
 
     pub(crate) fn to_ffi(self) -> FfiVectorImageRenderRequest {
-        let (owner, is_replaced_content, list, computed_index) = match self.source {
-            VectorImageSource::Layer {
-                owner,
-                list,
-                computed_index,
-            } => (owner, false, list, computed_index),
-            VectorImageSource::ReplacedContent { owner } => (owner, true, FfiLayerImageList::Background, 0),
-        };
         FfiVectorImageRenderRequest {
-            owner,
-            is_replaced_content,
-            list,
-            computed_index,
+            image_identity: self.image_identity,
+            color_scheme: self.color_scheme,
             css_width: CssPixels::from_raw(self.css_width_raw),
             css_height: CssPixels::from_raw(self.css_height_raw),
             raster_scale: self.raster_scale(),
