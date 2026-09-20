@@ -142,6 +142,7 @@ public:
 
     void begin_style_update() const;
     void end_style_update() const;
+    [[nodiscard]] Parser::ValueParserFFI::FfiMediaEnvironment const* ensure_media_environment_for_style_update() const;
 
     // Forget every style one element computed on another's behalf. See m_style_sharing_cache.
     void drop_style_sharing_cache() const;
@@ -230,7 +231,6 @@ private:
 
     [[nodiscard]] StyleEngine::StyleRecordDelta record_computed_style_inputs(Optional<DOM::AbstractElement>, ComputedValues const&, StyleNodeID style_node_id) const;
     [[nodiscard]] Parser::ValueParserFFI::FfiMediaEnvironment const* cached_media_environment_for_style_update() const;
-    [[nodiscard]] Parser::ValueParserFFI::FfiMediaEnvironment const* ensure_media_environment_for_style_update() const;
 
     enum class ComputeStyleMode {
         Normal,
