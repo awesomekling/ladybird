@@ -1275,6 +1275,7 @@ unsafe extern "C" fn finalize_custom_property_component(
 ) {
     let context = unsafe { &*context.cast::<CustomPropertyFinalizerContext>() };
     unsafe {
+        crate::css::style::seal::note_host_call("custom_properties.finalize_component");
         (context
             .input
             .finalize_component
@@ -1655,6 +1656,7 @@ pub(crate) fn resolve_cascade_value(
         None => crate::css::custom_properties::NativeVarResolution::NotHandled,
     };
     if let Some(note_substitution) = resolution_context.note_substitution {
+        crate::css::style::seal::note_host_call("substitution.note_substitution");
         unsafe { note_substitution(resolution_context.callback_context, unresolved_data) };
     }
 
@@ -1867,6 +1869,7 @@ pub unsafe extern "C" fn rust_resolve_unresolved_style_values(
         }
         if let Some(finalize_component) = finalize_component {
             unsafe {
+                crate::css::style::seal::note_host_call("custom_properties.finalize_component");
                 finalize_component(
                     finalizer_context,
                     component.as_ptr(),
@@ -1940,6 +1943,7 @@ pub unsafe extern "C" fn rust_cascade_matched_blocks(
     );
     let mut resolution_context = *resolution_context;
     if custom_properties_apply {
+        crate::css::style::seal::note_host_call("cascade.install_custom_properties");
         resolution_context.custom_property_store = unsafe {
             (resolution_context
                 .install_custom_properties

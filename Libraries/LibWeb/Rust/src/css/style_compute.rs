@@ -4704,6 +4704,7 @@ unsafe fn compute_longhands(
         crate::css::ffi_stats::bump(crate::css::ffi_stats::FfiOp::LonghandDriverPhaseCallback);
         let mut context = std::mem::MaybeUninit::<FfiLonghandPhaseContext>::uninit();
         unsafe {
+            crate::css::style::seal::note_host_call("longhand.prepare_phase_context");
             (input.prepare_phase_context)(input.callback_context, phase, context.as_mut_ptr());
             context.assume_init()
         }
@@ -5192,6 +5193,7 @@ pub unsafe extern "C" fn rust_compute_properties(input: *const FfiComputePropert
             .unwrap_or_else(ComputedLonghandTable::new)
     };
     unsafe {
+        crate::css::style::seal::note_host_call("computed_properties.prepare_longhand_drive");
         (input.prepare_longhand_drive)(
             input.callback_context,
             &raw const requirements,
@@ -5215,23 +5217,29 @@ pub unsafe extern "C" fn rust_compute_properties(input: *const FfiComputePropert
     }
     let mut animated_overlay = drive_input.animated_overlay;
     let mut animation_values_applied = unsafe { animated_overlay.as_ref() }.is_some_and(|overlay| !overlay.is_empty());
+    crate::css::style::seal::note_host_call("computed_properties.finish_longhand_drive");
     unsafe { (input.finish_longhand_drive)(input.callback_context, &raw const result) };
     unsafe { destroy_style_computation_result(&result) };
     unsafe { crate::css::cascaded_properties::destroy_style_computation_requirements(requirements.storage) };
     if input.stop_after_longhand_drive {
+        crate::css::style::seal::note_host_call("computed_properties.finish_properties");
         unsafe { (input.finish_properties)(input.callback_context, false) };
         unsafe { &mut *drive_input.longhand_table }.freeze();
         return;
     }
 
+    crate::css::style::seal::note_host_call("computed_properties.process_animation_definitions");
     unsafe { (input.process_animation_definitions)(input.callback_context) };
+    crate::css::style::seal::note_host_call("computed_properties.prepare_animations");
     let has_animations = unsafe { (input.prepare_animations)(input.callback_context) };
     if animation_values_applied || has_animations {
         let invalidated = unsafe { restore_post_compute_values(&mut *drive_input.longhand_table, false) };
+        crate::css::style::seal::note_host_call("computed_properties.did_mutate_post_compute");
         unsafe { (input.did_mutate_post_compute)(input.callback_context, invalidated) };
     }
     if has_animations {
         animated_overlay = unsafe {
+            crate::css::style::seal::note_host_call("computed_properties.apply_animations");
             (input.apply_animations)(
                 input.callback_context,
                 (&*drive_input.environment).box_type_input.check_input_line_height,
@@ -5243,6 +5251,7 @@ pub unsafe extern "C" fn rust_compute_properties(input: *const FfiComputePropert
 
     if parent_text_align_input_is_animated && !animation_values_applied {
         let invalidated = unsafe { restore_post_compute_values(&mut *drive_input.longhand_table, true) };
+        crate::css::style::seal::note_host_call("computed_properties.did_mutate_post_compute");
         unsafe { (input.did_mutate_post_compute)(input.callback_context, invalidated) };
     }
     let finalization_mode = if animation_values_applied {
@@ -5263,6 +5272,7 @@ pub unsafe extern "C" fn rust_compute_properties(input: *const FfiComputePropert
             unsafe { animated_overlay.as_mut() },
             Some(&finalization_line_height_metrics),
         );
+        crate::css::style::seal::note_host_call("computed_properties.did_mutate_post_compute");
         unsafe { (input.did_mutate_post_compute)(input.callback_context, finalization.invalidated_longhands) };
     }
     let parent_style_in_display_none_subtree = parent_snapshot
@@ -5274,6 +5284,7 @@ pub unsafe extern "C" fn rust_compute_properties(input: *const FfiComputePropert
     .is_none();
     unsafe { &mut *drive_input.longhand_table }
         .set_in_display_none_subtree(parent_style_in_display_none_subtree || display_is_none);
+    crate::css::style::seal::note_host_call("computed_properties.finish_properties");
     unsafe { (input.finish_properties)(input.callback_context, parent_style_in_display_none_subtree) };
     unsafe { &mut *drive_input.longhand_table }.freeze();
 }

@@ -92,6 +92,7 @@ mod publication;
 #[cfg(feature = "style-recording")]
 pub mod record_replay;
 mod routing;
+pub(crate) mod seal;
 mod sorted_merge;
 mod style_invalidation;
 #[cfg(not(feature = "style-recording"))]
