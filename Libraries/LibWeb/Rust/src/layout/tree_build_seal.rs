@@ -23,26 +23,26 @@
 //! matters as much as the name, because a route a full suite takes twice is a different problem
 //! from one it takes a hundred thousand times.
 //!
-//! What the whole suite takes, by `during_build` count, as of the commit that read a
-//! pseudo-element's build facts from the mirror. Six of these are not tree builder callback slots
-//! at all, which is what the gate was for:
+//! What the whole suite takes, by `during_build` count, as of the commit that cleared a stale
+//! layout node in the arena. Six of these are not tree builder callback slots at all, which is
+//! what the gate was for:
 //!
 //! | route | during build | note |
 //! |---|---|---|
-//! | `principal_dom_node` | 4994523 | slot |
-//! | `layout_node_shell_factory` | 3931117 | **not a slot**: the arena materialising a shell |
-//! | `prepare_principal_element` | 2018671 | slot |
-//! | `attach_style_resources` | 1851115 | slot |
-//! | `clear_stale_layout_node` | 1528957 | slot |
-//! | `shell_style_changed` | 80258 | **not a slot**: a row's style reaching its shell |
-//! | `text_source` | 62695 | **not a slot**: a text row's characters, synced mid-build |
-//! | `pseudo.create_content_item` | 42859 | slot |
-//! | `pseudo.create_layout_node` | 42331 | slot |
+//! | `principal_dom_node` | 5094171 | slot |
+//! | `layout_node_shell_factory` | 4009795 | **not a slot**: the arena materialising a shell |
+//! | `prepare_principal_element` | 2064229 | slot |
+//! | `attach_style_resources` | 1896086 | slot |
+//! | `shell_style_changed` | 81809 | **not a slot**: a row's style reaching its shell |
+//! | `text_source` | 64211 | **not a slot**: a text row's characters, synced mid-build |
+//! | `pseudo.create_content_item` | 44541 | slot |
+//! | `pseudo.create_layout_node` | 44042 | slot |
 //! | `pseudo.create_nested_list_marker` | 1532 | slot |
-//! | `create_first_letter_nodes` | 239 | slot |
-//! | `svg_resource.layout_dom_node` | 10 | **not a slot**: nested in `clear_stale_layout_node` |
+//! | `create_first_letter_nodes` | 236 | slot |
+//! | `svg_resource_box_survives` | 14 | slot |
+//! | `svg_resource.layout_dom_node` | 10 | **not a slot**: nested in `svg_resource_box_survives` |
 //! | `svg_resource.dom_is_shadow_including_inclusive_descendant` | 10 | as above |
-//! | `owned_image_provider_notify_detach` | 3 | **not a slot**: a detaching row's provider |
+//! | `owned_image_provider_notify_detach` | 2 | **not a slot**: a detaching row's provider |
 //!
 //! `build_replaced_content_facts` and `viewport_propagation_facts` are counted too and have never
 //! been taken during a build: they belong to the layout entry that follows it.

@@ -96,10 +96,10 @@ pub(crate) enum StaleSubtreeClearScope {
 #[repr(C)]
 pub struct FfiDomTreeBuilderCallbacks {
     pub builder: *mut c_void,
-    /// Clears one node's stale layout box, answering whether its subtree must survive with it.
-    /// The second identity is the root of the subtree being cleared, or 0 when the clear is not
-    /// bounded to one; only an SVG resource box reads it.
-    pub clear_stale_layout_node: unsafe extern "C" fn(*mut c_void, u32, u32) -> bool,
+    /// Whether an SVG resource box the walk reached survives its DOM ancestor's box being
+    /// cleared, which it does unless its layout attachment is inside the cleared subtree. The
+    /// identity is the root of that subtree, or 0 when the clear is not bounded to one.
+    pub svg_resource_box_survives: unsafe extern "C" fn(*mut c_void, NodeSlotId, u32) -> bool,
     pub create_first_letter_nodes:
         unsafe extern "C" fn(*mut c_void, *mut c_void, FfiFirstLetterTarget) -> FfiFirstLetterNodes,
     /// The DOM node the walk's identity names. The walk navigates by identity and resolves the
@@ -436,10 +436,10 @@ pub unsafe extern "C" fn rust_should_preserve_svg_resource_layout_node(
 
 #[repr(C)]
 pub struct FfiTopLayerDetachCallbacks {
-    /// Answers `clear_stale_layout_node`, which is the only thing the stale-subtree walk asks of
-    /// the main side.
+    /// Answers whether an SVG resource box survives, which is the only thing the stale-subtree
+    /// walk asks of the main side.
     pub context: *mut c_void,
-    pub clear_stale_layout_node: unsafe extern "C" fn(*mut c_void, u32, u32) -> bool,
+    pub svg_resource_box_survives: unsafe extern "C" fn(*mut c_void, NodeSlotId, u32) -> bool,
 }
 
 /// What the shadow-including walk that clears stale layout boxes needs. The navigation is the
@@ -450,7 +450,7 @@ pub struct FfiTopLayerDetachCallbacks {
 pub(crate) struct StaleSubtreeHost {
     arena: *mut LayoutNodeArena,
     context: *mut c_void,
-    clear_stale_layout_node: unsafe extern "C" fn(*mut c_void, u32, u32) -> bool,
+    svg_resource_box_survives: unsafe extern "C" fn(*mut c_void, NodeSlotId, u32) -> bool,
 }
 
 impl StaleSubtreeHost {
@@ -484,9 +484,106 @@ impl StaleSubtreeHost {
     /// Clears the stale layout box of the node `style_node` names, answering whether its subtree
     /// survives with it.
     fn clear_stale_layout_node(&self, style_node: u32, cleared_subtree_root: u32) -> bool {
-        super::tree_build_seal::note_host_call("clear_stale_layout_node");
-        // SAFETY: The host remains live throughout the walk, and the identity names a live node.
-        unsafe { (self.clear_stale_layout_node)(self.context, style_node, cleared_subtree_root) }
+        let Some(node) = StyleNodeID::from_raw(style_node) else {
+            return false;
+        };
+        clear_stale_layout_node(
+            self.arena,
+            self.svg_resource_box_survives,
+            self.context,
+            node,
+            cleared_subtree_root,
+        )
+    }
+}
+
+/// Whether the kind names a box laid out on behalf of an element that references it, rather than
+/// at its own place in the tree.
+fn node_kind_is_svg_resource_box(kind: NodeKind) -> bool {
+    matches!(
+        kind,
+        NodeKind::SVGPatternBox | NodeKind::SVGMaskBox | NodeKind::SVGClipBox
+    )
+}
+
+/// Gives up the box the node names, and every box its pseudo-elements hold, answering whether the
+/// subtree below it survives instead.
+///
+/// `cleared_subtree_root` is the root of the subtree being cleared, or 0 when the clear is not
+/// bounded to one. Only an SVG resource box reads it, which is the one question left for the host.
+fn clear_stale_layout_node(
+    arena: *mut LayoutNodeArena,
+    svg_resource_box_survives: unsafe extern "C" fn(*mut c_void, NodeSlotId, u32) -> bool,
+    context: *mut c_void,
+    node: StyleNodeID,
+    cleared_subtree_root: u32,
+) -> bool {
+    // SAFETY: The arena outlives every walk over it.
+    let arena_ref = unsafe { &*arena };
+    arena_ref.retire_layout_tree_update_marks_of_cleared_node(node);
+
+    let row = arena_ref.bound_row(node);
+    if !row.is_invalid() {
+        // An SVGPatternBox, SVGMaskBox or SVGClipBox is attached under the element that references
+        // it, not at its own DOM position, so it survives its DOM ancestor being cleared unless its
+        // layout attachment is inside the cleared subtree too.
+        if node_kind_is_svg_resource_box(arena_ref.data(row).kind.get()) {
+            super::tree_build_seal::note_host_call("svg_resource_box_survives");
+            // SAFETY: The host remains live throughout the walk, and the row is live.
+            if unsafe { svg_resource_box_survives(context, row, cleared_subtree_root) } {
+                return true;
+            }
+        }
+        // SAFETY: The arena handle is the one this walk was given, and each of these borrows the
+        // arena for itself.
+        unsafe {
+            crate::painting::ffi::layout_arena_paintable_cleared_from_node(arena.cast(), row);
+            super::layout_node_arena::layout_arena_prepare_node_for_detach(arena.cast(), row);
+        }
+        arena_ref.unbind_row(row);
+        let parent = arena_ref.data(row).parent.get();
+        if !parent.is_invalid() {
+            // SAFETY: As above.
+            unsafe { super::layout_node_arena::layout_arena_detach_and_free_subtree(arena.cast(), row) };
+            // The parent may keep its subtree (a child lost its box in place); an emptied container
+            // reads as having block-level children, like a freshly built one.
+            if arena_ref.data(parent).first_child.get().is_invalid() {
+                arena_ref.set_node_flag(parent, NodeFlag::ChildrenAreInline, false);
+            }
+        }
+    }
+
+    if node.element_index().is_some() {
+        clear_synthetic_pseudo_element_boxes(arena, node);
+    }
+    false
+}
+
+/// Every pseudo-element of the element gives up the box it holds. A text node has none, and no
+/// kind above the synthetic ones is ever bound to a box.
+fn clear_synthetic_pseudo_element_boxes(arena: *mut LayoutNodeArena, node: StyleNodeID) {
+    // SAFETY: The arena outlives every walk over it.
+    let arena_ref = unsafe { &*arena };
+    if !arena_ref.has_pseudo_element_boxes() {
+        return;
+    }
+    for generated_for in 1..=crate::layout::node_data::GENERATED_FOR_LAST_SYNTHETIC {
+        let row = arena_ref.bound_pseudo_element_row(node, generated_for);
+        if row.is_invalid() {
+            continue;
+        }
+        let mut rows = Vec::new();
+        arena_ref.for_each_node_in_layout_subtree_in_pre_order(row, |row| rows.push(row));
+        // SAFETY: The arena handle is the one this walk was given, and each of these borrows the
+        // arena for itself.
+        unsafe {
+            for row in rows {
+                crate::painting::ffi::layout_arena_paintable_cleared_from_node(arena.cast(), row);
+            }
+            super::layout_node_arena::layout_arena_prepare_subtree_for_detach(arena.cast(), row);
+            super::layout_node_arena::layout_arena_detach_and_free_subtree(arena.cast(), row);
+        }
+        arena_ref.clear_pseudo_element_box(node, generated_for);
     }
 }
 
@@ -533,7 +630,7 @@ pub unsafe extern "C" fn rust_detach_top_layer_element_layout_subtree(
     let host = StaleSubtreeHost {
         arena,
         context: callbacks.context,
-        clear_stale_layout_node: callbacks.clear_stale_layout_node,
+        svg_resource_box_survives: callbacks.svg_resource_box_survives,
     };
     // A top-layer member the style engine no longer tracks has left the DOM. Nothing of it is in
     // the mirror, and nothing of it is bound to a row, so there is nothing to detach or clear.
@@ -1543,7 +1640,7 @@ impl DomTreeBuilderHost<'_> {
         StaleSubtreeHost {
             arena: self.arena,
             context: self.callbacks.builder,
-            clear_stale_layout_node: self.callbacks.clear_stale_layout_node,
+            svg_resource_box_survives: self.callbacks.svg_resource_box_survives,
         }
     }
 }
@@ -1687,12 +1784,16 @@ fn update_layout_tree_for_svg_switch_children(
         // NB: Clean up any stale children that should no longer be rendered.
         let mut child = host.first_dom_child(switch_element);
         while child != 0 {
-            if child != rendered_child {
-                super::tree_build_seal::note_host_call("clear_stale_layout_node");
-                // SAFETY: The builder remains live, and `child` names a live DOM node.
-                unsafe {
-                    (host.callbacks.clear_stale_layout_node)(host.callbacks.builder, child, 0);
-                }
+            if child != rendered_child
+                && let Some(child_identity) = StyleNodeID::from_raw(child)
+            {
+                clear_stale_layout_node(
+                    host.arena,
+                    host.callbacks.svg_resource_box_survives,
+                    host.callbacks.builder,
+                    child_identity,
+                    0,
+                );
             }
             child = host.next_dom_sibling(child);
         }
