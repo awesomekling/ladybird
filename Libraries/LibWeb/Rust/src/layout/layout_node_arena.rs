@@ -2633,7 +2633,7 @@ impl LayoutNodeArena {
 
     pub(crate) fn set_node_dom_paint_facts(&self, id: NodeSlotId, facts: u8) -> bool {
         self.assert_owner_thread();
-        crate::painting::published_immutable::before_mutation(self, "M5 layout_arena_set_node_dom_paint_facts");
+        crate::painting::published_immutable::note_row_mutation(self, id, "M5 layout_arena_set_node_dom_paint_facts");
         let mut any_changed = false;
         for row in self.rows_sharing_dom_node_with(id) {
             let data = self.data(row);

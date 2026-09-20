@@ -188,7 +188,7 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn push_paint_damage(&self, row: NodeSlotId, damage: PaintDamage) {
-        crate::painting::published_immutable::before_mutation(self, "M12 LayoutNodeArena::push_paint_damage");
+        crate::painting::published_immutable::note_row_mutation(self, row, "M12 LayoutNodeArena::push_paint_damage");
         self.debug_assert_not_recording();
         if damage.is_empty() || !self.paintable_row_is_populated(row) {
             return;

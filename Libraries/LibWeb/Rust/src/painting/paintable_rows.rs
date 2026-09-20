@@ -1019,7 +1019,7 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn paintable_row_freed(&mut self, reset: PaintableRowReset) {
-        crate::painting::published_immutable::before_mutation(self, "M1b paintable_row_freed");
+        crate::painting::published_immutable::note_row_mutation(self, reset.slot, "M1b paintable_row_freed");
         self.reset_paintable_row(false, reset);
     }
 

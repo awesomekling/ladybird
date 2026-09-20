@@ -7,11 +7,11 @@
 //! Census of paintable-row mutations after publication.
 //!
 //! `LIBWEB_VERIFY_PUBLISHED_IMMUTABLE` enables the verifier. It fingerprints the
-//! paintable rows at each layout commit and checks them before named mutation
-//! funnels and before the next commit. Unset, the mutation hooks return before
-//! inspecting the arena. Reports are log-only and each call site is reported at
-//! most once per thread. `LIBWEB_VERIFY_PUBLISHED_IMMUTABLE_LOG` names the log
-//! file; standard error is the fallback.
+//! paintable rows at each layout commit, records named mutation funnels, and
+//! checks the rows before the next publication. Unset, the mutation hooks return
+//! before inspecting the arena. Reports are log-only and each call site is
+//! reported at most once per arena. `LIBWEB_VERIFY_PUBLISHED_IMMUTABLE_LOG`
+//! names the log file; standard error is the fallback.
 
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
@@ -24,7 +24,7 @@ use std::sync::OnceLock;
 #[derive(Default)]
 struct PublishedArena {
     rows: HashMap<NodeSlotId, u64>,
-    last_mutation: Option<&'static str>,
+    last_mutations: HashMap<NodeSlotId, &'static str>,
     reported: HashSet<&'static str>,
     in_publication: bool,
 }
@@ -109,16 +109,23 @@ fn verify(arena: &LayoutNodeArena, call_site: &'static str) {
         if changed.is_empty() {
             return;
         }
-        let mutation = published.last_mutation.unwrap_or(call_site);
-        let should_report = published.reported.insert(mutation);
+        let mut by_mutation = HashMap::<&'static str, Vec<NodeSlotId>>::new();
+        for row in changed {
+            by_mutation
+                .entry(published.last_mutations.get(&row).copied().unwrap_or(call_site))
+                .or_default()
+                .push(row);
+        }
         published.rows = current;
-        if should_report {
-            report(mutation, &changed);
+        for (mutation, rows) in by_mutation {
+            if published.reported.insert(mutation) {
+                report(mutation, &rows);
+            }
         }
     });
 }
 
-pub(crate) fn before_mutation(arena: &LayoutNodeArena, call_site: &'static str) {
+pub(crate) fn note_row_mutation(arena: &LayoutNodeArena, row: NodeSlotId, call_site: &'static str) {
     if !enabled() {
         return;
     }
@@ -133,10 +140,9 @@ pub(crate) fn before_mutation(arena: &LayoutNodeArena, call_site: &'static str) 
     if in_publication {
         return;
     }
-    verify(arena, call_site);
     STATE.with(|state| {
         if let Some(published) = state.borrow_mut().arenas.get_mut(&key) {
-            published.last_mutation = Some(call_site);
+            published.last_mutations.entry(row).or_insert(call_site);
         }
     });
 }
@@ -151,7 +157,7 @@ pub(crate) fn published(arena: &LayoutNodeArena) {
         let mut state = state.borrow_mut();
         let published = state.arenas.entry(key).or_default();
         published.rows = rows;
-        published.last_mutation = None;
+        published.last_mutations.clear();
         published.in_publication = false;
     });
 }
