@@ -6977,6 +6977,45 @@ fn finish_resolved_animation_properties(resolved: ResolvedAnimationDeclarations)
     }
 }
 
+/// The key one effect's keyframes are sampled at, from the timing the host published for it rather
+/// than from the effect's own `transformed_progress()`.
+///
+/// Returns whether the mirror answered at all. Where it did, `*is_resolved_out` says whether the
+/// progress resolved: an effect whose progress is unresolved is one the stage leaves out.
+///
+/// # Safety
+/// `style_engine` must be a live style engine, and both out-parameters must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_published_animation_current_key(
+    style_engine: *const std::ffi::c_void,
+    style_node: u32,
+    slot: u8,
+    effect_identity: u64,
+    is_resolved_out: *mut bool,
+    key_out: *mut f64,
+) -> bool {
+    use crate::css::style::animations;
+
+    let engine = unsafe { &*style_engine.cast::<crate::css::style::StyleEngine>() };
+    let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
+        return false;
+    };
+    let Some(row) = engine.element_animation_timing_rows_for_effect(node, slot, effect_identity) else {
+        return false;
+    };
+    let Some(timeline_time) = animations::row_timeline_time(row, engine.animation_timeline_samples()) else {
+        return false;
+    };
+    let Some(key) = animations::row_current_key(row, timeline_time) else {
+        return false;
+    };
+    unsafe {
+        *is_resolved_out = key.is_some();
+        *key_out = key.unwrap_or(0.0);
+    }
+    true
+}
+
 /// Resolve the animation declarations of an element's effects from the description the host
 /// published for them, instead of from a batch the stage assembled by walking the host's keyframe
 /// sets.

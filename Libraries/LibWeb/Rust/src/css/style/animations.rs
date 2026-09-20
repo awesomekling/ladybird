@@ -240,6 +240,24 @@ pub(crate) mod timing_row_flag {
     /// The host could not describe this animation - an effect whose local time is overridden for
     /// observation, for instance - so the mirror must not answer for it.
     pub(crate) const UNDECIDABLE: u32 = 1 << 18;
+    /// `Bindings::PlaybackDirection`, in IDL order.
+    pub(crate) const PLAYBACK_DIRECTION_SHIFT: u32 = 19;
+    pub(crate) const PLAYBACK_DIRECTION_MASK: u32 = 0b11;
+    /// The effect's own easing: 0 the identity `linear`, 1 `cubic-bezier()`, 2 `steps()`.
+    pub(crate) const EASING_KIND_SHIFT: u32 = 21;
+    pub(crate) const EASING_KIND_MASK: u32 = 0b11;
+    pub(crate) const EASING_STEP_POSITION_SHIFT: u32 = 23;
+    pub(crate) const EASING_STEP_POSITION_MASK: u32 = 0b111;
+    /// A `linear()` easing that has control points of its own, which the row has no room to spell
+    /// out. The mirror declines the key rather than answering with the identity curve.
+    pub(crate) const EASING_HAS_CONTROL_POINTS: u32 = 1 << 26;
+}
+
+/// `Bindings::PlaybackDirection`, in IDL order.
+mod playback_direction {
+    pub(super) const NORMAL: u32 = 0;
+    pub(super) const REVERSE: u32 = 1;
+    pub(super) const ALTERNATE_REVERSE: u32 = 3;
 }
 
 /// `Bindings::FillMode`, in IDL order.
@@ -250,11 +268,14 @@ mod fill_mode {
 }
 
 /// How many words of each buffer one row occupies.
-pub(crate) const TIMING_ROW_WORDS: usize = 2;
-pub(crate) const TIMING_ROW_TIMES: usize = 8;
+pub(crate) const TIMING_ROW_WORDS: usize = 5;
+pub(crate) const TIMING_ROW_TIMES: usize = 13;
 
 const WORD_FLAGS: usize = 0;
 const WORD_TIMELINE: usize = 1;
+const WORD_EASING_INTERVAL_COUNT: usize = 2;
+const WORD_EFFECT_IDENTITY_LOW: usize = 3;
+const WORD_EFFECT_IDENTITY_HIGH: usize = 4;
 
 const TIME_START: usize = 0;
 const TIME_HOLD: usize = 1;
@@ -264,12 +285,19 @@ const TIME_ITERATION_DURATION: usize = 4;
 const TIME_PLAYBACK_RATE: usize = 5;
 const TIME_PENDING_PLAYBACK_RATE: usize = 6;
 const TIME_ITERATION_COUNT: usize = 7;
+const TIME_ITERATION_START: usize = 8;
+const TIME_EASING_X1: usize = 9;
+const TIME_EASING_Y1: usize = 10;
+const TIME_EASING_X2: usize = 11;
+const TIME_EASING_Y2: usize = 12;
 
 /// One animation's timing, as the host held it when the style update began.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct AnimationTimingRow {
     flags: u32,
     timeline: u32,
+    easing_interval_count: i32,
+    effect_identity: u64,
     times: [f64; TIMING_ROW_TIMES],
 }
 
@@ -327,6 +355,45 @@ pub(crate) fn row_is_relevant(row: &AnimationTimingRow, timeline_time: Option<Ti
         return Some(false);
     }
 
+    let timing = resolve_timing(row, timeline_time)?;
+
+    // https://www.w3.org/TR/web-animations-1/#in-play
+    let is_in_play = timing.phase == Phase::Active && !row.has(flag::IS_FINISHED);
+
+    // https://www.w3.org/TR/web-animations-1/#current
+    let is_current = is_in_play
+        || (timing.playback_rate > 0.0 && timing.phase == Phase::Before)
+        || (timing.playback_rate < 0.0 && timing.phase == Phase::After)
+        || (row.has(flag::HAS_TIMELINE)
+            && !row.has(flag::TIMELINE_IS_MONOTONICALLY_INCREASING)
+            && play_state(row, timing.current_time, timing.end_time)? != PlayState::Idle);
+    if is_current {
+        return Some(true);
+    }
+
+    // https://www.w3.org/TR/web-animations-1/#in-effect, via the active time.
+    Some(timing.active_time.is_some())
+}
+
+/// A mirror of `AnimationEffect::ResolvedTiming`, with what `Animation` contributes to it.
+#[derive(Clone, Copy)]
+struct ResolvedTiming {
+    phase: Phase,
+    current_time: Option<TimeValue>,
+    active_time: Option<TimeValue>,
+    active_duration: TimeValue,
+    end_time: TimeValue,
+    iteration_duration: TimeValue,
+    iteration_count: f64,
+    playback_rate: f64,
+}
+
+/// Resolve everything the phase and the active time are derived from. `None` where the host's
+/// arithmetic would refuse to mix two times' kinds, which is where the mirror must decline.
+#[must_use]
+fn resolve_timing(row: &AnimationTimingRow, timeline_time: Option<TimeValue>) -> Option<ResolvedTiming> {
+    use timing_row_flag as flag;
+
     let progress_based = row.has(flag::TIMELINE_IS_PROGRESS_BASED);
     let zero = TimeValue::zero(progress_based);
     let playback_rate = row.times[TIME_PLAYBACK_RATE];
@@ -377,21 +444,7 @@ pub(crate) fn row_is_relevant(row: &AnimationTimingRow, timeline_time: Option<Ti
         }
     };
 
-    // https://www.w3.org/TR/web-animations-1/#in-play
-    let is_in_play = phase == Phase::Active && !row.has(flag::IS_FINISHED);
-
-    // https://www.w3.org/TR/web-animations-1/#current
-    let is_current = is_in_play
-        || (playback_rate > 0.0 && phase == Phase::Before)
-        || (playback_rate < 0.0 && phase == Phase::After)
-        || (row.has(flag::HAS_TIMELINE)
-            && !row.has(flag::TIMELINE_IS_MONOTONICALLY_INCREASING)
-            && play_state(row, current_time, end_time)? != PlayState::Idle);
-    if is_current {
-        return Some(true);
-    }
-
-    // https://www.w3.org/TR/web-animations-1/#in-effect, via the active time.
+    // https://www.w3.org/TR/web-animations-1/#active-time
     let fill_mode = (row.flags >> flag::FILL_MODE_SHIFT) & flag::FILL_MODE_MASK;
     let active_time = match phase {
         Phase::Before => match fill_mode == fill_mode::BACKWARDS || fill_mode == fill_mode::BOTH {
@@ -410,7 +463,134 @@ pub(crate) fn row_is_relevant(row: &AnimationTimingRow, timeline_time: Option<Ti
         },
         Phase::Idle => None,
     };
-    Some(active_time.is_some())
+
+    Some(ResolvedTiming {
+        phase,
+        current_time,
+        active_time,
+        active_duration,
+        end_time,
+        iteration_duration,
+        iteration_count,
+        playback_rate,
+    })
+}
+
+/// The key the style stage samples an effect's keyframes at, which is
+/// `AnimationEffect::transformed_progress()` scaled the way `collect_animation_effects_into` scales
+/// it. The outer `None` is the mirror declining; the inner `None` is the host's unresolved
+/// progress, which is the stage skipping the effect.
+///
+/// A mirror of `transformed_progress()` and everything under it: `overall_progress()`,
+/// `simple_iteration_progress()`, `current_iteration()`, `current_direction()`,
+/// `directed_progress()` and `EasingFunction::evaluate_at()`.
+#[must_use]
+pub(crate) fn row_current_key(row: &AnimationTimingRow, timeline_time: Option<TimeValue>) -> Option<Option<f64>> {
+    use timing_row_flag as flag;
+
+    if row.has(flag::UNDECIDABLE) || row.has(flag::EASING_HAS_CONTROL_POINTS) {
+        return None;
+    }
+    let timing = resolve_timing(row, timeline_time)?;
+
+    // https://www.w3.org/TR/web-animations-1/#overall-progress
+    let Some(active_time) = timing.active_time else {
+        return Some(None);
+    };
+    let iteration_start = row.times[TIME_ITERATION_START];
+    let iterations_elapsed = if timing.iteration_duration.value == 0.0 {
+        match timing.phase {
+            Phase::Before => 0.0,
+            _ => timing.iteration_count,
+        }
+    } else {
+        // `TimeValue::operator/` verifies that the two times measure the same thing.
+        if !active_time.agrees_with(timing.iteration_duration) {
+            return None;
+        }
+        active_time.value / timing.iteration_duration.value
+    };
+    let overall_progress = iterations_elapsed + iteration_start;
+
+    // https://www.w3.org/TR/web-animations-1/#simple-iteration-progress
+    let mut simple_iteration_progress = match overall_progress.is_infinite() {
+        true => iteration_start % 1.0,
+        false => overall_progress % 1.0,
+    };
+    if simple_iteration_progress == 0.0
+        && (timing.phase == Phase::Active || timing.phase == Phase::After)
+        && active_time.compare(timing.active_duration)?.is_eq()
+        && timing.iteration_count != 0.0
+    {
+        simple_iteration_progress = 1.0;
+    }
+
+    // https://www.w3.org/TR/web-animations-1/#current-iteration
+    let current_iteration = if timing.phase == Phase::After && timing.iteration_count.is_infinite() {
+        timing.iteration_count
+    } else if simple_iteration_progress == 1.0 {
+        overall_progress.floor() - 1.0
+    } else {
+        overall_progress.floor()
+    };
+
+    // https://www.w3.org/TR/web-animations-1/#directed-progress, step 2.
+    let direction = (row.flags >> flag::PLAYBACK_DIRECTION_SHIFT) & flag::PLAYBACK_DIRECTION_MASK;
+    let going_forwards = match direction {
+        playback_direction::NORMAL => true,
+        playback_direction::REVERSE => false,
+        _ => {
+            let mut iteration = current_iteration;
+            if direction == playback_direction::ALTERNATE_REVERSE {
+                iteration += 1.0;
+            }
+            iteration.is_infinite() || iteration % 2.0 == 0.0
+        }
+    };
+    let directed_progress = match going_forwards {
+        true => simple_iteration_progress,
+        false => 1.0 - simple_iteration_progress,
+    };
+
+    // https://www.w3.org/TR/web-animations-1/#transformed-progress
+    let before_flag =
+        (timing.phase == Phase::Before && going_forwards) || (timing.phase == Phase::After && !going_forwards);
+    let easing_kind = (row.flags >> flag::EASING_KIND_SHIFT) & flag::EASING_KIND_MASK;
+    let output_progress = match easing_kind {
+        // `linear`, which the host holds as `linear(0, 1)`.
+        0 => crate::css::animation::evaluate_linear_easing(
+            &[
+                crate::css::animation::FfiLinearEasingPoint {
+                    input: 0.0,
+                    output: 0.0,
+                },
+                crate::css::animation::FfiLinearEasingPoint {
+                    input: 1.0,
+                    output: 1.0,
+                },
+            ],
+            directed_progress,
+            before_flag,
+        ),
+        1 => crate::css::animation::evaluate_cubic_bezier_easing(
+            row.times[TIME_EASING_X1],
+            row.times[TIME_EASING_Y1],
+            row.times[TIME_EASING_X2],
+            row.times[TIME_EASING_Y2],
+            directed_progress,
+        ),
+        2 => crate::css::animation::evaluate_steps_easing(
+            row.easing_interval_count,
+            ((row.flags >> flag::EASING_STEP_POSITION_SHIFT) & flag::EASING_STEP_POSITION_MASK) as u8,
+            directed_progress,
+            before_flag,
+        ),
+        _ => return None,
+    };
+
+    // `AnimationKeyFrameKeyScaleFactor`, and the host's clamp to what an `i64` key can hold.
+    let key = output_progress * 100.0 * 1000.0;
+    Some(Some(key.clamp(i64::MIN as f64, i64::MAX as f64)))
 }
 
 /// A mirror of `Animation::play_state_at()`. `associated_effect_end` is the effect's end time,
@@ -471,6 +651,9 @@ impl AnimationTimingRows {
             let mut row = AnimationTimingRow {
                 flags: words[WORD_FLAGS],
                 timeline: words[WORD_TIMELINE],
+                easing_interval_count: words[WORD_EASING_INTERVAL_COUNT] as i32,
+                effect_identity: u64::from(words[WORD_EFFECT_IDENTITY_LOW])
+                    | (u64::from(words[WORD_EFFECT_IDENTITY_HIGH]) << 32),
                 times: [0.0; TIMING_ROW_TIMES],
             };
             row.times
@@ -490,6 +673,21 @@ impl AnimationTimingRows {
     #[must_use]
     pub(crate) fn rows(&self, node: StyleNodeID, slot: AnimationSlot) -> &[AnimationTimingRow] {
         self.rows.get(&(node, slot)).map_or(&[][..], |rows| &rows[..])
+    }
+
+    /// The row of one effect, which the stage names by the identity it already uses to look its
+    /// description up. The host publishes the rows in its own order, not the composite order the
+    /// stage walks in, so a position is not an answer.
+    #[must_use]
+    pub(crate) fn row_for_effect(
+        &self,
+        node: StyleNodeID,
+        slot: AnimationSlot,
+        effect_identity: u64,
+    ) -> Option<&AnimationTimingRow> {
+        self.rows(node, slot)
+            .iter()
+            .find(|row| row.effect_identity == effect_identity)
     }
 
     /// Give up the rows of identities that have been retired, which can be minted again.
@@ -540,13 +738,22 @@ impl AnimationTimelineSamples {
 pub(crate) fn any_row_is_relevant(rows: &[AnimationTimingRow], samples: &AnimationTimelineSamples) -> Option<bool> {
     let mut any = false;
     for row in rows {
-        let timeline_time = match row.has(timing_row_flag::HAS_TIMELINE) {
-            true => samples.sample(row.timeline)?,
-            false => None,
-        };
-        any |= row_is_relevant(row, timeline_time)?;
+        any |= row_is_relevant(row, row_timeline_time(row, samples)?)?;
     }
     Some(any)
+}
+
+/// The current time of the timeline a row names, as the host sampled it when this style update
+/// began. `None` where the host published no sample for that timeline.
+#[must_use]
+pub(crate) fn row_timeline_time(
+    row: &AnimationTimingRow,
+    samples: &AnimationTimelineSamples,
+) -> Option<Option<TimeValue>> {
+    match row.has(timing_row_flag::HAS_TIMELINE) {
+        true => samples.sample(row.timeline),
+        false => Some(None),
+    }
 }
 
 /// Flags on a published animation effect.

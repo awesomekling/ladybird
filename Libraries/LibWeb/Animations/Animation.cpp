@@ -1322,7 +1322,32 @@ Animation::StyleTimingRow Animation::style_timing_row() const
     record_time(StyleTimingRow::EndDelay, m_effect->end_delay(), StyleTimingRow::end_delay_is_percentage);
     record_time(StyleTimingRow::IterationDuration, m_effect->iteration_duration(), StyleTimingRow::iteration_duration_is_percentage);
     row.times[StyleTimingRow::IterationCount] = m_effect->iteration_count();
+    row.times[StyleTimingRow::IterationStart] = m_effect->iteration_start();
     row.flags |= static_cast<u32>(to_underlying(m_effect->fill_mode())) << StyleTimingRow::fill_mode_shift;
+    row.flags |= static_cast<u32>(to_underlying(m_effect->playback_direction())) << StyleTimingRow::playback_direction_shift;
+
+    m_effect->timing_function().visit(
+        [&](CSS::LinearEasingFunction const& linear) {
+            // `linear` itself is `linear(0, 1)`, which is the identity the mirror can evaluate
+            // without being told any stops.
+            auto is_identity = linear.control_points.size() == 2
+                && linear.control_points[0] == CSS::LinearEasingFunction::ControlPoint { 0, 0 }
+                && linear.control_points[1] == CSS::LinearEasingFunction::ControlPoint { 1, 1 };
+            if (!is_identity)
+                row.flags |= StyleTimingRow::easing_has_control_points;
+        },
+        [&](CSS::CubicBezierEasingFunction const& bezier) {
+            row.flags |= 1u << StyleTimingRow::easing_kind_shift;
+            row.times[StyleTimingRow::EasingX1] = bezier.x1;
+            row.times[StyleTimingRow::EasingY1] = bezier.y1;
+            row.times[StyleTimingRow::EasingX2] = bezier.x2;
+            row.times[StyleTimingRow::EasingY2] = bezier.y2;
+        },
+        [&](CSS::StepsEasingFunction const& steps) {
+            row.flags |= 2u << StyleTimingRow::easing_kind_shift;
+            row.flags |= static_cast<u32>(to_underlying(steps.position)) << StyleTimingRow::easing_step_position_shift;
+            row.easing_interval_count = steps.interval_count;
+        });
 
     return row;
 }

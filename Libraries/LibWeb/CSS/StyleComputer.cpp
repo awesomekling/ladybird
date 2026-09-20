@@ -863,17 +863,41 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
     Vector<ActiveEffect, 1> active_effects;
     Vector<StyleValueFFI::FfiAnimationPreparationEffect, 1> preparation_effects;
     Vector<double, 1> current_keys;
+    auto animation_slot = abstract_element.pseudo_element().has_value()
+        ? static_cast<u8>(to_underlying(*abstract_element.pseudo_element()) + 1)
+        : static_cast<u8>(0);
     for (auto effect : effects) {
         auto animation = effect->associated_animation();
-        auto output_progress = effect->transformed_progress();
-        if (!animation || !output_progress.has_value() || !effect->key_frame_set())
+
+        // The key an effect samples at is a pure function of its timing, all of which the host
+        // published when it last moved. Ask the mirror for it, and walk the host's effect only
+        // where the mirror declines - an easing it has no room to spell out, times whose kinds the
+        // host's arithmetic would refuse to mix.
+        bool published_key_is_resolved = false;
+        double published_key = 0;
+        auto has_published_key = StyleValueFFI::rust_published_animation_current_key(
+            m_style_engine.rust_handle(),
+            abstract_element.element().style_node_id().value(),
+            animation_slot,
+            effect->animation_preparation_identity(),
+            &published_key_is_resolved,
+            &published_key);
+
+        Optional<double> output_progress;
+        if (!has_published_key)
+            output_progress = effect->transformed_progress();
+        auto key_is_resolved = has_published_key ? published_key_is_resolved : output_progress.has_value();
+        if (!animation || !key_is_resolved || !effect->key_frame_set())
             continue;
         auto const& key_frame_set = *effect->key_frame_set();
         auto& keyframes = key_frame_set.keyframes_by_key;
         if (keyframes.size() < 2)
             continue;
-        double current_key = *output_progress * 100.0 * Animations::KeyframeEffect::AnimationKeyFrameKeyScaleFactor;
-        current_key = clamp(current_key, static_cast<double>(NumericLimits<i64>::min()), static_cast<double>(NumericLimits<i64>::max()));
+        double current_key = published_key;
+        if (!has_published_key) {
+            current_key = *output_progress * 100.0 * Animations::KeyframeEffect::AnimationKeyFrameKeyScaleFactor;
+            current_key = clamp(current_key, static_cast<double>(NumericLimits<i64>::min()), static_cast<double>(NumericLimits<i64>::max()));
+        }
         active_effects.append({ effect, *animation, current_key });
         preparation_effects.append({
             .identity = effect->animation_preparation_identity(),
