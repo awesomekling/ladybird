@@ -528,6 +528,16 @@ pub(crate) struct ShadowIncludingParent {
     pub(crate) parent_is_a_shadow_root: bool,
 }
 
+/// What one step of the shadow-including walk that clears stale layout boxes needs to know about
+/// a node: whether its boxes belong to someone else, and where the walk goes next.
+#[derive(Clone, Copy)]
+pub(crate) struct StaleWalkFacts {
+    pub(crate) rendered_in_top_layer: bool,
+    pub(crate) shadow_root: Option<StyleNodeID>,
+    pub(crate) first_dom_child: Option<StyleNodeID>,
+    pub(crate) next_dom_sibling: Option<StyleNodeID>,
+}
+
 pub(crate) struct LayoutNodeArena {
     chunks: Vec<Box<Chunk>>,
     chunks_by_address: Vec<ChunkAddress>,
@@ -1626,6 +1636,25 @@ impl LayoutNodeArena {
         let host = self.style_record_host();
         assert!(!host.style_engine.is_null());
         unsafe { callback(&mut *host.style_engine.cast::<StyleEngine>()) }
+    }
+
+    /// Everything one step of the stale-subtree walk reads out of the style mirror, taken in one
+    /// borrow. The walk steps through every node below a rebuilt subtree, and asking the mirror
+    /// four separate questions per node was four separate borrows of the style engine.
+    pub(crate) fn stale_walk_facts(&self, style_node: StyleNodeID) -> StaleWalkFacts {
+        self.with_style_store(|engine| {
+            let tree = engine.tree();
+            let owns_children = style_node.element_index().is_some();
+            StaleWalkFacts {
+                rendered_in_top_layer: owns_children
+                    && engine.element_adjustment_facts(style_node)
+                        & crate::css::style::bridge::element_adjustment_fact::RENDERED_IN_TOP_LAYER
+                        != 0,
+                shadow_root: owns_children.then(|| tree.shadow_root_of(style_node)).flatten(),
+                first_dom_child: owns_children.then(|| tree.dom_children(style_node).next()).flatten(),
+                next_dom_sibling: tree.next_sibling_in_dom_order(style_node),
+            }
+        })
     }
 
     /// The first child the style mirror's DOM child sequence holds for `style_node`, text nodes
