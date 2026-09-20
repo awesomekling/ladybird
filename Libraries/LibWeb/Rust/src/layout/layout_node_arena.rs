@@ -33,6 +33,7 @@ use crate::layout::node_data::{
     AncestorFact, DomPaintFact, FfiNodeConstructionFacts, FfiNodeLink, FfiStylePayloads, MAX_NODE_SLOT_COUNT, NodeData,
     NodeFlag, NodeKind, NodeSlotId,
 };
+use crate::layout::used_values::FfiCssPixelPoint;
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -560,6 +561,11 @@ pub(crate) struct LayoutNodeArena {
     /// The principal box each pseudo-element is bound to, keyed by its generator's identity and its
     /// kind. The generated content inside the box carries the same pair but is never bound.
     bound_pseudo_element_rows: RefCell<HashMap<(StyleNodeID, u8), NodeSlotId>>,
+    /// The scroll offset each pseudo-element holds, keyed by its generator's identity and its
+    /// kind. A pseudo-element has no identity of its own and its box is replaced whenever its
+    /// subtree is rebuilt, so the offset is held against the pair that outlives both, and a newly
+    /// bound box reads it here instead of asking the DOM cell that used to store it.
+    pseudo_element_scroll_offsets: RefCell<HashMap<(StyleNodeID, u8), FfiCssPixelPoint>>,
     /// Where each element sits in the shadow-including tree, as the tree build last saw it, indexed
     /// by the element's dense index. An element's DOM parent only changes when it is inserted or
     /// removed, and either one makes the tree build visit it again, so the fact keeps up with the
@@ -698,6 +704,7 @@ impl LayoutNodeArena {
             first_rows_by_style_node: RefCell::new(RowsByStyleNode::default()),
             bound_rows_by_style_node: RefCell::new(RowsByStyleNode::default()),
             bound_pseudo_element_rows: RefCell::new(HashMap::default()),
+            pseudo_element_scroll_offsets: RefCell::new(HashMap::default()),
             shadow_including_parent_elements: RefCell::new(Vec::new()),
             anchor_name_elements: RefCell::new(HashMap::default()),
             bound_viewport_row: Cell::new(NodeSlotId::INVALID),
@@ -1401,6 +1408,9 @@ impl LayoutNodeArena {
             .retain(|&(scope_host, _), _| scope_host != style_node.raw());
         self.counters_sets.borrow_mut().forget(style_node);
         self.generated_content.borrow_mut().forget(style_node);
+        self.pseudo_element_scroll_offsets
+            .borrow_mut()
+            .retain(|&(generator, _), _| generator != style_node);
         loop {
             let row = self.first_rows_by_style_node.borrow().head(style_node);
             if row.is_invalid() {
@@ -2303,6 +2313,47 @@ impl LayoutNodeArena {
     /// Stamp a row the build allocated for an element. Beyond what `stamp_dom_row` records, the
     /// row takes the style record the mirror published under the element's identity, so the kind
     /// the row is built with and the style it is built from come out of the same published answer.
+    /// The scroll offset the pseudo-element `pseudo_kind` names on `generator` holds. Zero while
+    /// nothing has scrolled it.
+    pub(crate) fn pseudo_element_scroll_offset(&self, generator: StyleNodeID, pseudo_kind: u8) -> FfiCssPixelPoint {
+        self.pseudo_element_scroll_offsets
+            .borrow()
+            .get(&(generator, pseudo_kind))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Record what the pseudo-element has scrolled to. A zero offset is the absence of one, which
+    /// is what an identity that has never scrolled reads as.
+    pub(crate) fn set_pseudo_element_scroll_offset(
+        &self,
+        generator: StyleNodeID,
+        pseudo_kind: u8,
+        offset: FfiCssPixelPoint,
+    ) {
+        let mut offsets = self.pseudo_element_scroll_offsets.borrow_mut();
+        if offset == FfiCssPixelPoint::default() {
+            offsets.remove(&(generator, pseudo_kind));
+        } else {
+            offsets.insert((generator, pseudo_kind), offset);
+        }
+    }
+
+    /// An element keeps what its pseudo-elements have scrolled to across an identity change, as it
+    /// keeps their bindings.
+    pub(crate) fn move_pseudo_element_scroll_offsets(&self, old_generator: StyleNodeID, new_generator: StyleNodeID) {
+        let mut offsets = self.pseudo_element_scroll_offsets.borrow_mut();
+        let moved = offsets
+            .iter()
+            .filter(|((generator, _), _)| *generator == old_generator)
+            .map(|((_, pseudo_kind), offset)| (*pseudo_kind, *offset))
+            .collect::<Vec<_>>();
+        for (pseudo_kind, offset) in moved {
+            offsets.remove(&(old_generator, pseudo_kind));
+            offsets.insert((new_generator, pseudo_kind), offset);
+        }
+    }
+
     pub(crate) fn stamp_dom_element_row(&self, slot: NodeSlotId, kind: NodeKind, style_node: StyleNodeID) {
         self.stamp_dom_row(slot, kind, Some(style_node));
         let (record, payloads) = self
@@ -4969,6 +5020,52 @@ pub unsafe extern "C" fn layout_arena_set_style_node_of_generated_subtree(
     // SAFETY: As above.
     unsafe { &*arena.cast::<LayoutNodeArena>() }
         .set_style_node_of_generated_subtree(root, StyleNodeID::from_raw(style_node));
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_pseudo_element_scroll_offset(
+    arena: *mut c_void,
+    generator: u32,
+    pseudo_kind: u8,
+) -> FfiCssPixelPoint {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(generator) = StyleNodeID::from_raw(generator) else {
+        return FfiCssPixelPoint::default();
+    };
+    // SAFETY: As above.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.pseudo_element_scroll_offset(generator, pseudo_kind)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_pseudo_element_scroll_offset(
+    arena: *mut c_void,
+    generator: u32,
+    pseudo_kind: u8,
+    offset: FfiCssPixelPoint,
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(generator) = StyleNodeID::from_raw(generator) else {
+        return;
+    };
+    // SAFETY: As above.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset);
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_move_pseudo_element_scroll_offsets(
+    arena: *mut c_void,
+    old_generator: u32,
+    new_generator: u32,
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let (Some(old_generator), Some(new_generator)) = (
+        StyleNodeID::from_raw(old_generator),
+        StyleNodeID::from_raw(new_generator),
+    ) else {
+        return;
+    };
+    // SAFETY: As above.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.move_pseudo_element_scroll_offsets(old_generator, new_generator);
 }
 
 #[unsafe(no_mangle)]

@@ -917,6 +917,9 @@ void Node::dom_node_style_node_changed(DOM::Node& dom_node, CSS::StyleNodeID old
                         RustFFI::layout_arena_set_style_node_of_generated_subtree(arena->handle(), layout_node->m_slot, new_style_node.value());
                 });
             }
+            // What the node's pseudo-elements have scrolled to is keyed by the same pair, and
+            // takes the node's new identity along with their bindings.
+            RustFFI::layout_arena_move_pseudo_element_scroll_offsets(arena->handle(), old_style_node.value(), new_style_node.value());
         }
         // A retired identity may be reused, so it leaves every row carrying it, including rows of a
         // removed subtree that outlive the disconnection.
