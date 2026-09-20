@@ -124,6 +124,31 @@ mod tests {
         assert!(!arena.paintable_side_data(node).overflow_valid_across_recommits.get());
         assert!(!arena.paintable_side_data(node).overflow_measured_this_commit.get());
     }
+
+    #[test]
+    fn row_reset_version_changes_for_each_kind_of_reset() {
+        let mut arena = LayoutNodeArena::new();
+        let node = arena.allocate_for_test().slot;
+        arena.populate_paintable_row(node);
+        let initial_version = arena.paintable_rows().paintable_row_reset_version(node);
+
+        arena.paintable_rows_mut().begin_paintable_row_recommit(node);
+        let recommitted_version = arena.paintable_rows().paintable_row_reset_version(node);
+        assert_eq!(recommitted_version, initial_version + 1);
+
+        let reset = arena.prepare_paintable_row_cleared_reset(node).unwrap();
+        arena.paintable_row_cleared(reset);
+        let cleared_version = arena.paintable_rows().paintable_row_reset_version(node);
+        assert_eq!(cleared_version, recommitted_version + 1);
+
+        arena.populate_paintable_row(node);
+        let reset = arena.prepare_paintable_row_freed_reset(node.slot_index()).unwrap();
+        arena.paintable_row_freed(reset);
+        assert_eq!(
+            arena.paintable_rows().paintable_row_reset_version(node),
+            cleared_version + 1
+        );
+    }
 }
 
 #[repr(align(64))]
@@ -224,6 +249,7 @@ struct CommittedFragmentLinkSlot {
 pub(crate) struct PaintableRowStore {
     chunks: Vec<Box<PaintableRowChunk>>,
     side_data: RefCell<Vec<PaintableSideData>>,
+    row_reset_versions: Vec<u64>,
     pub(crate) row_paint_states: RefCell<Vec<RowPaintState>>,
     pub(crate) damage: DamageSet,
     visual_context_records: RefCell<Vec<Option<PaintableVisualContextRecord>>>,
@@ -320,6 +346,13 @@ where
         };
         let generation = chunk.slots[index % PAINTABLE_SLOTS_PER_CHUNK].slot_generation;
         generation != 0 && generation == id.generation()
+    }
+
+    /// Identifies the version of the physical row slot. Unlike `NodeSlotId::generation()`, this
+    /// changes when the same node's row is recommitted or cleared as well as when it is freed.
+    #[expect(dead_code, reason = "consumed by cached published-row readers")]
+    pub(crate) fn paintable_row_reset_version(&self, id: NodeSlotId) -> u64 {
+        self.arena.paintable_rows.row_reset_versions[id.slot_index() as usize]
     }
 
     pub(crate) fn clear_cached_overflow_data(&self, id: NodeSlotId) {
@@ -429,6 +462,7 @@ where
     }
 
     pub(crate) fn begin_paintable_row_recommit(&mut self, id: NodeSlotId) {
+        self.bump_paintable_row_reset_version(id);
         {
             let data = self.paintable_data_mut(id);
             data.offset = used_values::FfiCssPixelPoint::default();
@@ -799,6 +833,7 @@ impl LayoutNodeArena {
                     chunks.push(new_chunk());
                 }
                 side_data.push(PaintableSideData::default());
+                store.row_reset_versions.push(0);
                 row_paint_states.push(RowPaintState::default());
                 absolute_rect_memo.push(None);
                 visual_context_records.push(None);
@@ -823,6 +858,7 @@ impl LayoutNodeArena {
 
     fn reset_paintable_row(&mut self, row_is_still_linked: bool, reset: PaintableRowReset) {
         let id = reset.slot;
+        self.bump_paintable_row_reset_version(id);
         if reset.kind == crate::painting::paintable_data::PaintableRowResetKind::Freed {
             self.paintable_rows.scroll_offsets.forget(id);
             self.paintable_rows.unique_node_ids.forget(id);
@@ -863,6 +899,11 @@ impl LayoutNodeArena {
         store.visual_context_records.borrow_mut()[index] = None;
         store.stacking_context_entries.borrow_mut()[index] = None;
         self.flush_committed_box_changes();
+    }
+
+    fn bump_paintable_row_reset_version(&mut self, id: NodeSlotId) {
+        let version = &mut self.paintable_rows.row_reset_versions[id.slot_index() as usize];
+        *version = version.checked_add(1).expect("paintable row reset version overflowed");
     }
 
     pub(crate) fn paintable_visual_context_record(
