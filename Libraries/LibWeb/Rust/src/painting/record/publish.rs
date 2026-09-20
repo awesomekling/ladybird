@@ -17,6 +17,7 @@ use crate::painting::record::{RecordingOutput, RecordingResult};
 fn resolve_vector_image_placeholders(
     output: &mut RecordingOutput,
     requests: &[VectorImageRenderRequest],
+    main_thread: &crate::stage::MainThread,
     publish: &FfiRecordingPublishCallbacks,
 ) {
     if requests.is_empty() {
@@ -24,7 +25,7 @@ fn resolve_vector_image_placeholders(
     }
     let resolved_ids: Vec<u64> = requests
         .iter()
-        .map(|request| publish.resolve_vector_image_display_list(&request.to_ffi()))
+        .map(|request| publish.resolve_vector_image_display_list(main_thread, &request.to_ffi()))
         .collect();
     let display_list = std::sync::Arc::make_mut(&mut output.display_list);
     let id_field_offset = std::mem::offset_of!(PaintNestedDisplayList, display_list_id);
@@ -54,6 +55,7 @@ fn resolve_vector_image_placeholders(
 pub(crate) fn publish_recording(
     arena: &LayoutNodeArena,
     pending: PendingRecording,
+    main_thread: &crate::stage::MainThread,
     publish: &FfiRecordingPublishCallbacks,
 ) -> u64 {
     let PendingRecording {
@@ -70,26 +72,27 @@ pub(crate) fn publish_recording(
     } = resources;
     let pass = crate::painting::seal::enter(crate::painting::seal::Pass::RecordingPublish);
     for font in fonts.values() {
-        publish.add_font(font);
+        publish.add_font(main_thread, font);
     }
     for frame in image_frames.values() {
-        publish.add_image_frame(frame);
+        publish.add_image_frame(main_thread, frame);
     }
     for frame in arena.svg_paint_resources().published_filter_image_frames() {
-        publish.add_image_frame(&frame);
+        publish.add_image_frame(main_thread, &frame);
     }
     for (resource_id, sink_handle) in video_sinks {
-        publish.add_video_sink(resource_id, sink_handle);
+        publish.add_video_sink(main_thread, resource_id, sink_handle);
     }
     // Resolving a vector image lays out and records another document, which reads that document
     // and re-enters this arena's SVG paint resource sync. That is a paint stage of its own, so
     // this one ends before it begins rather than containing it.
     drop(pass);
-    resolve_vector_image_placeholders(&mut output, &vector_image_render_requests, publish);
+    resolve_vector_image_placeholders(&mut output, &vector_image_render_requests, main_thread, publish);
     let recording_from_scratch = recording_from_scratch.map(|mut recording_from_scratch| {
         resolve_vector_image_placeholders(
             &mut recording_from_scratch.output,
             &recording_from_scratch.resources.vector_image_render_requests,
+            main_thread,
             publish,
         );
         recording_from_scratch

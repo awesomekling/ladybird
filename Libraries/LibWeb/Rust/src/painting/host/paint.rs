@@ -555,24 +555,32 @@ pub struct FfiRecordingPublishCallbacks {
 }
 
 impl FfiRecordingPublishCallbacks {
-    pub(crate) fn add_font(&self, font: &libgfx_rust::font::FontHandle) {
+    pub(crate) fn add_font(&self, _: &crate::stage::MainThread, font: &libgfx_rust::font::FontHandle) {
         // SAFETY: The C++ host registers the live font synchronously.
         unsafe { (self.add_font)(self.context, font.as_raw()) };
     }
 
-    pub(crate) fn add_image_frame(&self, frame: &libgfx_rust::image_frame::ImageFrameHandle) {
+    pub(crate) fn add_image_frame(
+        &self,
+        _: &crate::stage::MainThread,
+        frame: &libgfx_rust::image_frame::ImageFrameHandle,
+    ) {
         // SAFETY: The C++ host copies the live frame synchronously.
         unsafe { (self.add_image_frame)(self.context, frame.as_raw()) };
     }
 
-    pub(crate) fn resolve_vector_image_display_list(&self, request: &FfiVectorImageRenderRequest) -> u64 {
+    pub(crate) fn resolve_vector_image_display_list(
+        &self,
+        _: &crate::stage::MainThread,
+        request: &FfiVectorImageRenderRequest,
+    ) -> u64 {
         crate::painting::seal::note_host_call("resolve_vector_image_display_list");
         // SAFETY: The C++ host records the image's display list synchronously and reads the
         // request only for the duration of the call.
         unsafe { (self.resolve_vector_image_display_list)(self.context, request) }
     }
 
-    pub(crate) fn add_video_sink(&self, resource_id: u64, sink_handle: u64) {
+    pub(crate) fn add_video_sink(&self, _: &crate::stage::MainThread, resource_id: u64, sink_handle: u64) {
         // SAFETY: The C++ host registers the sink synchronously.
         unsafe { (self.add_video_sink)(self.context, resource_id, sink_handle) };
     }

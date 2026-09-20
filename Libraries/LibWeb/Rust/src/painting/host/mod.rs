@@ -53,6 +53,7 @@ impl FfiGeometryHostCallbacks {
     /// held across this call and no pass may be running.
     pub(crate) unsafe fn set_scroll_offset(
         &self,
+        _: &crate::stage::MainThread,
         layout_node_shell: *mut std::ffi::c_void,
         offset: crate::layout::used_values::FfiCssPixelPoint,
     ) {
