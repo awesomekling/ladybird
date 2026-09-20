@@ -3349,6 +3349,14 @@ pub struct FfiNativeRuleTarget {
     pub origin: FfiCascadeOrigin,
 }
 
+#[derive(Clone, Copy, Default)]
+#[repr(C)]
+pub struct FfiNativeContainerMatchResult {
+    pub matches: bool,
+    pub depends_on_size: bool,
+    pub depends_on_style: bool,
+}
+
 /// Resolve a native rule identity in this document's engine, including shared sheets.
 ///
 /// # Safety
@@ -3518,9 +3526,8 @@ pub unsafe extern "C" fn style_engine_native_rule_matches_containers(
     engine: *const c_void,
     rule: u32,
     context: *mut c_void,
-    mark_dependencies: unsafe extern "C" fn(*mut c_void, bool, bool),
     evaluate: unsafe extern "C" fn(*mut c_void, *const c_void, *const u16, usize) -> bool,
-) -> bool {
+) -> FfiNativeContainerMatchResult {
     use crate::css::parser::query_parser::CONTAINER_QUERY_REQUIRES_STYLE;
     let containers = {
         let engine = unsafe { &*engine.cast::<StyleEngine>() };
@@ -3528,7 +3535,7 @@ pub unsafe extern "C" fn style_engine_native_rule_matches_containers(
             .checked_sub(1)
             .and_then(|id| engine.native_rules.targets.get(&RuleID(id)))
         else {
-            return false;
+            return FfiNativeContainerMatchResult::default();
         };
         target.containers().to_vec()
     };
@@ -3542,9 +3549,7 @@ pub unsafe extern "C" fn style_engine_native_rule_matches_containers(
             })
         })
     });
-    super::seal::note_host_call("native_rule_matches_containers.mark_dependencies");
-    unsafe { mark_dependencies(context, size, style) };
-    containers.iter().all(|conditions| {
+    let matches = containers.iter().all(|conditions| {
         conditions.conditions.iter().any(|condition| {
             let name = condition.name.as_ref().map_or(&[][..], |name| name.units());
             let query = condition
@@ -3554,7 +3559,12 @@ pub unsafe extern "C" fn style_engine_native_rule_matches_containers(
             super::seal::note_host_call("native_rule_matches_containers.evaluate");
             unsafe { evaluate(context, query, name.as_ptr(), name.len()) }
         })
-    })
+    });
+    FfiNativeContainerMatchResult {
+        matches,
+        depends_on_size: size,
+        depends_on_style: style,
+    }
 }
 /// Interns one name identity and returns its document-local atom.
 ///

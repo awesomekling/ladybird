@@ -88,6 +88,17 @@ void CommitMessages::note_style_query_custom_property_reference(NodeIdentity ide
     });
 }
 
+void CommitMessages::note_style_container_query_dependencies(NodeIdentity identity, u8 dependencies)
+{
+    m_style_messages.append(Message {
+        .identity = identity,
+        .kind = Kind::StyleContainerQueryDependencies,
+        .style_container_query_dependencies = dependencies,
+        .pseudo_element = {},
+        .custom_property_name = {},
+    });
+}
+
 void CommitMessages::apply_style_messages()
 {
     if (m_applying)
@@ -215,6 +226,15 @@ void CommitMessages::apply(Message const& message)
     case Kind::StyleQueryCustomPropertyReference:
         if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
             element->record_style_query_custom_property_reference(message.pseudo_element, message.custom_property_name);
+        return;
+    case Kind::StyleContainerQueryDependencies:
+        if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr())) {
+            if (message.style_container_query_dependencies & 1)
+                element->set_style_depends_on_size_container_query();
+            if (message.style_container_query_dependencies & 2)
+                element->set_style_depends_on_style_container_query();
+            element->finish_recording_style_dependencies();
+        }
         return;
     case Kind::TopLayerZoneRebuildNeeded:
         m_document.set_top_layer_needs_layout_zone_rebuild();

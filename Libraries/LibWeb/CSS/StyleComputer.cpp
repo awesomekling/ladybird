@@ -2766,19 +2766,18 @@ RefPtr<StyleComputer::CascadeInput const> StyleComputer::style_engine_cascade_in
         // which is what bounds the scan that re-styles it when the container moves.
         if (target->has_container_conditions) {
             input_is_cacheable = false;
-            auto matches = StyleEngineFFI::style_engine_native_rule_matches_containers(
+            auto match_result = StyleEngineFFI::style_engine_native_rule_matches_containers(
                 style_engine.rust_handle(), match.rule, &abstract_element,
-                [](void* context, bool size, bool style) {
-                    auto& element = static_cast<DOM::AbstractElement*>(context)->element();
-                    if (size)
-                        element.set_style_depends_on_size_container_query();
-                    if (style)
-                        element.set_style_depends_on_style_container_query();
-                },
                 [](void* context, void const* query, u16 const* name, size_t length) {
                     return evaluate_native_container_condition(static_cast<Parser::ValueParserFFI::FfiQueryHandle const*>(query), { reinterpret_cast<char16_t const*>(name), length }, *static_cast<DOM::AbstractElement*>(context));
                 });
-            if (!matches)
+            u8 dependencies = (match_result.depends_on_size ? 1 : 0) | (match_result.depends_on_style ? 2 : 0);
+            if (dependencies) {
+                input->depends_on_size_container_query |= match_result.depends_on_size;
+                input->depends_on_style_container_query |= match_result.depends_on_style;
+                abstract_element.document().commit_messages().note_style_container_query_dependencies(DOM::NodeIdentity::of(abstract_element.element()), dependencies);
+            }
+            if (!match_result.matches)
                 continue;
         }
 
@@ -3907,7 +3906,9 @@ NonnullRefPtr<ComputedValues const> StyleComputer::build_and_share_computed_valu
         && !element.style_uses_tree_counting_function()
         && !element.style_depends_on_viewport_metrics()
         && !element.style_depends_on_size_container_query()
+        && !sharing.depends_on_size_container_query
         && !element.style_depends_on_style_container_query()
+        && !sharing.depends_on_style_container_query
         && !sharing.computation_reads_unkeyed_context;
     // The flags are cleared for the next computation, so the record is what has to answer whether
     // that computation can be skipped.
@@ -3918,6 +3919,8 @@ NonnullRefPtr<ComputedValues const> StyleComputer::build_and_share_computed_valu
         record->style_reads_resource_context = sharing.computation_reads_resource_context;
         record->style_uses_var_css_function = element.style_uses_var_css_function() || (sharing.substitution_usage & substitution_uses_var);
         record->style_uses_inherit_css_function = element.style_uses_inherit_css_function() || (sharing.substitution_usage & substitution_uses_inherit);
+        record->style_depends_on_size_container_query |= sharing.depends_on_size_container_query;
+        record->style_depends_on_style_container_query |= sharing.depends_on_style_container_query;
         record->explicitly_inherited_non_inherited_style_groups = sharing.explicitly_inherited_non_inherited_style_groups;
     }
     if (sharing.is_candidate && sharing.may_reuse_or_publish_shared_style) {
@@ -4444,6 +4447,10 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
     // second answer would hide rather than fix.
     VERIFY(style_engine_input);
     auto const& cascade_input = *style_engine_input;
+    if (sharing) {
+        sharing->depends_on_size_container_query = cascade_input.depends_on_size_container_query;
+        sharing->depends_on_style_container_query = cascade_input.depends_on_style_container_query;
+    }
 
     auto const highlight_inheritance_parent = abstract_element.highlight_inheritance_parent();
     auto const effective_highlight_parent_style_record = highlight_parent_style_record.value_or(
@@ -5052,6 +5059,10 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
     };
 
     record_style_input();
+    if (new_style_input_record) {
+        new_style_input_record->style_depends_on_size_container_query |= cascade_input.depends_on_size_container_query;
+        new_style_input_record->style_depends_on_style_container_query |= cascade_input.depends_on_style_container_query;
+    }
 
     // The element's own last answer comes before another element's: it needs no lookup, and it is
     // the one whose marks are already on the element.
