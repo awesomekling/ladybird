@@ -1326,7 +1326,7 @@ void StyleComputer::invalidate_animated_custom_property_readers(DOM::AbstractEle
     }
 }
 
-void StyleComputer::process_animation_definitions(ComputedStyleWorkingSet const& computed_properties, CascadedProperties const& cascaded_properties, DOM::AbstractElement& abstract_element, ReadonlySpan<AnimationProperties> animation_definitions) const
+void StyleComputer::apply_animation_definitions(ComputedStyleWorkingSet const& computed_properties, CascadedProperties const& cascaded_properties, DOM::AbstractElement& abstract_element, ReadonlySpan<AnimationProperties> animation_definitions, ReadonlySpan<i32> definition_matches) const
 {
     auto& document = abstract_element.document();
 
@@ -1362,16 +1362,17 @@ void StyleComputer::process_animation_definitions(ComputedStyleWorkingSet const&
         return in_display_none_subtree.value();
     };
 
-    // The same @keyframes rule name may be repeated within an animation-name. Changes to the animation-name update
-    // existing animations by iterating over the new list of animations from last to first, and, for each animation,
-    // finding the last matching animation in the list of existing animations. If a match is found, the existing
-    // animation is updated using the animation properties corresponding to its position in the new list of animations,
-    // whilst maintaining its current playback time as described above. The matching animation is removed from the
-    // existing list of animations such that it will not match twice. If a match is not found, a new animation is
-    // created. As a result, updating animation-name from ‘a’ to ‘a, a’ will cause the existing animation for ‘a’ to
-    // become the second animation in the list and a new animation will be created for the first item in the list.
+    // Which animation each definition claims is decided by the style computation, from the names of
+    // the animations this element owns, which it publishes. What it decides is what
+    // https://drafts.csswg.org/css-animations-1/#animations describes: the new list is walked last
+    // to first, and each definition takes the last existing animation of the same name that no later
+    // definition has taken, so updating animation-name from 'a' to 'a, a' makes the existing
+    // animation the second of the two and creates the first.
+    VERIFY(definition_matches.size() == animation_definitions.size());
 
     auto existing_animations = *element_animations;
+    Vector<bool> existing_animation_was_claimed;
+    existing_animation_was_claimed.resize(existing_animations.size());
     Vector<GC::Ref<CSSAnimation>> new_animations;
 
     for (size_t i = animation_definitions.size(); i-- > 0;) {
@@ -1403,17 +1404,13 @@ void StyleComputer::process_animation_definitions(ComputedStyleWorkingSet const&
             return find_keyframes(nullptr);
         };
 
-        Optional<size_t> existing_animation_index;
+        auto matched_index = definition_matches[i];
+        VERIFY(matched_index < static_cast<i32>(existing_animations.size()));
 
-        for (size_t i = existing_animations.size(); i-- > 0;) {
-            if (existing_animations[i]->animation_name() == animation_name) {
-                existing_animation_index = i;
-                break;
-            }
-        }
-
-        if (existing_animation_index.has_value()) {
-            auto existing_animation = existing_animations.take(*existing_animation_index);
+        if (matched_index >= 0) {
+            auto existing_animation = existing_animations[matched_index];
+            VERIFY(!existing_animation_was_claimed[matched_index]);
+            existing_animation_was_claimed[matched_index] = true;
 
             if (auto effect = existing_animation->effect()) {
                 as<Animations::KeyframeEffect>(*effect).set_key_frame_set(resolve_keyframes());
@@ -1446,10 +1443,11 @@ void StyleComputer::process_animation_definitions(ComputedStyleWorkingSet const&
     }
 
     // Once an animation has started it continues until it ends or the animation-name is removed
-    // NB: All animations that are matched by the new set of animations have been removed from `existing_animations` by
-    //     this point so any still in the Vector have had their animation-name entries removed.
-    for (auto const& existing_animation : existing_animations)
-        existing_animation->cancel(Animations::Animation::ShouldInvalidate::No);
+    // NB: An animation no definition claimed is one whose animation-name entry has gone.
+    for (size_t i = 0; i < existing_animations.size(); ++i) {
+        if (!existing_animation_was_claimed[i])
+            existing_animations[i]->cancel(Animations::Animation::ShouldInvalidate::No);
+    }
 
     // NB: We create animations in reverse definition order so flip it back.
     new_animations.reverse();
@@ -5564,6 +5562,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         OwnPtr<CustomPropertyResolutionState> custom_property_resolution;
         GC::RootVector<GC::Ref<Animations::KeyframeEffect>> animation_effects;
         Vector<AnimationProperties> animation_definitions;
+        // Per definition, the index of the CSS animation it claims in the list the element already
+        // holds, or -1 where the style computation asks for a new one. Decided in Rust from the
+        // published animation names, applied by the animation stage below.
+        Vector<i32> animation_definition_matches;
         Vector<TransitionProperties> transitions;
         bool transition_delay_and_duration_are_single_zero { false };
         u64 container_relative_length_unit_mask { 0 };
@@ -5907,7 +5909,9 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             }
             state.transition_delay_and_duration_are_single_zero = longhand_result->transitions.delay_and_duration_are_single_zero;
             state.animation_definitions.ensure_capacity(longhand_result->animations.count);
+            state.animation_definition_matches.ensure_capacity(longhand_result->animations.count);
             for (auto const& animation : ReadonlySpan<ComputedValuesFFI::FfiComputedAnimation> { longhand_result->animations.animations, longhand_result->animations.count }) {
+                state.animation_definition_matches.unchecked_append(animation.matched_existing_index);
                 Variant<double, Utf16String> duration { animation.duration };
                 if (animation.duration_is_auto)
                     duration = "auto"_utf16;
@@ -5975,11 +5979,11 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             //     than after the definitions lets an element without animations skip that step.
             style_computer.m_keyframes_inherited_non_inherited_style_groups = 0;
             style_computer.clear_computation_context_caches(); },
-        .process_animation_definitions = [](void* context_pointer) {
-            auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
-            context.style_computer->process_animation_definitions(*context.state->working_set, context.cascaded_properties, context.abstract_element, context.state->animation_definitions.span()); },
         .prepare_animations = [](void* context_pointer) -> bool {
             auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
+            // Applying the plan the style computation decided has to happen before the effects are
+            // collected, since an animation it starts composes into this very computation.
+            context.style_computer->apply_animation_definitions(*context.state->working_set, context.cascaded_properties, context.abstract_element, context.state->animation_definitions.span(), context.state->animation_definition_matches.span());
             auto animations = context.abstract_element.element().get_animations_internal(
                 Animations::Animatable::GetAnimationsSorted::Yes,
                 Animations::Animatable::GetAnimationsOptions { .subtree = false, .pseudo_element = {} });
