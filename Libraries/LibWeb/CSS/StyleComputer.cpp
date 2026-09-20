@@ -5863,7 +5863,9 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         state.computation_environment = {
             .box_type_input = state.box_type_input,
             .color_scheme_input = state.effective_color_scheme_input,
-            .is_th_element = abstract_element.element().local_name() == HTML::TagNames::th,
+            .is_th_element = published_adjustment_facts.has_value()
+                ? (*published_adjustment_facts & to_underlying(ElementStyleAdjustmentFact::IsTh)) != 0
+                : abstract_element.element().local_name() == HTML::TagNames::th,
             .has_new_font_size = state.new_font_size != nullptr,
             .has_tree_counting_context = state.tree_counting_context.has_value(),
             .sibling_count = state.tree_counting_context.has_value() ? static_cast<u64>(state.tree_counting_context->sibling_count) : 0,
