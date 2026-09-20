@@ -1465,7 +1465,6 @@ pub unsafe extern "C" fn style_engine_committed_transform_reference_box(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_destroy(engine: *mut c_void) {
     super::seal::flush_census();
-    crate::css::cascaded_properties::flush_substitution_usage_verifier();
     let mut engine = unsafe { Box::from_raw(engine.cast::<StyleEngine>()) };
     engine.end_recording();
 }

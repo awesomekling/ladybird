@@ -297,24 +297,6 @@ static void report_style_query_dependencies(DOM::AbstractElement abstract_elemen
     });
 }
 
-static thread_local u64 custom_property_install_comparisons;
-static thread_local u64 custom_property_install_mismatches;
-
-void StyleComputer::flush_custom_property_install_verifier()
-{
-    auto const* path = getenv("LIBWEB_VERIFY_CUSTOM_PROPERTY_INSTALL_LOG");
-    if (!path || custom_property_install_comparisons == 0)
-        return;
-    if (auto* file = fopen(path, "a")) {
-        fprintf(file, "CUSTOM PROPERTY INSTALL SUMMARY: comparisons=%llu mismatches=%llu\n",
-            static_cast<unsigned long long>(custom_property_install_comparisons),
-            static_cast<unsigned long long>(custom_property_install_mismatches));
-        fclose(file);
-    }
-    custom_property_install_comparisons = 0;
-    custom_property_install_mismatches = 0;
-}
-
 class Fnv1a64 {
 public:
     void add(u64 value)
@@ -3248,8 +3230,6 @@ NonnullRefPtr<CascadedProperties> StyleComputer::compute_cascaded_values(DOM::Ab
     assign_source_slots(cascade_result.source_slot_assignments, cascade_result.source_slot_assignment_count);
     if (cascade_result.custom_properties_apply) {
         RefPtr<CustomPropertyData const> resolved = parent_custom_property_data;
-        OrderedHashMap<Utf16FlyString, StyleProperty> expected_own_values;
-        bool corrupted = false;
         if (cascade_result.custom_property_store) {
             OrderedHashMap<Utf16FlyString, StyleProperty> own_values;
             ComputedValuesFFI::rust_custom_property_store_for_each_own_entry(cascade_result.custom_property_store, &own_values, [](void* context, size_t name_raw, bool important, void const* data) {
@@ -3262,31 +3242,13 @@ NonnullRefPtr<CascadedProperties> StyleComputer::compute_cascaded_values(DOM::Ab
                         .value = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(static_cast<StyleValueFFI::StyleValueData const*>(data))),
                     });
             });
-            expected_own_values = own_values;
-            if (getenv("LIBWEB_CORRUPT_CUSTOM_PROPERTY_INSTALL")) {
-                corrupted = true;
-                ComputedValuesFFI::rust_custom_property_store_destroy(cascade_result.custom_property_store);
-            } else {
-                resolved = intern_custom_property_data(CustomPropertyData::create(
-                    move(own_values), parent_custom_property_data, cascade_result.custom_property_store));
-            }
+            resolved = intern_custom_property_data(CustomPropertyData::create(
+                move(own_values), parent_custom_property_data, cascade_result.custom_property_store));
         }
         RefPtr<CustomPropertyData const> installed = resolved;
         if (resolved && resolved != parent_custom_property_data)
             installed = custom_property_data_keeping_identity(document, abstract_element.custom_property_data(), resolved);
         abstract_element.set_custom_property_data(installed);
-        if (getenv("LIBWEB_VERIFY_CUSTOM_PROPERTY_INSTALL_LOG")) {
-            ++custom_property_install_comparisons;
-            auto actual = abstract_element.custom_property_data();
-            if (actual && actual->is_animation_overlay())
-                actual = actual->parent();
-            auto expected = installed;
-            if (expected && expected->is_animation_overlay())
-                expected = expected->parent();
-            bool matches = corrupted ? expected_own_values.is_empty() : actual == expected;
-            if (!matches)
-                ++custom_property_install_mismatches;
-        }
     }
     report_substitution_usage(abstract_element.element(), cascade_result.substitution_usage, substitution_usage);
     report_style_query_dependencies(abstract_element, style_query_dependencies);

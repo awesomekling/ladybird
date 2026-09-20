@@ -238,35 +238,4 @@ void ScrollStateQueryContainers::visit_edges(GC::Cell::Visitor& visitor)
         visitor.visit(it.key);
 }
 
-void ScrollStateQueryContainers::verify_published_style_snapshots(DOM::Document& document) const
-{
-    auto const* path = getenv("LIBWEB_VERIFY_LAYOUT_STYLE_SNAPSHOT_LOG");
-    if (!path)
-        return;
-    u64 comparisons = 0;
-    u64 mismatches = 0;
-    for (auto const& [element, container] : m_containers) {
-        auto row = Layout::RustFFI::layout_arena_style_snapshot_row(document.layout_node_arena().handle(), element->style_node_id().value());
-        ++comparisons;
-        mismatches += row.has_row ? 0 : 1;
-        if (auto* layout_node = element->unsafe_layout_node(); layout_node && Painting::has_committed_box(*layout_node)) {
-            comparisons += 3;
-            mismatches += row.has_committed_box ? 0 : 1;
-            mismatches += row.content_width_raw == Painting::content_width(*layout_node).raw_value() ? 0 : 1;
-            mismatches += row.content_height_raw == Painting::content_height(*layout_node).raw_value() ? 0 : 1;
-        }
-        comparisons += 4;
-        mismatches += row.stuck == container.snapshot.stuck ? 0 : 1;
-        mismatches += row.snapped == container.snapshot.snapped ? 0 : 1;
-        mismatches += row.scrollable == container.snapshot.scrollable ? 0 : 1;
-        mismatches += row.scrolled == container.snapshot.scrolled ? 0 : 1;
-    }
-    if (comparisons == 0)
-        return;
-    if (auto* file = fopen(path, "a")) {
-        fprintf(file, "LAYOUT STYLE SNAPSHOT SUMMARY: comparisons=%llu mismatches=%llu\n", comparisons, mismatches);
-        fclose(file);
-    }
-}
-
 }

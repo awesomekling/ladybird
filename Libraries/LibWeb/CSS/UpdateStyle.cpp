@@ -43,7 +43,6 @@ static void finish_complete_style_update(DOM::Document& document)
     for (size_t i = 0; i < releases.fly_string_count; ++i)
         ladybird_utf16_fly_string_unref(releases.fly_strings[i]);
     document.commit_messages().apply_style_messages();
-    StyleComputer::flush_custom_property_install_verifier();
 }
 
 enum class DocumentWithoutBrowsingContext {
