@@ -825,9 +825,24 @@ void set_needs_repaint(Layout::Node const& node, InvalidateDisplayList should_in
     if (!has_committed_box(node))
         return;
 
+    auto identity = node.dom_node_identity();
+    if (!identity) {
+        // Anonymous rows cannot be resolved by the journal. The layout operation that owns them
+        // keeps their slots live while this apply-only path pushes damage.
+        apply_repaint_damage(node, should_invalidate_display_list, RepaintDamageStage::AnonymousRow);
+        return;
+    }
+    const_cast<DOM::Document&>(node.document()).invalidation_journal().note_needs_repaint(identity, should_invalidate_display_list);
+}
+
+void apply_repaint_damage(Layout::Node const& node, InvalidateDisplayList should_invalidate_display_list, RepaintDamageStage stage)
+{
+    if (!has_committed_box(node))
+        return;
+
     auto& document = const_cast<DOM::Document&>(node.document());
     if (should_invalidate_display_list != InvalidateDisplayList::No) {
-        Layout::RustFFI::layout_arena_paintable_invalidate_for_repaint(node.arena_handle(), committed_row_slot(node), should_invalidate_display_list == InvalidateDisplayList::PaintCommandsAndHitTestList);
+        Layout::RustFFI::layout_arena_paintable_invalidate_for_repaint(node.arena_handle(), committed_row_slot(node), should_invalidate_display_list == InvalidateDisplayList::PaintCommandsAndHitTestList, to_underlying(stage));
 
         // The root element paints the body's propagated background, so a body repaint must also refresh the
         // root's cached background. Changes to the propagation source are handled during paint preparation.
@@ -841,12 +856,33 @@ void set_needs_repaint(Layout::Node const& node, InvalidateDisplayList should_in
     BoxViewRepaintAccess::set_document_needs_repaint(document, should_invalidate_display_list);
 }
 
+void apply_repaint_damage(Layout::TextNode const& node, InvalidateDisplayList should_invalidate_display_list, RepaintDamageStage stage)
+{
+    if (auto* containing_block = node.containing_block())
+        apply_repaint_damage(*containing_block, should_invalidate_display_list, stage);
+
+    if (should_invalidate_display_list != InvalidateDisplayList::No)
+        Layout::RustFFI::layout_arena_invalidate_nearest_self_painting_inline_paint_cache(node.arena_handle(), Layout::Node::slot_id(&node), to_underlying(stage));
+}
+
 void set_needs_repaint_in_subtree(Layout::Node const& node)
 {
     if (!has_committed_box(node))
         return;
-    Layout::RustFFI::layout_arena_paintable_invalidate_subtree_for_repaint(node.arena_handle(), committed_row_slot(node));
-    set_needs_repaint(node);
+    auto identity = node.dom_node_identity();
+    if (!identity) {
+        apply_subtree_repaint_damage(node, RepaintDamageStage::AnonymousRow);
+        apply_repaint_damage(node, InvalidateDisplayList::PaintCommandsAndHitTestList, RepaintDamageStage::AnonymousRow);
+        return;
+    }
+    const_cast<DOM::Document&>(node.document()).invalidation_journal().note_needs_repaint_in_subtree(identity);
+}
+
+void apply_subtree_repaint_damage(Layout::Node const& node, RepaintDamageStage stage)
+{
+    if (!has_committed_box(node))
+        return;
+    Layout::RustFFI::layout_arena_paintable_invalidate_subtree_for_repaint(node.arena_handle(), committed_row_slot(node), to_underlying(stage));
 }
 
 void invalidate_paint_cache(Layout::Node const& node)

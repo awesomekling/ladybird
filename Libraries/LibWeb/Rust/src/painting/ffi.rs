@@ -396,8 +396,14 @@ pub unsafe extern "C" fn layout_arena_node_has_css_transform(arena: *mut c_void,
 pub unsafe extern "C" fn layout_arena_invalidate_nearest_self_painting_inline_paint_cache(
     arena: *mut c_void,
     node: NodeSlotId,
+    stage: u8,
 ) {
     let arena = unsafe { arena_from_handle(arena) };
+    let _writer = crate::painting::published_immutable::enter_writer(match stage {
+        0 => "journal drain",
+        1 => "anonymous row invalidation",
+        _ => "unknown repaint damage stage",
+    });
     if let Some(ancestor) =
         crate::painting::fragment_ownership::nearest_self_painting_inline_box(&arena.paintable_rows(), node)
     {
@@ -1937,6 +1943,7 @@ pub unsafe extern "C" fn layout_arena_paintable_invalidate_paint_cache(
         3 => "paint fact reconciliation",
         _ => "unknown paint-cache invalidation stage",
     };
+    let _writer = crate::painting::published_immutable::enter_writer(writer);
     crate::painting::published_immutable::note_row_mutation_with_writer(
         arena,
         paintable,
@@ -1967,9 +1974,15 @@ pub unsafe extern "C" fn layout_arena_paintable_invalidate_for_repaint(
     arena: *mut c_void,
     paintable: NodeSlotId,
     include_hit_test_items: bool,
+    stage: u8,
 ) {
     use crate::painting::record::damage::PaintDamage;
     let arena = unsafe { arena_from_handle(arena) };
+    let _writer = crate::painting::published_immutable::enter_writer(match stage {
+        0 => "journal drain",
+        1 => "anonymous row invalidation",
+        _ => "unknown repaint damage stage",
+    });
     let damage = if include_hit_test_items {
         PaintDamage::ALL_PRODUCERS
     } else {
@@ -1985,8 +1998,14 @@ pub unsafe extern "C" fn layout_arena_paintable_invalidate_for_repaint(
 pub unsafe extern "C" fn layout_arena_paintable_invalidate_subtree_for_repaint(
     arena: *mut c_void,
     paintable: NodeSlotId,
+    stage: u8,
 ) {
     let arena = unsafe { arena_from_handle(arena) };
+    let _writer = crate::painting::published_immutable::enter_writer(match stage {
+        0 => "journal drain",
+        1 => "anonymous row invalidation",
+        _ => "unknown repaint damage stage",
+    });
     arena.push_paint_damage_to_paint_subtree(paintable, crate::painting::record::damage::PaintDamage::ALL_PRODUCERS);
 }
 
