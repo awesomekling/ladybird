@@ -5545,7 +5545,18 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
     };
     // The plan has to reach the host's objects whenever it has any work: a definition to retime or
     // to start, or an animation no definition claimed and that must therefore be cancelled.
-    let plan_has_work = has_animation_definitions || input.has_css_defined_animations;
+    // NB: The host's own flag is sticky and shared by every pseudo-element slot - it says the
+    //     element has held a CSS-defined animation at some point, not that it holds one now - so an
+    //     element whose animations have all ended would claim a plan forever. The names published
+    //     for the slot are the list the plan actually works on, and an empty one leaves it nothing
+    //     to retime and nothing to cancel.
+    let element_has_css_defined_animations = match crate::css::style::tree::StyleNodeID::from_raw(input.style_node) {
+        Some(node) => !style_engine
+            .element_css_defined_animations(node, animation_slot(input.pseudo_kind))
+            .is_empty(),
+        None => input.has_css_defined_animations,
+    };
+    let plan_has_work = has_animation_definitions || element_has_css_defined_animations;
     // What is left is whether the element has anything to sample, which is a question about the
     // WAAPI timing model: an animation is relevant when its effect is current or in effect. Both
     // are pure functions of the animation's timing and of the current time its timeline was sampled
