@@ -10,7 +10,7 @@ use super::formatting_context::LayoutMode;
 use super::formatting_context::{FfiLayoutHostCallbacks, LayoutHost};
 use super::geometry::AvailableSize;
 use super::geometry::AvailableSpace;
-use super::rendered_text::{FfiTextSource, FfiTextSourceRange, RenderedTextBoundary, TextContent, TextFragments};
+use super::rendered_text::{FfiTextSourceRange, RenderedTextBoundary, TextContent, TextFragments};
 use super::svg_formatting_context::FfiSvgAttributeFacts;
 
 /// How many interned names one SVG element's publication can name.
@@ -23,7 +23,7 @@ use crate::css::style::bridge::ElementBoxKind;
 use crate::css::style::fast_hash::{FastMap as HashMap, FastSet as HashSet};
 use crate::css::style::tree::StyleNodeID;
 use crate::css::style::{
-    PublishedBoxFacts, StyleEngine, TextStyleParentFacts,
+    PublishedBoxFacts, PublishedTextSource, StyleEngine, TextStyleParentFacts,
     layout_style::{AnonymousStyleKind, AnonymousStyleOverrides, DerivedStyleRecord, LayoutStyle},
 };
 use crate::layout::ComputedValuesView;
@@ -345,6 +345,10 @@ struct TextNodeState {
     source_range: Option<FfiTextSourceRange>,
     first_letter: NodeSlotId,
     content: Option<TextContent>,
+    /// What a generated text row renders. Generated content has no DOM text node behind it, so
+    /// the build stamps the characters it resolved on the row rather than reading them back out
+    /// of the host object it asked to be allocated.
+    generated_text: Option<ak::Utf16String>,
 }
 
 #[derive(Default)]
@@ -648,7 +652,6 @@ pub(crate) struct LayoutNodeArena {
     default_scroll_shift_anchors: RefCell<Vec<DefaultScrollShiftAnchorSlot>>,
     any_default_scroll_shift_anchor_ever_stored: Cell<bool>,
     text_nodes: Vec<TextNodeSlot>,
-    pub(super) text_source_callback: Option<unsafe extern "C" fn(*mut c_void) -> FfiTextSource>,
     pub(super) searchable_text: Option<Vec<super::text_queries::MappedText>>,
     replaced_content_facts: Vec<ReplacedContentFactsSlot>,
     raw_table_column_spans: HashMap<NodeSlotId, u32>,
@@ -770,7 +773,6 @@ impl LayoutNodeArena {
             default_scroll_shift_anchors: RefCell::new(Vec::new()),
             any_default_scroll_shift_anchor_ever_stored: Cell::new(false),
             text_nodes: Vec::new(),
-            text_source_callback: None,
             searchable_text: None,
             replaced_content_facts: Vec::new(),
             raw_table_column_spans: HashMap::default(),
@@ -4049,6 +4051,48 @@ impl LayoutNodeArena {
         self.text_node_state(id)?.content.as_ref()
     }
 
+    /// Record what a generated text row spells, as the build resolved it.
+    pub(crate) fn set_generated_text(&mut self, id: NodeSlotId, text: ak::Utf16String) {
+        self.text_node_state_mut(id).generated_text = Some(text);
+    }
+
+    fn generated_text(&self, id: NodeSlotId) -> Option<&ak::Utf16String> {
+        self.text_node_state(id)?.generated_text.as_ref()
+    }
+
+    /// Everything a text row renders from. Generated content carries its own characters; a row
+    /// bound to a DOM text node reads the characters and facts the style mirror publishes for it.
+    pub(crate) fn published_text_source(&self, id: NodeSlotId, uses_locale: bool) -> PublishedTextSource {
+        if self.data(id).kind.get() == NodeKind::GeneratedTextNode {
+            return PublishedTextSource {
+                data: self.generated_text(id).cloned().unwrap_or_default(),
+                locale: uses_locale.then(|| self.generated_text_language_tag(id)).flatten(),
+                is_password_input: false,
+            };
+        }
+        let Some(style_node) = self.node_style_node(id).filter(|style_node| style_node.is_text()) else {
+            return PublishedTextSource::default();
+        };
+        self.with_style_engine(|engine| engine.published_text_source(style_node, uses_locale))
+    }
+
+    /// The language tag a generated text row's transform reads: the one the element the content
+    /// was generated for resolves to. The row is either the pseudo-element's own box or a child of
+    /// it, and a generated row under an ordinary box reads no tag at all.
+    fn generated_text_language_tag(&self, id: NodeSlotId) -> Option<Vec<u16>> {
+        let generator = if self.node_is_generated_for_pseudo_element(id) {
+            self.node_style_node(id)
+        } else {
+            let parent = self.data(id).parent.get();
+            match !parent.is_invalid() && self.node_is_generated_for_pseudo_element(parent) {
+                true => self.node_style_node(parent),
+                false => None,
+            }
+        }?;
+        let tag = self.with_style_engine(|engine| engine.element_language_tag(generator).to_vec());
+        (!tag.is_empty()).then_some(tag)
+    }
+
     pub(super) fn set_first_letter_slices(
         &mut self,
         first_letter: NodeSlotId,
@@ -4648,10 +4692,8 @@ pub(crate) struct NodeAllocation {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn layout_arena_create(text_source: unsafe extern "C" fn(*mut c_void) -> FfiTextSource) -> *mut c_void {
-    let mut arena = Box::new(LayoutNodeArena::new());
-    arena.text_source_callback = Some(text_source);
-    Box::into_raw(arena).cast()
+pub extern "C" fn layout_arena_create() -> *mut c_void {
+    Box::into_raw(Box::new(LayoutNodeArena::new())).cast()
 }
 
 #[unsafe(no_mangle)]

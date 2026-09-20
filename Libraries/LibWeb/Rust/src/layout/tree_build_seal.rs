@@ -23,16 +23,15 @@
 //! matters as much as the name, because a route a full suite takes twice is a different problem
 //! from one it takes a hundred thousand times.
 //!
-//! What the whole suite takes, by `during_build` count, as of the commit that answered an SVG
-//! resource box's survival from the style mirror. Three of these are not tree builder callback
-//! slots at all, which is what the gate was for:
+//! What the whole suite takes, by `during_build` count, as of the commit that published a text
+//! node's characters in the style mirror. Two of these are not tree builder callback slots at
+//! all, which is what the gate was for:
 //!
 //! | route | during build | note |
 //! |---|---|---|
 //! | `layout_node_shell_factory` | 4003054 | **not a slot**: the arena materialising a shell |
 //! | `attach_style_resources` | 1893085 | slot |
 //! | `shell_style_changed` | 81525 | **not a slot**: a row's style reaching its shell |
-//! | `text_source` | 64085 | **not a slot**: a text row's characters, synced mid-build |
 //! | `pseudo.create_content_item` | 44560 | slot |
 //! | `pseudo.create_layout_node` | 44077 | slot |
 //! | `pseudo.create_nested_list_marker` | 1531 | slot |
