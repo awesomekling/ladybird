@@ -219,6 +219,11 @@ impl LayoutNodeArena {
             if state.damage().contains(PaintDamage::DESCENDANT_READERS) {
                 break;
             }
+            crate::painting::published_immutable::note_row_mutation(
+                self,
+                ancestor,
+                "M12 LayoutNodeArena::hint_descendant_readers_above",
+            );
             if state.add(PaintDamage::DESCENDANT_READERS, stamp) {
                 set.rows.borrow_mut().push(ancestor);
             }
