@@ -7016,6 +7016,70 @@ pub unsafe extern "C" fn rust_published_animation_current_key(
     true
 }
 
+/// Where one effect sits in the composite order of the element's published animation list.
+///
+/// The list is published in composite order, so a stage that holds a subset of it can put its own
+/// effects in order by their positions in it instead of comparing the host's animations. Returns
+/// whether the list names the effect at all: an effect of a transition that was provisionally
+/// started and then discarded belongs to no list, and there the stage has to ask the host.
+///
+/// # Safety
+/// `style_engine` must be a live style engine, and `position_out` must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_published_animation_composite_position(
+    style_engine: *const std::ffi::c_void,
+    style_node: u32,
+    slot: u8,
+    effect_identity: u64,
+    position_out: *mut u32,
+) -> bool {
+    let engine = unsafe { &*style_engine.cast::<crate::css::style::StyleEngine>() };
+    let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
+        return false;
+    };
+    let Some(position) = engine
+        .element_animation_timing_rows(node, slot)
+        .iter()
+        .position(|row| row.effect_identity() == effect_identity)
+    else {
+        return false;
+    };
+    unsafe { *position_out = position as u32 };
+    true
+}
+
+/// Order one element's animation timing rows in composite order, as indices into the list the host
+/// packed. The order is decided from the rows alone: every number
+/// `KeyframeEffect::composite_order()` compares travels on the row, so the list a stage reads is in
+/// the order it composes in without the stage holding any of the animations.
+///
+/// # Safety
+/// `words` must name `row_count * TIMING_ROW_WORDS` readable words and `order_out` `row_count`
+/// writable ones.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_animation_timing_rows_composite_order(
+    words: *const u32,
+    row_count: usize,
+    order_out: *mut u32,
+) {
+    use crate::css::style::animations;
+
+    if row_count == 0 {
+        return;
+    }
+    let words = unsafe { std::slice::from_raw_parts(words, row_count * animations::TIMING_ROW_WORDS) };
+    let rows: Vec<animations::AnimationTimingRow> = (0..row_count)
+        .map(|index| {
+            animations::AnimationTimingRow::from_words(
+                &words[index * animations::TIMING_ROW_WORDS..][..animations::TIMING_ROW_WORDS],
+            )
+        })
+        .collect();
+    let mut order: Vec<u32> = (0..row_count as u32).collect();
+    order.sort_by(|&a, &b| animations::composite_order(&rows[a as usize], &rows[b as usize]));
+    unsafe { std::slice::from_raw_parts_mut(order_out, row_count) }.copy_from_slice(&order);
+}
+
 /// Resolve the animation declarations of an element's effects from the description the host
 /// published for them, instead of from a batch the stage assembled by walking the host's keyframe
 /// sets.

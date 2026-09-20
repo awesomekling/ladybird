@@ -1281,6 +1281,21 @@ Animation::StyleTimingRow Animation::style_timing_row() const
             row.flags |= percentage_flag;
     };
 
+    // The composite order is a property of the animation, not of its effect's timing, so it is
+    // recorded before the early return an undecidable row takes: a row that answers nothing about
+    // relevance still has to take its place in the order.
+    row.composite_class = static_cast<u8>(to_underlying(animation_class()));
+    row.composite_class_key = class_specific_composite_order_key();
+    row.composite_transition_property = class_specific_composite_order_property();
+    row.global_list_order = m_global_animation_list_order;
+    if (m_owning_element.has_value()) {
+        row.flags |= StyleTimingRow::has_owning_element;
+        row.composite_owning_node = m_owning_element->element().style_node_id().value();
+        row.composite_owning_slot = m_owning_element->pseudo_element().has_value()
+            ? static_cast<u8>(to_underlying(*m_owning_element->pseudo_element()) + 1)
+            : static_cast<u8>(0);
+    }
+
     if (m_start_time.has_value()) {
         row.flags |= StyleTimingRow::has_start_time;
         record_time(StyleTimingRow::StartTime, *m_start_time, StyleTimingRow::start_time_is_percentage);

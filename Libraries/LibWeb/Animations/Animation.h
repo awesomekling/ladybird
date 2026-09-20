@@ -72,6 +72,13 @@ public:
         // it, but the transition is not associated with its target yet, so it answers no question
         // about which effects the element holds.
         static constexpr u32 not_associated = 1u << 27;
+        // The animation names an owning element, which is the first thing the class-specific
+        // composite order of a CSS animation or transition compares.
+        static constexpr u32 has_owning_element = 1u << 28;
+
+        // How many words of the buffer a published row occupies. Mirrored by `TIMING_ROW_WORDS` in
+        // `Rust/src/css/style/animations.rs`; keep the two in step.
+        static constexpr size_t word_count = 9;
 
         enum Time : size_t {
             StartTime,
@@ -96,6 +103,17 @@ public:
         // The effect this row is the timing of, so a stage that walks effects in composite order
         // can find the row belonging to the one in its hand.
         u64 effect_identity { 0 };
+        // Where the animation sits in the composite order, as data rather than as a comparison
+        // against another GC object: its class, the owning element the class-specific order
+        // compares first, the class-specific key (a CSS animation's `animation-name` index, a
+        // transition's generation), the transition property whose name breaks a tie inside one
+        // generation, and the global animation list position that breaks every remaining tie.
+        u8 composite_class { 0 };
+        u8 composite_owning_slot { 0 };
+        u16 composite_transition_property { 0 };
+        u32 composite_owning_node { 0 };
+        u32 composite_class_key { 0 };
+        u32 global_list_order { 0 };
         double times[TimeCount] {};
     };
     StyleTimingRow style_timing_row() const;
@@ -211,6 +229,11 @@ public:
 
     virtual AnimationClass animation_class() const { return AnimationClass::None; }
     virtual int class_specific_composite_order(GC::Ref<Animation>) const { return 0; }
+
+    // The same class-specific order, as the numbers it is decided by, so that a published row can
+    // carry it and a consumer that holds no GC object can order two rows for itself.
+    virtual u32 class_specific_composite_order_key() const { return 0; }
+    virtual u16 class_specific_composite_order_property() const { return 0; }
 
     unsigned int global_animation_list_order() const { return m_global_animation_list_order; }
 

@@ -16,6 +16,7 @@
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/StyleValueRustFFI.h>
 
 namespace Web::Animations {
 
@@ -535,16 +536,41 @@ void Animatable::publish_animation_timing_rows()
         words.append(bit_cast<u32>(row.easing_interval_count));
         words.append(static_cast<u32>(row.effect_identity));
         words.append(static_cast<u32>(row.effect_identity >> 32));
+        words.append(static_cast<u32>(row.composite_class)
+            | (static_cast<u32>(row.composite_owning_slot) << 8)
+            | (static_cast<u32>(row.composite_transition_property) << 16));
+        words.append(row.composite_owning_node);
+        words.append(row.composite_class_key);
+        words.append(row.global_list_order);
         for (auto time : row.times)
             times.append(bit_cast<u64>(time));
         effects_in_order.append(keyframe_effect);
+    };
+    // The order the animations happen to sit in the element's list is the order they were
+    // associated in. The composite order is the one a consumer of the published list needs, and
+    // every number it is decided by travels on the row, so the mirror sorts the list rather than
+    // the element sorting its own animations for the occasion.
+    Vector<u32> ordered_words;
+    Vector<u64> ordered_times;
+    Vector<GC::Ref<KeyframeEffect>> ordered_effects;
+    Vector<u32> order;
+    auto put_rows_in_composite_order = [&] {
+        auto row_count = effects_in_order.size();
+        order.resize(row_count);
+        CSS::StyleValueFFI::rust_animation_timing_rows_composite_order(words.data(), row_count, order.data());
+        ordered_words.clear_with_capacity();
+        ordered_times.clear_with_capacity();
+        ordered_effects.clear_with_capacity();
+        for (auto index : order) {
+            ordered_words.append(words.data() + index * Animation::StyleTimingRow::word_count, Animation::StyleTimingRow::word_count);
+            ordered_times.append(times.data() + index * Animation::StyleTimingRow::TimeCount, Animation::StyleTimingRow::TimeCount);
+            ordered_effects.append(effects_in_order[index]);
+        }
     };
     for (auto slot : slots_with_rows) {
         words.clear_with_capacity();
         times.clear_with_capacity();
         effects_in_order.clear_with_capacity();
-        // A provisional transition composes below every associated effect, which is also the order
-        // the animated style update collects the two lists in.
         for (auto& effect : provisional_effects) {
             if (slot_of(*effect) != slot)
                 continue;
@@ -560,8 +586,9 @@ void Animatable::publish_animation_timing_rows()
                 continue;
             append_row(keyframe_effect, *animation, 0);
         }
-        CSS::record_element_animation_timing_rows(*element, slot, words, times);
-        CSS::record_element_animation_effect_descriptions(*element, slot, effects_in_order);
+        put_rows_in_composite_order();
+        CSS::record_element_animation_timing_rows(*element, slot, ordered_words, ordered_times);
+        CSS::record_element_animation_effect_descriptions(*element, slot, ordered_effects);
     }
 
     for (auto slot : impl.published_timing_row_slots) {
