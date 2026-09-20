@@ -35,7 +35,7 @@ pub(crate) struct Fragment {
     pub(crate) flex_layout_data: Option<std::rc::Rc<formatting_context::FlexLayoutData>>,
     pub(crate) used_grid_tracks: Option<std::rc::Rc<grid_formatting_context::OwnedUsedGridTracks>>,
     pub(crate) svg: CommittedSvgFacts,
-    pub(crate) computed_svg_path: Option<std::rc::Rc<libgfx_rust::path::OwnedPath>>,
+    pub(crate) computed_svg_path: Option<std::sync::Arc<libgfx_rust::path::OwnedPath>>,
     pub(crate) has_line_clamp_point: bool,
     pub(crate) is_invisible_for_line_clamp: bool,
     pub(crate) children: Vec<FragmentLink>,
@@ -58,6 +58,14 @@ fn same_allocation<T>(left: Option<&std::rc::Rc<T>>, right: Option<&std::rc::Rc<
     match (left, right) {
         (None, None) => true,
         (Some(left), Some(right)) => std::rc::Rc::ptr_eq(left, right),
+        _ => false,
+    }
+}
+
+fn same_atomic_allocation<T>(left: Option<&std::sync::Arc<T>>, right: Option<&std::sync::Arc<T>>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => std::sync::Arc::ptr_eq(left, right),
         _ => false,
     }
 }
@@ -105,7 +113,7 @@ impl Fragment {
             && same_allocation(self.flex_layout_data.as_ref(), previous.flex_layout_data.as_ref())
             && same_allocation(self.used_grid_tracks.as_ref(), previous.used_grid_tracks.as_ref())
             && self.svg == previous.svg
-            && same_allocation(self.computed_svg_path.as_ref(), previous.computed_svg_path.as_ref())
+            && same_atomic_allocation(self.computed_svg_path.as_ref(), previous.computed_svg_path.as_ref())
             && self.has_line_clamp_point == previous.has_line_clamp_point
             && self.is_invisible_for_line_clamp == previous.is_invisible_for_line_clamp
     }
@@ -279,7 +287,7 @@ struct CommittedRarePayloads {
     flex_layout_data: Option<std::rc::Rc<formatting_context::FlexLayoutData>>,
     used_grid_tracks: Option<std::rc::Rc<grid_formatting_context::OwnedUsedGridTracks>>,
     svg: CommittedSvgFacts,
-    computed_svg_path: Option<std::rc::Rc<libgfx_rust::path::OwnedPath>>,
+    computed_svg_path: Option<std::sync::Arc<libgfx_rust::path::OwnedPath>>,
 }
 
 fn snapshot_fragment(

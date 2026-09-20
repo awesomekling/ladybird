@@ -6,7 +6,7 @@
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
-use std::rc::Rc;
+use std::sync::Arc;
 
 unsafe extern "C" {
     fn ladybird_gfx_font_snapshot(font: *const c_void, out_snapshot: *mut FfiFontSnapshot);
@@ -66,6 +66,12 @@ struct FontEntry {
     facts: FontFacts,
 }
 
+// SAFETY: Gfx::Font is immutable after construction and atomically reference counted. The
+// entry's FFI calls only perform const queries, and its retained reference keeps the font live.
+unsafe impl Send for FontEntry {}
+// SAFETY: See the Send implementation above.
+unsafe impl Sync for FontEntry {}
+
 impl Drop for FontEntry {
     fn drop(&mut self) {
         // SAFETY: FontHandle::intern took the reference this releases.
@@ -74,7 +80,7 @@ impl Drop for FontEntry {
 }
 
 #[derive(Clone)]
-pub struct FontHandle(Rc<FontEntry>);
+pub struct FontHandle(Arc<FontEntry>);
 
 impl FontHandle {
     /// # Safety
@@ -89,7 +95,7 @@ impl FontHandle {
         // SAFETY: The caller guarantees the font is live; the reference taken
         // here keeps it that way until the entry drops.
         unsafe { ladybird_gfx_font_ref(raw.as_ptr()) };
-        Self(Rc::new(FontEntry {
+        Self(Arc::new(FontEntry {
             id: FontId(snapshot.id),
             raw,
             facts: FontFacts {

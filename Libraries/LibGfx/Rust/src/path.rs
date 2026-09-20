@@ -195,6 +195,12 @@ pub struct OwnedPath {
     identity: u64,
 }
 
+// SAFETY: OwnedPath has unique ownership of an immutable Gfx::Path. Its mutating operation
+// requires exclusive Rust access, while shared operations perform only const queries.
+unsafe impl Send for OwnedPath {}
+// SAFETY: See the Send implementation above.
+unsafe impl Sync for OwnedPath {}
+
 impl std::fmt::Debug for OwnedPath {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
