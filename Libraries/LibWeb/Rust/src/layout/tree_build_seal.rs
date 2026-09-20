@@ -23,19 +23,24 @@
 //! matters as much as the name, because a route a full suite takes twice is a different problem
 //! from one it takes a hundred thousand times.
 //!
-//! What the whole suite takes, by `during_build` count, as of the commit that gated a box's style
-//! resource attachment. Two of these are not tree builder callback slots at all, which is what the
-//! gate was for:
+//! What the whole suite takes, by `during_build` count, as of the commit that published which
+//! nodes sit in the focused text control. Two of these are not tree builder callback slots at all,
+//! which is what the gate was for:
 //!
 //! | route | during build | note |
 //! |---|---|---|
-//! | `layout_node_shell_factory` | 4003666 | **not a slot**: the arena materialising a shell |
-//! | `shell_style_changed` | 81630 | **not a slot**: a row's style reaching its shell |
-//! | `pseudo.create_content_item` | 44528 | slot |
-//! | `pseudo.create_layout_node` | 44012 | slot |
-//! | `attach_style_resources` | 11453 | slot |
-//! | `pseudo.create_nested_list_marker` | 1532 | slot |
-//! | `create_first_letter_nodes` | 241 | slot |
+//! | `layout_node_shell_factory` | 3979254 | **not a slot**: the arena materialising a shell |
+//! | `shell_style_changed` | 81109 | **not a slot**: a row's style reaching its shell |
+//! | `pseudo.create_content_item` | 43551 | slot |
+//! | `pseudo.create_layout_node` | 43164 | slot |
+//! | `attach_style_resources` | 11479 | slot |
+//! | `pseudo.create_nested_list_marker` | 1455 | slot |
+//! | `create_first_letter_nodes` | 239 | slot |
+//!
+//! What the allow-list costs, by the same count, so that the debt is a number rather than a word:
+//! `notify_box_presence` 11302407, `layout_node_shell_destroy` 2555730, `paintable_row_reset`
+//! 559316, `image_observers_destroy` 2045, `deliver_commit_messages` 1014,
+//! `owned_image_provider_notify_detach` 1, `owned_image_provider_destroy` 1.
 //!
 //! Two of these counts are not stable: `layout_node_shell_factory` and `notify_box_presence` swing
 //! by about a tenth between runs of the same binary, because a handful of tests do a variable
