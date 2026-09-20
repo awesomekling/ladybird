@@ -136,6 +136,7 @@ struct CustomFunctionDefinition {
 struct CustomFunctionRegistry {
     caller_scope_identity: usize,
     definitions: Vec<CustomFunctionDefinition>,
+    visible_definitions: HashMap<(usize, Vec<u16>), CustomFunctionIdentity>,
 }
 
 #[derive(Clone)]
@@ -194,6 +195,12 @@ pub struct FfiSubstitutionFunctionDefinition {
     pub signature: *const c_void,
     pub declarations: *const FfiSubstitutionFunctionDeclaration,
     pub declaration_count: usize,
+}
+
+#[repr(C)]
+pub struct FfiSubstitutionFunctionVisibility {
+    pub caller_scope_identity: usize,
+    pub function_identity: u64,
 }
 
 impl CustomPropertyRegistry {
@@ -485,7 +492,6 @@ struct ASFResolutionContext<'a> {
     attribute_names_are_ascii_case_insensitive: bool,
     contains_attr_tainted_values: bool,
     custom_functions: Option<&'a CustomFunctionRegistry>,
-    resolve_custom_function: Option<unsafe extern "C" fn(usize, FfiUtf16View) -> CustomFunctionIdentity>,
     parse_context: Option<&'a ParseContext>,
     media_environment: Option<&'a FfiMediaEnvironment>,
     load_media_environment: Option<unsafe extern "C" fn(*mut c_void) -> *const c_void>,
@@ -730,6 +736,8 @@ unsafe fn custom_function_registry_from_ffi(
     definitions: *const FfiSubstitutionFunctionDefinition,
     definition_count: usize,
     caller_scope_identity: usize,
+    visibilities: *const FfiSubstitutionFunctionVisibility,
+    visibility_count: usize,
 ) -> Option<CustomFunctionRegistry> {
     let definitions = if definition_count == 0 {
         &[]
@@ -773,9 +781,28 @@ unsafe fn custom_function_registry_from_ffi(
             declarations: parsed_declarations,
         });
     }
+    let visibilities = if visibility_count == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(visibilities, visibility_count) }
+    };
+    let mut visible_definitions = HashMap::with_capacity(visibilities.len());
+    for visibility in visibilities {
+        let definition = parsed_definitions
+            .iter()
+            .find(|definition| definition.identity == visibility.function_identity)?;
+        visible_definitions.insert(
+            (
+                visibility.caller_scope_identity,
+                definition.signature.name.units().to_vec(),
+            ),
+            definition.identity,
+        );
+    }
     Some(CustomFunctionRegistry {
         caller_scope_identity,
         definitions: parsed_definitions,
+        visible_definitions,
     })
 }
 
@@ -789,6 +816,8 @@ pub(crate) unsafe fn prepare_var_resolution_environment(
     custom_functions: *const FfiSubstitutionFunctionDefinition,
     custom_function_count: usize,
     custom_function_scope_identity: usize,
+    custom_function_visibilities: *const FfiSubstitutionFunctionVisibility,
+    custom_function_visibility_count: usize,
 ) -> Option<VarResolutionEnvironment> {
     let attributes = if attribute_count == 0 {
         &[]
@@ -804,7 +833,13 @@ pub(crate) unsafe fn prepare_var_resolution_environment(
         })
         .collect();
     let custom_functions = unsafe {
-        custom_function_registry_from_ffi(custom_functions, custom_function_count, custom_function_scope_identity)
+        custom_function_registry_from_ffi(
+            custom_functions,
+            custom_function_count,
+            custom_function_scope_identity,
+            custom_function_visibilities,
+            custom_function_visibility_count,
+        )
     }?;
     Some(VarResolutionEnvironment {
         attributes,
@@ -2147,31 +2182,16 @@ fn replace_a_dashed_function(
                 .map(|definition| definition.scope_identity)
         })
         .unwrap_or(functions.caller_scope_identity);
-    let resolved_identity = context.resolve_custom_function.map(|resolve| unsafe {
-        crate::css::style::seal::note_host_call("substitution.resolve_custom_function");
-        resolve(
-            caller_scope_identity,
-            FfiUtf16View {
-                ascii: std::ptr::null(),
-                utf16: name.as_ptr(),
-                length: name.len(),
-            },
-        )
+    let resolved_identity = functions
+        .visible_definitions
+        .get(&(caller_scope_identity, name.to_vec()))
+        .copied();
+    let definition = resolved_identity.and_then(|identity| {
+        functions
+            .definitions
+            .iter()
+            .find(|definition| definition.identity == identity)
     });
-    let definition = resolved_identity
-        .and_then(|identity| {
-            functions
-                .definitions
-                .iter()
-                .find(|definition| definition.identity == identity)
-        })
-        .or_else(|| {
-            resolved_identity.is_none().then(|| {
-                functions.definitions.iter().find(|definition| {
-                    definition.signature.name.units() == name && definition.scope_identity == caller_scope_identity
-                })
-            })?
-        });
     let Some(function) = definition else {
         return TokenResolution::Invalid;
     };
@@ -2652,7 +2672,6 @@ pub(crate) unsafe fn resolve_vars(
     value_data: *const c_void,
     environment: &mut VarResolutionEnvironment,
     attribute_names_are_ascii_case_insensitive: bool,
-    resolve_custom_function: Option<unsafe extern "C" fn(usize, FfiUtf16View) -> u64>,
     callback_context: *mut c_void,
     evaluate_style_query: Option<unsafe extern "C" fn(*mut c_void, FfiUtf16View) -> u8>,
     final_custom_properties: Option<&HashMap<Vec<u16>, *const c_void>>,
@@ -2697,7 +2716,6 @@ pub(crate) unsafe fn resolve_vars(
         attribute_names_are_ascii_case_insensitive,
         contains_attr_tainted_values: false,
         custom_functions: Some(custom_functions),
-        resolve_custom_function,
         parse_context,
         media_environment,
         load_media_environment,
@@ -2899,6 +2917,7 @@ mod tests {
                 parameter_defaults: vec![None],
                 declarations: vec![(utf16("result"), tokenize_owned(b"var(--value)"), true)],
             }],
+            visible_definitions: HashMap::from([((1, utf16("--echo")), 2)]),
         };
         let mut context = ASFResolutionContext {
             custom_functions: Some(&functions),

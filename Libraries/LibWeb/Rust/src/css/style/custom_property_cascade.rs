@@ -99,9 +99,10 @@ fn engine_resolution_context(
         custom_functions: std::ptr::null(),
         custom_function_count: 0,
         custom_function_scope_identity: 0,
+        custom_function_visibilities: std::ptr::null(),
+        custom_function_visibility_count: 0,
         callback_context: std::ptr::null_mut(),
         install_custom_properties: None,
-        resolve_custom_function: None,
         evaluate_style_query: None,
         note_substitution: None,
     }
@@ -605,9 +606,9 @@ impl RetainedState {
         let mut random_function_index = 0_usize;
         let mut parse_context = registry_ref.parse_context(&mut random_function_index);
         parse_context.in_quirks_mode = inputs.in_quirks_mode;
-        let Some(mut resolution_environment) =
-            (unsafe { prepare_var_resolution_environment(std::ptr::null(), 0, std::ptr::null(), 0, 0) })
-        else {
+        let Some(mut resolution_environment) = (unsafe {
+            prepare_var_resolution_environment(std::ptr::null(), 0, std::ptr::null(), 0, 0, std::ptr::null(), 0)
+        }) else {
             counters.bump(Counter::EngineComputedRecordBailSubstitution);
             return None;
         };
@@ -630,7 +631,6 @@ impl RetainedState {
                 written.pointer().cast(),
                 &mut resolution_environment,
                 false,
-                None,
                 std::ptr::null_mut(),
                 None,
                 None,
