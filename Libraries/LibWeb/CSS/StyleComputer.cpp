@@ -106,7 +106,6 @@
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
-#include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Platform/FontPlugin.h>
 #include <LibWeb/SVG/SVGElement.h>
 #include <LibWeb/StyleValueRustFFI.h>
@@ -773,6 +772,21 @@ static Optional<CSS::EasingFunction> resolve_keyframe_easing(CSS::StyleValue con
     return {};
 }
 
+// The size of the element's transform reference box, as the last committed layout left it, which a
+// keyframe or transition resolves a percentage translation against. The stage asks the engine by
+// identity rather than following the element's layout-node pointer: the box is an earlier stage's
+// committed output, and the pointer is a live read of a later stage's objects.
+static void apply_committed_transform_reference_box(StyleEngine& style_engine, DOM::AbstractElement abstract_element, StyleValueFFI::FfiAnimationContext& animation_context)
+{
+    auto committed = StyleEngineFFI::style_engine_committed_transform_reference_box(
+        style_engine.rust_handle(), abstract_element.element().style_node_id().value());
+    if (!committed.has_box)
+        return;
+    animation_context.has_transform_reference_box = true;
+    animation_context.transform_reference_box_width = committed.width;
+    animation_context.transform_reference_box_height = committed.height;
+}
+
 void StyleComputer::collect_animations_into(DOM::AbstractElement abstract_element, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>> effects, ComputedStyleWorkingSet& computed_properties, AnimationRefresh refresh) const
 {
     if (refresh == AnimationRefresh::No) {
@@ -877,12 +891,7 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
         auto* mutable_animation_overlay = computed_properties.prepare_animated_overlay_for_rust_mutation(Badge<StyleComputer> {});
         StyleValueFFI::FfiAnimationContext animation_context {};
         animation_context.current_color = static_cast<StyleValueFFI::StyleValueData const*>(computed_properties.effective_property_data(PropertyID::Color));
-        if (auto const* layout_node = abstract_element.element().unsafe_layout_node(); layout_node && Painting::has_committed_box(*layout_node)) {
-            auto reference_box = Painting::transform_reference_box(*layout_node);
-            animation_context.has_transform_reference_box = true;
-            animation_context.transform_reference_box_width = reference_box.width().to_double();
-            animation_context.transform_reference_box_height = reference_box.height().to_double();
-        }
+        apply_committed_transform_reference_box(m_style_engine, abstract_element, animation_context);
         StyleValueFFI::FfiComputedAnimationBatch computed_batch {
             .context = animation_context,
             .preparation_key = &preparation_key,
@@ -1220,12 +1229,7 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
             .transform_reference_box_width = 0,
             .transform_reference_box_height = 0,
         };
-        if (auto const* layout_node = abstract_element.element().unsafe_layout_node(); layout_node && Painting::has_committed_box(*layout_node)) {
-            auto reference_box = Painting::transform_reference_box(*layout_node);
-            animation_context.has_transform_reference_box = true;
-            animation_context.transform_reference_box_width = reference_box.width().to_double();
-            animation_context.transform_reference_box_height = reference_box.height().to_double();
-        }
+        apply_committed_transform_reference_box(m_style_engine, abstract_element, animation_context);
         custom_underlying_values.ensure_capacity(custom_properties_by_name_id.size());
         custom_initial_values.ensure_capacity(custom_properties_by_name_id.size());
         for (auto const& property : custom_properties_by_name_id) {
@@ -1680,12 +1684,7 @@ Vector<GC::Ref<Animations::KeyframeEffect>> StyleComputer::start_needed_transiti
         .transform_reference_box_width = 0,
         .transform_reference_box_height = 0,
     };
-    if (auto const* layout_node = abstract_element.element().unsafe_layout_node(); layout_node && Painting::has_committed_box(*layout_node)) {
-        auto reference_box = Painting::transform_reference_box(*layout_node);
-        transition_animation_context.has_transform_reference_box = true;
-        transition_animation_context.transform_reference_box_width = reference_box.width().to_double();
-        transition_animation_context.transform_reference_box_height = reference_box.height().to_double();
-    }
+    apply_committed_transform_reference_box(m_style_engine, abstract_element, transition_animation_context);
     clear_computation_context_caches();
 
     struct PreparedTransition {

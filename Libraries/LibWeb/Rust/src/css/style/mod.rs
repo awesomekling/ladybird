@@ -1081,6 +1081,11 @@ pub struct HostState {
     /// release batch supplies their lifetime boundary while still requiring every released atom to
     /// be reclaimable from replay's complete semantic root set.
     replay_reclaimed_style_atoms: Option<Vec<StyleAtomID>>,
+    /// The document's layout arena, which holds the boxes the last layout committed. The style
+    /// stage reads an earlier stage's committed output through it; it holds no style state and is
+    /// never written here. Absent until the document builds a layout tree, and for a replayed
+    /// engine, which has no arena.
+    layout_arena: Option<std::ptr::NonNull<std::ffi::c_void>>,
 }
 
 /// Mutable engine state; operations borrow their instrumentation from the boundary.
