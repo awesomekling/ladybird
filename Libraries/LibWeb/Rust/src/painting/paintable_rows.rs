@@ -350,7 +350,7 @@ where
 
     /// Identifies the version of the physical row slot. Unlike `NodeSlotId::generation()`, this
     /// changes when the same node's row is recommitted or cleared as well as when it is freed.
-    #[expect(dead_code, reason = "consumed by cached published-row readers")]
+    #[cfg_attr(not(test), expect(dead_code, reason = "consumed by cached published-row readers"))]
     pub(crate) fn paintable_row_reset_version(&self, id: NodeSlotId) -> u64 {
         self.arena.paintable_rows.row_reset_versions[id.slot_index() as usize]
     }
