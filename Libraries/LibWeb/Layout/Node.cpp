@@ -98,14 +98,14 @@ Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind k
     , m_slot(m_arena->allocate(build_node_construction_facts(document, node, kind, this)))
     , m_kind(kind)
 {
-    publish_scroll_offset();
+    publish_own_scroll_offset();
     // The node is in hand here, so neither of these has to look one up. A fresh row is in no
     // focused text control until something says otherwise, so only a row that is in a user agent
     // shadow tree at all has to ask.
     RustFFI::layout_arena_publish_unique_node_id(m_arena->handle(), m_slot,
         is_viewport() ? document.unique_id().value() : (is<DOM::Element>(node.ptr()) ? node->unique_id().value() : 0));
     if (has_flag(RustFFI::NodeFlag::IsInUserAgentShadowTree))
-        publish_is_in_focused_text_control();
+        publish_own_is_in_focused_text_control();
 
     if (!node)
         return;
@@ -133,7 +133,7 @@ Node::Node(DOM::Document& document, BindToPreparedArenaSlot, Compositing::RustFF
     RustFFI::layout_arena_attach_shell(m_arena->handle(), m_slot, this);
     publish_unique_node_id();
     if (has_flag(RustFFI::NodeFlag::IsInUserAgentShadowTree))
-        publish_is_in_focused_text_control();
+        publish_own_is_in_focused_text_control();
 }
 
 Node::~Node()
@@ -937,7 +937,24 @@ CSSPixelPoint Node::dom_target_scroll_offset() const
     return {};
 }
 
+void Node::publish_to_every_row_built_for_dom_node(void (Node::*publish)())
+{
+    struct Publication {
+        void (Node::*publish)();
+    } publication { publish };
+    RustFFI::layout_arena_for_each_row_built_for_same_node(m_arena->handle(), m_slot, &publication,
+        [](void* context, void* shell) {
+            auto* row = static_cast<Node*>(shell);
+            (row->*static_cast<Publication*>(context)->publish)();
+        });
+}
+
 void Node::publish_scroll_offset()
+{
+    publish_to_every_row_built_for_dom_node(&Node::publish_own_scroll_offset);
+}
+
+void Node::publish_own_scroll_offset()
 {
     set_flag(RustFFI::NodeFlag::HasScrollOffset, dom_target_stores_scroll_offset());
     RustFFI::layout_arena_publish_scroll_offset(m_arena->handle(), m_slot, dom_target_scroll_offset());
@@ -978,6 +995,11 @@ bool Node::dom_target_is_in_focused_text_control() const
 
 void Node::publish_is_in_focused_text_control()
 {
+    publish_to_every_row_built_for_dom_node(&Node::publish_own_is_in_focused_text_control);
+}
+
+void Node::publish_own_is_in_focused_text_control()
+{
     set_flag(RustFFI::NodeFlag::IsInFocusedTextControl, dom_target_is_in_focused_text_control());
 }
 
@@ -986,7 +1008,15 @@ void Node::publish_unique_node_id()
     RustFFI::layout_arena_publish_unique_node_id(m_arena->handle(), m_slot, dom_target_unique_node_id());
 }
 
+// The sweep reaches a node's rows through the one it is bound to, so an old row left over from a
+// rebuild was invisible to it. Every row built for the node answers for itself here.
 void Node::verify_published_scroll_offset() const
+{
+    RustFFI::layout_arena_for_each_row_built_for_same_node(m_arena->handle(), m_slot, nullptr,
+        [](void*, void* shell) { static_cast<Node const*>(shell)->verify_own_published_scroll_offset(); });
+}
+
+void Node::verify_own_published_scroll_offset() const
 {
     VERIFY(has_flag(RustFFI::NodeFlag::HasScrollOffset) == dom_target_stores_scroll_offset());
     VERIFY(RustFFI::layout_arena_published_scroll_offset(m_arena->handle(), m_slot) == dom_target_scroll_offset());
