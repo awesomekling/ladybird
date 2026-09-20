@@ -122,15 +122,19 @@ void InvalidationJournal::drain()
     if (m_entries.is_empty())
         return;
 
-    auto* published_arena = m_document.layout_node_arena_if_created();
-    if (published_arena)
-        Layout::RustFFI::layout_arena_before_invalidation_journal_drain(published_arena->handle());
+    auto* publication_arena = m_document.layout_node_arena_if_created();
+    if (publication_arena)
+        Layout::RustFFI::layout_arena_before_invalidation_journal_drain(publication_arena->handle());
 
     while (!m_entries.is_empty()) {
         auto entries = move(m_entries);
         m_entry_index_by_identity.clear_with_capacity();
 
         auto* arena = m_document.layout_node_arena_if_created();
+        if (!publication_arena && arena) {
+            Layout::RustFFI::layout_arena_before_invalidation_journal_drain(arena->handle());
+            publication_arena = arena;
+        }
 
         for (auto const& entry : entries) {
             auto node = entry.identity.resolve(m_document);
@@ -191,8 +195,8 @@ void InvalidationJournal::drain()
         }
     }
 
-    if (published_arena)
-        Layout::RustFFI::layout_arena_after_invalidation_journal_drain(published_arena->handle());
+    if (publication_arena)
+        Layout::RustFFI::layout_arena_after_invalidation_journal_drain(publication_arena->handle());
 }
 
 }
