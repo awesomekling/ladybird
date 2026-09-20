@@ -193,7 +193,6 @@ public:
     // element inherits, which must be the environment the engine resolved it over. Nothing when
     // the identity is no engine environment or was resolved over another.
     [[nodiscard]] RefPtr<CustomPropertyData const> engine_custom_property_environment(u64 identity, RefPtr<CustomPropertyData const> const& inherited) const;
-    static void flush_custom_property_install_verifier();
 
     // Whether the collection refreshes a previously published style outside the drive; a refresh
     // re-runs the animated element style adjustments and leaves the non-inherited-property

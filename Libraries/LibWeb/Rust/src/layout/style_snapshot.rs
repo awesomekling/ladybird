@@ -40,39 +40,6 @@ pub struct FfiLayoutStyleScrollState {
     pub scrolled: u8,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-#[repr(C)]
-pub struct FfiLayoutStyleSnapshotRow {
-    pub content_width_raw: i32,
-    pub content_height_raw: i32,
-    pub layout_commit_generation: u64,
-    pub stuck: u8,
-    pub snapped: u8,
-    pub scrollable: u8,
-    pub scrolled: u8,
-    pub has_committed_box: bool,
-    pub has_row: bool,
-}
-
-impl From<Option<LayoutStyleSnapshotRow>> for FfiLayoutStyleSnapshotRow {
-    fn from(row: Option<LayoutStyleSnapshotRow>) -> Self {
-        let Some(row) = row else {
-            return Self::default();
-        };
-        Self {
-            content_width_raw: row.content_width_raw,
-            content_height_raw: row.content_height_raw,
-            layout_commit_generation: row.layout_commit_generation,
-            stuck: row.stuck,
-            snapped: row.snapped,
-            scrollable: row.scrollable,
-            scrolled: row.scrolled,
-            has_committed_box: row.has_committed_box,
-            has_row: true,
-        }
-    }
-}
-
 #[derive(Clone, Default)]
 struct SnapshotGeneration {
     layout_commit_generation: u64,
@@ -105,9 +72,7 @@ impl LayoutStyleSnapshotStore {
             .as_mut()
             .expect("layout snapshot geometry published outside a commit");
         let row = building.rows.entry(node).or_default();
-        row.content_width_raw = size.width.raw_value().wrapping_add(i32::from(
-            std::env::var_os("LIBWEB_CORRUPT_LAYOUT_STYLE_SNAPSHOT").is_some(),
-        ));
+        row.content_width_raw = size.width.raw_value();
         row.content_height_raw = size.height.raw_value();
         row.layout_commit_generation = building.layout_commit_generation;
         row.has_committed_box = has_committed_box;
@@ -213,23 +178,6 @@ pub unsafe extern "C" fn layout_arena_publish_style_snapshot_scroll_states(
     unsafe { &*arena.cast::<LayoutNodeArena>() }
         .layout_style_snapshots
         .publish_scroll_states(states);
-}
-
-/// Read one row for publication verification and non-style consumers.
-///
-/// # Safety
-///
-/// `arena` must be a live layout arena handle on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_style_snapshot_row(
-    arena: *mut c_void,
-    style_node: u32,
-) -> FfiLayoutStyleSnapshotRow {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
-    let row = StyleNodeID::from_raw(style_node)
-        .and_then(|node| arena.with_style_store(|engine| engine.layout_style_snapshot(node)));
-    row.into()
 }
 
 #[cfg(test)]

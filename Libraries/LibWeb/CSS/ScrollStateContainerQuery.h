@@ -50,8 +50,6 @@ public:
     // whether any did.
     bool snapshot_post_layout_state(DOM::Document&, Snapshot);
 
-    void verify_published_style_snapshots(DOM::Document&) const;
-
     void visit_edges(GC::Cell::Visitor&);
 
 private:

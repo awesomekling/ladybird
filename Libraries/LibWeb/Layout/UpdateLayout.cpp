@@ -92,7 +92,6 @@ void Document::update_layout(UpdateLayoutReason reason, ThrottledAnimationSampli
         join_scope.note_extra_pass();
         update_style_and_layout_once(reason, animation_sampling_scope);
     }
-    m_scroll_state_query_containers.verify_published_style_snapshots(*this);
 }
 
 void Document::update_style_and_layout_once(UpdateLayoutReason reason, ThrottledAnimationSamplingScope animation_sampling_scope)

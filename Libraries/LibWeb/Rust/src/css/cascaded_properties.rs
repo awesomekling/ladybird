@@ -1302,72 +1302,6 @@ impl FfiSubstitutionUsage {
     }
 }
 
-thread_local! {
-    static SUBSTITUTION_USAGE_COMPARISONS: Cell<u64> = const { Cell::new(0) };
-    static SUBSTITUTION_USAGE_MISMATCHES: Cell<u64> = const { Cell::new(0) };
-}
-
-fn reported_substitution_usage(expected: FfiSubstitutionUsage) -> FfiSubstitutionUsage {
-    if std::env::var_os("LIBWEB_VERIFY_SUBSTITUTION_USAGE_LOG").is_none() {
-        return expected;
-    }
-    let mut reported = expected;
-    if std::env::var_os("LIBWEB_CORRUPT_SUBSTITUTION_USAGE").is_some() {
-        reported.uses_var = !reported.uses_var;
-    }
-    let expected = [
-        expected.uses_var,
-        expected.uses_attr,
-        expected.uses_if,
-        expected.uses_inherit,
-        expected.uses_custom_function,
-    ];
-    let reported = [
-        reported.uses_var,
-        reported.uses_attr,
-        reported.uses_if,
-        reported.uses_inherit,
-        reported.uses_custom_function,
-    ];
-    SUBSTITUTION_USAGE_COMPARISONS.with(|count| count.set(count.get().wrapping_add(expected.len() as u64)));
-    SUBSTITUTION_USAGE_MISMATCHES.with(|count| {
-        count.set(
-            count.get().wrapping_add(
-                expected
-                    .iter()
-                    .zip(reported)
-                    .filter(|(expected, reported)| **expected != *reported)
-                    .count() as u64,
-            ),
-        );
-    });
-    FfiSubstitutionUsage {
-        uses_var: reported[0],
-        uses_attr: reported[1],
-        uses_if: reported[2],
-        uses_inherit: reported[3],
-        uses_custom_function: reported[4],
-    }
-}
-
-pub(crate) fn flush_substitution_usage_verifier() {
-    let Some(path) = std::env::var_os("LIBWEB_VERIFY_SUBSTITUTION_USAGE_LOG") else {
-        return;
-    };
-    let comparisons = SUBSTITUTION_USAGE_COMPARISONS.with(|count| count.replace(0));
-    let mismatches = SUBSTITUTION_USAGE_MISMATCHES.with(|count| count.replace(0));
-    if comparisons == 0 {
-        return;
-    }
-    use std::io::Write;
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-        let _ = writeln!(
-            file,
-            "SUBSTITUTION USAGE SUMMARY: comparisons={comparisons} mismatches={mismatches}"
-        );
-    }
-}
-
 /// One unresolved value submitted to the bulk substitution resolver.
 #[repr(C)]
 pub struct FfiUnresolvedStyleValue {
@@ -2126,7 +2060,7 @@ unsafe fn resolve_unresolved_style_values(
             .map_or(0, |environment| environment.final_value_misses()),
         cycle_participants,
         depends_on_viewport_metrics: false,
-        substitution_usage: reported_substitution_usage(substitution_usage),
+        substitution_usage,
     }
 }
 
@@ -2308,7 +2242,7 @@ pub unsafe extern "C" fn rust_cascade_matched_blocks(
             storage: std::ptr::null_mut(),
             custom_property_store,
             custom_properties_apply,
-            substitution_usage: reported_substitution_usage(substitution_usage),
+            substitution_usage,
         };
     }
     let source_slot_assignments = source_slot_assignments.into_boxed_slice();
@@ -2320,7 +2254,7 @@ pub unsafe extern "C" fn rust_cascade_matched_blocks(
         storage: storage.cast(),
         custom_property_store,
         custom_properties_apply,
-        substitution_usage: reported_substitution_usage(substitution_usage),
+        substitution_usage,
     }
 }
 
