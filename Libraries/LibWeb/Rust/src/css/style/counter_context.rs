@@ -34,6 +34,35 @@ impl std::ops::DerefMut for StyleEngine {
 }
 
 impl StyleEngine {
+    pub(crate) fn resolve_font_for_legacy_drive(
+        &mut self,
+        request: bridge::FfiFontResolutionRequest,
+    ) -> bridge::FfiResolvedFont {
+        if let Some(resolved) = self.state.retained.resolved_font(request) {
+            return resolved;
+        }
+        self.counters.bump(Counter::FontRefillRounds);
+        self.counters.bump(Counter::FontResolutionRequests);
+        let resolver = self
+            .state
+            .host
+            .font_resolver
+            .as_ref()
+            .expect("a legacy longhand request has a font resolver");
+        let cache = self
+            .state
+            .retained
+            .font_resolution
+            .as_mut()
+            .expect("a legacy longhand request has a font resolution cache");
+        resolver.refill(cache, font_resolution::FontRequest::new(request));
+        cache
+            .lookup(request)
+            .expect("the font resolver must install its answer")
+    }
+}
+
+impl StyleEngine {
     #[must_use]
     pub fn new(device_class: DeviceClass) -> Self {
         Self {
