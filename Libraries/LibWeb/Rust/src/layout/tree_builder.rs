@@ -2449,7 +2449,15 @@ fn construct_principal_layout_node(
                 host.layout().set_children_are_inline(box_kept, false);
             }
         }
-        if should_create_layout_node {
+        // Nothing published a style for the element, so a bypass path reached it without the
+        // style stage settling it. The host is the only thing that can compute one, and the pin
+        // below needs the record it leaves.
+        let element_has_published_style = host
+            .layout()
+            .arena()
+            .with_style_store(|engine| engine.element_published_style_record(element_identity))
+            .is_some();
+        if should_create_layout_node && !element_has_published_style {
             super::tree_build_seal::note_host_call("restyle_bypass_path_element");
             // SAFETY: The builder remains live, and the identity names a live element.
             unsafe {
