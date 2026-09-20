@@ -65,6 +65,7 @@ public:
     bool select_word_for_dictionary_lookup(CSSPixelPoint visual_viewport_position);
 #endif
     void update_hover_after_scroll();
+    void apply_hover_target_after_scroll(Badge<DOM::CommitMessages>, GC::Ptr<DOM::Node>, Optional<DOM::HoverEventData> const&);
     GC::Ptr<DOM::Node> target_node_for_mouse_position(CSSPixelPoint);
 
     EventResult handle_keydown(UIEvents::KeyCode, unsigned modifiers, u32 code_point, bool repeat, bool should_insert_text, bool async_scroll_performed_default_action = false);

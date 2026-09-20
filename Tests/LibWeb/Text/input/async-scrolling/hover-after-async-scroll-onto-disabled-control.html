@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    body {
+        margin: 0;
+    }
+
+    #scroller {
+        overflow: scroll;
+        height: 200px;
+        width: 300px;
+    }
+
+    .item {
+        height: 200px;
+    }
+
+    .item:hover {
+        outline: 2px solid green;
+    }
+
+    #disabled-button {
+        display: block;
+        height: 200px;
+        width: 300px;
+    }
+</style>
+<div id="scroller">
+    <div class="item" id="enabled-box">enabled</div>
+    <button id="disabled-button" disabled>disabled</button>
+    <div class="item" id="last-box">last</div>
+</div>
+<script>
+    function hoverStates() {
+        let hovered = [];
+        for (const element of document.querySelectorAll(":hover"))
+            hovered.push(element.localName + (element.id ? `#${element.id}` : ""));
+        return `hovered=[${hovered.join(",")}] top=${scroller.scrollTop}`;
+    }
+
+    async function waitForHover(element) {
+        for (let i = 0; i < 60; ++i) {
+            if (element.matches(":hover"))
+                return;
+            await timeout(50);
+        }
+        println(`timed out waiting for ${element.id} to be hovered`);
+    }
+
+    async function waitForHoverStates(expected) {
+        for (let i = 0; i < 60; ++i) {
+            if (hoverStates() === expected)
+                return;
+            await timeout(50);
+        }
+        println(`timed out waiting for ${expected}`);
+    }
+
+    promiseTest(async () => {
+        await animationFrame();
+        await animationFrame();
+
+        let events = [];
+        document.addEventListener("mouseover", event => events.push(`over:${event.target.id || event.target.localName}`));
+        document.addEventListener("mouseout", event => events.push(`out:${event.target.id || event.target.localName}`));
+
+        internals.mouseMove(10, 10);
+        println(`initial ${hoverStates()}`);
+
+        // A disabled form control swallows the pointer: the hover decision names nothing, and
+        // everything the document was hovering is cleared.
+        events = [];
+        await internals.wheel(10, 10, 0, 200);
+        await waitForHoverStates("hovered=[] top=200");
+        println(`onto disabled control ${hoverStates()}`);
+        println(`onto disabled control events=${events.join(",")}`);
+
+        // Scrolling off it again gives the document a hover target back.
+        events = [];
+        await internals.wheel(10, 10, 0, 200);
+        await waitForHover(document.getElementById("last-box"));
+        println(`past disabled control ${hoverStates()}`);
+        println(`past disabled control events=${events.join(",")}`);
+    });
+</script>

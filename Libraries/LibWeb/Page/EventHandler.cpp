@@ -19,6 +19,7 @@
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/VisualViewport.h>
 #include <LibWeb/Clipboard/ClipboardEvent.h>
+#include <LibWeb/DOM/CommitMessages.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Range.h>
@@ -1188,10 +1189,17 @@ void EventHandler::update_hover_after_scroll(CSSPixelPoint visual_viewport_posit
         hit_text_fragment = target->is_text_fragment;
     }
 
+    // The hit test above ran on committed data and named what it found by identity. Which node the
+    // pointer ended up over is decided here, from that; the main side learns it by draining the
+    // commit list, not from this function.
+    auto report_hover_target = [&](GC::Ptr<DOM::Node> hover_target, Optional<DOM::HoverEventData> hover_event_data) {
+        document->commit_messages().note_hover_target_after_scroll(DOM::NodeIdentity::of(hover_target.ptr()), move(hover_event_data));
+    };
+
     ArmedScopeGuard clear_hover = [&] {
         update_hovered_chrome_widget(nullptr);
         update_cursor(nullptr, nullptr, nullptr);
-        track_the_effective_position_of_the_legacy_mouse_pointer(nullptr);
+        report_hover_target(nullptr, {});
     };
 
     if (!target.has_value())
@@ -1221,17 +1229,22 @@ void EventHandler::update_hover_after_scroll(CSSPixelPoint visual_viewport_posit
     update_cursor(target_layout_node, *node, chrome_widget, hit_text_fragment);
 
     auto coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *layout_node);
-    track_the_effective_position_of_the_legacy_mouse_pointer(node, DOM::HoverEventData {
-                                                                       .screen_position = screen_position,
-                                                                       .page_offset = coordinates.page_offset,
-                                                                       .viewport_position = coordinates.viewport_position,
-                                                                       .offset = coordinates.offset,
-                                                                       .movement = {},
-                                                                       .button = button,
-                                                                       .buttons = buttons,
-                                                                       .modifiers = modifiers,
-                                                                   });
+    report_hover_target(node, DOM::HoverEventData {
+                                  .screen_position = screen_position,
+                                  .page_offset = coordinates.page_offset,
+                                  .viewport_position = coordinates.viewport_position,
+                                  .offset = coordinates.offset,
+                                  .movement = {},
+                                  .button = button,
+                                  .buttons = buttons,
+                                  .modifiers = modifiers,
+                              });
     clear_hover.disarm();
+}
+
+void EventHandler::apply_hover_target_after_scroll(Badge<DOM::CommitMessages>, GC::Ptr<DOM::Node> hover_target, Optional<DOM::HoverEventData> const& hover_event_data)
+{
+    track_the_effective_position_of_the_legacy_mouse_pointer(hover_target, hover_event_data);
 }
 
 // https://w3c.github.io/uievents/#unicode-character-categories
