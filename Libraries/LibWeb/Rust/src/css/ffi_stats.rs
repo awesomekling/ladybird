@@ -318,8 +318,8 @@ pub extern "C" fn rust_style_ffi_complete_style_update_end() -> FfiDeferredCppRe
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn rust_style_ffi_note_longhand_input_freeze() {
-    crate::css::style::seal::note_stage_interleave("longhand_input_freeze");
+pub extern "C" fn rust_style_ffi_note_longhand_input_freeze(reasons: u8) {
+    crate::css::style::seal::note_longhand_input_freeze(reasons);
 }
 
 #[unsafe(no_mangle)]

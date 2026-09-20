@@ -53,7 +53,32 @@ thread_local! {
     static REPORTED: RefCell<HashSet<&'static str>> = RefCell::new(HashSet::new());
     static COUNTS: RefCell<HashMap<&'static str, Counts>> = RefCell::new(HashMap::new());
     static STAGE_INTERLEAVES: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
+    static LONGHAND_INPUT_FREEZE_REASONS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
     static BETWEEN_PASS_SERVICES: RefCell<HashMap<&'static str, (u64, u64)>> = RefCell::new(HashMap::new());
+}
+
+pub(crate) fn note_longhand_input_freeze(reasons: u8) {
+    note_stage_interleave("longhand_input_freeze");
+    if mode() == Mode::Off || UPDATE_DEPTH.with(|depth| depth.get() == 0) {
+        return;
+    }
+    let names = [
+        "working_set",
+        "monospace_recascade",
+        "random_base_rows",
+        "stylesheet_source_wrappers",
+        "custom_property_adapter",
+        "parent_animated_overlay",
+    ];
+    LONGHAND_INPUT_FREEZE_REASONS.with(|counts| {
+        let mut counts = counts.borrow_mut();
+        for (index, name) in names.into_iter().enumerate() {
+            if reasons & (1 << index) != 0 {
+                let count = counts.entry(name).or_default();
+                *count = count.wrapping_add(1);
+            }
+        }
+    });
 }
 
 fn write_report(report: &str) {
@@ -202,6 +227,17 @@ pub(crate) fn flush_census() {
     interleaves.sort_unstable_by_key(|(name, _)| *name);
     for (name, count) in interleaves {
         write_report(&format!("STYLE SEAL COUNT: stage_interleave {name}: {count}\n"));
+    }
+    let mut freeze_reasons = LONGHAND_INPUT_FREEZE_REASONS.with(|counts| {
+        std::mem::take(&mut *counts.borrow_mut())
+            .into_iter()
+            .collect::<Vec<_>>()
+    });
+    freeze_reasons.sort_unstable_by_key(|(reason, _)| *reason);
+    for (reason, count) in freeze_reasons {
+        write_report(&format!(
+            "STYLE SEAL COUNT: longhand_input_freeze reason={reason}: {count}\n"
+        ));
     }
     let mut services = BETWEEN_PASS_SERVICES.with(|services| {
         std::mem::take(&mut *services.borrow_mut())
