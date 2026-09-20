@@ -327,7 +327,7 @@ pub struct FfiImageContent {
     // it again from what the recording published even after the content changed.
     pub vector_image_identity: u64,
     pub vector_has_active_view_box: bool,
-    pub frame: *const c_void,
+    pub frame_id: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -374,7 +374,7 @@ pub struct FfiVideoPaintFacts {
     pub video_src_height: i32,
     pub video_sink_resource_id: u64,
     pub video_sink_handle: u64,
-    pub poster_frame: *const c_void,
+    pub poster_frame_id: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

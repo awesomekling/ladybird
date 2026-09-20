@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ptr::NonNull;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 unsafe extern "C" {
     fn ladybird_gfx_decoded_image_frame_retain(
@@ -29,15 +30,28 @@ struct ImageFrameEntry {
     raw: NonNull<c_void>,
 }
 
+// SAFETY: The entry owns an immutable Gfx::DecodedImageFrame copy. Its bitmap is
+// atomically reference counted, and neither the frame nor its color space is
+// mutated while the entry is live.
+unsafe impl Send for ImageFrameEntry {}
+// SAFETY: See the Send implementation above.
+unsafe impl Sync for ImageFrameEntry {}
+
 impl Drop for ImageFrameEntry {
     fn drop(&mut self) {
+        image_frame_storage().lock().unwrap().remove(&self.snapshot.id);
         // SAFETY: ImageFrameHandle::retain took the copy this releases.
         unsafe { ladybird_gfx_decoded_image_frame_release(self.raw.as_ptr()) };
     }
 }
 
 #[derive(Clone)]
-pub struct ImageFrameHandle(Rc<ImageFrameEntry>);
+pub struct ImageFrameHandle(Arc<ImageFrameEntry>);
+
+fn image_frame_storage() -> &'static Mutex<HashMap<u64, Weak<ImageFrameEntry>>> {
+    static STORAGE: OnceLock<Mutex<HashMap<u64, Weak<ImageFrameEntry>>>> = OnceLock::new();
+    STORAGE.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 impl ImageFrameHandle {
     /// # Safety
@@ -49,7 +63,28 @@ impl ImageFrameHandle {
         // addresses a local. The returned copy is owned by the entry.
         let raw = unsafe { ladybird_gfx_decoded_image_frame_retain(frame, &raw mut snapshot) };
         let raw = NonNull::new(raw).expect("Gfx::DecodedImageFrame copy must not be null");
-        Self(Rc::new(ImageFrameEntry { snapshot, raw }))
+        let mut storage = image_frame_storage().lock().unwrap();
+        if let Some(entry) = storage.get(&snapshot.id).and_then(Weak::upgrade) {
+            // The existing immutable record is the same decoded frame. Drop the
+            // redundant copy made before the registry lookup.
+            unsafe { ladybird_gfx_decoded_image_frame_release(raw.as_ptr()) };
+            return Self(entry);
+        }
+        let entry = Arc::new(ImageFrameEntry { snapshot, raw });
+        storage.insert(snapshot.id, Arc::downgrade(&entry));
+        Self(entry)
+    }
+
+    pub fn resolve(id: u64) -> Option<Self> {
+        if id == 0 {
+            return None;
+        }
+        image_frame_storage()
+            .lock()
+            .unwrap()
+            .get(&id)
+            .and_then(Weak::upgrade)
+            .map(Self)
     }
 
     #[inline]
@@ -71,6 +106,47 @@ impl ImageFrameHandle {
     pub fn as_raw(&self) -> *const c_void {
         self.0.raw.as_ptr()
     }
+}
+
+/// # Safety
+///
+/// `frame` must point to a live `Gfx::DecodedImageFrame`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ladybird_gfx_image_frame_handle_create(frame: *const c_void) -> *const c_void {
+    Arc::into_raw(unsafe { ImageFrameHandle::retain(frame) }.0).cast()
+}
+
+/// # Safety
+///
+/// `handle` must be null or an Arc pointer returned by this module.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ladybird_gfx_image_frame_handle_ref(handle: *const c_void) -> *const c_void {
+    if handle.is_null() {
+        return handle;
+    }
+    unsafe { Arc::increment_strong_count(handle.cast::<ImageFrameEntry>()) };
+    handle
+}
+
+/// # Safety
+///
+/// `handle` must be null or an owned Arc pointer returned by this module.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ladybird_gfx_image_frame_handle_unref(handle: *const c_void) {
+    if !handle.is_null() {
+        drop(unsafe { Arc::from_raw(handle.cast::<ImageFrameEntry>()) });
+    }
+}
+
+/// # Safety
+///
+/// `handle` must be null or a live Arc pointer returned by this module.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ladybird_gfx_image_frame_handle_id(handle: *const c_void) -> u64 {
+    if handle.is_null() {
+        return 0;
+    }
+    unsafe { &*handle.cast::<ImageFrameEntry>() }.snapshot.id
 }
 
 impl PartialEq for ImageFrameHandle {
