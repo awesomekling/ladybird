@@ -5961,11 +5961,14 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 style_computer.m_root_element_font_metrics = style_computer.calculate_root_element_font_metrics(computed_style);
                 style_computer.m_root_element_font_metrics_depend_on_viewport_metrics = computed_style.font_metrics_depend_on_viewport_metrics();
             }
+            // NB: Keyframe collection is the only thing that sets this, and nothing between here and
+            //     where the animation stage consumes it runs in between. Clearing it here rather
+            //     than after the definitions lets an element without animations skip that step.
+            style_computer.m_keyframes_inherited_non_inherited_style_groups = 0;
             style_computer.clear_computation_context_caches(); },
         .process_animation_definitions = [](void* context_pointer) {
             auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
-            context.style_computer->process_animation_definitions(*context.state->working_set, context.cascaded_properties, context.abstract_element, context.state->animation_definitions.span());
-            context.style_computer->m_keyframes_inherited_non_inherited_style_groups = 0; },
+            context.style_computer->process_animation_definitions(*context.state->working_set, context.cascaded_properties, context.abstract_element, context.state->animation_definitions.span()); },
         .prepare_animations = [](void* context_pointer) -> bool {
             auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
             auto animations = context.abstract_element.element().get_animations_internal(
