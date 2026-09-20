@@ -6,10 +6,10 @@
 
 use crate::css_pixels::CssPixelPoint;
 use crate::display_list::commands::{SpatialNodeIndex, VISUAL_VIEWPORT_NODE_INDEX};
+use crate::fast_hash::FastMap;
 use crate::node_slot_id::NodeSlotId;
 use libgfx_rust::FloatPoint;
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 // Where a box's scroll offset is, as the render side sees it.
 //
@@ -26,7 +26,7 @@ use std::collections::HashMap;
 // offset as it is built.
 #[derive(Default)]
 pub struct ScrollOffsetColumn {
-    offsets: RefCell<HashMap<NodeSlotId, CssPixelPoint>>,
+    offsets: RefCell<FastMap<NodeSlotId, CssPixelPoint>>,
 }
 
 impl ScrollOffsetColumn {
