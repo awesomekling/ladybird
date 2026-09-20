@@ -320,20 +320,19 @@ HitTestResult HitTestDisplayList::hit_test_result_for_item(Item item, CSSPixelPo
     // AD-HOC: Our viewport refers to the document instead of the root element. The steps above imply that we should
     //         not hit test the viewport as a box, and report the root element as hit when we otherwise miss, so we
     //         correct those hits here. This is where both pointer event hit testing and elementFromPoint() converge.
-    GC::Ptr<DOM::Node> root_element;
+    DOM::NodeIdentity root_element;
     if (paintable_layout_node && paintable_layout_node->kind() == Layout::RustFFI::NodeKind::Viewport) {
-        auto* named_element = const_cast<DOM::Element*>(paintable_layout_node->document().document_element());
-        if (auto* root_layout_node = named_element ? named_element->unsafe_layout_node() : nullptr; root_layout_node && has_committed_box(*root_layout_node)) {
-            root_element = named_element;
-            hit_node = committed_row_slot(*root_layout_node);
+        auto root_row = Layout::RustFFI::layout_arena_published_root_element_row(m_arena->handle());
+        if (root_row.index != Layout::RustFFI::INVALID_NODE_SLOT_INDEX) {
+            root_element = identity_for_dispatch_shell(layout_node_for_committed_slot(*m_arena, root_row), false);
+            hit_node = root_row;
         }
     }
 
     auto resolved = Layout::RustFFI::layout_arena_hit_test_resolve_hit(m_arena->handle(), item.index(), local_point);
-    GC::Ptr<DOM::Node> node = root_element;
-    if (!node && paintable_layout_node)
-        node = image_map_area_for_point(*paintable_layout_node, local_point);
-    auto identity = DOM::NodeIdentity::of(node.ptr());
+    auto identity = root_element;
+    if (identity.is_none() && paintable_layout_node)
+        identity = DOM::NodeIdentity::of(image_map_area_for_point(*paintable_layout_node, local_point).ptr());
     if (identity.is_none())
         identity = identity_for_dispatch_shell(resolved.dispatch_shell, resolved.allow_pseudo_fallback);
     if (identity.is_none())
