@@ -378,59 +378,6 @@ pub(crate) fn display_contents_text_needs_style_wrapper(
 }
 
 #[repr(C)]
-pub struct FfiStaleNodeCallbacks {
-    pub layout_dom_node: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
-    pub dom_is_shadow_including_inclusive_descendant: unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool,
-}
-
-/// Returns whether an SVG resource layout node must survive cleanup of a DOM subtree.
-///
-/// # Safety
-///
-/// The callback table, arena, layout node, and optional cleared subtree root must remain valid for the duration of the
-/// call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_should_preserve_svg_resource_layout_node(
-    callbacks: *const FfiStaleNodeCallbacks,
-    arena: *mut c_void,
-    layout_node: NodeSlotId,
-    cleared_subtree_root: *mut c_void,
-) -> bool {
-    assert!(!callbacks.is_null());
-    assert!(!arena.is_null());
-    assert!(!layout_node.is_invalid());
-    // SAFETY: Guaranteed by the entry point's contract.
-    let callbacks = unsafe { &*callbacks };
-    let arena = arena.cast::<LayoutNodeArena>();
-    if cleared_subtree_root.is_null() {
-        return true;
-    }
-
-    // SAFETY: The arena and layout node remain live throughout the ancestor walk.
-    let mut ancestor = unsafe { &*arena }.data(layout_node).parent.get();
-    while !ancestor.is_invalid() {
-        // SAFETY: `ancestor` is a live layout node, and a non-anonymous one has a shell.
-        let data = unsafe { &*arena }.data(ancestor);
-        let parent = data.parent.get();
-        if data.flags.get() & NodeFlag::Anonymous as u32 != 0 {
-            ancestor = parent;
-            continue;
-        }
-        super::tree_build_seal::note_host_call("svg_resource.layout_dom_node");
-        let dom_node = unsafe { (callbacks.layout_dom_node)(data.shell.get()) };
-        if !dom_node.is_null() && {
-            super::tree_build_seal::note_host_call("svg_resource.dom_is_shadow_including_inclusive_descendant");
-            // SAFETY: Both DOM pointers remain live throughout cleanup.
-            unsafe { (callbacks.dom_is_shadow_including_inclusive_descendant)(dom_node, cleared_subtree_root) }
-        } {
-            return false;
-        }
-        ancestor = parent;
-    }
-    true
-}
-
-#[repr(C)]
 pub struct FfiTopLayerDetachCallbacks {
     /// Answers whether an SVG resource box survives, which is the only thing the stale-subtree
     /// walk asks of the main side.

@@ -498,22 +498,21 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
 // asks rather than once per cleared node.
 bool LayoutTreeBuildBridge::svg_resource_box_survives(DOM::Document& document, RustFFI::NodeSlotId slot, u32 cleared_subtree_root)
 {
+    if (cleared_subtree_root == 0)
+        return true;
+    auto cleared_subtree_root_node = document.style_computer().node_for_style_node(CSS::StyleNodeID { cleared_subtree_root });
+    if (!cleared_subtree_root_node)
+        return true;
     auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_node_shell_if_live(document.layout_node_arena().handle(), slot));
     VERIFY(layout_node);
-    auto* cleared_subtree_root_node = cleared_subtree_root == 0
-        ? nullptr
-        : document.style_computer().node_for_style_node(CSS::StyleNodeID { cleared_subtree_root }).ptr();
-    RustFFI::FfiStaleNodeCallbacks callbacks {
-        .layout_dom_node = [](void* layout_node_pointer) -> void* {
-            VERIFY(layout_node_pointer);
-            return static_cast<Layout::Node*>(layout_node_pointer)->dom_node(); },
-        .dom_is_shadow_including_inclusive_descendant = [](void* node_pointer, void* root_pointer) {
-            VERIFY(node_pointer);
-            VERIFY(root_pointer);
-            return static_cast<DOM::Node*>(node_pointer)->is_shadow_including_inclusive_descendant_of(*static_cast<DOM::Node*>(root_pointer)); },
-    };
-    return RustFFI::rust_should_preserve_svg_resource_layout_node(
-        &callbacks, layout_node->arena_handle(), slot, cleared_subtree_root_node);
+    for (auto* ancestor = layout_node->parent(); ancestor; ancestor = ancestor->parent()) {
+        if (ancestor->is_anonymous())
+            continue;
+        auto const* dom_node = ancestor->dom_node();
+        if (dom_node && dom_node->is_shadow_including_inclusive_descendant_of(*cleared_subtree_root_node))
+            return false;
+    }
+    return true;
 }
 
 void LayoutTreeBuildBridge::detach_top_layer_element_layout_subtree(DOM::Element& element)

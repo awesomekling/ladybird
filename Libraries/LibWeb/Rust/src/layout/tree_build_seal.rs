@@ -23,24 +23,22 @@
 //! matters as much as the name, because a route a full suite takes twice is a different problem
 //! from one it takes a hundred thousand times.
 //!
-//! What the whole suite takes, by `during_build` count, as of the commit that named the element a
-//! tree builder callback is about by its identity. Five of these are not tree builder callback
-//! slots at all, which is what the gate was for:
+//! What the whole suite takes, by `during_build` count, as of the commit that answered an SVG
+//! resource box's survival on the main side. Five of these are not tree builder callback slots at
+//! all, which is what the gate was for:
 //!
 //! | route | during build | note |
 //! |---|---|---|
-//! | `layout_node_shell_factory` | 3935878 | **not a slot**: the arena materialising a shell |
-//! | `prepare_principal_element` | 2023722 | slot |
-//! | `attach_style_resources` | 1855907 | slot |
-//! | `shell_style_changed` | 80489 | **not a slot**: a row's style reaching its shell |
-//! | `text_source` | 63094 | **not a slot**: a text row's characters, synced mid-build |
-//! | `pseudo.create_content_item` | 43048 | slot |
-//! | `pseudo.create_layout_node` | 42547 | slot |
+//! | `layout_node_shell_factory` | 3999771 | **not a slot**: the arena materialising a shell |
+//! | `prepare_principal_element` | 2056228 | slot |
+//! | `attach_style_resources` | 1887731 | slot |
+//! | `shell_style_changed` | 81530 | **not a slot**: a row's style reaching its shell |
+//! | `text_source` | 63938 | **not a slot**: a text row's characters, synced mid-build |
+//! | `pseudo.create_content_item` | 44495 | slot |
+//! | `pseudo.create_layout_node` | 43998 | slot |
 //! | `pseudo.create_nested_list_marker` | 1532 | slot |
-//! | `create_first_letter_nodes` | 241 | slot |
-//! | `svg_resource_box_survives` | 14 | slot |
-//! | `svg_resource.layout_dom_node` | 10 | **not a slot**: nested in `svg_resource_box_survives` |
-//! | `svg_resource.dom_is_shadow_including_inclusive_descendant` | 10 | as above |
+//! | `create_first_letter_nodes` | 234 | slot |
+//! | `svg_resource_box_survives` | 13 | slot |
 //! | `owned_image_provider_notify_detach` | 2 | **not a slot**: a detaching row's provider |
 //!
 //! `build_replaced_content_facts` and `viewport_propagation_facts` are counted too and have never
