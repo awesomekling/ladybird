@@ -13,7 +13,7 @@ use crate::css::style::bridge::element_adjustment_fact;
 use crate::css::style::layout_style::{AnonymousStyleKind, AnonymousStyleOverrides};
 use crate::css::style::tree::StyleNodeID;
 use crate::css::style::tree::layout_tree_update_reuse_reason;
-use crate::layout::layout_node_arena::LayoutNodeArena;
+use crate::layout::layout_node_arena::{LayoutNodeArena, StaleWalkFacts};
 use crate::layout::node_data::{
     GENERATED_FOR_AFTER, GENERATED_FOR_BACKDROP, GENERATED_FOR_BEFORE, GENERATED_FOR_FIRST_LETTER,
     GENERATED_FOR_MARKER, NodeData, NodeFlag, NodeKind, NodeSlotId,
@@ -358,24 +358,6 @@ impl StaleSubtreeHost {
         unsafe { &*self.arena }
     }
 
-    /// The first node in the DOM child sequence the style mirror holds for `style_node`, or 0.
-    fn first_dom_child(&self, style_node: u32) -> u32 {
-        raw_style_node(self.arena().first_dom_child(StyleNodeID::from_raw(style_node)))
-    }
-
-    /// The node after `style_node` in the DOM child sequence its parent holds, or 0.
-    fn next_dom_sibling(&self, style_node: u32) -> u32 {
-        let Some(style_node) = StyleNodeID::from_raw(style_node) else {
-            return 0;
-        };
-        raw_style_node(self.arena().next_dom_sibling(style_node))
-    }
-
-    /// The shadow root the style mirror holds for the element `style_node` names, or 0.
-    fn shadow_root_style_node(&self, style_node: u32) -> u32 {
-        raw_style_node(self.arena().shadow_root_of(StyleNodeID::from_raw(style_node)))
-    }
-
     /// How many nodes the style mirror holds assigned to the slot `style_node` names. A node that
     /// is not a slot, and a slot rendering its fallback content, answer zero.
     fn assigned_node_count(&self, style_node: u32) -> usize {
@@ -392,11 +374,10 @@ impl StaleSubtreeHost {
             .raw()
     }
 
-    /// Whether the style store holds the element in the top layer.
-    fn rendered_in_top_layer(&self, style_node: u32) -> bool {
-        self.arena().element_adjustment_facts(StyleNodeID::from_raw(style_node))
-            & element_adjustment_fact::RENDERED_IN_TOP_LAYER
-            != 0
+    /// Everything one step of the walk reads out of the style mirror, in one borrow.
+    fn walk_facts(&self, style_node: u32) -> StaleWalkFacts {
+        self.arena()
+            .stale_walk_facts(StyleNodeID::from_raw(style_node).expect("the walk only reaches named nodes"))
     }
 
     /// Clears the stale layout box of the node `style_node` names, answering whether its subtree
@@ -490,34 +471,55 @@ fn clear_stale_subtree(host: StaleSubtreeHost, root: u32, scope: StaleSubtreeCle
         StaleSubtreeClearScope::Inclusive => 0,
         _ => root,
     };
+    let facts = host.walk_facts(root);
     if scope == StaleSubtreeClearScope::DescendantsBoundedToRoot {
-        clear_stale_subtree_descendants(host, root, root, cleared_subtree_root);
+        clear_stale_subtree_descendants(host, facts, root, cleared_subtree_root);
     } else {
-        clear_stale_node(host, root, root, cleared_subtree_root);
+        clear_stale_node(host, root, facts, root, cleared_subtree_root);
     }
 }
 
-fn clear_stale_node(host: StaleSubtreeHost, node: u32, subtree_root: u32, cleared_subtree_root: u32) {
+fn clear_stale_node(
+    host: StaleSubtreeHost,
+    node: u32,
+    facts: StaleWalkFacts,
+    subtree_root: u32,
+    cleared_subtree_root: u32,
+) {
     // A top layer member lays out as a sibling of the root element, so its boxes are not this
     // subtree's to clear.
-    if node != subtree_root && host.rendered_in_top_layer(node) {
+    if node != subtree_root && facts.rendered_in_top_layer {
         return;
     }
     if host.clear_stale_layout_node(node, cleared_subtree_root) {
         return;
     }
-    clear_stale_subtree_descendants(host, node, subtree_root, cleared_subtree_root);
+    clear_stale_subtree_descendants(host, facts, subtree_root, cleared_subtree_root);
 }
 
-fn clear_stale_subtree_descendants(host: StaleSubtreeHost, node: u32, subtree_root: u32, cleared_subtree_root: u32) {
-    let shadow_root = host.shadow_root_style_node(node);
-    if shadow_root != 0 {
-        clear_stale_node(host, shadow_root, subtree_root, cleared_subtree_root);
+/// Walks below a node whose own facts the caller already read. Clearing a node's box never moves
+/// a node, so each child's own step carries where the walk goes after it.
+fn clear_stale_subtree_descendants(
+    host: StaleSubtreeHost,
+    facts: StaleWalkFacts,
+    subtree_root: u32,
+    cleared_subtree_root: u32,
+) {
+    if let Some(shadow_root) = facts.shadow_root {
+        let shadow_root_facts = host.walk_facts(shadow_root.raw());
+        clear_stale_node(
+            host,
+            shadow_root.raw(),
+            shadow_root_facts,
+            subtree_root,
+            cleared_subtree_root,
+        );
     }
-    let mut child = host.first_dom_child(node);
-    while child != 0 {
-        clear_stale_node(host, child, subtree_root, cleared_subtree_root);
-        child = host.next_dom_sibling(child);
+    let mut child = facts.first_dom_child;
+    while let Some(current) = child {
+        let child_facts = host.walk_facts(current.raw());
+        clear_stale_node(host, current.raw(), child_facts, subtree_root, cleared_subtree_root);
+        child = child_facts.next_dom_sibling;
     }
 }
 
