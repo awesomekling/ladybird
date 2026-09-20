@@ -255,6 +255,17 @@ pub(crate) mod timing_row_flag {
     /// effect, so the row is published for it to be sampled from, but the transition is not
     /// associated with its target yet and the row answers nothing about what the element holds.
     pub(crate) const NOT_ASSOCIATED: u32 = 1 << 27;
+    /// The animation names an owning element, which is the first thing the class-specific composite
+    /// order of a CSS animation or transition compares.
+    pub(crate) const HAS_OWNING_ELEMENT: u32 = 1 << 28;
+}
+
+/// `Animations::AnimationClass`, in declaration order, which is also the inter-class composite
+/// order the host sorts by.
+mod animation_class {
+    pub(super) const CSS_ANIMATION_WITH_OWNING_ELEMENT: u8 = 0;
+    pub(super) const CSS_TRANSITION: u8 = 1;
+    pub(super) const CSS_ANIMATION_WITHOUT_OWNING_ELEMENT: u8 = 2;
 }
 
 /// `Bindings::PlaybackDirection`, in IDL order.
@@ -272,7 +283,7 @@ mod fill_mode {
 }
 
 /// How many words of each buffer one row occupies.
-pub(crate) const TIMING_ROW_WORDS: usize = 5;
+pub(crate) const TIMING_ROW_WORDS: usize = 9;
 pub(crate) const TIMING_ROW_TIMES: usize = 13;
 
 const WORD_FLAGS: usize = 0;
@@ -280,6 +291,12 @@ const WORD_TIMELINE: usize = 1;
 const WORD_EASING_INTERVAL_COUNT: usize = 2;
 const WORD_EFFECT_IDENTITY_LOW: usize = 3;
 const WORD_EFFECT_IDENTITY_HIGH: usize = 4;
+/// The class in the low byte, the owning element's pseudo-element slot in the second, and the
+/// transition property in the high half.
+const WORD_COMPOSITE: usize = 5;
+const WORD_COMPOSITE_OWNING_NODE: usize = 6;
+const WORD_COMPOSITE_CLASS_KEY: usize = 7;
+const WORD_GLOBAL_LIST_ORDER: usize = 8;
 
 const TIME_START: usize = 0;
 const TIME_HOLD: usize = 1;
@@ -302,10 +319,41 @@ pub(crate) struct AnimationTimingRow {
     timeline: u32,
     easing_interval_count: i32,
     effect_identity: u64,
+    composite_class: u8,
+    composite_owning_slot: u8,
+    composite_transition_property: u16,
+    composite_owning_node: u32,
+    composite_class_key: u32,
+    global_list_order: u32,
     times: [f64; TIMING_ROW_TIMES],
 }
 
 impl AnimationTimingRow {
+    /// One row's worth of the word buffer the host packs a list into. The times travel in their own
+    /// buffer and are filled in by the caller.
+    #[must_use]
+    pub(crate) fn from_words(words: &[u32]) -> Self {
+        Self {
+            flags: words[WORD_FLAGS],
+            timeline: words[WORD_TIMELINE],
+            easing_interval_count: words[WORD_EASING_INTERVAL_COUNT] as i32,
+            effect_identity: u64::from(words[WORD_EFFECT_IDENTITY_LOW])
+                | (u64::from(words[WORD_EFFECT_IDENTITY_HIGH]) << 32),
+            composite_class: words[WORD_COMPOSITE] as u8,
+            composite_owning_slot: (words[WORD_COMPOSITE] >> 8) as u8,
+            composite_transition_property: (words[WORD_COMPOSITE] >> 16) as u16,
+            composite_owning_node: words[WORD_COMPOSITE_OWNING_NODE],
+            composite_class_key: words[WORD_COMPOSITE_CLASS_KEY],
+            global_list_order: words[WORD_GLOBAL_LIST_ORDER],
+            times: [0.0; TIMING_ROW_TIMES],
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn effect_identity(&self) -> u64 {
+        self.effect_identity
+    }
+
     #[must_use]
     fn has(&self, flag: u32) -> bool {
         self.flags & flag != 0
@@ -651,15 +699,7 @@ impl AnimationTimingRows {
         );
         let mut rows = Vec::with_capacity(count);
         for index in 0..count {
-            let words = &words[index * TIMING_ROW_WORDS..][..TIMING_ROW_WORDS];
-            let mut row = AnimationTimingRow {
-                flags: words[WORD_FLAGS],
-                timeline: words[WORD_TIMELINE],
-                easing_interval_count: words[WORD_EASING_INTERVAL_COUNT] as i32,
-                effect_identity: u64::from(words[WORD_EFFECT_IDENTITY_LOW])
-                    | (u64::from(words[WORD_EFFECT_IDENTITY_HIGH]) << 32),
-                times: [0.0; TIMING_ROW_TIMES],
-            };
+            let mut row = AnimationTimingRow::from_words(&words[index * TIMING_ROW_WORDS..][..TIMING_ROW_WORDS]);
             row.times
                 .copy_from_slice(&times[index * TIMING_ROW_TIMES..][..TIMING_ROW_TIMES]);
             rows.push(row);
@@ -680,8 +720,8 @@ impl AnimationTimingRows {
     }
 
     /// The row of one effect, which the stage names by the identity it already uses to look its
-    /// description up. The host publishes the rows in its own order, not the composite order the
-    /// stage walks in, so a position is not an answer.
+    /// description up. The list is published in composite order, but the stage holds a subset of
+    /// it, so a position in the stage's own list is not an answer.
     #[must_use]
     pub(crate) fn row_for_effect(
         &self,
@@ -700,6 +740,74 @@ impl AnimationTimingRows {
             return;
         }
         self.rows.retain(|&(node, _), _| !nodes.contains(&node));
+    }
+}
+
+/// Whether two rows name different owning elements, which is what the class-specific composite
+/// order of a CSS animation and of a CSS transition asks first.
+#[must_use]
+fn owning_element_differs(a: &AnimationTimingRow, b: &AnimationTimingRow) -> bool {
+    a.composite_owning_node != b.composite_owning_node || a.composite_owning_slot != b.composite_owning_slot
+}
+
+/// A mirror of `KeyframeEffect::composite_order()` over two published rows, plus the one rule the
+/// published list adds on top of it: a provisionally started transition is not in the element's
+/// effect stack yet, and composes below every effect that is.
+///
+/// Where the spec asks for the tree order of two differing owning elements, the host has a `FIXME`
+/// that returns 0 and leaves the global animation list to decide. That is mirrored as it stands -
+/// the point here is to preserve the host's order exactly, not to fix it.
+#[must_use]
+pub(crate) fn composite_order(a: &AnimationTimingRow, b: &AnimationTimingRow) -> std::cmp::Ordering {
+    use crate::css::property_metadata::property_name;
+    use std::cmp::Ordering;
+    use timing_row_flag as flag;
+
+    match a.has(flag::NOT_ASSOCIATED).cmp(&b.has(flag::NOT_ASSOCIATED)) {
+        // `false` orders before `true`, so an associated effect would sort first. It is the
+        // provisional transition that composes below, so the two are compared the other way round.
+        Ordering::Equal => {}
+        order => return order.reverse(),
+    }
+
+    // 1. Animations that differ by class are sorted by the inter-class composite order.
+    if a.composite_class != b.composite_class {
+        return a.composite_class.cmp(&b.composite_class);
+    }
+
+    // 2. Otherwise by the class-specific composite order of their common class.
+    let class_specific = match a.composite_class {
+        animation_class::CSS_ANIMATION_WITH_OWNING_ELEMENT => match owning_element_differs(a, b) {
+            true => Ordering::Equal,
+            false => a.composite_class_key.cmp(&b.composite_class_key),
+        },
+        animation_class::CSS_TRANSITION => {
+            let a_owns = a.has(flag::HAS_OWNING_ELEMENT);
+            let b_owns = b.has(flag::HAS_OWNING_ELEMENT);
+            if !a_owns && !b_owns {
+                a.global_list_order.cmp(&b.global_list_order)
+            } else if a_owns != b_owns {
+                // The one with an owning element sorts first.
+                match a_owns {
+                    true => Ordering::Less,
+                    false => Ordering::Greater,
+                }
+            } else if owning_element_differs(a, b) {
+                Ordering::Equal
+            } else if a.composite_class_key != b.composite_class_key {
+                a.composite_class_key.cmp(&b.composite_class_key)
+            } else {
+                property_name(a.composite_transition_property).cmp(property_name(b.composite_transition_property))
+            }
+        }
+        animation_class::CSS_ANIMATION_WITHOUT_OWNING_ELEMENT => a.global_list_order.cmp(&b.global_list_order),
+        _ => Ordering::Equal,
+    };
+
+    // 3. Otherwise by the position of the animations in the global animation list.
+    match class_specific {
+        Ordering::Equal => a.global_list_order.cmp(&b.global_list_order),
+        order => order,
     }
 }
 

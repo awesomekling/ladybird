@@ -6038,7 +6038,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 computed_in_display_none_subtree = in_display_none_subtree != 0;
             context.style_computer->apply_animation_definitions(context.abstract_element, context.state->animation_definitions.span(), context.state->animation_definition_matches.span(), context.state->animation_definition_keyframe_sets.span(), computed_in_display_none_subtree);
             auto animations = context.abstract_element.element().get_animations_internal(
-                Animations::Animatable::GetAnimationsSorted::Yes,
+                Animations::Animatable::GetAnimationsSorted::No,
                 Animations::Animatable::GetAnimationsOptions { .subtree = false, .pseudo_element = {} });
             if (animations.is_exception()) {
                 dbgln("Error getting animations for element {}", context.abstract_element.debug_description());
@@ -6051,6 +6051,35 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                         context.state->animation_effects.append(keyframe_effect);
                 }
             }
+            // The element's animation list is published in composite order, so the stage takes its
+            // own order from the positions in that list rather than comparing the host's animations
+            // to each other. An effect the list does not name - a dirty effect of a transition that
+            // was provisionally started and then discarded - belongs to no list, and there the whole
+            // order falls back to the comparison the host makes.
+            auto animation_slot = context.abstract_element.pseudo_element().has_value()
+                ? static_cast<u8>(to_underlying(*context.abstract_element.pseudo_element()) + 1)
+                : static_cast<u8>(0);
+            auto published_composite_position = [&](Animations::KeyframeEffect const& effect) -> Optional<u32> {
+                u32 position = 0;
+                if (!StyleValueFFI::rust_published_animation_composite_position(
+                        context.style_computer->m_style_engine.rust_handle(),
+                        context.abstract_element.element().style_node_id().value(),
+                        animation_slot, effect.animation_preparation_identity(), &position))
+                    return {};
+                return position;
+            };
+            bool order_is_published = true;
+            for (auto const& effect : context.state->animation_effects) {
+                if (!published_composite_position(effect).has_value()) {
+                    order_is_published = false;
+                    break;
+                }
+            }
+            quick_sort(context.state->animation_effects, [&](GC::Ref<Animations::KeyframeEffect> const& a, GC::Ref<Animations::KeyframeEffect> const& b) {
+                if (order_is_published)
+                    return *published_composite_position(a) < *published_composite_position(b);
+                return Animations::KeyframeEffect::composite_order(a, b) < 0;
+            });
             // Nothing the plan left behind is relevant to this element, so there is nothing to sample
             // and the computation keeps the overlay and the line height metrics it already had.
             if (context.state->animation_effects.is_empty())

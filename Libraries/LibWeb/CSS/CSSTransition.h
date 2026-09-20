@@ -42,6 +42,8 @@ public:
 
     virtual Animations::AnimationClass animation_class() const override;
     virtual int class_specific_composite_order(GC::Ref<Animations::Animation> other) const override;
+    virtual u32 class_specific_composite_order_key() const override { return static_cast<u32>(m_transition_generation); }
+    virtual u16 class_specific_composite_order_property() const override { return to_underlying(m_transition_property); }
 
     double transition_start_time() const { return m_start_time; }
     double transition_end_time() const { return m_end_time; }
