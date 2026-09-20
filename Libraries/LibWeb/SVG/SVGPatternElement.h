@@ -59,7 +59,7 @@ public:
 
     void push_paint_server_description(void* sink, Layout::Node const& target_layout_node) const;
 
-    virtual Layout::Node* create_layout_node(CSS::LayoutStyle) override { return nullptr; }
+    virtual CSS::ElementBoxKind box_kind() const override;
 
 protected:
     SVGPatternElement(DOM::Document&, DOM::QualifiedName);

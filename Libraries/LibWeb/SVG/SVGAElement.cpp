@@ -7,6 +7,7 @@
 
 #include <LibGC/Heap.h>
 #include <LibWeb/CSS/Invalidation/LinkInvalidator.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/DOM/DOMTokenList.h>
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/SVG/AttributeNames.h>
@@ -67,9 +68,9 @@ GC::Ref<DOM::DOMTokenList> SVGAElement::rel_list()
     return *m_rel_list;
 }
 
-Layout::Node* SVGAElement::create_layout_node(CSS::LayoutStyle style)
+CSS::ElementBoxKind SVGAElement::box_kind() const
 {
-    return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::SVGGraphicsBox);
+    return CSS::ElementBoxKind::SvgGraphics;
 }
 
 void SVGAElement::activation_behavior(DOM::Event const& event)

@@ -487,6 +487,7 @@ static void publish_element_selector_features(StyleEngine& style_engine, DOM::El
                                             .custom_state_count = 0,
                                             .heading_level = heading_level,
                                             .is_slot = is_slot,
+                                            .box_kind = to_underlying(element.box_kind()),
                                             .reserved = 0,
                                             .adjustment_facts = element_style_adjustment_facts(element),
                                             .construction_facts = element_construction_facts(element),
@@ -676,7 +677,7 @@ void record_element_adjustment_facts(DOM::Element& element)
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
     style_engine->set_element_adjustment_facts(element.style_node_id(), element_style_adjustment_facts(element));
-    style_engine->set_element_construction_facts(element.style_node_id(), element_construction_facts(element));
+    style_engine->set_element_construction_facts(element.style_node_id(), element_construction_facts(element), to_underlying(element.box_kind()));
 }
 
 void record_element_construction_facts(DOM::Element& element)
@@ -684,7 +685,7 @@ void record_element_construction_facts(DOM::Element& element)
     auto* style_engine = style_engine_for(element);
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
-    style_engine->set_element_construction_facts(element.style_node_id(), element_construction_facts(element));
+    style_engine->set_element_construction_facts(element.style_node_id(), element_construction_facts(element), to_underlying(element.box_kind()));
 }
 
 void publish_required_attribute_value_texts(StyleEngine& style_engine, StyleComputer& style_computer)
@@ -2242,6 +2243,11 @@ void record_element_attribute_changed(DOM::Element& element, Utf16FlyString cons
     // box adjustments and whether it supports dimension attributes.
     if (old_value.has_value() != new_value.has_value() || name == HTML::AttributeNames::type)
         record_element_adjustment_facts(element);
+
+    // The box an element asks for also moves with the value of these, which say whether it is an
+    // editing host and whether it renders its alternative text instead of its image.
+    else if (name == HTML::AttributeNames::contenteditable || name == HTML::AttributeNames::alt)
+        record_element_construction_facts(element);
 
     // Both values cross as atoms. Their text is recorded once per distinct value only when a
     // compiled selector for this attribute uses an operator that cannot compare atom identities.

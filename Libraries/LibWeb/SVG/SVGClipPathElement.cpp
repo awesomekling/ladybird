@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
@@ -31,10 +32,10 @@ void SVGClipPathElement::attribute_changed(Utf16FlyString const& name, Optional<
     }
 }
 
-Layout::Node* SVGClipPathElement::create_layout_node(CSS::LayoutStyle)
+CSS::ElementBoxKind SVGClipPathElement::box_kind() const
 {
     // Clip paths are handled as a special case in the TreeBuilder.
-    return nullptr;
+    return CSS::ElementBoxKind::NoBox;
 }
 
 }

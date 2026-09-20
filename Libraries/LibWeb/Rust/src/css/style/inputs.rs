@@ -16,6 +16,9 @@ pub struct PublishedBoxFacts {
     pub content_visibility: u8,
     pub position: u8,
     pub float_: u8,
+    /// Whether the record suppresses the element's native appearance, which decides whether an
+    /// input's native widget box is built at all.
+    pub appearance_is_none: bool,
 }
 
 /// What the style mirror says about the element a text node's box takes its style from: the text's
@@ -485,9 +488,10 @@ impl RetainedState {
         self.computed_group_sets.adjustment_facts(node)
     }
 
-    /// Replace the element facts a layout row built for the element records.
-    pub fn set_element_construction_facts(&mut self, node: StyleNodeID, facts: u32) {
-        self.computed_group_sets.set_construction_facts(node, facts);
+    /// Replace the element facts a layout row built for the element records, and which principal
+    /// box the element asks for.
+    pub fn set_element_construction_facts(&mut self, node: StyleNodeID, facts: u32, box_kind: u8) {
+        self.computed_group_sets.set_construction_facts(node, facts, box_kind);
     }
 
     /// The element facts the store holds, as `bridge::element_construction_fact` names them. A
@@ -495,6 +499,13 @@ impl RetainedState {
     #[must_use]
     pub fn element_construction_facts(&self, node: StyleNodeID) -> u32 {
         self.computed_group_sets.construction_facts(node)
+    }
+
+    /// Which principal box the element asks for, as the raw byte of a `bridge::ElementBoxKind`.
+    /// A text node and a retired identity ask for nothing in particular.
+    #[must_use]
+    pub fn element_box_kind(&self, node: StyleNodeID) -> u8 {
+        self.computed_group_sets.box_kind(node)
     }
 
     /// Whether a flat-tree descendant of the node holds a layout tree update mark.
@@ -646,6 +657,7 @@ impl RetainedState {
             content_visibility: view.content_visibility(),
             position: view.position(),
             float_: view.float_(),
+            appearance_is_none: view.appearance() == crate::css::css_enums::appearance::NONE,
         })
     }
 
@@ -2458,7 +2470,7 @@ impl StyleEngineState {
             .set_adjustment_facts(node, arrival.adjustment_facts);
         self.retained
             .computed_group_sets
-            .set_construction_facts(node, arrival.construction_facts);
+            .set_construction_facts(node, arrival.construction_facts, arrival.box_kind);
         for &state in custom_states {
             self.record_batched_input(
                 InputKey::LocalFeature(node, LocalFeatureKey::CustomState(state)),

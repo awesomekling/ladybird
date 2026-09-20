@@ -167,6 +167,38 @@ enum ElementConstructionFact : u32 {
     // this word alone, so the fact is published into both rather than read across two.
     ConstructedAsDocumentElement = 1 << 6,
 };
+// Which principal box an element asks for before its computed style has a say. The element's own
+// type and state decide this; the tree build resolves it against the element's computed display
+// and appearance. Mirrors Rust `FfiElementBoxKind`.
+enum class ElementBoxKind : u8 {
+    // The computed display decides the box on its own.
+    FromDisplay,
+    // The element generates no box, whatever its display says.
+    NoBox,
+    Break,
+    FieldSet,
+    Legend,
+    Audio,
+    Video,
+    Canvas,
+    NavigableContainerViewport,
+    TextArea,
+    Image,
+    SvgGraphics,
+    SvgSvg,
+    SvgText,
+    SvgTextPath,
+    SvgForeignObject,
+    SvgImage,
+    SvgGeometry,
+    // An input's native widget. `appearance: none` suppresses it, and then the computed display
+    // decides the box like it does for any other element.
+    InputButton,
+    InputCheckBox,
+    InputRadioButton,
+    InputRange,
+    InputText,
+};
 WEB_API u32 element_construction_facts(DOM::Element const&);
 WEB_API u32 element_style_adjustment_facts(DOM::Element const&);
 WEB_API u32 element_box_type_adjustment_facts(DOM::Element const&);

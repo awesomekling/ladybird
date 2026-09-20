@@ -5,6 +5,7 @@
  */
 
 #include <LibGC/Heap.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/SVG/SVGTextElement.h>
 
@@ -17,9 +18,9 @@ SVGTextElement::SVGTextElement(DOM::Document& document, DOM::QualifiedName quali
 {
 }
 
-Layout::Node* SVGTextElement::create_layout_node(CSS::LayoutStyle style)
+CSS::ElementBoxKind SVGTextElement::box_kind() const
 {
-    return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::SVGTextBox);
+    return CSS::ElementBoxKind::SvgText;
 }
 
 }

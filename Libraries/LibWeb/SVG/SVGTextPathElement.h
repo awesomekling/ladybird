@@ -21,7 +21,7 @@ class SVGTextPathElement
     GC_DECLARE_ALLOCATOR(SVGTextPathElement);
 
 public:
-    virtual Layout::Node* create_layout_node(CSS::LayoutStyle) override;
+    virtual CSS::ElementBoxKind box_kind() const override;
 
     // The `href`/`xlink:href` this element names a shape with, and the parsed `startOffset`, as
     // the layout stage reads them off the element's published attributes.

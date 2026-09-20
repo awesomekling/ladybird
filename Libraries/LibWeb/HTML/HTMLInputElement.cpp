@@ -27,6 +27,7 @@
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/SelectorMatching.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
@@ -161,49 +162,40 @@ void HTMLInputElement::set_being_activated(bool activated)
     }
 }
 
-Layout::Node* HTMLInputElement::create_layout_node(CSS::LayoutStyle style)
+CSS::ElementBoxKind HTMLInputElement::box_kind() const
 {
     if (type_state() == TypeAttributeState::Hidden)
-        return nullptr;
+        return CSS::ElementBoxKind::NoBox;
 
     // NOTE: Image inputs are `appearance: none` per the default UA style,
     //       but we still need to create an ImageBox for them, or no image will get loaded.
     if (type_state() == TypeAttributeState::ImageButton) {
-        if (renders_as_alt_text() && !get_attribute_value(HTML::AttributeNames::alt).is_empty()) {
-            auto computed_style = this->computed_style();
-            VERIFY(computed_style);
-            return Element::create_layout_node_for_display_type(document(), computed_style->display(), style, this);
-        }
-        return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::ImageBox);
+        if (renders_as_alt_text() && !get_attribute_value(HTML::AttributeNames::alt).is_empty())
+            return CSS::ElementBoxKind::FromDisplay;
+        return CSS::ElementBoxKind::Image;
     }
 
     // https://drafts.csswg.org/css-ui/#appearance-switching
     // This specification introduces the appearance property to provide some control over this behavior.
     // In particular, using appearance: none allows authors to suppress the native appearance of widgets,
     // giving them a primitive appearance where CSS can be used to restyle them.
-    auto computed_style = this->computed_style();
-    VERIFY(computed_style);
-    if (computed_style->appearance() == CSS::Appearance::None) {
-        return Element::create_layout_node_for_display_type(document(), computed_style->display(), style, this);
-    }
-
+    // The tree build applies that suppression; the kinds below are the ones it can suppress.
     switch (type_state()) {
-
     case TypeAttributeState::SubmitButton:
     case TypeAttributeState::Button:
     case TypeAttributeState::ResetButton:
-        return &Layout::allocate_layout_node<Layout::Box>(document(), this, style, Layout::RustFFI::NodeKind::BlockContainer);
+        return CSS::ElementBoxKind::InputButton;
     case TypeAttributeState::Checkbox:
-        return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::CheckBox);
+        return CSS::ElementBoxKind::InputCheckBox;
     case TypeAttributeState::RadioButton:
-        return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::RadioButton);
+        return CSS::ElementBoxKind::InputRadioButton;
     case TypeAttributeState::Range:
-        return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::RangeInputBox);
+        return CSS::ElementBoxKind::InputRange;
     case TypeAttributeState::Color:
     case TypeAttributeState::FileUpload:
-        return Element::create_layout_node_for_display_type(document(), computed_style->display(), style, this);
+        return CSS::ElementBoxKind::FromDisplay;
     default:
-        return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::TextInputBox);
+        return CSS::ElementBoxKind::InputText;
     }
 }
 

@@ -19,6 +19,7 @@ use super::tree_builder::FfiLayoutTreeBuildOutcome;
 use super::update_layout::{FfiLayoutTreeBuildStats, FfiLayoutUpdateHostCallbacks};
 use super::used_values::SizeConstraint;
 use super::used_values::UsedValues;
+use crate::css::style::bridge::ElementBoxKind;
 use crate::css::style::fast_hash::{FastMap as HashMap, FastSet as HashSet};
 use crate::css::style::tree::StyleNodeID;
 use crate::css::style::{
@@ -1829,6 +1830,26 @@ impl LayoutNodeArena {
                 unsafe { &*host.style_engine.cast::<StyleEngine>() }.element_construction_facts(style_node)
             }
             _ => 0,
+        }
+    }
+
+    /// Which principal box the element asks for, before its computed style has a say. A text
+    /// node, an anonymous row and an arena that names no style mirror ask for nothing in
+    /// particular, which is what the computed display alone decides.
+    pub(crate) fn element_box_kind(&self, style_node: Option<StyleNodeID>) -> ElementBoxKind {
+        match style_node {
+            Some(style_node) if style_node.element_index().is_some() => {
+                let Some(host) = self.style_record_host.get() else {
+                    return ElementBoxKind::FromDisplay;
+                };
+                assert!(!host.style_engine.is_null());
+                // SAFETY: As with `with_style_engine`, the engine outlives the arena's live nodes
+                // and no host callback runs while the borrow is active.
+                ElementBoxKind::from_raw(
+                    unsafe { &*host.style_engine.cast::<StyleEngine>() }.element_box_kind(style_node),
+                )
+            }
+            _ => ElementBoxKind::FromDisplay,
         }
     }
 

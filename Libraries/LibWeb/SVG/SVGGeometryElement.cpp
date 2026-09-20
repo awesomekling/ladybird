@@ -6,6 +6,7 @@
 
 #include <LibGC/Heap.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/SVG/SVGGeometryElement.h>
@@ -23,9 +24,9 @@ void SVGGeometryElement::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_path_length);
 }
 
-Layout::Node* SVGGeometryElement::create_layout_node(CSS::LayoutStyle style)
+CSS::ElementBoxKind SVGGeometryElement::box_kind() const
 {
-    return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::SVGGeometryBox);
+    return CSS::ElementBoxKind::SvgGeometry;
 }
 
 // https://w3c.github.io/svgwg/svg2-draft/types.html#__svg__SVGGeometryElement__getTotalLength

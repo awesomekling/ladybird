@@ -39,9 +39,9 @@ SVGElement::SVGElement(DOM::Document& document, DOM::QualifiedName qualified_nam
 {
 }
 
-Layout::Node* SVGElement::create_layout_node(CSS::LayoutStyle)
+CSS::ElementBoxKind SVGElement::box_kind() const
 {
-    return nullptr;
+    return CSS::ElementBoxKind::NoBox;
 }
 
 struct NamedPropertyID {
