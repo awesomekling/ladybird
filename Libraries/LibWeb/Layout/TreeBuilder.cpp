@@ -58,7 +58,7 @@ public:
     static void detach_top_layer_element_layout_subtree(DOM::Element&);
 
 private:
-    static TraversalDecision clear_stale_layout_node(DOM::Node&, u32 cleared_subtree_root);
+    static bool svg_resource_box_survives(DOM::Document&, RustFFI::NodeSlotId, u32 cleared_subtree_root);
 
     RustFFI::FfiDomTreeBuilderCallbacks make_ffi_dom_tree_builder_callbacks();
     RustFFI::FfiPseudoTreeBuilderCallbacks make_ffi_pseudo_tree_builder_callbacks();
@@ -484,69 +484,38 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
     };
 }
 
-static bool is_svg_resource_box(Node const& layout_node)
+// SVGPatternBox, SVGMaskBox, and SVGClipBox are created on behalf of a referencing element and
+// attached to that element's layout subtree, so they survive cleanup of their DOM ancestor unless
+// their layout attachment is inside the subtree being cleared too. The cleared root is only ever
+// looked at here, so the walk carries it as an identity and it is resolved once one of these boxes
+// asks rather than once per cleared node.
+bool LayoutTreeBuildBridge::svg_resource_box_survives(DOM::Document& document, RustFFI::NodeSlotId slot, u32 cleared_subtree_root)
 {
-    return layout_node.is_svg_pattern_box() || layout_node.is_svg_mask_box() || layout_node.is_svg_clip_box();
-}
-
-TraversalDecision LayoutTreeBuildBridge::clear_stale_layout_node(DOM::Node& node, u32 cleared_subtree_root)
-{
-    node.set_needs_layout_tree_update(false, DOM::SetNeedsLayoutTreeUpdateReason::None);
-    node.set_child_needs_layout_tree_update(false);
-
-    // NB: Called during layout tree construction.
-    auto* layout_node = node.unsafe_layout_node();
-    // SVGPatternBox, SVGMaskBox, and SVGClipBox are created on behalf of a referencing
-    // element and attached to that element's layout subtree. Skip them so they survive
-    // cleanup of their DOM ancestor, unless their layout attachment is inside the
-    // subtree being cleared too.
-    if (layout_node && is_svg_resource_box(*layout_node)) {
-        // The cleared root is only ever looked at here, so the walk carries it as an identity and
-        // it is resolved once an SVG resource box asks rather than once per cleared node.
-        auto* cleared_subtree_root_node = cleared_subtree_root == 0
-            ? nullptr
-            : node.document().style_computer().node_for_style_node(CSS::StyleNodeID { cleared_subtree_root }).ptr();
-        RustFFI::FfiStaleNodeCallbacks callbacks {
-            .layout_dom_node = [](void* layout_node_pointer) -> void* {
-                VERIFY(layout_node_pointer);
-                return static_cast<Layout::Node*>(layout_node_pointer)->dom_node(); },
-            .dom_is_shadow_including_inclusive_descendant = [](void* node_pointer, void* root_pointer) {
-                VERIFY(node_pointer);
-                VERIFY(root_pointer);
-                return static_cast<DOM::Node*>(node_pointer)->is_shadow_including_inclusive_descendant_of(*static_cast<DOM::Node*>(root_pointer)); },
-        };
-        if (RustFFI::rust_should_preserve_svg_resource_layout_node(
-                &callbacks, layout_node->arena_handle(), Node::slot_id(layout_node), cleared_subtree_root_node))
-            return TraversalDecision::SkipChildrenAndContinue;
-    }
-
-    if (layout_node)
-        layout_node->clear_committed_box();
-    LayoutTreeBuilderAccess::detach_layout_node(node);
-    if (layout_node && layout_node->parent()) {
-        // The parent may keep its subtree (a child lost its box in place); an emptied container
-        // reads as having block-level children, like a freshly built one.
-        auto* parent = layout_node->parent();
-        destroy_layout_subtree(*layout_node);
-        if (!parent->has_children())
-            parent->set_children_are_inline(false);
-    }
-
-    if (is<DOM::Element>(node))
-        LayoutTreeBuilderAccess::clear_synthetic_pseudo_element_layout_nodes(static_cast<DOM::Element&>(node));
-
-    return TraversalDecision::Continue;
+    auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_node_shell_if_live(document.layout_node_arena().handle(), slot));
+    VERIFY(layout_node);
+    auto* cleared_subtree_root_node = cleared_subtree_root == 0
+        ? nullptr
+        : document.style_computer().node_for_style_node(CSS::StyleNodeID { cleared_subtree_root }).ptr();
+    RustFFI::FfiStaleNodeCallbacks callbacks {
+        .layout_dom_node = [](void* layout_node_pointer) -> void* {
+            VERIFY(layout_node_pointer);
+            return static_cast<Layout::Node*>(layout_node_pointer)->dom_node(); },
+        .dom_is_shadow_including_inclusive_descendant = [](void* node_pointer, void* root_pointer) {
+            VERIFY(node_pointer);
+            VERIFY(root_pointer);
+            return static_cast<DOM::Node*>(node_pointer)->is_shadow_including_inclusive_descendant_of(*static_cast<DOM::Node*>(root_pointer)); },
+    };
+    return RustFFI::rust_should_preserve_svg_resource_layout_node(
+        &callbacks, layout_node->arena_handle(), slot, cleared_subtree_root_node);
 }
 
 void LayoutTreeBuildBridge::detach_top_layer_element_layout_subtree(DOM::Element& element)
 {
     RustFFI::FfiTopLayerDetachCallbacks callbacks {
         .context = &element.document(),
-        .clear_stale_layout_node = [](void* document_pointer, u32 style_node, u32 cleared_subtree_root) -> bool {
+        .svg_resource_box_survives = [](void* document_pointer, RustFFI::NodeSlotId slot, u32 cleared_subtree_root) -> bool {
             VERIFY(document_pointer);
-            auto& document = *static_cast<DOM::Document*>(document_pointer);
-            auto decision = clear_stale_layout_node(dom_node_for_style_node(document, style_node), cleared_subtree_root);
-            return decision == TraversalDecision::SkipChildrenAndContinue; },
+            return svg_resource_box_survives(*static_cast<DOM::Document*>(document_pointer), slot, cleared_subtree_root); },
     };
     RustFFI::rust_detach_top_layer_element_layout_subtree(
         &callbacks, element.document().layout_node_arena().handle(), element.style_node_id().value());
@@ -571,11 +540,10 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
 {
     return {
         .builder = this,
-        .clear_stale_layout_node = [](void* builder_pointer, u32 style_node, u32 cleared_subtree_root) -> bool {
+        .svg_resource_box_survives = [](void* builder_pointer, RustFFI::NodeSlotId slot, u32 cleared_subtree_root) -> bool {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
-            auto decision = clear_stale_layout_node(dom_node_for_style_node(*builder.m_document, style_node), cleared_subtree_root);
-            return decision == TraversalDecision::SkipChildrenAndContinue; },
+            return svg_resource_box_survives(*builder.m_document, slot, cleared_subtree_root); },
         .create_first_letter_nodes = [](void*, void* element_pointer, RustFFI::FfiFirstLetterTarget target) -> RustFFI::FfiFirstLetterNodes {
             VERIFY(element_pointer);
             return create_first_letter_nodes(*static_cast<DOM::Element*>(element_pointer), target); },

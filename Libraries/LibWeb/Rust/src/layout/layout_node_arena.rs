@@ -1312,6 +1312,28 @@ impl LayoutNodeArena {
         self.scroll_offsets().publish(slot, scroll_offset.into());
     }
 
+    /// Retires the tree update marks a node gives up along with its stale box. A shadow root has
+    /// no box of its own, so the mark it gives up is its host's as well; only the node's own
+    /// child mark goes, as the host may still have other children to update.
+    pub(crate) fn retire_layout_tree_update_marks_of_cleared_node(&self, node: StyleNodeID) {
+        self.with_style_engine(|engine| {
+            let mut current = node;
+            while engine.merge_layout_tree_update_mark(current, false, 0) {
+                let Some(host) = engine.tree().host_of(current) else {
+                    break;
+                };
+                current = host;
+            }
+            engine.set_child_needs_layout_tree_update(node, false);
+        });
+    }
+
+    /// Whether any element holds a box for one of its pseudo-elements, which is what says a walk
+    /// over one element's pseudo-element boxes has anything to look at.
+    pub(crate) fn has_pseudo_element_boxes(&self) -> bool {
+        !self.bound_pseudo_element_rows.borrow().is_empty()
+    }
+
     /// The pseudo-element of kind `generated_for` on the element with `generator` gives up the box
     /// it holds, which is what a build does before it decides whether the pseudo-element gets one.
     pub(crate) fn clear_pseudo_element_box(&self, generator: StyleNodeID, generated_for: u8) {
