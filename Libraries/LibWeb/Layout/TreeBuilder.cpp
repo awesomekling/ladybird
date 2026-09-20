@@ -95,7 +95,6 @@ void LayoutTreeBuilderAccess::set_synthetic_pseudo_element_node(DOM::Element& el
 }
 
 static void update_style_if_needed_for_layout_tree_bypass_path(DOM::Element&);
-static Compositing::RustFFI::NodeSlotId create_layout_node_for_text(DOM::Text&);
 
 class GeneratedContentImageProvider final
     : public ImageProvider {
@@ -780,9 +779,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             VERIFY(document_pointer);
             auto& document = *static_cast<DOM::Document*>(document_pointer);
             return Node::slot_id(&allocate_layout_node<Layout::Viewport>(document, document.style_computer().create_document_style())); },
-        .create_principal_text_layout = [](void*, void* text_pointer) -> Compositing::RustFFI::NodeSlotId {
-            VERIFY(text_pointer);
-            return create_layout_node_for_text(*static_cast<DOM::Text*>(text_pointer)); },
         .attach_style_resources = [](void* builder_pointer, Compositing::RustFFI::NodeSlotId slot) {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
@@ -803,12 +799,6 @@ static void update_style_if_needed_for_layout_tree_bypass_path(DOM::Element& ele
 {
     if (!element.has_style())
         element.document().update_style_for_element({ element });
-}
-
-static Compositing::RustFFI::NodeSlotId create_layout_node_for_text(DOM::Text& text_node)
-{
-    text_node.update_inside_blocking_wheel_event_handler_state();
-    return Node::slot_id(&allocate_layout_node<Layout::TextNode>(text_node.document(), text_node));
 }
 
 RustFFI::FfiLayoutTreeBuildOutcome LayoutTreeBuildBridge::build(DOM::Node& dom_node)

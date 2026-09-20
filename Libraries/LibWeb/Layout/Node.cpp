@@ -104,14 +104,21 @@ Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind k
 
     if (!node)
         return;
-    auto* row_already_bound_to_dom_node = node->unsafe_layout_node();
+    take_over_rows_of_dom_node(*node, attach_to_dom_node);
+}
+
+// What a row built around a DOM node owes the node's other rows, and the node itself. A row the
+// build prepared reaches this through its identity instead of through a pointer it was handed.
+void Node::take_over_rows_of_dom_node(DOM::Node& node, AttachToDOMNode attach_to_dom_node)
+{
+    auto* row_already_bound_to_dom_node = node.unsafe_layout_node();
     if (row_already_bound_to_dom_node)
         RustFFI::layout_arena_note_rows_share_dom_node(m_arena->handle(), row_already_bound_to_dom_node->m_slot, m_slot);
     // A <pattern> inherits the attributes it does not carry from the pattern its `href` names, so
     // its published facts are not a pure function of its own attributes and its own change steps
     // cannot keep them fresh. Republishing as a box is built covers the case, since a pattern is
     // read through a box. Every other SVG element published once, when it was registered.
-    if (auto* pattern_element = as_if<SVG::SVGPatternElement>(node.ptr()))
+    if (auto* pattern_element = as_if<SVG::SVGPatternElement>(&node))
         pattern_element->publish_svg_attribute_facts();
     if (attach_to_dom_node == AttachToDOMNode::Yes) {
         if (row_already_bound_to_dom_node)
@@ -120,15 +127,28 @@ Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind k
     }
 }
 
+// The build stamps a row out of the node's identity and materialises its shell here. Everything
+// the DOM-backed constructor read off the node it was handed, this one reaches through the
+// identity the row already carries; a row stamped for no node at all is an anonymous box.
 Node::Node(DOM::Document& document, BindToPreparedArenaSlot, Compositing::RustFFI::NodeSlotId slot, RustFFI::NodeKind kind)
     : m_arena(document.layout_node_arena())
     , m_slot(slot)
     , m_kind(kind)
 {
     RustFFI::layout_arena_attach_shell(m_arena->handle(), m_slot, this);
+    auto* node = dom_node();
+    if (node) {
+        // The state one of the paint facts is derived from is refreshed as a box is built for the
+        // node, as it was when the build built the box in C++.
+        node->update_inside_blocking_wheel_event_handler_state();
+        RustFFI::layout_arena_set_constructed_row_dom_paint_facts(m_arena->handle(), m_slot, dom_paint_facts_of(node));
+        publish_own_scroll_offset();
+    }
     publish_unique_node_id();
     if (has_flag(RustFFI::NodeFlag::IsInUserAgentShadowTree))
         publish_own_is_in_focused_text_control();
+    if (node)
+        take_over_rows_of_dom_node(*node, AttachToDOMNode::Yes);
 }
 
 Node::~Node()

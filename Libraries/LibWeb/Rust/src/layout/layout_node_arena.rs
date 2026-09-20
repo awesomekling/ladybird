@@ -2272,6 +2272,41 @@ impl LayoutNodeArena {
         self.enroll_node_for_replaced_content_facts_sync_if_eligible(slot);
     }
 
+    /// Stamp a row the build allocated for a DOM node, before any shell exists for it. What
+    /// `bind_shell` reads off the caller's construction facts is read here from the style mirror
+    /// under the node's identity instead; the shell answers for the paint facts once it is
+    /// materialised, since those are not published.
+    pub(crate) fn stamp_dom_row(&self, slot: NodeSlotId, kind: NodeKind, style_node: StyleNodeID) {
+        self.assert_owner_thread();
+        let data = self.data(slot);
+        assert_eq!(
+            data.kind.get(),
+            NodeKind::Unset,
+            "stamped a prepared row onto a bound slot"
+        );
+        data.kind.set(kind);
+        data.flags.set(super::node_facts::construction_flags(
+            &FfiNodeConstructionFacts {
+                kind,
+                shell: std::ptr::null_mut(),
+                is_anonymous: false,
+                dom_paint_facts: 0,
+                style_node: style_node.raw(),
+            },
+            self.element_construction_facts(Some(style_node)),
+        ));
+        self.set_node_style_node(slot, Some(style_node));
+        self.enroll_node_for_replaced_content_facts_sync_if_eligible(slot);
+    }
+
+    /// The paint facts a row is built with, answered by the shell a prepared row was materialised
+    /// into. A row being built is not a published row, so this is the plain write `bind_shell`
+    /// performs rather than the change funnel a live row's facts move through.
+    pub(crate) fn set_constructed_row_dom_paint_facts(&self, slot: NodeSlotId, facts: u8) {
+        self.assert_owner_thread();
+        self.data(slot).dom_paint_facts.set(facts);
+    }
+
     pub(crate) fn refresh_insets_use_anchor_functions_flag(&self, slot: NodeSlotId) {
         let insets_use_anchor_functions = self.style_payloads(slot).is_some_and(|payloads| {
             super::node_facts::style_insets_use_anchor_functions(ComputedValuesView::new(&payloads.groups))
@@ -2351,7 +2386,7 @@ impl LayoutNodeArena {
             return std::ptr::null_mut();
         };
         let data = self.data(id);
-        if data.kind.get() == NodeKind::Unset || data.flags.get() & NodeFlag::Anonymous as u32 == 0 {
+        if data.kind.get() == NodeKind::Unset {
             return std::ptr::null_mut();
         }
         // SAFETY: Registration and unregistration keep the factory context live; the factory binds a
@@ -4724,6 +4759,18 @@ pub unsafe extern "C" fn layout_arena_set_anchor_name_elements(
     };
     // SAFETY: The C++ wrapper keeps the arena alive for this call.
     unsafe { &*arena.cast::<LayoutNodeArena>() }.set_anchor_name_elements(scope_host, anchor_name, &elements);
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_constructed_row_dom_paint_facts(
+    arena: *mut c_void,
+    id: NodeSlotId,
+    facts: u8,
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: The C++ wrapper keeps the arena alive for this call and
+    // serializes all access on the document thread.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_constructed_row_dom_paint_facts(id, facts);
 }
 
 #[unsafe(no_mangle)]
