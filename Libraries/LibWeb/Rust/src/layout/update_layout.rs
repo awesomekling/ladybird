@@ -20,6 +20,12 @@ use crate::css::ffi_support::FfiUtf16View;
 use std::ffi::c_void;
 use std::time::Instant;
 
+pub(crate) struct MainThreadFfiEntry {
+    _private: (),
+}
+
+const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
+
 /// The document-side steps of a layout update. Each callback receives the registered
 /// `context`, the owning document, first and answers synchronously; any of them may run the
 /// layout update of another document, so the loop holds no arena borrow across a call.
@@ -497,7 +503,7 @@ pub unsafe extern "C" fn layout_arena_update_layout_is_running(arena: *mut c_voi
 pub unsafe extern "C" fn layout_arena_update_layout(arena: *mut c_void, inputs: *const FfiLayoutUpdateInputs) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     assert!(!inputs.is_null());
-    let main_thread = unsafe { crate::stage::MainThread::from_ffi_entry() };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     abort_on_panic(|| {
         // SAFETY: Guaranteed by the entry point's contract.
         unsafe { update_layout(&main_thread, arena, &*inputs) };
