@@ -141,7 +141,6 @@ Node::Node(DOM::Document& document, BindToPreparedArenaSlot, Compositing::RustFF
         RustFFI::layout_arena_set_constructed_row_dom_paint_facts(m_arena->handle(), m_slot, dom_paint_facts_of(node));
         publish_own_scroll_offset();
     }
-    publish_unique_node_id();
     if (has_flag(RustFFI::NodeFlag::IsInUserAgentShadowTree))
         publish_own_is_in_focused_text_control();
     if (node) {

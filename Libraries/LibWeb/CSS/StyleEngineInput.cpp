@@ -365,6 +365,9 @@ void record_document_tree_tracked(DOM::Document& document)
     auto& style_engine = document.style_computer().style_engine();
     document.set_style_node_id(style_engine.allocate_style_node());
     style_engine.mark_relation_only_style_node(document.style_node_id());
+    // The viewport's row answers by the document's name, and the document's identity is where the
+    // build can reach it without holding the document.
+    style_engine.set_element_unique_node_id(document.style_node_id(), static_cast<u64>(document.unique_id().value()));
 }
 
 void record_subtree_connecting(DOM::Node& root)

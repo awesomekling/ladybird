@@ -18,11 +18,10 @@ Viewport::Viewport(DOM::Document& document, BindToPreparedArenaSlot bind, Compos
     : Box(document, bind, slot, kind, CSS::LayoutStyle { document.style_computer().create_document_style() })
 {
     // As in the DOM-backed constructor: the base constructor could not have asked for the
-    // navigable's offset, nor named the document, because `is_viewport()` does not answer yes
-    // until this box's own constructor runs. The rows the document already has take the
-    // navigable's offset along with this one.
+    // navigable's offset, because `is_viewport()` does not answer yes until this box's own
+    // constructor runs. The rows the document already has take the navigable's offset along with
+    // this one.
     publish_scroll_offset();
-    publish_unique_node_id();
 }
 
 Viewport::~Viewport() = default;

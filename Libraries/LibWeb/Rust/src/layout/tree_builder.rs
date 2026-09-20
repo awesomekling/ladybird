@@ -2509,7 +2509,7 @@ fn construct_principal_layout_node(
         }
     } else if should_create_layout_node {
         if update.kind.is_document() {
-            let created = host.layout().create_document_box();
+            let created = host.layout().create_document_box(context.document_style_node);
             layout_node = created;
             created_box = Some(host.layout().created(created));
         } else if update.kind.is_text() {
@@ -3994,9 +3994,19 @@ impl TreeBuilderHost {
 
     /// The row the document's viewport is built in. The document names no identity of its own, so
     /// the row is stamped out of its kind alone; the shell it is materialised into is what asks
-    /// the style computer for the document's style.
-    fn create_document_box(&self) -> NodeSlotId {
-        self.create_dom_box(NodeKind::Viewport, None)
+    /// the style computer for the document's style. The name the row answers by is the document's,
+    /// which the mirror publishes under the document's identity rather than on the row's.
+    fn create_document_box(&self, document_style_node: u32) -> NodeSlotId {
+        let slot = self.stamp_dom_box(NodeKind::Viewport, None);
+        if let Some(document_style_node) = StyleNodeID::from_raw(document_style_node) {
+            let unique_node_id = self
+                .arena()
+                .with_style_store(|engine| engine.element_unique_node_id(document_style_node));
+            self.arena().unique_node_ids().publish(slot, unique_node_id);
+        }
+        self.arena().take_over_rows_of_bound_node(slot);
+        assert!(!self.arena().node_shell(slot).is_null());
+        slot
     }
 
     /// The row an element's principal box is built in. The row is stamped out of the element's
@@ -4014,12 +4024,19 @@ impl TreeBuilderHost {
     }
 
     fn create_dom_box(&self, kind: NodeKind, style_node: Option<StyleNodeID>) -> NodeSlotId {
+        let slot = self.stamp_dom_box(kind, style_node);
+        self.arena().take_over_rows_of_bound_node(slot);
+        assert!(!self.arena().node_shell(slot).is_null());
+        slot
+    }
+
+    /// The row alone, before anything is bound to it and before its shell is materialised, which
+    /// is where a row that answers by a name of its own publishes it.
+    fn stamp_dom_box(&self, kind: NodeKind, style_node: Option<StyleNodeID>) -> NodeSlotId {
         // SAFETY: Entry points guarantee that the arena remains live, and callers hold no reference
         // derived from it across the allocation.
         let slot = unsafe { &mut *self.arena }.allocate_unbound();
         self.arena().stamp_dom_row(slot, kind, style_node);
-        self.arena().take_over_rows_of_bound_node(slot);
-        assert!(!self.arena().node_shell(slot).is_null());
         slot
     }
 
