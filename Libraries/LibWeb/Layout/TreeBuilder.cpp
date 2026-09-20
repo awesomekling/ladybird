@@ -838,11 +838,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             VERIFY(layout_node);
             as<NodeWithStyle>(*layout_node).attach_style_resources(); },
 
-        .document_element_layout_node = [](void* document_pointer) -> Compositing::RustFFI::NodeSlotId {
-            VERIFY(document_pointer);
-            // NB: Called during layout tree construction.
-            auto* document_element = static_cast<DOM::Document*>(document_pointer)->document_element();
-            return Node::slot_id(document_element ? document_element->unsafe_layout_node() : nullptr); },
         .layout = make_ffi_tree_builder_callbacks(),
         .pseudo = make_ffi_pseudo_tree_builder_callbacks(),
     };

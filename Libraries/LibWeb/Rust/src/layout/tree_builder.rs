@@ -112,7 +112,6 @@ pub struct FfiDomTreeBuilderCallbacks {
     /// Attaches the image observers a box's style asks for. Principal and pseudo-element boxes
     /// both go through this; nothing about it depends on which the box is.
     pub attach_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId),
-    pub document_element_layout_node: unsafe extern "C" fn(*mut c_void) -> NodeSlotId,
     pub layout: FfiTreeBuilderCallbacks,
     pub pseudo: FfiPseudoTreeBuilderCallbacks,
 }
@@ -2726,7 +2725,16 @@ pub unsafe extern "C" fn rust_build_layout_tree(
         // UAs must apply the scrollbar-color value set on the root element to the viewport.
         // NB: Called during layout tree construction.
         // SAFETY: The document remains live throughout the build.
-        let root_layout_node = unsafe { (host.callbacks.document_element_layout_node)(document) };
+        // The document element is the document's only named DOM child: a doctype, a comment and a
+        // processing instruction hold no place in the mirror's child sequence, and a document can
+        // have no text child.
+        let root_layout_node = match layout_host
+            .arena()
+            .first_dom_child(StyleNodeID::from_raw(context.document_style_node))
+        {
+            Some(document_element) => layout_host.arena().bound_row(document_element),
+            None => NodeSlotId::INVALID,
+        };
         if !root_layout_node.is_invalid() {
             let scrollbar_width = layout_host
                 .style(root_layout_node)
