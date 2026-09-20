@@ -3166,6 +3166,34 @@ pub(crate) fn resolve_calculated_number_with_context(
     numeric_type.matches_number(resolve_as).then_some(value)
 }
 
+/// Resolves a calculation to the canonical unit used by style-range comparison. The returned
+/// kind is number, percentage, length, angle, time, frequency, or resolution respectively.
+pub(crate) fn resolve_calculated_style_range_value(
+    calculated: &crate::css::style_value::StyleValueData,
+    context: Option<&crate::css::style_compute::FfiLengthResolutionContext>,
+) -> Option<(u8, f64)> {
+    let (value, numeric_type, resolve_as) = resolve_calculated_with_length_resolution(
+        calculated,
+        None,
+        LengthResolution {
+            context,
+            fallback: None,
+        },
+    )?;
+    if numeric_type.matches_number(resolve_as) {
+        return Some((0, value));
+    }
+    if numeric_type.matches_percentage() {
+        return Some((1, value));
+    }
+    for (dimension, kind) in [(0, 2), (1, 3), (2, 4), (3, 5), (4, 6)] {
+        if numeric_type.matches_dimension(dimension, resolve_as) {
+            return Some((kind, value));
+        }
+    }
+    None
+}
+
 /// Resolves a calculated value that must produce a percentage, with no
 /// external context; the equivalent of the C++ resolve_percentage with an
 /// empty context.

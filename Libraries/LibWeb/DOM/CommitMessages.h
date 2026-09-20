@@ -52,6 +52,7 @@ public:
 
     // Substitution dependencies produced by a finished style computation.
     void note_style_substitution_usage(NodeIdentity, u8 usage);
+    void note_style_query_custom_property_reference(NodeIdentity, Optional<CSS::PseudoElement>, Utf16FlyString);
 
     // Applies only style-stage reports, leaving layout and event messages at their existing drains.
     void apply_style_messages();
@@ -69,6 +70,7 @@ private:
         NeedsLayoutTreeUpdate,
         SvgResourceReferenced,
         StyleSubstitutionUsage,
+        StyleQueryCustomPropertyReference,
         TopLayerZoneRebuildNeeded,
         UnexpectedFragmentedInline,
     };
@@ -86,6 +88,8 @@ private:
         // Where the pointer was, for the hover events the target change ends in. Only
         // HoverTargetAfterScroll has one.
         Optional<HoverEventData> hover_event_data {};
+        Optional<CSS::PseudoElement> pseudo_element;
+        Utf16FlyString custom_property_name;
     };
 
     void apply(Message const&);
