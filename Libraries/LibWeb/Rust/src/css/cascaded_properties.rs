@@ -130,6 +130,11 @@ pub(crate) type WinningDeclaration = (
     crate::css::style_compute::ExternalValueDependencies,
 );
 
+pub(crate) struct SourceResourceContext {
+    pub(crate) base_url: Box<[u8]>,
+    pub(crate) origin_clean: bool,
+}
+
 /// The immutable winner inputs used by longhand computation, without cascade history.
 pub(crate) trait CascadedValues {
     fn winning_declaration(&self, property: u16) -> Option<WinningDeclaration>;
@@ -157,6 +162,7 @@ pub struct CascadedPropertyStore {
     next_cascade_index: u64,
     next_source_slot: u32,
     free_source_slots: Vec<u32>,
+    source_resource_contexts: Vec<Option<SourceResourceContext>>,
     /// One bit per longhand property identifier, so the hot "is there any
     /// cascaded value at all" checks skip the hash map.
     contained: [u64; CONTAINED_BITMAP_WORDS],
@@ -171,6 +177,7 @@ impl CascadedPropertyStore {
             next_cascade_index: 0,
             next_source_slot: 0,
             free_source_slots: Vec::new(),
+            source_resource_contexts: Vec::new(),
             contained: [0; CONTAINED_BITMAP_WORDS],
             retained_seeded: [0; CONTAINED_BITMAP_WORDS],
         }
@@ -181,6 +188,7 @@ impl CascadedPropertyStore {
         self.arena.clear();
         self.last_entry_index.clear();
         self.free_source_slots.clear();
+        self.source_resource_contexts.clear();
         self.next_cascade_index = 0;
         self.next_source_slot = 0;
         self.contained = [0; CONTAINED_BITMAP_WORDS];
@@ -191,6 +199,21 @@ impl CascadedPropertyStore {
         let index = property_id as usize;
         debug_assert!(index <= LAST_LONGHAND_PROPERTY_ID as usize);
         self.contained[index / 64] & (1 << (index % 64)) != 0
+    }
+
+    pub(crate) fn source_resource_contexts(&self) -> &[Option<SourceResourceContext>] {
+        &self.source_resource_contexts
+    }
+
+    fn set_source_resource_context(&mut self, slot: u32, base_url: &[u8], has_value: bool, origin_clean: bool) {
+        let slot = slot as usize;
+        if self.source_resource_contexts.len() <= slot {
+            self.source_resource_contexts.resize_with(slot + 1, || None);
+        }
+        self.source_resource_contexts[slot] = has_value.then(|| SourceResourceContext {
+            base_url: base_url.into(),
+            origin_clean,
+        });
     }
 
     fn set_contained(&mut self, property_id: u16, contained: bool) {
@@ -566,6 +589,26 @@ pub unsafe extern "C" fn rust_cascaded_properties_has_style_sheet_context(
     unsafe { &*store }
         .last_entry(property_id)
         .is_some_and(|entry| entry.has_style_sheet_context)
+}
+
+/// Publishes the immutable resource context for one declaration source slot.
+///
+/// # Safety
+/// `store` must be valid and `base_url` must name `base_url_length` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_cascaded_properties_set_source_resource_context(
+    store: *mut CascadedPropertyStore,
+    slot: u32,
+    base_url: *const u8,
+    base_url_length: usize,
+    has_value: bool,
+    origin_clean: bool,
+) {
+    let base_url = match base_url_length {
+        0 => &[][..],
+        length => unsafe { std::slice::from_raw_parts(base_url, length) },
+    };
+    unsafe { &mut *store }.set_source_resource_context(slot, base_url, has_value, origin_clean);
 }
 
 pub const CASCADED_ENVIRONMENT_NEEDS_DOCUMENT_BASE_URL: u8 = 1 << 0;
@@ -2313,6 +2356,21 @@ mod tests {
 
         drop(store);
         assert!(weak_value.upgrade().is_none());
+    }
+
+    #[test]
+    fn source_resource_context_is_owned_by_the_store() {
+        let mut store = CascadedPropertyStore::new();
+        let mut base_url = b"https://example.test/style/".to_vec();
+        store.set_source_resource_context(3, &base_url, true, true);
+        base_url.fill(b'x');
+
+        let context = store.source_resource_contexts()[3]
+            .as_ref()
+            .expect("the source slot must retain its context");
+        assert_eq!(context.base_url.as_ref(), b"https://example.test/style/");
+        assert!(context.origin_clean);
+        assert!(store.source_resource_contexts()[0].is_none());
     }
 
     #[test]

@@ -5716,8 +5716,6 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         ComputedValuesFFI::FfiEffectiveColorSchemeInput effective_color_scheme_input {};
         ComputedValuesFFI::FfiBoxTypeTransformationInput box_type_input {};
         Optional<DOM::AbstractElement::TreeCountingFunctionResolutionContext> tree_counting_context;
-        Vector<String> style_sheet_base_urls;
-        Vector<ComputedValuesFFI::FfiStyleSheetResourceContext> style_sheet_resource_contexts;
         ComputedValuesFFI::FfiStyleComputationEnvironment computation_environment {};
         OwnPtr<CustomPropertyResolutionState> custom_property_resolution;
         GC::RootVector<GC::Ref<Animations::KeyframeEffect>> animation_effects;
@@ -5836,23 +5834,12 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             }
         }
         if (computation_requirements->environment_requirements & ComputedValuesFFI::CASCADED_ENVIRONMENT_NEEDS_STYLE_SHEET_CONTEXT) {
-            state.style_sheet_base_urls.resize(context.cascaded_properties.source_slot_count());
-            state.style_sheet_resource_contexts.resize(context.cascaded_properties.source_slot_count());
             for (size_t slot = 0; slot < context.cascaded_properties.source_slot_count(); ++slot) {
-                auto& resource_context = state.style_sheet_resource_contexts[slot];
                 auto const* published_resource_context = context.cascaded_properties.source_resource_context_for_slot(static_cast<u32>(slot));
                 if (!published_resource_context)
                     continue;
                 if (auto source = context.cascaded_properties.source_for_slot(static_cast<u32>(slot)))
                     computed_style.set_style_sheet_for_source_slot(static_cast<u32>(slot), const_cast<StyleSheetState*>(source.ptr()));
-                state.style_sheet_base_urls[slot] = published_resource_context->serialized_base_url;
-                resource_context.has_value = true;
-                resource_context.origin_clean = published_resource_context->origin_clean;
-            }
-            for (size_t slot = 0; slot < state.style_sheet_resource_contexts.size(); ++slot) {
-                auto bytes = state.style_sheet_base_urls[slot].bytes();
-                state.style_sheet_resource_contexts[slot].base_url = bytes.data();
-                state.style_sheet_resource_contexts[slot].base_url_length = bytes.size();
             }
         }
         auto document_base_url_bytes = computation_requirements->environment_requirements & ComputedValuesFFI::CASCADED_ENVIRONMENT_NEEDS_DOCUMENT_BASE_URL
@@ -5872,8 +5859,8 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             .random_base_value_count = 0,
             .document_base_url = document_base_url_bytes.data(),
             .document_base_url_length = document_base_url_bytes.size(),
-            .style_sheet_resource_contexts = state.style_sheet_resource_contexts.data(),
-            .style_sheet_resource_context_count = state.style_sheet_resource_contexts.size(),
+            .style_sheet_resource_contexts = nullptr,
+            .style_sheet_resource_context_count = 0,
             .device_pixels_per_css_pixel = document_environment.device_pixels_per_css_pixel,
             .initial_font_size_raw = InitialValues::font_size().raw_value(),
             .default_font_size_raw = style_computer.default_user_font_size().raw_value(),

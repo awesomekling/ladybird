@@ -5852,6 +5852,28 @@ pub unsafe extern "C" fn rust_compute_properties(
     let mut environment = unsafe { *drive_input.environment };
     environment.random_base_values = random_base_values.as_ptr();
     environment.random_base_value_count = random_base_values.len();
+    let style_sheet_resource_contexts = if prepared.requirements.environment_requirements
+        & crate::css::cascaded_properties::CASCADED_ENVIRONMENT_NEEDS_STYLE_SHEET_CONTEXT
+        != 0
+    {
+        unsafe { &*drive_input.store }
+            .source_resource_contexts()
+            .iter()
+            .map(|context| match context {
+                Some(context) => FfiStyleSheetResourceContext {
+                    base_url: context.base_url.as_ptr(),
+                    base_url_length: context.base_url.len(),
+                    has_value: true,
+                    origin_clean: context.origin_clean,
+                },
+                None => FfiStyleSheetResourceContext::empty(),
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    environment.style_sheet_resource_contexts = style_sheet_resource_contexts.as_ptr();
+    environment.style_sheet_resource_context_count = style_sheet_resource_contexts.len();
     let style_engine = unsafe { &*input.style_engine.cast::<crate::css::style::StyleEngine>() };
     let inheritance_parent_style_record = retained_inheritance_parent_style_record(style_engine, input);
     let parent_snapshot = if inheritance_parent_style_record != 0 {
