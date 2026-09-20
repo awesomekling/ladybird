@@ -489,11 +489,24 @@ pub struct FfiCanvasPaintFacts {
     pub content_generation: u64,
 }
 
+/// A `Web::HTML::CrossProcessId`. A zero id names no navigable.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct FfiCrossProcessId {
+    pub namespace_id: u64,
+    pub local_id: u64,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct FfiNavigableContainerPaintFacts {
     pub has_composited_context: bool,
     pub composited_context_id: u64,
+    /// The container's content navigable, if this process hosts it, so that a hit on the
+    /// container's viewport names the navigable the event goes to without asking the DOM. Content
+    /// hosted by another process leaves this zero: a navigable standing in for it locally carries
+    /// the same id, and an event over it goes to the process hosting the content instead.
+    pub local_content_navigable: FfiCrossProcessId,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

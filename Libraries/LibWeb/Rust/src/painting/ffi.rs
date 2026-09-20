@@ -1568,6 +1568,25 @@ pub unsafe extern "C" fn layout_arena_set_navigable_container_paint_facts(
     )
 }
 
+/// The locally hosted content navigable a navigable container's row last published. A zero id names
+/// none, which is also what a row carrying no navigable container facts answers.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_navigable_container_local_content_navigable(
+    arena: *mut c_void,
+    slot: NodeSlotId,
+) -> crate::painting::host::FfiCrossProcessId {
+    let arena = unsafe { arena_from_handle(arena) };
+    arena
+        .replaced_paint_facts(slot)
+        .and_then(|facts| facts.navigable_container())
+        .map(|facts| facts.local_content_navigable)
+        .unwrap_or_default()
+}
+
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<style>
+    body { margin: 0; }
+    iframe { position: absolute; top: 0; left: 0; width: 100px; height: 100px; border: none; }
+</style>
+<script src="include.js"></script>
+<script>
+    asyncTest(async (done) => {
+        let reportClick = null;
+        window.reportClick = label => reportClick(label);
+
+        const clicked = () => new Promise(resolve => { reportClick = resolve; });
+        const loaded = element => new Promise(resolve => { element.onload = () => resolve(); });
+
+        const page = (label, extra = "") => `<!DOCTYPE html><style>body{margin:0}</style>${extra}
+            <div style="width:100px;height:100px"
+                 onclick="(parent.reportClick || parent.parent.reportClick)('${label}')"></div>`;
+
+        async function clickAndReport(step, x, y) {
+            const answer = clicked();
+            internals.click(x, y);
+            println(`${step}: ${await answer}`);
+        }
+
+        // A freshly created container publishes the navigable hosting its content as soon as that
+        // navigable is attached, which is before anything has painted it.
+        const frame = document.createElement("iframe");
+        frame.srcdoc = page("first document");
+        document.body.appendChild(frame);
+        await loaded(frame);
+        await clickAndReport("click into a new iframe", 50, 50);
+
+        // Navigating the container keeps its content navigable, and the row is recommitted.
+        frame.srcdoc = page("second document");
+        await loaded(frame);
+        await clickAndReport("click after the iframe navigated", 50, 50);
+
+        // Taking the container out of the document destroys its content navigable, and putting it
+        // back creates another one.
+        frame.remove();
+        frame.srcdoc = page("third document");
+        document.body.appendChild(frame);
+        await loaded(frame);
+        await clickAndReport("click after the iframe was reinserted", 50, 50);
+
+        // A container inside a container: each level answers for its own hit.
+        frame.srcdoc = page("outer document", `<iframe style="position:absolute;top:0;left:0;width:50px;height:50px;border:none"
+             srcdoc="${page("inner document").replace(/"/g, "&quot;")}"></iframe>`);
+        await loaded(frame);
+        await clickAndReport("click into a nested iframe", 25, 25);
+        await clickAndReport("click beside the nested iframe", 75, 75);
+
+        done();
+    });
+</script>
