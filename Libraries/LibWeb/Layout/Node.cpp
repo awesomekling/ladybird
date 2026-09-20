@@ -439,7 +439,7 @@ NodeWithStyle::~NodeWithStyle()
 
 void NodeWithStyle::clear_image_observers()
 {
-    m_image_observers = {};
+    delete static_cast<ImageObserverSlots*>(RustFFI::layout_arena_replace_image_observers(arena_handle(), slot_id(this), nullptr));
 }
 
 void NodeWithStyle::rebuild_image_observers()
@@ -453,19 +453,19 @@ void NodeWithStyle::rebuild_image_observers()
         return make<ImageObserver>(*this, *image_to_observe);
     };
 
-    ImageObserverSlots new_observers;
+    auto new_observers = make<ImageObserverSlots>();
     for (auto const& layer : background_layers())
-        new_observers.background_layers.append(observer_for(layer.background_image.ptr()));
+        new_observers->background_layers.append(observer_for(layer.background_image.ptr()));
     for (auto const& layer : mask_layers())
-        new_observers.mask_layers.append(observer_for(layer.background_image.ptr()));
+        new_observers->mask_layers.append(observer_for(layer.background_image.ptr()));
     for (auto const& cursor_style_value : m_cursor_style_values)
-        new_observers.cursors.append(cursor_style_value ? observer_for(&cursor_style_value->image()) : nullptr);
-    new_observers.border_image_source = observer_for(border_image().source.ptr());
-    new_observers.list_style_image = observer_for(list_style_image());
+        new_observers->cursors.append(cursor_style_value ? observer_for(&cursor_style_value->image()) : nullptr);
+    new_observers->border_image_source = observer_for(border_image().source.ptr());
+    new_observers->list_style_image = observer_for(list_style_image());
     // TODO: Observe other <image> accepting properties once we support them.
 
     // Register the new observers before the old ones unregister so a shared resource is never dropped and refetched.
-    m_image_observers = move(new_observers);
+    delete static_cast<ImageObserverSlots*>(RustFFI::layout_arena_replace_image_observers(arena_handle(), slot_id(this), new_observers.leak_ptr()));
 }
 
 static NodeWithStyle::ImageObserver const* image_observer_at(Vector<OwnPtr<NodeWithStyle::ImageObserver>> const& observers, size_t index)
@@ -475,19 +475,38 @@ static NodeWithStyle::ImageObserver const* image_observer_at(Vector<OwnPtr<NodeW
     return observers[index].ptr();
 }
 
+NodeWithStyle::ImageObserverSlots* NodeWithStyle::image_observers() const
+{
+    return static_cast<ImageObserverSlots*>(RustFFI::layout_arena_image_observers(arena_handle(), slot_id(this)));
+}
+
+void NodeWithStyle::delete_arena_owned_image_observers(ImageObserverSlots& observers)
+{
+    delete &observers;
+}
+
 NodeWithStyle::ImageObserver const* NodeWithStyle::background_image_observer(size_t layer_index) const
 {
-    return image_observer_at(m_image_observers.background_layers, layer_index);
+    auto* observers = image_observers();
+    return observers ? image_observer_at(observers->background_layers, layer_index) : nullptr;
 }
 
 NodeWithStyle::ImageObserver const* NodeWithStyle::mask_image_observer(size_t layer_index) const
 {
-    return image_observer_at(m_image_observers.mask_layers, layer_index);
+    auto* observers = image_observers();
+    return observers ? image_observer_at(observers->mask_layers, layer_index) : nullptr;
 }
 
 NodeWithStyle::ImageObserver const* NodeWithStyle::cursor_image_observer(size_t cursor_index) const
 {
-    return image_observer_at(m_image_observers.cursors, cursor_index);
+    auto* observers = image_observers();
+    return observers ? image_observer_at(observers->cursors, cursor_index) : nullptr;
+}
+
+NodeWithStyle::ImageObserver const* NodeWithStyle::border_image_source_observer() const
+{
+    auto* observers = image_observers();
+    return observers ? observers->border_image_source.ptr() : nullptr;
 }
 
 }
