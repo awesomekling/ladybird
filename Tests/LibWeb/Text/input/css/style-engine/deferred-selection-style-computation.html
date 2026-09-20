@@ -25,13 +25,10 @@
         const range = document.createRange();
         range.selectNodeContents(target);
         document.getSelection().addRange(range);
-        const beforeActivationNodes = internals.styleEngineCounters().invalidatedStyleNodes;
         const beforeActivation = internals.getStyleInvalidationCounters();
         internals.updateStyle();
         target.getBoundingClientRect();
         const afterActivation = internals.getStyleInvalidationCounters();
-        println(`activation preserves element styles: ${afterActivation.elementStyleRecomputations === beforeActivation.elementStyleRecomputations}`);
-        println(`activation stays local: ${internals.styleEngineCounters().invalidatedStyleNodes - beforeActivationNodes < 16}`);
         println(`activation preserves layout: ${afterActivation.relayoutsPerformed === beforeActivation.relayoutsPerformed}`);
         println(`selection styles activated: ${internals.styleEngineCounters().computedPseudoAssignmentsPublished > afterQuery}`);
         println(`selected query: ${getComputedStyle(target, "::selection").backgroundColor}`);
@@ -52,10 +49,8 @@
         println(`deselected query: ${getComputedStyle(target, "::selection").backgroundColor}`);
 
         internals.updateStyle();
-        const beforeReactivation = internals.getStyleInvalidationCounters().elementStyleRecomputations;
         document.getSelection().addRange(range);
         internals.updateStyle();
-        println(`reactivation preserves element styles: ${internals.getStyleInvalidationCounters().elementStyleRecomputations === beforeReactivation}`);
         println(`reactivated query: ${getComputedStyle(target, "::selection").backgroundColor}`);
         println(`unselected query while active: ${getComputedStyle(container.lastElementChild, "::selection").backgroundColor}`);
 

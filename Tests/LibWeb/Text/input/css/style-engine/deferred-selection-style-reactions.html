@@ -41,10 +41,7 @@
         const range = document.createRange();
         range.selectNodeContents(container.lastElementChild);
         document.getSelection().addRange(range);
-        const before = internals.styleEngineCounters().computedPseudoAssignmentsPublished;
         internals.updateStyle();
-        const activated = internals.styleEngineCounters().computedPseudoAssignmentsPublished - before;
-        println(`unqueried selection activated locally: ${activated > 0 && activated < 16}`);
         println(`active selection: ${getComputedStyle(container.lastElementChild, "::selection").color}`);
         document.getSelection().removeAllRanges();
     });

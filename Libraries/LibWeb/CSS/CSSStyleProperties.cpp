@@ -628,17 +628,17 @@ Optional<StyleProperty> CSSStyleProperties::get_property_internal(PropertyNameAn
     return get_direct_property(property);
 }
 
-static void ensure_pseudo_element_style_for_cssom(DOM::AbstractElement abstract_element)
+static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::AbstractElement abstract_element)
 {
     auto pseudo_element = abstract_element.pseudo_element();
     if (!pseudo_element.has_value())
-        return;
+        return {};
     if (!is_synthetic_pseudo_element(*pseudo_element))
-        return;
+        return {};
     if (*pseudo_element != PseudoElement::Backdrop
         && *pseudo_element != PseudoElement::Selection
         && abstract_element.computed_style())
-        return;
+        return {};
 
     auto& document = abstract_element.document();
     document.begin_style_stabilization_epoch();
@@ -647,23 +647,33 @@ static void ensure_pseudo_element_style_for_cssom(DOM::AbstractElement abstract_
     };
     auto& style_computer = abstract_element.document().style_computer();
 
+    Optional<StyleRecordID> highlight_parent_style_record { StyleRecordID {} };
+    if (is_highlight_pseudo_element(*pseudo_element) && document.selection_styles_are_observable()) {
+        auto highlight_parent = abstract_element.highlight_inheritance_parent();
+        highlight_parent_style_record = highlight_parent.has_value() ? highlight_parent->style_record_identity() : StyleRecordID {};
+    }
+    RefPtr<ComputedValues const> target_style;
     auto compute = [&](DOM::AbstractElement target) {
         bool did_change_custom_properties = false;
         StyleEngine::StyleRecordDelta style_record_delta {};
-        auto style = style_computer.compute_pseudo_element_style_if_needed(target, did_change_custom_properties, nullptr, style_record_delta);
-        target.element().set_computed_style(*pseudo_element, style ? style_record_delta.new_style_record : StyleRecordID {});
+        auto style = style_computer.compute_pseudo_element_style_if_needed(target, did_change_custom_properties, nullptr, style_record_delta, highlight_parent_style_record);
+        highlight_parent_style_record = style ? style_record_delta.new_style_record : StyleRecordID {};
+        return style;
     };
 
+    Vector<RefPtr<ComputedValues const>> ancestor_styles;
     // A highlight pseudo-element inherits from its parent element's, which nothing keeps current while selection
     // styles are unobservable, so the chain is computed outermost first.
     if (is_highlight_pseudo_element(*pseudo_element) && !document.selection_styles_are_observable()) {
+        highlight_parent_style_record = StyleRecordID {};
         Vector<DOM::AbstractElement> ancestors;
         for (auto ancestor = abstract_element.element().element_to_inherit_style_from({}); ancestor; ancestor = ancestor->element_to_inherit_style_from({}))
             ancestors.append({ *ancestor, pseudo_element });
         for (auto& ancestor : ancestors.in_reverse())
-            compute(ancestor);
+            ancestor_styles.append(compute(ancestor));
     }
-    compute(abstract_element);
+    target_style = compute(abstract_element);
+    return target_style;
 }
 
 static RefPtr<StyleValue const> resolve_color_style_value(StyleValue const&, Color, ColorResolutionContext const* = nullptr);
@@ -671,7 +681,12 @@ static RefPtr<StyleValue const> resolve_color_style_value(StyleValue const&, Col
 // Brings style (and, when the property needs it, layout) up to date for computed-style property
 // access, and returns the layout node to read used values from (may be null). An empty Optional
 // means the element cannot expose computed style at all (disconnected, or no browsing context).
-static Optional<Layout::NodeWithStyle*> prepare_computed_style_and_layout_for_property(DOM::AbstractElement abstract_element, PropertyID property_id)
+struct PreparedComputedStyle {
+    Layout::NodeWithStyle* layout_node { nullptr };
+    RefPtr<ComputedValues const> transient_style;
+};
+
+static Optional<PreparedComputedStyle> prepare_computed_style_and_layout_for_property(DOM::AbstractElement abstract_element, PropertyID property_id)
 {
     if (!element_exposes_computed_style(abstract_element.element()))
         return {};
@@ -707,7 +722,7 @@ static Optional<Layout::NodeWithStyle*> prepare_computed_style_and_layout_for_pr
         abstract_element.document().update_style_for_element(abstract_element);
     else
         abstract_element.document().update_style_for_element(abstract_element, DOM::Document::StyleUpdateMode::OnlyIfNeeded);
-    ensure_pseudo_element_style_for_cssom(abstract_element);
+    auto transient_style = compute_pseudo_element_style_for_cssom(abstract_element);
 
     // Container queries and container-relative units need layout to resolve. Avoid forcing layout for every
     // getComputedStyle() call; only elements that actually depend on a query container need the post-layout style.
@@ -724,16 +739,18 @@ static Optional<Layout::NodeWithStyle*> prepare_computed_style_and_layout_for_pr
         layout_node = abstract_element.layout_node();
         // A synthetic pseudo which is not rendered is not part of the layout-driven pseudo
         // recomputation above. Refresh its CSSOM-only style against the settled container size.
-        ensure_pseudo_element_style_for_cssom(abstract_element);
+        transient_style = compute_pseudo_element_style_for_cssom(abstract_element);
     }
 
     if (auto pseudo_element = abstract_element.pseudo_element(); layout_node && pseudo_element.has_value()) {
         auto pseudo_style = abstract_element.element().computed_style(*pseudo_element);
-        if (!pseudo_style || pseudo_style->display().is_contents())
+        auto const* computed_values = transient_style ? transient_style.ptr() : pseudo_style ? &*pseudo_style
+                                                                                             : nullptr;
+        if (!computed_values || computed_values->display().is_contents())
             layout_node = nullptr;
     }
 
-    return layout_node;
+    return PreparedComputedStyle { layout_node, move(transient_style) };
 }
 
 Optional<RefPtr<StyleValue const>> CSSStyleProperties::resolved_value_read_from_computed_style(DOM::AbstractElement abstract_element, PropertyID property_id)
@@ -760,6 +777,8 @@ Optional<RefPtr<StyleValue const>> CSSStyleProperties::resolved_value_read_from_
     if (!prepared.has_value())
         return RefPtr<StyleValue const> {};
 
+    if (prepared->transient_style)
+        return RefPtr<StyleValue const> { prepared->transient_style->computed_style_value(property_id) };
     if (auto style = abstract_element.computed_style())
         return RefPtr<StyleValue const> { style->computed_style_value(property_id) };
 
@@ -781,7 +800,8 @@ Optional<StyleProperty> CSSStyleProperties::get_direct_property(PropertyNameAndI
         auto maybe_layout_node = prepare_computed_style_and_layout_for_property(abstract_element, property_id);
         if (!maybe_layout_node.has_value())
             return {};
-        auto* layout_node = *maybe_layout_node;
+        auto* layout_node = maybe_layout_node->layout_node;
+        auto transient_style = move(maybe_layout_node->transient_style);
 
         // FIXME: Somehow get custom properties if there's no layout node.
         if (property_name_and_id.is_custom_property()) {
@@ -817,12 +837,12 @@ Optional<StyleProperty> CSSStyleProperties::get_direct_property(PropertyNameAndI
 
         if (!layout_node) {
             auto style_record = abstract_element.computed_style();
-            RefPtr<ComputedValues const> transient_style;
-            if (!style_record) {
+            if (!transient_style && !style_record) {
                 // A synthetic pseudo-element without matching rules has no durable style.
                 transient_style = abstract_element.document().style_computer().materialize_style_record(abstract_element);
             }
-            auto const* computed_values = style_record ? &*style_record : transient_style.ptr();
+            auto const* computed_values = transient_style ? transient_style.ptr() : style_record ? &*style_record
+                                                                                                 : nullptr;
             VERIFY(computed_values);
 
             auto computed_value_for_property = [&](PropertyID computed_property_id) -> NonnullRefPtr<StyleValue const> {
@@ -899,7 +919,7 @@ Optional<StyleProperty> CSSStyleProperties::get_direct_property(PropertyNameAndI
             };
         }
 
-        auto value = style_value_for_computed_property(*layout_node, property_id);
+        auto value = style_value_for_computed_property(*layout_node, property_id, transient_style.ptr());
         if (!value)
             return {};
         return StyleProperty {
@@ -975,10 +995,12 @@ Optional<Utf16String> CSSStyleProperties::serialized_computed_value_from_stored_
     auto maybe_layout_node = prepare_computed_style_and_layout_for_property(abstract_element, property_id);
     if (!maybe_layout_node.has_value())
         return {};
-    auto* layout_node = *maybe_layout_node;
+    auto* layout_node = maybe_layout_node->layout_node;
 
     auto style = abstract_element.computed_style();
-    if (!style)
+    auto const* computed_values = maybe_layout_node->transient_style ? maybe_layout_node->transient_style.ptr() : style ? &*style
+                                                                                                                        : nullptr;
+    if (!computed_values)
         return {};
 
     // letter-spacing: a used value of zero resolves to `normal`; leave that to the value path.
@@ -996,7 +1018,7 @@ Optional<Utf16String> CSSStyleProperties::serialized_computed_value_from_stored_
         }
     }
 
-    auto const* handle = style->stored_style_value_handle(property_id);
+    auto const* handle = computed_values->stored_style_value_handle(property_id);
     if (!handle)
         return {};
     return serialize_style_value_handle(*handle, SerializationMode::ResolvedValue);
@@ -1027,7 +1049,7 @@ static RefPtr<StyleValue const> resolve_color_style_value(StyleValue const& styl
     return ColorStyleValue::create_from_color(computed_color, ColorSyntax::Modern);
 }
 
-RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(Layout::NodeWithStyle const& layout_node, PropertyID property_id) const
+RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(Layout::NodeWithStyle const& layout_node, PropertyID property_id, ComputedValues const* transient_style) const
 {
     if (!owner_node().has_value()) {
         dbgln_if(LIBWEB_CSS_DEBUG, "Computed style for CSSStyleProperties without owner node was requested");
@@ -1051,6 +1073,10 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
 
     auto& element = owner_node()->element();
     auto pseudo_element = owner_node()->pseudo_element();
+    auto stored_style = element.computed_style(pseudo_element);
+    auto const* computed_values = transient_style ? transient_style : stored_style ? &*stored_style
+                                                                                   : nullptr;
+    VERIFY(computed_values);
 
     auto used_value_for_inset = [&layout_node, used_value_for_property](LengthPercentageOrAuto const& start_side, LengthPercentageOrAuto const& end_side, Function<CSSPixels(Layout::Node const&)>&& used_value_getter) -> Optional<CSSPixels> {
         if (!layout_node.is_positioned())
@@ -1066,17 +1092,16 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
         return used_value_for_property(move(used_value_getter));
     };
 
-    auto get_computed_value = [&element, pseudo_element](PropertyID property_id) -> NonnullRefPtr<StyleValue const> {
-        auto style = element.computed_style(pseudo_element);
-        VERIFY(style);
-        return style->computed_style_value(property_id).release_nonnull();
+    auto get_computed_value = [computed_values](PropertyID property_id) -> NonnullRefPtr<StyleValue const> {
+        return computed_values->computed_style_value(property_id).release_nonnull();
     };
     auto color_resolution_context = ColorResolutionContext::for_layout_node_with_style(layout_node);
 
     if (property_is_logical_alias(property_id)) {
         return style_value_for_computed_property(
             layout_node,
-            map_logical_alias_to_physical_property(property_id, LogicalAliasMappingContext { layout_node.writing_mode(), layout_node.direction() }));
+            map_logical_alias_to_physical_property(property_id, LogicalAliasMappingContext { computed_values->writing_mode(), computed_values->direction() }),
+            transient_style);
     }
 
     // A limited number of properties have special rules for producing their "resolved value".
@@ -1103,7 +1128,7 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
         // -> A resolved value special case property like color defined in another specification
         //    The resolved value is the used value.
     case PropertyID::BackgroundColor: {
-        auto const* background_values = element.style_group<ComputedValues::BackgroundValues>(pseudo_element);
+        auto const* background_values = static_cast<ComputedValues::BackgroundValues const*>(computed_values->style_group_payload(StyleGroupIndex::BackgroundValues));
         VERIFY(background_values);
         auto const& handle = background_values->background_color_style_value;
         VERIFY(handle.pointer);
@@ -1127,10 +1152,8 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
     case PropertyID::CaretColor:
         return resolve_color_style_value(*get_computed_value(property_id), layout_node.caret_color(), &color_resolution_context);
     case PropertyID::Color: {
-        auto style = element.computed_style(pseudo_element);
-        VERIFY(style);
         auto current_color_resolution_context = ColorResolutionContext::for_element(*owner_node());
-        return resolve_color_style_value(*get_computed_value(property_id), style->color(), &current_color_resolution_context);
+        return resolve_color_style_value(*get_computed_value(property_id), computed_values->color(), &current_color_resolution_context);
     }
     case PropertyID::ColumnRuleColor:
         return resolve_color_style_value(*get_computed_value(property_id), layout_node.column_rule_color(), &color_resolution_context);
@@ -1152,7 +1175,7 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
         auto line_height = get_computed_value(property_id);
         if (line_height->is_keyword() && line_height->to_keyword() == Keyword::Normal)
             return line_height;
-        auto const* font_values = element.style_group<ComputedValues::FontValues>(pseudo_element);
+        auto const* font_values = static_cast<ComputedValues::FontValues const*>(computed_values->style_group_payload(StyleGroupIndex::FontValues));
         VERIFY(font_values);
         return LengthStyleValue::create(Length::make_px(font_values->line_height_used));
     }
@@ -1428,7 +1451,7 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(L
         StyleValueVector longhand_values;
         longhand_values.ensure_capacity(longhand_ids.size());
         for (auto longhand_id : longhand_ids)
-            longhand_values.append(style_value_for_computed_property(layout_node, longhand_id).release_nonnull());
+            longhand_values.append(style_value_for_computed_property(layout_node, longhand_id, transient_style).release_nonnull());
         return ShorthandStyleValue::create(property_id, move(longhand_ids), move(longhand_values));
     }
 }
