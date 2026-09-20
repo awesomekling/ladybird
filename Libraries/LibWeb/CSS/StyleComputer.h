@@ -201,7 +201,7 @@ public:
         No,
         Yes,
     };
-    void collect_animations_into(DOM::AbstractElement, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>, ComputedStyleWorkingSet&, AnimationRefresh) const;
+    void collect_animations_into(DOM::AbstractElement, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>, ComputedStyleWorkingSet&, AnimationRefresh, ComputedValuesFFI::FfiAnimationLengthContexts const* = nullptr) const;
 
     // `explicitly_inherited_non_inherited_style_groups` reports the style groups whose values the
     // computation read from the half of the style it inherits from that a child normally cannot
@@ -353,7 +353,7 @@ private:
 
     [[nodiscard]] RefPtr<ComputedStyleWorkingSet> compute_style_impl(DOM::AbstractElement, ComputeStyleMode, Optional<bool&> did_change_custom_properties, StyleScope const&, IncludeInlineStyle, StyleEngineMatchResult* = nullptr, StyleSharingCandidate* = nullptr, Optional<StyleRecordID> highlight_parent_style_record = {}) const;
     [[nodiscard]] NonnullRefPtr<CascadedProperties> compute_cascaded_values(DOM::AbstractElement, CascadeInput const&, IncludeInlineStyle, StyleSharingCandidate* sharing = nullptr, Vector<StyleProperty> const* precomputed_presentational_hints = nullptr, u8* substitution_usage = nullptr) const;
-    void collect_animation_effects_into(DOM::AbstractElement, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>, ComputedStyleWorkingSet&) const;
+    void collect_animation_effects_into(DOM::AbstractElement, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>, ComputedStyleWorkingSet&, ComputedValuesFFI::FfiAnimationLengthContexts const*) const;
     NonnullRefPtr<StyleValue const> compute_animated_custom_property_value(Utf16FlyString const& name, NonnullRefPtr<StyleValue const> specified_value, ComputedStyleWorkingSet&, DOM::AbstractElement) const;
     void publish_animated_custom_properties(ComputedStyleWorkingSet&, DOM::AbstractElement) const;
     void invalidate_animated_custom_property_readers(DOM::AbstractElement, OrderedHashMap<Utf16FlyString, NonnullRefPtr<StyleValue const>> const& animated_values) const;
@@ -401,6 +401,10 @@ public:
 
 private:
     [[nodiscard]] Length::FontMetrics calculate_root_element_font_metrics(ComputedStyleWorkingSet const&) const;
+    // The only way the root element font metrics ever change. A `rem` inside a keyframe resolves
+    // against them, so the style stage reads the mirror's copy, and that copy is only right if
+    // every write comes through here.
+    void set_root_element_font_metrics(Length::FontMetrics const&, bool depends_on_viewport_metrics) const;
     NonnullRefPtr<StyleValue const> finalize_custom_property_value(ComputedStyleWorkingSet const*, AbstractOrHypotheticalElement const&, Utf16FlyString const&, NonnullRefPtr<StyleValue const>) const;
 
     GC::Ref<DOM::Document> m_document;

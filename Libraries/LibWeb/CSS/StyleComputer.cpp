@@ -329,6 +329,7 @@ StyleComputer::StyleComputer(DOM::Document& document)
     , m_root_element_font_metrics(m_default_font_metrics)
     , m_style_engine(StyleEngine::DeviceClass::ForegroundDesktop, this)
 {
+    set_root_element_font_metrics(m_root_element_font_metrics, m_root_element_font_metrics_depend_on_viewport_metrics);
 }
 
 void StyleComputer::finalize()
@@ -814,15 +815,15 @@ static void apply_committed_transform_reference_box(StyleEngine& style_engine, D
     animation_context.transform_reference_box_height = committed.height;
 }
 
-void StyleComputer::collect_animations_into(DOM::AbstractElement abstract_element, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>> effects, ComputedStyleWorkingSet& computed_properties, AnimationRefresh refresh) const
+void StyleComputer::collect_animations_into(DOM::AbstractElement abstract_element, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>> effects, ComputedStyleWorkingSet& computed_properties, AnimationRefresh refresh, ComputedValuesFFI::FfiAnimationLengthContexts const* stage_length_contexts) const
 {
     if (refresh == AnimationRefresh::No) {
-        collect_animation_effects_into(abstract_element, effects, computed_properties);
+        collect_animation_effects_into(abstract_element, effects, computed_properties, stage_length_contexts);
         publish_animated_custom_properties(computed_properties, abstract_element);
         return;
     }
     m_keyframes_inherited_non_inherited_style_groups = 0;
-    collect_animation_effects_into(abstract_element, effects, computed_properties);
+    collect_animation_effects_into(abstract_element, effects, computed_properties, stage_length_contexts);
     publish_animated_custom_properties(computed_properties, abstract_element);
     // An animation-only overlay update resolves keyframe values just like a full style computation does, so a
     // keyframe-borne `inherit` on a non-inherited property discovered here must leave the same invalidation
@@ -838,7 +839,7 @@ void StyleComputer::collect_animations_into(DOM::AbstractElement abstract_elemen
     }
 }
 
-void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract_element, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>> effects, ComputedStyleWorkingSet& computed_properties) const
+void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract_element, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>> effects, ComputedStyleWorkingSet& computed_properties, ComputedValuesFFI::FfiAnimationLengthContexts const* stage_length_contexts) const
 {
     struct KeyframeDeclaration {
         size_t keyframe_index { 0 };
@@ -1254,15 +1255,26 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
             .initial_font_size_raw = InitialValues::font_size().raw_value(),
             .default_font_size_raw = default_user_font_size().raw_value(),
         };
-        auto font_length_resolution_context = to_ffi_length_resolution_context_with_container_bases(
-            get_computation_context_for_property(PropertyID::FontFamily, computed_properties, abstract_element).length_resolution_context,
-            resolved_batch.container_relative_length_unit_mask);
-        auto line_height_length_resolution_context = to_ffi_length_resolution_context_with_container_bases(
-            get_computation_context_for_property(PropertyID::LineHeight, computed_properties, abstract_element).length_resolution_context,
-            resolved_batch.container_relative_length_unit_mask);
-        auto remaining_length_resolution_context = to_ffi_length_resolution_context_with_container_bases(
-            get_computation_context_for_property(PropertyID::Color, computed_properties, abstract_element).length_resolution_context,
-            resolved_batch.container_relative_length_unit_mask);
+        // The longhand drive already resolved lengths in these very contexts, so it keeps them and
+        // the stage computes its keyframes in what it kept. Container bases are the exception: the
+        // drive derives them from the element's own unit mask and the batch needs the batch's, so a
+        // batch that uses a container unit has them built here as before.
+        auto const* kept_length_contexts = resolved_batch.container_relative_length_unit_mask == 0 ? stage_length_contexts : nullptr;
+        auto font_length_resolution_context = kept_length_contexts
+            ? kept_length_contexts->font
+            : to_ffi_length_resolution_context_with_container_bases(
+                  get_computation_context_for_property(PropertyID::FontFamily, computed_properties, abstract_element).length_resolution_context,
+                  resolved_batch.container_relative_length_unit_mask);
+        auto line_height_length_resolution_context = kept_length_contexts
+            ? kept_length_contexts->line_height
+            : to_ffi_length_resolution_context_with_container_bases(
+                  get_computation_context_for_property(PropertyID::LineHeight, computed_properties, abstract_element).length_resolution_context,
+                  resolved_batch.container_relative_length_unit_mask);
+        auto remaining_length_resolution_context = kept_length_contexts
+            ? kept_length_contexts->remaining
+            : to_ffi_length_resolution_context_with_container_bases(
+                  get_computation_context_for_property(PropertyID::Color, computed_properties, abstract_element).length_resolution_context,
+                  resolved_batch.container_relative_length_unit_mask);
 
         auto inheritance_parent = abstract_element.element_to_inherit_style_from();
         ComputedValuesFFI::FfiAnimationKeyframeLonghandInput const keyframe_input {
@@ -3327,8 +3339,24 @@ Length::FontMetrics StyleComputer::calculate_root_element_font_metrics(ComputedS
 
 void StyleComputer::update_root_element_font_metrics(ComputedValues const& values)
 {
-    m_root_element_font_metrics = Length::FontMetrics { values.font_size(), values.font_list().first_available_font().pixel_metrics(), values.line_height() };
-    m_root_element_font_metrics_depend_on_viewport_metrics = values.font_metrics_depend_on_viewport_metrics();
+    set_root_element_font_metrics(
+        Length::FontMetrics { values.font_size(), values.font_list().first_available_font().pixel_metrics(), values.line_height() },
+        values.font_metrics_depend_on_viewport_metrics());
+}
+
+void StyleComputer::set_root_element_font_metrics(Length::FontMetrics const& metrics, bool depends_on_viewport_metrics) const
+{
+    m_root_element_font_metrics = metrics;
+    m_root_element_font_metrics_depend_on_viewport_metrics = depends_on_viewport_metrics;
+
+    Array<u64, 5> const words {
+        bit_cast<u64>(metrics.font_size.to_double()),
+        bit_cast<u64>(metrics.x_height.to_double()),
+        bit_cast<u64>(metrics.cap_height.to_double()),
+        bit_cast<u64>(metrics.zero_advance.to_double()),
+        bit_cast<u64>(metrics.line_height.to_double()),
+    };
+    m_style_engine.set_root_element_font_metrics(words.span(), depends_on_viewport_metrics);
 }
 
 CSSPixels StyleComputer::default_user_font_size()
@@ -6007,8 +6035,9 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 *context.explicitly_inherited_non_inherited_style_groups |= style_groups;
         }
         if (!context.stop_after_longhand_drive && !context.abstract_element.pseudo_element().has_value() && context.abstract_element.element().is_document_element()) {
-            style_computer.m_root_element_font_metrics = style_computer.calculate_root_element_font_metrics(computed_style);
-            style_computer.m_root_element_font_metrics_depend_on_viewport_metrics = computed_style.font_metrics_depend_on_viewport_metrics();
+            style_computer.set_root_element_font_metrics(
+                style_computer.calculate_root_element_font_metrics(computed_style),
+                computed_style.font_metrics_depend_on_viewport_metrics());
         }
         // NB: Keyframe collection is the only thing that sets this, and nothing between here and
         //     where the animation stage consumes it runs in between. Clearing it here rather
@@ -6036,7 +6065,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         .stop_after_longhand_drive = stop_after_longhand_drive,
         .transaction_input = nullptr,
         .callback_context = &native_context,
-        .apply_animations = [](void* context_pointer, i8 in_display_none_subtree, bool should_measure_line_height, ComputedValuesFFI::FfiInputLineHeightMetrics* line_height_metrics, bool* did_sample) -> ComputedValuesFFI::AnimatedOverlay* {
+        .apply_animations = [](void* context_pointer, i8 in_display_none_subtree, bool should_measure_line_height, ComputedValuesFFI::FfiInputLineHeightMetrics* line_height_metrics, ComputedValuesFFI::FfiAnimationLengthContexts const* stage_length_contexts, bool* did_sample) -> ComputedValuesFFI::AnimatedOverlay* {
             auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
             *did_sample = false;
             // Applying the plan the style computation decided has to happen before the effects are
@@ -6094,7 +6123,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 return nullptr;
             *did_sample = true;
             auto& computed_style = *context.state->working_set;
-            context.style_computer->collect_animations_into(context.abstract_element, context.state->animation_effects.span(), computed_style, AnimationRefresh::No);
+            context.style_computer->collect_animations_into(context.abstract_element, context.state->animation_effects.span(), computed_style, AnimationRefresh::No, stage_length_contexts);
             *line_height_metrics = input_line_height_metrics(computed_style, context.abstract_element, should_measure_line_height);
             return computed_style.prepare_animated_overlay_for_rust_finalization(
                 Badge<StyleComputer> {}, ComputedStyleWorkingSet::CreateAnimatedOverlay::No); },

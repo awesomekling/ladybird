@@ -78,6 +78,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         animation_timing_rows,
         animation_effect_descriptions,
         animation_timeline_samples,
+        root_element_font_metrics,
         animation_keyframes,
         custom_property_registrations_changed,
         pending_element_style_computation_selections,
@@ -177,6 +178,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(animation_timing_rows);
     assert_member_is_sync(animation_effect_descriptions);
     assert_member_is_sync(animation_timeline_samples);
+    assert_member_is_sync(root_element_font_metrics);
     assert_member_is_sync(animation_keyframes);
     assert_member_is_sync(custom_property_registrations_changed);
     assert_member_is_sync(pending_element_style_computation_selections);

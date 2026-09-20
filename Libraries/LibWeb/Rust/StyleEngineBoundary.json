@@ -141,7 +141,8 @@
     [141, "EventDispatchIsDisabled"],
     [142, "SetElementCssDefinedAnimations"],
     [143, "SetElementAnimationTimingRows"],
-    [144, "SetAnimationTimelineSamples"]
+    [144, "SetAnimationTimelineSamples"],
+    [145, "SetRootElementFontMetrics"]
   ],
   "operations": [
     {"event": "TakeSharedComputationContext", "ffi": "style_engine_take_shared_computation_context", "cpp": "take_shared_computation_context", "return": "u64", "args": [["node", "style_node"], ["parent_record", "style_record"], ["environment", "u64"], ["shape", "u64_slice"], ["pseudo_elements", "u64"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return 0; }; let shape = shape.try_into().expect(\"a shared style shape has four words\"); let result = engine.take_shared_computation_context(node, parent_record, environment, shape, pseudo_elements).unwrap_or(0);"},
@@ -252,6 +253,7 @@
     { "event": "SetElementCssDefinedAnimations", "ffi": "style_engine_set_element_css_defined_animations", "cpp": "set_element_css_defined_animations", "return": "void", "args": [["node", "style_node"], ["slot", "u8"], ["name_lengths", "u32_slice"], ["name_units", "u16_slice"]], "record_order": ["node", "slot", "name_lengths", "name_units"], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_element_css_defined_animations(node, slot, name_lengths, name_units);" },
     { "event": "SetElementAnimationTimingRows", "ffi": "style_engine_set_element_animation_timing_rows", "cpp": "set_element_animation_timing_rows", "return": "void", "args": [["node", "style_node"], ["slot", "u8"], ["words", "u32_slice"], ["times", "u64_slice"]], "record_order": ["node", "slot", "words", "times"], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_element_animation_timing_rows(node, slot, words, times);" },
     { "event": "SetAnimationTimelineSamples", "ffi": "style_engine_set_animation_timeline_samples", "cpp": "set_animation_timeline_samples", "return": "void", "args": [["identities", "u32_slice"], ["words", "u32_slice"], ["times", "u64_slice"]], "record_order": ["identities", "words", "times"], "body": "engine.set_animation_timeline_samples(identities, words, times);" },
+    { "event": "SetRootElementFontMetrics", "ffi": "style_engine_set_root_element_font_metrics", "cpp": "set_root_element_font_metrics", "return": "void", "args": [["words", "u64_slice"], ["depends_on_viewport_metrics", "bool"]], "record_order": ["depends_on_viewport_metrics", "words"], "body": "engine.set_root_element_font_metrics(words, depends_on_viewport_metrics);" },
     { "event": "SetTreeScopeRoot", "ffi": "style_engine_set_tree_scope_root", "cpp": "set_tree_scope_root", "return": "void", "args": [["tree_scope", "tree_scope_id"], ["root", "style_node"]], "body": "let Some(root) = StyleNodeID::from_raw(root) else { return; }; engine.set_tree_scope_root(TreeScopeID(tree_scope), root);" },
     { "event": "SetRuleInALayer", "name": "set_rule_in_a_layer", "return": "void", "args": [["rule", "style_rule_id"]], "body": "if rule == 0 { return; } engine.set_rule_in_a_layer(RuleID(rule - 1));" },
     { "event": "SetRuleConditionsHold", "name": "set_rule_conditions_hold", "return": "void", "args": [["rule", "style_rule_id"], ["conditions_hold", "bool"]], "body": "if rule == 0 { return; } engine.set_rule_conditions_hold(RuleID(rule - 1), conditions_hold);" },

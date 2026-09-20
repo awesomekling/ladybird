@@ -2671,6 +2671,67 @@ pub struct FfiLonghandFinalizationResult {
     pub invalidated_longhands: u16,
 }
 
+/// The three length-resolution contexts a keyframe value is computed in.
+///
+/// The host builds them in `compute_animation_values` out of the working set, with
+/// `get_computation_context_for_property(FontFamily / LineHeight / Color)`. Everything they need
+/// the longhand drive already has, so the drive keeps them instead of the host building them
+/// again - but they must carry what the *host* would read rather than what the drive happens to
+/// hold: the root font metrics are the published member the host keeps, not the root element's
+/// committed style, and the viewport dependence is the drive's accumulated flag rather than the
+/// font phase's.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct FfiAnimationLengthContexts {
+    pub font: FfiLengthResolutionContext,
+    pub line_height: FfiLengthResolutionContext,
+    pub remaining: FfiLengthResolutionContext,
+}
+
+impl FfiAnimationLengthContexts {
+    /// Put the kept contexts in the state the host's animation path would have built them in: the
+    /// root font metrics are the row the host published rather than the root element's committed
+    /// style, the viewport dependence is the one the whole drive accumulated rather than the font
+    /// phase's, and the container bases are dropped - the drive derived them from the element's own
+    /// unit mask, while the host derives the animation ones from the animation batch's.
+    fn settle(
+        &mut self,
+        root_font_metrics: crate::css::style::animations::RootElementFontMetrics,
+        is_html_html_element: bool,
+        font_metrics_depend_on_viewport_metrics: bool,
+    ) {
+        let published = FfiFontMetrics {
+            font_size: root_font_metrics.font_size,
+            x_height: root_font_metrics.x_height,
+            cap_height: root_font_metrics.cap_height,
+            zero_advance: root_font_metrics.zero_advance,
+            line_height: root_font_metrics.line_height,
+        };
+        for context in [&mut self.font, &mut self.line_height, &mut self.remaining] {
+            context.has_container_width_basis = false;
+            context.has_container_height_basis = false;
+            context.container_width_basis = 0.0;
+            context.container_height_basis = 0.0;
+            context.container_width_basis_depends_on_viewport_metrics = false;
+            context.container_height_basis_depends_on_viewport_metrics = false;
+            context.resolved_viewport_relative_length = std::ptr::null_mut();
+        }
+        // The font context is `Length::ResolutionContext::for_element()` on both sides, root
+        // metrics included; only the other two take the host's member.
+        for context in [&mut self.line_height, &mut self.remaining] {
+            context.font_metrics_depend_on_viewport_metrics = font_metrics_depend_on_viewport_metrics;
+            context.root_font_metrics = published;
+            context.root_font_metrics_depend_on_viewport_metrics = root_font_metrics.depends_on_viewport_metrics;
+        }
+        // The root element resolves its own `rem` against the font it is computing.
+        if is_html_html_element {
+            self.line_height.root_font_metrics = self.line_height.font_metrics;
+            self.line_height.root_font_metrics_depend_on_viewport_metrics = font_metrics_depend_on_viewport_metrics;
+            self.remaining.root_font_metrics_depend_on_viewport_metrics = font_metrics_depend_on_viewport_metrics;
+        }
+    }
+}
+
 struct LonghandTransactionContinuation {
     drive_result: FfiLonghandDriveResult,
     finalization_line_height_metrics: FfiInputLineHeightMetrics,
@@ -2679,6 +2740,8 @@ struct LonghandTransactionContinuation {
     animated_overlay: *mut AnimatedOverlay,
     animation_values_applied: bool,
     parent_text_align_input_is_animated: bool,
+    // The length-resolution contexts the animation tail needs, kept where the drive built them.
+    animation_length_contexts: FfiAnimationLengthContexts,
 }
 
 #[repr(C)]
@@ -2773,8 +2836,14 @@ pub struct FfiComputePropertiesInput {
     /// give, and a negative value where it could not and the host has to walk the ancestors
     /// itself. The last argument reports whether anything was sampled; where nothing was, the
     /// overlay and the line height metrics the computation already holds stand.
-    pub apply_animations:
-        unsafe extern "C" fn(*mut c_void, i8, bool, *mut FfiInputLineHeightMetrics, *mut bool) -> *mut AnimatedOverlay,
+    pub apply_animations: unsafe extern "C" fn(
+        *mut c_void,
+        i8,
+        bool,
+        *mut FfiInputLineHeightMetrics,
+        *const FfiAnimationLengthContexts,
+        *mut bool,
+    ) -> *mut AnimatedOverlay,
 }
 
 /// Document-level inputs to used color-scheme resolution. Scheme values use
@@ -4709,7 +4778,11 @@ unsafe fn compute_longhands(
     input: &FfiLonghandTransactionInput,
     parent_snapshot: Option<&ParentSnapshot<'_>>,
     highlight: Option<&HighlightInheritance<'_>>,
-) -> (FfiLonghandDriveResult, FfiInputLineHeightMetrics) {
+) -> (
+    FfiLonghandDriveResult,
+    FfiInputLineHeightMetrics,
+    FfiAnimationLengthContexts,
+) {
     let mut driver_results = empty_longhand_driver_results();
     let driver_results_pointer = &raw mut driver_results;
     let mut effective_color_scheme = -1;
@@ -4900,6 +4973,15 @@ unsafe fn compute_longhands(
             },
         },
         input_line_height_metrics,
+        // NB: Additive, and the only thing below this line: the three contexts as the drive built
+        //     them. What the animation tail still has to put right - the host's root font metrics,
+        //     the document element's special case and the accumulated viewport dependence - is done
+        //     by the caller, which is where the element's published facts are in hand.
+        FfiAnimationLengthContexts {
+            font: input.font_length_resolution_context,
+            line_height: line_height_context,
+            remaining: remaining_length_context,
+        },
     )
 }
 
@@ -5431,8 +5513,9 @@ pub unsafe extern "C" fn rust_compute_properties(
         snapshot.has_animated_property(property_id::TEXT_ALIGN)
             || snapshot.has_animated_property(property_id::DIRECTION)
     });
-    let (mut result, finalization_line_height_metrics) =
+    let (mut result, finalization_line_height_metrics, animation_length_contexts) =
         unsafe { compute_longhands(drive_input, parent_snapshot.as_ref(), highlight.as_ref()) };
+
     if !input.stop_after_longhand_drive {
         result.transitions = build_computed_transition_list(unsafe { &*drive_input.longhand_table });
         // The sticky flag is the host's own precondition for holding any CSS animation, so an
@@ -5479,6 +5562,7 @@ pub unsafe extern "C" fn rust_compute_properties(
         animated_overlay,
         animation_values_applied,
         parent_text_align_input_is_animated,
+        animation_length_contexts,
     });
     let drive_result = &raw const continuation.drive_result;
     let storage = Box::into_raw(continuation);
@@ -5510,7 +5594,21 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         mut animated_overlay,
         mut animation_values_applied,
         parent_text_align_input_is_animated,
+        mut animation_length_contexts,
     } = *continuation;
+    // NB: The root element's own computation refreshes the host's root font metrics in the callback
+    //     that applies the drive result, which runs between the drive and this tail - so the
+    //     contexts take the published row here, where the host would read its member, and not where
+    //     the drive built them.
+    animation_length_contexts.settle(
+        style_engine.root_element_font_metrics(),
+        crate::css::style::tree::StyleNodeID::from_raw(input.style_node).is_some_and(|node| {
+            style_engine.element_construction_facts(node)
+                & crate::css::style::bridge::element_construction_fact::IS_HTML_HTML_ELEMENT
+                != 0
+        }),
+        drive_result.driver_results.font_metrics_depend_on_viewport_metrics,
+    );
     unsafe { destroy_style_computation_result(&drive_result) };
     if input.stop_after_longhand_drive {
         unsafe { &mut *drive_input.longhand_table }.freeze();
@@ -5600,6 +5698,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
                 in_display_none_subtree,
                 (&*drive_input.environment).box_type_input.check_input_line_height,
                 &raw mut finalization_line_height_metrics,
+                &raw const animation_length_contexts,
                 &raw mut animation_stage_sampled,
             )
         };

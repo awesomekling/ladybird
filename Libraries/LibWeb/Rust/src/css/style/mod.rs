@@ -887,6 +887,8 @@ pub struct RetainedState {
     /// The current time each of the document's animation timelines was sampled at when the style
     /// update began.
     animation_timeline_samples: animations::AnimationTimelineSamples,
+    /// The font metrics a `rem` resolves against, as the host last left them.
+    root_element_font_metrics: animations::RootElementFontMetrics,
     /// The `@keyframes` each of the document's style scopes defines, as the host's rule caches
     /// resolved them when the style update began.
     animation_keyframes: animations::AnimationKeyframes,
