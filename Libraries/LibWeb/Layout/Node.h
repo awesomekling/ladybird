@@ -213,7 +213,9 @@ public:
     // offset without asking the DOM where it is stored. Published from the same places, plus the
     // viewport's box, whose offset the navigable stores.
     void publish_scroll_offset();
+    void publish_own_scroll_offset();
     void verify_published_scroll_offset() const;
+    void verify_own_published_scroll_offset() const;
     [[nodiscard]] CSSPixelPoint dom_target_scroll_offset() const;
 
     // The unique node id of what this box is the box of: an element, the element a pseudo-element
@@ -228,7 +230,14 @@ public:
     // the answer rather than asking: published when a row is built, and again for both sides of a
     // change of the document's focused area.
     void publish_is_in_focused_text_control();
+    void publish_own_is_in_focused_text_control();
     [[nodiscard]] bool dom_target_is_in_focused_text_control() const;
+
+    // A rebuild can leave an old row and its replacement both built for one node, and the document
+    // hands out only the replacement. The old row is still read as that node's box until the commit
+    // that retires it, so a fact published about the node reaches every row built for it, each row
+    // answering for itself: what a row holds depends on whether it is the one the node is bound to.
+    void publish_to_every_row_built_for_dom_node(void (Node::*publish)());
 
     // Any invalidation below a node must reach every ancestor's epoch: cached runs capture
     // subtree structure, and unlike intrinsic-size invalidation there is no absolutely-positioned

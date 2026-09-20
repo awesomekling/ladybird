@@ -2662,19 +2662,26 @@ impl LayoutNodeArena {
         bound_link.set(added_row);
     }
 
-    pub(crate) fn rows_sharing_dom_node_with(&self, id: NodeSlotId) -> Vec<NodeSlotId> {
+    /// Visits `id` and every other row built for the same DOM node. A row that shares its node
+    /// with none, which is nearly all of them, costs one link read.
+    pub(crate) fn for_each_row_built_for_same_node(&self, id: NodeSlotId, mut visit: impl FnMut(NodeSlotId)) {
+        visit(id);
         let Some(link) = self.next_rows_built_for_same_node.get(id.slot_index() as usize) else {
-            return vec![id];
+            return;
         };
         let mut row = link.get();
         if row.is_invalid() {
-            return vec![id];
+            return;
         }
-        let mut rows = vec![id];
         while row != id {
-            rows.push(row);
+            visit(row);
             row = self.next_rows_built_for_same_node[row.slot_index() as usize].get();
         }
+    }
+
+    pub(crate) fn rows_sharing_dom_node_with(&self, id: NodeSlotId) -> Vec<NodeSlotId> {
+        let mut rows = Vec::new();
+        self.for_each_row_built_for_same_node(id, |row| rows.push(row));
         rows
     }
 
@@ -4727,6 +4734,34 @@ pub unsafe extern "C" fn layout_arena_unbind_row(arena: *mut c_void, id: NodeSlo
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
     unsafe { &*arena.cast::<LayoutNodeArena>() }.unbind_row(id);
+}
+
+/// Visits the live shell of every row built for the same DOM node as `id`, that row included.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread; `visit`
+/// is called synchronously with `context`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_for_each_row_built_for_same_node(
+    arena: *mut c_void,
+    id: NodeSlotId,
+    context: *mut c_void,
+    visit: unsafe extern "C" fn(*mut c_void, *mut c_void),
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on
+    // the document thread.
+    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    // The ring is a column of links rather than a borrow, so the host may re-enter the arena
+    // from `visit`. What it must not do is change which rows are built for the node.
+    arena.for_each_row_built_for_same_node(id, |row| {
+        let shell = arena.shell_if_live(row);
+        if !shell.is_null() {
+            // SAFETY: The host answers synchronously and does not free the shell.
+            unsafe { visit(context, shell) };
+        }
+    });
 }
 
 #[unsafe(no_mangle)]
