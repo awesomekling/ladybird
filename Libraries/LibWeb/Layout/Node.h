@@ -412,6 +412,9 @@ class WEB_API NodeWithStyle : public Node {
 public:
     NodeWithStyle(DOM::Document&, GC::Ptr<DOM::Node>, CSS::LayoutStyle, RustFFI::NodeKind = RustFFI::NodeKind::NodeWithStyle);
     NodeWithStyle(DOM::Document&, BindToPreparedArenaSlot, Compositing::RustFFI::NodeSlotId, RustFFI::NodeKind);
+    // A row the build prepared whose style the shell is what asks for, rather than the style
+    // mirror holding it under an identity the row names.
+    NodeWithStyle(DOM::Document&, BindToPreparedArenaSlot, Compositing::RustFFI::NodeSlotId, RustFFI::NodeKind, CSS::LayoutStyle);
 
     virtual ~NodeWithStyle() override;
 
@@ -718,6 +721,7 @@ private:
     virtual bool is_node_with_style() const final { return true; }
 
     void initialize_from_style_record();
+    void adopt_style(DOM::Document&, GC::Ptr<DOM::Node>, CSS::LayoutStyle);
     void publish_style_record_to_node_data();
     void did_update_style_record();
 

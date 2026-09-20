@@ -50,6 +50,7 @@ public:
 
     Box(DOM::Document&, GC::Ptr<DOM::Node>, CSS::LayoutStyle, RustFFI::NodeKind = RustFFI::NodeKind::Box);
     Box(DOM::Document&, BindToPreparedArenaSlot, Compositing::RustFFI::NodeSlotId, RustFFI::NodeKind);
+    Box(DOM::Document&, BindToPreparedArenaSlot, Compositing::RustFFI::NodeSlotId, RustFFI::NodeKind, CSS::LayoutStyle);
 
 private:
     CSS::SizeWithAspectRatio compute_auto_content_box_size() const;

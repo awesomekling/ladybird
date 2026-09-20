@@ -775,10 +775,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
                 break;
             }
             return Node::slot_id(layout_node); },
-        .create_principal_document_layout = [](void*, void* document_pointer) -> Compositing::RustFFI::NodeSlotId {
-            VERIFY(document_pointer);
-            auto& document = *static_cast<DOM::Document*>(document_pointer);
-            return Node::slot_id(&allocate_layout_node<Layout::Viewport>(document, document.style_computer().create_document_style())); },
         .attach_style_resources = [](void* builder_pointer, Compositing::RustFFI::NodeSlotId slot) {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);

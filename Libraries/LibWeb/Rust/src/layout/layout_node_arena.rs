@@ -2275,8 +2275,9 @@ impl LayoutNodeArena {
     /// Stamp a row the build allocated for a DOM node, before any shell exists for it. What
     /// `bind_shell` reads off the caller's construction facts is read here from the style mirror
     /// under the node's identity instead; the shell answers for the paint facts once it is
-    /// materialised, since those are not published.
-    pub(crate) fn stamp_dom_row(&self, slot: NodeSlotId, kind: NodeKind, style_node: StyleNodeID) {
+    /// materialised, since those are not published. The document names no identity of its own,
+    /// and its row is recognised by its kind.
+    pub(crate) fn stamp_dom_row(&self, slot: NodeSlotId, kind: NodeKind, style_node: Option<StyleNodeID>) {
         self.assert_owner_thread();
         let data = self.data(slot);
         assert_eq!(
@@ -2291,11 +2292,11 @@ impl LayoutNodeArena {
                 shell: std::ptr::null_mut(),
                 is_anonymous: false,
                 dom_paint_facts: 0,
-                style_node: style_node.raw(),
+                style_node: style_node.map_or(0, StyleNodeID::raw),
             },
-            self.element_construction_facts(Some(style_node)),
+            self.element_construction_facts(style_node),
         ));
-        self.set_node_style_node(slot, Some(style_node));
+        self.set_node_style_node(slot, style_node);
         self.enroll_node_for_replaced_content_facts_sync_if_eligible(slot);
     }
 
