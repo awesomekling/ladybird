@@ -6044,6 +6044,7 @@ void Element::set_scroll_offset(Optional<CSS::PseudoElement> pseudo_element_type
         ensure_element_rare_data().scroll_offset = offset;
     else if (auto* rare_data = element_rare_data())
         rare_data->scroll_offset = {};
+    Layout::publish_element_scroll_offset(*this);
     if (auto* layout_node = unsafe_layout_node())
         layout_node->publish_scroll_offset();
 }

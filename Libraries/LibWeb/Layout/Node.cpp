@@ -102,6 +102,26 @@ void publish_dom_paint_facts(DOM::Node const& dom_node)
     document.invalidation_journal().note_dom_paint_facts(DOM::NodeIdentity::of(dom_node), facts);
 }
 
+// What a row built for the element is scrolled to. The element's box is replaced whenever its
+// subtree is rebuilt, so the offset is held against the identity that outlives it and a row the
+// build stamps reads it there, the way a pseudo-element's box already does. The rows the element
+// already has are published to separately, by the caller that has one in hand.
+void publish_element_scroll_offset(DOM::Element const& element)
+{
+    auto& document = const_cast<DOM::Document&>(element.document());
+    auto offset = element.scroll_offset({});
+    auto* arena = document.layout_node_arena_if_created();
+    if (!arena) {
+        // Nothing has scrolled anything before a layout tree exists, so there is no offset to
+        // forget, as for a pseudo-element's.
+        if (offset.is_zero())
+            return;
+        arena = &document.layout_node_arena();
+    }
+    if (element.style_node_id().value() != 0)
+        RustFFI::layout_arena_set_element_scroll_offset(arena->handle(), element.style_node_id().value(), offset);
+}
+
 Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind kind, AttachToDOMNode attach_to_dom_node)
     : m_arena(document.layout_node_arena())
     , m_slot(m_arena->allocate(build_node_construction_facts(node, kind, this)))
@@ -151,8 +171,6 @@ Node::Node(DOM::Document& document, BindToPreparedArenaSlot, Compositing::RustFF
 {
     RustFFI::layout_arena_attach_shell(m_arena->handle(), m_slot, this);
     auto* node = dom_node();
-    if (node)
-        publish_own_scroll_offset();
     if (has_flag(RustFFI::NodeFlag::IsInUserAgentShadowTree))
         publish_own_is_in_focused_text_control();
     if (node) {
@@ -941,6 +959,10 @@ void Node::dom_node_style_node_changed(DOM::Node& dom_node, CSS::StyleNodeID old
             // What the node's pseudo-elements have scrolled to is keyed by the same pair, and
             // takes the node's new identity along with their bindings.
             RustFFI::layout_arena_move_pseudo_element_scroll_offsets(arena->handle(), old_style_node.value(), new_style_node.value());
+            // So does what the element itself has scrolled to, which is keyed by the identity
+            // alone; the element still holds the offset, so it is simply republished.
+            if (auto* element = as_if<DOM::Element>(dom_node))
+                publish_element_scroll_offset(*element);
         }
         // A retired identity may be reused, so it leaves every row carrying it, including rows of a
         // removed subtree that outlive the disconnection.
