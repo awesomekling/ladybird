@@ -16,15 +16,32 @@ pub(crate) fn empty_line_is_anchored_to_its_forced_break(arena: &LayoutNodeArena
     arena.node_kind_if_live(item.caret_node) == Some(crate::layout::node_data::NodeKind::BreakNode)
 }
 
+/// The DOM node a row stands for, named the way the host names one: by the style node, or by 0
+/// for a row that stands for no node of its own. An anonymous row stands for none, and so does
+/// the viewport row, whose node is the document and which the style mirror holds no identity for.
+pub(crate) fn row_dom_style_node(arena: &LayoutNodeArena, slot: NodeSlotId) -> u32 {
+    if !arena.node_is_dom_backed(slot) {
+        return 0;
+    }
+    if arena.node_kind_if_live(slot) == Some(crate::layout::node_data::NodeKind::Viewport) {
+        return 0;
+    }
+    arena.node_style_node(slot).map_or(0, |style_node| style_node.raw())
+}
+
 impl HitTestList {
-    pub(crate) fn item_target_shell(&self, arena: &LayoutNodeArena, item_index: usize) -> *mut c_void {
+    pub(crate) fn item_target_slot(&self, arena: &LayoutNodeArena, item_index: usize) -> Option<NodeSlotId> {
         let item = &self.items[item_index];
-        let slot = match item.kind {
+        match item.kind {
             HitTestItemKind::TextFragment => fragment_layout_node_slot(arena, item),
             HitTestItemKind::EmptyLine => Some(item.caret_node),
             _ => Some(item.paintable),
-        };
-        slot.map_or(std::ptr::null_mut(), |slot| arena.shell_if_live(slot))
+        }
+    }
+
+    pub(crate) fn item_target_shell(&self, arena: &LayoutNodeArena, item_index: usize) -> *mut c_void {
+        self.item_target_slot(arena, item_index)
+            .map_or(std::ptr::null_mut(), |slot| arena.shell_if_live(slot))
     }
 
     pub(crate) fn item_dispatch_shell(&self, arena: &LayoutNodeArena, item_index: usize) -> (*mut c_void, bool) {
