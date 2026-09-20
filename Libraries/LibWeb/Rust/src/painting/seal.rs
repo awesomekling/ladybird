@@ -42,10 +42,9 @@
 //! **A nested vector image, recorded beside the publish that asked for it.**
 //! `resolve_vector_image_display_list` lays out and records an SVG-as-image document, which is a
 //! paint stage of that document rather than of this one, so
-//! [`crate::painting::record::publish::publish_recording`] ends the publish around it. It is the
-//! one entry on this list that still reads this document - to find the image the placeholder
-//! names - and pre-recording the nested list when the image's decoded data changes is what would
-//! end that.
+//! [`crate::painting::record::publish::publish_recording`] ends the publish around it. The
+//! request names the image and the scheme it renders with, both of them published by the
+//! recording, so resolving it reads nothing of this document.
 //!
 //! **Result sinks of C++ to Rust queries.** A query that answers through a callback appending to
 //! a caller-owned collection runs with no pass in progress at all, so the predicate excludes

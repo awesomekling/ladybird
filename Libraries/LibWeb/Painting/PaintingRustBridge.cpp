@@ -172,19 +172,6 @@ static bool rust_painting_timing_enabled()
     return enabled;
 }
 
-static Layout::NodeWithStyle::ImageObserver const* layer_image_observer(Layout::NodeWithStyle const& layout_node, Layout::RustFFI::FfiLayerImageList list, u32 computed_index)
-{
-    switch (list) {
-    case Layout::RustFFI::FfiLayerImageList::Background:
-        return layout_node.background_image_observer(computed_index);
-    case Layout::RustFFI::FfiLayerImageList::Mask:
-        return layout_node.mask_image_observer(computed_index);
-    case Layout::RustFFI::FfiLayerImageList::BorderImageSource:
-        return layout_node.border_image_source_observer();
-    }
-    VERIFY_NOT_REACHED();
-}
-
 static Layout::RustFFI::FfiRootBackgroundSource rust_root_background_source(DOM::Document const& document)
 {
     Layout::RustFFI::FfiRootBackgroundSource source {};
@@ -299,19 +286,11 @@ Layout::RustFFI::FfiRenderingPreparationOutcome rust_prepare_for_rendering(DOM::
         layout_arena_handle(document), rust_root_background_source(document), visual_context_update_pending);
 }
 
-static CSS::PreferredColorScheme image_color_scheme(Layout::NodeWithStyle const& layout_node)
+// Whether a `color-scheme` declaration names a scheme an SVG used as an image can answer
+// `prefers-color-scheme` with.
+static bool declares_light_or_dark_color_scheme(ReadonlySpan<Utf16FlyString> schemes)
 {
-    auto supports_color_scheme = [](ReadonlySpan<Utf16FlyString> schemes) {
-        return schemes.contains_slow("light"_utf16) || schemes.contains_slow("dark"_utf16);
-    };
-    if (supports_color_scheme(layout_node.color_schemes()))
-        return layout_node.color_scheme();
-    auto& document = layout_node.document();
-    if (auto schemes = document.supported_color_schemes(); schemes.has_value() && supports_color_scheme(*schemes))
-        return layout_node.color_scheme();
-    // INTEROP: Like Firefox, images use the preferred scheme when neither the element nor
-    //          its document opts into a supported scheme. Controls still default to light.
-    return document.svg_image_color_scheme().value_or(document.page().preferred_color_scheme());
+    return schemes.contains_slow("light"_utf16) || schemes.contains_slow("dark"_utf16);
 }
 
 CSS::ColorResolutionContext gradient_stop_color_resolution_context(Layout::NodeWithStyle const& layout_node)
@@ -497,22 +476,12 @@ static Layout::RustFFI::FfiRecordingPublishCallbacks recording_publish_callbacks
             auto empty_display_list = [&] {
                 return context.resource_storage.add_display_list(Compositing::DisplayList::create(document.paint_state().visual_context_tree(document)), document.paint_state().visual_context_tree(document)).value();
             };
-            auto const* layout_node = static_cast<Layout::NodeWithStyle const*>(Layout::RustFFI::layout_arena_node_shell_if_live(layout_arena_handle(document), request->owner));
-            if (!layout_node)
-                return empty_display_list();
-            GC::Ptr<HTML::DecodedImageData> decoded_image_data;
-            if (request->is_replaced_content) {
-                if (layout_node->kind() == Layout::RustFFI::NodeKind::ImageBox)
-                    decoded_image_data = static_cast<Layout::Box const&>(*layout_node).image_provider().decoded_image_data();
-                else if (layout_node->kind() == Layout::RustFFI::NodeKind::SVGImageBox)
-                    decoded_image_data = as<SVG::SVGImageElement>(*layout_node->dom_node()).decoded_image_data();
-            } else if (auto const* observer = layer_image_observer(*layout_node, request->list, request->computed_index)) {
-                decoded_image_data = observer->decoded_image_data();
-            }
-            auto const* svg_image_data = as_if<SVG::SVGDecodedImageData>(decoded_image_data.ptr());
+            // The recording published the image and the scheme it renders with, so finding it is a
+            // lookup rather than a walk back to the element that references it.
+            auto const* svg_image_data = SVG::SVGDecodedImageData::with_vector_image_identity(request->image_identity);
             if (!svg_image_data)
                 return empty_display_list();
-            auto display_list = svg_image_data->record_display_list_at_scale({ request->css_width, request->css_height }, request->raster_scale, image_color_scheme(*layout_node), context.resource_storage);
+            auto display_list = svg_image_data->record_display_list_at_scale({ request->css_width, request->css_height }, request->raster_scale, static_cast<CSS::PreferredColorScheme>(request->color_scheme), context.resource_storage);
             if (!display_list.has_value())
                 return empty_display_list();
             return context.resource_storage.add_display_list(move(*display_list)).value();
@@ -646,6 +615,9 @@ RefPtr<Compositing::DisplayList> record_rust_display_list(DOM::Document& documen
         inputs.selection_background_light = CSS::SystemColor::transform_selection_background_color(inputs.window_is_focused ? CSS::SystemColor::highlight(CSS::PreferredColorScheme::Light) : CSS::SystemColor::inactive_highlight(CSS::PreferredColorScheme::Light));
         inputs.selection_background_dark = CSS::SystemColor::transform_selection_background_color(inputs.window_is_focused ? CSS::SystemColor::highlight(CSS::PreferredColorScheme::Dark) : CSS::SystemColor::inactive_highlight(CSS::PreferredColorScheme::Dark));
         inputs.document_has_supported_color_schemes = document.supported_color_schemes().has_value();
+        auto supported_color_schemes = document.supported_color_schemes();
+        inputs.document_declares_light_or_dark_color_scheme = supported_color_schemes.has_value() && declares_light_or_dark_color_scheme(*supported_color_schemes);
+        inputs.image_color_scheme_fallback = to_underlying(document.svg_image_color_scheme().value_or(document.page().preferred_color_scheme()));
     }
     inputs.caret = resolve_document_caret_paint(document);
     inputs.focused_text_control = resolve_focused_text_control_selection(document);

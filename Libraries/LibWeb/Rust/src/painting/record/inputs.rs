@@ -60,6 +60,11 @@ pub(crate) struct RecordingInputs<'a> {
     pub selection_background_dark: Color,
     pub palette_is_dark: bool,
     pub document_has_supported_color_schemes: bool,
+    // An SVG used as an image answers `prefers-color-scheme` with the referencing element's used
+    // `color-scheme`, but only when that element or the document opted into a scheme it can
+    // answer with. These are the document's half of that decision.
+    pub document_declares_light_or_dark_color_scheme: bool,
+    pub image_color_scheme_fallback: u8,
     pub inspector_highlight: Option<InspectorHighlight<'a>>,
     pub tooltip_color: Color,
     pub tooltip_text_color: Color,

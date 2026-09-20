@@ -406,7 +406,7 @@ pub(crate) fn paint_decoded_image_frame<O: Observer>(
 
 pub(crate) fn paint_image_content<O: Observer>(
     recorder: &mut PaintRecorder<'_, O>,
-    source: crate::painting::record::vector_images::VectorImageSource,
+    facts_owner: NodeSlotId,
     content: &crate::painting::image_content::ImageContent,
     dest_rect: FloatRect,
     image_rendering: u8,
@@ -424,14 +424,20 @@ pub(crate) fn paint_image_content<O: Observer>(
             ForceDarkRole::Background,
         ),
         ImageContent::Vector {
-            has_active_view_box, ..
-        } => recorder.paint_vector_image(
-            source,
-            *has_active_view_box,
-            dest_rect,
-            accumulated_scale,
-            compositing_and_blending_operator,
-        ),
+            image_identity,
+            has_active_view_box,
+            ..
+        } => {
+            let color_scheme = recorder.image_color_scheme(facts_owner);
+            recorder.paint_vector_image(
+                *image_identity,
+                color_scheme,
+                *has_active_view_box,
+                dest_rect,
+                accumulated_scale,
+                compositing_and_blending_operator,
+            );
+        }
         ImageContent::None | ImageContent::Raster(None) => {}
     }
 }
@@ -449,11 +455,7 @@ fn paint_image_layer<O: Observer>(
 ) {
     let converter = recorder.converter;
     let image = layer.image.expect("an imageless layer never reaches the image paint");
-    let vector_image_source = crate::painting::record::vector_images::VectorImageSource::Layer {
-        owner: image.facts_owner,
-        list: image.list,
-        computed_index: image.computed_index,
-    };
+    let facts_owner = image.facts_owner;
     let facts =
         crate::painting::record::paint::background_resolution::committed_layer_image_paint_facts(recorder, &image);
     let mut image_rect = layer.image_rect;
@@ -667,7 +669,7 @@ fn paint_image_layer<O: Observer>(
         if dest_rect.height == 0 {
             dest_rect.height = 1;
         }
-        if let crate::painting::image_content::ImageContent::Vector { .. } = &facts.content {
+        if let crate::painting::image_content::ImageContent::Vector { image_identity, .. } = &facts.content {
             if clip_rect.is_empty() {
                 return;
             }
@@ -676,9 +678,11 @@ fn paint_image_layer<O: Observer>(
                 (dest_rect.width, dest_rect.height),
                 (dest_rect.width, dest_rect.height),
             );
+            let color_scheme = recorder.image_color_scheme(facts_owner);
             let display_list_id = recorder.resources.vector_image_placeholder(
                 crate::painting::record::vector_images::VectorImageRenderRequest::new(
-                    vector_image_source,
+                    *image_identity,
+                    color_scheme,
                     CssPixels::from_integer(i64::from(dest_rect.width)),
                     CssPixels::from_integer(i64::from(dest_rect.height)),
                     1.0,
@@ -851,7 +855,7 @@ fn paint_image_layer<O: Observer>(
                 recorder.accumulated_2d_scale_at(recorder.recorder.accumulated_visual_context().spatial);
             paint_image_content(
                 recorder,
-                vector_image_source,
+                facts_owner,
                 &facts.content,
                 dest_rect,
                 image_rendering,

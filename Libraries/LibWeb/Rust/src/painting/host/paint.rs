@@ -42,6 +42,8 @@ pub struct FfiRecordingInputs {
     pub selection_background_dark: Color,
     pub palette_is_dark: bool,
     pub document_has_supported_color_schemes: bool,
+    pub document_declares_light_or_dark_color_scheme: bool,
+    pub image_color_scheme_fallback: u8,
     pub has_inspector_highlight: bool,
     pub inspector_highlight_paintable: crate::layout::node_data::NodeSlotId,
     pub tooltip_color: Color,
@@ -141,6 +143,8 @@ impl FfiRecordingInputs {
             selection_background_dark: self.selection_background_dark,
             palette_is_dark: self.palette_is_dark,
             document_has_supported_color_schemes: self.document_has_supported_color_schemes,
+            document_declares_light_or_dark_color_scheme: self.document_declares_light_or_dark_color_scheme,
+            image_color_scheme_fallback: self.image_color_scheme_fallback,
             inspector_highlight: self.has_inspector_highlight.then(|| {
                 // SAFETY: The caller lends the label bytes and supplies live fonts for this overlay.
                 let (text, fonts) = unsafe {
@@ -317,6 +321,9 @@ pub struct FfiNaturalSize {
 pub struct FfiImageContent {
     pub kind: FfiImageContentKind,
     pub vector_content_identity: u64,
+    // Names the image itself rather than the content it currently holds, so the publish can find
+    // it again from what the recording published even after the content changed.
+    pub vector_image_identity: u64,
     pub vector_has_active_view_box: bool,
     pub frame: *const c_void,
 }
@@ -454,10 +461,8 @@ pub enum FfiLayerImageList {
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct FfiVectorImageRenderRequest {
-    pub owner: crate::layout::node_data::NodeSlotId,
-    pub is_replaced_content: bool,
-    pub list: FfiLayerImageList,
-    pub computed_index: u32,
+    pub image_identity: u64,
+    pub color_scheme: u8,
     pub css_width: crate::css::css_pixels::CssPixels,
     pub css_height: crate::css::css_pixels::CssPixels,
     pub raster_scale: f32,

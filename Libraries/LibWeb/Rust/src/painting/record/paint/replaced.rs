@@ -264,7 +264,7 @@ pub(crate) fn paint_replaced_image_content<O: Observer>(
     let accumulated_scale = recorder.accumulated_2d_scale_at(recorder.recorder.accumulated_visual_context().spatial);
     paint_image_content(
         recorder,
-        crate::painting::record::vector_images::VectorImageSource::ReplacedContent { owner: paintable },
+        paintable,
         content,
         dest_rect,
         image_rendering,
