@@ -1987,6 +1987,31 @@ impl RetainedState {
         None
     }
 
+    /// The display the box-type transformation reads for one computation target. A
+    /// pseudo-element inherits from its originating element; an element starts at its flat-tree
+    /// parent. The returned display is retained computed state, never a DOM projection.
+    pub fn box_type_parent_display_for_target(
+        &self,
+        node: StyleNodeID,
+        is_pseudo_element: bool,
+    ) -> Option<crate::css::display::FfiDisplay> {
+        let mut ancestor = is_pseudo_element
+            .then_some(node)
+            .or_else(|| self.tree.flat_tree_parent(node));
+        while let Some(current) = ancestor {
+            let record = self.computed_group_sets.assigned_style_record(current)?;
+            let view = self.computed_group_sets.style_record_view(record.raw())?;
+            let table = unsafe { view.longhand_table.as_ref() }?;
+            let display =
+                crate::css::style_compute::effective_display(table, unsafe { view.animated_overlay.as_ref() });
+            if !display.is_contents() {
+                return Some(display);
+            }
+            ancestor = self.tree.flat_tree_parent(current);
+        }
+        None
+    }
+
     /// Whether a winner state declares `inherit` for a non-inherited property, or carries a value
     /// the engine cannot see the spelling of.
     pub(super) fn node_explicitly_inherits_non_inherited_property(&self, node: StyleNodeID) -> bool {

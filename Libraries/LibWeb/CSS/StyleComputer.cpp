@@ -3527,28 +3527,36 @@ ComputationContext const& StyleComputer::get_computation_context_for_property(Pr
     }
 }
 
+enum class BoxTypeParentDisplaySource {
+    Host,
+    Retained,
+};
+
 static ComputedValuesFFI::FfiBoxTypeTransformationInput make_box_type_transformation_input(
-    DOM::AbstractElement abstract_element, Optional<Display> known_parent_display = {}, Optional<u32> published_adjustment_facts = {})
+    DOM::AbstractElement abstract_element, Optional<Display> known_parent_display = {}, Optional<u32> published_adjustment_facts = {}, BoxTypeParentDisplaySource parent_display_source = BoxTypeParentDisplaySource::Host)
 {
     auto& element = abstract_element.element();
 
-    // NOTE: If we're computing style for a pseudo-element, the effective parent will be the originating element itself, not its parent.
-    auto parent = abstract_element.element_to_inherit_style_from();
+    Optional<Display> parent_display = known_parent_display;
+    if (parent_display_source == BoxTypeParentDisplaySource::Host) {
+        // NOTE: If we're computing style for a pseudo-element, the effective parent will be the originating element itself, not its parent.
+        auto parent = abstract_element.element_to_inherit_style_from();
 
-    // Climb out of `display: contents` context.
-    Optional<Display> parent_display;
-    while (parent.has_value() && parent->has_style()) {
-        auto display = [&] {
-            if (known_parent_display.has_value())
-                return *known_parent_display;
-            return parent->computed_style()->display();
-        }();
-        known_parent_display.clear();
-        if (!display.is_contents()) {
-            parent_display = display;
-            break;
+        // Climb out of `display: contents` context.
+        parent_display.clear();
+        while (parent.has_value() && parent->has_style()) {
+            auto display = [&] {
+                if (known_parent_display.has_value())
+                    return *known_parent_display;
+                return parent->computed_style()->display();
+            }();
+            known_parent_display.clear();
+            if (!display.is_contents()) {
+                parent_display = display;
+                break;
+            }
+            parent = parent->element_to_inherit_style_from();
         }
-        parent = parent->element_to_inherit_style_from();
     }
 
     return ComputedValuesFFI::rust_box_type_transformation_input(
@@ -3558,6 +3566,35 @@ static ComputedValuesFFI::FfiBoxTypeTransformationInput make_box_type_transforma
             : ComputedValuesFFI::FfiStyleAdjustmentTarget::Element,
         parent_display.has_value(),
         parent_display.has_value() ? to_ffi_display(*parent_display) : ComputedValuesFFI::FfiDisplay {});
+}
+
+struct RetainedBoxTypeParentDisplay {
+    bool available { false };
+    Optional<Display> display;
+};
+
+static RetainedBoxTypeParentDisplay retained_box_type_parent_display(StyleEngine const& style_engine, DOM::AbstractElement abstract_element)
+{
+    auto encoded = style_engine.box_type_parent_display(
+        abstract_element.element().style_node_id(), abstract_element.pseudo_element().has_value());
+    if (!(encoded >> 63))
+        return {};
+    if (!((encoded >> 32) & 1))
+        return { true, {} };
+    auto raw = static_cast<u32>(encoded);
+    auto tag = static_cast<Display::Type>(raw & 0xff);
+    auto first = static_cast<u8>(raw >> 8);
+    auto second = static_cast<u8>(raw >> 16);
+    auto third = static_cast<u8>(raw >> 24);
+    switch (tag) {
+    case Display::Type::OutsideAndInside:
+        return { true, Display { static_cast<DisplayOutside>(first), static_cast<DisplayInside>(second), third ? Display::ListItem::Yes : Display::ListItem::No } };
+    case Display::Type::Internal:
+        return { true, Display { static_cast<DisplayInternal>(first) } };
+    case Display::Type::Box:
+        return { true, Display { static_cast<DisplayBox>(first) } };
+    }
+    VERIFY_NOT_REACHED();
 }
 
 static ComputedValuesFFI::FfiInputLineHeightMetrics input_line_height_metrics(ComputedStyleWorkingSet const& style, DOM::AbstractElement abstract_element, bool should_measure)
@@ -5771,7 +5808,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         Optional<u32> published_adjustment_facts;
         if (published_adjustment_fact_row >> 32)
             published_adjustment_facts = static_cast<u32>(published_adjustment_fact_row);
-        state.box_type_input = make_box_type_transformation_input(abstract_element, {}, published_adjustment_facts);
+        auto retained_parent_display = retained_box_type_parent_display(style_computer.style_engine(), abstract_element);
+        state.box_type_input = make_box_type_transformation_input(
+            abstract_element, retained_parent_display.display, published_adjustment_facts,
+            retained_parent_display.available ? BoxTypeParentDisplaySource::Retained : BoxTypeParentDisplaySource::Host);
         if (computation_requirements->uses_tree_counting_function) {
             auto tree_counting_inputs = style_computer.style_engine().element_tree_counting_inputs(abstract_element.element().style_node_id());
             if (tree_counting_inputs != 0) {
