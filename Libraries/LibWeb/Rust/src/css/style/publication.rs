@@ -70,7 +70,7 @@ impl RetainedState {
         pseudo_kind: u8,
     ) -> Option<computed::FinalStyleRecordID> {
         let parent = if pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT {
-            self.tree.flat_tree_parent(node)?
+            self.tree.inheritance_parent(node)?
         } else if (bridge::FIRST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND
             ..=bridge::LAST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND)
             .contains(&pseudo_kind)
@@ -4459,11 +4459,20 @@ mod tests {
     #[test]
     fn retained_inheritance_parent_uses_tree_and_element_backed_pseudo_records() {
         let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
-        let mut raw_nodes = [0; 6];
+        let mut raw_nodes = [0; 8];
         engine.allocate_style_nodes(&mut raw_nodes);
-        let [parent, child, host, shadow_root, wrapper, represented] =
-            raw_nodes.map(|node| StyleNodeID::from_raw(node).unwrap());
+        let [
+            parent,
+            child,
+            host,
+            light_child,
+            shadow_root,
+            wrapper,
+            represented,
+            slot,
+        ] = raw_nodes.map(|node| StyleNodeID::from_raw(node).unwrap());
         engine.tree.set_parent(child, Some(parent));
+        engine.tree.set_parent(light_child, Some(host));
         engine.tree.set_parent(wrapper, Some(shadow_root));
         engine.tree.set_parent(represented, Some(wrapper));
         engine
@@ -4495,8 +4504,9 @@ mod tests {
         };
         let parent_record = publish(&mut engine, parent);
         let child_record = publish(&mut engine, child);
-        publish(&mut engine, host);
+        let host_record = publish(&mut engine, host);
         let wrapper_record = publish(&mut engine, wrapper);
+        let slot_record = publish(&mut engine, slot);
 
         assert_eq!(
             engine.retained_inheritance_parent_style_record(child, u8::MAX),
@@ -4509,6 +4519,19 @@ mod tests {
         assert_eq!(
             engine.retained_inheritance_parent_style_record(host, bridge::FIRST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND,),
             Some(wrapper_record)
+        );
+        assert_eq!(engine.tree.flat_tree_parent(light_child), None);
+        assert_eq!(
+            engine.retained_inheritance_parent_style_record(light_child, u8::MAX),
+            Some(host_record)
+        );
+        let retained = &mut engine.state.retained;
+        retained
+            .tree
+            .set_assigned_slot(light_child, Some(slot), &mut retained.memory);
+        assert_eq!(
+            engine.retained_inheritance_parent_style_record(light_child, u8::MAX),
+            Some(slot_record)
         );
     }
 
