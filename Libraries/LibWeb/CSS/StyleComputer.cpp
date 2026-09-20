@@ -5613,12 +5613,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         AbstractOrHypotheticalElement resolution_element;
         SubstitutionData substitution_data;
         ComputedValuesFFI::FfiCascadeResolutionContext resolution_context {};
-        ComputedValuesFFI::FfiLengthResolutionContext style_query_length_resolution_context {};
         void* style_query_dependencies { ComputedValuesFFI::rust_style_query_dependencies_create() };
         FlatPtr document_identity;
         size_t registration_generation;
         Optional<PreferredColorScheme> color_scheme;
-        bool root_font_metrics_prepared { false };
 
         CustomPropertyResolutionState(NonnullRefPtr<CustomPropertyData const> data, RefPtr<CustomPropertyData const> parent_data, DOM::AbstractElement element, FlatPtr document_identity, size_t registration_generation)
             : data(move(data))
@@ -5635,7 +5633,6 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             ComputedValuesFFI::rust_style_query_dependencies_destroy(style_query_dependencies);
         }
     };
-    using PreparePhaseContext = void (*)(void*, u8, ComputedValuesFFI::FfiLonghandPhaseContext*);
     struct NativeLonghandState {
         AK_ALLOC_WITH_KMALLOC;
 
@@ -5682,56 +5679,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         bool* computation_reads_unkeyed_context;
         bool* computation_reads_resource_context;
         u8* substitution_usage;
-        PreparePhaseContext prepare_phase_context;
         OwnPtr<NativeLonghandState> state;
-    };
-    auto prepare_phase_context = [](void* context_pointer, u8 phase, ComputedValuesFFI::FfiLonghandPhaseContext* output) {
-        auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
-        auto& style_computer = *context.style_computer;
-        auto& state = *context.state;
-        auto& computed_style = *state.working_set;
-        auto context_property = phase == ComputedValuesFFI::LONGHAND_PHASE_CONTEXT_AFTER_FONT ? PropertyID::LineHeight : PropertyID::Color;
-        auto const& computation_context = context.abstract_element.document().style_computer().get_computation_context_for_property(context_property, computed_style, context.abstract_element);
-        if (state.custom_property_resolution) {
-            state.custom_property_resolution->style_query_length_resolution_context = to_ffi_length_resolution_context(computation_context.length_resolution_context);
-            state.custom_property_resolution->resolution_context.style_query_length_resolution_context = &state.custom_property_resolution->style_query_length_resolution_context;
-        }
-        bool is_after_line_height = phase == ComputedValuesFFI::LONGHAND_PHASE_CONTEXT_AFTER_LINE_HEIGHT;
-        *output = {
-            .length_resolution_context = to_ffi_length_resolution_context_with_container_bases(computation_context.length_resolution_context, state.container_relative_length_unit_mask),
-            .input_line_height_metrics = is_after_line_height ? input_line_height_metrics(computed_style, context.abstract_element, state.box_type_input.check_input_line_height) : ComputedValuesFFI::FfiInputLineHeightMetrics {},
-            .line_height_before_adjustments = is_after_line_height ? computed_style.effective_property_data(PropertyID::LineHeight) : nullptr,
-            .custom_property_input = {},
-        };
-        if (!is_after_line_height || !state.custom_property_resolution)
-            return;
-
-        auto& resolution_state = *state.custom_property_resolution;
-        auto& document = context.abstract_element.document();
-        resolution_state.color_scheme = computed_style.color_scheme(document.page().preferred_color_scheme(), document.supported_color_schemes());
-        if (auto cached = resolution_state.data->cached_resolution(resolution_state.document_identity, resolution_state.registration_generation, *resolution_state.color_scheme)) {
-            context.abstract_element.set_custom_property_data(move(cached));
-            return;
-        }
-        document.style_invalidation_counters().custom_property_elements++;
-        document.style_invalidation_counters().custom_property_resolutions += resolution_state.data->declared_count();
-        document.style_invalidation_counters().custom_property_value_computations += resolution_state.data->declared_count();
-        if (!resolution_state.root_font_metrics_prepared) {
-            if (!context.abstract_element.pseudo_element().has_value() && context.abstract_element.element().is_document_element()) {
-                style_computer.m_root_element_font_metrics = style_computer.calculate_root_element_font_metrics(computed_style);
-                style_computer.m_root_element_font_metrics_depend_on_viewport_metrics = computed_style.font_metrics_depend_on_viewport_metrics();
-            }
-            resolution_state.root_font_metrics_prepared = true;
-        }
-        output->custom_property_input = {
-            .store = resolution_state.data->rust_store(),
-            .resolved_parent_store = resolution_state.parent_data ? resolution_state.parent_data->rust_store() : resolution_state.data->parent() ? resolution_state.data->parent()->rust_store()
-                                                                                                                                                 : nullptr,
-            .reuse_resolved_parent_if_empty = resolution_state.parent_data != nullptr,
-            .resolution_context = &resolution_state.resolution_context,
-            .finalization_environment = &state.computation_environment,
-            .finalization_color_scheme = static_cast<u8>(to_underlying(*resolution_state.color_scheme)),
-        };
     };
     NativeComputePropertiesContext native_context {
         .style_computer = *this,
@@ -5745,7 +5693,6 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         .computation_reads_unkeyed_context = computation_reads_unkeyed_context,
         .computation_reads_resource_context = computation_reads_resource_context,
         .substitution_usage = substitution_usage,
-        .prepare_phase_context = prepare_phase_context,
         .state = nullptr,
     };
     auto const highlight_inheritance_parent = abstract_element.highlight_inheritance_parent();
@@ -5885,10 +5832,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                     resolution.resolution_context = {
                         .parse_context = &resolution.substitution_data.parse_context,
                         .media_environment = style_computer.cached_media_environment_for_style_update(),
-                        .load_media_environment = [](void* context) -> void const* {
-                            auto& element = *static_cast<AbstractOrHypotheticalElement*>(context);
-                            return element.document().style_computer().ensure_media_environment_for_style_update();
-                        },
+                        .load_media_environment = nullptr,
                         .custom_property_store = resolution.data->rust_store(),
                         .animated_custom_property_store = nullptr,
                         .animated_custom_property_base_store = nullptr,
@@ -5903,7 +5847,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                         .custom_function_scope_identity = bit_cast<FlatPtr>(&resolution.resolution_element.style_scope()),
                         .custom_function_visibilities = resolution.substitution_data.function_visibilities.data(),
                         .custom_function_visibility_count = resolution.substitution_data.function_visibilities.size(),
-                        .style_query_length_resolution_context = &resolution.style_query_length_resolution_context,
+                        .style_query_length_resolution_context = nullptr,
                         .style_query_dependencies = resolution.style_query_dependencies,
                         .callback_context = &resolution.resolution_element,
                     };
@@ -5912,6 +5856,22 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
 
             state.container_relative_length_unit_mask = computation_requirements->container_relative_length_unit_mask;
             auto const& font_computation_context = style_computer.get_computation_context_for_property(PropertyID::FontFamily, computed_style, abstract_element);
+            void const* custom_property_store = nullptr;
+            void const* resolved_parent_custom_property_store = nullptr;
+            bool reuse_resolved_parent_custom_property_store_if_empty = false;
+            ComputedValuesFFI::FfiCascadeResolutionContext custom_property_resolution_context {};
+            if (state.custom_property_resolution) {
+                auto& resolution = *state.custom_property_resolution;
+                custom_property_store = resolution.data->rust_store();
+                resolved_parent_custom_property_store = resolution.parent_data ? resolution.parent_data->rust_store() : resolution.data->parent() ? resolution.data->parent()->rust_store()
+                                                                                                                                                          : nullptr;
+                reuse_resolved_parent_custom_property_store_if_empty = resolution.parent_data != nullptr;
+                custom_property_resolution_context = resolution.resolution_context;
+                auto& counters = style_computer.document().style_invalidation_counters();
+                ++counters.custom_property_elements;
+                counters.custom_property_resolutions += resolution.data->declared_count();
+                counters.custom_property_value_computations += resolution.data->declared_count();
+            }
             *output = {
                 .longhand_table = computed_style.mutable_computed_longhand_table(),
                 .animated_overlay = parent_has_animated_values
@@ -5922,8 +5882,14 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 .computed_group_mask = computed_group_mask,
                 .computed_property_words = computed_properties_to_evaluate,
                 .font_length_resolution_context = to_ffi_length_resolution_context_with_container_bases(font_computation_context.length_resolution_context, computation_requirements->container_relative_length_unit_mask),
-                .callback_context = &context,
-                .prepare_phase_context = context.prepare_phase_context,
+                .font_environment_generation = style_computer.document().font_computer().environment_generation(),
+                .style_engine = style_computer.style_engine().rust_handle(),
+                .custom_property_store = custom_property_store,
+                .resolved_parent_custom_property_store = resolved_parent_custom_property_store,
+                .reuse_resolved_parent_custom_property_store_if_empty = reuse_resolved_parent_custom_property_store_if_empty,
+                .has_custom_property_resolution = state.custom_property_resolution != nullptr,
+                .check_input_line_height = state.box_type_input.check_input_line_height,
+                .custom_property_resolution_context = custom_property_resolution_context,
             }; },
         .finish_longhand_drive = [](void* context_pointer, ComputedValuesFFI::FfiLonghandDriveResult const* longhand_result) {
             auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
@@ -5964,6 +5930,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                     resolved = style_computer.intern_custom_property_data(
                         CustomPropertyData::create(move(resolved_own), resolution_state.parent_data ? resolution_state.parent_data : resolution_state.data->parent(), resolution.rust_store));
                 }
+                resolution_state.color_scheme = computed_style.color_scheme(style_computer.document().page().preferred_color_scheme(), style_computer.document().supported_color_schemes());
                 if (resolution_read_only_the_environment)
                     resolution_state.data->set_cached_resolution(resolution_state.document_identity, resolution_state.registration_generation, resolution_state.color_scheme.value(), resolved);
                 context.abstract_element.set_custom_property_data(move(resolved));

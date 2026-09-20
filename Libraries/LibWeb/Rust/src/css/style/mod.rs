@@ -90,6 +90,7 @@ mod prefix;
 pub mod program;
 mod program_updates;
 mod publication;
+pub(crate) use publication::drive_font_metric;
 #[cfg(feature = "style-recording")]
 pub mod record_replay;
 mod routing;

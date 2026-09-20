@@ -2641,16 +2641,14 @@ pub struct FfiLonghandDriveInput {
     pub computed_group_mask: u32,
     pub computed_property_words: *const u64,
     pub font_length_resolution_context: FfiLengthResolutionContext,
-    pub callback_context: *mut c_void,
-    pub prepare_phase_context: unsafe extern "C" fn(*mut c_void, u8, *mut FfiLonghandPhaseContext),
-}
-
-#[repr(C)]
-pub struct FfiLonghandPhaseContext {
-    pub length_resolution_context: FfiLengthResolutionContext,
-    pub input_line_height_metrics: FfiInputLineHeightMetrics,
-    pub line_height_before_adjustments: *const c_void,
-    pub custom_property_input: FfiCustomPropertyDriveInput,
+    pub font_environment_generation: u64,
+    pub style_engine: *const c_void,
+    pub custom_property_store: *const c_void,
+    pub resolved_parent_custom_property_store: *const c_void,
+    pub reuse_resolved_parent_custom_property_store_if_empty: bool,
+    pub has_custom_property_resolution: bool,
+    pub check_input_line_height: bool,
+    pub custom_property_resolution_context: crate::css::cascaded_properties::FfiCascadeResolutionContext,
 }
 
 #[repr(C)]
@@ -4715,26 +4713,80 @@ unsafe fn compute_longhands(
                 true,
             );
         };
-    let prepare_phase_context = |phase| {
-        crate::css::ffi_stats::bump(crate::css::ffi_stats::FfiOp::LonghandDriverPhaseCallback);
-        let mut context = std::mem::MaybeUninit::<FfiLonghandPhaseContext>::uninit();
-        unsafe {
-            crate::css::style::seal::note_host_call("longhand.prepare_phase_context");
-            (input.prepare_phase_context)(input.callback_context, phase, context.as_mut_ptr());
-            context.assume_init()
-        }
-    };
-
     drive_phase(
         LONGHAND_DRIVE_PHASE_FONT,
         &raw const input.font_length_resolution_context,
         std::ptr::null(),
         std::ptr::null(),
     );
-    let line_height_context = prepare_phase_context(LONGHAND_PHASE_CONTEXT_AFTER_FONT);
+    let style_engine = unsafe { &mut *input.style_engine.cast_mut().cast::<crate::css::style::StyleEngine>() };
+    let value_of = |property| -> Option<&StyleValueData> {
+        unsafe {
+            (&*input.longhand_table)
+                .effective_value(input.animated_overlay.as_ref(), property, true)
+                .value
+                .cast::<StyleValueData>()
+                .as_ref()
+        }
+    };
+    let font_size = match value_of(property_id::FONT_SIZE) {
+        Some(StyleValueData::Length { value, unit }) if *unit == px_length_unit() => {
+            crate::css::css_pixels::CssPixels::nearest_value_for(*value).to_double()
+        }
+        _ => input.font_length_resolution_context.font_metrics.font_size,
+    };
+    let font_slope = match value_of(property_id::FONT_STYLE) {
+        Some(StyleValueData::FontStyle { font_style, .. }) => match *font_style {
+            font_style_keyword::ITALIC => 1,
+            font_style_keyword::OBLIQUE => 2,
+            _ => 0,
+        },
+        _ => 0,
+    };
+    let font_weight = match value_of(property_id::FONT_WEIGHT) {
+        Some(StyleValueData::Number { value }) => *value,
+        _ => 400.0,
+    };
+    let font_width = match value_of(property_id::FONT_WIDTH) {
+        Some(StyleValueData::Percentage { value }) => *value,
+        _ => 100.0,
+    };
+    let font_optical_sizing = match value_of(property_id::FONT_OPTICAL_SIZING) {
+        Some(StyleValueData::Keyword { keyword }) => keyword_to_font_optical_sizing(*keyword).unwrap_or(0),
+        _ => 0,
+    };
+    let font_family = unsafe { &*input.longhand_table }
+        .effective_value(
+            unsafe { input.animated_overlay.as_ref() },
+            property_id::FONT_FAMILY,
+            true,
+        )
+        .value;
+    let resolved_font =
+        style_engine.resolve_font_for_legacy_drive(crate::css::style::bridge::FfiFontResolutionRequest {
+            font_family: crate::css::style::bridge::FfiHostHandle::from_pointer(font_family.cast()),
+            font_size_raw: crate::css::css_pixels::CssPixels::nearest_value_for(font_size).raw_value(),
+            font_slope,
+            font_weight,
+            font_width,
+            font_optical_sizing,
+            font_environment_generation: input.font_environment_generation,
+        });
+    let inherited_line_height = input.font_length_resolution_context.font_metrics.line_height;
+    let own_metrics = |line_height| FfiFontMetrics {
+        font_size,
+        x_height: crate::css::style::drive_font_metric(resolved_font.x_height),
+        cap_height: crate::css::style::drive_font_metric(resolved_font.ascent),
+        zero_advance: crate::css::style::drive_font_metric(resolved_font.zero_advance),
+        line_height,
+    };
+    let mut line_height_context = input.font_length_resolution_context;
+    line_height_context.font_metrics = own_metrics(inherited_line_height);
+    line_height_context.font_metrics_depend_on_viewport_metrics =
+        driver_results.font_metrics_depend_on_viewport_metrics;
     drive_phase(
         LONGHAND_DRIVE_PHASE_LINE_HEIGHT,
-        &raw const line_height_context.length_resolution_context,
+        &raw const line_height_context,
         std::ptr::null(),
         std::ptr::null(),
     );
@@ -4744,14 +4796,56 @@ unsafe fn compute_longhands(
         std::ptr::null(),
         std::ptr::null(),
     );
-    let remaining_context = prepare_phase_context(LONGHAND_PHASE_CONTEXT_AFTER_LINE_HEIGHT);
+    let normal_line_height = f64::from(resolved_font.ascent.round() as i32 + resolved_font.descent.round() as i32);
+    let line_height_before_adjustments = match value_of(property_id::LINE_HEIGHT) {
+        Some(StyleValueData::Keyword { keyword: value }) if *value == keyword::NORMAL => normal_line_height,
+        Some(StyleValueData::Length { value, unit }) if *unit == px_length_unit() => {
+            crate::css::css_pixels::CssPixels::nearest_value_for(*value).to_double()
+        }
+        Some(StyleValueData::Number { value }) => {
+            crate::css::css_pixels::CssPixels::nearest_value_for(value * font_size).to_double()
+        }
+        _ => inherited_line_height,
+    };
+    let mut remaining_length_context = input.font_length_resolution_context;
+    remaining_length_context.font_metrics = own_metrics(line_height_before_adjustments);
+    remaining_length_context.font_metrics_depend_on_viewport_metrics =
+        driver_results.font_metrics_depend_on_viewport_metrics;
+    let input_line_height_metrics = if input.check_input_line_height {
+        FfiInputLineHeightMetrics {
+            current_line_height: line_height_before_adjustments,
+            minimum_line_height: normal_line_height,
+        }
+    } else {
+        FfiInputLineHeightMetrics {
+            current_line_height: 0.0,
+            minimum_line_height: 0.0,
+        }
+    };
+    let line_height_before_adjustments = unsafe { &*input.longhand_table }
+        .effective_value(
+            unsafe { input.animated_overlay.as_ref() },
+            property_id::LINE_HEIGHT,
+            true,
+        )
+        .value;
     drive_phase(
         LONGHAND_DRIVE_PHASE_REMAINING,
-        &raw const remaining_context.length_resolution_context,
-        &raw const remaining_context.input_line_height_metrics,
-        remaining_context.line_height_before_adjustments,
+        &raw const remaining_length_context,
+        &raw const input_line_height_metrics,
+        line_height_before_adjustments,
     );
-    let custom_properties = if remaining_context.custom_property_input.store.is_null() {
+    let mut custom_property_resolution_context = input.custom_property_resolution_context;
+    custom_property_resolution_context.style_query_length_resolution_context = &raw const remaining_length_context;
+    let custom_property_input = FfiCustomPropertyDriveInput {
+        store: input.custom_property_store,
+        resolved_parent_store: input.resolved_parent_custom_property_store,
+        reuse_resolved_parent_if_empty: input.reuse_resolved_parent_custom_property_store_if_empty,
+        resolution_context: &raw const custom_property_resolution_context,
+        finalization_environment: input.environment,
+        finalization_color_scheme: unsafe { &*input.longhand_table }.effective_color_scheme() as u8,
+    };
+    let custom_properties = if !input.has_custom_property_resolution {
         FfiResolvedCustomProperties {
             properties: std::ptr::null(),
             count: 0,
@@ -4767,9 +4861,7 @@ unsafe fn compute_longhands(
             storage: std::ptr::null_mut(),
         }
     } else {
-        unsafe {
-            crate::css::cascaded_properties::drive_custom_property_resolution(&remaining_context.custom_property_input)
-        }
+        unsafe { crate::css::cascaded_properties::drive_custom_property_resolution(&custom_property_input) }
     };
     (
         FfiLonghandDriveResult {
@@ -4787,7 +4879,7 @@ unsafe fn compute_longhands(
                 storage: std::ptr::null_mut(),
             },
         },
-        remaining_context.input_line_height_metrics,
+        input_line_height_metrics,
     )
 }
 

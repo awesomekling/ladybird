@@ -59,7 +59,7 @@
             document.body.appendChild(simple);
         });
         println(`longhand computation used one Rust entry: ${simpleCounters.longhandDriverEntries === 1}`);
-        println(`longhand computation used two context callbacks: ${simpleCounters.longhandDriverPhaseCallbacks === 2}`);
+        println(`longhand computation used no context callbacks: ${simpleCounters.longhandDriverPhaseCallbacks === 0}`);
         println(`shorthand expansion entered Rust: ${simpleCounters.shorthandExpansionEntries > 0}`);
         const inheritanceParent = document.createElement("div");
         const inheritanceChild = document.createElement("span");

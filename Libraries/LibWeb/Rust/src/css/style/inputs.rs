@@ -25,6 +25,10 @@ impl StyleEngine {
 }
 
 impl RetainedState {
+    pub(crate) fn resolved_font(&self, request: bridge::FfiFontResolutionRequest) -> Option<bridge::FfiResolvedFont> {
+        self.font_resolution.as_ref()?.lookup(request)
+    }
+
     /// Refresh the container-query projection at the computed-record publication funnel. The
     /// projection owns the name spellings, so a sealed evaluator never has to follow an AK string
     /// or a computed-group payload.
