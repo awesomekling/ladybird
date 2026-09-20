@@ -138,9 +138,11 @@ Node::Node(DOM::Document& document, BindToPreparedArenaSlot, Compositing::RustFF
     RustFFI::layout_arena_attach_shell(m_arena->handle(), m_slot, this);
     auto* node = dom_node();
     if (node) {
-        // The state one of the paint facts is derived from is refreshed as a box is built for the
-        // node, as it was when the build built the box in C++.
-        node->update_inside_blocking_wheel_event_handler_state();
+        // A text node's wheel-handler state is refreshed as its box is built, which is where the
+        // build refreshed it. An element's was refreshed as the element was prepared, and the
+        // document's is never derived from the tree at all.
+        if (kind == RustFFI::NodeKind::TextNode)
+            node->update_inside_blocking_wheel_event_handler_state();
         RustFFI::layout_arena_set_constructed_row_dom_paint_facts(m_arena->handle(), m_slot, dom_paint_facts_of(node));
         publish_own_scroll_offset();
     }
@@ -338,6 +340,11 @@ bool NodeWithStyle::is_sticky_position() const
 NodeWithStyle::NodeWithStyle(DOM::Document& document, GC::Ptr<DOM::Node> node, CSS::LayoutStyle style, RustFFI::NodeKind kind)
     : Node(document, node, kind)
 {
+    adopt_style(document, node, move(style));
+}
+
+void NodeWithStyle::adopt_style(DOM::Document& document, GC::Ptr<DOM::Node> node, CSS::LayoutStyle style)
+{
     VERIFY(style);
     if (!!style.style_record_identity()) {
         m_style_record_identity = style.style_record_identity();
@@ -358,6 +365,12 @@ NodeWithStyle::NodeWithStyle(DOM::Document& document, BindToPreparedArenaSlot bi
     VERIFY(m_style_record_identity);
     m_style_payloads = RustFFI::layout_arena_node_style_payloads(arena_handle(), slot);
     VERIFY(m_style_payloads);
+}
+
+NodeWithStyle::NodeWithStyle(DOM::Document& document, BindToPreparedArenaSlot bind, RustFFI::NodeSlotId slot, RustFFI::NodeKind kind, CSS::LayoutStyle style)
+    : Node(document, bind, slot, kind)
+{
+    adopt_style(document, dom_node(), move(style));
 }
 
 void NodeWithStyle::initialize_from_style_record()

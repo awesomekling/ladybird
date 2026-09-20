@@ -111,7 +111,6 @@ pub struct FfiDomTreeBuilderCallbacks {
     /// kind but `Normal`, and the build never asks for a box the element says it has none of.
     pub create_principal_element_layout:
         unsafe extern "C" fn(*mut c_void, *mut c_void, FfiElementLayoutKind, u8) -> NodeSlotId,
-    pub create_principal_document_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
     /// Attaches the image observers a box's style asks for. Principal and pseudo-element boxes
     /// both go through this; nothing about it depends on which the box is.
     pub attach_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId),
@@ -2337,9 +2336,7 @@ fn construct_principal_layout_node(
         }
     } else if should_create_layout_node {
         if update.kind.is_document() {
-            // SAFETY: The builder and DOM document remain live throughout construction.
-            let created =
-                unsafe { (host.callbacks.create_principal_document_layout)(host.callbacks.builder, dom_node) };
+            let created = host.layout().create_document_box();
             layout_node = created;
             created_box = Some(host.layout().created(created));
         } else if update.kind.is_text() {
@@ -3713,10 +3710,21 @@ impl TreeBuilderHost<'_> {
     /// alone, and materialising its shell is what gives the text node a `Layout::TextNode`.
     fn create_text_box(&self, style_node: Option<StyleNodeID>) -> NodeSlotId {
         let style_node = style_node.expect("a text node's box is built for its identity");
+        self.create_dom_box(NodeKind::TextNode, Some(style_node))
+    }
+
+    /// The row the document's viewport is built in. The document names no identity of its own, so
+    /// the row is stamped out of its kind alone; the shell it is materialised into is what asks
+    /// the style computer for the document's style.
+    fn create_document_box(&self) -> NodeSlotId {
+        self.create_dom_box(NodeKind::Viewport, None)
+    }
+
+    fn create_dom_box(&self, kind: NodeKind, style_node: Option<StyleNodeID>) -> NodeSlotId {
         // SAFETY: Entry points guarantee that the arena remains live, and callers hold no reference
         // derived from it across the allocation.
         let slot = unsafe { &mut *self.arena }.allocate_unbound();
-        self.arena().stamp_dom_row(slot, NodeKind::TextNode, style_node);
+        self.arena().stamp_dom_row(slot, kind, style_node);
         assert!(!self.arena().node_shell(slot).is_null());
         slot
     }
