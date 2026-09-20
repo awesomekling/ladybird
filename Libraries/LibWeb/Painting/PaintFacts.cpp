@@ -20,6 +20,7 @@
 #include <LibWeb/Layout/ImageProvider.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/Node.h>
+#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/PaintFacts.h>
@@ -196,6 +197,15 @@ static GC::Ptr<HTML::DecodedImageData> decoded_image_data_of(Layout::NodeWithSty
     return observer->decoded_image_data();
 }
 
+static DOM::NodeIdentity paint_facts_journal_anchor(Layout::Node const& layout_node)
+{
+    for (auto const* ancestor = &layout_node; ancestor; ancestor = ancestor->parent_ptr()) {
+        if (auto identity = ancestor->dom_node_identity(); identity)
+            return identity;
+    }
+    return {};
+}
+
 void push_layer_image_paint_facts(Layout::NodeWithStyle const& layout_node)
 {
     auto const& background_layers = layout_node.background_layers();
@@ -218,14 +228,18 @@ void push_layer_image_paint_facts(Layout::NodeWithStyle const& layout_node)
     for (size_t layer_index = 0; layer_index < mask_layers.size(); ++layer_index)
         append_entry(Layout::RustFFI::FfiLayerImageList::Mask, layer_index, mask_layers[layer_index].background_image.ptr(), layout_node.mask_image_observer(layer_index));
     append_entry(Layout::RustFFI::FfiLayerImageList::BorderImageSource, 0, layout_node.border_image().source.ptr(), layout_node.border_image_source_observer());
-    auto identity = layout_node.dom_node_identity();
+    auto identity = paint_facts_journal_anchor(layout_node);
     if (!identity) {
         Layout::RustFFI::layout_arena_set_layer_image_paint_facts(layout_node.arena_handle(), Layout::Node::slot_id(&layout_node), entries.data(), entries.size());
         return;
     }
-    const_cast<DOM::Document&>(layout_node.document()).invalidation_journal().note_paint_facts(identity, DOM::PaintFactsFamily::LayerImage, [entries = move(entries), current_frame_handles = move(current_frame_handles)](Layout::Node const& current_layout_node) {
+    auto target_slot = Layout::Node::slot_id(&layout_node);
+    const_cast<DOM::Document&>(layout_node.document()).invalidation_journal().note_paint_facts(identity, DOM::PaintFactsFamily::LayerImage, [target_slot, entries = move(entries), current_frame_handles = move(current_frame_handles)](Layout::Node const& anchor_layout_node) {
         (void)current_frame_handles;
-        Layout::RustFFI::layout_arena_set_layer_image_paint_facts(current_layout_node.arena_handle(), Layout::Node::slot_id(&current_layout_node), entries.data(), entries.size());
+        auto* current_layout_node = anchor_layout_node.node_arena().node_if_live(target_slot);
+        if (!current_layout_node)
+            return;
+        Layout::RustFFI::layout_arena_set_layer_image_paint_facts(current_layout_node->arena_handle(), Layout::Node::slot_id(current_layout_node), entries.data(), entries.size());
     });
 }
 
@@ -238,15 +252,20 @@ bool push_replaced_image_paint_facts(Layout::ImageProvider const& image_provider
         .natural = natural_size_facts(image_provider.intrinsic_width(), image_provider.intrinsic_height(), image_provider.intrinsic_aspect_ratio()),
         .content = image_content_facts(image_provider.decoded_image_data(), current_frame_handle),
     };
-    auto identity = layout_node.dom_node_identity();
-    if (!identity)
+    auto identity = paint_facts_journal_anchor(layout_node);
+    if (!identity) {
         return Layout::RustFFI::layout_arena_set_replaced_image_paint_facts(layout_node.arena_handle(), Layout::Node::slot_id(&layout_node), facts);
-    const_cast<DOM::Document&>(layout_node.document()).invalidation_journal().note_paint_facts(identity, DOM::PaintFactsFamily::ReplacedImage, [facts, current_frame_handle = move(current_frame_handle)](Layout::Node const& current_layout_node) {
+    }
+    auto target_slot = Layout::Node::slot_id(&layout_node);
+    const_cast<DOM::Document&>(layout_node.document()).invalidation_journal().note_paint_facts(identity, DOM::PaintFactsFamily::ReplacedImage, [target_slot, facts, current_frame_handle = move(current_frame_handle)](Layout::Node const& anchor_layout_node) {
         (void)current_frame_handle;
-        if (current_layout_node.kind() != Layout::RustFFI::NodeKind::ImageBox && current_layout_node.kind() != Layout::RustFFI::NodeKind::SVGImageBox)
+        auto* current_layout_node = anchor_layout_node.node_arena().node_if_live(target_slot);
+        if (!current_layout_node)
             return;
-        if (Layout::RustFFI::layout_arena_set_replaced_image_paint_facts(current_layout_node.arena_handle(), Layout::Node::slot_id(&current_layout_node), facts))
-            set_needs_repaint(current_layout_node, InvalidateDisplayList::PaintCommands);
+        if (current_layout_node->kind() != Layout::RustFFI::NodeKind::ImageBox && current_layout_node->kind() != Layout::RustFFI::NodeKind::SVGImageBox)
+            return;
+        if (Layout::RustFFI::layout_arena_set_replaced_image_paint_facts(current_layout_node->arena_handle(), Layout::Node::slot_id(current_layout_node), facts))
+            set_needs_repaint(*current_layout_node, InvalidateDisplayList::PaintCommands);
     });
     return false;
 }
@@ -281,15 +300,17 @@ static bool push_video_paint_facts_onto(HTML::HTMLVideoElement const& video_elem
         facts.representation = Layout::RustFFI::FfiVideoRepresentation::TransparentBlack;
         break;
     }
-    auto identity = layout_node.dom_node_identity();
+    auto identity = paint_facts_journal_anchor(layout_node);
     if (!identity)
         return Layout::RustFFI::layout_arena_set_video_paint_facts(layout_node.arena_handle(), Layout::Node::slot_id(&layout_node), facts);
-    const_cast<DOM::Document&>(layout_node.document()).invalidation_journal().note_paint_facts(identity, DOM::PaintFactsFamily::Video, [facts, poster_frame_handle = move(poster_frame_handle)](Layout::Node const& current_layout_node) {
+    auto target_slot = Layout::Node::slot_id(&layout_node);
+    const_cast<DOM::Document&>(layout_node.document()).invalidation_journal().note_paint_facts(identity, DOM::PaintFactsFamily::Video, [target_slot, facts, poster_frame_handle = move(poster_frame_handle)](Layout::Node const& anchor_layout_node) {
         (void)poster_frame_handle;
-        if (current_layout_node.kind() != Layout::RustFFI::NodeKind::VideoBox)
+        auto* current_layout_node = anchor_layout_node.node_arena().node_if_live(target_slot);
+        if (!current_layout_node || current_layout_node->kind() != Layout::RustFFI::NodeKind::VideoBox)
             return;
-        if (Layout::RustFFI::layout_arena_set_video_paint_facts(current_layout_node.arena_handle(), Layout::Node::slot_id(&current_layout_node), facts))
-            set_needs_repaint(current_layout_node, InvalidateDisplayList::PaintCommands);
+        if (Layout::RustFFI::layout_arena_set_video_paint_facts(current_layout_node->arena_handle(), Layout::Node::slot_id(current_layout_node), facts))
+            set_needs_repaint(*current_layout_node, InvalidateDisplayList::PaintCommands);
     });
     return false;
 }
