@@ -395,6 +395,9 @@ scalar_accessors! {
         is_inline_size_container: bool => is_inline_size_container,
         aspect_ratio_uses_natural_when_available: bool => aspect_ratio.use_natural_aspect_ratio_if_available,
     }
+    misc_reset: {
+        appearance: u8 => appearance,
+    }
     border_facts: {
         border_top_width: CssPixels => border_top.width,
         border_right_width: CssPixels => border_right.width,

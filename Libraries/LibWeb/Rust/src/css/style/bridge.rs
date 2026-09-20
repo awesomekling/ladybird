@@ -556,7 +556,9 @@ pub struct FfiElementArrival {
     pub custom_state_count: u32,
     pub heading_level: u8,
     pub is_slot: bool,
-    pub reserved: u16,
+    /// The element's `FfiElementBoxKind`: which principal box it asks for.
+    pub box_kind: u8,
+    pub reserved: u8,
     /// The element's `ElementStyleAdjustmentFact` bits: what the box-type transformation and the
     /// element style adjustments read of the DOM. Mirrors the C++ enum.
     pub adjustment_facts: u32,
@@ -643,6 +645,83 @@ pub mod element_construction_fact {
     /// Also an `element_adjustment_fact`, which the style computation reads. A row is built out
     /// of this word alone, so the fact is published into both rather than read across two.
     pub const IS_DOCUMENT_ELEMENT: u32 = 1 << 6;
+}
+
+/// Which principal box an element asks for before its computed style has a say. The element's own
+/// type and state decide this; the tree build resolves it against the computed `display` and
+/// `appearance`. Mirrors the C++ `CSS::ElementBoxKind`; it crosses the boundary as its raw byte.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub(crate) enum ElementBoxKind {
+    /// The computed display decides the box on its own.
+    FromDisplay = 0,
+    /// The element generates no box, whatever its display says.
+    NoBox = 1,
+    Break = 2,
+    FieldSet = 3,
+    Legend = 4,
+    Audio = 5,
+    Video = 6,
+    Canvas = 7,
+    NavigableContainerViewport = 8,
+    TextArea = 9,
+    Image = 10,
+    SvgGraphics = 11,
+    SvgSvg = 12,
+    SvgText = 13,
+    SvgTextPath = 14,
+    SvgForeignObject = 15,
+    SvgImage = 16,
+    SvgGeometry = 17,
+    // An input's native widget. `appearance: none` suppresses it, and then the computed display
+    // decides the box like it does for any other element.
+    InputButton = 18,
+    InputCheckBox = 19,
+    InputRadioButton = 20,
+    InputRange = 21,
+    InputText = 22,
+}
+
+impl ElementBoxKind {
+    /// The kind the mirror holds under `raw`. A node the mirror holds nothing for asks for
+    /// nothing in particular, which is what a fresh column reads as.
+    #[must_use]
+    pub(crate) fn from_raw(raw: u8) -> Self {
+        match raw {
+            1 => Self::NoBox,
+            2 => Self::Break,
+            3 => Self::FieldSet,
+            4 => Self::Legend,
+            5 => Self::Audio,
+            6 => Self::Video,
+            7 => Self::Canvas,
+            8 => Self::NavigableContainerViewport,
+            9 => Self::TextArea,
+            10 => Self::Image,
+            11 => Self::SvgGraphics,
+            12 => Self::SvgSvg,
+            13 => Self::SvgText,
+            14 => Self::SvgTextPath,
+            15 => Self::SvgForeignObject,
+            16 => Self::SvgImage,
+            17 => Self::SvgGeometry,
+            18 => Self::InputButton,
+            19 => Self::InputCheckBox,
+            20 => Self::InputRadioButton,
+            21 => Self::InputRange,
+            22 => Self::InputText,
+            _ => Self::FromDisplay,
+        }
+    }
+
+    /// Whether `appearance: none` suppresses the box this kind asks for.
+    #[must_use]
+    pub(crate) fn is_suppressed_by_appearance_none(self) -> bool {
+        matches!(
+            self,
+            Self::InputButton | Self::InputCheckBox | Self::InputRadioButton | Self::InputRange | Self::InputText
+        )
+    }
 }
 
 /// Which local fact a feature delta describes.
@@ -4041,6 +4120,7 @@ mod tests {
                 custom_state_count: 2,
                 heading_level: 4,
                 is_slot: true,
+                box_kind: 0,
                 reserved: 0,
             },
             FfiElementArrival {
@@ -4054,6 +4134,7 @@ mod tests {
                 custom_state_count: 1,
                 heading_level: 0,
                 is_slot: false,
+                box_kind: 0,
                 reserved: 0,
             },
         ];
@@ -4085,6 +4166,7 @@ mod tests {
             custom_state_count,
             heading_level: 0,
             is_slot: false,
+            box_kind: 0,
             reserved: 0,
         }
     }

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/SVG/SVGDefsElement.h>
 
@@ -18,6 +19,11 @@ SVGDefsElement::SVGDefsElement(DOM::Document& document, DOM::QualifiedName quali
 
 SVGDefsElement::~SVGDefsElement()
 {
+}
+
+CSS::ElementBoxKind SVGDefsElement::box_kind() const
+{
+    return CSS::ElementBoxKind::NoBox;
 }
 
 }

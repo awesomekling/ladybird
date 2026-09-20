@@ -9,6 +9,7 @@
 #include <LibWeb/CSS/Invalidation/EmbeddedContentInvalidator.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
@@ -192,22 +193,22 @@ void HTMLObjectElement::apply_presentational_hints(Vector<CSS::StyleProperty>& p
     });
 }
 
-Layout::Node* HTMLObjectElement::create_layout_node(CSS::LayoutStyle style)
+CSS::ElementBoxKind HTMLObjectElement::box_kind() const
 {
     switch (m_representation) {
     case Representation::Children:
-        return NavigableContainer::create_layout_node(style);
+        return NavigableContainer::box_kind();
     case Representation::ContentNavigable:
-        return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::NavigableContainerViewport);
+        return CSS::ElementBoxKind::NavigableContainerViewport;
     case Representation::Image:
         if (image_data())
-            return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::ImageBox);
+            return CSS::ElementBoxKind::Image;
         break;
     default:
         break;
     }
 
-    return nullptr;
+    return CSS::ElementBoxKind::NoBox;
 }
 
 bool HTMLObjectElement::has_ancestor_media_element_or_object_element_not_showing_fallback_content() const
@@ -554,6 +555,9 @@ void HTMLObjectElement::update_layout_and_child_objects(Representation represent
     }
 
     m_representation = representation;
+    // The representation decides which box the element asks for, and the build reads that from
+    // the mirror.
+    CSS::record_element_construction_facts(*this);
 
     if (auto parent_element = this->parent_element())
         parent_element->set_needs_layout_tree_update(true, DOM::SetNeedsLayoutTreeUpdateReason::HTMLObjectElementUpdateLayoutAndChildObjects);

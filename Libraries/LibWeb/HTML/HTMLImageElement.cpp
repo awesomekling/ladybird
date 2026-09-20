@@ -14,6 +14,7 @@
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
@@ -313,14 +314,11 @@ void HTMLImageElement::form_associated_element_attribute_changed(Utf16FlyString 
     }
 }
 
-Layout::Node* HTMLImageElement::create_layout_node(CSS::LayoutStyle style)
+CSS::ElementBoxKind HTMLImageElement::box_kind() const
 {
-    if (renders_as_alt_text() && !alt().is_empty()) {
-        auto computed_style = this->computed_style();
-        VERIFY(computed_style);
-        return Element::create_layout_node_for_display_type(document(), computed_style->display(), style, this);
-    }
-    return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::ImageBox);
+    if (renders_as_alt_text() && !alt().is_empty())
+        return CSS::ElementBoxKind::FromDisplay;
+    return CSS::ElementBoxKind::Image;
 }
 
 void HTMLImageElement::create_alt_text_shadow_tree()
@@ -352,6 +350,9 @@ void HTMLImageElement::remove_alt_text_shadow_tree()
 void HTMLImageElement::update_alt_text_shadow_tree()
 {
     auto alt_text = alt();
+    // Whether the element renders as alt text decides which box it asks for, and the build reads
+    // that from the mirror.
+    CSS::record_element_construction_facts(*this);
     if (!renders_as_alt_text() || alt_text.is_empty()) {
         remove_alt_text_shadow_tree();
         return;

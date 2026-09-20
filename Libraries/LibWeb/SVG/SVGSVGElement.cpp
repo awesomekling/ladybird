@@ -9,6 +9,7 @@
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Event.h>
@@ -45,9 +46,9 @@ void SVGSVGElement::visit_edges(Visitor& visitor)
     visitor.visit(m_active_view_element);
 }
 
-Layout::Node* SVGSVGElement::create_layout_node(CSS::LayoutStyle style)
+CSS::ElementBoxKind SVGSVGElement::box_kind() const
 {
-    return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::SVGSVGBox);
+    return CSS::ElementBoxKind::SvgSvg;
 }
 
 Optional<CSS::Length> SVGSVGElement::width_attribute_length() const

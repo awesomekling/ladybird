@@ -21,6 +21,7 @@
 #include <LibWeb/CSS/GeneratedContent.h>
 #include <LibWeb/CSS/PseudoElement.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleInvalidation.h>
 #include <LibWeb/CSS/StyleValues/ContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CounterStyleStyleValue.h>
@@ -625,6 +626,81 @@ void LayoutTreeBuildBridge::pin_style_record_for_build(CSS::StyleRecordID style_
     m_pinned_style_records.append(style_record_identity);
 }
 
+// The principal box an element asks for. The element's own type and state decided the kind at
+// style time; the display mapping answers for the ones that leave the choice to their display.
+static NodeWithStyle* create_principal_element_box(DOM::Element& element, CSS::LayoutStyle style, CSS::ElementBoxKind box_kind)
+{
+    auto& document = element.document();
+    auto box_of_kind = [&](RustFFI::NodeKind kind) -> Layout::Box& {
+        return allocate_layout_node<Layout::Box>(document, element, style, kind);
+    };
+    auto block_container_of_kind = [&](RustFFI::NodeKind kind) -> BlockContainer& {
+        return allocate_layout_node<BlockContainer>(document, element, style, kind);
+    };
+    switch (box_kind) {
+    case CSS::ElementBoxKind::NoBox:
+        // The build does not ask for a box it was told does not exist.
+        VERIFY_NOT_REACHED();
+    case CSS::ElementBoxKind::FromDisplay: {
+        auto computed_style = element.computed_style();
+        VERIFY(computed_style);
+        return DOM::Element::create_layout_node_for_display_type(document, computed_style->display(), style, &element);
+    }
+    case CSS::ElementBoxKind::Break:
+        return &allocate_layout_node<NodeWithStyle>(document, element, style, RustFFI::NodeKind::BreakNode);
+    case CSS::ElementBoxKind::FieldSet: {
+        auto& fieldset_box = block_container_of_kind(RustFFI::NodeKind::FieldSetBox);
+        // https://html.spec.whatwg.org/multipage/rendering.html#the-fieldset-and-legend-elements
+        // If the computed outer display type is inline, the fieldset is expected to behave as inline-block. Otherwise,
+        // it is expected to behave as flow-root. This does not change the computed value.
+        if (fieldset_box.display().is_flow_inside())
+            fieldset_box.set_display(CSS::Display { fieldset_box.display().outside(), CSS::DisplayInside::FlowRoot });
+        return &fieldset_box;
+    }
+    case CSS::ElementBoxKind::Legend:
+        return &block_container_of_kind(RustFFI::NodeKind::LegendBox);
+    case CSS::ElementBoxKind::Audio:
+    case CSS::ElementBoxKind::Video: {
+        auto& media_box = box_of_kind(box_kind == CSS::ElementBoxKind::Audio ? RustFFI::NodeKind::AudioBox : RustFFI::NodeKind::VideoBox);
+        media_box.set_replaced_box_can_have_children(element.shadow_root() != nullptr);
+        return &media_box;
+    }
+    case CSS::ElementBoxKind::Canvas:
+        return &box_of_kind(RustFFI::NodeKind::CanvasBox);
+    case CSS::ElementBoxKind::NavigableContainerViewport:
+        return &box_of_kind(RustFFI::NodeKind::NavigableContainerViewport);
+    case CSS::ElementBoxKind::TextArea:
+        return &block_container_of_kind(RustFFI::NodeKind::TextAreaBox);
+    case CSS::ElementBoxKind::Image:
+        return &box_of_kind(RustFFI::NodeKind::ImageBox);
+    case CSS::ElementBoxKind::SvgGraphics:
+        return &box_of_kind(RustFFI::NodeKind::SVGGraphicsBox);
+    case CSS::ElementBoxKind::SvgSvg:
+        return &box_of_kind(RustFFI::NodeKind::SVGSVGBox);
+    case CSS::ElementBoxKind::SvgText:
+        return &box_of_kind(RustFFI::NodeKind::SVGTextBox);
+    case CSS::ElementBoxKind::SvgTextPath:
+        return &box_of_kind(RustFFI::NodeKind::SVGTextPathBox);
+    case CSS::ElementBoxKind::SvgForeignObject:
+        return &block_container_of_kind(RustFFI::NodeKind::SVGForeignObjectBox);
+    case CSS::ElementBoxKind::SvgImage:
+        return &box_of_kind(RustFFI::NodeKind::SVGImageBox);
+    case CSS::ElementBoxKind::SvgGeometry:
+        return &box_of_kind(RustFFI::NodeKind::SVGGeometryBox);
+    case CSS::ElementBoxKind::InputButton:
+        return &block_container_of_kind(RustFFI::NodeKind::BlockContainer);
+    case CSS::ElementBoxKind::InputCheckBox:
+        return &box_of_kind(RustFFI::NodeKind::CheckBox);
+    case CSS::ElementBoxKind::InputRadioButton:
+        return &box_of_kind(RustFFI::NodeKind::RadioButton);
+    case CSS::ElementBoxKind::InputRange:
+        return &block_container_of_kind(RustFFI::NodeKind::RangeInputBox);
+    case CSS::ElementBoxKind::InputText:
+        return &block_container_of_kind(RustFFI::NodeKind::TextInputBox);
+    }
+    VERIFY_NOT_REACHED();
+}
+
 RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_builder_callbacks()
 {
     return {
@@ -668,7 +744,7 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             auto style_record_identity = element.style_record_identity();
             VERIFY(style_record_identity);
             static_cast<LayoutTreeBuildBridge*>(builder_pointer)->pin_style_record_for_build(style_record_identity); },
-        .create_principal_element_layout = [](void* builder_pointer, void* element_pointer, RustFFI::FfiElementLayoutKind kind) -> Compositing::RustFFI::NodeSlotId {
+        .create_principal_element_layout = [](void* builder_pointer, void* element_pointer, RustFFI::FfiElementLayoutKind kind, u8 box_kind) -> Compositing::RustFFI::NodeSlotId {
             VERIFY(builder_pointer);
             VERIFY(element_pointer);
             auto& element = *static_cast<DOM::Element*>(element_pointer);
@@ -696,7 +772,7 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
                 layout_node = &allocate_layout_node<Layout::Box>(element.document(), element, style, RustFFI::NodeKind::SVGPatternBox);
                 break;
             case RustFFI::FfiElementLayoutKind::Normal:
-                layout_node = element.create_layout_node(style);
+                layout_node = create_principal_element_box(element, style, static_cast<CSS::ElementBoxKind>(box_kind));
                 break;
             }
             return Node::slot_id(layout_node); },

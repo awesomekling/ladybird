@@ -9,7 +9,7 @@ use super::*;
 use crate::abort_on_panic;
 use crate::css::css_enums::{float, positioning, white_space_collapse};
 use crate::css::style::StyleEngine;
-use crate::css::style::bridge::element_adjustment_fact;
+use crate::css::style::bridge::{ElementBoxKind, element_adjustment_fact};
 use crate::css::style::layout_style::{AnonymousStyleKind, AnonymousStyleOverrides};
 use crate::css::style::tree::StyleNodeID;
 use crate::css::style::tree::layout_tree_update_reuse_reason;
@@ -106,8 +106,11 @@ pub struct FfiDomTreeBuilderCallbacks {
     /// node once per visit rather than once per payload callback.
     pub principal_dom_node: unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void,
     pub prepare_principal_element: unsafe extern "C" fn(*mut c_void, *mut c_void, bool),
+    /// The last argument is the raw byte of a `CSS::ElementBoxKind`: the box kind the element
+    /// asked for, resolved against its computed appearance. It is `FromDisplay` for every layout
+    /// kind but `Normal`, and the build never asks for a box the element says it has none of.
     pub create_principal_element_layout:
-        unsafe extern "C" fn(*mut c_void, *mut c_void, FfiElementLayoutKind) -> NodeSlotId,
+        unsafe extern "C" fn(*mut c_void, *mut c_void, FfiElementLayoutKind, u8) -> NodeSlotId,
     pub create_principal_document_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
     pub create_principal_text_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
     /// Attaches the image observers a box's style asks for. Principal and pseudo-element boxes
@@ -135,6 +138,15 @@ pub enum FfiElementLayoutKind {
     SvgClipPath,
     SvgPattern,
     Normal,
+}
+
+/// The principal box an element gets: the one its own type asks for, or the computed display's
+/// answer where the type asks for nothing or `appearance: none` suppresses a native widget.
+pub(crate) fn resolved_element_box_kind(box_kind: ElementBoxKind, appearance_is_none: bool) -> ElementBoxKind {
+    if appearance_is_none && box_kind.is_suppressed_by_appearance_none() {
+        return ElementBoxKind::FromDisplay;
+    }
+    box_kind
 }
 
 fn apply_replaced_display_adjustment(
@@ -1339,6 +1351,14 @@ impl DomTreeBuilderHost<'_> {
             .display
     }
 
+    /// Whether the element's published style suppresses its native appearance.
+    fn published_appearance_is_none(&self, style_node: u32) -> bool {
+        self.layout()
+            .arena()
+            .published_box_facts(StyleNodeID::from_raw(style_node))
+            .is_some_and(|facts| facts.appearance_is_none)
+    }
+
     /// Whether the element's published style record replaces its contents with a single image.
     fn published_content_is_single_image(&self, style_node: u32) -> bool {
         self.layout()
@@ -1401,6 +1421,12 @@ impl DomTreeBuilderHost<'_> {
     /// Whether the style store holds the element in the top layer.
     fn rendered_in_top_layer(&self, style_node: u32) -> bool {
         self.element_type_facts(style_node) & element_adjustment_fact::RENDERED_IN_TOP_LAYER != 0
+    }
+
+    /// Which principal box the element asks for, before its computed style has a say.
+    fn published_box_kind(&self, style_node: u32) -> ElementBoxKind {
+        // SAFETY: The arena outlives the build.
+        unsafe { &*self.arena }.element_box_kind(StyleNodeID::from_raw(style_node))
     }
 
     /// The element type facts the style store holds for a node the walk reached.
@@ -2271,9 +2297,27 @@ fn construct_principal_layout_node(
                 context.layout_svg_mask_or_clip_path,
                 context.layout_svg_pattern,
             );
-            // SAFETY: The builder and element remain live throughout construction.
-            let created = unsafe {
-                (host.callbacks.create_principal_element_layout)(host.callbacks.builder, dom_node, layout_kind)
+            // An element that says it generates no box is not asked for one. Only the normal
+            // construction path consults the element; the others build a box of a fixed kind.
+            let box_kind = match layout_kind {
+                FfiElementLayoutKind::Normal => resolved_element_box_kind(
+                    host.published_box_kind(update.style_node),
+                    host.published_appearance_is_none(update.style_node),
+                ),
+                _ => ElementBoxKind::FromDisplay,
+            };
+            let created = if box_kind == ElementBoxKind::NoBox {
+                NodeSlotId::INVALID
+            } else {
+                // SAFETY: The builder and element remain live throughout construction.
+                unsafe {
+                    (host.callbacks.create_principal_element_layout)(
+                        host.callbacks.builder,
+                        dom_node,
+                        layout_kind,
+                        box_kind as u8,
+                    )
+                }
             };
             layout_node = created;
             if !created.is_invalid() {
