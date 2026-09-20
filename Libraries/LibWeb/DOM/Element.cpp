@@ -6790,6 +6790,8 @@ void Element::play_or_cancel_animations_after_display_property_change()
         auto pseudo_element = static_cast<CSS::PseudoElement>(i);
         play_or_cancel_depending_on_display(*css_defined_animations(pseudo_element));
     }
+
+    publish_animation_timing_rows();
 }
 
 // https://drafts.csswg.org/selectors/#indicate-focus

@@ -2672,6 +2672,10 @@ void Document::finish_animated_style_update()
 
     for (auto& effect : effects)
         effect->request_observation_sample();
+
+    // Sampling animated style runs the finished-state procedure, which moves hold and start times.
+    // The style stage that follows in this same update must not read what they were before.
+    publish_animation_environment_for_style_update();
 }
 
 void Document::prepare_for_rendering()
@@ -7277,6 +7281,44 @@ GC::Ref<Animations::DocumentTimeline> Document::timeline()
     if (!m_default_timeline)
         m_default_timeline = Animations::DocumentTimeline::create(*this, 0.0);
     return *m_default_timeline;
+}
+
+// Whether an animation is relevant, and therefore whether the style stage has anything to sample,
+// is a question about the WAAPI timing model. Publish what answers it: the current time of every
+// timeline, and the timing of every animation. Script cannot run inside a style update, so this is
+// current for the whole of one; what the stage itself changes it republishes as it goes.
+void Document::publish_animation_environment_for_style_update()
+{
+    Vector<u32> identities;
+    Vector<u32> words;
+    Vector<u64> times;
+    identities.ensure_capacity(m_associated_animation_timelines.size());
+    for (auto const& timeline : m_associated_animation_timelines) {
+        identities.unchecked_append(timeline->style_engine_identity());
+        auto current_time = timeline->current_time();
+        u32 sample_flags = 0;
+        if (current_time.has_value()) {
+            sample_flags |= 1;
+            if (current_time->type == Animations::TimeValue::Type::Percentage)
+                sample_flags |= 2;
+        }
+        words.append(sample_flags);
+        times.append(bit_cast<u64>(current_time.map([](auto const& time) { return time.value; }).value_or(0.0)));
+    }
+    CSS::record_animation_timeline_samples(*this, identities, words, times);
+
+    HashTable<GC::Ptr<DOM::Element>> targets;
+    for (auto& animation : m_associated_animations) {
+        auto effect = animation.effect();
+        if (!effect)
+            continue;
+        auto target = effect->target();
+        if (!target || &target->document() != this)
+            continue;
+        targets.set(target);
+    }
+    for (auto target : targets)
+        target->publish_animation_timing_rows();
 }
 
 void Document::associate_with_timeline(GC::Ref<Animations::AnimationTimeline> timeline)

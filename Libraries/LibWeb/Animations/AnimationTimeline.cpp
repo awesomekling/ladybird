@@ -135,6 +135,7 @@ bool AnimationTimeline::is_inactive() const
 
 AnimationTimeline::AnimationTimeline(GC::Ref<DOM::Document> document)
     : m_associated_document(document)
+    , m_style_engine_identity(document->allocate_animation_timeline_identity())
 {
     m_associated_document->associate_with_timeline(*this);
 }

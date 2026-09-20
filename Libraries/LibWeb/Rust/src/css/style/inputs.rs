@@ -878,6 +878,44 @@ impl RetainedState {
         self.css_defined_animations.names(node, slot)
     }
 
+    /// Record the timing of the animations the host holds for one of an element's animation lists.
+    ///
+    /// The times travel as raw `f64` bits beside a word of presence and kind flags, eight times and
+    /// two words per animation, because a row is a handful of scalars and a struct per animation
+    /// would cost more than the scalars do.
+    pub fn set_element_animation_timing_rows(
+        &mut self,
+        node: StyleNodeID,
+        slot: animations::AnimationSlot,
+        words: &[u32],
+        times: &[u64],
+    ) {
+        let times = times.iter().map(|&bits| f64::from_bits(bits)).collect::<Vec<_>>();
+        self.animation_timing_rows.set(node, slot, words, &times);
+    }
+
+    /// The timing of the animations the host holds for one of an element's animation lists.
+    #[must_use]
+    pub(crate) fn element_animation_timing_rows(
+        &self,
+        node: StyleNodeID,
+        slot: animations::AnimationSlot,
+    ) -> &[animations::AnimationTimingRow] {
+        self.animation_timing_rows.rows(node, slot)
+    }
+
+    /// Record the current time each of the document's animation timelines was sampled at. Published
+    /// whole at the style update's begin boundary, since a timeline's time only moves outside one.
+    pub fn set_animation_timeline_samples(&mut self, identities: &[u32], words: &[u32], times: &[u64]) {
+        let times = times.iter().map(|&bits| f64::from_bits(bits)).collect::<Vec<_>>();
+        self.animation_timeline_samples.set(identities, words, &times);
+    }
+
+    #[must_use]
+    pub(crate) fn animation_timeline_samples(&self) -> &animations::AnimationTimelineSamples {
+        &self.animation_timeline_samples
+    }
+
     /// Record the custom properties an element declares or references. Also an index rather than an
     /// input, and for the same reason: it answers which elements an `@property` registration reaches.
     pub fn set_element_custom_property_names(
@@ -1279,6 +1317,8 @@ impl StyleEngineState {
                 custom_property_environments: Default::default(),
                 nodes_with_substituted_records: HashSet::default(),
                 css_defined_animations: Default::default(),
+                animation_timing_rows: Default::default(),
+                animation_timeline_samples: Default::default(),
                 custom_property_registrations_changed: false,
                 pending_element_style_computation_selections: HashMap::default(),
                 pending_pseudo_style_computation_selections: HashMap::default(),
@@ -2016,6 +2056,7 @@ impl StyleEngineState {
                     .retain(|member| !retired_nodes.contains(member));
             }
             self.retained.css_defined_animations.retire(&retired_nodes);
+            self.retained.animation_timing_rows.retire(&retired_nodes);
             self.retained
                 .deferred_pseudo_element_observable_nodes
                 .retain(|member| !retired_nodes.contains(member));

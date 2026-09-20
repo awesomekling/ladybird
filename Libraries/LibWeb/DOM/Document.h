@@ -1057,6 +1057,11 @@ public:
     GC::Ref<Animations::DocumentTimeline> timeline();
     auto const& last_animation_frame_timestamp() const { return m_last_animation_frame_timestamp; }
 
+    u32 allocate_animation_timeline_identity() { return ++m_next_animation_timeline_identity; }
+    // Publish what the style stage needs to know about animation timing: the current time of every
+    // timeline, and the timing of every animation an element holds a keyframe effect for.
+    void publish_animation_environment_for_style_update();
+
     void associate_with_timeline(GC::Ref<Animations::AnimationTimeline>);
     void disassociate_with_timeline(GC::Ref<Animations::AnimationTimeline>);
     void associate_with_animation(GC::Ref<Animations::Animation>);
@@ -1989,6 +1994,7 @@ private:
 
     // https://www.w3.org/TR/web-animations-1/#timeline-associated-with-a-document
     HashTable<GC::Ref<Animations::AnimationTimeline>> m_associated_animation_timelines;
+    u32 m_next_animation_timeline_identity { 0 };
 
     // NB: Weak so the document does not unnecessarily keep animations alive. Note that this also includes animations
     //     associated with elements in shadow trees so differs from getAnimations()

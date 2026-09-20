@@ -52,6 +52,11 @@ public:
     virtual Optional<double> convert_a_timeline_time_to_an_origin_relative_time(Optional<TimeValue>) { VERIFY_NOT_REACHED(); }
     virtual bool can_convert_a_timeline_time_to_an_origin_relative_time() const { return false; }
 
+    // The identity the style engine knows this timeline by. A timeline's current time is sampled
+    // once per style update and published under it, so the animations it drives can be described
+    // without naming the timeline object itself.
+    u32 style_engine_identity() const { return m_style_engine_identity; }
+
     void associate_with_animation(GC::Ref<Animation> value) { m_associated_animations.set(*value); }
     void disassociate_with_animation(GC::Ref<Animation> value) { m_associated_animations.remove(*value); }
     GC::WeakHashSet<Animation> const& associated_animations() const { return m_associated_animations; }
@@ -77,6 +82,7 @@ protected:
     GC::Ref<DOM::Document> m_associated_document;
 
     GC::WeakHashSet<Animation> m_associated_animations;
+    u32 m_style_engine_identity { 0 };
     Optional<u64> m_last_current_time_update_task_generation;
     Optional<TimeValue> m_observed_current_time;
 

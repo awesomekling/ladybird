@@ -870,6 +870,12 @@ pub struct RetainedState {
     /// The names of the CSS animations the host holds for each element, which the animation stage
     /// matches its newly computed definitions against.
     css_defined_animations: animations::CssDefinedAnimations,
+    /// The timing of every animation the host holds a keyframe effect for, per element and
+    /// pseudo-element, which the animation stage decides relevance from.
+    animation_timing_rows: animations::AnimationTimingRows,
+    /// The current time each of the document's animation timelines was sampled at when the style
+    /// update began.
+    animation_timeline_samples: animations::AnimationTimelineSamples,
     /// Whether the registrations used by this transaction differ from the preceding one. A
     /// previously substituted record must then be recomputed by C++, which implements registered
     /// custom properties, even when its cascade winners did not move.
