@@ -5215,6 +5215,7 @@ pub unsafe extern "C" fn rust_compute_properties(input: *const FfiComputePropert
         result.transitions = build_computed_transition_list(unsafe { &*drive_input.longhand_table });
         result.animations = build_computed_animation_list(unsafe { &*drive_input.longhand_table });
     }
+    let has_animation_definitions = result.animations.count != 0;
     let mut animated_overlay = drive_input.animated_overlay;
     let mut animation_values_applied = unsafe { animated_overlay.as_ref() }.is_some_and(|overlay| !overlay.is_empty());
     crate::css::style::seal::note_host_call("computed_properties.finish_longhand_drive");
@@ -5228,10 +5229,30 @@ pub unsafe extern "C" fn rust_compute_properties(input: *const FfiComputePropert
         return;
     }
 
-    crate::css::style::seal::note_host_call("computed_properties.process_animation_definitions");
-    unsafe { (input.process_animation_definitions)(input.callback_context) };
-    crate::css::style::seal::note_host_call("computed_properties.prepare_animations");
-    let has_animations = unsafe { (input.prepare_animations)(input.callback_context) };
+    // OPTIMIZATION: An element that declares no animation, owns no CSS-defined animation and has no
+    //               animation associated with it has nothing for the animation stage to do:
+    //               reconciling the definitions reconciles two empty lists, and collecting the
+    //               effects to sample finds none. Every part of that question is already published,
+    //               so the answer costs a mirror read instead of two host calls.
+    let element_has_associated_animations = match crate::css::style::tree::StyleNodeID::from_raw(input.style_node) {
+        Some(node) => {
+            style_engine.element_adjustment_facts(node)
+                & crate::css::style::bridge::element_adjustment_fact::HAS_ANIMATIONS
+                != 0
+        }
+        // An element the mirror does not name is one nothing is published about, so it asks the host.
+        None => true,
+    };
+    let element_has_animation_state =
+        has_animation_definitions || input.has_css_defined_animations || element_has_associated_animations;
+    let has_animations = if element_has_animation_state {
+        crate::css::style::seal::note_host_call("computed_properties.process_animation_definitions");
+        unsafe { (input.process_animation_definitions)(input.callback_context) };
+        crate::css::style::seal::note_host_call("computed_properties.prepare_animations");
+        unsafe { (input.prepare_animations)(input.callback_context) }
+    } else {
+        false
+    };
     if animation_values_applied || has_animations {
         let invalidated = unsafe { restore_post_compute_values(&mut *drive_input.longhand_table, false) };
         crate::css::style::seal::note_host_call("computed_properties.did_mutate_post_compute");
