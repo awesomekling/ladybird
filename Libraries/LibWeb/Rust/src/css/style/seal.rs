@@ -59,6 +59,7 @@ thread_local! {
     static UPDATE_DEPTH: Cell<u32> = const { Cell::new(0) };
     static REPORTED: RefCell<HashSet<&'static str>> = RefCell::new(HashSet::new());
     static COUNTS: RefCell<HashMap<&'static str, Counts>> = RefCell::new(HashMap::new());
+    static BETWEEN_PASS_SERVICES: RefCell<HashMap<&'static str, (u64, u64)>> = RefCell::new(HashMap::new());
 }
 
 fn write_report(report: &str) {
@@ -85,6 +86,45 @@ pub(crate) fn end_update() {
         return;
     }
     UPDATE_DEPTH.with(|depth| depth.set(depth.get().checked_sub(1).expect("unbalanced style update scope")));
+}
+
+/// Run a main-thread resource service between sealed evaluation passes.
+///
+/// Unlike an allow-listed callback, this remains a visible dependency of the style update. Abort
+/// mode therefore rejects it unless the service-specific escape hatch is set. The escape hatch is
+/// useful for proving that every other crossing is gone while the resource service remains.
+pub(crate) fn between_pass_font_service<T>(requests: u64, service: impl FnOnce() -> T) -> T {
+    let mode = mode();
+    if mode == Mode::Off {
+        return service();
+    }
+    if UPDATE_DEPTH.with(|depth| depth.get() == 0) {
+        note_host_call("resolve_font");
+        return service();
+    }
+    let suspended_depth = UPDATE_DEPTH.with(|depth| depth.replace(0));
+    debug_assert_ne!(suspended_depth, 0);
+    BETWEEN_PASS_SERVICES.with(|services| {
+        let mut services = services.borrow_mut();
+        let counts = services.entry("resolve_font").or_default();
+        counts.0 = counts.0.wrapping_add(requests);
+        counts.1 = counts.1.wrapping_add(1);
+    });
+    let allowed = std::env::var("LIBWEB_SEAL_STYLE_STAGE_ALLOW_FONT_SERVICE").as_deref() == Ok("1");
+    assert!(
+        mode != Mode::Abort || allowed,
+        "style stage is sealed, but requires the between-pass resolve_font service"
+    );
+    let result = service();
+    UPDATE_DEPTH.with(|depth| {
+        assert_eq!(
+            depth.get(),
+            0,
+            "unbalanced style update scope in a between-pass service"
+        );
+        depth.set(suspended_depth);
+    });
+    result
 }
 
 /// Record one Rust-to-C++ call. Calls outside the complete style update are part of input
@@ -134,6 +174,17 @@ pub(crate) fn flush_census() {
         write_report(&format!(
             "STYLE SEAL COUNT: callback={callback} calls={} during_style={}\n",
             counts.calls, counts.during_style
+        ));
+    }
+    let mut services = BETWEEN_PASS_SERVICES.with(|services| {
+        std::mem::take(&mut *services.borrow_mut())
+            .into_iter()
+            .collect::<Vec<_>>()
+    });
+    services.sort_unstable_by_key(|(service, _)| *service);
+    for (service, (requests, rounds)) in services {
+        write_report(&format!(
+            "STYLE SEAL COUNT: between_pass_service {service}: {requests} requests in {rounds} rounds\n"
         ));
     }
 }

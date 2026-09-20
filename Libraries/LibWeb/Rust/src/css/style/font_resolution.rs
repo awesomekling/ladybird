@@ -134,8 +134,7 @@ impl FontResolverHost {
     /// the returned cascade and retain the host's rendering-triggered loading behavior.
     pub fn refill(&self, cache: &mut FontResolutionCache, request: FontRequest) {
         cache.prepare(request.ffi.font_environment_generation);
-        super::seal::note_host_call("resolve_font");
-        let ffi = unsafe { (self.resolve)(self.context, request.ffi) };
+        let ffi = super::seal::between_pass_font_service(1, || unsafe { (self.resolve)(self.context, request.ffi) });
         cache.insert(request, ffi);
     }
 }
