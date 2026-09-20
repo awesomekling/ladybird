@@ -11,6 +11,7 @@
 
 #include <AK/AtomicRefCounted.h>
 #include <AK/FlyString.h>
+#include <AK/Once.h>
 #include <AK/Optional.h>
 #include <AK/RefPtr.h>
 #include <AK/Utf16String.h>
@@ -111,6 +112,7 @@ private:
 #endif
 
     mutable RefPtr<Font const> m_bold_variant;
+    mutable OnceFlag m_harfbuzz_font_once;
     mutable hb_font_t* m_harfbuzz_font { nullptr };
 
     mutable TriState m_is_emoji_font { TriState::Unknown };
