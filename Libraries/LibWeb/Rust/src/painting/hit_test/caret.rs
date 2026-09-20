@@ -431,8 +431,10 @@ impl HitTestList {
     fn line_in_scope(&self, arena: &LayoutNodeArena, callbacks: &FfiHitTestQueryCallbacks, line_index: usize) -> bool {
         let line = &self.caret_lines[line_index];
         for caret_item_index in line.first_caret_item_index..=line.last_caret_item_index {
-            let shell = self.item_target_shell(arena, self.caret_item_indices[caret_item_index]);
-            if !shell.is_null() && callbacks.shell_in_scope(shell) {
+            let Some(slot) = self.item_target_slot(arena, self.caret_item_indices[caret_item_index]) else {
+                continue;
+            };
+            if resolve::row_is_in_scope(arena, callbacks.scope, callbacks.document, slot) {
                 return true;
             }
         }

@@ -6,6 +6,7 @@
 
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Node.h>
+#include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/HTML/HTMLAreaElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
 #include <LibWeb/HTML/HTMLMapElement.h>
@@ -91,14 +92,28 @@ CSSPixelRect HitTestDisplayList::viewport_rect_for_context(Compositing::SpatialN
     return result.scaled(1.0f / pixel_ratio).to_type<CSSPixels>();
 }
 
+// The identity the style mirror holds for a node, which is what the render side compares against.
+// Only the four node types that hold a place in the mirror's child sequence have one.
+static u32 style_node_of(DOM::Node const* node)
+{
+    if (auto const* document = as_if<DOM::Document>(node))
+        return document->style_node_id().value();
+    if (auto const* shadow_root = as_if<DOM::ShadowRoot>(node))
+        return shadow_root->style_node_id().value();
+    return Layout::Node::style_node_of(node).value();
+}
+
 struct HitTestDisplayList::QueryContext {
     GC::Ptr<DOM::Document const> document;
     double device_pixels_per_css_pixel { 1 };
     ChromeMetrics const* chrome_metrics { nullptr };
     GC::Ptr<DOM::Node const> scope { nullptr };
 
-    Layout::RustFFI::FfiHitTestQueryCallbacks callbacks()
+    // A scope from another document names nothing in this arena, so it is dropped rather than
+    // mistaken for one of this document's identities.
+    Layout::RustFFI::FfiHitTestQueryCallbacks callbacks(DOM::Document const* arena_document)
     {
+        auto scope_in_this_document = scope && arena_document && &scope->document() == arena_document;
         auto scroll_offsets = document ? document->scroll_state_snapshot().device_offsets() : ReadonlySpan<Gfx::FloatPoint> {};
         Layout::RustFFI::FfiHitTestQueryCallbacks callbacks {
             .context = this,
@@ -109,12 +124,8 @@ struct HitTestDisplayList::QueryContext {
             .chrome_metrics = {},
             .viewport_wheel_overflow_x = 0,
             .viewport_wheel_overflow_y = 0,
-            .shell_in_scope = [](void* context_pointer, void* shell) -> bool {
-                auto& context = *static_cast<QueryContext*>(context_pointer);
-                VERIFY(context.scope);
-                auto const* dom_node = dom_node_for_shell(shell);
-                return dom_node && context.scope->is_inclusive_ancestor_of(*dom_node);
-            },
+            .scope = scope_in_this_document ? style_node_of(scope.ptr()) : 0,
+            .document = style_node_of(arena_document),
         };
         if (chrome_metrics)
             callbacks.chrome_metrics = *chrome_metrics;
@@ -136,7 +147,6 @@ struct CaretPositionQueryContext {
 
     CaretPositionQueryContext(DOM::Node const& node, size_t offset)
     {
-        auto style_node_of = [](DOM::Node const* node) { return Layout::Node::style_node_of(node).value(); };
         query.node = style_node_of(&node);
         auto const* child_at_offset = node.child_at_index(offset);
         query.child_at_offset = style_node_of(child_at_offset);
@@ -162,13 +172,13 @@ Optional<HitTestDisplayList::TopmostItem> HitTestDisplayList::topmost_item_from(
 Optional<HitTestDisplayList::TopmostItem> HitTestDisplayList::find_topmost_item(CSSPixelPoint point, DOM::Document const& document, double device_pixels_per_css_pixel, ChromeMetrics const& chrome_metrics) const
 {
     QueryContext context { &document, device_pixels_per_css_pixel, &chrome_metrics, nullptr };
-    return topmost_item_from(Layout::RustFFI::layout_arena_hit_test_find_topmost_item(m_arena->handle(), context.callbacks(), point));
+    return topmost_item_from(Layout::RustFFI::layout_arena_hit_test_find_topmost_item(m_arena->handle(), context.callbacks(m_arena->document()), point));
 }
 
 void HitTestDisplayList::find_topmost_items_for_caret(CSSPixelPoint point, DOM::Document const& document, double device_pixels_per_css_pixel, ChromeMetrics const& chrome_metrics, Optional<TopmostItem>& caret_item, Optional<TopmostItem>& hit_item) const
 {
     QueryContext context { &document, device_pixels_per_css_pixel, &chrome_metrics, nullptr };
-    auto items = Layout::RustFFI::layout_arena_hit_test_find_topmost_items_for_caret(m_arena->handle(), context.callbacks(), point);
+    auto items = Layout::RustFFI::layout_arena_hit_test_find_topmost_items_for_caret(m_arena->handle(), context.callbacks(m_arena->document()), point);
     caret_item = topmost_item_from(items.caret_item);
     hit_item = topmost_item_from(items.hit_item);
 }
@@ -177,7 +187,7 @@ Vector<size_t> HitTestDisplayList::hit_item_indices_topmost_first(CSSPixelPoint 
 {
     QueryContext context { &document, device_pixels_per_css_pixel, &chrome_metrics, nullptr };
     Vector<size_t> indices;
-    Layout::RustFFI::layout_arena_hit_test_all(m_arena->handle(), context.callbacks(), point, &indices, [](void* sink, size_t index) {
+    Layout::RustFFI::layout_arena_hit_test_all(m_arena->handle(), context.callbacks(m_arena->document()), point, &indices, [](void* sink, size_t index) {
         static_cast<Vector<size_t>*>(sink)->append(index);
     });
     return indices;
@@ -204,7 +214,7 @@ bool HitTestDisplayList::item_is_inline_adjacent_to_line(size_t item_index, size
 HitTestDisplayList::ClosestLine HitTestDisplayList::find_closest_line(CSSPixelPoint point, DOM::Document const& document, double device_pixels_per_css_pixel, CaretPositionMode mode, DOM::Node const* scope_dom_node, Compositing::AccumulatedVisualContextTree::ClipBehavior clip_behavior) const
 {
     QueryContext context { &document, device_pixels_per_css_pixel, nullptr, scope_dom_node };
-    auto result = Layout::RustFFI::layout_arena_hit_test_find_closest_line(m_arena->handle(), context.callbacks(), point, to_underlying(mode), scope_dom_node != nullptr, clip_behavior == Compositing::AccumulatedVisualContextTree::ClipBehavior::Respect);
+    auto result = Layout::RustFFI::layout_arena_hit_test_find_closest_line(m_arena->handle(), context.callbacks(m_arena->document()), point, to_underlying(mode), scope_dom_node != nullptr, clip_behavior == Compositing::AccumulatedVisualContextTree::ClipBehavior::Respect);
     ClosestLine closest_line;
     if (result.has_index)
         closest_line.index = result.index;
@@ -432,7 +442,7 @@ Optional<CaretPosition> HitTestDisplayList::caret_position_on_adjacent_line(DOM:
 
     // INTEROP: Vertical caret movement in Chromium, WebKit, and Gecko follows rendered line geometry rather than DOM
     QueryContext context { nullptr, 1, nullptr, &scope };
-    auto adjacent = Layout::RustFFI::layout_arena_hit_test_adjacent_line(m_arena->handle(), context.callbacks(), current_line.line_index, direction == CaretLineDirection::Next ? 1 : 0, inline_coordinate.raw_value());
+    auto adjacent = Layout::RustFFI::layout_arena_hit_test_adjacent_line(m_arena->handle(), context.callbacks(m_arena->document()), current_line.line_index, direction == CaretLineDirection::Next ? 1 : 0, inline_coordinate.raw_value());
     if (!adjacent.has_line)
         return {};
     // Reuse point-to-caret resolution after choosing the line so text, atomic boxes, and empty lines share one rule for

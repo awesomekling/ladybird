@@ -1694,6 +1694,47 @@ impl StyleNodeTree {
         candidate == root
     }
 
+    /// Whether `node` is `root` or lies below it, text nodes included.
+    ///
+    /// This is the DOM tree and not the flat tree: a slotted node lies below the parent it is
+    /// written under rather than below the slot it renders in, and a shadow root is a root of its
+    /// own, so a host is not an ancestor of what its shadow tree holds. `document` is the node the
+    /// document's children belong to; they are not linked into a child sequence under it, so the
+    /// climb ends at a node with no parent instead of reaching it.
+    ///
+    /// The depth column cannot bound this climb the way it bounds [`Self::is_in_subtree_of`],
+    /// because it counts through the shadow roots this stops at.
+    #[must_use]
+    pub fn is_in_dom_subtree_of(&self, node: StyleNodeID, root: StyleNodeID, document: StyleNodeID) -> bool {
+        if node == root {
+            return true;
+        }
+        // Only an element owns a child sequence, so a text root holds nothing but itself, and a
+        // text node is answered for by the element it is linked under.
+        if root.is_text() {
+            return false;
+        }
+        let mut candidate = match node.is_text() {
+            true => match self.text_parent(node) {
+                Some(parent) => parent,
+                None => return false,
+            },
+            false => node,
+        };
+        loop {
+            if candidate == root {
+                return true;
+            }
+            if self.host_of(candidate).is_some() {
+                return false;
+            }
+            match self.parent(candidate) {
+                Some(parent) => candidate = parent,
+                None => return root == document,
+            }
+        }
+    }
+
     // -- Accounting --------------------------------------------------------------------------
 
     /// Exact capacity of every column, charged to Tier 1.
@@ -2326,6 +2367,41 @@ mod tests {
         assert!(!fixture.tree.has_shadow_relations());
         assert_eq!(fixture.tree.flat_tree_children(parent).collect::<Vec<_>>(), vec![child]);
         assert_eq!(fixture.tree.assigned_nodes_of(parent), &[]);
+    }
+
+    #[test]
+    fn the_dom_subtree_test_stops_at_a_shadow_root_and_ends_at_the_document() {
+        let mut fixture = TreeFixture::new();
+        let document = fixture.element();
+        let root_element = fixture.element();
+        let host = fixture.element();
+        let light_child = fixture.element();
+        let shadow_root = fixture.element();
+        let shadow_child = fixture.element();
+        let text = fixture.tree.allocate_text(&mut fixture.memory);
+        fixture.attach_children(root_element, &[host]);
+        fixture.attach_children(host, &[light_child]);
+        fixture.attach_children(shadow_root, &[shadow_child]);
+        fixture.tree.set_shadow_root(host, shadow_root, &mut fixture.memory);
+        fixture.tree.link_in_dom_order(text, Some(shadow_child), None);
+        // The document's children are not linked under it, exactly as the host links them.
+        assert_eq!(fixture.tree.parent(root_element), None);
+        assert_eq!(fixture.tree.parent(shadow_root), None);
+
+        let is_in = |node, root| fixture.tree.is_in_dom_subtree_of(node, root, document);
+        assert!(is_in(light_child, host), "a light child lies below its host");
+        assert!(is_in(host, host), "the test is inclusive");
+        assert!(is_in(light_child, document), "the document holds its own tree");
+        assert!(is_in(shadow_child, shadow_root), "a shadow root holds its own tree");
+        assert!(is_in(text, shadow_child), "a text node is answered for by its parent");
+        assert!(
+            !is_in(shadow_child, host),
+            "a host is not an ancestor of its shadow tree"
+        );
+        assert!(!is_in(shadow_child, document), "nor is the document");
+        assert!(!is_in(text, host), "and neither is it of text inside that tree");
+        assert!(!is_in(host, light_child), "a child is not an ancestor of its parent");
+        assert!(!is_in(host, text), "a text node holds nothing but itself");
     }
 
     #[test]
