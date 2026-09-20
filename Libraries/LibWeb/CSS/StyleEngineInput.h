@@ -167,6 +167,16 @@ enum ElementConstructionFact : u32 {
     // this word alone, so the fact is published into both rather than read across two.
     ConstructedAsDocumentElement = 1 << 6,
 };
+// What an element's `disabled` attribute makes of it, as the walk from a hit node to an event
+// target reads it. Mirrors the Rust `DISABLED_*` constants.
+enum ElementFormControlDisabledFact : u8 {
+    // A button, input, select, textarea or form-associated custom element carrying the attribute.
+    // It is disabled, and so is everything written under it.
+    DisabledFormControl = 1 << 0,
+    // A `<fieldset>` carrying the attribute. The fieldset itself stays enabled; everything written
+    // under it does not, its first `<legend>` included.
+    DisabledFieldSet = 1 << 1,
+};
 // Which principal box an element asks for before its computed style has a say. The element's own
 // type and state decide this; the tree build resolves it against the element's computed display
 // and appearance. Mirrors Rust `FfiElementBoxKind`.
@@ -200,6 +210,13 @@ enum class ElementBoxKind : u8 {
     InputText,
 };
 WEB_API u32 element_construction_facts(DOM::Element const&);
+WEB_API u8 element_form_control_disabled_facts(DOM::Element const&);
+WEB_API void record_element_form_control_disabled_facts(DOM::Element&);
+
+// Whether an event aimed at the node named by `identity` would reach a disabled form control on its
+// way out of the tree: the node itself is one, or one of the nodes it is written under is. Answered
+// from the published facts above, without asking a DOM node anything.
+WEB_API bool event_dispatch_is_disabled(DOM::Document&, DOM::NodeIdentity);
 WEB_API u32 element_style_adjustment_facts(DOM::Element const&);
 WEB_API u32 element_box_type_adjustment_facts(DOM::Element const&);
 WEB_API void record_element_adjustment_facts(DOM::Element&);

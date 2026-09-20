@@ -17,11 +17,13 @@
 #include <LibUnicode/CharacterTypes.h>
 #include <LibUnicode/Segmenter.h>
 #include <LibWeb/CSS/ComputedValues.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/VisualViewport.h>
 #include <LibWeb/Clipboard/ClipboardEvent.h>
 #include <LibWeb/DOM/CommitMessages.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/DOM/Range.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/Editing/EditingHistory.h>
@@ -280,13 +282,11 @@ static bool parent_element_for_event_dispatch(Layout::Node& target_layout_node, 
             layout_node = generator_layout_node;
     }
 
-    auto* current_ancestor_node = node.ptr();
-    do {
-        auto const* form_associated_element = as_if<HTML::FormAssociatedElement>(current_ancestor_node);
-        if (form_associated_element && !form_associated_element->enabled()) {
-            return false;
-        }
-    } while ((current_ancestor_node = current_ancestor_node->parent()));
+    // An event aimed at a disabled form control is not dispatched, and neither is one aimed at
+    // anything written under one. Both follow from facts the element published when its `disabled`
+    // attribute last moved, so the answer costs no DOM walk.
+    if (CSS::event_dispatch_is_disabled(node->document(), DOM::NodeIdentity::of(*node)))
+        return false;
 
     while (layout_node && node && !node->is_element()) {
         auto* dom_node = layout_node->is_anonymous() ? nullptr : layout_node->dom_node();

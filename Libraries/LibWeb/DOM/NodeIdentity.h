@@ -34,6 +34,10 @@ public:
     bool operator==(NodeIdentity const&) const = default;
     [[nodiscard]] unsigned hash() const { return pair_int_hash(m_style_node.value(), to_underlying(m_kind)); }
 
+    // The style tree identity this names, which is nothing for the document and for no node at all.
+    // A reader that asks the style mirror a question about this node asks it with this.
+    [[nodiscard]] CSS::StyleNodeID style_node() const { return m_kind == Kind::StyleNode ? m_style_node : CSS::StyleNodeID {}; }
+
     [[nodiscard]] GC::Ptr<Node> resolve(Document&) const;
     // The layout row this identity's node is bound to in `arena`, if any. This is the arena's own
     // index; no DOM node is asked for its layout node.
