@@ -48,6 +48,7 @@ void InvalidationJournal::note_needs_repaint(NodeIdentity identity, InvalidateDi
     entry.needs_repaint = true;
     // Each level of display list invalidation covers the one below it, so the widest mark wins.
     entry.invalidate_display_list = max(entry.invalidate_display_list, invalidate_display_list);
+    m_document.request_frame_for_journalled_repaint({});
     drain_if_the_render_side_is_reading();
 }
 
@@ -57,6 +58,7 @@ void InvalidationJournal::note_needs_repaint_in_subtree(NodeIdentity identity)
     entry.needs_subtree_repaint = true;
     entry.needs_repaint = true;
     entry.invalidate_display_list = InvalidateDisplayList::PaintCommandsAndHitTestList;
+    m_document.request_frame_for_journalled_repaint({});
     drain_if_the_render_side_is_reading();
 }
 

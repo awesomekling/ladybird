@@ -9948,6 +9948,30 @@ void Document::set_needs_repaint(InvalidateDisplayList should_invalidate_display
     }
 }
 
+// A repaint mark the journal holds is written through at the next drain, and the drain the
+// rendering update performs is the one that reaches a mark made outside a layout update. That
+// update only happens if a frame was asked for, so the damage waits for the drain but the request
+// for the frame that drains it cannot. Everything else the applied mark does stays with the drain.
+void Document::request_frame_for_journalled_repaint(Badge<InvalidationJournal>)
+{
+    request_frame_for_pending_repaint();
+}
+
+void Document::request_frame_for_pending_repaint()
+{
+    auto navigable = this->navigable();
+    if (!navigable)
+        return;
+
+    if (navigable->is_traversable()) {
+        page().client().request_frame();
+        return;
+    }
+
+    if (auto container = navigable->container())
+        container->document().request_frame_for_pending_repaint();
+}
+
 void Document::set_needs_accumulated_visual_contexts_update(bool value)
 {
     m_needs_accumulated_visual_contexts_update = value;
