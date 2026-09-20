@@ -1926,13 +1926,22 @@ pub unsafe extern "C" fn layout_arena_paintable_invalidate_paint_cache(
     arena: *mut c_void,
     paintable: NodeSlotId,
     propagated_text_decorations: bool,
+    stage: u8,
 ) {
     use crate::painting::record::damage::PaintDamage;
     let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::published_immutable::note_row_mutation(
+    let writer = match stage {
+        0 => "journal drain",
+        1 => "anonymous row invalidation",
+        2 => "layout detach cleanup",
+        3 => "paint fact reconciliation",
+        _ => "unknown paint-cache invalidation stage",
+    };
+    crate::painting::published_immutable::note_row_mutation_with_writer(
         arena,
         paintable,
         "M12 layout_arena_paintable_invalidate_paint_cache",
+        writer,
     );
     if propagated_text_decorations {
         arena.push_propagated_text_decoration_damage(paintable);

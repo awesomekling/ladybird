@@ -89,7 +89,22 @@ WEB_API void push_selection_pseudo_style_of_parent(Layout::TextNode&);
 
 WEB_API void set_needs_repaint(Layout::Node const&, InvalidateDisplayList = InvalidateDisplayList::PaintCommandsAndHitTestList);
 WEB_API void set_needs_repaint_in_subtree(Layout::Node const&);
+
+enum class PaintCacheInvalidation : u8 {
+    PaintAndHitTest,
+    PropagatedTextDecorations,
+};
+
+enum class PaintCacheInvalidationStage : u8 {
+    JournalDrain,
+    AnonymousRow,
+    DetachCleanup,
+    PaintFactReconciliation,
+};
+
 WEB_API void invalidate_paint_cache(Layout::Node const&);
+WEB_API void invalidate_propagated_text_decoration_caches(Layout::Node const&);
+WEB_API void apply_paint_cache_invalidation(Layout::Node const&, PaintCacheInvalidation, PaintCacheInvalidationStage);
 WEB_API void repaint_after_style_change(Layout::Node const&, CSS::RequiredInvalidationAfterStyleChange const&);
 
 WEB_API Layout::RustFFI::FfiRectToViewportTransform identity_rect_to_viewport_transform();

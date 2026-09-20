@@ -15,6 +15,12 @@
 #include <LibWeb/Forward.h>
 #include <LibWeb/InvalidateDisplayList.h>
 
+namespace Web::Painting {
+
+enum class PaintCacheInvalidation : u8;
+
+}
+
 namespace Web::DOM {
 
 enum class PaintFactsFamily : u8 {
@@ -46,6 +52,7 @@ public:
     void note_canvas_paint_facts(NodeIdentity, bool has_content, i32 content_width, i32 content_height, u64 canvas_id, u64 content_generation);
     void note_form_control_paint_facts(NodeIdentity, bool enabled, bool checked, bool indeterminate, bool being_activated);
     void note_paint_facts(NodeIdentity, PaintFactsFamily, Function<void(Layout::Node const&)>&&);
+    void note_paint_cache_invalidation(NodeIdentity, Painting::PaintCacheInvalidation);
 
     // Writes every entry through to the render side and empties the journal.
     void drain();
@@ -76,6 +83,8 @@ private:
         bool form_control_checked { false };
         bool form_control_indeterminate { false };
         bool form_control_being_activated { false };
+        bool invalidate_paint_and_hit_test_cache { false };
+        bool invalidate_propagated_text_decoration_caches { false };
         Function<void(Layout::Node const&)> layer_image_paint_facts_update;
         Function<void(Layout::Node const&)> replaced_image_paint_facts_update;
         Function<void(Layout::Node const&)> video_paint_facts_update;

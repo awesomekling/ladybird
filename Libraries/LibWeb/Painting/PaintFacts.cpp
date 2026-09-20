@@ -65,8 +65,10 @@ static void push_canvas_paint_facts_onto(HTML::HTMLCanvasElement const& canvas, 
         facts.content_generation = canvas.content_generation();
     }
     bool changed = Layout::RustFFI::layout_arena_set_canvas_paint_facts(layout_node.arena_handle(), Layout::Node::slot_id(&layout_node), facts);
+    // This reconciles facts while a layout row is being published, so the damage belongs to that
+    // publication rather than a later identity-based journal entry.
     if (changed && has_committed_box(layout_node))
-        invalidate_paint_cache(layout_node);
+        apply_paint_cache_invalidation(layout_node, PaintCacheInvalidation::PaintAndHitTest, PaintCacheInvalidationStage::PaintFactReconciliation);
 }
 
 void push_canvas_paint_facts(HTML::HTMLCanvasElement const& canvas)
@@ -100,7 +102,12 @@ static Optional<u64> composited_context_id_for_navigable_container(HTML::Navigab
     return context_id->value();
 }
 
-static void push_navigable_container_paint_facts_onto(HTML::NavigableContainer const& navigable_container, Layout::Node const& layout_node)
+enum class ReconcilingBeforeRecording : u8 {
+    No,
+    Yes,
+};
+
+static void push_navigable_container_paint_facts_onto(HTML::NavigableContainer const& navigable_container, Layout::Node const& layout_node, ReconcilingBeforeRecording reconciling = ReconcilingBeforeRecording::No)
 {
     Layout::RustFFI::FfiNavigableContainerPaintFacts facts {};
     if (auto context_id = composited_context_id_for_navigable_container(navigable_container); context_id.has_value()) {
@@ -114,7 +121,15 @@ static void push_navigable_container_paint_facts_onto(HTML::NavigableContainer c
         facts.local_content_navigable.local_id = content_navigable->id().local_id;
     }
     bool changed = Layout::RustFFI::layout_arena_set_navigable_container_paint_facts(layout_node.arena_handle(), Layout::Node::slot_id(&layout_node), facts);
-    if (changed && has_committed_box(layout_node))
+    if (!changed)
+        return;
+    if (reconciling == ReconcilingBeforeRecording::Yes) {
+        // Recording reads these facts immediately below its call site, after the journal has
+        // already drained. Reconcile and damage them as one named pre-recording stage.
+        apply_paint_cache_invalidation(layout_node, PaintCacheInvalidation::PaintAndHitTest, PaintCacheInvalidationStage::PaintFactReconciliation);
+        return;
+    }
+    if (has_committed_box(layout_node))
         invalidate_paint_cache(layout_node);
 }
 
@@ -134,7 +149,7 @@ void reconcile_navigable_container_paint_facts(DOM::Document const& document)
         auto const* layout_node = navigable_container->layout_node();
         if (!layout_node || !is_navigable_container_viewport_paintable(*layout_node))
             continue;
-        push_navigable_container_paint_facts_onto(*navigable_container, *layout_node);
+        push_navigable_container_paint_facts_onto(*navigable_container, *layout_node, ReconcilingBeforeRecording::Yes);
     }
 }
 
