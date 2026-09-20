@@ -2517,6 +2517,12 @@ impl LayoutNodeArena {
             self.element_construction_facts(style_node),
         ));
         self.set_node_style_node(slot, style_node);
+        // The name the document knows the row's node by. The mirror publishes one for an element
+        // and for the document; a text node's row answers for nothing, as its identity reads zero.
+        let unique_node_id = style_node.map_or(0, |style_node| {
+            self.with_style_store(|engine| engine.element_unique_node_id(style_node))
+        });
+        self.unique_node_ids().publish(slot, unique_node_id);
         self.enroll_node_for_replaced_content_facts_sync_if_eligible(slot);
     }
 
