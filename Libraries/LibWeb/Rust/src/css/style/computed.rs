@@ -3330,6 +3330,11 @@ impl ComputedGroupSets {
     }
 
     fn note_style_record_publication(&self, style_record: FinalStyleRecordID, entry: &'static str) {
+        // Fingerprinting a record hashes every group payload it names, and these two sit on the
+        // reader entry points, so nothing may be hashed unless the verifier is on to read it.
+        if !crate::painting::published_immutable::enabled() {
+            return;
+        }
         let Some(fingerprint) = self.style_record_fingerprint(style_record) else {
             return;
         };
@@ -3342,6 +3347,9 @@ impl ComputedGroupSets {
     }
 
     fn verify_style_record(&self, style_record: FinalStyleRecordID, entry: &'static str) {
+        if !crate::painting::published_immutable::enabled() {
+            return;
+        }
         let Some(fingerprint) = self.style_record_fingerprint(style_record) else {
             return;
         };
