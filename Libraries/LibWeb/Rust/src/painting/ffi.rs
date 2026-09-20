@@ -604,6 +604,7 @@ pub unsafe extern "C" fn layout_arena_prepare_for_rendering(
     root_background_source: crate::painting::host::FfiRootBackgroundSource,
     visual_context_update_pending: bool,
 ) -> FfiRenderingPreparationOutcome {
+    let main_thread = unsafe { crate::stage::MainThread::from_ffi_entry() };
     let arena = unsafe { arena_from_handle(arena) };
     let background_source_changed = {
         let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
@@ -615,7 +616,7 @@ pub unsafe extern "C" fn layout_arena_prepare_for_rendering(
     // The overflow recalculation is a pass of its own, and it hands the document the scroll
     // offsets it settled only once that pass is over. Enter the visual context update after it,
     // so that handover is not inside a pass either.
-    crate::painting::scrollable_overflow::update_scrollable_overflow(arena);
+    crate::painting::scrollable_overflow::update_scrollable_overflow(arena, &main_thread);
     let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
     // The root background covers the viewport united with the root's scrollable overflow, which
     // recording reads. Measure it here: measuring it lazily during recording could flip its
@@ -1634,12 +1635,13 @@ pub unsafe extern "C" fn layout_arena_publish_recording(
     arena: *mut c_void,
     publish: crate::painting::host::FfiRecordingPublishCallbacks,
 ) -> u64 {
+    let main_thread = unsafe { crate::stage::MainThread::from_ffi_entry() };
     let arena = unsafe { arena_from_handle(arena) };
     let Some(pending) = arena.paint_state().borrow_mut().pending_recording.take() else {
         return 0;
     };
     crate::painting::published_immutable::before_publication(arena);
-    let sequence = crate::painting::record::publish::publish_recording(arena, pending, &publish);
+    let sequence = crate::painting::record::publish::publish_recording(arena, pending, &main_thread, &publish);
     crate::painting::published_immutable::published(arena);
     sequence
 }

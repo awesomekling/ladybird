@@ -811,7 +811,7 @@ fn box_holds_scroll_state(arena: &LayoutNodeArena, slot: NodeSlotId) -> bool {
         || arena.node_flags_if_live(slot) & crate::layout::node_data::NodeFlag::HasScrollOffset as u32 != 0
 }
 
-pub(crate) fn update_scrollable_overflow(arena: &LayoutNodeArena) {
+pub(crate) fn update_scrollable_overflow(arena: &LayoutNodeArena, main_thread: &crate::stage::MainThread) {
     let Some(viewport) = arena.scrollable_overflow.viewport.get() else {
         return;
     };
@@ -913,7 +913,7 @@ pub(crate) fn update_scrollable_overflow(arena: &LayoutNodeArena) {
         if !shell.is_null() {
             // SAFETY: The registered host receives a live shell. No mutable arena or cache
             // borrow is held while it re-enters geometry queries to store the offset.
-            unsafe { host.set_scroll_offset(shell, offset.into()) };
+            unsafe { host.set_scroll_offset(main_thread, shell, offset.into()) };
         }
     }
 }
