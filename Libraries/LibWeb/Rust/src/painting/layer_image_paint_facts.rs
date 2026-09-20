@@ -19,17 +19,14 @@ pub(crate) struct LayerImagePaintFacts {
 }
 
 impl LayerImagePaintFacts {
-    /// # Safety
-    ///
-    /// `facts.content.frame` must be null or point to a live `Gfx::DecodedImageFrame`.
-    pub(crate) unsafe fn from_ffi(facts: &FfiLayerImagePaintFacts) -> Self {
+    pub(crate) fn from_ffi(facts: &FfiLayerImagePaintFacts) -> Self {
         Self {
             is_paintable: facts.is_paintable,
             natural: SizeWithAspectRatio::from_ffi(&facts.natural),
             image_set_selected_option_index: facts
                 .has_image_set_selected_option
                 .then_some(facts.image_set_selected_option_index),
-            content: unsafe { ImageContent::from_ffi(&facts.content) },
+            content: ImageContent::from_ffi(&facts.content),
             single_pixel_color: facts
                 .single_pixel_color
                 .has_value

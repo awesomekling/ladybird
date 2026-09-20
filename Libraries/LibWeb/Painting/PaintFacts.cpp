@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibGfx/ImageFrameHandle.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ImageSetStyleValue.h>
 #include <LibWeb/DOM/Document.h>
@@ -149,7 +150,7 @@ static Layout::RustFFI::FfiNaturalSize natural_size_facts(Optional<CSSPixels> wi
     return natural;
 }
 
-static Layout::RustFFI::FfiImageContent image_content_facts(GC::Ptr<HTML::DecodedImageData> decoded_image_data, Optional<Gfx::DecodedImageFrame>& current_frame_storage)
+static Layout::RustFFI::FfiImageContent image_content_facts(GC::Ptr<HTML::DecodedImageData> decoded_image_data, Optional<Gfx::ImageFrameHandle>& current_frame_handle)
 {
     Layout::RustFFI::FfiImageContent content {};
     if (!decoded_image_data)
@@ -162,17 +163,18 @@ static Layout::RustFFI::FfiImageContent image_content_facts(GC::Ptr<HTML::Decode
         return content;
     }
     content.kind = Layout::RustFFI::FfiImageContentKind::Raster;
-    current_frame_storage = decoded_image_data->current_frame();
-    if (current_frame_storage.has_value())
-        content.frame = &current_frame_storage.value();
+    if (auto current_frame = decoded_image_data->current_frame(); current_frame.has_value()) {
+        current_frame_handle.emplace(current_frame.value());
+        content.frame_id = current_frame_handle->id();
+    }
     return content;
 }
 
-static Layout::RustFFI::FfiLayerImagePaintFacts layer_image_paint_facts_for(CSS::AbstractImageStyleValue const& image, GC::Ptr<HTML::DecodedImageData> decoded_image_data, Optional<Gfx::DecodedImageFrame>& current_frame_storage)
+static Layout::RustFFI::FfiLayerImagePaintFacts layer_image_paint_facts_for(CSS::AbstractImageStyleValue const& image, GC::Ptr<HTML::DecodedImageData> decoded_image_data, Optional<Gfx::ImageFrameHandle>& current_frame_handle)
 {
     Layout::RustFFI::FfiLayerImagePaintFacts facts {};
     facts.is_paintable = image.is_paintable(decoded_image_data);
-    facts.content = image_content_facts(decoded_image_data, current_frame_storage);
+    facts.content = image_content_facts(decoded_image_data, current_frame_handle);
     if (decoded_image_data) {
         auto natural_size = image.natural_size(*decoded_image_data);
         facts.natural = natural_size_facts(natural_size.width, natural_size.height, natural_size.aspect_ratio);
@@ -199,16 +201,16 @@ void push_layer_image_paint_facts(Layout::NodeWithStyle const& layout_node)
     auto const& background_layers = layout_node.background_layers();
     auto const& mask_layers = layout_node.mask_layers();
     Vector<Layout::RustFFI::FfiLayerImagePaintFactsEntry> entries;
-    Vector<Optional<Gfx::DecodedImageFrame>> current_frames;
-    current_frames.ensure_capacity(background_layers.size() + mask_layers.size() + 1);
+    Vector<Optional<Gfx::ImageFrameHandle>> current_frame_handles;
+    current_frame_handles.ensure_capacity(background_layers.size() + mask_layers.size() + 1);
     auto append_entry = [&](Layout::RustFFI::FfiLayerImageList list, size_t computed_index, CSS::AbstractImageStyleValue const* image, Layout::NodeWithStyle::ImageObserver const* observer) {
         if (!image)
             return;
-        current_frames.append({});
+        current_frame_handles.append({});
         entries.append({
             .list = list,
             .computed_index = static_cast<u32>(computed_index),
-            .facts = layer_image_paint_facts_for(*image, decoded_image_data_of(observer), current_frames.last()),
+            .facts = layer_image_paint_facts_for(*image, decoded_image_data_of(observer), current_frame_handles.last()),
         });
     };
     for (size_t layer_index = 0; layer_index < background_layers.size(); ++layer_index)
@@ -223,10 +225,10 @@ bool push_replaced_image_paint_facts(Layout::ImageProvider const& image_provider
 {
     if (layout_node.kind() != Layout::RustFFI::NodeKind::ImageBox && layout_node.kind() != Layout::RustFFI::NodeKind::SVGImageBox)
         return false;
-    Optional<Gfx::DecodedImageFrame> current_frame;
+    Optional<Gfx::ImageFrameHandle> current_frame_handle;
     Layout::RustFFI::FfiReplacedImagePaintFacts facts {
         .natural = natural_size_facts(image_provider.intrinsic_width(), image_provider.intrinsic_height(), image_provider.intrinsic_aspect_ratio()),
-        .content = image_content_facts(image_provider.decoded_image_data(), current_frame),
+        .content = image_content_facts(image_provider.decoded_image_data(), current_frame_handle),
     };
     return Layout::RustFFI::layout_arena_set_replaced_image_paint_facts(layout_node.arena_handle(), Layout::Node::slot_id(&layout_node), facts);
 }
@@ -234,6 +236,7 @@ bool push_replaced_image_paint_facts(Layout::ImageProvider const& image_provider
 static bool push_video_paint_facts_onto(HTML::HTMLVideoElement const& video_element, Layout::Node const& layout_node)
 {
     Layout::RustFFI::FfiVideoPaintFacts facts {};
+    Optional<Gfx::ImageFrameHandle> poster_frame_handle;
     switch (video_element.current_representation()) {
     case HTML::HTMLVideoElement::Representation::FirstVideoFrame:
     case HTML::HTMLVideoElement::Representation::VideoFrame: {
@@ -251,8 +254,10 @@ static bool push_video_paint_facts_onto(HTML::HTMLVideoElement const& video_elem
     }
     case HTML::HTMLVideoElement::Representation::PosterFrame:
         facts.representation = Layout::RustFFI::FfiVideoRepresentation::PosterFrame;
-        if (auto const& poster_frame = video_element.poster_frame(); poster_frame.has_value())
-            facts.poster_frame = &poster_frame.value();
+        if (auto const& poster_frame = video_element.poster_frame(); poster_frame.has_value()) {
+            poster_frame_handle.emplace(poster_frame.value());
+            facts.poster_frame_id = poster_frame_handle->id();
+        }
         break;
     case HTML::HTMLVideoElement::Representation::TransparentBlack:
         facts.representation = Layout::RustFFI::FfiVideoRepresentation::TransparentBlack;

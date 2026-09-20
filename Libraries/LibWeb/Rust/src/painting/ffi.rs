@@ -1476,7 +1476,7 @@ pub unsafe extern "C" fn layout_arena_set_canvas_paint_facts(
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread, and
-/// `entries` must point at `count` readable entries whose frame pointers are null or live.
+/// `entries` must point at `count` readable entries whose frame ids name live shared resources.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_layer_image_paint_facts(
     arena: *mut c_void,
@@ -1495,9 +1495,7 @@ pub unsafe extern "C" fn layout_arena_set_layer_image_paint_facts(
                 |entry| crate::painting::layer_image_paint_facts::LayerImagePaintFactsEntry {
                     list: entry.list,
                     computed_index: entry.computed_index,
-                    facts: unsafe {
-                        crate::painting::layer_image_paint_facts::LayerImagePaintFacts::from_ffi(&entry.facts)
-                    },
+                    facts: crate::painting::layer_image_paint_facts::LayerImagePaintFacts::from_ffi(&entry.facts),
                 },
             )
             .collect()
@@ -1508,7 +1506,7 @@ pub unsafe extern "C" fn layout_arena_set_layer_image_paint_facts(
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread, and
-/// `facts.frame` must be null or point to a live `Gfx::DecodedImageFrame`.
+/// Any nonzero frame id in `facts` must name a live shared resource.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_replaced_image_paint_facts(
     arena: *mut c_void,
@@ -1521,7 +1519,7 @@ pub unsafe extern "C" fn layout_arena_set_replaced_image_paint_facts(
         slot,
         "M6 layout_arena_set_replaced_image_paint_facts",
     );
-    let facts = unsafe { crate::painting::replaced_paint_facts::ImagePaintFacts::from_ffi(&facts) };
+    let facts = crate::painting::replaced_paint_facts::ImagePaintFacts::from_ffi(&facts);
     arena.set_replaced_paint_facts(
         slot,
         crate::painting::replaced_paint_facts::ReplacedPaintFacts::Image(facts),
@@ -1531,7 +1529,7 @@ pub unsafe extern "C" fn layout_arena_set_replaced_image_paint_facts(
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread, and
-/// `facts.poster_frame` must be null or point to a live `Gfx::DecodedImageFrame`.
+/// Any nonzero poster frame id in `facts` must name a live shared resource.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_video_paint_facts(
     arena: *mut c_void,
@@ -1540,7 +1538,7 @@ pub unsafe extern "C" fn layout_arena_set_video_paint_facts(
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
     crate::painting::published_immutable::note_row_mutation(arena, slot, "M6 layout_arena_set_video_paint_facts");
-    let facts = unsafe { crate::painting::replaced_paint_facts::VideoPaintFacts::from_ffi(&facts) };
+    let facts = crate::painting::replaced_paint_facts::VideoPaintFacts::from_ffi(&facts);
     arena.set_replaced_paint_facts(
         slot,
         crate::painting::replaced_paint_facts::ReplacedPaintFacts::Video(facts),
