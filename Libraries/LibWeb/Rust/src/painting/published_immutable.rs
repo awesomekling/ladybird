@@ -23,7 +23,7 @@ use std::sync::OnceLock;
 
 #[derive(Default)]
 struct PublishedArena {
-    rows: HashMap<NodeSlotId, u64>,
+    rows: HashMap<NodeSlotId, RowFingerprint>,
     last_mutations: HashMap<NodeSlotId, &'static str>,
     reported: HashSet<&'static str>,
     in_publication: bool,
@@ -48,17 +48,32 @@ fn enabled() -> bool {
     })
 }
 
-fn row_fingerprint(arena: &LayoutNodeArena, row: NodeSlotId) -> u64 {
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct RowFingerprint {
+    paintable_data: u64,
+    dom_paint_facts: u64,
+    replaced_paint_facts: u64,
+    layer_image_paint_facts: u64,
+    paint_damage: u64,
+}
+
+fn fingerprint(value: &impl Hash) -> u64 {
     let mut hasher = DefaultHasher::new();
-    format!("{:?}", arena.paintable_rows().paintable_data(row)).hash(&mut hasher);
-    arena.node_dom_paint_facts(row).hash(&mut hasher);
-    format!("{:?}", arena.replaced_paint_facts(row)).hash(&mut hasher);
-    arena.layer_image_paint_facts_for_verification(row).hash(&mut hasher);
-    arena.paint_damage_of_row(row).hash(&mut hasher);
+    value.hash(&mut hasher);
     hasher.finish()
 }
 
-fn fingerprints(arena: &LayoutNodeArena) -> HashMap<NodeSlotId, u64> {
+fn row_fingerprint(arena: &LayoutNodeArena, row: NodeSlotId) -> RowFingerprint {
+    RowFingerprint {
+        paintable_data: fingerprint(&format!("{:?}", arena.paintable_rows().paintable_data(row))),
+        dom_paint_facts: fingerprint(&arena.node_dom_paint_facts(row)),
+        replaced_paint_facts: fingerprint(&format!("{:?}", arena.replaced_paint_facts(row))),
+        layer_image_paint_facts: fingerprint(&arena.layer_image_paint_facts_for_verification(row)),
+        paint_damage: fingerprint(&arena.paint_damage_of_row(row)),
+    }
+}
+
+fn fingerprints(arena: &LayoutNodeArena) -> HashMap<NodeSlotId, RowFingerprint> {
     arena
         .published_paintable_rows()
         .into_iter()
@@ -66,7 +81,10 @@ fn fingerprints(arena: &LayoutNodeArena) -> HashMap<NodeSlotId, u64> {
         .collect()
 }
 
-fn changed_rows(previous: &HashMap<NodeSlotId, u64>, current: &HashMap<NodeSlotId, u64>) -> Vec<NodeSlotId> {
+fn changed_rows(
+    previous: &HashMap<NodeSlotId, RowFingerprint>,
+    current: &HashMap<NodeSlotId, RowFingerprint>,
+) -> Vec<NodeSlotId> {
     let mut changed: Vec<_> = previous
         .iter()
         .filter_map(|(row, fingerprint)| (current.get(row) != Some(fingerprint)).then_some(*row))
@@ -74,6 +92,32 @@ fn changed_rows(previous: &HashMap<NodeSlotId, u64>, current: &HashMap<NodeSlotI
     changed.extend(current.keys().filter(|row| !previous.contains_key(row)).copied());
     changed.sort_unstable_by_key(|row| row.index);
     changed
+}
+
+fn unclassified_mutation(
+    previous: Option<&RowFingerprint>,
+    current: Option<&RowFingerprint>,
+    fallback: &'static str,
+) -> &'static str {
+    let (Some(previous), Some(current)) = (previous, current) else {
+        return "unclassified row membership";
+    };
+    if previous.paintable_data != current.paintable_data {
+        return "unclassified paintable data";
+    }
+    if previous.dom_paint_facts != current.dom_paint_facts {
+        return "unclassified DOM paint facts";
+    }
+    if previous.replaced_paint_facts != current.replaced_paint_facts {
+        return "unclassified replaced paint facts";
+    }
+    if previous.layer_image_paint_facts != current.layer_image_paint_facts {
+        return "unclassified layer image paint facts";
+    }
+    if previous.paint_damage != current.paint_damage {
+        return "unclassified paint damage";
+    }
+    fallback
 }
 
 fn report(call_site: &'static str, changed: &[NodeSlotId]) {
@@ -111,8 +155,9 @@ fn verify(arena: &LayoutNodeArena, call_site: &'static str) {
         }
         let mut by_mutation = HashMap::<&'static str, Vec<NodeSlotId>>::new();
         for row in changed {
+            let unclassified = unclassified_mutation(published.rows.get(&row), current.get(&row), call_site);
             by_mutation
-                .entry(published.last_mutations.get(&row).copied().unwrap_or(call_site))
+                .entry(published.last_mutations.get(&row).copied().unwrap_or(unclassified))
                 .or_default()
                 .push(row);
         }
@@ -195,15 +240,64 @@ mod tests {
         let row_1 = NodeSlotId::new(1, 1);
         let row_2 = NodeSlotId::new(2, 1);
         let row_3 = NodeSlotId::new(3, 1);
-        let previous = HashMap::from([(row_1, 10), (row_2, 20)]);
-        let current = HashMap::from([(row_1, 11), (row_3, 30)]);
+        let previous = HashMap::from([
+            (
+                row_1,
+                RowFingerprint {
+                    paintable_data: 10,
+                    ..Default::default()
+                },
+            ),
+            (
+                row_2,
+                RowFingerprint {
+                    paintable_data: 20,
+                    ..Default::default()
+                },
+            ),
+        ]);
+        let current = HashMap::from([
+            (
+                row_1,
+                RowFingerprint {
+                    paintable_data: 11,
+                    ..Default::default()
+                },
+            ),
+            (
+                row_3,
+                RowFingerprint {
+                    paintable_data: 30,
+                    ..Default::default()
+                },
+            ),
+        ]);
         assert_eq!(changed_rows(&previous, &current), vec![row_1, row_2, row_3]);
     }
 
     #[test]
     fn changed_rows_ignores_an_identical_publication() {
         let row = NodeSlotId::new(7, 2);
-        let rows = HashMap::from([(row, 42)]);
+        let rows = HashMap::from([(
+            row,
+            RowFingerprint {
+                paintable_data: 42,
+                ..Default::default()
+            },
+        )]);
         assert!(changed_rows(&rows, &rows).is_empty());
+    }
+
+    #[test]
+    fn unclassified_mutation_names_the_changed_component() {
+        let previous = RowFingerprint::default();
+        let current = RowFingerprint {
+            paint_damage: 1,
+            ..Default::default()
+        };
+        assert_eq!(
+            unclassified_mutation(Some(&previous), Some(&current), "fallback"),
+            "unclassified paint damage"
+        );
     }
 }
