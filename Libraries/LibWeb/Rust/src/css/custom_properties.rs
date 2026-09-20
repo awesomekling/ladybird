@@ -229,6 +229,287 @@ impl CustomPropertyRegistry {
     }
 }
 
+pub(crate) fn collect_registered_custom_property_random_sharings(
+    store: &CustomPropertyStore,
+    registry: &CustomPropertyRegistry,
+    sharings: &mut Vec<*const StyleValueData>,
+) -> Vec<RetainedStyleValueData> {
+    let mut parsed_values = Vec::new();
+    for entry in store.own_values.values() {
+        let initial_count = sharings.len();
+        crate::css::style_compute::collect_unfixed_random_sharings_in_value(entry.value.data(), sharings);
+        if sharings.len() != initial_count {
+            continue;
+        }
+        let Some(registration) = registry.registrations.get(entry.name.as_ref()) else {
+            continue;
+        };
+        if matches!(registration.syntax, SyntaxNode::Universal) {
+            continue;
+        }
+        let Some(source) = crate::css::serialize::serialize_resolved_style_value_to_utf16(entry.value.data()) else {
+            continue;
+        };
+        let mut random_function_index = 0;
+        let value_context = FfiValueParsingContext {
+            kind: FfiValueParsingContextKind::Property,
+            value: crate::css::property_metadata::property_id::CUSTOM,
+            secondary_value: 0,
+            name: Default::default(),
+        };
+        let mut parse_context = registry.parse_context(&mut random_function_index);
+        parse_context.value_contexts = &raw const value_context;
+        parse_context.value_context_count = 1;
+        let Some(parsed) = parse_with_syntax(&parse_context, &source, &registration.syntax) else {
+            continue;
+        };
+        let parsed = RetainedStyleValueData::from_owned(parsed);
+        crate::css::style_compute::collect_unfixed_random_sharings_in_value(parsed.data(), sharings);
+        parsed_values.push(parsed);
+    }
+    parsed_values
+}
+
+fn registered_initial_value(
+    registry: &CustomPropertyRegistry,
+    registration: &RegisteredCustomProperty,
+    length: &crate::css::style_compute::FfiLengthResolutionContext,
+    scheme: u8,
+) -> RetainedStyleValueData {
+    let Some(source) = registration.initial_source.as_ref() else {
+        return RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid);
+    };
+    let mut random_function_index = 0;
+    let Some(parsed) = parse_with_syntax(
+        &registry.parse_context(&mut random_function_index),
+        source,
+        &registration.syntax,
+    ) else {
+        return RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid);
+    };
+    absolutize_registered_custom_property_value(registry, parsed, length, None, &[], scheme).0
+}
+
+fn absolutize_registered_custom_property_value(
+    registry: &CustomPropertyRegistry,
+    value: StyleValueData,
+    length: &crate::css::style_compute::FfiLengthResolutionContext,
+    environment: Option<&crate::css::style_compute::FfiStyleComputationEnvironment>,
+    random_base_values: &[crate::css::style_compute::FfiRandomBaseValue],
+    scheme: u8,
+) -> (RetainedStyleValueData, bool) {
+    let tree_counting = environment
+        .filter(|environment| environment.has_tree_counting_context)
+        .map(|environment| (environment.sibling_count, environment.sibling_index));
+    let context = crate::css::absolutize::AbsolutizationContext {
+        length,
+        scheme: Some(scheme),
+        resolved_viewport_relative_length: Cell::new(false),
+        tree_counting,
+        random_base_values,
+        document_base_url: &registry.document_base_url,
+        style_sheet_resource_context: None,
+    };
+    let value = match crate::css::absolutize::absolutize(&value, &context) {
+        Some(crate::css::absolutize::Absolutized::Changed(value)) => value,
+        Some(crate::css::absolutize::Absolutized::Unchanged) | None => RetainedStyleValueData::from_owned(value),
+    };
+    (value, context.resolved_viewport_relative_length.get())
+}
+
+fn random_base_values_for_reparsed_value(
+    reparsed: &StyleValueData,
+    sources: &[&StyleValueData],
+    environment: Option<&crate::css::style_compute::FfiStyleComputationEnvironment>,
+) -> Vec<crate::css::style_compute::FfiRandomBaseValue> {
+    let Some(environment) = environment else {
+        return Vec::new();
+    };
+    let published = if environment.random_base_value_count == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(environment.random_base_values, environment.random_base_value_count) }
+    };
+    let mut reparsed_sharings = Vec::new();
+    crate::css::style_compute::collect_unfixed_random_sharings_in_value(reparsed, &mut reparsed_sharings);
+    let source_sharings = sources
+        .iter()
+        .map(|source| {
+            let mut sharings = Vec::new();
+            crate::css::style_compute::collect_unfixed_random_sharings_in_value(source, &mut sharings);
+            sharings
+        })
+        .collect::<Vec<_>>();
+    reparsed_sharings
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, reparsed)| {
+            let StyleValueData::RandomValueSharing {
+                is_auto,
+                name,
+                element_shared,
+                ..
+            } = (unsafe { &*reparsed })
+            else {
+                unreachable!();
+            };
+            let exact_base = published.iter().find(|base| {
+                let StyleValueData::RandomValueSharing {
+                    is_auto: published_is_auto,
+                    name: published_name,
+                    element_shared: published_element_shared,
+                    ..
+                } = (unsafe { &*base.source.cast::<StyleValueData>() })
+                else {
+                    return false;
+                };
+                *published_is_auto == *is_auto && *published_element_shared == *element_shared && published_name == name
+            });
+            let source_base = || {
+                source_sharings.iter().find_map(|sharings| {
+                    let source = *sharings.get(index)?;
+                    published.iter().find(|base| base.source == source.cast())
+                })
+            };
+            let base = exact_base.or_else(source_base);
+            let base = base?;
+            Some(crate::css::style_compute::FfiRandomBaseValue {
+                source: reparsed.cast(),
+                value: base.value,
+            })
+        })
+        .collect()
+}
+
+/// Finalizes one substituted custom-property value against immutable registry, parent-store,
+/// length, and color-scheme inputs. This mirrors StyleComputer::finalize_custom_property_value
+/// without consulting the DOM or any GC-managed object.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn finalize_custom_property_value(
+    registry: Option<&CustomPropertyRegistry>,
+    resolved_parent: Option<&CustomPropertyStore>,
+    name_raw: usize,
+    name: &[u16],
+    value: RetainedStyleValueData,
+    specified_value: Option<&StyleValueData>,
+    length: Option<&crate::css::style_compute::FfiLengthResolutionContext>,
+    environment: Option<&crate::css::style_compute::FfiStyleComputationEnvironment>,
+    scheme: u8,
+) -> (RetainedStyleValueData, bool) {
+    let registration = registry.and_then(|registry| registry.registrations.get(name));
+    let initial = || {
+        registration.map_or_else(
+            || RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid),
+            |registration| registered_initial_value(registry.unwrap(), registration, length.unwrap(), scheme),
+        )
+    };
+    let inherited = || {
+        resolved_parent
+            .and_then(|parent| parent.get(name_raw))
+            .map(|entry| entry.value.clone())
+            .unwrap_or_else(initial)
+    };
+
+    let value = match value.data() {
+        StyleValueData::Keyword { keyword } if name != "result".encode_utf16().collect::<Vec<_>>() => {
+            if *keyword == crate::css::css_enums::keyword::INITIAL {
+                initial()
+            } else if *keyword == crate::css::css_enums::keyword::INHERIT {
+                inherited()
+            } else if *keyword == crate::css::css_enums::keyword::UNSET {
+                if registration.is_some_and(|registration| !registration.inherits) {
+                    initial()
+                } else {
+                    inherited()
+                }
+            } else {
+                value
+            }
+        }
+        _ => value,
+    };
+
+    let invalid_fallback = || {
+        let Some(registration) = registration else {
+            return RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid);
+        };
+        if matches!(registration.syntax, SyntaxNode::Universal) {
+            return RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid);
+        }
+        if registration.inherits { inherited() } else { initial() }
+    };
+    if matches!(value.data(), StyleValueData::GuaranteedInvalid) {
+        return (invalid_fallback(), false);
+    }
+    let Some(registration) = registration else {
+        return (value, false);
+    };
+    if matches!(registration.syntax, SyntaxNode::Universal) {
+        return (value, false);
+    }
+
+    let contains_attr_tainted_values = matches!(
+        value.data(),
+        StyleValueData::Unresolved {
+            contains_attr_tainted_values: true,
+            ..
+        }
+    );
+    let Some(source) = crate::css::serialize::serialize_resolved_style_value_to_utf16(value.data()) else {
+        return (invalid_fallback(), false);
+    };
+    let mut random_function_index = 0;
+    let value_context = FfiValueParsingContext {
+        kind: FfiValueParsingContextKind::Property,
+        value: crate::css::property_metadata::property_id::CUSTOM,
+        secondary_value: 0,
+        name: Default::default(),
+    };
+    let mut parse_context = registry.unwrap().parse_context(&mut random_function_index);
+    parse_context.value_contexts = &raw const value_context;
+    parse_context.value_context_count = 1;
+    let Some(parsed) = parse_with_syntax(&parse_context, &source, &registration.syntax) else {
+        return (invalid_fallback(), false);
+    };
+    // Parsing a registered value creates fresh random-sharing nodes, while the published random
+    // bases are keyed by the corresponding nodes in the substituted value. Preserve their
+    // traversal correspondence across the required serialize-and-reparse step.
+    let mut random_sources = vec![value.data()];
+    if let Some(specified_value) = specified_value {
+        random_sources.push(specified_value);
+    }
+    let random_base_values = random_base_values_for_reparsed_value(&parsed, &random_sources, environment);
+    let (computed, depends_on_viewport_metrics) = absolutize_registered_custom_property_value(
+        registry.unwrap(),
+        parsed,
+        length.unwrap(),
+        environment,
+        &random_base_values,
+        scheme,
+    );
+    if !contains_attr_tainted_values {
+        return (computed, depends_on_viewport_metrics);
+    }
+
+    let source = crate::css::serialize::serialize_resolved_style_value_to_utf16(computed.data()).unwrap_or_default();
+    let mut wrapped = crate::css::parser::value_parser::unresolved_value(
+        &source,
+        &[],
+        crate::css::parser::arbitrary_substitution::SubstitutionFunctionsPresence::default(),
+    );
+    let StyleValueData::Unresolved {
+        contains_attr_tainted_values,
+        parsed_value,
+        ..
+    } = &mut wrapped
+    else {
+        unreachable!();
+    };
+    *contains_attr_tainted_values = true;
+    *parsed_value = computed;
+    (RetainedStyleValueData::from_owned(wrapped), depends_on_viewport_metrics)
+}
+
 impl CustomPropertyStore {
     pub(crate) fn get(&self, name_raw: usize) -> Option<&CustomPropertyEntry> {
         self.own_values
