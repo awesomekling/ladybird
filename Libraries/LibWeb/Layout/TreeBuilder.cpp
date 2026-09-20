@@ -78,8 +78,6 @@ void LayoutTreeBuilderAccess::set_synthetic_pseudo_element_node(DOM::Element& el
     element.set_synthetic_pseudo_element_node({}, pseudo_element, layout_node);
 }
 
-static void update_style_if_needed_for_layout_tree_bypass_path(DOM::Element&);
-
 class GeneratedContentImageProvider final
     : public ImageProvider {
 public:
@@ -499,10 +497,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
             return create_first_letter_nodes(as<DOM::Element>(dom_node_for_style_node(*builder.m_document, style_node)), target); },
-        .restyle_bypass_path_element = [](void* builder_pointer, u32 style_node) {
-            VERIFY(builder_pointer);
-            auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
-            update_style_if_needed_for_layout_tree_bypass_path(as<DOM::Element>(dom_node_for_style_node(*builder.m_document, style_node))); },
         .attach_style_resources = [](void* builder_pointer, Compositing::RustFFI::NodeSlotId slot, bool owns_content_replacement_image) {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
@@ -518,16 +512,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
 
         .pseudo = make_ffi_pseudo_tree_builder_callbacks(),
     };
-}
-
-// A bypass path (top-layer iteration, slot projection, SVG mask/clip-path or pattern reference)
-// may reach an element whose `computed_values` is null. Route through `update_style_for_element`,
-// which seeds the style computer's ancestor filter so descendant-combinator selectors continue to
-// match during the lazy re-cascade.
-static void update_style_if_needed_for_layout_tree_bypass_path(DOM::Element& element)
-{
-    if (!element.has_style())
-        element.document().update_style_for_element({ element });
 }
 
 RustFFI::FfiLayoutTreeBuildOutcome LayoutTreeBuildBridge::build(DOM::Node& dom_node)
