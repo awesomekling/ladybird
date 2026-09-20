@@ -6,6 +6,12 @@
 
 use super::*;
 
+pub(crate) struct MainThreadFfiEntry {
+    _private: (),
+}
+
+const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
+
 pub(super) const CALC_NUMERIC_KIND_LENGTH: u8 = 4;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2321,7 +2327,7 @@ pub unsafe extern "C" fn layout_arena_run_root_layout(
     document_in_quirks_mode: bool,
     should_collect_devtools_layout_data: bool,
 ) {
-    let main_thread = unsafe { crate::stage::MainThread::from_ffi_entry() };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: Guaranteed by the entry point's contract.
     unsafe {
         run_root_layout(
@@ -2584,7 +2590,7 @@ pub unsafe extern "C" fn layout_arena_compute_subtree_layout(
     viewport_inline_size_raw: i32,
     document_in_quirks_mode: bool,
 ) {
-    let main_thread = unsafe { crate::stage::MainThread::from_ffi_entry() };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: Guaranteed by the entry point's contract.
     unsafe {
         compute_subtree_layout(&main_thread, arena, root, viewport_inline_size_raw, document_in_quirks_mode);

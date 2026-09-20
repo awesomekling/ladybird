@@ -33,6 +33,12 @@ use crate::layout::node_data::{
     AncestorFact, DomPaintFact, FfiNodeConstructionFacts, FfiNodeLink, FfiStylePayloads, MAX_NODE_SLOT_COUNT, NodeData,
     NodeFlag, NodeKind, NodeSlotId,
 };
+
+pub(crate) struct MainThreadFfiEntry {
+    _private: (),
+}
+
+const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
 use crate::layout::used_values::FfiCssPixelPoint;
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -5623,7 +5629,7 @@ pub unsafe extern "C" fn layout_arena_for_each_pending_rebuilt_subtree_root(
 /// `arena` must be a live handle with a registered layout host, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_sync_enrolled_content_for_layout(arena: *mut c_void) {
-    let main_thread = unsafe { crate::stage::MainThread::from_ffi_entry() };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: Guaranteed by the entry point's contract.
     unsafe { sync_enrolled_content_for_layout(&main_thread, arena) }
 }

@@ -25,6 +25,12 @@ use libgfx_rust::filter::Filter;
 use std::ffi::c_void;
 use std::rc::Rc;
 
+pub(crate) struct MainThreadFfiEntry {
+    _private: (),
+}
+
+const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
+
 /// SAFETY: `arena` must be a live handle from `layout_arena_create`, borrowed for this call on
 /// the document thread.
 #[track_caller]
@@ -604,7 +610,7 @@ pub unsafe extern "C" fn layout_arena_prepare_for_rendering(
     root_background_source: crate::painting::host::FfiRootBackgroundSource,
     visual_context_update_pending: bool,
 ) -> FfiRenderingPreparationOutcome {
-    let main_thread = unsafe { crate::stage::MainThread::from_ffi_entry() };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     let arena = unsafe { arena_from_handle(arena) };
     let background_source_changed = {
         let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
@@ -1685,7 +1691,7 @@ pub unsafe extern "C" fn layout_arena_publish_recording(
     arena: *mut c_void,
     publish: crate::painting::host::FfiRecordingPublishCallbacks,
 ) -> u64 {
-    let main_thread = unsafe { crate::stage::MainThread::from_ffi_entry() };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     let arena = unsafe { arena_from_handle(arena) };
     let Some(pending) = arena.paint_state().borrow_mut().pending_recording.take() else {
         return 0;
