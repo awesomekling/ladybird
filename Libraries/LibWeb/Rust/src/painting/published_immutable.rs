@@ -54,6 +54,16 @@ struct Mutation {
 #[derive(Default)]
 struct State {
     arenas: HashMap<usize, PublishedArena>,
+    style_records: HashMap<(usize, u64), u64>,
+    style_stats: HashMap<(usize, &'static str, &'static str, &'static Location<'static>), StyleStats>,
+    reported_style_records: HashSet<(usize, u64, &'static str, &'static str, &'static Location<'static>)>,
+}
+
+#[derive(Default)]
+struct StyleStats {
+    publications: u64,
+    comparisons: u64,
+    changes: u64,
 }
 
 thread_local! {
@@ -84,6 +94,13 @@ pub(crate) fn enter_writer_if_unattributed(writer: &'static str) -> WriterScope 
         current.set(previous.or(writer));
         previous
     }))
+}
+
+fn current_writer() -> &'static str {
+    CURRENT_WRITER
+        .with(Cell::get)
+        .or_else(crate::painting::seal::current_pass_name)
+        .unwrap_or("main-side direct")
 }
 
 fn enabled() -> bool {
@@ -188,6 +205,95 @@ fn report(call_site: &'static str, writer: &'static str, caller: Option<&Locatio
         }
         None => eprint!("{report}"),
     }
+}
+
+fn write_report(report: &str) {
+    match std::env::var_os("LIBWEB_VERIFY_PUBLISHED_IMMUTABLE_LOG") {
+        Some(path) => {
+            use std::io::Write;
+            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                let _ = file.write_all(report.as_bytes());
+            }
+        }
+        None => eprint!("{report}"),
+    }
+}
+
+#[track_caller]
+pub(crate) fn publish_style_record(engine: usize, record: u64, fingerprint: u64, entry: &'static str) {
+    note_style_record(engine, record, fingerprint, entry, true);
+}
+
+#[track_caller]
+pub(crate) fn verify_style_record(engine: usize, record: u64, fingerprint: u64, entry: &'static str) {
+    note_style_record(engine, record, fingerprint, entry, false);
+}
+
+#[track_caller]
+fn note_style_record(engine: usize, record: u64, fingerprint: u64, entry: &'static str, publication: bool) {
+    if !enabled() {
+        return;
+    }
+    let caller = Location::caller();
+    let writer = current_writer();
+    let mut changed = false;
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        if !publication {
+            changed = state
+                .style_records
+                .get(&(engine, record))
+                .is_some_and(|published| *published != fingerprint);
+        }
+        let stats = state
+            .style_stats
+            .entry((engine, entry, writer, caller))
+            .or_default();
+        if publication {
+            stats.publications += 1;
+        } else {
+            stats.comparisons += 1;
+            stats.changes += u64::from(changed);
+        }
+        if publication || !state.style_records.contains_key(&(engine, record)) {
+            state.style_records.insert((engine, record), fingerprint);
+        }
+        if changed
+            && state
+                .reported_style_records
+                .insert((engine, record, entry, writer, caller))
+        {
+            write_report(&format!(
+                "PUBLISHED STYLE IMMUTABLE: writer={writer}: entry={entry}: caller={caller}: record={record:#x} changed without publication\n"
+            ));
+        }
+    });
+}
+
+pub(crate) fn finish_style_engine(engine: usize) {
+    if !enabled() {
+        return;
+    }
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        let stats = state
+            .style_stats
+            .keys()
+            .filter(|(key, ..)| *key == engine)
+            .copied()
+            .collect::<Vec<_>>();
+        for key @ (_, entry, writer, caller) in stats {
+            let stats = state.style_stats.remove(&key).expect("style verifier statistics disappeared");
+            write_report(&format!(
+                "PUBLISHED STYLE SUMMARY: writer={writer}: entry={entry}: caller={caller}: publications={} comparisons={} changes={}\n",
+                stats.publications, stats.comparisons, stats.changes
+            ));
+        }
+        state.style_records.retain(|(key, _), _| *key != engine);
+        state
+            .reported_style_records
+            .retain(|(key, ..)| *key != engine);
+    });
 }
 
 fn verify(arena: &LayoutNodeArena, call_site: &'static str) {
