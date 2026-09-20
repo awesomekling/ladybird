@@ -68,6 +68,10 @@ public:
         // A `linear()` easing that has control points of its own. The row spells out a curve, not a
         // list of stops, so the mirror declines the key rather than answering with the wrong one.
         static constexpr u32 easing_has_control_points = 1u << 26;
+        // A provisionally started transition's row. Its effect is sampled by the pass that started
+        // it, but the transition is not associated with its target yet, so it answers no question
+        // about which effects the element holds.
+        static constexpr u32 not_associated = 1u << 27;
 
         enum Time : size_t {
             StartTime,

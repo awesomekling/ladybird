@@ -251,6 +251,10 @@ pub(crate) mod timing_row_flag {
     /// A `linear()` easing that has control points of its own, which the row has no room to spell
     /// out. The mirror declines the key rather than answering with the identity curve.
     pub(crate) const EASING_HAS_CONTROL_POINTS: u32 = 1 << 26;
+    /// A provisionally started transition's row. The pass that started the transition samples its
+    /// effect, so the row is published for it to be sampled from, but the transition is not
+    /// associated with its target yet and the row answers nothing about what the element holds.
+    pub(crate) const NOT_ASSOCIATED: u32 = 1 << 27;
 }
 
 /// `Bindings::PlaybackDirection`, in IDL order.
@@ -738,6 +742,9 @@ impl AnimationTimelineSamples {
 pub(crate) fn any_row_is_relevant(rows: &[AnimationTimingRow], samples: &AnimationTimelineSamples) -> Option<bool> {
     let mut any = false;
     for row in rows {
+        if row.has(timing_row_flag::NOT_ASSOCIATED) {
+            continue;
+        }
         any |= row_is_relevant(row, row_timeline_time(row, samples)?)?;
     }
     Some(any)

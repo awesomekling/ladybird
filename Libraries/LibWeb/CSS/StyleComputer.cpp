@@ -642,6 +642,20 @@ void StyleComputer::for_each_provisional_transition_effect(DOM::AbstractElement 
     }
 }
 
+// The same effects, for every one of the element's animation lists at once, which is the shape the
+// element's timing rows are published in.
+void StyleComputer::for_each_provisional_transition_effect_on_element(DOM::Element const& element, Function<void(Animations::KeyframeEffect&)> const& callback) const
+{
+    for (auto const& state : m_provisional_transition_states) {
+        if (state.element.ptr() != &element)
+            continue;
+        if (!state.proposed_transition)
+            continue;
+        if (auto effect = state.proposed_transition->effect(); effect && effect->is_keyframe_effect())
+            callback(static_cast<Animations::KeyframeEffect&>(*effect));
+    }
+}
+
 void StyleComputer::commit_transition_stabilization_epoch()
 {
     for (auto const& state : m_provisional_transition_states) {
@@ -686,9 +700,19 @@ void StyleComputer::commit_transition_stabilization_epoch()
         }
         ++document().style_invalidation_counters().committed_transition_actions;
     }
+    // A provisional transition's timing row is published while the epoch is open. Once it closes,
+    // every one of those transitions has either been associated with its target or dropped, so the
+    // rows the targets publish have to be built again from what they hold now.
+    GC::ConservativeVector<GC::Ref<DOM::Element>> elements_with_provisional_rows;
+    for (auto const& state : m_provisional_transition_states) {
+        if (state.proposed_transition && !elements_with_provisional_rows.contains_slow(GC::Ref { *state.element }))
+            elements_with_provisional_rows.append(*state.element);
+    }
     m_provisional_transition_states.clear();
     m_provisional_transition_state_indices.clear();
     m_provisional_transition_state_indices_by_target.clear();
+    for (auto& element : elements_with_provisional_rows)
+        element->publish_animation_timing_rows();
     for (auto const& baseline : m_transition_stabilization_baselines)
         unpin_style_record(baseline.value);
     m_transition_stabilization_baselines.clear();
@@ -1984,13 +2008,18 @@ Vector<GC::Ref<Animations::KeyframeEffect>> StyleComputer::start_needed_transiti
                     continue;
                 remaining_effects.append(keyframe_effect);
             }
-            if (!remaining_effects.is_empty())
+            if (!remaining_effects.is_empty()) {
+                abstract_element.element().publish_animation_timing_rows();
                 collect_animations_into(abstract_element, remaining_effects.span(), new_style, AnimationRefresh::No);
+            }
         }
     }
 
     // Immediately set the properties to the transitions' current values, to prevent single-frame jumps.
     if (!newly_started_transition_effects.is_empty()) {
+        // The transitions just started are provisional, so nothing has published their timing yet.
+        // Publish it before the collection below samples them.
+        abstract_element.element().publish_animation_timing_rows();
         collect_animations_into(abstract_element, newly_started_transition_effects.span(), new_style, AnimationRefresh::No);
         // NB: Construction does not invalidate animated style because the effects were just evaluated. Request the
         //     first animation frame directly so timeline updates can schedule subsequent animated style updates.
