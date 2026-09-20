@@ -278,6 +278,7 @@ pub(crate) fn release_utf16_fly_string(raw: usize) {
 /// through consumption of every published style reaction.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_style_ffi_complete_style_update_begin() {
+    crate::css::style::seal::begin_update();
     COMPLETE_STYLE_UPDATE_STATE.with(|state| {
         let mut state = state.borrow_mut();
         assert!(
@@ -293,7 +294,7 @@ pub extern "C" fn rust_style_ffi_complete_style_update_begin() {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_style_ffi_complete_style_update_end() -> FfiDeferredCppReleases {
-    COMPLETE_STYLE_UPDATE_STATE.with(|state| {
+    let releases = COMPLETE_STYLE_UPDATE_STATE.with(|state| {
         let mut state = state.borrow_mut();
         state.depth = state
             .depth
@@ -311,7 +312,19 @@ pub extern "C" fn rust_style_ffi_complete_style_update_end() -> FfiDeferredCppRe
             fly_strings: state.releases.fly_strings.as_ptr(),
             fly_string_count: state.releases.fly_strings.len(),
         }
-    })
+    });
+    crate::css::style::seal::end_update();
+    releases
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_style_ffi_note_longhand_input_freeze() {
+    crate::css::style::seal::note_stage_interleave("longhand_input_freeze");
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_style_ffi_note_longhand_result_apply() {
+    crate::css::style::seal::note_stage_interleave("longhand_result_apply");
 }
 
 #[unsafe(no_mangle)]

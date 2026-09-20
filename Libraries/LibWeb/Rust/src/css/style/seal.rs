@@ -6,8 +6,8 @@
 
 //! Sealed mode for the style stage.
 //!
-//! The style stage begins after a legacy transaction has frozen its native inputs and ends before
-//! its outputs are committed. Engine-native transactions use the same computation boundary.
+//! The style stage spans a complete style update, after its document inputs are published and
+//! before its outputs are committed.
 //! `LIBWEB_SEAL_STYLE_STAGE` turns this gate on. Unset or `0`, it costs only the mode check. `1`
 //! reports each callback site once; `abort` makes the first callback fatal. Reports and census
 //! totals go to stderr or to the file named by `LIBWEB_SEAL_STYLE_STAGE_LOG`.
@@ -59,6 +59,7 @@ thread_local! {
     static UPDATE_DEPTH: Cell<u32> = const { Cell::new(0) };
     static REPORTED: RefCell<HashSet<&'static str>> = RefCell::new(HashSet::new());
     static COUNTS: RefCell<HashMap<&'static str, Counts>> = RefCell::new(HashMap::new());
+    static STAGE_INTERLEAVES: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
     static BETWEEN_PASS_SERVICES: RefCell<HashMap<&'static str, (u64, u64)>> = RefCell::new(HashMap::new());
 }
 
@@ -86,6 +87,35 @@ pub(crate) fn end_update() {
         return;
     }
     UPDATE_DEPTH.with(|depth| depth.set(depth.get().checked_sub(1).expect("unbalanced style update scope")));
+}
+
+/// Record a return to main-thread work before the complete style stage has finished.
+pub(crate) fn note_stage_interleave(name: &'static str) {
+    let mode = mode();
+    if mode == Mode::Off || UPDATE_DEPTH.with(|depth| depth.get() == 0) {
+        return;
+    }
+    STAGE_INTERLEAVES.with(|interleaves| {
+        let mut interleaves = interleaves.borrow_mut();
+        let count = interleaves.entry(name).or_default();
+        *count = count.wrapping_add(1);
+    });
+    let allowed = match name {
+        "longhand_input_freeze" => {
+            std::env::var("LIBWEB_SEAL_STYLE_STAGE_ALLOW_LONGHAND_INPUT_FREEZE").as_deref() == Ok("1")
+        }
+        "longhand_result_apply" => {
+            std::env::var("LIBWEB_SEAL_STYLE_STAGE_ALLOW_LONGHAND_RESULT_APPLY").as_deref() == Ok("1")
+        }
+        _ => false,
+    };
+    assert!(
+        mode != Mode::Abort || allowed,
+        "style stage is sealed, but interleaves main-thread work for {name}"
+    );
+    if REPORTED.with(|reported| reported.borrow_mut().insert(name)) {
+        write_report(&format!("STYLE SEAL: stage_interleave {name}\n"));
+    }
 }
 
 /// Run a main-thread resource service between sealed evaluation passes.
@@ -175,6 +205,15 @@ pub(crate) fn flush_census() {
             "STYLE SEAL COUNT: callback={callback} calls={} during_style={}\n",
             counts.calls, counts.during_style
         ));
+    }
+    let mut interleaves = STAGE_INTERLEAVES.with(|interleaves| {
+        std::mem::take(&mut *interleaves.borrow_mut())
+            .into_iter()
+            .collect::<Vec<_>>()
+    });
+    interleaves.sort_unstable_by_key(|(name, _)| *name);
+    for (name, count) in interleaves {
+        write_report(&format!("STYLE SEAL COUNT: stage_interleave {name}: {count}\n"));
     }
     let mut services = BETWEEN_PASS_SERVICES.with(|services| {
         std::mem::take(&mut *services.borrow_mut())

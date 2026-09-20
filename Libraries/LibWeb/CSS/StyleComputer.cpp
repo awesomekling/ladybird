@@ -5924,8 +5924,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         state.transition_delay_and_duration_are_single_zero = longhand_result->transitions.delay_and_duration_are_single_zero;
         state.animation_definitions.ensure_capacity(longhand_result->animations.count);
         state.animation_definition_matches.ensure_capacity(longhand_result->animations.count);
+        state.animation_definition_keyframe_sets.ensure_capacity(longhand_result->animations.count);
         for (auto const& animation : ReadonlySpan<ComputedValuesFFI::FfiComputedAnimation> { longhand_result->animations.animations, longhand_result->animations.count }) {
             state.animation_definition_matches.unchecked_append(animation.matched_existing_index);
+            state.animation_definition_keyframe_sets.unchecked_append(static_cast<Animations::KeyframeEffect::KeyFrameSet const*>(animation.keyframe_set));
             Variant<double, Utf16String> duration { animation.duration };
             if (animation.duration_is_auto)
                 duration = "auto"_utf16;
@@ -6072,6 +6074,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     };
     auto prepared_transaction = ComputedValuesFFI::rust_prepare_longhand_transaction(&input);
     ComputedValuesFFI::FfiLonghandTransactionInput transaction_input {};
+    StyleValueFFI::rust_style_ffi_note_longhand_input_freeze();
     prepare_longhand_transaction(
         &native_context,
         &prepared_transaction.requirements,
@@ -6080,6 +6083,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         &transaction_input);
     input.transaction_input = &transaction_input;
     auto transaction_result = ComputedValuesFFI::rust_compute_properties(&input, &prepared_transaction);
+    StyleValueFFI::rust_style_ffi_note_longhand_result_apply();
     consume_longhand_transaction_result(&native_context, transaction_result.drive_result);
     auto parent_style_in_display_none_subtree = ComputedValuesFFI::rust_finalize_longhand_transaction(&input, transaction_result);
     finish_properties(&native_context, parent_style_in_display_none_subtree);
