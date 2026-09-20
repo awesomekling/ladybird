@@ -109,9 +109,7 @@ pub struct FfiDomTreeBuilderCallbacks {
         unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, FfiElementLayoutKind) -> NodeSlotId,
     pub create_principal_document_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
     pub create_principal_text_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
-    pub set_principal_layout_node: unsafe extern "C" fn(*mut c_void, *mut c_void, NodeSlotId),
-    pub principal_layout_node: unsafe extern "C" fn(*mut c_void) -> NodeSlotId,
-    pub attach_principal_style_resources: unsafe extern "C" fn(*mut c_void),
+    pub attach_principal_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId),
     pub document_element_layout_node: unsafe extern "C" fn(*mut c_void) -> NodeSlotId,
     pub layout: FfiTreeBuilderCallbacks,
     pub pseudo: FfiPseudoTreeBuilderCallbacks,
@@ -123,7 +121,6 @@ pub struct FfiDomTreeBuilderCallbacks {
 #[repr(C)]
 pub struct FfiPrincipalNodeFrame {
     pub frame: *mut c_void,
-    pub old_layout_node: NodeSlotId,
     /// The DOM node the walk's identity names. The walk navigates by identity and takes the pointer
     /// from here, so the node is resolved once per visit rather than once per payload callback.
     pub dom_node: *mut c_void,
@@ -2152,22 +2149,15 @@ fn pseudo_element_box_of_element_box(layout: &TreeBuilderHost<'_>, node: LayoutN
     }
 }
 
-/// Hands the frame the box the node entered the update with, for a node that keeps it. Nothing
-/// between the entry and here rebinds the node, so the entry row is still the node's box.
-fn keep_principal_layout_node(host: &DomTreeBuilderHost<'_>, frame: *mut c_void, old_layout_node: LayoutNode) {
-    if old_layout_node.is_invalid() {
-        return;
-    }
-    // SAFETY: The builder and frame remain live, and the entry row is a live box.
-    unsafe { (host.callbacks.set_principal_layout_node)(host.callbacks.builder, frame, old_layout_node) };
-}
-
 fn construct_principal_layout_node(
     update: &mut PrincipalNodeUpdate<'_, '_, '_, '_>,
     should_create_layout_node: bool,
 ) -> PrincipalBoxConstruction {
     let host = update.host;
     let mut created_box = None;
+    // The box this visit leaves the node with: the one it entered with when the node keeps it,
+    // otherwise the one the host just built. Nothing between the entry and here rebinds the node.
+    let mut layout_node = NodeSlotId::INVALID;
     let frame = update.frame;
     let dom_node = update.dom_node;
     let old_layout_node = update.old_layout_node;
@@ -2237,6 +2227,7 @@ fn construct_principal_layout_node(
             let created = unsafe {
                 (host.callbacks.create_principal_element_layout)(host.callbacks.builder, frame, dom_node, layout_kind)
             };
+            layout_node = created;
             if !created.is_invalid() {
                 created_box = Some(host.layout().created(created));
             }
@@ -2251,12 +2242,13 @@ fn construct_principal_layout_node(
                 context.layout_svg_pattern = false;
             }
         } else {
-            keep_principal_layout_node(host, frame, old_layout_node);
+            layout_node = old_layout_node;
         }
     } else if should_create_layout_node {
         if update.kind.is_document() {
             // SAFETY: The frame and DOM document remain live throughout construction.
             let created = unsafe { (host.callbacks.create_principal_document_layout)(frame, dom_node) };
+            layout_node = created;
             created_box = Some(host.layout().created(created));
         } else if update.kind.is_text() {
             let facts = host
@@ -2282,19 +2274,17 @@ fn construct_principal_layout_node(
                 let wrapper_slot = wrapper.slot();
                 layout_host.set_children_are_inline(wrapper_slot, true);
                 layout_host.attach_child(wrapper_slot, layout_host.created(text_layout_node), NodeSlotId::INVALID);
-                // SAFETY: The builder and frame remain live, and the wrapper is a live node the builder owns.
-                unsafe { (host.callbacks.set_principal_layout_node)(host.callbacks.builder, frame, wrapper_slot) };
+                layout_node = wrapper_slot;
                 created_box = Some(wrapper);
             } else {
+                layout_node = text_layout_node;
                 created_box = Some(layout_host.created(text_layout_node));
             }
         }
     } else {
-        keep_principal_layout_node(host, frame, old_layout_node);
+        layout_node = old_layout_node;
     }
 
-    // SAFETY: The frame remains live throughout the call.
-    let layout_node = unsafe { (host.callbacks.principal_layout_node)(frame) };
     PrincipalBoxConstruction {
         layout_node,
         created_box,
@@ -2329,7 +2319,6 @@ fn update_principal_node_after_entry(
     entry_decision: PrincipalNodeEntryDecision,
 ) {
     let host = update.host;
-    let frame = update.frame;
     let dom_node = update.dom_node;
 
     let prior_has_svg_root = update.context.has_svg_root;
@@ -2348,13 +2337,13 @@ fn update_principal_node_after_entry(
     let context = &mut *update.context;
 
     if !construction.layout_node.is_invalid() {
+        let layout_node = construction.layout_node;
         if update.kind.is_element() || update.kind.is_document() {
-            // SAFETY: The frame owns a live NodeWithStyle for elements and documents.
-            unsafe { (host.callbacks.attach_principal_style_resources)(frame) };
+            // SAFETY: The builder remains live, and the box is a live NodeWithStyle for elements
+            // and documents.
+            unsafe { (host.callbacks.attach_principal_style_resources)(host.callbacks.builder, layout_node) };
         }
 
-        // SAFETY: `has_layout_node` guarantees that the frame owns a live principal layout node.
-        let layout_node = unsafe { (host.callbacks.principal_layout_node)(frame) };
         let starts_new_subtree = entry_decision.should_create_layout_node && update.state.new_subtree_root.is_invalid();
         if starts_new_subtree {
             update.state.new_subtree_root = layout_node;
@@ -2506,7 +2495,7 @@ fn update_principal_node_after_entry(
                 host,
                 update.state,
                 dom_node,
-                (host.callbacks.principal_layout_node)(frame),
+                construction.layout_node,
                 context,
                 PrincipalDescendantUpdate {
                     kind: update.kind,
@@ -2597,7 +2586,15 @@ fn update_layout_tree_from(
         assert!(!pushed_frame.frame.is_null());
         let dom_node = pushed_frame.dom_node;
         assert!(!dom_node.is_null());
-        let old_layout_node = pushed_frame.old_layout_node;
+        // The box the node already has is the row the arena binds to its identity; the document is
+        // named by the viewport row instead, since it has no identity of its own there.
+        let old_layout_node = if is_document_root {
+            host.layout().arena().bound_viewport_row()
+        } else {
+            host.layout()
+                .arena()
+                .bound_row(StyleNodeID::from_raw(style_node).expect("a node the walk enters is named"))
+        };
         let entry_facts = PrincipalNodeEntryFacts {
             must_create_subtree,
             needs_layout_tree_update: host
