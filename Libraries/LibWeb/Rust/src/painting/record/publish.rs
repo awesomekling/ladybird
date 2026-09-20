@@ -68,6 +68,7 @@ pub(crate) fn publish_recording(
         vector_image_render_requests,
         ..
     } = resources;
+    let pass = crate::painting::seal::enter(crate::painting::seal::Pass::RecordingPublish);
     for font in fonts.values() {
         publish.add_font(font);
     }
@@ -80,13 +81,21 @@ pub(crate) fn publish_recording(
     for (resource_id, sink_handle) in video_sinks {
         publish.add_video_sink(resource_id, sink_handle);
     }
+    // Resolving a vector image lays out and records another document, which reads that document
+    // and re-enters this arena's SVG paint resource sync. That is a paint stage of its own, so
+    // this one ends before it begins rather than containing it.
+    drop(pass);
     resolve_vector_image_placeholders(&mut output, &vector_image_render_requests, publish);
-    if let Some(mut recording_from_scratch) = recording_from_scratch {
+    let recording_from_scratch = recording_from_scratch.map(|mut recording_from_scratch| {
         resolve_vector_image_placeholders(
             &mut recording_from_scratch.output,
             &recording_from_scratch.resources.vector_image_render_requests,
             publish,
         );
+        recording_from_scratch
+    });
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::RecordingPublish);
+    if let Some(recording_from_scratch) = recording_from_scratch {
         crate::painting::record::verify::verify_assembled_recording_matches_fresh(
             &output,
             &recording_from_scratch.output,
