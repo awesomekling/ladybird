@@ -253,6 +253,20 @@ double StyleEngine::ensure_random_base_value(StyleNodeID node, Utf16View name, b
     return bit_cast<double>(ensure_random_base_value(node, code_units.span(), element_shared));
 }
 
+void StyleEngine::freeze_longhand_inputs(ReadonlySpan<StyleNodeID> nodes)
+{
+    Vector<u32> raw_nodes;
+    raw_nodes.ensure_capacity(nodes.size());
+    for (auto node : nodes)
+        raw_nodes.unchecked_append(node.value());
+    StyleEngineFFI::style_engine_freeze_longhand_inputs(m_impl, raw_nodes.data(), raw_nodes.size());
+}
+
+StyleEngineFFI::FfiFrozenLonghandInputRow StyleEngine::frozen_longhand_input(StyleNodeID node) const
+{
+    return StyleEngineFFI::style_engine_frozen_longhand_input(m_impl, node.value());
+}
+
 void StyleEngine::decide_transitions(StyleRecordID before_style_record, void const* after_longhand_table, void const* after_animated_overlay, StyleValueFFI::FfiTransitionInput& input, StyleValueFFI::FfiTransitionAction* actions) const
 {
     StyleValueFFI::rust_decide_transitions(m_impl, before_style_record.value(), after_longhand_table, after_animated_overlay, &input, actions);

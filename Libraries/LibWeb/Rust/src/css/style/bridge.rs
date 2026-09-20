@@ -564,6 +564,15 @@ pub struct FfiElementArrival {
     pub construction_facts: u32,
 }
 
+/// Inputs independent of results produced earlier in the same preorder style batch.
+#[derive(Clone, Copy, Default)]
+#[repr(C)]
+pub struct FfiFrozenLonghandInputRow {
+    pub adjustment_facts: u32,
+    pub is_present: bool,
+    pub tree_counting_inputs: u64,
+}
+
 /// The last pseudo-element kind C++ materializes as a synthetic pseudo-element; the kinds up to
 /// it are the bits a style record's pseudo-element mask carries. Mirrors the C++
 /// `last_synthetic_pseudo_element`.
@@ -4313,6 +4322,48 @@ pub unsafe extern "C" fn style_engine_sort_style_deltas_for_direct_application(
             .compare_style_reaction_order(first_node, second_node)
             .then_with(|| pseudo_rank(first).cmp(&pseudo_rank(second)))
     });
+}
+
+/// Freezes independent longhand inputs for the complete dirty reaction set.
+///
+/// # Safety
+/// `engine` must be live, and `nodes` must name `count` readable entries.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_freeze_longhand_inputs(engine: *mut c_void, nodes: *const u32, count: usize) {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    if count == 0 {
+        engine.freeze_longhand_inputs(&[]);
+        return;
+    }
+    assert!(!nodes.is_null(), "a non-empty style-node span must have storage");
+    let nodes = unsafe { std::slice::from_raw_parts(nodes, count) }
+        .iter()
+        .filter_map(|&node| StyleNodeID::from_raw(node))
+        .collect::<Vec<_>>();
+    engine.freeze_longhand_inputs(&nodes);
+}
+
+/// Returns one row from the current reaction batch's frozen longhand input table.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_frozen_longhand_input(
+    engine: *const c_void,
+    node: u32,
+) -> FfiFrozenLonghandInputRow {
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return FfiFrozenLonghandInputRow::default();
+    };
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    let Some(row) = engine.frozen_longhand_input(node) else {
+        return FfiFrozenLonghandInputRow::default();
+    };
+    FfiFrozenLonghandInputRow {
+        adjustment_facts: row.adjustment_facts,
+        is_present: true,
+        tree_counting_inputs: row.tree_counting_inputs,
+    }
 }
 
 /// Installs the authoritative release order recorded for the next replay transaction.

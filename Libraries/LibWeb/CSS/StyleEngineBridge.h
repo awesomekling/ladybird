@@ -60,6 +60,8 @@ public:
 #include <LibWeb/StyleEngineBridgeGenerated.h>
 
     [[nodiscard]] double ensure_random_base_value(StyleNodeID, Utf16View name, bool element_shared);
+    void freeze_longhand_inputs(ReadonlySpan<StyleNodeID>);
+    [[nodiscard]] StyleEngineFFI::FfiFrozenLonghandInputRow frozen_longhand_input(StyleNodeID) const;
 
     // Identity 0 is never returned; it means "no node".
     StyleNodeID allocate_style_node();

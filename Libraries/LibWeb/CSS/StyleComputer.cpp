@@ -5804,7 +5804,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         };
         computed_style.clear_effective_color_scheme();
 
-        auto published_adjustment_fact_row = style_computer.style_engine().element_adjustment_facts(abstract_element.element().style_node_id());
+        auto frozen_input = style_computer.style_engine().frozen_longhand_input(abstract_element.element().style_node_id());
+        auto published_adjustment_fact_row = frozen_input.is_present
+            ? (1ull << 32) | frozen_input.adjustment_facts
+            : style_computer.style_engine().element_adjustment_facts(abstract_element.element().style_node_id());
         Optional<u32> published_adjustment_facts;
         if (published_adjustment_fact_row >> 32)
             published_adjustment_facts = static_cast<u32>(published_adjustment_fact_row);
@@ -5813,7 +5816,9 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             abstract_element, retained_parent_display.display, published_adjustment_facts,
             retained_parent_display.available ? BoxTypeParentDisplaySource::Retained : BoxTypeParentDisplaySource::Host);
         if (computation_requirements->uses_tree_counting_function) {
-            auto tree_counting_inputs = style_computer.style_engine().element_tree_counting_inputs(abstract_element.element().style_node_id());
+            auto tree_counting_inputs = frozen_input.is_present
+                ? frozen_input.tree_counting_inputs
+                : style_computer.style_engine().element_tree_counting_inputs(abstract_element.element().style_node_id());
             if (tree_counting_inputs != 0) {
                 state.tree_counting_context = DOM::AbstractElement::TreeCountingFunctionResolutionContext {
                     .sibling_count = static_cast<size_t>(tree_counting_inputs >> 32),
