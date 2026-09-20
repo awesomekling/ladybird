@@ -2503,8 +2503,13 @@ void Document::sample_animation_effects_needing_style_update()
             timeline->set_current_time_override_for_style_sampling(timeline->current_time_for_observation());
     }
     ScopeGuard clear_current_time_overrides = [&] {
+        if (timelines_with_current_time_override.is_empty())
+            return;
         for (auto& timeline : timelines_with_current_time_override)
             timeline->clear_current_time_override_for_style_sampling();
+        // The samples an overlay was just built from are this one pass's, not the document's.
+        // Put the timelines' own times back where the next style update will read them.
+        publish_animation_environment_for_style_update();
     };
 
     Animations::AnimationUpdateContext context;

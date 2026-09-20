@@ -823,6 +823,16 @@ static ReadonlySpan<CSS::ComputedValuesFFI::FfiAnimatedOverlayEntry> animated_ov
 
 AnimationUpdateContext::~AnimationUpdateContext()
 {
+    // Building the overlay below is a style computation, and it samples each effect from the timing
+    // the document published rather than from the effect. Whatever this update moved - a timeline
+    // that ticked, a start time a pending task committed, an effect script detached from its
+    // animation - moved it after the last publication, so publish again here, the last moment
+    // before the stage reads.
+    if (!elements.is_empty()) {
+        auto& document = elements.begin()->key.element().document();
+        document.publish_animation_environment_for_style_update();
+    }
+
     for (auto& it : elements) {
         auto style = it.value.target_style;
         if (!style)
