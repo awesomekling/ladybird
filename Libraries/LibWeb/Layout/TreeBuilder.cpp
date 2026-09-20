@@ -34,7 +34,6 @@
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/Dump.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
-#include <LibWeb/HTML/HTMLSlotElement.h>
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/NodeArena.h>
@@ -61,9 +60,6 @@ private:
     struct PrincipalNodeFrameStorage;
     struct PseudoElementFrameStorage;
     static TraversalDecision clear_stale_layout_node(DOM::Node&, u32 cleared_subtree_root);
-    static TraversalDecision clear_stale_layout_node_in_subtree(DOM::Node&, DOM::Node const& subtree_root, u32 cleared_subtree_root);
-
-    DOM::Node& dom_node_for_style_node(u32 style_node) const;
 
     RustFFI::FfiDomTreeBuilderCallbacks make_ffi_dom_tree_builder_callbacks();
     RustFFI::FfiPseudoTreeBuilderCallbacks make_ffi_pseudo_tree_builder_callbacks();
@@ -98,22 +94,6 @@ void LayoutTreeBuilderAccess::set_synthetic_pseudo_element_node(DOM::Element& el
 static void update_style_if_needed_for_layout_tree_bypass_path(DOM::Element&);
 struct PrincipalNodeFrame;
 static Compositing::RustFFI::NodeSlotId create_layout_node_for_text(DOM::Text&);
-
-static size_t ffi_assigned_node_count(void* slot_element_pointer)
-{
-    VERIFY(slot_element_pointer);
-    return static_cast<HTML::HTMLSlotElement*>(slot_element_pointer)->assigned_nodes_internal().size();
-}
-
-static void* ffi_assigned_node_at(void* slot_element_pointer, size_t index)
-{
-    VERIFY(slot_element_pointer);
-    auto assigned_nodes = static_cast<HTML::HTMLSlotElement*>(slot_element_pointer)->assigned_nodes_internal();
-    VERIFY(index < assigned_nodes.size());
-    DOM::Node* node = nullptr;
-    assigned_nodes[index].visit([&](auto& assigned_node) { node = assigned_node.ptr(); });
-    return node;
-}
 
 class GeneratedContentImageProvider final
     : public ImageProvider {
@@ -358,12 +338,14 @@ static void publish_generated_content(DOM::AbstractElement const& element_refere
 // The node an identity the walk carries names. The document is the build's root and is not in the
 // style computer's node index, because a document holding a reference back to itself there would
 // keep itself alive; every other identity resolves through the index.
-DOM::Node& LayoutTreeBuildBridge::dom_node_for_style_node(u32 style_node) const
+// The DOM node the style mirror files under `style_node`. The document is the only node the
+// style computer does not answer for, because it is not in the node map.
+static DOM::Node& dom_node_for_style_node(DOM::Document& document, u32 style_node)
 {
     CSS::StyleNodeID identity { style_node };
-    if (identity == m_document->style_node_id())
-        return *m_document;
-    auto node = m_document->style_computer().node_for_style_node(identity);
+    if (identity == document.style_node_id())
+        return document;
+    auto node = document.style_computer().node_for_style_node(identity);
     VERIFY(node);
     return *node;
 }
@@ -602,33 +584,9 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
     };
 }
 
-// The identity the style mirror files a node under, matching DOM::Node's own mapping.
-static u32 style_node_identity_of(DOM::Node const& node)
-{
-    if (auto const* element = as_if<DOM::Element>(node))
-        return element->style_node_id().value();
-    if (auto const* text = as_if<DOM::Text>(node))
-        return text->style_node_id().value();
-    if (auto const* shadow_root = as_if<DOM::ShadowRoot>(node))
-        return shadow_root->style_node_id().value();
-    if (auto const* document = as_if<DOM::Document>(node))
-        return document->style_node_id().value();
-    return 0;
-}
-
 static bool is_svg_resource_box(Node const& layout_node)
 {
     return layout_node.is_svg_pattern_box() || layout_node.is_svg_mask_box() || layout_node.is_svg_clip_box();
-}
-
-TraversalDecision LayoutTreeBuildBridge::clear_stale_layout_node_in_subtree(DOM::Node& node, DOM::Node const& subtree_root, u32 cleared_subtree_root)
-{
-    if (&node != &subtree_root) {
-        auto const* element = as_if<DOM::Element>(node);
-        if (element && element->rendered_in_top_layer())
-            return TraversalDecision::SkipChildrenAndContinue;
-    }
-    return clear_stale_layout_node(node, cleared_subtree_root);
 }
 
 TraversalDecision LayoutTreeBuildBridge::clear_stale_layout_node(DOM::Node& node, u32 cleared_subtree_root)
@@ -683,28 +641,18 @@ TraversalDecision LayoutTreeBuildBridge::clear_stale_layout_node(DOM::Node& node
 void LayoutTreeBuildBridge::detach_top_layer_element_layout_subtree(DOM::Element& element)
 {
     RustFFI::FfiTopLayerDetachCallbacks callbacks {
-        .element_layout_node = [](void* element_pointer) -> Compositing::RustFFI::NodeSlotId {
-            VERIFY(element_pointer);
-            // NB: Called at DOM mutation processing time, outside layout tree construction.
-            return Node::slot_id(static_cast<DOM::Element*>(element_pointer)->unsafe_layout_node()); },
+        .context = &element.document(),
         .prepare_subtree_for_detach = [](void* layout_node_pointer) {
             VERIFY(layout_node_pointer);
             static_cast<Layout::Node*>(layout_node_pointer)->prepare_subtree_for_detach_from_layout_tree(); },
-        .clear_stale_subtree = [](void* root_pointer) {
-            VERIFY(root_pointer);
-            auto& root = *static_cast<DOM::Node*>(root_pointer);
-            auto root_identity = style_node_identity_of(root);
-            root.for_each_shadow_including_inclusive_descendant([&](auto& node) {
-                return clear_stale_layout_node_in_subtree(node, root, root_identity);
-            }); },
-        .slot_element = [](void* element_pointer) -> void* {
-            VERIFY(element_pointer);
-            return as_if<HTML::HTMLSlotElement>(*static_cast<DOM::Element*>(element_pointer)); },
-        .assigned_node_count = ffi_assigned_node_count,
-        .assigned_node_at = ffi_assigned_node_at,
+        .clear_stale_layout_node = [](void* document_pointer, u32 style_node, u32 cleared_subtree_root) -> bool {
+            VERIFY(document_pointer);
+            auto& document = *static_cast<DOM::Document*>(document_pointer);
+            auto decision = clear_stale_layout_node(dom_node_for_style_node(document, style_node), cleared_subtree_root);
+            return decision == TraversalDecision::SkipChildrenAndContinue; },
     };
     RustFFI::rust_detach_top_layer_element_layout_subtree(
-        &callbacks, element.document().layout_node_arena().handle(), &element);
+        &callbacks, element.document().layout_node_arena().handle(), element.style_node_id().value());
 }
 
 struct PrincipalNodeFrame {
@@ -733,7 +681,7 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
         .clear_stale_layout_node = [](void* builder_pointer, u32 style_node, u32 cleared_subtree_root) -> bool {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
-            auto decision = clear_stale_layout_node(builder.dom_node_for_style_node(style_node), cleared_subtree_root);
+            auto decision = clear_stale_layout_node(dom_node_for_style_node(*builder.m_document, style_node), cleared_subtree_root);
             return decision == TraversalDecision::SkipChildrenAndContinue; },
         .create_first_letter_nodes = [](void*, void* element_pointer, RustFFI::FfiFirstLetterTarget target) -> RustFFI::FfiFirstLetterNodes {
             VERIFY(element_pointer);
@@ -747,7 +695,7 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             if (storage.active_frame_count == storage.frames.size())
                 storage.frames.append(make<PrincipalNodeFrame>());
             auto& frame = *storage.frames[storage.active_frame_count++];
-            auto& node = builder.dom_node_for_style_node(style_node);
+            auto& node = dom_node_for_style_node(*builder.m_document, style_node);
             frame.anonymous_computed_values = nullptr;
             VERIFY(!frame.style_record_owner);
             frame.style_record_identity = 0;
