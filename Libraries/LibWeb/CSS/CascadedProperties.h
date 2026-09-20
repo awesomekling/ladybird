@@ -9,6 +9,7 @@
 #include <AK/HashMap.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/RefCounted.h>
+#include <AK/String.h>
 #include <AK/Utf16FlyString.h>
 #include <AK/Vector.h>
 #include <AK/WeakPtr.h>
@@ -41,6 +42,11 @@ public:
     void assign_source_slot(u32 slot, RefPtr<StyleSheetState const> source, GC::Ptr<DOM::ShadowRoot const> source_shadow_root);
     [[nodiscard]] size_t source_slot_count() const { return m_source_slots.size(); }
     [[nodiscard]] RefPtr<StyleSheetState const> source_for_slot(u32 slot) const;
+    struct SourceResourceContext {
+        String serialized_base_url;
+        bool origin_clean { false };
+    };
+    [[nodiscard]] SourceResourceContext const* source_resource_context_for_slot(u32 slot) const;
 
 private:
     CascadedProperties();
@@ -48,6 +54,7 @@ private:
     struct SourcePair {
         WeakPtr<StyleSheetState const> source;
         GC::Weak<DOM::ShadowRoot const> source_shadow_root;
+        Optional<SourceResourceContext> resource_context;
     };
 
     ComputedValuesFFI::CascadedPropertyStore* m_store { nullptr };

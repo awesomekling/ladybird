@@ -40,7 +40,15 @@ void CascadedProperties::assign_source_slot(u32 slot, RefPtr<StyleSheetState con
 {
     if (slot >= m_source_slots.size())
         m_source_slots.resize(slot + 1);
-    m_source_slots[slot] = SourcePair { source.ptr(), source_shadow_root.ptr() };
+    Optional<SourceResourceContext> resource_context;
+    if (source) {
+        auto base_url = source->style_resource_base_url();
+        resource_context = SourceResourceContext {
+            .serialized_base_url = base_url.has_value() ? base_url->to_string() : String {},
+            .origin_clean = source->is_origin_clean(),
+        };
+    }
+    m_source_slots[slot] = SourcePair { source.ptr(), source_shadow_root.ptr(), move(resource_context) };
 }
 
 RefPtr<StyleSheetState const> CascadedProperties::source_for_slot(u32 slot) const
@@ -48,6 +56,13 @@ RefPtr<StyleSheetState const> CascadedProperties::source_for_slot(u32 slot) cons
     if (slot >= m_source_slots.size())
         return nullptr;
     return m_source_slots[slot].source.ptr();
+}
+
+CascadedProperties::SourceResourceContext const* CascadedProperties::source_resource_context_for_slot(u32 slot) const
+{
+    if (slot >= m_source_slots.size())
+        return nullptr;
+    return m_source_slots[slot].resource_context.ptr();
 }
 
 RefPtr<StyleValue const> CascadedProperties::property(PropertyID property_id) const
