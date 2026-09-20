@@ -2665,6 +2665,12 @@ pub struct FfiLonghandTransactionResult {
     pub storage: *mut c_void,
 }
 
+#[repr(C)]
+pub struct FfiLonghandFinalizationResult {
+    pub parent_style_in_display_none_subtree: bool,
+    pub invalidated_longhands: u16,
+}
+
 struct LonghandTransactionContinuation {
     drive_result: FfiLonghandDriveResult,
     finalization_line_height_metrics: FfiInputLineHeightMetrics,
@@ -2769,7 +2775,6 @@ pub struct FfiComputePropertiesInput {
     /// overlay and the line height metrics the computation already holds stand.
     pub apply_animations:
         unsafe extern "C" fn(*mut c_void, i8, bool, *mut FfiInputLineHeightMetrics, *mut bool) -> *mut AnimatedOverlay,
-    pub did_mutate_post_compute: unsafe extern "C" fn(*mut c_void, u16),
 }
 
 /// Document-level inputs to used color-scheme resolution. Scheme values use
@@ -5492,7 +5497,7 @@ pub unsafe extern "C" fn rust_compute_properties(
 pub unsafe extern "C" fn rust_finalize_longhand_transaction(
     input: *const FfiComputePropertiesInput,
     transaction: FfiLonghandTransactionResult,
-) -> bool {
+) -> FfiLonghandFinalizationResult {
     let input = unsafe { &*input };
     let drive_input = unsafe { &*input.transaction_input };
     let style_engine = unsafe { &*input.style_engine.cast::<crate::css::style::StyleEngine>() };
@@ -5509,8 +5514,12 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
     unsafe { destroy_style_computation_result(&drive_result) };
     if input.stop_after_longhand_drive {
         unsafe { &mut *drive_input.longhand_table }.freeze();
-        return false;
+        return FfiLonghandFinalizationResult {
+            parent_style_in_display_none_subtree: false,
+            invalidated_longhands: 0,
+        };
     }
+    let mut invalidated_longhands = 0;
     let parent_snapshot = if input.inheritance_parent_style_record != 0 {
         Some(parent_snapshot_for_style_record(
             style_engine,
@@ -5569,8 +5578,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
     // adjustments, so the adjustments are undone here and redone by the finalization below.
     if animation_values_applied || element_has_animation_state {
         let invalidated = unsafe { restore_post_compute_values(&mut *drive_input.longhand_table, false) };
-        crate::css::style::seal::note_host_call("computed_properties.did_mutate_post_compute");
-        unsafe { (input.did_mutate_post_compute)(input.callback_context, invalidated) };
+        invalidated_longhands |= invalidated;
     }
     if element_has_animation_state {
         let mut animation_stage_sampled = false;
@@ -5594,8 +5602,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
 
     if parent_text_align_input_is_animated && !animation_values_applied {
         let invalidated = unsafe { restore_post_compute_values(&mut *drive_input.longhand_table, true) };
-        crate::css::style::seal::note_host_call("computed_properties.did_mutate_post_compute");
-        unsafe { (input.did_mutate_post_compute)(input.callback_context, invalidated) };
+        invalidated_longhands |= invalidated;
     }
     let finalization_mode = if animation_values_applied {
         Some(FfiStyleFinalizationMode::All)
@@ -5615,8 +5622,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
             unsafe { animated_overlay.as_mut() },
             Some(&finalization_line_height_metrics),
         );
-        crate::css::style::seal::note_host_call("computed_properties.did_mutate_post_compute");
-        unsafe { (input.did_mutate_post_compute)(input.callback_context, finalization.invalidated_longhands) };
+        invalidated_longhands |= finalization.invalidated_longhands;
     }
     let parent_style_in_display_none_subtree = parent_snapshot
         .as_ref()
@@ -5628,7 +5634,10 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
     unsafe { &mut *drive_input.longhand_table }
         .set_in_display_none_subtree(parent_style_in_display_none_subtree || display_is_none);
     unsafe { &mut *drive_input.longhand_table }.freeze();
-    parent_style_in_display_none_subtree
+    FfiLonghandFinalizationResult {
+        parent_style_in_display_none_subtree,
+        invalidated_longhands,
+    }
 }
 
 /// Creates the complete initial document longhand table. Unlike a normal

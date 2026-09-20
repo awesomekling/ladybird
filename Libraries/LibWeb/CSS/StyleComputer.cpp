@@ -6032,9 +6032,6 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             *line_height_metrics = input_line_height_metrics(computed_style, context.abstract_element, should_measure_line_height);
             return computed_style.prepare_animated_overlay_for_rust_finalization(
                 Badge<StyleComputer> {}, ComputedStyleWorkingSet::CreateAnimatedOverlay::No); },
-        .did_mutate_post_compute = [](void* context_pointer, u16 invalidated_longhands) {
-            auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
-            context.state->working_set->did_apply_style_finalization_from_rust(invalidated_longhands); },
     };
     auto finish_properties = [](void* context_pointer, bool parent_style_in_display_none_subtree) {
         auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
@@ -6077,8 +6074,9 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     auto transaction_result = ComputedValuesFFI::rust_compute_properties(&input, &prepared_transaction);
     StyleValueFFI::rust_style_ffi_note_longhand_result_apply();
     consume_longhand_transaction_result(&native_context, transaction_result.drive_result);
-    auto parent_style_in_display_none_subtree = ComputedValuesFFI::rust_finalize_longhand_transaction(&input, transaction_result);
-    finish_properties(&native_context, parent_style_in_display_none_subtree);
+    auto finalization_result = ComputedValuesFFI::rust_finalize_longhand_transaction(&input, transaction_result);
+    native_context.state->working_set->did_apply_style_finalization_from_rust(finalization_result.invalidated_longhands);
+    finish_properties(&native_context, finalization_result.parent_style_in_display_none_subtree);
     return native_context.state->working_set;
 }
 

@@ -12,13 +12,6 @@
 //! reports each callback site once; `abort` makes the first callback fatal. Reports and census
 //! totals go to stderr or to the file named by `LIBWEB_SEAL_STYLE_STAGE_LOG`.
 //!
-//! # The allow-list
-//!
-//! `computed_properties.did_mutate_post_compute` is allowed: its complete C++ implementation only
-//! invalidates cached property data in the transaction-private `ComputedStyleWorkingSet` after
-//! Rust has mutated that working set's longhand table. It does not read or write DOM, CSSOM, GC,
-//! document, or shared cache state, and the working set has exclusive ownership during the call.
-//!
 //! A font cache miss is not the shared font resource service: the installed resolver can
 //! synchronously enter the font loader and resolve a pending web face, including its GC-visible
 //! callbacks. Likewise, callbacks that prepare C++ longhand state or report computed results are
@@ -172,11 +165,6 @@ pub(crate) fn note_host_call(callback: &'static str) {
         counts.during_style = counts.during_style.wrapping_add(u64::from(during_style));
     });
     if !during_style {
-        return;
-    }
-    if callback == "computed_properties.did_mutate_post_compute" {
-        // ComputedStyleWorkingSet::did_apply_style_finalization_from_rust() only updates the
-        // exclusively owned working set's derived-property cache after Rust mutates its table.
         return;
     }
     assert!(
