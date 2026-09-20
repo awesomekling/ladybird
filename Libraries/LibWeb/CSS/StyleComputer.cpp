@@ -5851,6 +5851,132 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             .custom_property_resolution_context = custom_property_resolution_context,
         };
     };
+    auto consume_longhand_transaction_result = [](void* context_pointer, ComputedValuesFFI::FfiLonghandDriveResult const* longhand_result) {
+        auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
+        auto& style_computer = *context.style_computer;
+        auto& state = *context.state;
+        auto& computed_style = *state.working_set;
+        if (state.custom_property_resolution && longhand_result->custom_properties.did_resolve) {
+            auto& resolution_state = *state.custom_property_resolution;
+            auto const& resolution = longhand_result->custom_properties;
+            style_computer.document().style_invalidation_counters().custom_property_overlay_hits += resolution.stats.final_value_hits;
+            style_computer.document().style_invalidation_counters().custom_property_value_computations += resolution.stats.final_value_misses;
+            style_computer.document().style_invalidation_counters().custom_property_cycle_participants += resolution.stats.cycle_participants;
+            if (resolution.stats.depends_on_viewport_metrics)
+                computed_style.set_depends_on_viewport_metrics();
+
+            OrderedHashMap<Utf16FlyString, StyleProperty> resolved_own;
+            for (auto const& property : ReadonlySpan<ComputedValuesFFI::FfiResolvedCustomProperty> { resolution.properties, resolution.count }) {
+                auto name = Utf16FlyString::from_raw(property.name_raw);
+                auto value = StyleValue::adopt_rust_style_value_data(static_cast<StyleValueFFI::StyleValueData const*>(property.data));
+                resolved_own.set(name, {
+                                           .important = property.important ? Important::Yes : Important::No,
+                                           .property_id = PropertyID::Custom,
+                                           .value = move(value),
+                                       });
+            }
+
+            auto& element = context.abstract_element.element();
+            report_substitution_usage(element, resolution.stats.substitution_usage, context.substitution_usage);
+            bool resolution_read_only_the_environment = !resolution.stats.substitution_usage.uses_attr
+                && !resolution.stats.substitution_usage.uses_if
+                && !resolution.stats.substitution_usage.uses_custom_function
+                && !element.style_uses_tree_counting_function();
+            RefPtr<CustomPropertyData const> resolved;
+            if (resolved_own.is_empty() && resolution_state.parent_data) {
+                resolved = resolution_state.parent_data;
+            } else {
+                VERIFY(resolution.rust_store);
+                resolved = style_computer.intern_custom_property_data(
+                    CustomPropertyData::create(move(resolved_own), resolution_state.parent_data ? resolution_state.parent_data : resolution_state.data->parent(), resolution.rust_store));
+            }
+            resolution_state.color_scheme = computed_style.color_scheme(style_computer.document().page().preferred_color_scheme(), style_computer.document().supported_color_schemes());
+            if (resolution_read_only_the_environment)
+                resolution_state.data->set_cached_resolution(resolution_state.document_identity, resolution_state.registration_generation, resolution_state.color_scheme.value(), resolved);
+            context.abstract_element.set_custom_property_data(move(resolved));
+        }
+        if (state.custom_property_resolution)
+            report_style_query_dependencies(context.abstract_element, state.custom_property_resolution->style_query_dependencies);
+        state.transitions.ensure_capacity(longhand_result->transitions.count);
+        for (auto const& transition : ReadonlySpan<ComputedValuesFFI::FfiComputedTransition> { longhand_result->transitions.transitions, longhand_result->transitions.count }) {
+            Vector<PropertyID> properties;
+            properties.ensure_capacity(transition.property_count);
+            for (auto property : ReadonlySpan<u16> { transition.properties, transition.property_count })
+                properties.unchecked_append(static_cast<PropertyID>(property));
+            auto timing_function = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
+                static_cast<StyleValueFFI::StyleValueData const*>(transition.timing_function)));
+            state.transitions.unchecked_append({
+                .properties = move(properties),
+                .duration = transition.duration,
+                .timing_function = EasingFunction::from_style_value(timing_function),
+                .delay = transition.delay,
+                .transition_behavior = static_cast<TransitionBehavior>(transition.behavior),
+            });
+        }
+        state.transition_delay_and_duration_are_single_zero = longhand_result->transitions.delay_and_duration_are_single_zero;
+        state.animation_definitions.ensure_capacity(longhand_result->animations.count);
+        state.animation_definition_matches.ensure_capacity(longhand_result->animations.count);
+        for (auto const& animation : ReadonlySpan<ComputedValuesFFI::FfiComputedAnimation> { longhand_result->animations.animations, longhand_result->animations.count }) {
+            state.animation_definition_matches.unchecked_append(animation.matched_existing_index);
+            Variant<double, Utf16String> duration { animation.duration };
+            if (animation.duration_is_auto)
+                duration = "auto"_utf16;
+            auto timing_function = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
+                static_cast<StyleValueFFI::StyleValueData const*>(animation.timing_function)));
+            static_assert(to_underlying(AnimationTimelineSource::Kind::Document) == to_underlying(ComputedValuesFFI::FfiAnimationTimelineKind::Document));
+            static_assert(to_underlying(AnimationTimelineSource::Kind::None) == to_underlying(ComputedValuesFFI::FfiAnimationTimelineKind::None));
+            static_assert(to_underlying(AnimationTimelineSource::Kind::Scroll) == to_underlying(ComputedValuesFFI::FfiAnimationTimelineKind::Scroll));
+            AnimationTimelineSource timeline {
+                .kind = static_cast<AnimationTimelineSource::Kind>(animation.timeline_kind),
+                .scroller = static_cast<Scroller>(animation.scroll_scroller),
+                .axis = static_cast<Axis>(animation.scroll_axis),
+            };
+            state.animation_definitions.unchecked_append({
+                .duration = move(duration),
+                .timing_function = EasingFunction::from_style_value(timing_function),
+                .iteration_count = animation.iteration_count,
+                .direction = static_cast<AnimationDirection>(animation.direction),
+                .play_state = static_cast<AnimationPlayState>(animation.play_state),
+                .delay = animation.delay,
+                .fill_mode = static_cast<AnimationFillMode>(animation.fill_mode),
+                .composition = static_cast<AnimationComposition>(animation.composition),
+                .name = css_string_from_rust(animation.name),
+                .timeline = timeline,
+            });
+        }
+        auto const& driver_results = longhand_result->driver_results;
+        style_computer.document().style_invalidation_counters().computed_longhand_evaluations += driver_results.longhand_evaluations;
+        if (driver_results.uses_tree_counting_function)
+            context.abstract_element.element().set_style_uses_tree_counting_function();
+
+        auto invalidate_post_adjusted_longhand = [&](u8 flag, PropertyID property_id) {
+            if (driver_results.post_adjusted_longhands & flag)
+                computed_style.did_store_property_data_from_drive(property_id);
+        };
+        invalidate_post_adjusted_longhand(ComputedValuesFFI::POST_ADJUSTED_FLOAT, PropertyID::Float);
+        invalidate_post_adjusted_longhand(ComputedValuesFFI::POST_ADJUSTED_DISPLAY, PropertyID::Display);
+        invalidate_post_adjusted_longhand(ComputedValuesFFI::POST_ADJUSTED_LINE_HEIGHT, PropertyID::LineHeight);
+        invalidate_post_adjusted_longhand(ComputedValuesFFI::POST_ADJUSTED_POSITION, PropertyID::Position);
+        invalidate_post_adjusted_longhand(ComputedValuesFFI::POST_ADJUSTED_TEXT_ALIGN, PropertyID::TextAlign);
+        if (!context.stop_after_longhand_drive && driver_results.explicitly_inherited_non_inherited_style_groups != 0) {
+            auto style_groups = driver_results.explicitly_inherited_non_inherited_style_groups;
+            if (style_groups == NumericLimits<u32>::max())
+                style_groups = ComputedValues::all_style_groups;
+            if (auto* parent = context.abstract_element.element().parent())
+                parent->add_children_explicitly_inherited_non_inherited_style_groups(style_groups);
+            if (context.explicitly_inherited_non_inherited_style_groups)
+                *context.explicitly_inherited_non_inherited_style_groups |= style_groups;
+        }
+        if (!context.stop_after_longhand_drive && is<HTML::HTMLHtmlElement>(context.abstract_element.element())) {
+            style_computer.m_root_element_font_metrics = style_computer.calculate_root_element_font_metrics(computed_style);
+            style_computer.m_root_element_font_metrics_depend_on_viewport_metrics = computed_style.font_metrics_depend_on_viewport_metrics();
+        }
+        // NB: Keyframe collection is the only thing that sets this, and nothing between here and
+        //     where the animation stage consumes it runs in between. Clearing it here rather
+        //     than after the definitions lets an element without animations skip that step.
+        style_computer.m_keyframes_inherited_non_inherited_style_groups = 0;
+        style_computer.clear_computation_context_caches();
+    };
     ComputedValuesFFI::FfiComputePropertiesInput input {
         .store = cascaded_properties.rust_store(),
         .custom_property_store = custom_property_data ? custom_property_data->rust_store() : nullptr,
@@ -5871,133 +5997,6 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         .stop_after_longhand_drive = stop_after_longhand_drive,
         .transaction_input = nullptr,
         .callback_context = &native_context,
-        .finish_longhand_drive = [](void* context_pointer, ComputedValuesFFI::FfiLonghandDriveResult const* longhand_result) {
-            auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
-            auto& style_computer = *context.style_computer;
-            auto& state = *context.state;
-            auto& computed_style = *state.working_set;
-            if (state.custom_property_resolution && longhand_result->custom_properties.did_resolve) {
-                auto& resolution_state = *state.custom_property_resolution;
-                auto const& resolution = longhand_result->custom_properties;
-                style_computer.document().style_invalidation_counters().custom_property_overlay_hits += resolution.stats.final_value_hits;
-                style_computer.document().style_invalidation_counters().custom_property_value_computations += resolution.stats.final_value_misses;
-                style_computer.document().style_invalidation_counters().custom_property_cycle_participants += resolution.stats.cycle_participants;
-                if (resolution.stats.depends_on_viewport_metrics)
-                    computed_style.set_depends_on_viewport_metrics();
-
-                OrderedHashMap<Utf16FlyString, StyleProperty> resolved_own;
-                for (auto const& property : ReadonlySpan<ComputedValuesFFI::FfiResolvedCustomProperty> { resolution.properties, resolution.count }) {
-                    auto name = Utf16FlyString::from_raw(property.name_raw);
-                    auto value = StyleValue::adopt_rust_style_value_data(static_cast<StyleValueFFI::StyleValueData const*>(property.data));
-                    resolved_own.set(name, {
-                                               .important = property.important ? Important::Yes : Important::No,
-                                               .property_id = PropertyID::Custom,
-                                               .value = move(value),
-                                           });
-                }
-
-                auto& element = context.abstract_element.element();
-                report_substitution_usage(element, resolution.stats.substitution_usage, context.substitution_usage);
-                bool resolution_read_only_the_environment = !resolution.stats.substitution_usage.uses_attr
-                    && !resolution.stats.substitution_usage.uses_if
-                    && !resolution.stats.substitution_usage.uses_custom_function
-                    && !element.style_uses_tree_counting_function();
-                RefPtr<CustomPropertyData const> resolved;
-                if (resolved_own.is_empty() && resolution_state.parent_data) {
-                    resolved = resolution_state.parent_data;
-                } else {
-                    VERIFY(resolution.rust_store);
-                    resolved = style_computer.intern_custom_property_data(
-                        CustomPropertyData::create(move(resolved_own), resolution_state.parent_data ? resolution_state.parent_data : resolution_state.data->parent(), resolution.rust_store));
-                }
-                resolution_state.color_scheme = computed_style.color_scheme(style_computer.document().page().preferred_color_scheme(), style_computer.document().supported_color_schemes());
-                if (resolution_read_only_the_environment)
-                    resolution_state.data->set_cached_resolution(resolution_state.document_identity, resolution_state.registration_generation, resolution_state.color_scheme.value(), resolved);
-                context.abstract_element.set_custom_property_data(move(resolved));
-            }
-            if (state.custom_property_resolution)
-                report_style_query_dependencies(context.abstract_element, state.custom_property_resolution->style_query_dependencies);
-            state.transitions.ensure_capacity(longhand_result->transitions.count);
-            for (auto const& transition : ReadonlySpan<ComputedValuesFFI::FfiComputedTransition> { longhand_result->transitions.transitions, longhand_result->transitions.count }) {
-                Vector<PropertyID> properties;
-                properties.ensure_capacity(transition.property_count);
-                for (auto property : ReadonlySpan<u16> { transition.properties, transition.property_count })
-                    properties.unchecked_append(static_cast<PropertyID>(property));
-                auto timing_function = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
-                    static_cast<StyleValueFFI::StyleValueData const*>(transition.timing_function)));
-                state.transitions.unchecked_append({
-                    .properties = move(properties),
-                    .duration = transition.duration,
-                    .timing_function = EasingFunction::from_style_value(timing_function),
-                    .delay = transition.delay,
-                    .transition_behavior = static_cast<TransitionBehavior>(transition.behavior),
-                });
-            }
-            state.transition_delay_and_duration_are_single_zero = longhand_result->transitions.delay_and_duration_are_single_zero;
-            state.animation_definitions.ensure_capacity(longhand_result->animations.count);
-            state.animation_definition_matches.ensure_capacity(longhand_result->animations.count);
-            state.animation_definition_keyframe_sets.ensure_capacity(longhand_result->animations.count);
-            for (auto const& animation : ReadonlySpan<ComputedValuesFFI::FfiComputedAnimation> { longhand_result->animations.animations, longhand_result->animations.count }) {
-                state.animation_definition_matches.unchecked_append(animation.matched_existing_index);
-                state.animation_definition_keyframe_sets.unchecked_append(static_cast<Animations::KeyframeEffect::KeyFrameSet const*>(animation.keyframe_set));
-                Variant<double, Utf16String> duration { animation.duration };
-                if (animation.duration_is_auto)
-                    duration = "auto"_utf16;
-                auto timing_function = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
-                    static_cast<StyleValueFFI::StyleValueData const*>(animation.timing_function)));
-                static_assert(to_underlying(AnimationTimelineSource::Kind::Document) == to_underlying(ComputedValuesFFI::FfiAnimationTimelineKind::Document));
-                static_assert(to_underlying(AnimationTimelineSource::Kind::None) == to_underlying(ComputedValuesFFI::FfiAnimationTimelineKind::None));
-                static_assert(to_underlying(AnimationTimelineSource::Kind::Scroll) == to_underlying(ComputedValuesFFI::FfiAnimationTimelineKind::Scroll));
-                AnimationTimelineSource timeline {
-                    .kind = static_cast<AnimationTimelineSource::Kind>(animation.timeline_kind),
-                    .scroller = static_cast<Scroller>(animation.scroll_scroller),
-                    .axis = static_cast<Axis>(animation.scroll_axis),
-                };
-                state.animation_definitions.unchecked_append({
-                    .duration = move(duration),
-                    .timing_function = EasingFunction::from_style_value(timing_function),
-                    .iteration_count = animation.iteration_count,
-                    .direction = static_cast<AnimationDirection>(animation.direction),
-                    .play_state = static_cast<AnimationPlayState>(animation.play_state),
-                    .delay = animation.delay,
-                    .fill_mode = static_cast<AnimationFillMode>(animation.fill_mode),
-                    .composition = static_cast<AnimationComposition>(animation.composition),
-                    .name = css_string_from_rust(animation.name),
-                    .timeline = timeline,
-                });
-            }
-            auto const& driver_results = longhand_result->driver_results;
-            style_computer.document().style_invalidation_counters().computed_longhand_evaluations += driver_results.longhand_evaluations;
-            if (driver_results.uses_tree_counting_function)
-                context.abstract_element.element().set_style_uses_tree_counting_function();
-
-            auto invalidate_post_adjusted_longhand = [&](u8 flag, PropertyID property_id) {
-                if (driver_results.post_adjusted_longhands & flag)
-                    computed_style.did_store_property_data_from_drive(property_id);
-            };
-            invalidate_post_adjusted_longhand(ComputedValuesFFI::POST_ADJUSTED_FLOAT, PropertyID::Float);
-            invalidate_post_adjusted_longhand(ComputedValuesFFI::POST_ADJUSTED_DISPLAY, PropertyID::Display);
-            invalidate_post_adjusted_longhand(ComputedValuesFFI::POST_ADJUSTED_LINE_HEIGHT, PropertyID::LineHeight);
-            invalidate_post_adjusted_longhand(ComputedValuesFFI::POST_ADJUSTED_POSITION, PropertyID::Position);
-            invalidate_post_adjusted_longhand(ComputedValuesFFI::POST_ADJUSTED_TEXT_ALIGN, PropertyID::TextAlign);
-            if (!context.stop_after_longhand_drive && driver_results.explicitly_inherited_non_inherited_style_groups != 0) {
-                auto style_groups = driver_results.explicitly_inherited_non_inherited_style_groups;
-                if (style_groups == NumericLimits<u32>::max())
-                    style_groups = ComputedValues::all_style_groups;
-                if (auto* parent = context.abstract_element.element().parent())
-                    parent->add_children_explicitly_inherited_non_inherited_style_groups(style_groups);
-                if (context.explicitly_inherited_non_inherited_style_groups)
-                    *context.explicitly_inherited_non_inherited_style_groups |= style_groups;
-            }
-            if (!context.stop_after_longhand_drive && is<HTML::HTMLHtmlElement>(context.abstract_element.element())) {
-                style_computer.m_root_element_font_metrics = style_computer.calculate_root_element_font_metrics(computed_style);
-                style_computer.m_root_element_font_metrics_depend_on_viewport_metrics = computed_style.font_metrics_depend_on_viewport_metrics();
-            }
-            // NB: Keyframe collection is the only thing that sets this, and nothing between here and
-            //     where the animation stage consumes it runs in between. Clearing it here rather
-            //     than after the definitions lets an element without animations skip that step.
-            style_computer.m_keyframes_inherited_non_inherited_style_groups = 0;
-            style_computer.clear_computation_context_caches(); },
         .apply_animations = [](void* context_pointer, i8 in_display_none_subtree, bool should_measure_line_height, ComputedValuesFFI::FfiInputLineHeightMetrics* line_height_metrics, bool* did_sample) -> ComputedValuesFFI::AnimatedOverlay* {
             auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
             *did_sample = false;
@@ -6034,33 +6033,34 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         .did_mutate_post_compute = [](void* context_pointer, u16 invalidated_longhands) {
             auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
             context.state->working_set->did_apply_style_finalization_from_rust(invalidated_longhands); },
-        .finish_properties = [](void* context_pointer, bool parent_style_in_display_none_subtree) {
-            auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
-            auto& style_computer = *context.style_computer;
-            auto& computed_style = *context.state->working_set;
-            computed_style.finish_animated_overlay_rust_mutation(Badge<StyleComputer> {});
-            if (context.stop_after_longhand_drive)
-                return;
+    };
+    auto finish_properties = [](void* context_pointer, bool parent_style_in_display_none_subtree) {
+        auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
+        auto& style_computer = *context.style_computer;
+        auto& computed_style = *context.state->working_set;
+        computed_style.finish_animated_overlay_rust_mutation(Badge<StyleComputer> {});
+        if (context.stop_after_longhand_drive)
+            return;
 
-            // Transition declarations [css-transitions-1]
-            // Theoretically this should be part of the cascade, but it works with computed values.
-            compute_transitioned_properties(move(context.state->transitions), context.state->transition_delay_and_duration_are_single_zero, context.abstract_element);
-            if (auto previous_style = context.abstract_element.computed_style()) {
-                // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
-                if (!previous_style->in_display_none_subtree() && !parent_style_in_display_none_subtree) {
-                    style_computer.start_needed_transitions(computed_style, context.abstract_element);
-                    // Starting a transition associates a new animation with the element.
-                    context.abstract_element.element().publish_animation_timing_rows();
-                }
+        // Transition declarations [css-transitions-1]
+        // Theoretically this should be part of the cascade, but it works with computed values.
+        compute_transitioned_properties(move(context.state->transitions), context.state->transition_delay_and_duration_are_single_zero, context.abstract_element);
+        if (auto previous_style = context.abstract_element.computed_style()) {
+            // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
+            if (!previous_style->in_display_none_subtree() && !parent_style_in_display_none_subtree) {
+                style_computer.start_needed_transitions(computed_style, context.abstract_element);
+                // Starting a transition associates a new animation with the element.
+                context.abstract_element.element().publish_animation_timing_rows();
             }
+        }
 
-            if (style_computer.m_keyframes_inherited_non_inherited_style_groups != 0) {
-                if (auto* parent = context.abstract_element.element().parent())
-                    parent->add_children_explicitly_inherited_non_inherited_style_groups(style_computer.m_keyframes_inherited_non_inherited_style_groups);
-                if (context.explicitly_inherited_non_inherited_style_groups)
-                    *context.explicitly_inherited_non_inherited_style_groups |= style_computer.m_keyframes_inherited_non_inherited_style_groups;
-                style_computer.m_keyframes_inherited_non_inherited_style_groups = 0;
-            } },
+        if (style_computer.m_keyframes_inherited_non_inherited_style_groups != 0) {
+            if (auto* parent = context.abstract_element.element().parent())
+                parent->add_children_explicitly_inherited_non_inherited_style_groups(style_computer.m_keyframes_inherited_non_inherited_style_groups);
+            if (context.explicitly_inherited_non_inherited_style_groups)
+                *context.explicitly_inherited_non_inherited_style_groups |= style_computer.m_keyframes_inherited_non_inherited_style_groups;
+            style_computer.m_keyframes_inherited_non_inherited_style_groups = 0;
+        }
     };
     auto prepared_transaction = ComputedValuesFFI::rust_prepare_longhand_transaction(&input);
     ComputedValuesFFI::FfiLonghandTransactionInput transaction_input {};
@@ -6071,7 +6071,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         prepared_transaction.parent_has_animated_values,
         &transaction_input);
     input.transaction_input = &transaction_input;
-    ComputedValuesFFI::rust_compute_properties(&input, &prepared_transaction);
+    auto transaction_result = ComputedValuesFFI::rust_compute_properties(&input, &prepared_transaction);
+    consume_longhand_transaction_result(&native_context, transaction_result.drive_result);
+    auto parent_style_in_display_none_subtree = ComputedValuesFFI::rust_finalize_longhand_transaction(&input, transaction_result);
+    finish_properties(&native_context, parent_style_in_display_none_subtree);
     return native_context.state->working_set;
 }
 
