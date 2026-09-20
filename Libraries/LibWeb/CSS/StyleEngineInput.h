@@ -167,6 +167,7 @@ enum ElementConstructionFact : u32 {
     // Also an ElementStyleAdjustmentFact, which the style computation reads. A row is built out of
     // this word alone, so the fact is published into both rather than read across two.
     ConstructedAsDocumentElement = 1 << 6,
+    IsHtmlImageElement = 1 << 7,
 };
 // What an element's `disabled` attribute makes of it, as the walk from a hit node to an event
 // target reads it. Mirrors the Rust `DISABLED_*` constants.

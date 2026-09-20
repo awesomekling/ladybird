@@ -2618,7 +2618,16 @@ fn update_principal_node_after_entry(
 
     if !construction.layout_node.is_invalid() {
         let layout_node = construction.layout_node;
-        if update.kind.is_element() || update.kind.is_document() {
+        // A box whose style holds no image, which holds nothing a style that did left behind, and
+        // whose paint facts are not read off its element has nothing to attach: the call would
+        // republish exactly what the row already holds.
+        if (update.kind.is_element() || update.kind.is_document())
+            && (construction.owns_content_replacement_image
+                || host
+                    .layout()
+                    .arena()
+                    .style_resources_attach_can_change_anything(layout_node))
+        {
             super::tree_build_seal::note_host_call("attach_style_resources");
             // SAFETY: The builder remains live, and the box is a live NodeWithStyle for elements
             // and documents.
@@ -3506,9 +3515,14 @@ fn create_pseudo_element(
         layout_host.attach_child(list_item_box, unplaced_box.take().expect("the marker box"), first_child);
     }
 
-    super::tree_build_seal::note_host_call("attach_style_resources");
-    // SAFETY: The builder remains live, and the box the host just built is a live NodeWithStyle.
-    unsafe { (host.callbacks.attach_style_resources)(host.callbacks.builder, layout_node, false) };
+    if layout_host
+        .arena()
+        .style_resources_attach_can_change_anything(layout_node)
+    {
+        super::tree_build_seal::note_host_call("attach_style_resources");
+        // SAFETY: The builder remains live, and the box the host just built is a live NodeWithStyle.
+        unsafe { (host.callbacks.attach_style_resources)(host.callbacks.builder, layout_node, false) };
+    }
     if decision == FfiPseudoElementDecision::ContentReplacement {
         let adjustment = replaced_element_display_adjustment(&host.layout(), layout_node);
         if adjustment != FfiReplacedElementDisplayAdjustment::None {

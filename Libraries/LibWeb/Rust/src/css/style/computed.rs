@@ -57,7 +57,7 @@ use crate::css::style_value::retained_value_may_depend_on_font_metrics;
 pub(crate) const INHERITED_GROUP_SWAP_ELIGIBLE: u8 = 1 << 3;
 /// The record holds an `<image>` in a property whose images a layout node loads and observes.
 /// Derived from the published payloads; see `style_group_payloads_hold_image_values`.
-pub(crate) const HOLDS_IMAGE_VALUES: u8 = 1 << 4;
+pub const HOLDS_IMAGE_VALUES: u8 = 1 << 4;
 
 /// The inherited style groups lead every group tuple; a node's inherited-group column names them.
 pub(super) const ENGINE_INHERITED_GROUP_COUNT: usize = 7;

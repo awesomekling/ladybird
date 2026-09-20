@@ -655,6 +655,9 @@ pub mod element_construction_fact {
     /// Also an `element_adjustment_fact`, which the style computation reads. A row is built out
     /// of this word alone, so the fact is published into both rather than read across two.
     pub const IS_DOCUMENT_ELEMENT: u32 = 1 << 6;
+    /// The row answers for the areas of the image map its element is associated with, whatever box
+    /// the element ends up with - an image rendering as its alt text still answers for its map.
+    pub const IS_HTML_IMAGE_ELEMENT: u32 = 1 << 7;
 }
 
 /// Which principal box an element asks for before its computed style has a say. The element's own
