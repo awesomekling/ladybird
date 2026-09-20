@@ -5804,16 +5804,14 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             state.style_sheet_resource_contexts.resize(context.cascaded_properties.source_slot_count());
             for (size_t slot = 0; slot < context.cascaded_properties.source_slot_count(); ++slot) {
                 auto& resource_context = state.style_sheet_resource_contexts[slot];
-                auto source = context.cascaded_properties.source_for_slot(static_cast<u32>(slot));
-                if (!source)
+                auto const* published_resource_context = context.cascaded_properties.source_resource_context_for_slot(static_cast<u32>(slot));
+                if (!published_resource_context)
                     continue;
-                auto* style_sheet = const_cast<StyleSheetState*>(source.ptr());
-                computed_style.set_style_sheet_for_source_slot(static_cast<u32>(slot), style_sheet);
-                auto base_url = style_sheet->style_resource_base_url();
-                if (base_url.has_value())
-                    state.style_sheet_base_urls[slot] = base_url->to_string();
+                if (auto source = context.cascaded_properties.source_for_slot(static_cast<u32>(slot)))
+                    computed_style.set_style_sheet_for_source_slot(static_cast<u32>(slot), const_cast<StyleSheetState*>(source.ptr()));
+                state.style_sheet_base_urls[slot] = published_resource_context->serialized_base_url;
                 resource_context.has_value = true;
-                resource_context.origin_clean = style_sheet->is_origin_clean();
+                resource_context.origin_clean = published_resource_context->origin_clean;
             }
             for (size_t slot = 0; slot < state.style_sheet_resource_contexts.size(); ++slot) {
                 auto bytes = state.style_sheet_base_urls[slot].bytes();
