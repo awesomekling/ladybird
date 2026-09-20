@@ -6,6 +6,7 @@
 
 #include <AK/ScopeGuard.h>
 #include <LibWeb/CSS/Invalidation/ContainerQueryInvalidator.h>
+#include <LibWeb/CSS/ScrollStateContainerQuery.h>
 #include <LibWeb/DOM/CommitMessages.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
@@ -94,6 +95,47 @@ void CommitMessages::note_style_container_query_dependencies(NodeIdentity identi
         .identity = identity,
         .kind = Kind::StyleContainerQueryDependencies,
         .style_container_query_dependencies = dependencies,
+        .pseudo_element = {},
+        .custom_property_name = {},
+    });
+}
+
+void CommitMessages::note_style_query_container_usage(NodeIdentity identity, u8 usage)
+{
+    m_style_messages.append(Message {
+        .identity = identity,
+        .kind = Kind::StyleQueryContainerUsage,
+        .style_query_container_usage = usage,
+        .pseudo_element = {},
+        .custom_property_name = {},
+    });
+}
+
+void CommitMessages::note_scroll_state_query_container_usage(NodeIdentity identity)
+{
+    m_style_messages.append(Message {
+        .identity = identity,
+        .kind = Kind::ScrollStateQueryContainerUsage,
+        .pseudo_element = {},
+        .custom_property_name = {},
+    });
+}
+
+void CommitMessages::note_style_query_needs_evaluation_after_layout(NodeIdentity identity)
+{
+    m_style_messages.append(Message {
+        .identity = identity,
+        .kind = Kind::StyleQueryNeedsEvaluationAfterLayout,
+        .pseudo_element = {},
+        .custom_property_name = {},
+    });
+}
+
+void CommitMessages::note_style_viewport_dependency(NodeIdentity identity)
+{
+    m_style_messages.append(Message {
+        .identity = identity,
+        .kind = Kind::StyleViewportDependency,
         .pseudo_element = {},
         .custom_property_name = {},
     });
@@ -233,8 +275,31 @@ void CommitMessages::apply(Message const& message)
                 element->set_style_depends_on_size_container_query();
             if (message.style_container_query_dependencies & 2)
                 element->set_style_depends_on_style_container_query();
-            element->finish_recording_style_dependencies();
+            element->finish_recording_container_query_dependencies();
         }
+        return;
+    case Kind::StyleQueryContainerUsage:
+        if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr())) {
+            if (message.style_query_container_usage & 1)
+                element->set_is_size_query_container();
+            if (message.style_query_container_usage & 2) {
+                element->set_is_style_query_container();
+                if (auto* root = m_document.document_element())
+                    root->set_is_style_query_container();
+            }
+        }
+        return;
+    case Kind::ScrollStateQueryContainerUsage:
+        if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
+            m_document.scroll_state_query_containers().snapshot_for_query(*element);
+        return;
+    case Kind::StyleQueryNeedsEvaluationAfterLayout:
+        if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
+            m_document.set_needs_container_query_evaluation_after_layout(*element);
+        return;
+    case Kind::StyleViewportDependency:
+        if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
+            element->set_style_depends_on_viewport_metrics();
         return;
     case Kind::TopLayerZoneRebuildNeeded:
         m_document.set_top_layer_needs_layout_zone_rebuild();

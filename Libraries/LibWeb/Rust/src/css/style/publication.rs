@@ -12,7 +12,8 @@ use winner_store::{WinnerDeclaration, WinnerStore, WinnerValue, shorthand_longha
 
 use super::*;
 use crate::css::computed_longhand_table::ComputedLonghandTable;
-use drive::{FontDriveGoal, drive_font_metric};
+use drive::FontDriveGoal;
+pub(crate) use drive::drive_font_metric;
 
 /// Another element's published style that a first-time computation may build over: the element
 /// whose cascade state stands in for the previous one, and the record it must still hold.

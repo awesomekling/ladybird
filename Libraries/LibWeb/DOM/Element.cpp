@@ -2136,6 +2136,12 @@ void Element::finish_recording_style_dependencies()
     m_style_input_record->style_depends_on_style_container_query = m_style_depends_on_style_container_query;
 }
 
+void Element::finish_recording_container_query_dependencies()
+{
+    finish_recording_style_dependencies();
+    publish_custom_property_names();
+}
+
 void Element::apply_style_substitution_usage(u8 usage)
 {
     if (usage & (1 << 0))
@@ -5343,6 +5349,8 @@ void Element::replace_style_record(CSS::StyleRecordID style_record_identity)
     if (old_style_record_identity == style_record_identity)
         return;
     m_style_record_identity = style_record_identity;
+    if (style_node_id() != 0)
+        document().style_computer().style_engine().set_element_container_query_inputs(style_node_id(), style_record_identity);
     if (auto* layout_node = unsafe_layout_node())
         layout_node->set_style_record_identity(style_record_identity);
 }

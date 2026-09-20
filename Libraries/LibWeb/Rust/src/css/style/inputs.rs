@@ -24,6 +24,55 @@ impl StyleEngine {
     }
 }
 
+impl RetainedState {
+    /// Refresh the container-query projection at the computed-record publication funnel. The
+    /// projection owns the name spellings, so a sealed evaluator never has to follow an AK string
+    /// or a computed-group payload.
+    pub fn set_element_container_query_inputs(&mut self, node: StyleNodeID, style_record: u64) {
+        let complete_record = self
+            .computed_group_sets
+            .style_record_payloads(style_record)
+            .is_some_and(|payloads| payloads.len() > crate::css::computed_value_types::STYLE_GROUP_INDEX_BOX);
+        if !complete_record {
+            self.container_query_inputs.clear(node);
+            return;
+        }
+        let Some(payloads) = self.computed_group_sets.style_record_payloads(style_record) else {
+            self.container_query_inputs.clear(node);
+            return;
+        };
+        let values = crate::css::computed_value_views::ComputedValuesView::new(
+            crate::css::host_shared::SharedPayload::as_pointer_slice(payloads),
+        );
+        let box_values = values.box_values();
+        let names = box_values
+            .container_name
+            .raws()
+            .iter()
+            .map(|raw| match unsafe { ak::utf16_string_units(raw) } {
+                ak::Utf16StringUnits::Ascii(units) => units.iter().copied().map(u16::from).collect(),
+                ak::Utf16StringUnits::Utf16(units) => units.to_vec(),
+            })
+            .collect();
+        self.container_query_inputs.set(
+            node,
+            tree::ContainerQueryInputRow {
+                style_record,
+                names,
+                is_size_container: box_values.is_size_container,
+                is_inline_size_container: box_values.is_inline_size_container,
+                is_scroll_state_container: box_values.is_scroll_state_container,
+                writing_mode: values.writing_mode(),
+                direction: values.direction(),
+            },
+        );
+    }
+
+    pub(super) fn container_query_inputs(&self, node: StyleNodeID) -> Option<&tree::ContainerQueryInputRow> {
+        self.container_query_inputs.get(node)
+    }
+}
+
 /// What an element's published style record says about the box it asks for. The layout tree build
 /// reads this for an element that has no box yet, where the arena has nothing to answer from.
 #[derive(Clone, Copy)]
@@ -1390,8 +1439,10 @@ impl StyleEngineState {
                 top_layer_elements: Vec::new(),
                 next_style_transaction_version: StyleTransactionVersion(1),
                 document_style_computation_inputs: None,
+                custom_property_registry: None,
                 font_resolution: None,
                 layout_style_snapshots: Default::default(),
+                container_query_inputs: Default::default(),
                 layer_topology_version: 0,
                 sheet_order_version: 0,
                 specified_values: SpecifiedValues::new(),
@@ -2148,6 +2199,9 @@ impl StyleEngineState {
         }
         if !retired_nodes.is_empty() {
             self.retained.layout_style_snapshots.retire(&retired_nodes);
+            for &node in &retired_nodes {
+                self.retained.container_query_inputs.clear(node);
+            }
             self.retained
                 .tree
                 .retire_elements(&retired_nodes, &mut self.retained.memory);

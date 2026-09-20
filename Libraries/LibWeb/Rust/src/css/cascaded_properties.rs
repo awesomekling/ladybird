@@ -1230,6 +1230,10 @@ impl StyleQueryDependencies {
     pub(crate) fn note(&mut self, name: &[u16]) {
         self.0.push(name.to_vec());
     }
+
+    pub(crate) fn into_names(self) -> Vec<Vec<u16>> {
+        self.0
+    }
 }
 
 #[unsafe(no_mangle)]

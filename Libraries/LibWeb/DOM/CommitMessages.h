@@ -54,6 +54,10 @@ public:
     void note_style_substitution_usage(NodeIdentity, u8 usage);
     void note_style_query_custom_property_reference(NodeIdentity, Optional<CSS::PseudoElement>, Utf16FlyString);
     void note_style_container_query_dependencies(NodeIdentity, u8 dependencies);
+    void note_style_query_container_usage(NodeIdentity, u8 usage);
+    void note_scroll_state_query_container_usage(NodeIdentity);
+    void note_style_query_needs_evaluation_after_layout(NodeIdentity);
+    void note_style_viewport_dependency(NodeIdentity);
 
     // Applies only style-stage reports, leaving layout and event messages at their existing drains.
     void apply_style_messages();
@@ -73,6 +77,10 @@ private:
         StyleSubstitutionUsage,
         StyleQueryCustomPropertyReference,
         StyleContainerQueryDependencies,
+        StyleQueryContainerUsage,
+        ScrollStateQueryContainerUsage,
+        StyleQueryNeedsEvaluationAfterLayout,
+        StyleViewportDependency,
         TopLayerZoneRebuildNeeded,
         UnexpectedFragmentedInline,
     };
@@ -86,6 +94,7 @@ private:
         bool has_committed_box { false };
         u8 style_substitution_usage { 0 };
         u8 style_container_query_dependencies { 0 };
+        u8 style_query_container_usage { 0 };
         // Only the layout tree update trace reads this.
         SetNeedsLayoutTreeUpdateReason layout_tree_update_reason {};
         // Where the pointer was, for the hover events the target change ends in. Only

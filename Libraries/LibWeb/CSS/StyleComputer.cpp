@@ -2798,10 +2798,36 @@ RefPtr<StyleComputer::CascadeInput const> StyleComputer::style_engine_cascade_in
         if (target->has_container_conditions) {
             input_is_cacheable = false;
             auto match_result = StyleEngineFFI::style_engine_native_rule_matches_containers(
-                style_engine.rust_handle(), match.rule, &abstract_element,
-                [](void* context, void const* query, u16 const* name, size_t length) {
-                    return evaluate_native_container_condition(static_cast<Parser::ValueParserFFI::FfiQueryHandle const*>(query), { reinterpret_cast<char16_t const*>(name), length }, *static_cast<DOM::AbstractElement*>(context));
-                });
+                style_engine.rust_handle(), match.rule, abstract_element.element().style_node_id().value(), abstract_element.pseudo_element().has_value());
+            ScopeGuard release_container_effects = [&] {
+                StyleEngineFFI::style_engine_native_container_effects_release(match_result.effects);
+            };
+            auto effect_count = StyleEngineFFI::style_engine_native_container_effect_count(match_result.effects);
+            for (size_t effect_index = 0; effect_index < effect_count; ++effect_index) {
+                auto effect = StyleEngineFFI::style_engine_native_container_effect(match_result.effects, effect_index);
+                auto identity = DOM::NodeIdentity::of_style_node(StyleNodeID { effect.style_node });
+                switch (effect.kind) {
+                case StyleEngineFFI::FfiContainerEffectKind::SizeContainerUsage:
+                    abstract_element.document().commit_messages().note_style_query_container_usage(identity, 1);
+                    break;
+                case StyleEngineFFI::FfiContainerEffectKind::StyleContainerUsage:
+                    abstract_element.document().commit_messages().note_style_query_container_usage(identity, 2);
+                    break;
+                case StyleEngineFFI::FfiContainerEffectKind::ScrollStateContainerUsage:
+                    abstract_element.document().commit_messages().note_scroll_state_query_container_usage(identity);
+                    break;
+                case StyleEngineFFI::FfiContainerEffectKind::NeedsEvaluationAfterLayout:
+                    abstract_element.document().commit_messages().note_style_query_needs_evaluation_after_layout(identity);
+                    break;
+                case StyleEngineFFI::FfiContainerEffectKind::SubjectViewportDependency:
+                    abstract_element.document().commit_messages().note_style_viewport_dependency(identity);
+                    break;
+                case StyleEngineFFI::FfiContainerEffectKind::CustomPropertyReference:
+                    abstract_element.document().commit_messages().note_style_query_custom_property_reference(
+                        identity, abstract_element.pseudo_element(), Utf16FlyString::from_utf16({ reinterpret_cast<char16_t const*>(effect.name), effect.name_length }));
+                    break;
+                }
+            }
             u8 dependencies = (match_result.depends_on_size ? 1 : 0) | (match_result.depends_on_style ? 2 : 0);
             if (dependencies) {
                 input->depends_on_size_container_query |= match_result.depends_on_size;

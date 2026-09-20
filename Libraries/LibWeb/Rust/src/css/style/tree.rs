@@ -37,6 +37,48 @@ use super::memory::MemoryCategory;
 use super::memory::MemoryController;
 use super::transaction::TreeRelations;
 
+/// Immutable style facts used to select a query container. These are kept apart from selector
+/// facts because they are replaced only when a computed record is published, not by DOM input
+/// journal entries.
+#[derive(Clone, Default)]
+pub(super) struct ContainerQueryInputRow {
+    pub(super) style_record: u64,
+    pub(super) names: Vec<Vec<u16>>,
+    pub(super) is_size_container: bool,
+    pub(super) is_inline_size_container: bool,
+    pub(super) is_scroll_state_container: bool,
+    pub(super) writing_mode: u8,
+    pub(super) direction: u8,
+}
+
+#[derive(Default)]
+pub(super) struct ContainerQueryInputColumns {
+    rows: Vec<Option<ContainerQueryInputRow>>,
+}
+
+impl ContainerQueryInputColumns {
+    pub(super) fn set(&mut self, node: StyleNodeID, row: ContainerQueryInputRow) {
+        let index = node.element_index().expect("container inputs belong to elements") as usize;
+        if self.rows.len() <= index {
+            self.rows.resize_with(index + 1, || None);
+        }
+        self.rows[index] = Some(row);
+    }
+
+    pub(super) fn clear(&mut self, node: StyleNodeID) {
+        let Some(index) = node.element_index().map(|index| index as usize) else {
+            return;
+        };
+        if let Some(row) = self.rows.get_mut(index) {
+            *row = None;
+        }
+    }
+
+    pub(super) fn get(&self, node: StyleNodeID) -> Option<&ContainerQueryInputRow> {
+        self.rows.get(node.element_index()? as usize).and_then(Option::as_ref)
+    }
+}
+
 /// The element is a button, input, select, textarea or form-associated custom element carrying a
 /// `disabled` attribute. Such an element is disabled, and so is everything written under it.
 pub const DISABLED_FORM_CONTROL: u8 = 1 << 0;
