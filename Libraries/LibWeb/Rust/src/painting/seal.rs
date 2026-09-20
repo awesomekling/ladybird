@@ -22,6 +22,12 @@
 //! follows is what the seal still permits, and why each of them is not a read of the document
 //! made by a running pass.
 //!
+//! Display-list recording now also has a compiler-enforced boundary: its input is `Sync`, its
+//! output is `Send`, and its runner receives neither [`crate::stage::MainThread`] nor a host
+//! callback table. Host calls therefore cannot be added to the runner through the supported
+//! interfaces. This runtime seal remains as redundant diagnostics until all pipeline stages use
+//! the same static boundary and the coordinator removes the seals together.
+//!
 //! # The passes
 //!
 //! [`Pass`] names the render-side passes the seal watches. A host call made while one of them is
