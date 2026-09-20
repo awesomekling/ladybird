@@ -6,6 +6,7 @@
 
 #include "RandomValueSharingStyleValue.h"
 #include <LibWeb/CSS/Serialize.h>
+#include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
 #include <LibWeb/DOM/Document.h>
@@ -29,24 +30,10 @@ ValueComparingNonnullRefPtr<StyleValue const> RandomValueSharingStyleValue::abso
     // Otherwise, the random base value is a pseudo-random real number in the range `[0, 1)` (greater than or equal to 0
     // and less than 1), generated from a uniform distribution, and influenced by the function’s random caching key.
 
-    // A random caching key is a tuple of:
-    RandomCachingKey random_caching_key {
-        // 1. A string name: the value of the <dashed-ident>, if specified in <random-value-sharing>; or else a string
-        //    of the form "PROPERTY N", where PROPERTY is the name of the property the random function is used in
-        //    (before shorthand expansion, if relevant), and N is the index of the random function among other random
-        //    functions in the same property value.
-        .name = name().value(),
-
-        // 2. An element ID identifying the element the style is being applied to, or null if element-shared is
-        //    specified in <random-value-sharing>.
-        // FIXME: Use the pseudo element's unique_id() when that's accessible
-        .element_id = element_shared() ? Optional<UniqueNodeID> { OptionalNone {} } : Optional<UniqueNodeID> { computation_context.abstract_element->element().unique_id() },
-
-        // 3. A document ID identifying the Document the styles are from.
-        // NB: This is implicit since the cache is stored on the document or the element (which is a child of the document).
-    };
-
-    auto random_base_value = const_cast<DOM::Element&>(computation_context.abstract_element->element()).ensure_css_random_base_value(random_caching_key);
+    auto name = this->name().value();
+    auto& element = computation_context.abstract_element->element();
+    auto& style_engine = const_cast<StyleEngine&>(element.document().style_computer().style_engine());
+    auto random_base_value = style_engine.ensure_random_base_value(element.style_node_id(), name.view(), element_shared());
 
     return RandomValueSharingStyleValue::create_fixed(NumberStyleValue::create(random_base_value));
 }

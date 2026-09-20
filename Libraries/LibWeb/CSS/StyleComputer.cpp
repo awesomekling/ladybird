@@ -1218,13 +1218,8 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
         random_base_values.ensure_capacity(resolved_batch.unfixed_random_sharing_count);
         for (auto const& sharing : ReadonlySpan<StyleValueFFI::FfiAnimationUnfixedRandomSharing> { resolved_batch.unfixed_random_sharings, resolved_batch.unfixed_random_sharing_count }) {
             VERIFY(sharing.name);
-            RandomCachingKey random_caching_key {
-                .name = css_string_from_rust(sharing.name),
-                .element_id = sharing.element_shared
-                    ? Optional<UniqueNodeID> { OptionalNone {} }
-                    : Optional<UniqueNodeID> { abstract_element.element().unique_id() },
-            };
-            random_base_values.empend(sharing.source, const_cast<DOM::Element&>(abstract_element.element()).ensure_css_random_base_value(random_caching_key));
+            auto name = css_string_from_rust(sharing.name);
+            random_base_values.empend(sharing.source, const_cast<StyleEngine&>(m_style_engine).ensure_random_base_value(abstract_element.element().style_node_id(), name.view(), sharing.element_shared));
         }
         // The document and the page cannot move inside a style update, so these come from the
         // snapshot the update's begin boundary took rather than from the document itself.
@@ -5799,13 +5794,8 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         state.random_base_values.ensure_capacity(computation_requirements->unfixed_random_sharing_count);
         for (auto const& sharing : ReadonlySpan<ComputedValuesFFI::FfiUnfixedRandomSharing> { computation_requirements->unfixed_random_sharings, computation_requirements->unfixed_random_sharing_count }) {
             VERIFY(sharing.name);
-            RandomCachingKey random_caching_key {
-                .name = css_string_from_rust(sharing.name),
-                .element_id = sharing.element_shared
-                    ? Optional<UniqueNodeID> { OptionalNone {} }
-                    : Optional<UniqueNodeID> { abstract_element.element().unique_id() },
-            };
-            state.random_base_values.empend(sharing.source, const_cast<DOM::Element&>(abstract_element.element()).ensure_css_random_base_value(random_caching_key));
+            auto name = css_string_from_rust(sharing.name);
+            state.random_base_values.empend(sharing.source, const_cast<StyleEngine&>(style_computer.style_engine()).ensure_random_base_value(abstract_element.element().style_node_id(), name.view(), sharing.element_shared));
         }
         if (computation_requirements->environment_requirements & ComputedValuesFFI::CASCADED_ENVIRONMENT_NEEDS_STYLE_SHEET_CONTEXT) {
             state.style_sheet_base_urls.resize(context.cascaded_properties.source_slot_count());

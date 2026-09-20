@@ -476,7 +476,6 @@ struct ComputationContext;
 struct CustomPropertyRegistration;
 struct LogicalAliasMappingContext;
 struct NormalGap;
-struct RandomCachingKey;
 struct RequiredInvalidationAfterStyleChange;
 struct TransitionProperties;
 
