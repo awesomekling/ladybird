@@ -1326,7 +1326,7 @@ void StyleComputer::invalidate_animated_custom_property_readers(DOM::AbstractEle
     }
 }
 
-void StyleComputer::apply_animation_definitions(ComputedStyleWorkingSet const& computed_properties, CascadedProperties const& cascaded_properties, DOM::AbstractElement& abstract_element, ReadonlySpan<AnimationProperties> animation_definitions, ReadonlySpan<i32> definition_matches) const
+void StyleComputer::apply_animation_definitions(ComputedStyleWorkingSet const& computed_properties, CascadedProperties const& cascaded_properties, DOM::AbstractElement& abstract_element, ReadonlySpan<AnimationProperties> animation_definitions, ReadonlySpan<i32> definition_matches, Optional<bool> computed_in_display_none_subtree) const
 {
     auto& document = abstract_element.document();
 
@@ -1345,9 +1345,10 @@ void StyleComputer::apply_animation_definitions(ComputedStyleWorkingSet const& c
     //     something other than none, the resulting style recomputation re-enters this function and starts them.
     //     Termination of running animations when display becomes none is handled by
     //     Element::play_or_cancel_animations_after_display_property_change().
-    // OPTIMIZATION: This involves an ancestor walk, so it's computed lazily since it's only needed on the path that
-    //               starts a brand new animation, not for the common case of an element without animations.
-    Optional<bool> in_display_none_subtree;
+    // NB: The style computation answers this from the published records where it can, since the walk it
+    //     otherwise takes reads the live tree. Where it has not, the answer is still computed lazily: it is
+    //     only needed on the path that starts a brand new animation.
+    Optional<bool> in_display_none_subtree = computed_in_display_none_subtree;
     auto is_in_display_none_subtree = [&] {
         if (!in_display_none_subtree.has_value()) {
             bool result = computed_properties.display().is_none();
@@ -5970,11 +5971,14 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             //     than after the definitions lets an element without animations skip that step.
             style_computer.m_keyframes_inherited_non_inherited_style_groups = 0;
             style_computer.clear_computation_context_caches(); },
-        .prepare_animations = [](void* context_pointer) -> bool {
+        .prepare_animations = [](void* context_pointer, i8 in_display_none_subtree) -> bool {
             auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
             // Applying the plan the style computation decided has to happen before the effects are
             // collected, since an animation it starts composes into this very computation.
-            context.style_computer->apply_animation_definitions(*context.state->working_set, context.cascaded_properties, context.abstract_element, context.state->animation_definitions.span(), context.state->animation_definition_matches.span());
+            Optional<bool> computed_in_display_none_subtree;
+            if (in_display_none_subtree >= 0)
+                computed_in_display_none_subtree = in_display_none_subtree != 0;
+            context.style_computer->apply_animation_definitions(*context.state->working_set, context.cascaded_properties, context.abstract_element, context.state->animation_definitions.span(), context.state->animation_definition_matches.span(), computed_in_display_none_subtree);
             auto animations = context.abstract_element.element().get_animations_internal(
                 Animations::Animatable::GetAnimationsSorted::Yes,
                 Animations::Animatable::GetAnimationsOptions { .subtree = false, .pseudo_element = {} });
