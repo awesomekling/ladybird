@@ -6199,13 +6199,32 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     };
     auto prepared_transaction = ComputedValuesFFI::rust_prepare_longhand_transaction(&input);
     ComputedValuesFFI::FfiLonghandTransactionInput transaction_input {};
-    StyleValueFFI::rust_style_ffi_note_longhand_input_freeze();
     prepare_longhand_transaction(
         &native_context,
         &prepared_transaction.requirements,
         prepared_transaction.longhand_table,
         prepared_transaction.parent_has_animated_values,
         &transaction_input);
+    enum LonghandInputFreezeReason : u8 {
+        WorkingSet = 1 << 0,
+        MonospaceRecascade = 1 << 1,
+        RandomBaseRows = 1 << 2,
+        StylesheetSourceWrappers = 1 << 3,
+        CustomPropertyAdapter = 1 << 4,
+        ParentAnimatedOverlay = 1 << 5,
+    };
+    u8 late_freeze_reasons = WorkingSet;
+    if (prepared_transaction.requirements.has_monospace_font_family)
+        late_freeze_reasons |= MonospaceRecascade;
+    if (prepared_transaction.requirements.unfixed_random_sharing_count != 0)
+        late_freeze_reasons |= RandomBaseRows;
+    if (prepared_transaction.requirements.environment_requirements & ComputedValuesFFI::CASCADED_ENVIRONMENT_NEEDS_STYLE_SHEET_CONTEXT)
+        late_freeze_reasons |= StylesheetSourceWrappers;
+    if (native_context.state->custom_property_resolution)
+        late_freeze_reasons |= CustomPropertyAdapter;
+    if (prepared_transaction.parent_has_animated_values)
+        late_freeze_reasons |= ParentAnimatedOverlay;
+    StyleValueFFI::rust_style_ffi_note_longhand_input_freeze(late_freeze_reasons);
     input.transaction_input = &transaction_input;
     auto transaction_result = ComputedValuesFFI::rust_compute_properties(&input, &prepared_transaction);
     StyleValueFFI::rust_style_ffi_note_longhand_result_apply();
