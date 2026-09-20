@@ -435,6 +435,7 @@ fn style_payloads_equal_in_layout_affecting_groups(a: *const c_void, b: *const c
 #[must_use]
 pub(crate) struct FreedSubtree {
     shells: Vec<*mut c_void>,
+    owned_image_providers: Vec<*mut c_void>,
     paintable_row_resets: Vec<crate::painting::paintable_rows::PaintableRowReset>,
     arena_pinned_style_records: Vec<u64>,
     style_record_host: Option<FfiStyleRecordHostCallbacks>,
@@ -476,6 +477,9 @@ impl FreedSubtree {
     pub(crate) fn destroy_shells_and_invoke_callbacks(self) {
         for shell in self.shells {
             crate::layout::tree_mutation::destroy_shell(shell);
+        }
+        for provider in self.owned_image_providers {
+            crate::layout::tree_mutation::destroy_owned_image_provider(provider);
         }
         for reset in self.paintable_row_resets {
             reset.invoke_callback();
@@ -566,6 +570,11 @@ pub(crate) struct LayoutNodeArena {
     /// subtree is rebuilt, so the offset is held against the pair that outlives both, and a newly
     /// bound box reads it here instead of asking the DOM cell that used to store it.
     pseudo_element_scroll_offsets: RefCell<HashMap<(StyleNodeID, u8), FfiCssPixelPoint>>,
+    /// The image provider a row owns, for a row whose image comes from its style rather than from a
+    /// DOM element. The provider is made for the row and is of no use without it, so the arena holds
+    /// it against the row and deletes it when the row is freed, rather than leaving it on a shell
+    /// that the arena materialises and destroys on its own schedule.
+    owned_image_providers: RefCell<HashMap<NodeSlotId, *mut c_void>>,
     /// Where each element sits in the shadow-including tree, as the tree build last saw it, indexed
     /// by the element's dense index. An element's DOM parent only changes when it is inserted or
     /// removed, and either one makes the tree build visit it again, so the fact keeps up with the
@@ -705,6 +714,7 @@ impl LayoutNodeArena {
             bound_rows_by_style_node: RefCell::new(RowsByStyleNode::default()),
             bound_pseudo_element_rows: RefCell::new(HashMap::default()),
             pseudo_element_scroll_offsets: RefCell::new(HashMap::default()),
+            owned_image_providers: RefCell::new(HashMap::default()),
             shadow_including_parent_elements: RefCell::new(Vec::new()),
             anchor_name_elements: RefCell::new(HashMap::default()),
             bound_viewport_row: Cell::new(NodeSlotId::INVALID),
@@ -990,10 +1000,14 @@ impl LayoutNodeArena {
         self.for_each_node_in_layout_subtree_in_pre_order(root, |slot| slots_in_pre_order.push(slot));
 
         let mut shells = Vec::with_capacity(slots_in_pre_order.len());
+        let mut owned_image_providers = Vec::new();
         let mut paintable_row_resets = Vec::new();
         let mut arena_pinned_style_records = Vec::new();
         for slot in slots_in_pre_order {
             shells.push(self.data(slot).shell.get());
+            if let Some(provider) = self.owned_image_providers.get_mut().remove(&slot) {
+                owned_image_providers.push(provider);
+            }
             if self.style_records_pinned_by_arena[slot.slot_index() as usize].get() {
                 arena_pinned_style_records.push(self.style_records[slot.slot_index() as usize].get());
             }
@@ -1004,6 +1018,7 @@ impl LayoutNodeArena {
         }
         FreedSubtree {
             shells,
+            owned_image_providers,
             paintable_row_resets,
             arena_pinned_style_records,
             style_record_host: self.style_record_host.get(),
@@ -2378,6 +2393,23 @@ impl LayoutNodeArena {
             super::node_facts::style_insets_use_anchor_functions(ComputedValuesView::new(&payloads.groups))
         });
         self.set_node_flag(slot, NodeFlag::InsetsUseAnchorFunctions, insets_use_anchor_functions);
+    }
+
+    /// Give `slot` the image provider it owns. A row is given one once, while it is being built.
+    pub(crate) fn set_owned_image_provider(&self, slot: NodeSlotId, provider: *mut c_void) {
+        self.assert_owner_thread();
+        assert!(!provider.is_null(), "a row was given a null owned image provider");
+        let previous = self.owned_image_providers.borrow_mut().insert(slot, provider);
+        assert!(previous.is_none(), "a row was given a second owned image provider");
+    }
+
+    /// The image provider `slot` owns, or null for a row whose image comes from its DOM element.
+    pub(crate) fn owned_image_provider(&self, slot: NodeSlotId) -> *mut c_void {
+        self.owned_image_providers
+            .borrow()
+            .get(&slot)
+            .copied()
+            .unwrap_or(std::ptr::null_mut())
     }
 
     pub(crate) fn set_shell_factory(&self, factory: Option<ShellFactory>) {
@@ -5049,6 +5081,24 @@ pub unsafe extern "C" fn layout_arena_set_pseudo_element_scroll_offset(
     };
     // SAFETY: As above.
     unsafe { &*arena.cast::<LayoutNodeArena>() }.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset);
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_owned_image_provider(
+    arena: *mut c_void,
+    slot: NodeSlotId,
+    provider: *mut c_void,
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: The handle came from layout_arena_create and outlives this call.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_owned_image_provider(slot, provider);
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_owned_image_provider(arena: *mut c_void, slot: NodeSlotId) -> *mut c_void {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: The handle came from layout_arena_create and outlives this call.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.owned_image_provider(slot)
 }
 
 #[unsafe(no_mangle)]

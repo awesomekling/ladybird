@@ -39,6 +39,8 @@ public:
     {
         return const_cast<ImageProvider&>(const_cast<Box const&>(*this).image_provider());
     }
+    // The provider a box owns belongs to the arena, which deletes it with the box's row. Nothing
+    // outside the box asks for it by itself, so only the box names it.
     void set_owned_image_provider(NonnullOwnPtr<ImageProvider>);
     void notify_owned_image_provider_of_detach();
 
@@ -57,7 +59,7 @@ private:
 
     virtual bool is_box() const final { return true; }
 
-    OwnPtr<ImageProvider> m_owned_image_provider;
+    ImageProvider* owned_image_provider() const;
 };
 
 template<>
