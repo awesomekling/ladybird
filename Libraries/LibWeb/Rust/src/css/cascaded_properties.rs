@@ -599,6 +599,7 @@ pub struct FfiStyleComputationRequirements {
 struct StyleComputationRequirementsStorage {
     computed_property_words: [u64; LONGHAND_WORD_COUNT],
     unfixed_random_sharings: Box<[FfiUnfixedRandomSharing]>,
+    _custom_property_requirement_values: Vec<RetainedStyleValueData>,
 }
 
 fn longhand_is_selected(words: &[u64], property_id: u16) -> bool {
@@ -742,6 +743,8 @@ unsafe fn plan_style_computation(
 
 pub(crate) unsafe fn collect_style_computation_requirements(
     store: *const CascadedPropertyStore,
+    custom_property_store: *const CustomPropertyStore,
+    custom_property_registry: *const crate::css::custom_properties::CustomPropertyRegistry,
     plan_input: Option<&StyleComputationPlanInput<'_>>,
 ) -> FfiStyleComputationRequirements {
     let store = unsafe { &*store };
@@ -763,6 +766,26 @@ pub(crate) unsafe fn collect_style_computation_requirements(
         }
         if dependencies.has_unfixed_random_sharing {
             crate::css::style_compute::collect_unfixed_random_sharings_in_value(entry.value.data(), &mut sharings);
+        }
+    }
+    let mut custom_property_requirement_values = Vec::new();
+    if let Some(custom_property_store) = unsafe { custom_property_store.as_ref() } {
+        for entry in custom_property_store.own_values.values() {
+            let dependencies = crate::css::style_compute::collect_external_value_dependencies(entry.value.data());
+            uses_tree_counting_function |= dependencies.uses_tree_counting_function;
+            container_relative_length_unit_mask |= dependencies.container_relative_length_unit_mask;
+        }
+        if let Some(registry) = unsafe { custom_property_registry.as_ref() } {
+            custom_property_requirement_values =
+                crate::css::custom_properties::collect_registered_custom_property_random_sharings(
+                    custom_property_store,
+                    registry,
+                    &mut sharings,
+                );
+        } else {
+            for entry in custom_property_store.own_values.values() {
+                crate::css::style_compute::collect_unfixed_random_sharings_in_value(entry.value.data(), &mut sharings);
+            }
         }
     }
     let unfixed_random_sharings = sharings
@@ -793,6 +816,7 @@ pub(crate) unsafe fn collect_style_computation_requirements(
     let storage = Box::new(StyleComputationRequirementsStorage {
         computed_property_words,
         unfixed_random_sharings,
+        _custom_property_requirement_values: custom_property_requirement_values,
     });
     let unfixed_random_sharings = storage.unfixed_random_sharings.as_ptr();
     let unfixed_random_sharing_count = storage.unfixed_random_sharings.len();
@@ -1351,6 +1375,7 @@ pub struct FfiCustomPropertyResolutionStats {
     pub final_value_hits: u64,
     pub final_value_misses: u64,
     pub cycle_participants: u64,
+    pub depends_on_viewport_metrics: bool,
     pub substitution_usage: FfiSubstitutionUsage,
 }
 
@@ -1361,9 +1386,8 @@ pub struct FfiCustomPropertyDriveInput {
     pub resolved_parent_store: *const c_void,
     pub reuse_resolved_parent_if_empty: bool,
     pub resolution_context: *const FfiCascadeResolutionContext,
-    pub finalizer_context: *mut c_void,
-    pub finalize_component:
-        Option<unsafe extern "C" fn(*mut c_void, *const usize, *const u32, usize, *mut FfiResolvedStyleValue)>,
+    pub finalization_environment: *const crate::css::style_compute::FfiStyleComputationEnvironment,
+    pub finalization_color_scheme: u8,
 }
 
 #[repr(C)]
@@ -1407,6 +1431,7 @@ fn custom_property_needs_resolution(value: &StyleValueData) -> bool {
 struct CustomPropertyFinalizerContext<'a> {
     input: &'a FfiCustomPropertyDriveInput,
     names: &'a [usize],
+    depends_on_viewport_metrics: Cell<bool>,
 }
 
 unsafe extern "C" fn finalize_custom_property_component(
@@ -1416,18 +1441,60 @@ unsafe extern "C" fn finalize_custom_property_component(
     outputs: *mut FfiResolvedStyleValue,
 ) {
     let context = unsafe { &*context.cast::<CustomPropertyFinalizerContext>() };
-    unsafe {
-        crate::css::style::seal::note_host_call("custom_properties.finalize_component");
-        (context
-            .input
-            .finalize_component
-            .expect("custom-property drive finalizer"))(
-            context.input.finalizer_context,
-            context.names.as_ptr(),
-            members,
-            member_count,
-            outputs,
+    let input = context.input;
+    let resolution_context = unsafe { &*input.resolution_context };
+    let registry = unsafe {
+        resolution_context
+            .custom_property_registry
+            .cast::<crate::css::custom_properties::CustomPropertyRegistry>()
+            .as_ref()
+    };
+    let inheritance_parent = unsafe {
+        resolution_context
+            .inheritance_custom_property_store
+            .cast::<CustomPropertyStore>()
+            .as_ref()
+    };
+    let length = unsafe {
+        resolution_context
+            .style_query_length_resolution_context
+            .cast::<crate::css::style_compute::FfiLengthResolutionContext>()
+            .as_ref()
+    };
+    let environment = unsafe { input.finalization_environment.as_ref() };
+    let members = unsafe { std::slice::from_raw_parts(members, member_count) };
+    for &member in members {
+        let output = unsafe { &mut *outputs.add(member as usize) };
+        let value = unsafe { RetainedStyleValueData::from_retained_pointer(output.data.cast()) };
+        let name_raw = context.names[member as usize];
+        let name = unsafe { &*input.store.cast::<CustomPropertyStore>() }
+            .own_values
+            .get(&name_raw)
+            .expect("declared custom property")
+            .name
+            .as_ref();
+        let specified_value = unsafe { &*input.store.cast::<CustomPropertyStore>() }
+            .own_values
+            .get(&name_raw)
+            .expect("declared custom property")
+            .value
+            .data();
+        let (finalized, depends_on_viewport_metrics) = crate::css::custom_properties::finalize_custom_property_value(
+            registry,
+            inheritance_parent,
+            name_raw,
+            name,
+            value,
+            Some(specified_value),
+            length,
+            environment,
+            input.finalization_color_scheme,
         );
+        context
+            .depends_on_viewport_metrics
+            .set(context.depends_on_viewport_metrics.get() || depends_on_viewport_metrics);
+        output.data = finalized.pointer().cast();
+        std::mem::forget(finalized);
     }
 }
 
@@ -1463,17 +1530,23 @@ pub(crate) unsafe fn drive_custom_property_resolution(
         .iter()
         .map(|_| FfiResolvedStyleValue { data: std::ptr::null() })
         .collect();
-    let mut finalizer_context = CustomPropertyFinalizerContext { input, names };
-    let stats = unsafe {
-        rust_resolve_unresolved_style_values(
+    let mut finalizer_context = CustomPropertyFinalizerContext {
+        input,
+        names,
+        depends_on_viewport_metrics: Cell::new(false),
+    };
+    let mut stats = unsafe {
+        resolve_unresolved_style_values(
             input.resolution_context,
             inputs.as_ptr(),
             inputs.len(),
             outputs.as_mut_ptr(),
             std::ptr::from_mut(&mut finalizer_context).cast(),
             Some(finalize_custom_property_component),
+            false,
         )
     };
+    stats.depends_on_viewport_metrics = finalizer_context.depends_on_viewport_metrics.get();
     let resolved_parent = if input.resolved_parent_store.is_null() {
         None
     } else {
@@ -1951,14 +2024,14 @@ fn custom_property_components(inputs: &[FfiUnresolvedStyleValue]) -> (Vec<Vec<u3
 /// Every pointer must remain valid for this call. `outputs` must have room for
 /// `input_count` entries, and a finalizer must replace each component output
 /// with a live style value pointer before returning.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_resolve_unresolved_style_values(
+unsafe fn resolve_unresolved_style_values(
     resolution_context: *const FfiCascadeResolutionContext,
     inputs: *const FfiUnresolvedStyleValue,
     input_count: usize,
     outputs: *mut FfiResolvedStyleValue,
     finalizer_context: *mut c_void,
     finalize_component: Option<unsafe extern "C" fn(*mut c_void, *const u32, usize, *mut FfiResolvedStyleValue)>,
+    finalizer_is_host_call: bool,
 ) -> FfiCustomPropertyResolutionStats {
     let resolution_context = unsafe { *resolution_context };
     let inputs = if input_count == 0 {
@@ -2014,7 +2087,9 @@ pub unsafe extern "C" fn rust_resolve_unresolved_style_values(
         }
         if let Some(finalize_component) = finalize_component {
             unsafe {
-                crate::css::style::seal::note_host_call("custom_properties.finalize_component");
+                if finalizer_is_host_call {
+                    crate::css::style::seal::note_host_call("custom_properties.finalize_component");
+                }
                 finalize_component(
                     finalizer_context,
                     component.as_ptr(),
@@ -2037,7 +2112,34 @@ pub unsafe extern "C" fn rust_resolve_unresolved_style_values(
             .as_ref()
             .map_or(0, |environment| environment.final_value_misses()),
         cycle_participants,
+        depends_on_viewport_metrics: false,
         substitution_usage: reported_substitution_usage(substitution_usage),
+    }
+}
+
+/// # Safety
+/// Every pointer must remain valid for this call. `outputs` must have room for
+/// `input_count` entries, and a finalizer must replace each component output
+/// with a live style value pointer before returning.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_resolve_unresolved_style_values(
+    resolution_context: *const FfiCascadeResolutionContext,
+    inputs: *const FfiUnresolvedStyleValue,
+    input_count: usize,
+    outputs: *mut FfiResolvedStyleValue,
+    finalizer_context: *mut c_void,
+    finalize_component: Option<unsafe extern "C" fn(*mut c_void, *const u32, usize, *mut FfiResolvedStyleValue)>,
+) -> FfiCustomPropertyResolutionStats {
+    unsafe {
+        resolve_unresolved_style_values(
+            resolution_context,
+            inputs,
+            input_count,
+            outputs,
+            finalizer_context,
+            finalize_component,
+            true,
+        )
     }
 }
 
@@ -2335,7 +2437,8 @@ mod tests {
             },
         ));
 
-        let requirements = unsafe { collect_style_computation_requirements(&store, None) };
+        let requirements =
+            unsafe { collect_style_computation_requirements(&store, std::ptr::null(), std::ptr::null(), None) };
         assert!(requirements.uses_tree_counting_function);
         assert_eq!(requirements.container_relative_length_unit_mask, 0b1111);
         assert_eq!(

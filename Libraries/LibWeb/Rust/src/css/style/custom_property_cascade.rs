@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::css::cascaded_properties::{
-    CallbackFreeParseOutcome, FfiCascadeResolutionContext, FfiCustomPropertyDriveInput, FfiResolvedStyleValue,
+    CallbackFreeParseOutcome, FfiCascadeResolutionContext, FfiCustomPropertyDriveInput,
     destroy_resolved_custom_properties, drive_custom_property_resolution, parse_substituted_source,
     parse_substituted_without_callbacks,
 };
@@ -28,50 +28,8 @@ use crate::css::custom_properties::{
 };
 use crate::css::ffi_support::FfiUtf16View;
 use crate::css::parser::value_parser::ParseOutcome;
-use crate::css::style_compute::keyword;
-use crate::css::style_value::{RetainedStyleValueData, StyleValueData, release_style_value, retain_style_value};
+use crate::css::style_value::{RetainedStyleValueData, StyleValueData, release_style_value};
 use custom_property_environments::CascadedCustomProperty;
-
-/// What the finalizer resolves a CSS-wide keyword against: the environment inherited.
-struct EngineFinalizer {
-    parent_store: *const c_void,
-}
-
-/// The tail of resolving one component of unregistered custom properties, as the C++ finalizer
-/// does it for a name without a registration: `initial` is the guaranteed-invalid value, `inherit`
-/// and `unset` are what the parent resolved the name to, and the rest stands as substituted.
-#[allow(clippy::arc_with_non_send_sync)]
-unsafe extern "C" fn finalize_engine_custom_property_component(
-    context: *mut c_void,
-    names: *const usize,
-    members: *const u32,
-    member_count: usize,
-    outputs: *mut FfiResolvedStyleValue,
-) {
-    let context = unsafe { &*context.cast::<EngineFinalizer>() };
-    let parent = unsafe { context.parent_store.cast::<CustomPropertyStore>().as_ref() };
-    let members = unsafe { std::slice::from_raw_parts(members, member_count) };
-    for &member in members {
-        let output = unsafe { &mut *outputs.add(member as usize) };
-        let value = unsafe { &*output.data.cast::<StyleValueData>() };
-        let StyleValueData::Keyword { keyword } = value else {
-            continue;
-        };
-        let replacement: *const StyleValueData = match *keyword {
-            keyword::INITIAL => Arc::into_raw(Arc::new(StyleValueData::GuaranteedInvalid)),
-            keyword::INHERIT | keyword::UNSET => {
-                let name_raw = unsafe { *names.add(member as usize) };
-                match parent.and_then(|parent| parent.get(name_raw)) {
-                    Some(entry) => unsafe { retain_style_value(entry.value.pointer()) },
-                    None => Arc::into_raw(Arc::new(StyleValueData::GuaranteedInvalid)),
-                }
-            }
-            _ => continue,
-        };
-        unsafe { release_style_value(output.data.cast()) };
-        output.data = replacement.cast();
-    }
-}
 
 /// The resolution context the engine substitutes under: the stores alone, with no callback into
 /// C++ - what the engine cannot resolve without one is left to C++ before this is built.
@@ -527,14 +485,13 @@ impl RetainedState {
         let parse_context = registry_ref.parse_context(&mut random_function_index);
         let resolution_context =
             engine_resolution_context(&parse_context, cascaded_store, parent_store, registry.as_pointer());
-        let mut finalizer = EngineFinalizer { parent_store };
         let drive = FfiCustomPropertyDriveInput {
             store: cascaded_store,
             resolved_parent_store: parent_store,
             reuse_resolved_parent_if_empty: !parent_store.is_null(),
             resolution_context: &raw const resolution_context,
-            finalizer_context: std::ptr::from_mut(&mut finalizer).cast(),
-            finalize_component: Some(finalize_engine_custom_property_component),
+            finalization_environment: std::ptr::null(),
+            finalization_color_scheme: 0,
         };
         // SAFETY: Every pointer the drive reads is live for the call, and the finalizer replaces
         // each output with one transferred reference.

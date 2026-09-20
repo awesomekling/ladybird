@@ -1384,7 +1384,7 @@ fn container_relative_length_unit_bit(unit: u8) -> u8 {
     }
 }
 
-fn collect_external_value_dependencies(value: &StyleValueData) -> ExternalValueDependencies {
+pub(crate) fn collect_external_value_dependencies(value: &StyleValueData) -> ExternalValueDependencies {
     fn collect_optional(value: &RetainedStyleValueData, dependencies: &mut ExternalValueDependencies) {
         if let Some(value) = value.optional_data() {
             collect(value, dependencies);
@@ -1714,6 +1714,7 @@ pub(crate) fn collect_unfixed_random_sharings_in_value(
         | StyleValueData::Filter { value, .. }
         | StyleValueData::OpenTypeTagged { value, .. }
         | StyleValueData::GridTrackPlacement { value, .. } => collect_values(&[value], sharings),
+        StyleValueData::Unresolved { parsed_value, .. } => collect_values(&[parsed_value], sharings),
         StyleValueData::ColorFunction {
             channel_0,
             channel_1,
@@ -2716,6 +2717,8 @@ pub struct FfiComputedAnimationList {
 #[repr(C)]
 pub struct FfiComputePropertiesInput {
     pub store: *const CascadedPropertyStore,
+    pub custom_property_store: *const c_void,
+    pub custom_property_registry: *const c_void,
     pub style_engine: *const c_void,
     pub style_node: u32,
     pub pseudo_kind: u8,
@@ -4755,6 +4758,7 @@ unsafe fn compute_longhands(
                 final_value_hits: 0,
                 final_value_misses: 0,
                 cycle_participants: 0,
+                depends_on_viewport_metrics: false,
                 substitution_usage: Default::default(),
             },
             storage: std::ptr::null_mut(),
@@ -5241,8 +5245,14 @@ pub unsafe extern "C" fn rust_compute_properties(input: *const FfiComputePropert
         has_relevant_animations_other_than_transitions: input.has_relevant_animations_other_than_transitions,
         has_css_defined_animations: input.has_css_defined_animations,
     };
-    let requirements =
-        unsafe { crate::css::cascaded_properties::collect_style_computation_requirements(input.store, Some(&plan)) };
+    let requirements = unsafe {
+        crate::css::cascaded_properties::collect_style_computation_requirements(
+            input.store,
+            input.custom_property_store.cast(),
+            input.custom_property_registry.cast(),
+            Some(&plan),
+        )
+    };
     let parent_snapshot = if input.inheritance_parent_style_record != 0 {
         Some(parent_snapshot_for_style_record(
             style_engine,
