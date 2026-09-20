@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/Function.h>
 #include <AK/HashMap.h>
 #include <AK/Vector.h>
 #include <LibWeb/DOM/Node.h>
@@ -15,6 +16,12 @@
 #include <LibWeb/InvalidateDisplayList.h>
 
 namespace Web::DOM {
+
+enum class PaintFactsFamily : u8 {
+    LayerImage,
+    ReplacedImage,
+    Video,
+};
 
 // What the DOM side has marked dirty on the render side but has not written there yet. An entry
 // names a node by identity and says what changed about it, and a second mark on the same node
@@ -38,6 +45,7 @@ public:
     void note_dom_paint_facts(NodeIdentity, u8 facts);
     void note_canvas_paint_facts(NodeIdentity, bool has_content, i32 content_width, i32 content_height, u64 canvas_id, u64 content_generation);
     void note_form_control_paint_facts(NodeIdentity, bool enabled, bool checked, bool indeterminate, bool being_activated);
+    void note_paint_facts(NodeIdentity, PaintFactsFamily, Function<void(Layout::Node const&)>&&);
 
     // Writes every entry through to the render side and empties the journal.
     void drain();
@@ -68,6 +76,9 @@ private:
         bool form_control_checked { false };
         bool form_control_indeterminate { false };
         bool form_control_being_activated { false };
+        Function<void(Layout::Node const&)> layer_image_paint_facts_update;
+        Function<void(Layout::Node const&)> replaced_image_paint_facts_update;
+        Function<void(Layout::Node const&)> video_paint_facts_update;
     };
 
     Entry& entry_for(NodeIdentity);

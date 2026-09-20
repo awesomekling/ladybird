@@ -17,7 +17,12 @@ namespace Web::DOM {
 InvalidationJournal::Entry& InvalidationJournal::entry_for(NodeIdentity identity)
 {
     auto index = m_entry_index_by_identity.ensure(identity, [&] {
-        m_entries.append(Entry { .identity = identity });
+        m_entries.append(Entry {
+            .identity = identity,
+            .layer_image_paint_facts_update = {},
+            .replaced_image_paint_facts_update = {},
+            .video_paint_facts_update = {},
+        });
         return m_entries.size() - 1;
     });
     return m_entries[index];
@@ -87,6 +92,23 @@ void InvalidationJournal::note_form_control_paint_facts(NodeIdentity identity, b
     drain_if_the_render_side_is_reading();
 }
 
+void InvalidationJournal::note_paint_facts(NodeIdentity identity, PaintFactsFamily family, Function<void(Layout::Node const&)>&& update)
+{
+    auto& entry = entry_for(identity);
+    switch (family) {
+    case PaintFactsFamily::LayerImage:
+        entry.layer_image_paint_facts_update = move(update);
+        break;
+    case PaintFactsFamily::ReplacedImage:
+        entry.replaced_image_paint_facts_update = move(update);
+        break;
+    case PaintFactsFamily::Video:
+        entry.video_paint_facts_update = move(update);
+        break;
+    }
+    drain_if_the_render_side_is_reading();
+}
+
 // A mark made from inside a layout update is one the render side is about to read, so it goes
 // through at once. Outside one, nothing reads what these marks change before the next drain.
 void InvalidationJournal::drain_if_the_render_side_is_reading()
@@ -118,7 +140,7 @@ void InvalidationJournal::drain()
                 node->apply_layout_tree_update_mark(entry.layout_tree_update_reason);
             }
 
-            if (!entry.needs_layout_update && !entry.needs_repaint && !entry.has_dom_paint_facts && !entry.has_canvas_paint_facts && !entry.has_form_control_paint_facts)
+            if (!entry.needs_layout_update && !entry.needs_repaint && !entry.has_dom_paint_facts && !entry.has_canvas_paint_facts && !entry.has_form_control_paint_facts && !entry.layer_image_paint_facts_update && !entry.replaced_image_paint_facts_update && !entry.video_paint_facts_update)
                 continue;
             // A node whose box went away between the mark and here has nothing left to mark.
             auto* layout_node = arena ? entry.identity.bound_layout_node(*arena) : nullptr;
@@ -154,6 +176,12 @@ void InvalidationJournal::drain()
                 if (changed && Painting::has_committed_box(*layout_node))
                     Painting::set_needs_repaint(*layout_node, InvalidateDisplayList::PaintCommands);
             }
+            if (entry.layer_image_paint_facts_update)
+                entry.layer_image_paint_facts_update(*layout_node);
+            if (entry.replaced_image_paint_facts_update)
+                entry.replaced_image_paint_facts_update(*layout_node);
+            if (entry.video_paint_facts_update)
+                entry.video_paint_facts_update(*layout_node);
             if (entry.needs_repaint) {
                 if (auto* text_node = as_if<Layout::TextNode>(*layout_node))
                     text_node->set_needs_repaint(entry.invalidate_display_list);
