@@ -39,7 +39,6 @@
 //! | `pseudo.create_nested_list_marker` | 1532 | slot |
 //! | `create_first_letter_nodes` | 234 | slot |
 //! | `svg_resource_box_survives` | 13 | slot |
-//! | `owned_image_provider_notify_detach` | 2 | **not a slot**: a detaching row's provider |
 //!
 //! `build_replaced_content_facts` and `viewport_propagation_facts` are counted too and have never
 //! been taken during a build: they belong to the layout entry that follows it.
@@ -55,10 +54,12 @@
 //! - `notify_box_presence` - a row telling the document that it gained or lost a box.
 //! - `paintable_row_reset` - the paint state that rides with a box going away.
 //!
-//! **Destruction of render-side objects the host owns the memory of.** The arena holds the shells,
-//! owned image providers and image observer sets as opaque pointers and the host frees them. These
-//! are handing memory back, not asking the document anything, and they are the same upcalls the
-//! sealed layout stage already permits outside a pass.
+//! **Render-side objects the host owns the memory of.** The arena holds the shells, owned image
+//! providers and image observer sets as opaque pointers, and the host frees them; a detaching
+//! row's provider is told its row has gone the same way. These hand memory back or clear a
+//! pointer into the arena, rather than asking the document anything, and they are the same upcalls
+//! the sealed layout stage already permits outside a pass. An owned image provider is always the
+//! one a box's generated content is built around, whose detach notification clears two pointers.
 //!
 //! **The shared resource services.** Fonts, text shaping and the Unicode services are the purity
 //! exception a render thread keeps: thread-safe services, not reads of the document. They are not
@@ -103,6 +104,7 @@ fn route_is_allowed(callback: &'static str) -> bool {
             | "paintable_row_reset"
             | "layout_node_shell_destroy"
             | "owned_image_provider_destroy"
+            | "owned_image_provider_notify_detach"
             | "image_observers_destroy"
     )
 }
