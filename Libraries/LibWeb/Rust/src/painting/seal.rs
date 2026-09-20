@@ -24,9 +24,9 @@
 //!
 //! [`Pass`] names the render-side passes the seal watches. A host call made while one of them is
 //! running is a violation; the same call made between passes is an input the stage was handed,
-//! and the seal permits it. Passes nest - a recording of a nested vector image runs inside the
-//! publish of the recording that asked for it - so a pass restores its predecessor when it ends
-//! and a report names the innermost one.
+//! and the seal permits it. Passes nest - a pass restores its predecessor when it ends, and a
+//! report names the innermost one - so a pass that means to call out has to end first, and has
+//! to check what it leaves running when it does.
 //!
 //! # The allow-list
 //!
@@ -35,6 +35,10 @@
 //! - **Outputs, after the pass.** The resource service the recording's publish hands fonts,
 //!   image frames and video sinks to. Publish is a pass of its own so that what it resolves is
 //!   still counted, but handing the resource service a font is not a read of the document.
+//! - **A nested vector image, recorded beside the publish that asked for it.** Laying out and
+//!   recording an SVG-as-image document is a paint stage of that document, not of this one, so
+//!   the publish ends around it. It still reads this document to find the image, which is what
+//!   pre-recording the nested list at decode time would end.
 //! - **Result sinks of C++ to Rust queries.** A query that answers through a callback appending
 //!   to a caller-owned collection runs with no pass in progress at all.
 //! - **Replay.** The display list player is a stage of its own.

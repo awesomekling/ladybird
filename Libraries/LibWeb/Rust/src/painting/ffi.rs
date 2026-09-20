@@ -1531,7 +1531,6 @@ pub unsafe extern "C" fn layout_arena_publish_recording(
     let Some(pending) = arena.paint_state().borrow_mut().pending_recording.take() else {
         return 0;
     };
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::RecordingPublish);
     crate::painting::record::publish::publish_recording(arena, pending, &publish)
 }
 
