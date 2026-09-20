@@ -35,9 +35,9 @@ class Animation : public DOM::EventTarget {
 
 public:
     // Everything the style stage needs to decide, without touching the GC heap, whether this
-    // animation is relevant: the timing of the animation and of its effect, packed into two words
-    // of presence and kind flags and eight raw times. The layout is mirrored by
-    // `Rust/src/css/style/animations.rs`; keep the two in step.
+    // animation is relevant and what key its effect samples at: the timing of the animation and of
+    // its effect, packed into words of presence and kind flags and raw times. The layout is
+    // mirrored by `Rust/src/css/style/animations.rs`; keep the two in step.
     struct StyleTimingRow {
         static constexpr u32 has_start_time = 1u << 0;
         static constexpr u32 start_time_is_percentage = 1u << 1;
@@ -56,6 +56,18 @@ public:
         static constexpr u32 timeline_is_progress_based = 1u << 14;
         static constexpr u32 fill_mode_shift = 15;
         static constexpr u32 undecidable = 1u << 18;
+        // `Bindings::PlaybackDirection`, in IDL order.
+        static constexpr u32 playback_direction_shift = 19;
+        static constexpr u32 playback_direction_mask = 0x3;
+        // The effect's own easing: 0 the identity `linear`, 1 `cubic-bezier()`, 2 `steps()`.
+        static constexpr u32 easing_kind_shift = 21;
+        static constexpr u32 easing_kind_mask = 0x3;
+        // `CSS::StepPosition`, which is also what the easing evaluator takes.
+        static constexpr u32 easing_step_position_shift = 23;
+        static constexpr u32 easing_step_position_mask = 0x7;
+        // A `linear()` easing that has control points of its own. The row spells out a curve, not a
+        // list of stops, so the mirror declines the key rather than answering with the wrong one.
+        static constexpr u32 easing_has_control_points = 1u << 26;
 
         enum Time : size_t {
             StartTime,
@@ -66,11 +78,20 @@ public:
             PlaybackRate,
             PendingPlaybackRate,
             IterationCount,
+            IterationStart,
+            EasingX1,
+            EasingY1,
+            EasingX2,
+            EasingY2,
             TimeCount,
         };
 
         u32 flags { 0 };
         u32 timeline_identity { 0 };
+        i32 easing_interval_count { 0 };
+        // The effect this row is the timing of, so a stage that walks effects in composite order
+        // can find the row belonging to the one in its hand.
+        u64 effect_identity { 0 };
         double times[TimeCount] {};
     };
     StyleTimingRow style_timing_row() const;

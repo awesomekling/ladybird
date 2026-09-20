@@ -519,8 +519,12 @@ void Animatable::publish_animation_timing_rows()
             if (slot_of(keyframe_effect) != slot)
                 continue;
             auto row = animation->style_timing_row();
+            row.effect_identity = keyframe_effect.animation_preparation_identity();
             words.append(row.flags);
             words.append(row.timeline_identity);
+            words.append(bit_cast<u32>(row.easing_interval_count));
+            words.append(static_cast<u32>(row.effect_identity));
+            words.append(static_cast<u32>(row.effect_identity >> 32));
             for (auto time : row.times)
                 times.append(bit_cast<u64>(time));
             effects_in_order.append(keyframe_effect);
