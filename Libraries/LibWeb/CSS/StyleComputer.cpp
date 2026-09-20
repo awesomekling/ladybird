@@ -308,7 +308,8 @@ void StyleComputer::flush_custom_property_install_verifier()
         return;
     if (auto* file = fopen(path, "a")) {
         fprintf(file, "CUSTOM PROPERTY INSTALL SUMMARY: comparisons=%llu mismatches=%llu\n",
-            custom_property_install_comparisons, custom_property_install_mismatches);
+            static_cast<unsigned long long>(custom_property_install_comparisons),
+            static_cast<unsigned long long>(custom_property_install_mismatches));
         fclose(file);
     }
     custom_property_install_comparisons = 0;
