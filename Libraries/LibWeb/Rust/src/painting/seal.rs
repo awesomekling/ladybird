@@ -17,8 +17,10 @@
 //! is fatal. Reports go to standard error, or to the file `LIBWEB_SEAL_PAINT_STAGE_LOG` names,
 //! since a test runner does not keep the render process's standard error.
 //!
-//! **The paint stage is not sealed yet.** Unlike layout, turning this on today reports plenty;
-//! that report is the to-do list.
+//! **The paint stage is sealed.** As of the commit that scoped a caret line search by identity,
+//! the whole test suite runs under `LIBWEB_SEAL_PAINT_STAGE=abort` without a single report. What
+//! follows is what the seal still permits, and why each of them is not a read of the document
+//! made by a running pass.
 //!
 //! # The passes
 //!
@@ -32,24 +34,35 @@
 //!
 //! What a sealed paint stage may still do, none of which this gate sees as a violation:
 //!
-//! - **Outputs, after the pass.** The resource service the recording's publish hands fonts,
-//!   image frames and video sinks to. Publish is a pass of its own so that what it resolves is
-//!   still counted, but handing the resource service a font is not a read of the document.
-//! - **A nested vector image, recorded beside the publish that asked for it.** Laying out and
-//!   recording an SVG-as-image document is a paint stage of that document, not of this one, so
-//!   the publish ends around it. It still reads this document to find the image, which is what
-//!   pre-recording the nested list at decode time would end.
-//! - **Result sinks of C++ to Rust queries.** A query that answers through a callback appending
-//!   to a caller-owned collection runs with no pass in progress at all.
-//! - **Replay.** The display list player is a stage of its own.
-//! - **Debug output.** Dumps and verification reports, the position the layout seal already
-//!   takes.
-//! - **Inputs synced before a pass, never during one.** The recording inputs, the SVG paint
-//!   resource sync and the paint fact pushes. Each one still gets a [`note_host_call`], so a
-//!   call that moved inside a pass would be reported.
+//! **Outputs, after the pass.** The resource service the recording's publish hands fonts, image
+//! frames and video sinks to - `FfiRecordingPublishCallbacks::add_font`, `add_image_frame` and
+//! `add_video_sink`. Publish is a pass of its own so that what it resolves is still counted, but
+//! handing the resource service a font is not a read of the document.
 //!
-//! Anything else a running pass asks the document is work item 7 still owes. Add a
-//! [`note_host_call`] beside any new host call rather than leaving it uncounted.
+//! **A nested vector image, recorded beside the publish that asked for it.**
+//! `resolve_vector_image_display_list` lays out and records an SVG-as-image document, which is a
+//! paint stage of that document rather than of this one, so
+//! [`crate::painting::record::publish::publish_recording`] ends the publish around it. It is the
+//! one entry on this list that still reads this document - to find the image the placeholder
+//! names - and pre-recording the nested list when the image's decoded data changes is what would
+//! end that.
+//!
+//! **Result sinks of C++ to Rust queries.** A query that answers through a callback appending to
+//! a caller-owned collection runs with no pass in progress at all, so the predicate excludes
+//! them without any of them having to say so.
+//!
+//! **Replay.** `FfiDisplayListReplayCallbacks`, the display list player: a stage of its own.
+//!
+//! **Debug output.** Dumps, traces and verification reports, the position the layout seal already
+//! takes for its own dump path.
+//!
+//! **Inputs synced before a pass, never during one.** The recording inputs, the SVG paint
+//! resource sync (`resolve_filter`, `resolve_paint_server`) and the paint fact pushes. Each one
+//! still gets a [`note_host_call`], so a call that moved inside a pass would be reported; none
+//! fires inside one today.
+//!
+//! Anything else a running pass asks the document is a regression. Add a [`note_host_call`]
+//! beside any new host call rather than leaving it uncounted.
 
 use std::cell::Cell;
 use std::cell::RefCell;
