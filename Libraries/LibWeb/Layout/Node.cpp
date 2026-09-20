@@ -138,11 +138,6 @@ Node::Node(DOM::Document& document, BindToPreparedArenaSlot, Compositing::RustFF
     RustFFI::layout_arena_attach_shell(m_arena->handle(), m_slot, this);
     auto* node = dom_node();
     if (node) {
-        // A text node's wheel-handler state is refreshed as its box is built, which is where the
-        // build refreshed it. An element's was refreshed as the element was prepared, and the
-        // document's is never derived from the tree at all.
-        if (kind == RustFFI::NodeKind::TextNode)
-            node->update_inside_blocking_wheel_event_handler_state();
         RustFFI::layout_arena_set_constructed_row_dom_paint_facts(m_arena->handle(), m_slot, dom_paint_facts_of(node));
         publish_own_scroll_offset();
     }

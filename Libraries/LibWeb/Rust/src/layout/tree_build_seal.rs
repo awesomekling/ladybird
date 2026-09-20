@@ -23,14 +23,14 @@
 //! matters as much as the name, because a route a full suite takes twice is a different problem
 //! from one it takes a hundred thousand times.
 //!
-//! What the whole suite takes, by `during_build` count, as of the commit that held an element's
-//! style record for the build in the arena. Three of these are not tree builder callback slots at
-//! all, which is what the gate was for:
+//! What the whole suite takes, by `during_build` count, as of the commit that derived a node's
+//! wheel-handler state where the tree changes. Three of these are not tree builder callback slots
+//! at all, which is what the gate was for:
 //!
 //! | route | during build | note |
 //! |---|---|---|
 //! | `layout_node_shell_factory` | 3507492 | **not a slot**: the arena materialising a shell |
-//! | `prepare_principal_element` | 2067094 | slot |
+//! | `restyle_bypass_path_element` | 1042302 | slot |
 //! | `attach_style_resources` | 1898182 | slot |
 //! | `shell_style_changed` | 81817 | **not a slot**: a row's style reaching its shell |
 //! | `text_source` | 63902 | **not a slot**: a text row's characters, synced mid-build |
