@@ -495,9 +495,18 @@ impl RetainedState {
     }
 
     /// The element facts the store holds, as `bridge::element_construction_fact` names them. A
-    /// text node and a retired identity hold none.
+    /// retired identity holds none. A text node has no element columns and holds one of the facts
+    /// on its own row, since which kind of tree it sits in decides what its row answers about the
+    /// text control around it.
     #[must_use]
     pub fn element_construction_facts(&self, node: StyleNodeID) -> u32 {
+        if node.is_text() {
+            return if self.tree.text_is_in_user_agent_shadow_tree(node) {
+                crate::css::style::bridge::element_construction_fact::IS_IN_USER_AGENT_SHADOW_TREE
+            } else {
+                0
+            };
+        }
         self.computed_group_sets.construction_facts(node)
     }
 
@@ -547,6 +556,12 @@ impl RetainedState {
     /// Record the text node's whitespace-only state, as its data now spells it.
     pub fn set_text_is_ascii_whitespace(&mut self, node: StyleNodeID, value: bool) {
         self.tree.set_text_is_ascii_whitespace(node, value, &mut self.memory);
+    }
+
+    /// Record which kind of tree the text node arrived in.
+    pub fn set_text_is_in_user_agent_shadow_tree(&mut self, node: StyleNodeID, value: bool) {
+        self.tree
+            .set_text_is_in_user_agent_shadow_tree(node, value, &mut self.memory);
     }
 
     /// Fold one layout tree update mark into the node's, answering whether its own bit changed.

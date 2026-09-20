@@ -938,6 +938,7 @@ impl StyleNodeTree {
         self.text.live.set(index as usize, true);
         self.text.marks.clear(index as usize);
         self.text.is_ascii_whitespace.set(index as usize, false);
+        self.text.is_in_user_agent_shadow_tree.set(index as usize, false);
         let current = self.text_capacity_bytes();
         self.record_capacity_change(memory, before, current);
         StyleNodeID::text(index)
@@ -957,6 +958,7 @@ impl StyleNodeTree {
             self.text.live.set(index as usize, false);
             self.text.marks.clear(index as usize);
             self.text.is_ascii_whitespace.set(index as usize, false);
+            self.text.is_in_user_agent_shadow_tree.set(index as usize, false);
             self.text.parent[index as usize] = None;
             self.text.next_sibling[index as usize] = None;
             self.text.previous_sibling[index as usize] = None;
@@ -984,6 +986,30 @@ impl StyleNodeTree {
         };
         let before = self.text_capacity_bytes();
         self.text.is_ascii_whitespace.set(index as usize, value);
+        let current = self.text_capacity_bytes();
+        self.record_capacity_change(memory, before, current);
+    }
+
+    /// Whether the text node sits in a user agent shadow tree. Only a text node is asked; every
+    /// other identity records the fact among its element construction facts.
+    #[must_use]
+    pub fn text_is_in_user_agent_shadow_tree(&self, node: StyleNodeID) -> bool {
+        node.text_index()
+            .is_some_and(|index| self.text.is_in_user_agent_shadow_tree.contains(index as usize))
+    }
+
+    /// Record which kind of tree the text node arrived in.
+    pub fn set_text_is_in_user_agent_shadow_tree(
+        &mut self,
+        node: StyleNodeID,
+        value: bool,
+        memory: &mut MemoryController,
+    ) {
+        let Some(index) = node.text_index() else {
+            return;
+        };
+        let before = self.text_capacity_bytes();
+        self.text.is_in_user_agent_shadow_tree.set(index as usize, value);
         let current = self.text_capacity_bytes();
         self.record_capacity_change(memory, before, current);
     }
@@ -1999,6 +2025,9 @@ struct TextRows {
     /// Whether the node's data is nothing but ASCII whitespace, which is what decides whether the
     /// layout tree build can collapse it away rather than give it a box of its own.
     is_ascii_whitespace: BitColumn,
+    /// Whether the node sits in a user agent shadow tree. An element records the same fact among
+    /// its construction facts; a text node has no element columns, so it records it here.
+    is_in_user_agent_shadow_tree: BitColumn,
     pending_reuse: Vec<u32>,
     free_indexes: Vec<u32>,
 }
@@ -2012,6 +2041,7 @@ impl TextRows {
                 self.live.capacity_bytes(),
                 self.marks.capacity_bytes(),
                 self.is_ascii_whitespace.capacity_bytes(),
+                self.is_in_user_agent_shadow_tree.capacity_bytes(),
             ];
             skip [self.pending_reuse, self.free_indexes];
         }

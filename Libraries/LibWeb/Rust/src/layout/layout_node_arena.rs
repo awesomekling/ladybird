@@ -1815,12 +1815,12 @@ impl LayoutNodeArena {
         }
     }
 
-    /// The element facts a row built for `style_node` records, as `element_construction_fact`
-    /// names them. A text node, an anonymous row and the document hold none, and answer zero, as
-    /// does a row built in an arena that names no style mirror at all.
+    /// The facts a row built for `style_node` records, as `element_construction_fact` names them.
+    /// A text node holds only which kind of tree it sits in; an anonymous row and the document
+    /// hold none, and answer zero, as does a row built in an arena that names no style mirror.
     pub(crate) fn element_construction_facts(&self, style_node: Option<StyleNodeID>) -> u32 {
         match style_node {
-            Some(style_node) if style_node.element_index().is_some() => {
+            Some(style_node) => {
                 let Some(host) = self.style_record_host.get() else {
                     return 0;
                 };

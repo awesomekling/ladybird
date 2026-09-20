@@ -295,6 +295,15 @@ void record_element_connected(DOM::Element& element)
     republish_assigned_slot_of(element);
 }
 
+// A text node's row is built with the same fact an element's row records, and it decides what the
+// row answers about the text control around it. A text node has no element columns in the mirror,
+// so the fact travels on its own row, published where its identity arrives.
+static bool text_is_in_user_agent_shadow_tree(DOM::Text const& text)
+{
+    auto shadow_root = text.containing_shadow_root();
+    return shadow_root && shadow_root->is_user_agent_internal();
+}
+
 void record_text_connected(DOM::Text& text)
 {
     auto* style_engine = style_engine_for(text);
@@ -305,6 +314,7 @@ void record_text_connected(DOM::Text& text)
     text.set_style_node_id(identity);
     text.document().style_computer().register_style_node(identity, text);
     style_engine->set_text_is_ascii_whitespace(identity, text.data().is_ascii_whitespace());
+    style_engine->set_text_is_in_user_agent_shadow_tree(identity, text_is_in_user_agent_shadow_tree(text));
     ensure_dom_order_parent_identity(text.parent(), *style_engine);
 
     Vector<u32, 192> links;
@@ -400,6 +410,7 @@ void record_subtree_connecting(DOM::Node& root)
             text_arrivals[i]->set_style_node_id(identities[i]);
             style_computer.register_style_node(identities[i], text_arrivals[i]);
             style_engine.set_text_is_ascii_whitespace(identities[i], text_arrivals[i]->data().is_ascii_whitespace());
+            style_engine.set_text_is_in_user_agent_shadow_tree(identities[i], text_is_in_user_agent_shadow_tree(*text_arrivals[i]));
         }
     }
 
