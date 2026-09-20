@@ -10,7 +10,7 @@ use crate::css::display::FfiDisplay;
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
 use crate::layout::node_facts;
-use crate::painting::host::FfiGeometryHostCallbacks;
+use crate::painting::host::GeometryHostCallbacks;
 use crate::painting::paintable_data::FfiOverflowData;
 use crate::painting::paintable_rows::PaintableRowsRead;
 use crate::painting::visual_context::dirty::VisualContextBoxDirtyKind;
@@ -719,7 +719,7 @@ fn measure_scrollable_overflow_impl(
 /// visual-context state temporarily borrowed or taken by painting traversals.
 #[derive(Default)]
 pub(crate) struct ScrollableOverflowState {
-    pub(crate) host: Cell<Option<FfiGeometryHostCallbacks>>,
+    pub(crate) host: Cell<Option<GeometryHostCallbacks>>,
     pub(crate) viewport: Cell<Option<NodeSlotId>>,
     pub(crate) full_layout_commit: Cell<bool>,
     pub(crate) contained_boxes_dirty: Cell<bool>,
