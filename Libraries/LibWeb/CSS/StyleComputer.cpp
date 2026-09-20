@@ -391,6 +391,7 @@ void StyleComputer::end_style_update() const
         return;
     m_style_update_ffi_media_environment.clear();
     m_style_update_media_environment.clear();
+    m_style_update_document_environment.clear();
 }
 
 Parser::ValueParserFFI::FfiMediaEnvironment const* StyleComputer::cached_media_environment_for_style_update() const
@@ -410,6 +411,26 @@ Parser::ValueParserFFI::FfiMediaEnvironment const* StyleComputer::ensure_media_e
         m_style_update_ffi_media_environment = m_style_update_media_environment->ffi_environment();
     }
     return &*m_style_update_ffi_media_environment;
+}
+
+StyleComputer::DocumentEnvironmentSnapshot const& StyleComputer::ensure_document_environment_for_style_update() const
+{
+    // NB: Outside a style update there is nothing to clear the cached snapshot, so always take a
+    //     fresh one, the way the media environment above does.
+    if (m_style_update_depth == 0 || !m_style_update_document_environment.has_value()) {
+        DocumentEnvironmentSnapshot snapshot;
+        snapshot.preferred_color_scheme = static_cast<u8>(to_underlying(document().page().preferred_color_scheme()));
+        if (auto supported = document().supported_color_schemes(); supported.has_value()) {
+            snapshot.has_supported_color_schemes = true;
+            snapshot.supported_color_scheme_codes.ensure_capacity(supported->size());
+            for (auto const& scheme : *supported)
+                snapshot.supported_color_scheme_codes.unchecked_append(to_underlying(preferred_color_scheme_from_string(scheme)));
+        }
+        snapshot.serialized_base_url = document().serialized_base_url();
+        snapshot.device_pixels_per_css_pixel = document().page().client().device_pixels_per_css_pixel();
+        m_style_update_document_environment = move(snapshot);
+    }
+    return *m_style_update_document_environment;
 }
 
 void StyleComputer::drop_style_sharing_cache() const
@@ -1136,24 +1157,19 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
             };
             random_base_values.empend(sharing.source, const_cast<DOM::Element&>(abstract_element.element()).ensure_css_random_base_value(random_caching_key));
         }
-        String document_base_url;
-        if (resolved_batch.needs_document_base_url)
-            document_base_url = abstract_element.document().serialized_base_url();
-        auto document_base_url_bytes = document_base_url.bytes();
-        Vector<u8> document_supported_color_scheme_codes;
-        auto document_supported_color_schemes = document().supported_color_schemes();
-        if (document_supported_color_schemes.has_value()) {
-            document_supported_color_scheme_codes.ensure_capacity(document_supported_color_schemes->size());
-            for (auto const& scheme : *document_supported_color_schemes)
-                document_supported_color_scheme_codes.unchecked_append(to_underlying(preferred_color_scheme_from_string(scheme)));
-        }
+        // The document and the page cannot move inside a style update, so these come from the
+        // snapshot the update's begin boundary took rather than from the document itself.
+        auto const& document_environment = ensure_document_environment_for_style_update();
+        auto document_base_url_bytes = resolved_batch.needs_document_base_url
+            ? document_environment.serialized_base_url.bytes()
+            : ReadonlyBytes {};
         ComputedValuesFFI::FfiStyleComputationEnvironment const computation_environment {
             .box_type_input = {},
             .color_scheme_input = {
-                .preferred_color_scheme = static_cast<u8>(to_underlying(document().page().preferred_color_scheme())),
-                .has_document_supported_schemes = document_supported_color_schemes.has_value(),
-                .document_supported_scheme_codes = document_supported_color_scheme_codes.data(),
-                .document_supported_scheme_count = document_supported_color_scheme_codes.size(),
+                .preferred_color_scheme = document_environment.preferred_color_scheme,
+                .has_document_supported_schemes = document_environment.has_supported_color_schemes,
+                .document_supported_scheme_codes = document_environment.supported_color_scheme_codes.data(),
+                .document_supported_scheme_count = document_environment.supported_color_scheme_codes.size(),
             },
             .is_th_element = false,
             .has_new_font_size = false,
@@ -1166,7 +1182,7 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
             .document_base_url_length = document_base_url_bytes.size(),
             .style_sheet_resource_contexts = nullptr,
             .style_sheet_resource_context_count = 0,
-            .device_pixels_per_css_pixel = m_document->page().client().device_pixels_per_css_pixel(),
+            .device_pixels_per_css_pixel = document_environment.device_pixels_per_css_pixel,
             .initial_font_size_raw = InitialValues::font_size().raw_value(),
             .default_font_size_raw = default_user_font_size().raw_value(),
         };

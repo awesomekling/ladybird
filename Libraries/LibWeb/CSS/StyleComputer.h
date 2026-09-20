@@ -144,6 +144,18 @@ public:
     void end_style_update() const;
     [[nodiscard]] Parser::ValueParserFFI::FfiMediaEnvironment const* ensure_media_environment_for_style_update() const;
 
+    // The document- and page-wide answers a style computation needs that nothing in a style update
+    // can move. Taken once, at the update's begin boundary, so that the sealed stage reads the
+    // snapshot rather than the page.
+    struct DocumentEnvironmentSnapshot {
+        u8 preferred_color_scheme { 0 };
+        bool has_supported_color_schemes { false };
+        Vector<u8> supported_color_scheme_codes;
+        String serialized_base_url;
+        double device_pixels_per_css_pixel { 1 };
+    };
+    [[nodiscard]] DocumentEnvironmentSnapshot const& ensure_document_environment_for_style_update() const;
+
     // Forget every style one element computed on another's behalf. See m_style_sharing_cache.
     void drop_style_sharing_cache() const;
 
@@ -403,6 +415,7 @@ private:
     mutable u64 m_style_update_depth { 0 };
     mutable Optional<MediaEnvironmentSnapshot> m_style_update_media_environment;
     mutable Optional<Parser::ValueParserFFI::FfiMediaEnvironment> m_style_update_ffi_media_environment;
+    mutable Optional<DocumentEnvironmentSnapshot> m_style_update_document_environment;
     // The style most recently built, kept as a payload donor: a run of elements computing the same
     // style shares group payloads through it, which no parent or previous-style adoption can do.
     mutable RefPtr<ComputedValues const> m_last_built_computed_values;
