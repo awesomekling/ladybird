@@ -101,6 +101,13 @@ impl Pass {
     }
 }
 
+pub(crate) fn current_pass_name() -> Option<&'static str> {
+    CURRENT_PASS.with(|current| {
+        let pass = current.get();
+        (pass != Pass::None).then(|| pass.name())
+    })
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Mode {
     Off,
