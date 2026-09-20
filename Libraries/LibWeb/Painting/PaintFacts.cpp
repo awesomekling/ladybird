@@ -7,6 +7,7 @@
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ImageSetStyleValue.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/HTML/DecodedImageData.h>
 #include <LibWeb/HTML/HTMLCanvasElement.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
@@ -70,7 +71,8 @@ void push_canvas_paint_facts(HTML::HTMLCanvasElement const& canvas)
     auto const* layout_node = canvas.unsafe_layout_node();
     if (!layout_node || layout_node->kind() != Layout::RustFFI::NodeKind::CanvasBox)
         return;
-    push_canvas_paint_facts_onto(canvas, *layout_node);
+    auto content_size = canvas.canvas_surface_content_size();
+    const_cast<DOM::Document&>(canvas.document()).invalidation_journal().note_canvas_paint_facts(DOM::NodeIdentity::of(canvas), content_size.has_value(), content_size.has_value() ? content_size->width() : 0, content_size.has_value() ? content_size->height() : 0, content_size.has_value() ? canvas.canvas_id().value().value() : 0, content_size.has_value() ? canvas.content_generation() : 0);
 }
 
 static Optional<u64> composited_context_id_for_navigable_container(HTML::NavigableContainer const& navigable_container)
