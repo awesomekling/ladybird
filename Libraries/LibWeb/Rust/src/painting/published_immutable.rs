@@ -15,6 +15,7 @@
 
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
@@ -55,6 +56,19 @@ struct State {
 
 thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
+    static CURRENT_WRITER: Cell<Option<&'static str>> = const { Cell::new(None) };
+}
+
+pub(crate) struct WriterScope(Option<&'static str>);
+
+impl Drop for WriterScope {
+    fn drop(&mut self) {
+        CURRENT_WRITER.with(|writer| writer.set(self.0));
+    }
+}
+
+pub(crate) fn enter_writer(writer: &'static str) -> WriterScope {
+    WriterScope(CURRENT_WRITER.with(|current| current.replace(Some(writer))))
 }
 
 fn enabled() -> bool {
@@ -230,6 +244,7 @@ fn note_row_mutation_impl(
         "journal drain"
     } else {
         explicit_writer
+            .or_else(|| CURRENT_WRITER.with(Cell::get))
             .or_else(crate::painting::seal::current_pass_name)
             .unwrap_or("main-side direct")
     };

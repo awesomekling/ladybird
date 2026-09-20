@@ -47,6 +47,7 @@ public:
 
     void note_needs_layout_update(NodeIdentity, SetNeedsLayoutReason, Layout::LayoutUpdatePropagation);
     void note_needs_repaint(NodeIdentity, InvalidateDisplayList);
+    void note_needs_repaint_in_subtree(NodeIdentity);
     void note_needs_layout_tree_update(NodeIdentity, SetNeedsLayoutTreeUpdateReason);
     void note_dom_paint_facts(NodeIdentity, u8 facts);
     void note_canvas_paint_facts(NodeIdentity, bool has_content, i32 content_width, i32 content_height, u64 canvas_id, u64 content_generation);
@@ -69,6 +70,7 @@ private:
         InvalidateDisplayList invalidate_display_list { InvalidateDisplayList::No };
         bool needs_layout_update { false };
         bool needs_repaint { false };
+        bool needs_subtree_repaint { false };
         bool needs_layout_tree_update { false };
         bool has_dom_paint_facts { false };
         u8 dom_paint_facts { 0 };

@@ -51,6 +51,15 @@ void InvalidationJournal::note_needs_repaint(NodeIdentity identity, InvalidateDi
     drain_if_the_render_side_is_reading();
 }
 
+void InvalidationJournal::note_needs_repaint_in_subtree(NodeIdentity identity)
+{
+    auto& entry = entry_for(identity);
+    entry.needs_subtree_repaint = true;
+    entry.needs_repaint = true;
+    entry.invalidate_display_list = InvalidateDisplayList::PaintCommandsAndHitTestList;
+    drain_if_the_render_side_is_reading();
+}
+
 void InvalidationJournal::note_needs_layout_tree_update(NodeIdentity identity, SetNeedsLayoutTreeUpdateReason reason)
 {
     auto& entry = entry_for(identity);
@@ -158,7 +167,7 @@ void InvalidationJournal::drain()
                 node->apply_layout_tree_update_mark(entry.layout_tree_update_reason);
             }
 
-            if (!entry.needs_layout_update && !entry.needs_repaint && !entry.has_dom_paint_facts && !entry.has_canvas_paint_facts && !entry.has_form_control_paint_facts && !entry.invalidate_paint_and_hit_test_cache && !entry.invalidate_propagated_text_decoration_caches && !entry.layer_image_paint_facts_update && !entry.replaced_image_paint_facts_update && !entry.video_paint_facts_update)
+            if (!entry.needs_layout_update && !entry.needs_repaint && !entry.needs_subtree_repaint && !entry.has_dom_paint_facts && !entry.has_canvas_paint_facts && !entry.has_form_control_paint_facts && !entry.invalidate_paint_and_hit_test_cache && !entry.invalidate_propagated_text_decoration_caches && !entry.layer_image_paint_facts_update && !entry.replaced_image_paint_facts_update && !entry.video_paint_facts_update)
                 continue;
             // A node whose box went away between the mark and here has nothing left to mark.
             auto* layout_node = arena ? entry.identity.bound_layout_node(*arena) : nullptr;
@@ -204,11 +213,13 @@ void InvalidationJournal::drain()
                 Painting::apply_paint_cache_invalidation(*layout_node, Painting::PaintCacheInvalidation::PaintAndHitTest, Painting::PaintCacheInvalidationStage::JournalDrain);
             if (entry.invalidate_propagated_text_decoration_caches)
                 Painting::apply_paint_cache_invalidation(*layout_node, Painting::PaintCacheInvalidation::PropagatedTextDecorations, Painting::PaintCacheInvalidationStage::JournalDrain);
+            if (entry.needs_subtree_repaint)
+                Painting::apply_subtree_repaint_damage(*layout_node, Painting::RepaintDamageStage::JournalDrain);
             if (entry.needs_repaint) {
                 if (auto* text_node = as_if<Layout::TextNode>(*layout_node))
-                    text_node->set_needs_repaint(entry.invalidate_display_list);
+                    Painting::apply_repaint_damage(*text_node, entry.invalidate_display_list, Painting::RepaintDamageStage::JournalDrain);
                 else if (Painting::has_committed_box(*layout_node))
-                    Painting::set_needs_repaint(*layout_node, entry.invalidate_display_list);
+                    Painting::apply_repaint_damage(*layout_node, entry.invalidate_display_list, Painting::RepaintDamageStage::JournalDrain);
             }
         }
     }
