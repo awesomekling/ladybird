@@ -68,8 +68,10 @@ public:
     RefPtr<CSS::CustomPropertyData const> custom_property_data() const override;
     void set_custom_property_data(RefPtr<CSS::CustomPropertyData const> value) override;
 
-    CSSPixelPoint scroll_offset() const { return m_scroll_offset; }
-    void set_scroll_offset(CSSPixelPoint value) { m_scroll_offset = value; }
+    // The offset lives in the layout node arena, keyed by the generator's identity and this
+    // pseudo-element's kind, so a box bound to the pseudo-element reads it without asking here.
+    CSSPixelPoint scroll_offset() const;
+    void set_scroll_offset(CSSPixelPoint value);
 
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
@@ -86,7 +88,6 @@ private:
     // computed-values view rather than retaining one complete style per pseudo-element.
     CSS::StyleRecordID m_style_record_identity;
     OwnPtr<CustomPropertyDataStorage> m_custom_property_data;
-    CSSPixelPoint m_scroll_offset {};
 };
 
 // https://drafts.csswg.org/css-view-transitions/#pseudo-element-tree

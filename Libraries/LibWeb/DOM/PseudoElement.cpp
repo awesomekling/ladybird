@@ -68,6 +68,31 @@ Layout::NodeWithStyle* SyntheticPseudoElement::unsafe_layout_node() const
     return static_cast<Layout::NodeWithStyle*>(Layout::RustFFI::layout_arena_bound_pseudo_element_shell(arena->handle(), m_originating_element->style_node_id().value(), Layout::Node::encode_generated_for(m_type)));
 }
 
+CSSPixelPoint SyntheticPseudoElement::scroll_offset() const
+{
+    if (!m_originating_element)
+        return {};
+    auto* arena = m_originating_element->document().layout_node_arena_if_created();
+    if (!arena)
+        return {};
+    return Layout::RustFFI::layout_arena_pseudo_element_scroll_offset(arena->handle(),
+        m_originating_element->style_node_id().value(), Layout::Node::encode_generated_for(m_type));
+}
+
+void SyntheticPseudoElement::set_scroll_offset(CSSPixelPoint value)
+{
+    VERIFY(m_originating_element);
+    auto* arena = m_originating_element->document().layout_node_arena_if_created();
+    // Nothing has scrolled anything before a layout tree exists, so there is no offset to forget.
+    if (!arena) {
+        if (value.is_zero())
+            return;
+        arena = &m_originating_element->document().layout_node_arena();
+    }
+    Layout::RustFFI::layout_arena_set_pseudo_element_scroll_offset(arena->handle(),
+        m_originating_element->style_node_id().value(), Layout::Node::encode_generated_for(m_type), value);
+}
+
 void SyntheticPseudoElement::set_layout_node(Layout::NodeWithStyle* value)
 {
     auto* bound_row = unsafe_layout_node();
