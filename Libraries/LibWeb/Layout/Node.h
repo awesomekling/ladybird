@@ -357,6 +357,8 @@ protected:
     Node(DOM::Document&, GC::Ptr<DOM::Node>, RustFFI::NodeKind, AttachToDOMNode = AttachToDOMNode::Yes);
     Node(DOM::Document&, BindToPreparedArenaSlot, Compositing::RustFFI::NodeSlotId, RustFFI::NodeKind);
 
+    void take_over_rows_of_dom_node(DOM::Node&, AttachToDOMNode);
+
     bool has_flag(RustFFI::NodeFlag flag) const
     {
         return (RustFFI::layout_arena_node_flags(m_arena->handle(), m_slot) & static_cast<u32>(flag)) != 0;

@@ -112,7 +112,6 @@ pub struct FfiDomTreeBuilderCallbacks {
     pub create_principal_element_layout:
         unsafe extern "C" fn(*mut c_void, *mut c_void, FfiElementLayoutKind, u8) -> NodeSlotId,
     pub create_principal_document_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
-    pub create_principal_text_layout: unsafe extern "C" fn(*mut c_void, *mut c_void) -> NodeSlotId,
     /// Attaches the image observers a box's style asks for. Principal and pseudo-element boxes
     /// both go through this; nothing about it depends on which the box is.
     pub attach_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId),
@@ -2354,10 +2353,8 @@ fn construct_principal_layout_node(
                 host.text_is_ascii_whitespace(update.style_node),
                 facts.parent_collapses_whitespace,
             );
-            // SAFETY: The builder and DOM text node remain live throughout construction.
-            let text_layout_node =
-                unsafe { (host.callbacks.create_principal_text_layout)(host.callbacks.builder, dom_node) };
             let layout_host = host.layout();
+            let text_layout_node = layout_host.create_text_box(StyleNodeID::from_raw(update.style_node));
             if needs_style_wrapper {
                 let wrapper = layout_host.create_anonymous_box_from_style_record(
                     facts.style_record,
@@ -3710,6 +3707,18 @@ impl TreeBuilderHost<'_> {
             assert!(!self.arena().node_shell(slot).is_null());
         }
         UnplacedLayoutNode::new(slot)
+    }
+
+    /// The row a text node's box is built in. The row is stamped out of the text node's identity
+    /// alone, and materialising its shell is what gives the text node a `Layout::TextNode`.
+    fn create_text_box(&self, style_node: Option<StyleNodeID>) -> NodeSlotId {
+        let style_node = style_node.expect("a text node's box is built for its identity");
+        // SAFETY: Entry points guarantee that the arena remains live, and callers hold no reference
+        // derived from it across the allocation.
+        let slot = unsafe { &mut *self.arena }.allocate_unbound();
+        self.arena().stamp_dom_row(slot, NodeKind::TextNode, style_node);
+        assert!(!self.arena().node_shell(slot).is_null());
+        slot
     }
 
     fn anonymous_wrapper_overrides(&self, parent: LayoutNode) -> AnonymousStyleOverrides {
