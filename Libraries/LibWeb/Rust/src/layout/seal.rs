@@ -21,6 +21,12 @@
 //! [`super::layout_pass::LayoutPass`] no longer borrows the host table at all. What follows is
 //! what the seal still permits, and why each of them is not a read of the document.
 //!
+//! Full and partial layout now also have compiler-enforced boundaries: their shared input is
+//! `Sync`, their output is `Send`, and their runners receive neither [`crate::stage::MainThread`]
+//! nor a host callback table. Host calls therefore cannot be added to a runner through the
+//! supported interfaces. This runtime seal remains as redundant diagnostics until all pipeline
+//! stages use the same static boundary and the coordinator removes the seals together.
+//!
 //! # The allow-list
 //!
 //! **Outputs.** The render side tells the document what it decided. These run from commit, after
