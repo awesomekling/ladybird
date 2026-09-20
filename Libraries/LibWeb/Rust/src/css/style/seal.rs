@@ -14,11 +14,15 @@
 //!
 //! # The allow-list
 //!
-//! There are currently no host callbacks allowed during a style update. In particular, a font
-//! cache miss is not the shared font resource service: the installed resolver can synchronously
-//! enter the font loader and resolve a pending web face, including its GC-visible callbacks.
-//! Likewise, callbacks that prepare C++ longhand state or report computed results are crossings
-//! of the future thread boundary until they become published inputs or commit messages.
+//! `computed_properties.did_mutate_post_compute` is allowed: its complete C++ implementation only
+//! invalidates cached property data in the transaction-private `ComputedStyleWorkingSet` after
+//! Rust has mutated that working set's longhand table. It does not read or write DOM, CSSOM, GC,
+//! document, or shared cache state, and the working set has exclusive ownership during the call.
+//!
+//! A font cache miss is not the shared font resource service: the installed resolver can
+//! synchronously enter the font loader and resolve a pending web face, including its GC-visible
+//! callbacks. Likewise, callbacks that prepare C++ longhand state or report computed results are
+//! crossings of the future thread boundary until they become published inputs or commit messages.
 //!
 //! UTF-16 fly-string releases are deferred by the complete-update scope and drained after it.
 //! CSSOM rule-mutation notifications and rule-compilation visitors run outside a style update.
@@ -98,6 +102,11 @@ pub(crate) fn note_host_call(callback: &'static str) {
         counts.during_style = counts.during_style.wrapping_add(u64::from(during_style));
     });
     if !during_style {
+        return;
+    }
+    if callback == "computed_properties.did_mutate_post_compute" {
+        // ComputedStyleWorkingSet::did_apply_style_finalization_from_rust() only updates the
+        // exclusively owned working set's derived-property cache after Rust mutates its table.
         return;
     }
     assert!(
