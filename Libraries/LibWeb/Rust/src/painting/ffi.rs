@@ -2842,6 +2842,7 @@ pub unsafe extern "C" fn layout_arena_publish_scroll_offset(
 pub struct FfiImageMapArea {
     pub style_node: u32,
     pub shape: u8,
+    pub editable: u8,
     pub coords_offset: u32,
     pub coords_count: u32,
 }
@@ -2885,6 +2886,7 @@ pub unsafe extern "C" fn layout_arena_publish_image_map_areas(
             PublishedImageMapArea {
                 style_node: area.style_node,
                 shape: AreaShape::from_raw(area.shape),
+                editable: area.editable != 0,
                 coords: coords[start..end].to_vec().into_boxed_slice(),
             }
         })
@@ -2911,6 +2913,24 @@ pub unsafe extern "C" fn layout_arena_image_map_area_for_point(
     unsafe { arena_from_handle(arena) }
         .image_map_areas()
         .area_for_point(slot, x, y, image_width, image_height)
+}
+
+/// Whether the `<area>` of this image named by `style_node` is editable or an editing host: 1 or
+/// 0, and -1 when the identity names no area of this image. An area is never rendered, so this is
+/// where the fact every other hit target publishes onto its own row lives.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_image_map_area_editability(
+    arena: *mut c_void,
+    slot: NodeSlotId,
+    style_node: u32,
+) -> i8 {
+    unsafe { arena_from_handle(arena) }
+        .image_map_areas()
+        .area_editability(slot, style_node)
 }
 
 /// Publishes what the render side needs to know about the viewport it draws into. The document

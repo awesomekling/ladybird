@@ -344,7 +344,8 @@ void push_video_paint_facts(HTML::HTMLVideoElement const& video_element)
 
 // The `<area>` elements of the image map an image is associated with, in tree order, each named
 // by its style-tree identity, because that is what a hit hands back. An area is never rendered, so
-// it has no row of its own to carry its shape; the image whose map lists it does.
+// it has no row of its own to carry its shape or its editability; the image whose map lists it
+// does.
 static void push_image_map_area_facts_onto(HTML::HTMLImageElement& image_element, Layout::Node const& layout_node)
 {
     Vector<Layout::RustFFI::FfiImageMapArea> areas;
@@ -355,6 +356,7 @@ static void push_image_map_area_facts_onto(HTML::HTMLImageElement& image_element
             areas.append({
                 .style_node = DOM::NodeIdentity::of(area_element).style_node().value(),
                 .shape = to_underlying(area_element.shape_state()),
+                .editable = static_cast<u8>(area_element.is_editable_or_editing_host()),
                 .coords_offset = static_cast<u32>(coords.size()),
                 .coords_count = static_cast<u32>(area_coords.size()),
             });

@@ -32,10 +32,13 @@ impl AreaShape {
 }
 
 /// One `<area>` of an image map, as the image's row holds it: the style-tree identity to name as
-/// the hit target, and the parsed shape the point is tested against.
+/// the hit target, the parsed shape the point is tested against, and whether the area is editable
+/// or an editing host. An area is never rendered, so it has no row to carry that last fact the way
+/// every other hit target does, and it rides here instead.
 pub struct PublishedImageMapArea {
     pub style_node: u32,
     pub shape: AreaShape,
+    pub editable: bool,
     pub coords: Box<[f64]>,
 }
 
@@ -179,5 +182,20 @@ impl ImageMapAreaColumn {
             }
         }
         0
+    }
+
+    /// Whether the area of this image named by `style_node` is editable or an editing host: 1 or
+    /// 0, and -1 when the identity names no area of this image.
+    pub fn area_editability(&self, slot: NodeSlotId, style_node: u32) -> i8 {
+        let published = self.areas.borrow();
+        let Some(areas) = published.get(&slot) else {
+            return -1;
+        };
+        for area in areas {
+            if area.style_node == style_node {
+                return i8::from(area.editable);
+            }
+        }
+        -1
     }
 }
