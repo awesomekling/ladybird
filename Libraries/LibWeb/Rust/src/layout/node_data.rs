@@ -187,15 +187,9 @@ pub struct FfiNodeConstructionFacts {
     pub kind: NodeKind,
     pub shell: *mut c_void,
     pub is_anonymous: bool,
-    pub is_html_input_element: bool,
-    pub is_html_html_element: bool,
-    pub is_document_element: bool,
-    pub is_in_user_agent_shadow_tree: bool,
-    pub uses_button_layout: bool,
-    pub is_editing_host: bool,
-    pub is_body: bool,
     pub dom_paint_facts: u8,
-    /// The StyleNodeID of the element the row is bound to, or 0.
+    /// The StyleNodeID of the element the row is bound to, or 0. Every element fact the row is
+    /// built with is read from the style mirror under it; see `element_construction_fact`.
     pub style_node: u32,
 }
 

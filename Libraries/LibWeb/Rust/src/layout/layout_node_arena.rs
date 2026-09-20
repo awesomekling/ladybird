@@ -866,8 +866,11 @@ impl LayoutNodeArena {
         );
         data.kind.set(construction_facts.kind);
         data.shell.set(construction_facts.shell);
-        data.flags
-            .set(super::node_facts::construction_flags(&construction_facts));
+        let element_facts = self.element_construction_facts(StyleNodeID::from_raw(construction_facts.style_node));
+        data.flags.set(super::node_facts::construction_flags(
+            &construction_facts,
+            element_facts,
+        ));
         data.dom_paint_facts.set(construction_facts.dom_paint_facts);
         self.set_node_style_node(slot, StyleNodeID::from_raw(construction_facts.style_node));
         self.enroll_node_for_replaced_content_facts_sync_if_eligible(slot);
@@ -1811,6 +1814,24 @@ impl LayoutNodeArena {
         }
     }
 
+    /// The element facts a row built for `style_node` records, as `element_construction_fact`
+    /// names them. A text node, an anonymous row and the document hold none, and answer zero, as
+    /// does a row built in an arena that names no style mirror at all.
+    pub(crate) fn element_construction_facts(&self, style_node: Option<StyleNodeID>) -> u32 {
+        match style_node {
+            Some(style_node) if style_node.element_index().is_some() => {
+                let Some(host) = self.style_record_host.get() else {
+                    return 0;
+                };
+                assert!(!host.style_engine.is_null());
+                // SAFETY: As with `with_style_engine`, the engine outlives the arena's live nodes
+                // and no host callback runs while the borrow is active.
+                unsafe { &*host.style_engine.cast::<StyleEngine>() }.element_construction_facts(style_node)
+            }
+            _ => 0,
+        }
+    }
+
     /// A bit per pseudo-element kind the element's published style holds a record for, which is
     /// what says each of them exists at all. The style store settles no record for `::backdrop` or
     /// a highlight pseudo-element, so neither can be asked about this way.
@@ -2214,21 +2235,16 @@ impl LayoutNodeArena {
         );
         assert!(derived.record != 0 && !derived.payloads.is_null());
         data.kind.set(kind);
-        data.flags
-            .set(super::node_facts::construction_flags(&FfiNodeConstructionFacts {
+        data.flags.set(super::node_facts::construction_flags(
+            &FfiNodeConstructionFacts {
                 kind,
                 shell: std::ptr::null_mut(),
                 is_anonymous: true,
-                is_html_input_element: false,
-                is_html_html_element: false,
-                is_document_element: false,
-                is_in_user_agent_shadow_tree: false,
-                uses_button_layout: false,
-                is_editing_host: false,
-                is_body: false,
                 dom_paint_facts: 0,
                 style_node: 0,
-            }));
+            },
+            0,
+        ));
         self.style_records[slot.slot_index() as usize].set(derived.record);
         self.style_records_pinned_by_arena[slot.slot_index() as usize].set(true);
         data.style.set(derived.payloads);
@@ -5212,13 +5228,6 @@ mod tests {
             kind,
             shell: std::ptr::null_mut(),
             is_anonymous: false,
-            is_html_input_element: false,
-            is_html_html_element: false,
-            is_document_element: false,
-            is_in_user_agent_shadow_tree: false,
-            uses_button_layout: false,
-            is_editing_host: false,
-            is_body: false,
             dom_paint_facts: 0,
             style_node: 0,
         }

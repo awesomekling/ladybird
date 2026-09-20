@@ -2330,6 +2330,10 @@ void Node::recompute_editable_subtree_flags_and_repaint()
         // display list, so a flip must invalidate the recorded output.
         if (node.recompute_editable_subtree_flag())
             node.set_needs_repaint();
+        // Whether the node is an editing host is one of the facts a layout row is built with, and
+        // the mirror holds it for the build to read. It moves here and nowhere else.
+        if (auto* element = as_if<Element>(node))
+            CSS::record_element_construction_facts(*element);
         // Editing-host status and the empty-text fragment behavior of text nodes are
         // stamped into layout NodeData at layout node construction; contenteditable and
         // designMode changes reach here without a layout tree rebuild, so the stamps must

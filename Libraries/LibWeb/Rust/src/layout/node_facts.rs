@@ -234,22 +234,29 @@ pub(crate) fn has_ancestor_fact(data: &NodeData, fact: AncestorFact) -> bool {
     data.ancestor_facts.get() & fact as u8 != 0
 }
 
-pub(crate) fn construction_flags(facts: &FfiNodeConstructionFacts) -> u32 {
+/// The row flags a node is built with, from the kind and anonymity the caller names and the
+/// element facts the style mirror holds for the element the row is built for.
+pub(crate) fn construction_flags(facts: &FfiNodeConstructionFacts, element_facts: u32) -> u32 {
+    use crate::css::style::bridge::element_construction_fact as fact;
     let has_style = facts.kind != NodeKind::Node && !kind_is_text(facts.kind);
+    let holds = |bit: u32| element_facts & bit != 0;
     // Some native controls use a generic box so they can host their internal shadow tree, but
     // remain replaced elements for CSS box generation and inline layout.
-    let is_replaced_element = kind_is_replaced_box(facts.kind) || facts.is_html_input_element;
+    let is_replaced_element = kind_is_replaced_box(facts.kind) || holds(fact::IS_HTML_INPUT_ELEMENT);
     [
         (NodeFlag::Anonymous, facts.is_anonymous),
         (NodeFlag::HasStyle, has_style),
         (NodeFlag::IsReplacedElement, is_replaced_element),
-        (NodeFlag::IsHtmlInputElement, facts.is_html_input_element),
-        (NodeFlag::IsHtmlHtmlElement, facts.is_html_html_element),
-        (NodeFlag::IsDocumentElement, facts.is_document_element),
-        (NodeFlag::IsInUserAgentShadowTree, facts.is_in_user_agent_shadow_tree),
-        (NodeFlag::UsesButtonLayout, facts.uses_button_layout),
-        (NodeFlag::IsEditingHost, facts.is_editing_host),
-        (NodeFlag::IsBody, facts.is_body),
+        (NodeFlag::IsHtmlInputElement, holds(fact::IS_HTML_INPUT_ELEMENT)),
+        (NodeFlag::IsHtmlHtmlElement, holds(fact::IS_HTML_HTML_ELEMENT)),
+        (NodeFlag::IsDocumentElement, holds(fact::IS_DOCUMENT_ELEMENT)),
+        (
+            NodeFlag::IsInUserAgentShadowTree,
+            holds(fact::IS_IN_USER_AGENT_SHADOW_TREE),
+        ),
+        (NodeFlag::UsesButtonLayout, holds(fact::USES_BUTTON_LAYOUT)),
+        (NodeFlag::IsEditingHost, holds(fact::IS_EDITING_HOST)),
+        (NodeFlag::IsBody, holds(fact::IS_BODY)),
     ]
     .into_iter()
     .filter(|(_, is_set)| *is_set)
