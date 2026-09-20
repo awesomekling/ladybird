@@ -23,21 +23,21 @@
 //! matters as much as the name, because a route a full suite takes twice is a different problem
 //! from one it takes a hundred thousand times.
 //!
-//! What the whole suite takes, by `during_build` count, as of the commit that answered an SVG
-//! resource box's survival on the main side. Five of these are not tree builder callback slots at
+//! What the whole suite takes, by `during_build` count, as of the commit that held an element's
+//! style record for the build in the arena. Three of these are not tree builder callback slots at
 //! all, which is what the gate was for:
 //!
 //! | route | during build | note |
 //! |---|---|---|
-//! | `layout_node_shell_factory` | 3999771 | **not a slot**: the arena materialising a shell |
-//! | `prepare_principal_element` | 2056228 | slot |
-//! | `attach_style_resources` | 1887731 | slot |
-//! | `shell_style_changed` | 81530 | **not a slot**: a row's style reaching its shell |
-//! | `text_source` | 63938 | **not a slot**: a text row's characters, synced mid-build |
-//! | `pseudo.create_content_item` | 44495 | slot |
-//! | `pseudo.create_layout_node` | 43998 | slot |
+//! | `layout_node_shell_factory` | 3507492 | **not a slot**: the arena materialising a shell |
+//! | `prepare_principal_element` | 2067094 | slot |
+//! | `attach_style_resources` | 1898182 | slot |
+//! | `shell_style_changed` | 81817 | **not a slot**: a row's style reaching its shell |
+//! | `text_source` | 63902 | **not a slot**: a text row's characters, synced mid-build |
+//! | `pseudo.create_content_item` | 44380 | slot |
+//! | `pseudo.create_layout_node` | 43895 | slot |
 //! | `pseudo.create_nested_list_marker` | 1532 | slot |
-//! | `create_first_letter_nodes` | 234 | slot |
+//! | `create_first_letter_nodes` | 239 | slot |
 //! | `svg_resource_box_survives` | 13 | slot |
 //!
 //! `build_replaced_content_facts` and `viewport_propagation_facts` are counted too and have never

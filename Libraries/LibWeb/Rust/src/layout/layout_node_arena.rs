@@ -1312,6 +1312,22 @@ impl LayoutNodeArena {
         self.scroll_offsets().publish(slot, scroll_offset.into());
     }
 
+    /// Holds a style record for the rest of a layout tree build. The build releases them all
+    /// together, since letting go of one it has stopped looking at buys nothing before it ends.
+    pub(crate) fn pin_style_record_for_build(&self, record: u64) {
+        self.with_style_engine(|engine| engine.pin_layout_style_record(record));
+    }
+
+    /// Releases a pin [`Self::pin_style_record_for_build`] took.
+    pub(crate) fn release_style_record_pinned_for_build(&self, record: u64) {
+        self.with_style_engine(|engine| engine.unpin_layout_style_record(record));
+    }
+
+    /// The reasons the node's layout tree update mark permits reusing its box, if any.
+    pub(crate) fn layout_tree_update_reuse_reasons(&self, node: StyleNodeID) -> u8 {
+        self.with_style_store(|engine| engine.tree().layout_tree_update_reuse_reasons(node))
+    }
+
     /// Retires the tree update marks a node gives up along with its stale box. A shadow root has
     /// no box of its own, so the mark it gives up is its host's as well; only the node's own
     /// child mark goes, as the host may still have other children to update.

@@ -75,19 +75,6 @@ private:
     Vector<CSS::StyleRecordID> m_pinned_style_records;
 };
 
-void LayoutTreeBuilderAccess::clear_synthetic_pseudo_element_layout_nodes(DOM::Element& element)
-{
-    element.clear_synthetic_pseudo_element_layout_nodes({});
-}
-
-void LayoutTreeBuilderAccess::detach_layout_node(DOM::Node& node)
-{
-    if (auto* layout_node = node.unsafe_layout_node()) {
-        layout_node->prepare_for_detach_from_layout_tree();
-        RustFFI::layout_arena_unbind_row(layout_node->arena_handle(), Node::slot_id(layout_node));
-    }
-}
-
 void LayoutTreeBuilderAccess::set_synthetic_pseudo_element_node(DOM::Element& element, CSS::PseudoElement pseudo_element, Layout::NodeWithStyle* layout_node)
 {
     element.set_synthetic_pseudo_element_node({}, pseudo_element, layout_node);
@@ -559,28 +546,8 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
             auto& element = as<DOM::Element>(dom_node_for_style_node(*builder.m_document, style_node));
             element.update_inside_blocking_wheel_event_handler_state();
-            if (should_create_layout_node) {
-                LayoutTreeBuilderAccess::clear_synthetic_pseudo_element_layout_nodes(element);
-                update_style_if_needed_for_layout_tree_bypass_path(element);
-            }
-            if (!should_create_layout_node && element.needs_pseudo_element_layout_tree_update()) {
-                for (auto pseudo_element : { CSS::PseudoElement::Before, CSS::PseudoElement::After }) {
-                    if (auto* pseudo_node = element.pseudo_element_unsafe_layout_node(pseudo_element)) {
-                        pseudo_node->for_each_in_inclusive_subtree([](Layout::Node& node) {
-                            node.clear_committed_box();
-                            return TraversalDecision::Continue;
-                        });
-                        pseudo_node->prepare_subtree_for_detach_from_layout_tree();
-                        VERIFY(destroy_layout_subtree(*pseudo_node));
-                        LayoutTreeBuilderAccess::set_synthetic_pseudo_element_node(element, pseudo_element, nullptr);
-                    }
-                }
-                if (auto* layout_node = element.unsafe_layout_node(); !layout_node->has_children())
-                    layout_node->set_children_are_inline(false);
-            }
-            auto style_record_identity = element.style_record_identity();
-            VERIFY(style_record_identity);
-            static_cast<LayoutTreeBuildBridge*>(builder_pointer)->pin_style_record_for_build(style_record_identity); },
+            if (should_create_layout_node)
+                update_style_if_needed_for_layout_tree_bypass_path(element); },
         .attach_style_resources = [](void* builder_pointer, Compositing::RustFFI::NodeSlotId slot, bool owns_content_replacement_image) {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
