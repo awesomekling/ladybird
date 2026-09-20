@@ -5722,6 +5722,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         Vector<TransitionProperties> transitions;
         bool transition_delay_and_duration_are_single_zero { false };
         u64 container_relative_length_unit_mask { 0 };
+        bool attach_style_sheet_sources { false };
 
         explicit NativeLonghandState(NonnullRefPtr<ComputedStyleWorkingSet> working_set)
             : working_set(move(working_set))
@@ -5824,15 +5825,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 state.tree_counting_context = abstract_element.tree_counting_function_resolution_context();
             }
         }
-        if (computation_requirements->environment_requirements & ComputedValuesFFI::CASCADED_ENVIRONMENT_NEEDS_STYLE_SHEET_CONTEXT) {
-            for (size_t slot = 0; slot < context.cascaded_properties.source_slot_count(); ++slot) {
-                auto const* published_resource_context = context.cascaded_properties.source_resource_context_for_slot(static_cast<u32>(slot));
-                if (!published_resource_context)
-                    continue;
-                if (auto source = context.cascaded_properties.source_for_slot(static_cast<u32>(slot)))
-                    computed_style.set_style_sheet_for_source_slot(static_cast<u32>(slot), const_cast<StyleSheetState*>(source.ptr()));
-            }
-        }
+        state.attach_style_sheet_sources = (computation_requirements->environment_requirements & ComputedValuesFFI::CASCADED_ENVIRONMENT_NEEDS_STYLE_SHEET_CONTEXT) != 0;
         auto document_base_url_bytes = computation_requirements->environment_requirements & ComputedValuesFFI::CASCADED_ENVIRONMENT_NEEDS_DOCUMENT_BASE_URL
             ? document_environment.serialized_base_url.bytes()
             : ReadonlyBytes {};
@@ -5933,6 +5926,13 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         auto& style_computer = *context.style_computer;
         auto& state = *context.state;
         auto& computed_style = *state.working_set;
+        if (state.attach_style_sheet_sources) {
+            for (size_t slot = 0; slot < context.cascaded_properties.source_slot_count(); ++slot) {
+                if (auto source = context.cascaded_properties.source_for_slot(static_cast<u32>(slot))) {
+                    computed_style.set_style_sheet_for_source_slot(static_cast<u32>(slot), const_cast<StyleSheetState*>(source.ptr()));
+                }
+            }
+        }
         if (state.custom_property_resolution && longhand_result->custom_properties.did_resolve) {
             auto& resolution_state = *state.custom_property_resolution;
             auto const& resolution = longhand_result->custom_properties;
@@ -6187,8 +6187,6 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     u8 late_freeze_reasons = WorkingSet;
     if (prepared_transaction.requirements.has_monospace_font_family)
         late_freeze_reasons |= MonospaceRecascade;
-    if (prepared_transaction.requirements.environment_requirements & ComputedValuesFFI::CASCADED_ENVIRONMENT_NEEDS_STYLE_SHEET_CONTEXT)
-        late_freeze_reasons |= StylesheetSourceWrappers;
     if (native_context.state->custom_property_resolution)
         late_freeze_reasons |= CustomPropertyAdapter;
     if (prepared_transaction.parent_has_animated_values)
