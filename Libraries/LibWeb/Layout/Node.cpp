@@ -144,8 +144,15 @@ Node::Node(DOM::Document& document, BindToPreparedArenaSlot, Compositing::RustFF
     publish_unique_node_id();
     if (has_flag(RustFFI::NodeFlag::IsInUserAgentShadowTree))
         publish_own_is_in_focused_text_control();
-    if (node)
-        take_over_rows_of_dom_node(*node, AttachToDOMNode::Yes);
+    if (node) {
+        // A <pattern> inherits the attributes it does not carry from the pattern its `href` names,
+        // so its published facts are not a pure function of its own attributes and its own change
+        // steps cannot keep them fresh. Republishing as a box is built covers the case, since a
+        // pattern is read through a box. Every other SVG element published once, when it was
+        // registered.
+        if (auto* pattern_element = as_if<SVG::SVGPatternElement>(node))
+            pattern_element->publish_svg_attribute_facts();
+    }
 }
 
 Node::~Node()

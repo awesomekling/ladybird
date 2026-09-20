@@ -1441,6 +1441,28 @@ impl LayoutNodeArena {
         self.notify_box_presence(node);
     }
 
+    /// What a row the build stamped for a DOM node owes the node's other rows, and the node
+    /// itself. The row that was bound joins the ring of rows built for the same node and keeps
+    /// its style readable for as long as the host holds it; the stamped row becomes the node's.
+    pub(crate) fn take_over_rows_of_bound_node(&self, slot: NodeSlotId) {
+        self.assert_owner_thread();
+        let Some(node) = self.bound_node_of(slot) else {
+            return;
+        };
+        let previously_bound = self.with_bound_row_entry_of(node, |bound_row| *bound_row);
+        if !previously_bound.is_invalid() {
+            self.note_rows_share_dom_node(previously_bound, slot);
+            // The outgoing box keeps its style readable for as long as the host holds it.
+            if super::tree_builder::node_kind_is_node_with_style(self.data(previously_bound).kind.get()) {
+                let style_record = self.style_records[previously_bound.slot_index() as usize].get();
+                if style_record != 0 {
+                    self.pin_node_style_record_for_host(previously_bound, style_record);
+                }
+            }
+        }
+        self.bind_row(slot);
+    }
+
     /// Leaves the node `id` is bound to without a bound row.
     pub(crate) fn unbind_row(&self, id: NodeSlotId) {
         self.assert_owner_thread();

@@ -4008,6 +4008,7 @@ impl TreeBuilderHost {
         // derived from it across the allocation.
         let slot = unsafe { &mut *self.arena }.allocate_unbound();
         self.arena().stamp_dom_element_row(slot, kind, style_node);
+        self.arena().take_over_rows_of_bound_node(slot);
         assert!(!self.arena().node_shell(slot).is_null());
         slot
     }
@@ -4017,6 +4018,7 @@ impl TreeBuilderHost {
         // derived from it across the allocation.
         let slot = unsafe { &mut *self.arena }.allocate_unbound();
         self.arena().stamp_dom_row(slot, kind, style_node);
+        self.arena().take_over_rows_of_bound_node(slot);
         assert!(!self.arena().node_shell(slot).is_null());
         slot
     }
