@@ -69,7 +69,7 @@ pub(crate) struct RecordingResult {
 
 /// The hit-test items of the published frame, shared with the list that hit testing reads.
 pub struct PublishedHitTestItems {
-    pub items: Rc<Vec<HitTestItem>>,
+    pub items: Arc<Vec<HitTestItem>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

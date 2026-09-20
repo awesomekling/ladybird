@@ -1325,11 +1325,6 @@ struct RecordingStageOutput {
     recording_from_scratch: Option<crate::painting::record::RecordingResult>,
 }
 
-// SAFETY: DEBT: RecordingResult still contains Rc-backed hit-test data and resource handles. This
-// private output is consumed on the document thread immediately after the stage returns. Replace
-// those owners with thread-safe handles before transferring an output between threads.
-unsafe impl Send for RecordingStageOutput {}
-
 const _: () = {
     const fn assert_sync<T: Sync>() {}
     const fn assert_send<T: Send>() {}

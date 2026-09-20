@@ -302,7 +302,7 @@ impl CommittedSvgFacts {
 
 #[derive(Clone, Default)]
 pub(crate) struct UsedValuesRareData {
-    pub(crate) computed_svg_path: Option<std::rc::Rc<libgfx_rust::path::OwnedPath>>,
+    pub(crate) computed_svg_path: Option<std::sync::Arc<libgfx_rust::path::OwnedPath>>,
     pub(crate) svg: CommittedSvgFacts,
     pub(crate) grid_layout_data: Option<std::rc::Rc<grid_formatting_context::GridLayoutData>>,
     pub(crate) flex_layout_data: Option<std::rc::Rc<formatting_context::FlexLayoutData>>,
