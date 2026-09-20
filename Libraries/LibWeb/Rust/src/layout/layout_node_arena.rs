@@ -5184,6 +5184,67 @@ pub unsafe extern "C" fn layout_arena_node_style_record_pinned_by_host(arena: *m
     unsafe { &*arena.cast::<LayoutNodeArena>() }.node_style_record_pinned_by_host(slot)
 }
 
+/// `Painting::PaintCacheInvalidationStage::DetachCleanup`, which is what the retired host-side
+/// preparation attributed its invalidation to.
+const PAINT_CACHE_INVALIDATION_STAGE_DETACH_CLEANUP: u8 = 2;
+
+/// Prepares `row` for leaving the layout tree. A detached box is read until its row is freed, so
+/// its style record is pinned for the host and its paint cache is cleaned here rather than through
+/// the journal, which would resolve the identity after a replacement row had been bound. The image
+/// resources the row holds go with it.
+fn prepare_row_for_detach(arena: *mut c_void, row: NodeSlotId) {
+    // SAFETY: The handle came from layout_arena_create and outlives this call.
+    let arena_ref = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    let kind = arena_ref.data(row).kind.get();
+    let is_node_with_style = super::tree_builder::node_kind_is_node_with_style(kind);
+    if is_node_with_style {
+        let style_record = arena_ref.style_records[row.slot_index() as usize].get();
+        if style_record != 0 {
+            arena_ref.pin_node_style_record_for_host(row, style_record);
+        }
+    }
+    // SAFETY: The handle is the one this call was given, and the invalidation borrows the arena
+    // for itself.
+    unsafe {
+        crate::painting::ffi::layout_arena_paintable_invalidate_paint_cache(
+            arena,
+            row,
+            false,
+            PAINT_CACHE_INVALIDATION_STAGE_DETACH_CLEANUP,
+        );
+    }
+    if is_node_with_style {
+        crate::layout::tree_mutation::destroy_image_observers(
+            arena_ref.replace_image_observers(row, std::ptr::null_mut()),
+        );
+    }
+    if kind == NodeKind::ImageBox {
+        crate::layout::tree_mutation::notify_owned_image_provider_of_detach(arena_ref.owned_image_provider(row));
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_prepare_node_for_detach(arena: *mut c_void, row: NodeSlotId) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: The handle came from layout_arena_create and outlives this call.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.assert_owner_thread();
+    prepare_row_for_detach(arena, row);
+}
+
+/// Prepares every row in the layout subtree `root` heads for leaving the tree.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_prepare_subtree_for_detach(arena: *mut c_void, root: NodeSlotId) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: The handle came from layout_arena_create and outlives this call.
+    let arena_ref = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    arena_ref.assert_owner_thread();
+    let mut rows = Vec::new();
+    arena_ref.for_each_node_in_layout_subtree_in_pre_order(root, |row| rows.push(row));
+    for row in rows {
+        prepare_row_for_detach(arena, row);
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_replace_image_observers(
     arena: *mut c_void,

@@ -13,7 +13,7 @@ use crate::css::style::bridge::{ElementBoxKind, element_adjustment_fact};
 use crate::css::style::layout_style::{AnonymousStyleKind, AnonymousStyleOverrides};
 use crate::css::style::tree::StyleNodeID;
 use crate::css::style::tree::layout_tree_update_reuse_reason;
-use crate::layout::layout_node_arena::{LayoutNodeArena, StaleWalkFacts};
+use crate::layout::layout_node_arena::{LayoutNodeArena, StaleWalkFacts, layout_arena_prepare_subtree_for_detach};
 use crate::layout::node_data::{
     GENERATED_FOR_AFTER, GENERATED_FOR_BACKDROP, GENERATED_FOR_BEFORE, GENERATED_FOR_FIRST_LETTER,
     GENERATED_FOR_MARKER, NodeData, NodeFlag, NodeKind, NodeSlotId,
@@ -110,7 +110,6 @@ pub struct FfiDomTreeBuilderCallbacks {
     /// both go through this; nothing about it depends on which the box is. The flag says the box
     /// replaces its element's contents with a single image, which it owns the provider for.
     pub attach_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId, bool),
-    pub layout: FfiTreeBuilderCallbacks,
     pub pseudo: FfiPseudoTreeBuilderCallbacks,
 }
 
@@ -438,7 +437,6 @@ pub struct FfiTopLayerDetachCallbacks {
     /// Answers `clear_stale_layout_node`, which is the only thing the stale-subtree walk asks of
     /// the main side.
     pub context: *mut c_void,
-    pub prepare_subtree_for_detach: unsafe extern "C" fn(*mut c_void),
     pub clear_stale_layout_node: unsafe extern "C" fn(*mut c_void, u32, u32) -> bool,
 }
 
@@ -548,10 +546,9 @@ pub unsafe extern "C" fn rust_detach_top_layer_element_layout_subtree(
         } else {
             topmost
         };
-        let shell = unsafe { &*arena }.node_shell(layout_node_to_detach);
-        // SAFETY: The C++ detach preparation walks the still-linked subtree; the shared arena
-        // borrow ends before the subtree is freed.
-        unsafe { (callbacks.prepare_subtree_for_detach)(shell) };
+        // SAFETY: The preparation walks the still-linked subtree and the borrow it takes ends
+        // before the subtree is freed.
+        unsafe { layout_arena_prepare_subtree_for_detach(arena.cast::<c_void>(), layout_node_to_detach) };
         if unsafe { &*arena }.detach_from_parent(layout_node_to_detach) {
             free_subtree_and_destroy_shells(arena, layout_node_to_detach);
         }
@@ -725,8 +722,8 @@ enum SiblingDirection {
 /// The test reads the DOM child sequence, the sibling boxes an inserted child would land between,
 /// and the style records of children that have no box yet, all out of the style mirror and the
 /// arena. Every rejection is a shape the incremental insertion cannot produce the same tree for.
-struct ChildListInsertionReuse<'a, 'host> {
-    layout: &'a TreeBuilderHost<'host>,
+struct ChildListInsertionReuse<'a> {
+    layout: &'a TreeBuilderHost,
     engine: &'a StyleEngine,
     element: StyleNodeID,
     layout_node: LayoutNode,
@@ -782,7 +779,7 @@ fn resolve_layout_node_reuse(
 /// bare keyword or a list of plain strings. Anything else is content whose value depends on the
 /// tree around it, which only a full build resolves.
 fn may_update_pseudo_elements_in_place(
-    layout: &TreeBuilderHost<'_>,
+    layout: &TreeBuilderHost,
     engine: &StyleEngine,
     kind: PrincipalNodeKind,
     element: StyleNodeID,
@@ -867,7 +864,7 @@ fn may_update_pseudo_elements_in_place(
 /// Whether a `::first-letter` owner on or above the element styles a letter inside its subtree.
 /// See `DOM::Node::first_letter_owner_for_layout_subtree_from`.
 fn first_letter_owner_covers_subtree(
-    layout: &TreeBuilderHost<'_>,
+    layout: &TreeBuilderHost,
     engine: &StyleEngine,
     element: StyleNodeID,
     layout_node: LayoutNode,
@@ -892,7 +889,7 @@ fn first_letter_owner_covers_subtree(
 }
 
 fn may_reuse_layout_node_for_child_list_insertion(
-    layout: &TreeBuilderHost<'_>,
+    layout: &TreeBuilderHost,
     engine: &StyleEngine,
     kind: PrincipalNodeKind,
     element: StyleNodeID,
@@ -931,7 +928,7 @@ fn may_reuse_layout_node_for_child_list_insertion(
     test.run()
 }
 
-impl ChildListInsertionReuse<'_, '_> {
+impl ChildListInsertionReuse<'_> {
     fn arena(&self) -> &LayoutNodeArena {
         self.layout.arena()
     }
@@ -1534,11 +1531,8 @@ impl DomTreeBuilderHost<'_> {
         unsafe { &*self.arena }.element_adjustment_facts(StyleNodeID::from_raw(style_node))
     }
 
-    fn layout(&self) -> TreeBuilderHost<'_> {
-        TreeBuilderHost {
-            callbacks: &self.callbacks.layout,
-            arena: self.arena,
-        }
+    fn layout(&self) -> TreeBuilderHost {
+        TreeBuilderHost { arena: self.arena }
     }
 
     /// The build's own view of the stale-subtree walk.
@@ -2319,7 +2313,7 @@ fn pseudo_element_box(arena: &LayoutNodeArena, style_node: u32, generated_for: u
 
 /// The box of the pseudo-element `generated_for` on the element `node` is the box of. Rows of a
 /// text node and anonymous rows name no element and have no pseudo-elements.
-fn pseudo_element_box_of_element_box(layout: &TreeBuilderHost<'_>, node: LayoutNode, generated_for: u8) -> LayoutNode {
+fn pseudo_element_box_of_element_box(layout: &TreeBuilderHost, node: LayoutNode, generated_for: u8) -> LayoutNode {
     if node_has_flag(layout.data(node), NodeFlag::Anonymous) {
         return NodeSlotId::INVALID;
     }
@@ -2671,11 +2665,12 @@ fn update_principal_node_after_entry(
                     arena.set_committed_fragment_link(new_data, link, None);
                 }
                 transfer_fragments_to_replacement_box(arena, old_layout_node, layout_node);
-                // SAFETY: The old layout node is still attached and still has its shell.
+                // SAFETY: The old layout node is still attached, and the preparation borrows the
+                // arena for itself.
                 unsafe {
-                    (layout_host.callbacks.prepare_subtree_for_detach)(
-                        layout_host.callbacks.context,
-                        layout_host.shell(old_layout_node),
+                    layout_arena_prepare_subtree_for_detach(
+                        (arena as *const LayoutNodeArena).cast_mut().cast::<c_void>(),
+                        old_layout_node,
                     );
                 }
                 let old_parent = layout_host.parent(old_layout_node);
@@ -3449,7 +3444,7 @@ fn create_pseudo_element(
 }
 
 fn replaced_element_display_adjustment(
-    host: &TreeBuilderHost<'_>,
+    host: &TreeBuilderHost,
     node: LayoutNode,
 ) -> FfiReplacedElementDisplayAdjustment {
     if !node_has_flag(host.data(node), NodeFlag::IsReplacedElement) {
@@ -3556,12 +3551,6 @@ pub(crate) enum FfiInsertionMode {
     InDomOrder,
 }
 
-#[repr(C)]
-pub struct FfiTreeBuilderCallbacks {
-    pub context: *mut c_void,
-    pub prepare_subtree_for_detach: unsafe extern "C" fn(*mut c_void, *mut c_void),
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TraversalDecision {
     Continue,
@@ -3569,8 +3558,7 @@ enum TraversalDecision {
     Break,
 }
 
-struct TreeBuilderHost<'a> {
-    callbacks: &'a FfiTreeBuilderCallbacks,
+struct TreeBuilderHost {
     arena: *mut LayoutNodeArena,
 }
 
@@ -3670,7 +3658,7 @@ fn node_kind_is_text(kind: NodeKind) -> bool {
 /// Whether a row of this kind is a `Layout::NodeWithStyle`. A text row is not: it follows its
 /// parent's style rather than holding a record of its own, so a reader that wants the row's own
 /// box values must skip it.
-fn node_kind_is_node_with_style(kind: NodeKind) -> bool {
+pub(crate) fn node_kind_is_node_with_style(kind: NodeKind) -> bool {
     !node_kind_is_text(kind) && !matches!(kind, NodeKind::Unset | NodeKind::Node)
 }
 
@@ -3713,18 +3701,18 @@ fn node_is_generated_for_pseudo_element(data: &NodeData) -> bool {
     data.generated_for.get() != 0
 }
 
-fn node_is_inline_outside(host: &TreeBuilderHost<'_>, node: LayoutNode) -> bool {
+fn node_is_inline_outside(host: &TreeBuilderHost, node: LayoutNode) -> bool {
     node_kind_is_text(host.data(node).kind.get())
         || host
             .style(node)
             .is_some_and(|style| style.display().is_inline_outside())
 }
 
-fn node_is_out_of_flow(host: &TreeBuilderHost<'_>, node: LayoutNode) -> bool {
+fn node_is_out_of_flow(host: &TreeBuilderHost, node: LayoutNode) -> bool {
     node_facts::node_is_out_of_flow(host.data(node), host.style(node))
 }
 
-fn node_has_replaced_element_table_display_adjustment(host: &TreeBuilderHost<'_>, node: LayoutNode) -> bool {
+fn node_has_replaced_element_table_display_adjustment(host: &TreeBuilderHost, node: LayoutNode) -> bool {
     node_has_flag(host.data(node), NodeFlag::IsReplacedElement)
         && host.style(node).is_some_and(|style| {
             let display = style.display_before_box_type_transformation();
@@ -3732,12 +3720,12 @@ fn node_has_replaced_element_table_display_adjustment(host: &TreeBuilderHost<'_>
         })
 }
 
-fn node_is_fragmented_inline(host: &TreeBuilderHost<'_>, node: LayoutNode) -> bool {
+fn node_is_fragmented_inline(host: &TreeBuilderHost, node: LayoutNode) -> bool {
     let data = host.data(node);
     node_facts::node_is_fragmented_inline(data, host.style(node))
 }
 
-impl TreeBuilderHost<'_> {
+impl TreeBuilderHost {
     fn data(&self, node: LayoutNode) -> &NodeData {
         assert!(!node.is_invalid());
         // SAFETY: Entry points guarantee that the arena remains live, and callers only retain the reference until the
@@ -4017,7 +4005,7 @@ impl TreeBuilderHost<'_> {
     }
 }
 
-impl table_formatting_context::TableTree for TreeBuilderHost<'_> {
+impl table_formatting_context::TableTree for TreeBuilderHost {
     fn first_child(&self, node: LayoutNode) -> LayoutNode {
         TreeBuilderHost::first_child(self, node)
     }
@@ -4035,7 +4023,7 @@ impl table_formatting_context::TableTree for TreeBuilderHost<'_> {
     }
 }
 
-fn is_inclusive_layout_ancestor_of(host: &TreeBuilderHost<'_>, ancestor: LayoutNode, node: LayoutNode) -> bool {
+fn is_inclusive_layout_ancestor_of(host: &TreeBuilderHost, ancestor: LayoutNode, node: LayoutNode) -> bool {
     let mut current = node;
     while !current.is_invalid() {
         if current == ancestor {
@@ -4048,7 +4036,7 @@ fn is_inclusive_layout_ancestor_of(host: &TreeBuilderHost<'_>, ancestor: LayoutN
 
 // Restructuring the tree at a node outside the subtree being rebuilt in place means the update
 // escaped every rebuild root, so partial relayout is no longer sound for this build.
-fn note_layout_tree_restructuring_at(host: &TreeBuilderHost<'_>, state: &mut TreeBuilderState, node: LayoutNode) {
+fn note_layout_tree_restructuring_at(host: &TreeBuilderHost, state: &mut TreeBuilderState, node: LayoutNode) {
     if state.current_rebuild_root.is_invalid() {
         return;
     }
@@ -4057,7 +4045,7 @@ fn note_layout_tree_restructuring_at(host: &TreeBuilderHost<'_>, state: &mut Tre
     }
 }
 
-fn has_inline_or_in_flow_block_children(host: &TreeBuilderHost<'_>, node: LayoutNode) -> bool {
+fn has_inline_or_in_flow_block_children(host: &TreeBuilderHost, node: LayoutNode) -> bool {
     let mut child = host.first_child(node);
     while !child.is_invalid() {
         if node_is_inline_outside(host, child) || !node_is_out_of_flow(host, child) {
@@ -4068,7 +4056,7 @@ fn has_inline_or_in_flow_block_children(host: &TreeBuilderHost<'_>, node: Layout
     false
 }
 
-fn has_in_flow_block_children(host: &TreeBuilderHost<'_>, node: LayoutNode) -> bool {
+fn has_in_flow_block_children(host: &TreeBuilderHost, node: LayoutNode) -> bool {
     if node_has_flag(host.data(node), NodeFlag::ChildrenAreInline) {
         return false;
     }
@@ -4083,7 +4071,7 @@ fn has_in_flow_block_children(host: &TreeBuilderHost<'_>, node: LayoutNode) -> b
 }
 
 fn is_out_of_flow_table_internal_child_of_table_root(
-    host: &TreeBuilderHost<'_>,
+    host: &TreeBuilderHost,
     parent: LayoutNode,
     child: LayoutNode,
 ) -> bool {
@@ -4096,14 +4084,14 @@ fn is_out_of_flow_table_internal_child_of_table_root(
         && is_table_non_root_box_with_display(host.display_before_box_type_transformation(child))
 }
 
-fn create_anonymous_wrapper(host: &TreeBuilderHost<'_>, parent: LayoutNode) -> LayoutNode {
+fn create_anonymous_wrapper(host: &TreeBuilderHost, parent: LayoutNode) -> LayoutNode {
     let wrapper = host.create_anonymous_wrapper_box(parent);
     let wrapper_slot = wrapper.slot();
     host.attach_child(parent, wrapper, NodeSlotId::INVALID);
     wrapper_slot
 }
 
-fn last_child_creating_anonymous_wrapper_if_needed(host: &TreeBuilderHost<'_>, parent: LayoutNode) -> LayoutNode {
+fn last_child_creating_anonymous_wrapper_if_needed(host: &TreeBuilderHost, parent: LayoutNode) -> LayoutNode {
     let last_child = host.last_child(parent);
     if last_child.is_invalid() {
         return create_anonymous_wrapper(host, parent);
@@ -4120,7 +4108,7 @@ fn last_child_creating_anonymous_wrapper_if_needed(host: &TreeBuilderHost<'_>, p
 
 // The insertion_parent_for_*() functions maintain the invariant that the in-flow children of
 // block-level boxes must be either all block-level or all inline-level.
-fn insertion_parent_for_inline_node(host: &TreeBuilderHost<'_>, parent: LayoutNode) -> LayoutNode {
+fn insertion_parent_for_inline_node(host: &TreeBuilderHost, parent: LayoutNode) -> LayoutNode {
     let data = host.data(parent);
     if matches!(data.kind.get(), NodeKind::FieldSetBox | NodeKind::SVGForeignObjectBox) {
         return last_child_creating_anonymous_wrapper_if_needed(host, parent);
@@ -4149,7 +4137,7 @@ fn insertion_parent_for_inline_node(host: &TreeBuilderHost<'_>, parent: LayoutNo
     last_child_creating_anonymous_wrapper_if_needed(host, parent)
 }
 
-fn nearest_rebuildable_container(host: &TreeBuilderHost<'_>, node: LayoutNode) -> LayoutNode {
+fn nearest_rebuildable_container(host: &TreeBuilderHost, node: LayoutNode) -> LayoutNode {
     let mut container = node;
     loop {
         let data = host.data(container);
@@ -4163,7 +4151,7 @@ fn nearest_rebuildable_container(host: &TreeBuilderHost<'_>, node: LayoutNode) -
 
 /// The element a rebuild request names, or zero for a container that stands for no element: the
 /// viewport, and a box of a text node.
-fn rebuildable_container_element(host: &TreeBuilderHost<'_>, container: LayoutNode) -> u32 {
+fn rebuildable_container_element(host: &TreeBuilderHost, container: LayoutNode) -> u32 {
     match host.arena().node_style_node(container) {
         Some(style_node) if style_node.element_index().is_some() => style_node.raw(),
         _ => 0,
@@ -4504,7 +4492,7 @@ pub(crate) fn find_first_letter_in_text(
     FfiFirstLetterTarget::not_found()
 }
 
-fn find_first_letter_in_layout_text(host: &TreeBuilderHost<'_>, node: LayoutNode) -> FfiFirstLetterTarget {
+fn find_first_letter_in_layout_text(host: &TreeBuilderHost, node: LayoutNode) -> FfiFirstLetterTarget {
     // SAFETY: Tree building owns the arena, and no borrow crosses the source callback.
     let source = unsafe { super::rendered_text::text_source_for_node(host.arena, node) };
     // SAFETY: Copy the raw source before any further host call. First-letter
@@ -4635,7 +4623,7 @@ fn find_first_letter_in_block(host: &DomTreeBuilderHost<'_>, block: LayoutNode) 
     FfiFirstLetterTarget::not_found()
 }
 
-fn wrap_button_contents_if_needed(host: &TreeBuilderHost<'_>, layout_node: LayoutNode) {
+fn wrap_button_contents_if_needed(host: &TreeBuilderHost, layout_node: LayoutNode) {
     assert!(!layout_node.is_invalid());
     if !node_has_flag(host.data(layout_node), NodeFlag::UsesButtonLayout) {
         return;
@@ -4682,7 +4670,7 @@ fn wrap_button_contents_if_needed(host: &TreeBuilderHost<'_>, layout_node: Layou
 // https://html.spec.whatwg.org/multipage/rendering.html#rendered-legend
 // The rendered legend is the first legend child whose used 'float' is 'none' and whose used
 // 'position' is neither 'absolute' nor 'fixed'.
-fn rendered_legend(host: &TreeBuilderHost<'_>, fieldset: LayoutNode) -> LayoutNode {
+fn rendered_legend(host: &TreeBuilderHost, fieldset: LayoutNode) -> LayoutNode {
     let mut child = host.first_child(fieldset);
     while !child.is_invalid() {
         if host.data(child).kind.get() == NodeKind::LegendBox && !node_is_out_of_flow(host, child) {
@@ -4693,7 +4681,7 @@ fn rendered_legend(host: &TreeBuilderHost<'_>, fieldset: LayoutNode) -> LayoutNo
     NodeSlotId::INVALID
 }
 
-fn wrap_fieldset_contents_if_needed(host: &TreeBuilderHost<'_>, layout_node: LayoutNode) {
+fn wrap_fieldset_contents_if_needed(host: &TreeBuilderHost, layout_node: LayoutNode) {
     assert!(!layout_node.is_invalid());
 
     // https://html.spec.whatwg.org/multipage/rendering.html#the-fieldset-and-legend-elements
@@ -4754,7 +4742,7 @@ fn is_table_track_group(display: FfiDisplay) -> bool {
         || display.is_table_column_group()
 }
 
-fn display_for_table_fixup(host: &TreeBuilderHost<'_>, node: LayoutNode) -> FfiDisplay {
+fn display_for_table_fixup(host: &TreeBuilderHost, node: LayoutNode) -> FfiDisplay {
     // https://drafts.csswg.org/css-tables-3/#fixup-algorithm
     // For the purposes of these rules, out-of-flow elements are represented as inline elements of zero width and
     // height. Their containing blocks are chosen accordingly.
@@ -4772,7 +4760,7 @@ fn display_for_table_fixup(host: &TreeBuilderHost<'_>, node: LayoutNode) -> FfiD
     }
 }
 
-fn is_proper_table_child(host: &TreeBuilderHost<'_>, node: LayoutNode) -> bool {
+fn is_proper_table_child(host: &TreeBuilderHost, node: LayoutNode) -> bool {
     let display = display_for_table_fixup(host, node);
     is_table_track_group(display) || is_table_track(display) || display.is_table_caption()
 }
@@ -4781,16 +4769,16 @@ fn is_table_non_root_box_with_display(display: FfiDisplay) -> bool {
     display.is_internal_table() || display.is_table_caption()
 }
 
-fn is_table_non_root_box(host: &TreeBuilderHost<'_>, node: LayoutNode) -> bool {
+fn is_table_non_root_box(host: &TreeBuilderHost, node: LayoutNode) -> bool {
     is_table_non_root_box_with_display(host.display(node))
 }
 
-fn is_table_non_root_box_sibling(host: &TreeBuilderHost<'_>, sibling: LayoutNode) -> bool {
+fn is_table_non_root_box_sibling(host: &TreeBuilderHost, sibling: LayoutNode) -> bool {
     // Text nodes carry their parent's style, so only boxes can be table-non-root boxes.
     !sibling.is_invalid() && node_kind_is_box(host.data(sibling).kind.get()) && is_table_non_root_box(host, sibling)
 }
 
-fn is_tabular_container(host: &TreeBuilderHost<'_>, node: LayoutNode) -> bool {
+fn is_tabular_container(host: &TreeBuilderHost, node: LayoutNode) -> bool {
     // https://drafts.csswg.org/css-tables-3/#tabular-container
     let display = host.display(node);
     display.is_table_inside()
@@ -4800,7 +4788,7 @@ fn is_tabular_container(host: &TreeBuilderHost<'_>, node: LayoutNode) -> bool {
         || display.is_table_footer_group()
 }
 
-fn text_is_ascii_whitespace(host: &TreeBuilderHost<'_>, node: LayoutNode) -> bool {
+fn text_is_ascii_whitespace(host: &TreeBuilderHost, node: LayoutNode) -> bool {
     // SAFETY: Tree building owns the arena; no borrowed node data crosses the refresh.
     unsafe { super::rendered_text::ensure_text_content(host.arena, node) };
     host.arena()
@@ -4811,7 +4799,7 @@ fn text_is_ascii_whitespace(host: &TreeBuilderHost<'_>, node: LayoutNode) -> boo
         .all(|unit| matches!(unit, 0x09..=0x0d | 0x20))
 }
 
-fn is_ignorable_whitespace(host: &TreeBuilderHost<'_>, node: LayoutNode) -> bool {
+fn is_ignorable_whitespace(host: &TreeBuilderHost, node: LayoutNode) -> bool {
     if node_kind_is_text(host.data(node).kind.get()) && text_is_ascii_whitespace(host, node) {
         return true;
     }
@@ -4843,7 +4831,7 @@ fn is_ignorable_whitespace(host: &TreeBuilderHost<'_>, node: LayoutNode) -> bool
     false
 }
 
-fn is_first_or_last_child_with_table_non_root_sibling_if_any(host: &TreeBuilderHost<'_>, node: LayoutNode) -> bool {
+fn is_first_or_last_child_with_table_non_root_sibling_if_any(host: &TreeBuilderHost, node: LayoutNode) -> bool {
     let previous_sibling = host.previous_sibling(node);
     let next_sibling = host.next_sibling(node);
     if !previous_sibling.is_invalid() && !next_sibling.is_invalid() {
@@ -4859,7 +4847,7 @@ fn is_first_or_last_child_with_table_non_root_sibling_if_any(host: &TreeBuilderH
 }
 
 fn for_each_sequence_of_consecutive_children_matching(
-    host: &TreeBuilderHost<'_>,
+    host: &TreeBuilderHost,
     parent: LayoutNode,
     matcher: impl Fn(LayoutNode) -> bool,
     mut callback: impl FnMut(&[LayoutNode], LayoutNode),
@@ -4892,7 +4880,7 @@ fn for_each_sequence_of_consecutive_children_matching(
     }
 }
 
-fn remove_irrelevant_boxes(host: &TreeBuilderHost<'_>, root: LayoutNode) {
+fn remove_irrelevant_boxes(host: &TreeBuilderHost, root: LayoutNode) {
     // https://drafts.csswg.org/css-tables-3/#fixup-algorithm
     // 1. Remove irrelevant boxes:
     // The following boxes are discarded as if they were display:none:
@@ -4969,7 +4957,7 @@ fn remove_irrelevant_boxes(host: &TreeBuilderHost<'_>, root: LayoutNode) {
     host.remove_nodes(&to_remove);
 }
 
-fn generate_missing_child_wrappers(host: &TreeBuilderHost<'_>, root: LayoutNode) {
+fn generate_missing_child_wrappers(host: &TreeBuilderHost, root: LayoutNode) {
     // https://drafts.csswg.org/css-tables-3/#fixup-algorithm
     // 2. Generate missing child wrappers:
     host.for_each_in_inclusive_subtree(root, |parent| {
@@ -5022,7 +5010,7 @@ fn generate_missing_child_wrappers(host: &TreeBuilderHost<'_>, root: LayoutNode)
     });
 }
 
-fn generate_missing_parents(host: &TreeBuilderHost<'_>, root: LayoutNode) -> Vec<LayoutNode> {
+fn generate_missing_parents(host: &TreeBuilderHost, root: LayoutNode) -> Vec<LayoutNode> {
     // https://drafts.csswg.org/css-tables-3/#fixup-algorithm
     // 3. Generate missing parents:
     let mut table_roots_to_wrap = Vec::new();
@@ -5134,7 +5122,7 @@ fn generate_missing_parents(host: &TreeBuilderHost<'_>, root: LayoutNode) -> Vec
 }
 
 fn fixup_row(
-    host: &TreeBuilderHost<'_>,
+    host: &TreeBuilderHost,
     row: LayoutNode,
     table_grid: &table_formatting_context::TableGrid,
     row_index: usize,
@@ -5175,7 +5163,7 @@ fn fixup_row(
     }
 }
 
-fn missing_cells_fixup(host: &TreeBuilderHost<'_>, table_roots: &[LayoutNode]) {
+fn missing_cells_fixup(host: &TreeBuilderHost, table_roots: &[LayoutNode]) {
     // https://drafts.csswg.org/css-tables-3/#missing-cells-fixup
     // Once the amount of columns in a table is known, any table-row box must be modified such that it owns enough
     // cells to fill all the columns of the table, when taking spans into account. New table-cell anonymous boxes must
@@ -5213,7 +5201,7 @@ fn table_child_is_properly_parented(parent_display: FfiDisplay, child_display: F
     false
 }
 
-fn table_fixup_scope_for_rebuilt_subtree(host: &TreeBuilderHost<'_>, root: LayoutNode) -> LayoutNode {
+fn table_fixup_scope_for_rebuilt_subtree(host: &TreeBuilderHost, root: LayoutNode) -> LayoutNode {
     let parent = host.parent(root);
     if parent.is_invalid() {
         return root;
@@ -5254,7 +5242,7 @@ fn append_unique_node(nodes: &mut Vec<LayoutNode>, node: LayoutNode) {
     }
 }
 
-fn nearest_table_root(host: &TreeBuilderHost<'_>, node: LayoutNode) -> Option<LayoutNode> {
+fn nearest_table_root(host: &TreeBuilderHost, node: LayoutNode) -> Option<LayoutNode> {
     let mut current = node;
     while !current.is_invalid() {
         let data = host.data(current);
@@ -5267,7 +5255,7 @@ fn nearest_table_root(host: &TreeBuilderHost<'_>, node: LayoutNode) -> Option<La
 }
 
 fn fixup_tables_in_rebuilt_subtrees(
-    host: &TreeBuilderHost<'_>,
+    host: &TreeBuilderHost,
     rebuilt_subtree_roots: &[LayoutNode],
     reused_child_list_update_roots: &[LayoutNode],
     additional_roots: &[LayoutNode],
@@ -5327,7 +5315,7 @@ fn fixup_tables_in_rebuilt_subtrees(
     missing_cells_fixup(host, &table_roots);
 }
 
-fn fixup_tables(host: &TreeBuilderHost<'_>, root: LayoutNode) {
+fn fixup_tables(host: &TreeBuilderHost, root: LayoutNode) {
     assert!(!root.is_invalid());
     remove_irrelevant_boxes(host, root);
     generate_missing_child_wrappers(host, root);

@@ -244,24 +244,16 @@ void Node::pin_style_record_for_detachment()
         node_with_style->pin_style_record_for_cxx_consumers();
 }
 
+// Detachment must clean the rows being removed. A journal entry would instead resolve an identity
+// after a replacement row had been bound, so this apply-only path is intentional.
 void Node::prepare_for_detach_from_layout_tree()
 {
-    pin_style_record_for_detachment();
-    // Detachment must clean the row being removed. A journal entry would instead resolve the
-    // identity after a replacement row had been bound, so this apply-only path is intentional.
-    Painting::apply_paint_cache_invalidation(*this, Painting::PaintCacheInvalidation::PaintAndHitTest, Painting::PaintCacheInvalidationStage::DetachCleanup);
-    if (auto* node_with_style = as_if<NodeWithStyle>(*this))
-        node_with_style->clear_image_observers();
-    if (kind() == RustFFI::NodeKind::ImageBox)
-        static_cast<Box&>(*this).notify_owned_image_provider_of_detach();
+    RustFFI::layout_arena_prepare_node_for_detach(arena_handle(), slot_id(this));
 }
 
 void Node::prepare_subtree_for_detach_from_layout_tree()
 {
-    for_each_in_inclusive_subtree([](Node& node) {
-        node.prepare_for_detach_from_layout_tree();
-        return TraversalDecision::Continue;
-    });
+    RustFFI::layout_arena_prepare_subtree_for_detach(arena_handle(), slot_id(this));
 }
 
 Node* Node::topmost_layout_node_of_top_layer_placement()

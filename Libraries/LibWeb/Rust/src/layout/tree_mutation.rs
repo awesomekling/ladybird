@@ -12,6 +12,7 @@ unsafe extern "C" {
     fn ladybird_layout_node_shell_destroy(shell: *mut c_void);
     fn ladybird_layout_owned_image_provider_destroy(provider: *mut c_void);
     fn ladybird_layout_image_observers_destroy(observers: *mut c_void);
+    fn ladybird_layout_owned_image_provider_notify_detach(provider: *mut c_void);
 }
 
 pub(crate) fn destroy_shell(shell: *mut c_void) {
@@ -43,6 +44,16 @@ pub(crate) fn destroy_image_observers(observers: *mut c_void) {
     // SAFETY: The arena has already freed the set's row, and deleting a set never re-enters the
     // arena.
     unsafe { ladybird_layout_image_observers_destroy(observers) };
+}
+
+/// Tells the provider a row owns that the row is leaving the layout tree. An element's provider
+/// outlives its box and keeps nothing about it, so only a provider a row owns hears about this.
+pub(crate) fn notify_owned_image_provider_of_detach(provider: *mut c_void) {
+    if provider.is_null() {
+        return;
+    }
+    // SAFETY: The provider belongs to a live row and the notification does not re-enter the arena.
+    unsafe { ladybird_layout_owned_image_provider_notify_detach(provider) };
 }
 
 pub(crate) fn free_subtree_and_destroy_shells(arena: *mut LayoutNodeArena, root: NodeSlotId) {
@@ -145,6 +156,9 @@ mod ffi_test_stubs {
 
     #[unsafe(no_mangle)]
     extern "C" fn ladybird_layout_image_observers_destroy(_observers: *mut std::ffi::c_void) {}
+
+    #[unsafe(no_mangle)]
+    extern "C" fn ladybird_layout_owned_image_provider_notify_detach(_provider: *mut std::ffi::c_void) {}
 }
 
 #[cfg(test)]

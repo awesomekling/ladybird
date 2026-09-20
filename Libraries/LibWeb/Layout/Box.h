@@ -42,7 +42,6 @@ public:
     // The provider a box owns belongs to the arena, which deletes it with the box's row. Nothing
     // outside the box asks for it by itself, so only the box names it.
     void set_owned_image_provider(NonnullOwnPtr<ImageProvider>);
-    void notify_owned_image_provider_of_detach();
 
     void set_replaced_box_can_have_children(bool value) { set_flag(RustFFI::NodeFlag::ReplacedBoxCanHaveChildren, value); }
 
