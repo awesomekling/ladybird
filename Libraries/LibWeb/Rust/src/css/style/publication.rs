@@ -64,6 +64,19 @@ impl RootFontInputs {
 }
 
 impl RetainedState {
+    pub(crate) fn retained_inheritance_parent_style_record(
+        &self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+    ) -> Option<computed::FinalStyleRecordID> {
+        let parent = if pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT {
+            self.tree.flat_tree_parent(node)?
+        } else {
+            node
+        };
+        self.computed_group_sets.assigned_style_record(parent)
+    }
+
     fn shared_style_record_key(
         &self,
         node: StyleNodeID,
@@ -4420,6 +4433,45 @@ mod tests {
             assert_eq!(found_property, shorthand);
             assert!(std::ptr::eq(found_value.pointer(), original.pointer()));
         }
+    }
+
+    #[test]
+    fn retained_inheritance_parent_uses_flat_tree_and_originating_element_records() {
+        let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
+        let mut raw_nodes = [0; 2];
+        engine.allocate_style_nodes(&mut raw_nodes);
+        let [parent, child] = raw_nodes.map(|node| StyleNodeID::from_raw(node).unwrap());
+        engine.tree.set_parent(child, Some(parent));
+        let publish = |engine: &mut StyleEngine, node| {
+            engine
+                .publish_computed_groups(
+                    computed::ComputedStyleTarget::new(node, u8::MAX),
+                    &[],
+                    0,
+                    0,
+                    computed::ComputedMetadataInput {
+                        pseudo_element_styles: 0,
+                        dependency_flags: 0,
+                        counter_style_environment_identity: 0,
+                        animation_overlay_identity: 0,
+                        animated_overlay: HostShared::null(),
+                        animation_overlay_payloads: &[],
+                        longhand_table: HostShared::null(),
+                    },
+                )
+                .style_record_identity
+        };
+        let parent_record = publish(&mut engine, parent);
+        let child_record = publish(&mut engine, child);
+
+        assert_eq!(
+            engine.retained_inheritance_parent_style_record(child, u8::MAX),
+            Some(parent_record)
+        );
+        assert_eq!(
+            engine.retained_inheritance_parent_style_record(child, 0),
+            Some(child_record)
+        );
     }
 
     #[test]

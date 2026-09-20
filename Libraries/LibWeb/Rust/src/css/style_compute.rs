@@ -2857,6 +2857,26 @@ pub struct FfiEffectiveColorSchemeInput {
     pub document_supported_scheme_count: usize,
 }
 
+fn retained_inheritance_parent_style_record(
+    style_engine: &crate::css::style::StyleEngine,
+    input: &FfiComputePropertiesInput,
+) -> u64 {
+    let retained = crate::css::style::tree::StyleNodeID::from_raw(input.style_node)
+        .and_then(|node| style_engine.retained_inheritance_parent_style_record(node, input.pseudo_kind))
+        .map_or(0, |record| record.raw());
+    if input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT
+        && u16::from(input.pseudo_kind) > crate::css::style::bridge::LAST_SYNTHETIC_PSEUDO_ELEMENT_KIND
+    {
+        // Element-backed pseudo-element styles may carry an explicit inheritance override whose
+        // target is not the originating element. That target is not retained yet.
+        return input.inheritance_parent_style_record;
+    }
+    if retained == 0 {
+        return input.inheritance_parent_style_record;
+    }
+    retained
+}
+
 #[repr(C)]
 pub struct FfiDocumentLonghandInput {
     pub color_scheme_input: FfiEffectiveColorSchemeInput,
@@ -5405,6 +5425,7 @@ pub unsafe extern "C" fn rust_prepare_longhand_transaction(
 ) -> FfiPreparedLonghandTransaction {
     let input = unsafe { &*input };
     let style_engine = unsafe { &*input.style_engine.cast::<crate::css::style::StyleEngine>() };
+    let inheritance_parent_style_record = retained_inheritance_parent_style_record(style_engine, input);
     let previous_style = (input.previous_style_record != 0).then(|| {
         style_engine
             .style_record_view(input.previous_style_record)
@@ -5466,8 +5487,8 @@ pub unsafe extern "C" fn rust_prepare_longhand_transaction(
             .and_then(|view| view.longhand_table_seeded_with_values())
             .unwrap_or_else(ComputedLonghandTable::new)
     };
-    let parent_has_animated_values = (input.inheritance_parent_style_record != 0)
-        .then(|| parent_snapshot_for_style_record(style_engine, input.inheritance_parent_style_record, None))
+    let parent_has_animated_values = (inheritance_parent_style_record != 0)
+        .then(|| parent_snapshot_for_style_record(style_engine, inheritance_parent_style_record, None))
         .as_ref()
         .is_some_and(ParentSnapshot::has_animated_values);
     FfiPreparedLonghandTransaction {
@@ -5493,10 +5514,11 @@ pub unsafe extern "C" fn rust_compute_properties(
     let prepared = unsafe { &*prepared };
     let drive_input = unsafe { &*input.transaction_input };
     let style_engine = unsafe { &*input.style_engine.cast::<crate::css::style::StyleEngine>() };
-    let parent_snapshot = if input.inheritance_parent_style_record != 0 {
+    let inheritance_parent_style_record = retained_inheritance_parent_style_record(style_engine, input);
+    let parent_snapshot = if inheritance_parent_style_record != 0 {
         Some(parent_snapshot_for_style_record(
             style_engine,
-            input.inheritance_parent_style_record,
+            inheritance_parent_style_record,
             None,
         ))
     } else {
@@ -5618,10 +5640,11 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         };
     }
     let mut invalidated_longhands = 0;
-    let parent_snapshot = if input.inheritance_parent_style_record != 0 {
+    let inheritance_parent_style_record = retained_inheritance_parent_style_record(style_engine, input);
+    let parent_snapshot = if inheritance_parent_style_record != 0 {
         Some(parent_snapshot_for_style_record(
             style_engine,
-            input.inheritance_parent_style_record,
+            inheritance_parent_style_record,
             None,
         ))
     } else {
