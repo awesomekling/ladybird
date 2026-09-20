@@ -927,6 +927,16 @@ impl RetainedState {
         self.tree.unique_node_id(node)
     }
 
+    /// What a row built for the node is painted and hit-tested with.
+    #[must_use]
+    pub fn node_dom_paint_facts(&self, node: StyleNodeID) -> u8 {
+        self.tree.dom_paint_facts(node)
+    }
+
+    pub fn set_node_dom_paint_facts(&mut self, node: StyleNodeID, facts: u8) {
+        self.tree.set_dom_paint_facts(node, facts, &mut self.memory);
+    }
+
     pub fn set_element_form_control_disabled_facts(&mut self, node: StyleNodeID, facts: u8) {
         self.tree.set_form_control_disabled_facts(node, facts, &mut self.memory);
     }

@@ -149,7 +149,8 @@
     [151, "SetElementAssociatedPseudoKind"],
     [152, "BoxTypeParentDisplay"],
     [160, "SetTextData"],
-    [161, "SetTextIsPasswordInput"]
+    [161, "SetTextIsPasswordInput"],
+    [162, "SetNodeDomPaintFacts"]
   ],
   "operations": [
     {"event": "TakeSharedComputationContext", "ffi": "style_engine_take_shared_computation_context", "cpp": "take_shared_computation_context", "return": "u64", "args": [["node", "style_node"], ["parent_record", "style_record"], ["environment", "u64"], ["shape", "u64_slice"], ["pseudo_elements", "u64"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return 0; }; let shape = shape.try_into().expect(\"a shared style shape has four words\"); let result = engine.take_shared_computation_context(node, parent_record, environment, shape, pseudo_elements).unwrap_or(0);"},
@@ -172,6 +173,7 @@
     { "event": "SubtreeAffectsGeneratedContentState", "ffi": "style_engine_subtree_affects_generated_content_state", "cpp": "subtree_affects_generated_content_state", "return": "bool", "receiver": "const", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return false; }; let result = engine.subtree_affects_generated_content_state(node);" },
     { "event": "SetTextIsAsciiWhitespace", "ffi": "style_engine_set_text_is_ascii_whitespace", "cpp": "set_text_is_ascii_whitespace", "return": "void", "args": [["node", "style_node"], ["value", "bool"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_text_is_ascii_whitespace(node, value);" },
     { "event": "SetTextIsInUserAgentShadowTree", "ffi": "style_engine_set_text_is_in_user_agent_shadow_tree", "cpp": "set_text_is_in_user_agent_shadow_tree", "return": "void", "args": [["node", "style_node"], ["value", "bool"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_text_is_in_user_agent_shadow_tree(node, value);" },
+    { "event": "SetNodeDomPaintFacts", "ffi": "style_engine_set_node_dom_paint_facts", "cpp": "set_node_dom_paint_facts", "return": "void", "args": [["node", "style_node"], ["facts", "u8"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_node_dom_paint_facts(node, facts);" },
     { "event": "SetTextIsPasswordInput", "ffi": "style_engine_set_text_is_password_input", "cpp": "set_text_is_password_input", "return": "void", "args": [["node", "style_node"], ["value", "bool"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_text_is_password_input(node, value);" },
     { "event": "SetElementUniqueNodeId", "ffi": "style_engine_set_element_unique_node_id", "cpp": "set_element_unique_node_id", "return": "void", "args": [["node", "style_node"], ["unique_node_id", "u64"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_element_unique_node_id(node, unique_node_id as i64);" },
     { "event": "SetElementIdName", "ffi": "style_engine_set_element_id_name", "cpp": "set_element_id_name", "return": "void", "args": [["node", "style_node"], ["name", "style_atom"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_element_id_name(node, StyleAtomID(name));" },

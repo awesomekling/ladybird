@@ -81,11 +81,25 @@ static RustFFI::FfiNodeConstructionFacts build_node_construction_facts(GC::Ptr<D
     };
 }
 
-void Node::refresh_dom_paint_facts(DOM::Node const& dom_node)
+// What a row built for the node is painted and hit-tested with, published under the node's
+// identity for the rows the build has yet to stamp and journalled for the rows it already has.
+// Neither half needs the node to have a box, which is why this is not a row's own business: the
+// build reads the published answer for a node that gains one.
+void publish_dom_paint_facts(DOM::Node const& dom_node)
 {
-    VERIFY(this->dom_node() == &dom_node);
+    auto& document = const_cast<DOM::Document&>(dom_node.document());
     auto facts = dom_paint_facts_of(&dom_node);
-    const_cast<DOM::Document&>(dom_node.document()).invalidation_journal().note_dom_paint_facts(DOM::NodeIdentity::of(dom_node), facts);
+    // A document nothing is ever inert, editable or wheel-handled in publishes nothing, and the
+    // flag is what keeps a node's arrival free on such a page. It is set before the first non-zero
+    // publication, so a later drop back to zero is still published.
+    if (facts == 0 && !document.may_have_dom_paint_facts())
+        return;
+    if (facts != 0)
+        document.set_may_have_dom_paint_facts();
+    auto identity = dom_node.is_document() ? document.style_node_id() : Node::style_node_of(&dom_node);
+    if (identity.value() != 0)
+        document.style_computer().style_engine().set_node_dom_paint_facts(identity, facts);
+    document.invalidation_journal().note_dom_paint_facts(DOM::NodeIdentity::of(dom_node), facts);
 }
 
 Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind kind, AttachToDOMNode attach_to_dom_node)
@@ -137,10 +151,8 @@ Node::Node(DOM::Document& document, BindToPreparedArenaSlot, Compositing::RustFF
 {
     RustFFI::layout_arena_attach_shell(m_arena->handle(), m_slot, this);
     auto* node = dom_node();
-    if (node) {
-        RustFFI::layout_arena_set_constructed_row_dom_paint_facts(m_arena->handle(), m_slot, dom_paint_facts_of(node));
+    if (node)
         publish_own_scroll_offset();
-    }
     if (has_flag(RustFFI::NodeFlag::IsInUserAgentShadowTree))
         publish_own_is_in_focused_text_control();
     if (node) {

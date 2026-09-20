@@ -2349,8 +2349,8 @@ void Node::recompute_editable_subtree_flags_and_repaint()
         // did not, hence unconditionally for every node. A flipped stamp changes geometry
         // (an editing host gains a minimum block size, an empty editable text node gains
         // a zero-width fragment), so the affected node also needs a relayout.
+        Layout::publish_dom_paint_facts(node);
         if (auto* layout_node = node.unsafe_layout_node()) {
-            layout_node->refresh_dom_paint_facts(node);
             auto is_editing_host = node.is_editing_host();
             if (layout_node->is_editing_host() != is_editing_host) {
                 layout_node->set_is_editing_host(is_editing_host);
@@ -2722,6 +2722,11 @@ void Node::inserted()
         if (text)
             CSS::Invalidation::invalidate_style_after_text_change_under(*parent);
     }
+
+    // Inertness, editability and the wheel-handler state are all inherited, so a node that arrives
+    // somewhere new holds whatever its new place gives it. The identity it publishes under was
+    // taken just above.
+    Layout::publish_dom_paint_facts(*this);
 }
 
 void Node::removed_from(IsSubtreeRoot, Node* old_parent, Node&)
@@ -2750,6 +2755,7 @@ void Node::moved_from(IsSubtreeRoot, GC::Ptr<Node>)
         document().page().keyboard_scroll_dom_tree_changed(*this);
     recompute_editable_subtree_flag();
     derive_inside_blocking_wheel_event_handler_state_after_tree_change(*this);
+    Layout::publish_dom_paint_facts(*this);
 }
 
 static bool is_root_wheel_event_target(Node const& node)
@@ -2782,8 +2788,7 @@ bool Node::update_inside_blocking_wheel_event_handler_state()
 
     bool const flipped = was_inside_blocking_wheel_event_handler != m_inside_blocking_wheel_event_handler;
     if (flipped) {
-        if (auto* layout_node = unsafe_layout_node())
-            layout_node->refresh_dom_paint_facts(*this);
+        Layout::publish_dom_paint_facts(*this);
     }
     return flipped;
 }

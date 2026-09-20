@@ -648,6 +648,12 @@ pub struct StyleNodeTree {
     /// and so does a box built for one of the element's pseudo-elements - which is why the render
     /// side needs it for an element that has no box of its own.
     unique_node_ids: Vec<i64>,
+    /// What a row built for the node is painted and hit-tested with: whether the node is inert,
+    /// whether it is editable or an editing host, whether it sits inside a blocking wheel event
+    /// handler, and whether it is a navigable container holding a navigable. Almost every node
+    /// holds none of them, so the absence of an entry is the answer for nearly the whole tree.
+    /// Both element and text identities publish here, as both get rows.
+    dom_paint_facts: HashMap<StyleNodeID, u8>,
     /// The layout tree update mark elements hold. Text nodes hold one too, in `text.marks`.
     marks: LayoutTreeUpdateMarks,
     connected_element_count: u32,
@@ -706,6 +712,7 @@ impl StyleNodeTree {
             disabled_form_control: BitColumn::default(),
             disables_descendants: BitColumn::default(),
             unique_node_ids: Vec::new(),
+            dom_paint_facts: HashMap::default(),
             marks: LayoutTreeUpdateMarks::default(),
             connected_element_count: 0,
             pending_reuse: Vec::new(),
@@ -902,6 +909,7 @@ impl StyleNodeTree {
         self.disabled_form_control.set(index as usize, false);
         self.disables_descendants.set(index as usize, false);
         self.set_unique_node_id_at(index, 0);
+        self.dom_paint_facts.remove(&StyleNodeID::element(index));
         self.marks.clear(index as usize);
         if let Some(capacity_before_growth) = capacity_before_growth {
             let current = self.identity_capacity_bytes();
@@ -942,6 +950,7 @@ impl StyleNodeTree {
             self.disabled_form_control.set(index as usize, false);
             self.disables_descendants.set(index as usize, false);
             self.set_unique_node_id_at(index, 0);
+            self.dom_paint_facts.remove(&node);
             self.marks.clear(index as usize);
             self.parent[index as usize] = None;
             self.first_element_child[index as usize] = None;
@@ -992,6 +1001,7 @@ impl StyleNodeTree {
         self.text.is_ascii_whitespace.set(index as usize, false);
         self.text.is_in_user_agent_shadow_tree.set(index as usize, false);
         self.text.is_password_input.set(index as usize, false);
+        self.dom_paint_facts.remove(&StyleNodeID::text(index));
         self.text.data[index as usize] = ak::Utf16String::default();
         let current = self.text_capacity_bytes();
         self.record_capacity_change(memory, before, current);
@@ -1014,6 +1024,7 @@ impl StyleNodeTree {
             self.text.is_ascii_whitespace.set(index as usize, false);
             self.text.is_in_user_agent_shadow_tree.set(index as usize, false);
             self.text.is_password_input.set(index as usize, false);
+            self.dom_paint_facts.remove(&node);
             self.text.data[index as usize] = ak::Utf16String::default();
             self.text.parent[index as usize] = None;
             self.text.next_sibling[index as usize] = None;
@@ -1127,6 +1138,28 @@ impl StyleNodeTree {
         };
         let before = self.identity_capacity_bytes();
         self.set_unique_node_id_at(index, unique_node_id);
+        let current = self.identity_capacity_bytes();
+        self.record_capacity_change(memory, before, current);
+    }
+
+    // -- DOM paint facts -----------------------------------------------------------------------
+
+    /// What a row built for the node is painted and hit-tested with. An identity with nothing
+    /// published holds none of them, which is what nearly every node holds.
+    #[must_use]
+    pub fn dom_paint_facts(&self, node: StyleNodeID) -> u8 {
+        self.dom_paint_facts.get(&node).copied().unwrap_or(0)
+    }
+
+    /// Record what a row built for the node is painted and hit-tested with. Holding none of them
+    /// is the absence of an entry, so a node that loses its last fact stops costing anything.
+    pub fn set_dom_paint_facts(&mut self, node: StyleNodeID, facts: u8, memory: &mut MemoryController) {
+        let before = self.identity_capacity_bytes();
+        if facts == 0 {
+            self.dom_paint_facts.remove(&node);
+        } else {
+            self.dom_paint_facts.insert(node, facts);
+        }
         let current = self.identity_capacity_bytes();
         self.record_capacity_change(memory, before, current);
     }
@@ -2035,6 +2068,7 @@ impl StyleNodeTree {
                 self.first_child,
                 self.next_sibling,
                 self.previous_sibling,
+                self.dom_paint_facts,
             ];
             cached [];
             nested [

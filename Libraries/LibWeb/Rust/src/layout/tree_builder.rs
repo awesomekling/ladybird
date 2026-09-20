@@ -3999,10 +3999,14 @@ impl TreeBuilderHost {
     fn create_document_box(&self, document_style_node: u32) -> NodeSlotId {
         let slot = self.stamp_dom_box(NodeKind::Viewport, None);
         if let Some(document_style_node) = StyleNodeID::from_raw(document_style_node) {
-            let unique_node_id = self
-                .arena()
-                .with_style_store(|engine| engine.element_unique_node_id(document_style_node));
+            let (unique_node_id, dom_paint_facts) = self.arena().with_style_store(|engine| {
+                (
+                    engine.element_unique_node_id(document_style_node),
+                    engine.node_dom_paint_facts(document_style_node),
+                )
+            });
             self.arena().unique_node_ids().publish(slot, unique_node_id);
+            self.arena().set_constructed_row_dom_paint_facts(slot, dom_paint_facts);
         }
         self.arena().take_over_rows_of_bound_node(slot);
         assert!(!self.arena().node_shell(slot).is_null());
