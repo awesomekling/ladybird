@@ -37,6 +37,7 @@ public:
     void note_needs_layout_tree_update(NodeIdentity, SetNeedsLayoutTreeUpdateReason);
     void note_dom_paint_facts(NodeIdentity, u8 facts);
     void note_canvas_paint_facts(NodeIdentity, bool has_content, i32 content_width, i32 content_height, u64 canvas_id, u64 content_generation);
+    void note_form_control_paint_facts(NodeIdentity, bool enabled, bool checked, bool indeterminate, bool being_activated);
 
     // Writes every entry through to the render side and empties the journal.
     void drain();
@@ -62,6 +63,11 @@ private:
         i32 canvas_content_height { 0 };
         u64 canvas_id { 0 };
         u64 canvas_content_generation { 0 };
+        bool has_form_control_paint_facts { false };
+        bool form_control_enabled { false };
+        bool form_control_checked { false };
+        bool form_control_indeterminate { false };
+        bool form_control_being_activated { false };
     };
 
     Entry& entry_for(NodeIdentity);
