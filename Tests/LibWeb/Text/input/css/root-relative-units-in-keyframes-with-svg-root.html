@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<iframe id="frame" width="300" height="200"></iframe>
+<script>
+    asyncTest(done => {
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" style="font-size:32px; line-height:40px">
+<style>
+@keyframes widen { from { width: 1rem } to { width: 1rem } }
+@keyframes heighten { from { height: 1rlh } to { height: 1rlh } }
+#animated-rem { animation: widen 1000s linear paused forwards }
+#animated-rlh { animation: heighten 1000s linear paused forwards }
+#static-rem { width: 1rem }
+#static-rlh { height: 1rlh }
+</style>
+<foreignObject width="200" height="100">
+<div xmlns="http://www.w3.org/1999/xhtml" id="animated-rem">x</div>
+<div xmlns="http://www.w3.org/1999/xhtml" id="animated-rlh">x</div>
+<div xmlns="http://www.w3.org/1999/xhtml" id="static-rem">x</div>
+<div xmlns="http://www.w3.org/1999/xhtml" id="static-rlh">x</div>
+</foreignObject>
+</svg>`;
+        const frame = document.getElementById("frame");
+        frame.onload = () => {
+            const doc = frame.contentDocument;
+            const view = frame.contentWindow;
+            println(`root element: ${doc.documentElement.tagName}`);
+            const widthOf = id => view.getComputedStyle(doc.getElementById(id)).width;
+            const heightOf = id => view.getComputedStyle(doc.getElementById(id)).height;
+            println(`static rem width: ${widthOf("static-rem")}`);
+            println(`animated rem width: ${widthOf("animated-rem")}`);
+            println(`static rlh height: ${heightOf("static-rlh")}`);
+            println(`animated rlh height: ${heightOf("animated-rlh")}`);
+            done();
+        };
+        frame.src = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+    });
+</script>

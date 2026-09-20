@@ -1,0 +1,5 @@
+root element: svg
+static rem width: 32px
+animated rem width: 32px
+static rlh height: 40px
+animated rlh height: 40px
