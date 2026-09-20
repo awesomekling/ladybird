@@ -1291,16 +1291,8 @@ impl LayoutNodeArena {
         self.unique_node_ids().publish(slot, generator_unique_node_id);
 
         let previously_bound = self.bound_pseudo_element_row(generator, generated_for);
-        if !previously_bound.is_invalid() && previously_bound != slot {
-            // The outgoing box keeps its style readable for as long as the host holds it.
-            if super::tree_builder::node_kind_is_node_with_style(self.data(previously_bound).kind.get()) {
-                let style_record = self.style_records[previously_bound.slot_index() as usize].get();
-                if style_record != 0 {
-                    self.pin_node_style_record_for_host(previously_bound, style_record);
-                }
-            }
-            self.set_node_flag(previously_bound, NodeFlag::IsPseudoElementPrincipalBox, false);
-            self.unbind_row(previously_bound);
+        if previously_bound != slot {
+            self.clear_pseudo_element_box(generator, generated_for);
         }
         self.set_node_flag(slot, NodeFlag::IsPseudoElementPrincipalBox, true);
         self.bind_row(slot);
@@ -1318,6 +1310,24 @@ impl LayoutNodeArena {
             is_the_pseudo_elements_box && scroll_offset != FfiCssPixelPoint::default(),
         );
         self.scroll_offsets().publish(slot, scroll_offset.into());
+    }
+
+    /// The pseudo-element of kind `generated_for` on the element with `generator` gives up the box
+    /// it holds, which is what a build does before it decides whether the pseudo-element gets one.
+    pub(crate) fn clear_pseudo_element_box(&self, generator: StyleNodeID, generated_for: u8) {
+        let bound = self.bound_pseudo_element_row(generator, generated_for);
+        if bound.is_invalid() {
+            return;
+        }
+        // The outgoing box keeps its style readable for as long as the host holds it.
+        if super::tree_builder::node_kind_is_node_with_style(self.data(bound).kind.get()) {
+            let style_record = self.style_records[bound.slot_index() as usize].get();
+            if style_record != 0 {
+                self.pin_node_style_record_for_host(bound, style_record);
+            }
+        }
+        self.set_node_flag(bound, NodeFlag::IsPseudoElementPrincipalBox, false);
+        self.unbind_row(bound);
     }
 
     /// The row the pseudo-element of kind `generated_for` on the element with `generator` is bound
