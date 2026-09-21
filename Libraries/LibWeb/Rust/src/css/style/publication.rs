@@ -64,6 +64,12 @@ impl RootFontInputs {
 }
 
 impl RetainedState {
+    pub(crate) fn retained_style_record_custom_property_environment(&self, style_record: u64) -> u64 {
+        self.computed_group_sets
+            .style_record_custom_property_environment(style_record)
+            .unwrap_or(0)
+    }
+
     pub(crate) fn retained_highlight_inheritance_parent_style_record(
         &self,
         node: StyleNodeID,
@@ -85,6 +91,13 @@ impl RetainedState {
         pseudo_kind: u8,
     ) -> Option<computed::FinalStyleRecordID> {
         let parent = self.retained_inheritance_parent_node(node, pseudo_kind)?;
+        if let Some(record) = self
+            .legacy_finalized_longhand_rows
+            .get(&computed::ComputedStyleTarget::new(parent, u8::MAX))
+            .and_then(|row| computed::FinalStyleRecordID::from_raw(row.assembled_style_record))
+        {
+            return Some(record);
+        }
         self.computed_group_sets.assigned_style_record(parent)
     }
 
@@ -92,11 +105,25 @@ impl RetainedState {
         &self,
         node: StyleNodeID,
         pseudo_kind: u8,
-    ) -> Option<(&crate::css::computed_longhand_table::ComputedLonghandTable, u64)> {
+    ) -> Option<(
+        &crate::css::computed_longhand_table::ComputedLonghandTable,
+        u64,
+        u64,
+        u64,
+    )> {
         let parent = self.retained_inheritance_parent_node(node, pseudo_kind)?;
         self.legacy_finalized_longhand_rows
             .get(&computed::ComputedStyleTarget::new(parent, u8::MAX))
-            .map(|row| (row.table(), row.previous_style_record))
+            .map(|row| {
+                (
+                    row.table(),
+                    row.previous_style_record,
+                    row.assembled_style_record,
+                    self.computed_group_sets
+                        .assigned_style_record(parent)
+                        .map_or(0, computed::FinalStyleRecordID::raw),
+                )
+            })
     }
 
     pub(crate) unsafe fn retain_legacy_finalized_longhand_row(
@@ -105,10 +132,11 @@ impl RetainedState {
         pseudo_kind: u8,
         table: *const crate::css::computed_longhand_table::ComputedLonghandTable,
         previous_style_record: u64,
+        assembled_style_record: u64,
     ) {
         self.legacy_finalized_longhand_rows
             .insert(computed::ComputedStyleTarget::new(node, pseudo_kind), unsafe {
-                LegacyFinalizedLonghandRow::retain(table, previous_style_record)
+                LegacyFinalizedLonghandRow::retain(table, previous_style_record, assembled_style_record)
             });
     }
 
@@ -1243,13 +1271,14 @@ impl RetainedState {
             self.engine_full_drive(subject, None, &store, &inputs, &mut scratch.font_drive, goal, counters)?;
         let font = font.expect("a full drive resolves the font");
         let (new_style_record, swap_eligible) = self.assemble_and_publish_engine_record(
-            target,
+            Some(target),
             parent_record,
             table,
             &length,
             &font,
             environment,
             pseudo_styles,
+            0,
             Some(cascade_state),
             &mut scratch.computability,
             counters,
@@ -1621,25 +1650,121 @@ impl RetainedState {
         record.raw()
     }
 
+    pub(crate) fn assemble_legacy_record_for_verification(
+        &mut self,
+        node: StyleNodeID,
+        table: &ComputedLonghandTable,
+        length: &crate::css::style_compute::FfiLengthResolutionContext,
+        font: &crate::css::table_group_builder::FfiFontGroupBuildInputs,
+        counters: &mut Counters,
+    ) -> Option<computed::FinalStyleRecordID> {
+        use crate::css::property_metadata::property_id as prop;
+        use crate::css::style_value::StyleValueData;
+
+        fn content_reads_counter_style_environment(value: &StyleValueData) -> bool {
+            match value {
+                StyleValueData::Counter { counter_style, .. } => match counter_style.data() {
+                    StyleValueData::CounterStyle { is_symbols, name, .. } => {
+                        !*is_symbols && !counter_style_name_is_non_overridable(name.units())
+                    }
+                    _ => true,
+                },
+                StyleValueData::Content { content, alt_text } => {
+                    content_reads_counter_style_environment(content.data())
+                        || (!alt_text.pointer().is_null() && content_reads_counter_style_environment(alt_text.data()))
+                }
+                StyleValueData::ValueList { values, .. } => values
+                    .as_slice()
+                    .iter()
+                    .any(|value| content_reads_counter_style_environment(value.data())),
+                _ => false,
+            }
+        }
+        let content_reads_environment = table
+            .get(prop::CONTENT)
+            .is_some_and(|value| content_reads_counter_style_environment(value.data()));
+        let list_style_reads_environment = table
+            .get(prop::LIST_STYLE_TYPE)
+            .is_some_and(|value| match value.data() {
+                StyleValueData::CounterStyle { is_symbols, name, .. } => {
+                    !*is_symbols && !counter_style_name_is_non_overridable(name.units())
+                }
+                _ => false,
+            });
+        if content_reads_environment || list_style_reads_environment {
+            return None;
+        }
+        let parent_record = self.retained_inheritance_parent_style_record(node, u8::MAX);
+        let inherited_environment = self
+            .tree
+            .inheritance_parent(node)
+            .and_then(|parent| self.computed_group_sets.custom_property_environment_identity(parent));
+        let environment = if self.node_declares_custom_properties(node) {
+            self.computed_group_sets
+                .custom_property_environment_identity(node)
+                .or(inherited_environment)
+        } else {
+            inherited_environment
+        }
+        .unwrap_or(0);
+        // A C++ custom-property wrapper and an engine-owned environment can describe the same
+        // store with different identities. The custom-property result slice will transfer that
+        // identity explicitly; until then only assemble rows with no environment.
+        if environment != 0 {
+            return None;
+        }
+        let pseudo_styles = table.pseudo_element_styles();
+        let counter_style_environment_identity = self
+            .computed_group_sets
+            .assigned_style_record(node)
+            .and_then(|record| self.computed_group_sets.style_record_view(record.raw()))
+            .map_or(0, |view| view.counter_style_environment_identity);
+        let table = ComputedLonghandTable::copied_for_publication(table);
+        let mut scratch = EngineComputabilityScratch::default();
+        let record = self
+            .assemble_and_publish_engine_record(
+                None,
+                parent_record,
+                table,
+                length,
+                font,
+                environment,
+                pseudo_styles,
+                counter_style_environment_identity,
+                None,
+                &mut scratch,
+                counters,
+            )?
+            .0;
+        let bytes = scratch.capacity_bytes();
+        self.memory.reserve_required(MemoryCategory::BatchScratch, bytes);
+        drop(scratch);
+        self.memory.release(MemoryCategory::BatchScratch, bytes);
+        Some(record)
+    }
+
     /// Build a driven table's groups against the parent record's payloads and publish the record
     /// for `target` the way a C++ computation publishes one; the record's swap eligibility comes
     /// back beside its identity.
     #[allow(clippy::too_many_arguments)]
     fn assemble_and_publish_engine_record(
         &mut self,
-        target: computed::ComputedStyleTarget,
+        target: Option<computed::ComputedStyleTarget>,
         parent_record: Option<computed::FinalStyleRecordID>,
         mut table: ComputedLonghandTable,
         length: &crate::css::style_compute::FfiLengthResolutionContext,
         font: &crate::css::table_group_builder::FfiFontGroupBuildInputs,
         environment: u64,
         pseudo_styles: u64,
+        counter_style_environment_identity: u64,
         cascade_state: Option<(u64, CascadeStateID)>,
         scratch: &mut EngineComputabilityScratch,
         counters: &mut Counters,
     ) -> Option<(computed::FinalStyleRecordID, bool)> {
         use crate::css::computed_value_types::STYLE_GROUP_INDEX_FONT;
         use crate::css::table_group_builder::group_index;
+
+        let verifies_legacy_record = target.is_none();
 
         // The document element's groups build against no parent payloads.
         let (parent_payloads, parent_in_display_none_subtree) = match parent_record {
@@ -1705,6 +1830,54 @@ impl RetainedState {
             };
             payloads.push(payload);
         }
+        // C++ first shares each payload with the inheritance parent, then offers the complete
+        // style built immediately before this one as a second donor. Mirror that second pass so
+        // the verification record holds the same canonical payload identities, not merely
+        // value-equal fresh payloads.
+        let last_host_payloads = self
+            .computed_group_sets
+            .style_record_view(self.last_host_built_style_record)
+            .map(|view| view.payloads.to_vec());
+        let last_host_font_payload = last_host_payloads
+            .as_ref()
+            .map(|payloads| payloads[STYLE_GROUP_INDEX_FONT]);
+        if let Some(last_host_payloads) = &last_host_payloads {
+            for (group, (payload, &last_host_payload)) in payloads.iter_mut().zip(last_host_payloads).enumerate() {
+                if *payload == last_host_payload
+                    || !crate::css::computed_values::style_group_payloads_equal(
+                        group,
+                        payload.as_ptr(),
+                        last_host_payload.as_ptr(),
+                    )
+                {
+                    continue;
+                }
+                crate::css::computed_values::release_group_payload(group, payload.as_ptr());
+                crate::css::computed_values::retain_group_payload(group, last_host_payload.as_ptr());
+                *payload = last_host_payload;
+            }
+        }
+        // The between-pass font resolver deliberately omits feature and variation inputs. Its
+        // platform list is enough to drive longhands, but a newly allocated list is not the exact
+        // host working-set object identity held by a final record. Keep verification rows whose
+        // font payload is canonicalized to a donor that C++ uses too, and leave fresh font rows on
+        // the host path until the full font-group build input is published.
+        if verifies_legacy_record {
+            let font_payload = payloads[STYLE_GROUP_INDEX_FONT];
+            let parent_font_payload = parent_payloads[STYLE_GROUP_INDEX_FONT];
+            let default_font_payload = crate::css::computed_values::default_group_payload(STYLE_GROUP_INDEX_FONT);
+            let uses_exact_font_donor = font_payload.as_ptr() == parent_font_payload.as_ptr()
+                || font_payload.as_ptr() == default_font_payload
+                || last_host_font_payload.is_some_and(|payload| payload == font_payload);
+            if !uses_exact_font_donor {
+                for (group, payload) in payloads.into_iter().enumerate() {
+                    crate::css::computed_values::release_group_payload(group, payload.as_ptr());
+                }
+                release_table(table);
+                counters.bump(Counter::EngineComputedRecordBailFontPhase);
+                return None;
+            }
+        }
         let holds_image_values = crate::css::computed_values::style_group_payloads_hold_image_values(
             HostShared::as_pointer_slice(&payloads),
         );
@@ -1714,13 +1887,13 @@ impl RetainedState {
         let metadata_input = computed::ComputedMetadataInput {
             pseudo_element_styles: pseudo_styles,
             dependency_flags,
-            counter_style_environment_identity: 0,
+            counter_style_environment_identity,
             animation_overlay_identity: 0,
             animated_overlay: HostShared::null(),
             animation_overlay_payloads: &[],
             longhand_table: HostShared::new(table),
         };
-        if let Some(cascade_state) = cascade_state {
+        if let (Some(target), Some(cascade_state)) = (target, cascade_state) {
             self.computed_group_sets
                 .set_pending_cascade_state(target, cascade_state);
         }
@@ -1731,7 +1904,7 @@ impl RetainedState {
             table: true,
         };
         let publication = self.publish_computed_groups_impl(
-            Some(target),
+            target,
             &payloads,
             computed::ENGINE_INHERITED_GROUP_COUNT,
             environment,

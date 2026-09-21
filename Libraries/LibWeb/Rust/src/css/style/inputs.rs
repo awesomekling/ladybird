@@ -1645,6 +1645,7 @@ impl StyleEngineState {
                 custom_property_registry: None,
                 frozen_longhand_inputs: HashMap::default(),
                 legacy_finalized_longhand_rows: HashMap::default(),
+                last_host_built_style_record: 0,
                 font_resolution: None,
                 layout_style_snapshots: Default::default(),
                 container_query_inputs: Default::default(),

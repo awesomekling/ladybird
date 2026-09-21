@@ -858,6 +858,9 @@ pub struct RetainedState {
     /// Finalized legacy longhand rows produced earlier in the current direct-application batch.
     /// Descendants inherit from these stage results before the host projects them onto elements.
     legacy_finalized_longhand_rows: HashMap<computed::ComputedStyleTarget, LegacyFinalizedLonghandRow>,
+    /// The record from the most recent C++ `ComputedValues` build. The legacy builder adopts
+    /// value-equal payloads from this record after trying the inheritance parent.
+    last_host_built_style_record: u64,
     /// Every font resolution this document has been given. An evaluation step reads it; only a
     /// host round between passes adds to it.
     font_resolution: Option<font_resolution::FontResolutionCache>,
@@ -1120,17 +1123,20 @@ pub struct HostState {
 struct LegacyFinalizedLonghandRow {
     table: crate::css::host_shared::HostShared<crate::css::computed_longhand_table::ComputedLonghandTable>,
     previous_style_record: u64,
+    assembled_style_record: u64,
 }
 
 impl LegacyFinalizedLonghandRow {
     unsafe fn retain(
         table: *const crate::css::computed_longhand_table::ComputedLonghandTable,
         previous_style_record: u64,
+        assembled_style_record: u64,
     ) -> Self {
         unsafe { crate::css::computed_longhand_table::rust_computed_longhand_table_retain(table) };
         Self {
             table: crate::css::host_shared::HostShared::new(table),
             previous_style_record,
+            assembled_style_record,
         }
     }
 

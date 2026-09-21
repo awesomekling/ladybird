@@ -2764,8 +2764,9 @@ pub unsafe extern "C" fn style_engine_publish_computed_groups(
             .cast::<crate::css::computed_longhand_table::ComputedLonghandTable>()
             .as_ref()
     };
-    publish_computed_groups_from_inputs(
-        unsafe { &mut *engine.cast::<StyleEngine>() },
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    let result = publish_computed_groups_from_inputs(
+        engine,
         node,
         pseudo_kind,
         payloads,
@@ -2778,7 +2779,11 @@ pub unsafe extern "C" fn style_engine_publish_computed_groups(
         animation_overlay_payloads,
         longhand_table,
         custom_property_store,
-    )
+    );
+    if engine.host.computed_record_verification_counters.is_none() {
+        engine.note_host_built_style_record(result.new_style_record);
+    }
+    result
 }
 
 // Shared by host publication and native layout-style derivation. Recording stays at the

@@ -439,12 +439,13 @@ impl RetainedState {
                     let (table, length, longhand_evaluations, font) = driven?;
                     let font = font.expect("a full drive resolves the font");
                     let (record, _) = self.assemble_and_publish_engine_record(
-                        target,
+                        Some(target),
                         Some(new_element_record),
                         table,
                         &length,
                         &font,
                         environment,
+                        0,
                         0,
                         cascade_state,
                         &mut scratch.computability,
