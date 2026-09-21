@@ -750,21 +750,6 @@ Layout::NodeArena& Document::layout_node_arena()
                 return;
             }
             node->initialize_stamped_style_record();
-            switch (kind) {
-            case Layout::RustFFI::NodeKind::FieldSetBox:
-                // https://html.spec.whatwg.org/multipage/rendering.html#the-fieldset-and-legend-elements
-                // If the computed outer display type is inline, the fieldset is expected to behave as inline-block.
-                // Otherwise, it is expected to behave as flow-root. This does not change the computed value.
-                if (node->display().is_flow_inside())
-                    node->set_display(CSS::Display { node->display().outside(), CSS::DisplayInside::FlowRoot });
-                return;
-            case Layout::RustFFI::NodeKind::AudioBox:
-            case Layout::RustFFI::NodeKind::VideoBox:
-                static_cast<Layout::Box*>(node)->set_replaced_box_can_have_children(element->shadow_root() != nullptr);
-                return;
-            default:
-                return;
-            }
         });
         Layout::RustFFI::layout_arena_set_chrome_state_callback(
             m_layout_node_arena->handle(), this,
