@@ -5763,15 +5763,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         RefPtr<CustomPropertyData const> parent_data;
         OwnPtr<HostAdapter> host_adapter;
         ComputedValuesFFI::FfiCascadeResolutionContext resolution_context {};
-        FlatPtr document_identity;
-        size_t registration_generation;
-        Optional<PreferredColorScheme> color_scheme;
 
-        CustomPropertyResolutionState(NonnullRefPtr<CustomPropertyData const> data, RefPtr<CustomPropertyData const> parent_data, FlatPtr document_identity, size_t registration_generation)
+        CustomPropertyResolutionState(NonnullRefPtr<CustomPropertyData const> data, RefPtr<CustomPropertyData const> parent_data)
             : data(move(data))
             , parent_data(move(parent_data))
-            , document_identity(document_identity)
-            , registration_generation(registration_generation)
         {
         }
     };
@@ -5970,7 +5965,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             bool shares_parent_data = parent_inheritable_data.ptr() == data.ptr();
             if (!shares_parent_data) {
                 auto parent_data = move(parent_inheritable_data);
-                state.custom_property_resolution = make<CustomPropertyResolutionState>(data.release_nonnull(), move(parent_data), bit_cast<FlatPtr>(&style_computer.document()), style_computer.document().custom_property_registration_generation());
+                state.custom_property_resolution = make<CustomPropertyResolutionState>(data.release_nonnull(), move(parent_data));
                 auto& resolution = *state.custom_property_resolution;
                 if (!custom_property_resolution_is_callback_free)
                     resolution.host_adapter = make<CustomPropertyResolutionState::HostAdapter>(abstract_element);
@@ -6106,10 +6101,6 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
 
             auto& element = context.abstract_element.element();
             report_substitution_usage(element, resolution.stats.substitution_usage, context.substitution_usage);
-            bool resolution_read_only_the_environment = !resolution.stats.substitution_usage.uses_attr
-                && !resolution.stats.substitution_usage.uses_if
-                && !resolution.stats.substitution_usage.uses_custom_function
-                && !element.style_uses_tree_counting_function();
             RefPtr<CustomPropertyData const> resolved;
             auto inherited_data = resolution_state.parent_data ? resolution_state.parent_data : resolution_state.data->parent();
             if (StyleEngine::is_engine_custom_property_environment(resolution.environment_identity)) {
@@ -6130,9 +6121,6 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 resolved = style_computer.intern_custom_property_data(
                     CustomPropertyData::create(move(resolved_own), move(inherited_data), resolution.rust_store));
             }
-            resolution_state.color_scheme = computed_style.color_scheme(style_computer.document().page().preferred_color_scheme(), style_computer.document().supported_color_schemes());
-            if (resolution_read_only_the_environment)
-                resolution_state.data->set_cached_resolution(resolution_state.document_identity, resolution_state.registration_generation, resolution_state.color_scheme.value(), resolved);
             if (context.replaced_custom_property_data)
                 resolved = custom_property_data_keeping_identity(style_computer.document(), context.replaced_custom_property_data, resolved);
             context.abstract_element.set_custom_property_data(move(resolved));
