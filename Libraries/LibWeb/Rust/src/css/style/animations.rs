@@ -1766,6 +1766,87 @@ pub(crate) unsafe fn committed_transform_reference_box(
     Some((rect.width.to_double(), rect.height.to_double()))
 }
 
+/// One physical axis' container-unit basis for an element, and what resolving it says about the
+/// DOM.
+///
+/// A mirror of the per-axis half of `Length::container_relative_length_to_px_without_rounding`:
+/// the basis of `100cqw` / `100cqh` is the content size of the nearest flat-tree ancestor that
+/// accepts size queries on that axis, the small viewport when the walk finds none, and zero when
+/// the container it found has no box committed yet.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct ContainerUnitBasis {
+    pub(crate) basis: f64,
+    /// Whether the basis is the viewport's, which makes every value computed from it a viewport
+    /// dependency.
+    pub(crate) depends_on_viewport_metrics: bool,
+    /// The query container the walk landed on, which has to learn that something under it asks
+    /// about its size.
+    pub(crate) container: Option<StyleNodeID>,
+    /// Whether that container has no committed box, so the answer is zero until layout runs.
+    pub(crate) container_has_no_box: bool,
+}
+
+impl super::StyleEngine {
+    /// The container-unit basis for one physical axis of `subject`.
+    ///
+    /// A mirror of `nearest_query_container_for_axis` plus the basis read that follows it, taken
+    /// from the published container-query inputs and the retained layout snapshot instead of from
+    /// the DOM and the layout tree. `viewport` is the subject's own viewport length for the axis,
+    /// which is what the host falls back to.
+    pub(crate) fn container_unit_basis(
+        &self,
+        subject: StyleNodeID,
+        axis_is_horizontal: bool,
+        viewport: f64,
+    ) -> ContainerUnitBasis {
+        let mut ancestor = self.tree().flat_tree_parent(subject);
+        while let Some(node) = ancestor {
+            ancestor = self.tree().flat_tree_parent(node);
+            let Some(inputs) = self.container_query_inputs(node) else {
+                continue;
+            };
+            // The container's own writing mode decides which of its axes is the inline one, and an
+            // `inline-size` container answers only for that axis.
+            let container_inline_axis_is_horizontal =
+                inputs.writing_mode == crate::css::css_enums::writing_mode::HORIZONTAL_TB;
+            let eligible = if axis_is_horizontal == container_inline_axis_is_horizontal {
+                inputs.is_size_container || inputs.is_inline_size_container
+            } else {
+                inputs.is_size_container
+            };
+            if !eligible {
+                continue;
+            }
+            let snapshot = self.layout_style_snapshot(node).unwrap_or_default();
+            if !snapshot.has_committed_box {
+                return ContainerUnitBasis {
+                    basis: 0.0,
+                    depends_on_viewport_metrics: false,
+                    container: Some(node),
+                    container_has_no_box: true,
+                };
+            }
+            let raw = if axis_is_horizontal {
+                snapshot.content_width_raw
+            } else {
+                snapshot.content_height_raw
+            };
+            return ContainerUnitBasis {
+                basis: crate::css::css_pixels::CssPixels::from_raw(raw).to_double(),
+                depends_on_viewport_metrics: false,
+                container: Some(node),
+                container_has_no_box: false,
+            };
+        }
+        ContainerUnitBasis {
+            basis: viewport,
+            depends_on_viewport_metrics: true,
+            container: None,
+            container_has_no_box: false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -6262,6 +6262,31 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             m_keyframes_inherited_non_inherited_style_groups |= style_groups;
         }
         publish_animated_custom_properties(computed_style, abstract_element);
+        if (finalization_result.animation_subject_depends_on_size_container_query) {
+            // The stage resolved the batch's container units against the published container-query
+            // inputs, so what `Length::container_relative_length_to_px_without_rounding` records
+            // while it resolves is recorded here instead: a container unit asks about a container's
+            // box exactly as a size query does, and that is what bounds the re-style a resize of
+            // the container triggers.
+            const_cast<DOM::Element&>(abstract_element.element()).set_style_depends_on_size_container_query();
+            auto note_query_container = [&](u32 style_node, bool has_no_box) {
+                if (style_node == 0)
+                    return;
+                auto identity = DOM::NodeIdentity::of_style_node(StyleNodeID { style_node });
+                auto* container = as_if<DOM::Element>(identity.resolve(abstract_element.document()).ptr());
+                if (!container)
+                    return;
+                container->set_is_size_query_container();
+                if (!has_no_box)
+                    return;
+                // A running partial relayout pass reports layout as up to date, but a container
+                // with no paintable yet still needs the post-layout evaluation.
+                if (!abstract_element.document().layout_is_up_to_date() || abstract_element.document().is_running_update_layout())
+                    abstract_element.document().set_needs_container_query_evaluation_after_layout(*container);
+            };
+            note_query_container(finalization_result.animation_width_size_query_container, finalization_result.animation_width_size_query_container_has_no_box);
+            note_query_container(finalization_result.animation_height_size_query_container, finalization_result.animation_height_size_query_container_has_no_box);
+        }
     }
     if (finalization_result.applies_animation_plan_after_return) {
         // The stage sampled what this computation's plan leaves behind - the one animation it
