@@ -323,8 +323,13 @@ pub extern "C" fn rust_style_ffi_note_longhand_input_freeze(reasons: u8) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn rust_style_ffi_note_host_driven_row() {
-    crate::css::style::seal::note_host_driven_row();
+pub extern "C" fn rust_style_ffi_style_seal_is_reporting() -> bool {
+    crate::css::style::seal::is_reporting()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_style_ffi_note_host_driven_row(kinds: u8) {
+    crate::css::style::seal::note_host_driven_row(kinds);
 }
 
 #[unsafe(no_mangle)]
