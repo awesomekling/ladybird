@@ -10,7 +10,7 @@ use crate::painting::record::hit_test_items::HitTestFacts;
 use crate::painting::record::paint::text::SelectionStyleAnswer;
 use crate::painting::record::{BasePaintFacts, PatternTileKey};
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 #[derive(Clone, Copy)]
 struct StampedEntry<T> {
@@ -36,8 +36,8 @@ pub(crate) struct RecordingScratch {
     recording_stamp: u32,
     base_paint_facts: Vec<StampedEntry<BasePaintFacts>>,
     hit_test_facts: Vec<StampedEntry<HitTestFacts>>,
-    pub(super) pattern_tile_records: HashMap<PatternTileKey, Rc<Vec<u8>>>,
-    pub(super) selection_style_cache: HashMap<u32, Rc<SelectionStyleAnswer>>,
+    pub(super) pattern_tile_records: HashMap<PatternTileKey, Arc<Vec<u8>>>,
+    pub(super) selection_style_cache: HashMap<u32, Arc<SelectionStyleAnswer>>,
     pub(super) wheel_hit_test_target_cache: HashMap<NodeSlotId, SpatialNodeIndex>,
 }
 
@@ -104,3 +104,21 @@ impl RecordingScratch {
     memo_table!(base_paint_facts, set_base_paint_facts, base_paint_facts, BasePaintFacts);
     memo_table!(hit_test_facts, set_hit_test_facts, hit_test_facts, HitTestFacts);
 }
+
+/// Where the workspace waits between runs, so that one run's tables are the next run's
+/// allocations. Only the run that holds the guard can reach the workspace, which is what the
+/// stage needs and all it needs; parking it here rather than among the arena's columns keeps
+/// the recording stage's input free of it.
+#[derive(Default)]
+pub(crate) struct RecordingScratchSlot(Mutex<RecordingScratch>);
+
+impl RecordingScratchSlot {
+    pub(crate) fn take_for_run(&self) -> MutexGuard<'_, RecordingScratch> {
+        self.0.lock().expect("recording scratch is not held across a panic")
+    }
+}
+
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<RecordingScratch>();
+};

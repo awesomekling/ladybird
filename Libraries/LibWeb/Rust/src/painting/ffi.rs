@@ -1334,7 +1334,10 @@ const _: () = {
 
 /// The host-free display-list recording stage. Host callbacks require a `MainThread` capability,
 /// which this function neither receives nor stores in its input.
-fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOutput {
+fn record_display_list_stage(
+    stage: RecordingStageInput<'_>,
+    scratch: &mut crate::painting::record::scratch::RecordingScratch,
+) -> RecordingStageOutput {
     let RecordingStageInput {
         arena,
         viewport,
@@ -1360,7 +1363,6 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
     if inputs.publishes_recording {
         arena.note_publishing_paint_recording_started();
     }
-    let mut scratch = arena.recording_scratch().borrow_mut();
     // The retained tree describes the published tape and is written in place while a frame
     // is assembled, so only a recording that publishes may copy from that frame or touch
     // the tree; any other recording records from scratch into a tree of its own.
@@ -1381,7 +1383,7 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
     let recording = crate::painting::record::traversal::record_display_list(
         arena,
         &paint_state,
-        &mut scratch,
+        scratch,
         tree,
         viewport,
         &inputs,
@@ -1400,7 +1402,7 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
             crate::painting::record::traversal::record_display_list(
                 arena,
                 &paint_state,
-                &mut scratch,
+                scratch,
                 &mut tree_for_recording_from_scratch,
                 viewport,
                 &inputs,
@@ -1464,11 +1466,14 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
     let RecordingStageOutput {
         recording,
         recording_from_scratch,
-    } = record_display_list_stage(RecordingStageInput {
-        arena,
-        viewport,
-        inputs: recording_inputs,
-    });
+    } = record_display_list_stage(
+        RecordingStageInput {
+            arena,
+            viewport,
+            inputs: recording_inputs,
+        },
+        &mut arena.recording_scratch().take_for_run(),
+    );
     let mut paint_state = arena.paint_state().borrow_mut();
     if paint_state.trace_recordings && recording.output.capture_log_for_verification.is_some() {
         paint_state.pending_recording_trace = Some(crate::painting::paint_state::PendingRecordingTrace {
@@ -1781,7 +1786,7 @@ pub unsafe extern "C" fn layout_arena_set_node_selection_pseudo_style(
             blur_radius: layer.blur_radius,
         })
         .collect();
-    let answer = std::rc::Rc::new(crate::painting::record::paint::text::SelectionStyleAnswer { facts, shadows });
+    let answer = std::sync::Arc::new(crate::painting::record::paint::text::SelectionStyleAnswer { facts, shadows });
     for row in rows {
         paint_state.selection_pseudo_styles.insert(row, answer.clone());
     }
