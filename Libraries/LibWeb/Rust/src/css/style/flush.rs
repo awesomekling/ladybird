@@ -1785,6 +1785,41 @@ impl StyleEngineState {
             .memory
             .release(MemoryCategory::BatchScratch, direct_action_node_bytes);
         published_match_answers.sort();
+        // A node settles against the record its flat-tree parent holds, so a subtree with no
+        // records yet can only settle top-down: the parent has to be visited first. The batch
+        // arrives in style-node identity order, which is not tree order, so a descendant is
+        // routinely reached before the ancestor it inherits from and declines for an ancestor
+        // that is in the same batch. Visit it in the order C++ applies the deltas in instead.
+        if published_nodes.len() > 1 {
+            let ranks = self.tree.style_reaction_order_ranks(published_nodes.iter().copied());
+            let mut order: Vec<u32> = (0..published_nodes.len() as u32).collect();
+            order.sort_unstable_by_key(|&index| ranks[&published_nodes[index as usize]]);
+            let reordered: Vec<_> = order.iter().map(|&index| published_nodes[index as usize]).collect();
+            let reordered_inputs: Vec<_> = order
+                .iter()
+                .map(|&index| previous_cascade_inputs[index as usize])
+                .collect();
+            let reorder_bytes = (order.capacity() * size_of::<u32>()
+                + reordered.capacity() * size_of::<StyleNodeID>()
+                + reordered_inputs.capacity() * size_of::<Option<MatchAnswerID>>()
+                + ranks.capacity() * (size_of::<StyleNodeID>() + size_of::<usize>() + 1))
+                as u64;
+            self.retained
+                .memory
+                .reserve_required(MemoryCategory::BatchScratch, reorder_bytes);
+            published_nodes.clear();
+            published_nodes.extend(reordered.iter().copied());
+            previous_cascade_inputs.clear();
+            previous_cascade_inputs.extend(reordered_inputs.iter().copied());
+            drop((order, reordered, reordered_inputs, ranks));
+            self.retained
+                .memory
+                .release(MemoryCategory::BatchScratch, reorder_bytes);
+        }
+        // The records this loop computes are computed from the answers this transaction just
+        // published, so install them before it runs rather than after. Until now the loop read
+        // the previous transaction's answers and a node whose answer is new had none, which is
+        // why a first record only ever settled in the host's retry, after the install.
         // Record computation interns and installs immediately in the current evaluator.
         clock.enter(Counter::ComputationPublicationMicroseconds, counters);
         {
@@ -1812,7 +1847,10 @@ impl StyleEngineState {
                     & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT
                     != 0
             }) {
-                let answer = published_match_answers.lookup(root).unwrap();
+                let (answer_cascade_input, answer_winners_are_complete) = {
+                    let answer = published_match_answers.lookup(root).unwrap();
+                    (answer.cascade_input, answer.cascade_winners_are_complete)
+                };
                 let old_record = self.retained.computed_group_sets.assigned_style_record(root);
                 let reaction = style_input_reactions
                     .binary_search_by_key(&root, |&(node, _, _)| node)
@@ -1845,7 +1883,7 @@ impl StyleEngineState {
                 if can_prepare {
                     let flipped_rules = selector_truth_changes.deltas_for(root);
                     let answer_is_unchanged =
-                        answer.cascade_input.is_some() && answer.cascade_input == previous_cascade_inputs[root_index];
+                        answer_cascade_input.is_some() && answer_cascade_input == previous_cascade_inputs[root_index];
                     let flipped: publication::FlippedRules = flipped_rules
                         .iter()
                         .map(|delta| {
@@ -1867,7 +1905,7 @@ impl StyleEngineState {
                                     .all(|delta| self.retained.program.declarations_are_complete_for(delta.rule))));
                     self.prepare_root_font_inputs(
                         root,
-                        answer.cascade_winners_are_complete,
+                        answer_winners_are_complete,
                         winners_are_exact.then_some(flipped),
                         parent_inputs,
                         &mut engine_computed_record_scratch,
@@ -1966,9 +2004,12 @@ impl StyleEngineState {
                             .deltas_for(node)
                             .iter()
                             .any(|delta| self.retained.programs.entry(delta.entry).1.pseudo_element.is_some());
-                    let answer = published_match_answers
-                        .lookup(node)
-                        .expect("each accepted style reaction has a published match answer");
+                    let (answer_cascade_input, answer_winners_are_complete) = {
+                        let answer = published_match_answers
+                            .lookup(node)
+                            .expect("each accepted style reaction has a published match answer");
+                        (answer.cascade_input, answer.cascade_winners_are_complete)
+                    };
                     let style_input_reaction_index = style_input_reactions
                         .binary_search_by_key(&node, |&(style_node, _, _)| style_node)
                         .ok();
@@ -1988,7 +2029,7 @@ impl StyleEngineState {
                         self.retained.computed_group_sets.node_answer_is_incomplete(node);
                     // Custom properties alone leave an answer complete enough: the engine computes
                     // the environment they decide.
-                    let answer_is_incomplete = !answer.cascade_winners_are_complete
+                    let answer_is_incomplete = !answer_winners_are_complete
                         && !self.cascade_winners_are_complete_but_for_custom_properties(node);
                     self.retained
                         .computed_group_sets
@@ -2111,7 +2152,7 @@ impl StyleEngineState {
                             None => {
                                 counters.bump(Counter::EngineComputedRecordGateAncestors);
                                 retry_after_ancestor = self.retained.tree.tree_scope(node) == TreeScopeID::DOCUMENT
-                                    && (answer.cascade_winners_are_complete
+                                    && (answer_winners_are_complete
                                         || self.cascade_winners_are_complete_but_for_custom_properties(node));
                                 false
                             }
@@ -2127,8 +2168,8 @@ impl StyleEngineState {
                             // is rules flipping for the node, every one of them known and declaring
                             // nothing past its winners, or the node's answer is the one it had.
                             let flipped_rules = selector_truth_changes.deltas_for(node);
-                            let answer_is_unchanged = answer.cascade_input.is_some()
-                                && answer.cascade_input == previous_cascade_inputs[published_index];
+                            let answer_is_unchanged = answer_cascade_input.is_some()
+                                && answer_cascade_input == previous_cascade_inputs[published_index];
                             let flipped: publication::FlippedRules = flipped_rules
                                 .iter()
                                 .map(|delta| {
@@ -2150,7 +2191,7 @@ impl StyleEngineState {
                                         })));
                             self.engine_computed_record_delta(
                                 node,
-                                answer.cascade_winners_are_complete,
+                                answer_winners_are_complete,
                                 winners_are_exact.then_some(flipped),
                                 parent_inputs_moved,
                                 &mut engine_computed_record_scratch,
@@ -2237,7 +2278,7 @@ impl StyleEngineState {
                     };
                     let style_delta = PublishedStyleDeltaRecord {
                         style_node: node.raw(),
-                        match_answer: answer.cascade_input.map_or(0, |cascade_input| cascade_input.0),
+                        match_answer: answer_cascade_input.map_or(0, |cascade_input| cascade_input.0),
                         old_style_record,
                         new_style_record,
                         damage,
