@@ -1,5 +1,5 @@
 PASS: compound :hover descendant invalidation ignores unrelated hover | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: compound :hover descendant invalidation applies to matching guard | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: compound :hover descendant invalidation applies to matching guard | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: co-invalidated pseudo-class guard updates descendant | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: partial :where() alternative guard updates sibling | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: complex :is() alternative guard updates sibling | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
