@@ -276,6 +276,19 @@ fn wrapping_index(value: i64, modulus: usize) -> usize {
 }
 
 impl CounterStyle {
+    /// Whether every counter value this style represents produces the same text, which is what
+    /// makes a list marker built from it independent of its list item's counter value.
+    pub(crate) fn representation_is_constant(&self) -> bool {
+        let Algorithm::Generic {
+            system: GenericSystem::Cyclic,
+            symbols,
+        } = &self.algorithm
+        else {
+            return false;
+        };
+        symbols.len() == 1 && self.range.len() == 1 && self.range[0].start == i32::MIN && self.range[0].end == i32::MAX
+    }
+
     /// https://drafts.csswg.org/css-counter-styles-3/#counter-style-negative
     /// Not all system values use a negative sign. In particular, a counter style uses a negative
     /// sign if its system value is symbolic, alphabetic, numeric, additive, or extends if the
@@ -933,16 +946,6 @@ pub(crate) fn generate_a_counter_representation(
 
 /// A counter style C++ holds a handle to and names in a publication or a representation request.
 pub struct FfiRegisteredCounterStyle(Arc<CounterStyle>);
-
-/// The counter style a handle from `rust_counter_style_create` names, or none for a null handle.
-///
-/// # Safety
-///
-/// `handle` must be null or a live handle from `rust_counter_style_create`.
-pub(crate) unsafe fn counter_style_from_handle(handle: *const c_void) -> Option<Arc<CounterStyle>> {
-    // SAFETY: The caller passes a null or live handle.
-    unsafe { handle.cast::<FfiRegisteredCounterStyle>().as_ref() }.map(|style| style.0.clone())
-}
 
 #[repr(C)]
 #[derive(Clone, Copy)]

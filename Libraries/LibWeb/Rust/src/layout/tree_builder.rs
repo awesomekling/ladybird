@@ -3570,8 +3570,12 @@ fn create_pseudo_element(
         let marker_slot = marker.slot();
         let first_child = layout_host.first_child(layout_node);
         layout_host.attach_child(layout_node, marker, first_child);
-        let marker_content =
-            crate::layout::generated_content::resolve_nested_marker_content(layout_host.arena(), owner);
+        let marker_content = crate::layout::generated_content::resolve_nested_marker_content(
+            layout_host.arena(),
+            owner,
+            marker_slot,
+            layout_node,
+        );
         report_list_item_counter_rendering(state, owner, &marker_content);
         for item in marker_content.items {
             let content = if let crate::layout::generated_content::ContentItem::Text(text) = item {
@@ -3601,7 +3605,7 @@ fn create_pseudo_element(
     let resolved_content = crate::layout::generated_content::resolve_content(
         layout_host.arena(),
         owner,
-        layout_node_kind == NodeKind::ListItemMarkerBox,
+        (layout_node_kind == NodeKind::ListItemMarkerBox).then_some((layout_node, facts.originating_list_box)),
         initial_quote_nesting_level,
     );
     report_list_item_counter_rendering(state, owner, &resolved_content);
