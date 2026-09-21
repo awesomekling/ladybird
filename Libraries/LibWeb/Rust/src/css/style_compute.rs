@@ -3629,16 +3629,9 @@ fn retained_inheritance_parent_snapshot<'a>(
     input: &FfiComputePropertiesInput,
 ) -> Option<ParentSnapshot<'a>> {
     let style_node = crate::css::style::tree::StyleNodeID::from_raw(input.style_node);
-    if let Some((table, previous_style_record, assembled_style_record, projected_style_record)) =
+    if let Some((table, _previous_style_record, assembled_style_record, projected_style_record)) =
         style_node.and_then(|node| style_engine.retained_legacy_inheritance_parent_table(node, input.pseudo_kind))
     {
-        if std::env::var_os("LIBWEB_CORRUPT_RETAINED_LEGACY_PARENT").is_some() && previous_style_record != 0 {
-            return Some(parent_snapshot_for_style_record(
-                style_engine,
-                previous_style_record,
-                None,
-            ));
-        }
         if assembled_style_record != 0 {
             let difference = match (
                 style_engine.style_record_view(assembled_style_record),
