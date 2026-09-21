@@ -11,52 +11,41 @@
 //! document nothing. This gate names each route out of the build into C++, so what is left is
 //! countable rather than a matter of review.
 //!
-//! The stage is the whole of [`super::tree_builder::rust_build_layout_tree`], the walk the layout
-//! entry runs before the pass. `LIBWEB_SEAL_TREE_BUILD_STAGE` turns the gate on. Unset or `0`, it
-//! costs only the mode check and nothing is recorded. `1` reports each distinct route once and
-//! keeps a census; `abort` makes the first route out of the build fatal. Reports and census totals
-//! go to standard error, or to the file `LIBWEB_SEAL_TREE_BUILD_STAGE_LOG` names, since a test
-//! runner does not keep the render process's standard error.
+//! The stage is [`super::tree_builder::rust_build_layout_tree`]'s walk, the stage function the
+//! layout entry runs before the pass. `LIBWEB_SEAL_TREE_BUILD_STAGE` turns the gate on. Unset or
+//! `0`, it costs only the mode check and nothing is recorded. `1` reports each distinct route once
+//! and keeps a census; `abort` makes the first route out of the build fatal. Reports and census
+//! totals go to standard error, or to the file `LIBWEB_SEAL_TREE_BUILD_STAGE_LOG` names, since a
+//! test runner does not keep the render process's standard error.
 //!
-//! **The stage is not sealed yet.** The census a `1` run leaves is the to-do list: every line with
-//! a non-zero `during_build` is a route that has to go before the stage can be sealed. The count
-//! matters as much as the name, because a route a full suite takes twice is a different problem
-//! from one it takes a hundred thousand times.
+//! **The stage is sealed**: the whole suite passes with the gate in `abort`. The walk is not handed
+//! the main-thread capability, and the tree builder's host callbacks each take it, so the compiler
+//! holds the walk to that as well. What the build owes the host - the shells whose construction
+//! tells the host something, a box's style resources, a generated image's provider, and what the
+//! build found out - it queues, and its entry pays once the walk has returned.
 //!
-//! What the whole suite takes, by `during_build` count, as of the commit that stamped the marker a
-//! list-item pseudo-element nests. Two of these are not tree builder callback slots at all, which
-//! is what the gate was for:
+//! What the whole suite takes, as of the commit that took the capability away from the walk. Every
+//! route below but the allow-list's is taken only after the walk:
 //!
-//! | route | during build | note |
+//! | route | calls | during build |
 //! |---|---|---|
-//! | `layout_node_shell_factory` | 4045613 | **not a slot**: the arena materialising a shell |
-//! | `shell_style_changed` | 81661 | **not a slot**: a row's style reaching its shell |
-//! | `attach_style_resources` | 11890 | slot: every box's style resources, wherever it was built |
-//! | `pseudo.create_content_replacement_box` | 61 | slot: a box that owns the image it replaces its contents with |
-//! | `pseudo.create_content_item` | 20 | slot: what is left is the generated image cases |
+//! | `layout_node_shell_factory` | 2825050 | 0 |
+//! | `shell_style_changed` | 68261 | 0 |
+//! | `attach_style_resources` | 13164 | 0 |
+//! | `deliver_commit_messages` | 4012 | 0 |
+//! | `attach_generated_image` | 20 | 0 |
 //!
-//! `pseudo.create_layout_node` is gone: the build stamps every pseudo-element box but the content
-//! replacement, which is what the slot is named for now. `pseudo.create_nested_list_marker` is gone
-//! too, and with it the last style record the build asked to have computed while it ran.
-//!
-//! What the allow-list costs, by the same count, so that the debt is a number rather than a word:
-//! `notify_box_presence` 11382371, `layout_node_shell_destroy` 2575221, `paintable_row_reset`
-//! 567016, `image_observers_destroy` 2047, `deliver_commit_messages` 1028,
-//! `owned_image_provider_notify_detach` 2, `owned_image_provider_destroy` 2.
-//!
-//! Two of these counts are not stable: `layout_node_shell_factory` and `notify_box_presence` swing
+//! What the allow-list costs during a build, so that the debt is a number rather than a word:
+//! `notify_box_presence` 11339320, `layout_node_shell_destroy` 1294010, `paintable_row_reset`
+//! 557466, `image_observers_destroy` 2044, `owned_image_provider_notify_detach` 2,
+//! `owned_image_provider_destroy` 2. `layout_node_shell_factory` and `notify_box_presence` swing
 //! by about a tenth between runs of the same binary, because a handful of tests do a variable
-//! amount of build work. The rest hold to under a percent, so read those two as an order of
-//! magnitude rather than a number to compare against.
+//! amount of build work, so read those two as an order of magnitude.
 //!
-//! # Where the shells come from
-//!
-//! A census keyed by the entry point each materialisation was reached through, over the same
-//! suite: 3986003 of the 3986151 a build makes are reached from the render side itself - the
-//! build's own `node_shell` assertions - and 148 from the host's `node_shell_if_live`. Every
-//! materialisation the host reaches through `node_link_shell` (207877) and
-//! `containing_block_shell_if_live` (147) happens outside a build. So the build materialises
-//! almost four million shells for itself, and the main side asks for a fifth of a million.
+//! A build owes a shell only to a row whose shell's construction tells the host something about
+//! it; every other row gets one when something first asks for its box. Of the 4.6 million rows a suite run stamps, 2.8 million ever get a shell, most of them
+//! asked for by the layout tree dumps the tests print; of the rows `treebuild.html` stamps, fewer
+//! than three in ten do.
 //!
 //! `build_replaced_content_facts` and `viewport_propagation_facts` are counted too and have never
 //! been taken during a build: they belong to the layout entry that follows it.
@@ -68,7 +57,6 @@
 //! **Outputs.** The render side telling the document what it decided is not a read of the
 //! document:
 //!
-//! - `deliver_commit_messages` - what a finished build found out, delivered once the walk is over.
 //! - `notify_box_presence` - a row telling the document that it gained or lost a box.
 //! - `paintable_row_reset` - the paint state that rides with a box going away.
 //!
@@ -117,8 +105,7 @@ fn mode() -> Mode {
 fn route_is_allowed(callback: &'static str) -> bool {
     matches!(
         callback,
-        "deliver_commit_messages"
-            | "notify_box_presence"
+        "notify_box_presence"
             | "paintable_row_reset"
             | "layout_node_shell_destroy"
             | "owned_image_provider_destroy"
