@@ -14,6 +14,7 @@
 #include <LibGC/RootHashTable.h>
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/Font/FontDatabase.h>
+#include <LibGfx/Font/SystemFallbackFonts.h>
 #include <LibGfx/Font/TypefaceSkia.h>
 #include <LibWeb/CSS/Fetch.h>
 #include <LibWeb/CSS/FontFaceSet.h>
@@ -775,13 +776,14 @@ NonnullRefPtr<Gfx::FontCascadeList const> FontComputer::compute_font_for_style_v
         }
     } else {
         font_list->set_system_font_fallback_callback([](u32 code_point, Gfx::EmojiPresentation presentation, Gfx::Font const& reference_font) -> RefPtr<Gfx::Font const> {
-            return Gfx::FontDatabase::the().get_font_for_code_point(
-                code_point,
-                reference_font.point_size(),
-                reference_font.weight(),
-                reference_font.typeface().width(),
-                reference_font.slope(),
-                presentation == Gfx::EmojiPresentation::Emoji);
+            return Gfx::system_fallback_font({
+                .code_point = code_point,
+                .weight = static_cast<u16>(reference_font.weight()),
+                .width = reference_font.typeface().width(),
+                .slope = static_cast<u8>(reference_font.slope()),
+                .prefer_color_emoji = presentation == Gfx::EmojiPresentation::Emoji,
+                .point_size = reference_font.point_size(),
+            });
         });
     }
 
