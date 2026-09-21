@@ -855,6 +855,9 @@ pub struct RetainedState {
     /// parent results are deliberately absent: the preorder driver supplies those from retained
     /// result rows as it advances.
     frozen_longhand_inputs: HashMap<StyleNodeID, inputs::FrozenLonghandInputRow>,
+    /// Finalized legacy longhand rows produced earlier in the current direct-application batch.
+    /// Descendants inherit from these stage results before the host projects them onto elements.
+    legacy_finalized_longhand_rows: HashMap<computed::ComputedStyleTarget, LegacyFinalizedLonghandRow>,
     /// Every font resolution this document has been given. An evaluation step reads it; only a
     /// host round between passes adds to it.
     font_resolution: Option<font_resolution::FontResolutionCache>,
@@ -1112,6 +1115,37 @@ pub struct HostState {
     /// never written here. Absent until the document builds a layout tree, and for a replayed
     /// engine, which has no arena.
     layout_arena: Option<std::ptr::NonNull<std::ffi::c_void>>,
+}
+
+struct LegacyFinalizedLonghandRow {
+    table: crate::css::host_shared::HostShared<crate::css::computed_longhand_table::ComputedLonghandTable>,
+    previous_style_record: u64,
+}
+
+impl LegacyFinalizedLonghandRow {
+    unsafe fn retain(
+        table: *const crate::css::computed_longhand_table::ComputedLonghandTable,
+        previous_style_record: u64,
+    ) -> Self {
+        unsafe { crate::css::computed_longhand_table::rust_computed_longhand_table_retain(table) };
+        Self {
+            table: crate::css::host_shared::HostShared::new(table),
+            previous_style_record,
+        }
+    }
+
+    fn table(&self) -> &crate::css::computed_longhand_table::ComputedLonghandTable {
+        // SAFETY: This row owns one reference until it is dropped at the batch boundary.
+        unsafe { self.table.deref() }
+    }
+}
+
+impl Drop for LegacyFinalizedLonghandRow {
+    fn drop(&mut self) {
+        unsafe {
+            crate::css::computed_longhand_table::rust_computed_longhand_table_release(self.table.cast_mut());
+        }
+    }
 }
 
 /// Mutable engine state; operations borrow their instrumentation from the boundary.

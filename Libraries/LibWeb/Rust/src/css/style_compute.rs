@@ -3569,6 +3569,41 @@ fn retained_inheritance_parent_style_record(
     retained
 }
 
+fn retained_inheritance_parent_snapshot<'a>(
+    style_engine: &'a crate::css::style::StyleEngine,
+    input: &FfiComputePropertiesInput,
+) -> Option<ParentSnapshot<'a>> {
+    let style_node = crate::css::style::tree::StyleNodeID::from_raw(input.style_node);
+    if let Some((table, previous_style_record)) =
+        style_node.and_then(|node| style_engine.retained_legacy_inheritance_parent_table(node, input.pseudo_kind))
+    {
+        if std::env::var_os("LIBWEB_CORRUPT_RETAINED_LEGACY_PARENT").is_some() && previous_style_record != 0 {
+            return Some(parent_snapshot_for_style_record(
+                style_engine,
+                previous_style_record,
+                None,
+            ));
+        }
+        let projected_record = retained_inheritance_parent_style_record(style_engine, input);
+        let projected_table_matches = projected_record != 0
+            && style_engine
+                .style_record_view(projected_record)
+                .is_some_and(|view| unsafe { view.longhand_table.deref() }.publication_equals(table));
+        crate::css::style::seal::note_retained_legacy_parent(projected_table_matches);
+        let dependency_flags = table.publication_dependency_flags();
+        return Some(ParentSnapshot::new(
+            table,
+            None,
+            dependency_flags & (1 << 1) != 0,
+            dependency_flags & (1 << 2) != 0,
+        ));
+    }
+    match retained_inheritance_parent_style_record(style_engine, input) {
+        0 => None,
+        record => Some(parent_snapshot_for_style_record(style_engine, record, None)),
+    }
+}
+
 fn retained_highlight_inheritance_parent_style_record(
     style_engine: &crate::css::style::StyleEngine,
     input: &FfiComputePropertiesInput,
@@ -6137,7 +6172,6 @@ pub unsafe extern "C" fn rust_prepare_longhand_transaction(
 ) -> FfiPreparedLonghandTransaction {
     let input = unsafe { &*input };
     let style_engine = unsafe { &*input.style_engine.cast::<crate::css::style::StyleEngine>() };
-    let inheritance_parent_style_record = retained_inheritance_parent_style_record(style_engine, input);
     let previous_style = (input.previous_style_record != 0).then(|| {
         style_engine
             .style_record_view(input.previous_style_record)
@@ -6199,8 +6233,7 @@ pub unsafe extern "C" fn rust_prepare_longhand_transaction(
             .and_then(|view| view.longhand_table_seeded_with_values())
             .unwrap_or_else(ComputedLonghandTable::new)
     };
-    let parent_has_animated_values = (inheritance_parent_style_record != 0)
-        .then(|| parent_snapshot_for_style_record(style_engine, inheritance_parent_style_record, None))
+    let parent_has_animated_values = retained_inheritance_parent_snapshot(style_engine, input)
         .as_ref()
         .is_some_and(ParentSnapshot::has_animated_values);
     FfiPreparedLonghandTransaction {
@@ -6272,16 +6305,7 @@ pub unsafe extern "C" fn rust_compute_properties(
     environment.style_sheet_resource_contexts = style_sheet_resource_contexts.as_ptr();
     environment.style_sheet_resource_context_count = style_sheet_resource_contexts.len();
     let style_engine = unsafe { &*input.style_engine.cast::<crate::css::style::StyleEngine>() };
-    let inheritance_parent_style_record = retained_inheritance_parent_style_record(style_engine, input);
-    let parent_snapshot = if inheritance_parent_style_record != 0 {
-        Some(parent_snapshot_for_style_record(
-            style_engine,
-            inheritance_parent_style_record,
-            None,
-        ))
-    } else {
-        None
-    };
+    let parent_snapshot = retained_inheritance_parent_snapshot(style_engine, input);
     let highlight = (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT
         && crate::css::property_metadata::pseudo_element_is_highlight(input.pseudo_kind))
     .then(|| HighlightInheritance {
@@ -6457,7 +6481,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
 ) -> FfiLonghandFinalizationResult {
     let input = unsafe { &*input };
     let drive_input = unsafe { &*input.transaction_input };
-    let style_engine = unsafe { &*input.style_engine.cast::<crate::css::style::StyleEngine>() };
+    let style_engine = unsafe { &mut *input.style_engine.cast_mut().cast::<crate::css::style::StyleEngine>() };
     let continuation = unsafe { Box::from_raw(transaction.storage.cast::<LonghandTransactionContinuation>()) };
     let LonghandTransactionContinuation {
         drive_result,
@@ -6501,16 +6525,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         };
     }
     let mut invalidated_longhands = 0;
-    let inheritance_parent_style_record = retained_inheritance_parent_style_record(style_engine, input);
-    let parent_snapshot = if inheritance_parent_style_record != 0 {
-        Some(parent_snapshot_for_style_record(
-            style_engine,
-            inheritance_parent_style_record,
-            None,
-        ))
-    } else {
-        None
-    };
+    let parent_snapshot = retained_inheritance_parent_snapshot(style_engine, input);
 
     // OPTIMIZATION: An element with no plan to apply and nothing relevant to sample has nothing for
     //               the animation stage to do. The published per-element fact answers the weaker
@@ -6603,6 +6618,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
     }
     let mut stage_animation_tail = None;
     let mut applies_animation_plan_after_return = false;
+    let mut used_animation_host_call = false;
     if element_has_animation_state {
         // A plan that starts animations is one the stage can sample around too: what each new
         // animation would apply is a function of the definition just computed and of the
@@ -6691,6 +6707,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
                 minimum_line_height: 0.0,
             };
         } else {
+            used_animation_host_call = true;
             let mut animation_stage_sampled = false;
             let overlay = unsafe {
                 crate::css::style::seal::note_host_call("computed_properties.apply_animations");
@@ -6746,6 +6763,20 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
     unsafe { &mut *drive_input.longhand_table }
         .set_in_display_none_subtree(parent_style_in_display_none_subtree || display_is_none);
     unsafe { &mut *drive_input.longhand_table }.freeze();
+    if !used_animation_host_call
+        && unsafe { animated_overlay.as_ref() }.is_none_or(AnimatedOverlay::is_empty)
+        && input.pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT
+        && let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(input.style_node)
+    {
+        unsafe {
+            style_engine.retain_legacy_finalized_longhand_row(
+                node,
+                input.pseudo_kind,
+                drive_input.longhand_table,
+                input.previous_style_record,
+            );
+        };
+    }
     FfiLonghandFinalizationResult {
         parent_style_in_display_none_subtree,
         invalidated_longhands,
