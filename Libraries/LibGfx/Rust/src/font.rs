@@ -998,3 +998,52 @@ pub unsafe extern "C" fn ladybird_gfx_frozen_font_list_font_for_code_point(
     // The frozen list owns every font it can answer with, so the borrowed pointer stays live.
     font.as_raw()
 }
+
+unsafe extern "C" {
+    fn ladybird_gfx_typeface_ref(typeface: *const c_void);
+    fn ladybird_gfx_typeface_unref(typeface: *const c_void);
+}
+
+/// One reference to a `Gfx::Typeface`, held as an address rather than as a pointer.
+///
+/// A published `@font-face` table carries one of these per loaded face and is shared with
+/// whichever thread resolves a font from it, so the handle has to be `Send + Sync`. Holding the
+/// address as a `usize` makes it so by construction, which is what lets the table assert
+/// `Send + Sync` without an `unsafe impl` of its own.
+///
+/// `Gfx::Typeface` is atomically reference counted, so the reference taken here and given up in
+/// `Drop` is safe from any thread. Nothing in Rust dereferences the address: the resolver reads
+/// it back in C++, where the only thing asked of a typeface off the document thread is
+/// `Typeface::font()`, whose font cache the typeface guards with its own mutex.
+pub struct RetainedTypeface(usize);
+
+impl RetainedTypeface {
+    /// # Safety
+    ///
+    /// `address` must be zero, or the address of a live `Gfx::Typeface`.
+    pub unsafe fn retain(address: usize) -> Self {
+        if address != 0 {
+            // SAFETY: The caller guarantees the typeface is live for this call.
+            unsafe { ladybird_gfx_typeface_ref(address as *const c_void) };
+        }
+        Self(address)
+    }
+
+    pub fn address(&self) -> usize {
+        self.0
+    }
+}
+
+impl Drop for RetainedTypeface {
+    fn drop(&mut self) {
+        if self.0 != 0 {
+            // SAFETY: `retain` took the reference this releases.
+            unsafe { ladybird_gfx_typeface_unref(self.0 as *const c_void) };
+        }
+    }
+}
+
+const _: () = {
+    const fn assert_send_and_sync<T: Send + Sync>() {}
+    assert_send_and_sync::<RetainedTypeface>();
+};

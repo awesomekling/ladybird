@@ -115,6 +115,11 @@ public:
 
     RefPtr<Gfx::FontCascadeList const> font_with_point_size(float point_size, Gfx::FontVariationSettings const&, Gfx::ShapeFeatures const&) const;
 
+    // The font this face contributes right now, or nothing while it is still pending. A cascade
+    // entry built from the published table asks for this again once it is on the document thread,
+    // because a face that has settled since the table was published has one and the table did not.
+    [[nodiscard]] RefPtr<Gfx::Font const> font_for_rendering(float point_size, Gfx::FontVariationSettings const&, Gfx::ShapeFeatures const&) const;
+
     Vector<Gfx::UnicodeRange> const& unicode_ranges() const { return m_unicode_ranges; }
     bool has_urls() const { return !m_urls.is_empty(); }
     bool is_pending_rendering_from_cache() const;
@@ -132,6 +137,10 @@ public:
     }
 
     FontFaceLoadStatus status() const { return m_status; }
+
+    // A face whose display period has failed, or whose load errored, contributes nothing to a
+    // cascade at all - not even a pending entry that could later produce a font.
+    [[nodiscard]] bool is_unusable_for_rendering() const { return m_font_display_failed || m_status == FontFaceLoadStatus::Error; }
 
     GC::Ref<WebIDL::Promise> load();
     GC::Ref<WebIDL::Promise> loaded() const;
@@ -232,5 +241,6 @@ size_t request_wanted_web_faces();
 // its cascades want to its own end. Outside such a scope a want is acted on straight away.
 void begin_deferred_web_face_loads();
 void end_deferred_web_face_loads();
+[[nodiscard]] bool web_face_loads_are_deferred();
 
 }
