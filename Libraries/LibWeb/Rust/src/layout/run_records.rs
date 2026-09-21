@@ -8,14 +8,18 @@ use super::*;
 use std::mem::MaybeUninit;
 use std::ptr::NonNull;
 
-/// The slot-indexed table the runs of a layout pass lend their records through, and the stack their records
-/// live on. It is the stage runner's scratch rather than an arena column: nothing outside a running pass reads
-/// it, and every run releases its records before it ends, so between passes it holds no live record.
+/// What the layout stage keeps for itself. The slot-indexed table the runs of a layout pass lend
+/// their records through, and the stack their records live on, are the stage runner's scratch rather
+/// than arena columns: nothing outside a running pass reads them, and every run releases its records
+/// before it ends, so between passes they hold no live record. The intrinsic size caches outlive the
+/// pass, but only layout reads or writes them.
 pub(crate) struct LayoutScratch {
     run_used_records: RefCell<Vec<RunRecordSlot>>,
     next_run_nonce: Cell<u64>,
     live_run_nonces: RefCell<Vec<u64>>,
     run_record_stack: RunRecordStack,
+    /// The intrinsic sizes passes measured, kept for the passes after them.
+    pub(crate) intrinsic_size_caches: super::layout_node_arena::IntrinsicSizeCaches,
 }
 
 #[derive(Default)]
@@ -31,6 +35,7 @@ impl Default for LayoutScratch {
             next_run_nonce: Cell::new(1),
             live_run_nonces: RefCell::new(Vec::new()),
             run_record_stack: RunRecordStack::default(),
+            intrinsic_size_caches: Default::default(),
         }
     }
 }

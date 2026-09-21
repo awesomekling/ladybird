@@ -2276,6 +2276,17 @@ const _: () = {
     assert_send::<LayoutStageOutput>();
 };
 
+/// The arena's layout scratch, with the intrinsic size caches the arena recorded as stale since the
+/// last pass dropped, so the stage never reads them.
+fn layout_scratch_for_stage<'a>(arena_handle: *mut c_void, arena: &LayoutNodeArena) -> &'a LayoutScratch {
+    // SAFETY: The scratch lives beside the arena for as long as the handle does.
+    let scratch = unsafe { LayoutScratch::from_handle(arena_handle) };
+    scratch
+        .intrinsic_size_caches
+        .drop_slots(arena.take_intrinsic_size_caches_to_drop());
+    scratch
+}
+
 /// The host-free full layout stage. Host callbacks require a `MainThread` capability, which this
 /// function neither receives nor stores in its input.
 fn run_root_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScratch) -> LayoutStageOutput {
@@ -2429,8 +2440,7 @@ pub(crate) unsafe fn run_root_layout(
             document_in_quirks_mode,
             should_collect_devtools_layout_data,
         },
-        // SAFETY: The scratch lives beside the arena for as long as the handle does.
-        unsafe { LayoutScratch::from_handle(arena_handle) },
+        layout_scratch_for_stage(arena_handle, arena),
     );
     // SAFETY: Computation has finished and its input borrows are no longer used.
     let arena = unsafe { commit_entry_pass(main_thread, arena_handle, &host, root, &pass_fragments) };
@@ -2598,8 +2608,7 @@ pub(crate) unsafe fn compute_subtree_layout(
             document_in_quirks_mode,
             should_collect_devtools_layout_data: false,
         },
-        // SAFETY: The scratch lives beside the arena for as long as the handle does.
-        unsafe { LayoutScratch::from_handle(arena_handle) },
+        layout_scratch_for_stage(arena_handle, arena),
     );
     // SAFETY: Computation has finished and its input borrows are no longer used.
     let arena = unsafe { commit_entry_pass(main_thread, arena_handle, &host, root, &pass_fragments) };

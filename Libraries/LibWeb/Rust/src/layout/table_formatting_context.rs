@@ -2494,13 +2494,13 @@ impl<'pass> TableFormattingContext<'pass> {
         };
         let arena = self.callbacks.arena();
         let data = self.callbacks.node_data(cell.box_);
-        if let Some(cached) = arena.table_cell_measurement_cache_get(data, key) {
+        if let Some(cached) = self.callbacks.table_cell_measurement_cache_get(data, key) {
             return Some(cached);
         }
 
         let measured = self.measure_cell_content(cell, used, inner, adopt_automatic_content_block_size);
         arena.note_table_cell_measurement_cache_miss();
-        arena.table_cell_measurement_cache_put(data, key, measured);
+        self.callbacks.table_cell_measurement_cache_put(data, key, measured);
         Some(measured)
     }
 
