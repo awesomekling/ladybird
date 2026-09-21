@@ -271,7 +271,7 @@ fn apply_replaced_display_adjustment(
         FfiReplacedElementDisplayAdjustment::Inline => display_outside::INLINE,
         FfiReplacedElementDisplayAdjustment::None => return,
     };
-    arena.update_layout_style(node, |style| {
+    arena.update_layout_style(node, crate::layout::ShellStyleChangeNotice::AfterTreeBuild, |style| {
         style.set_display(FfiDisplay::outside_and_inside(outside, display_inside::FLOW, false));
     });
 }
@@ -3153,9 +3153,11 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost<'_>, document_style_node: u32)
                 .expect("the document element's box publishes its style during the build")
                 .misc_reset()
                 .scrollbar_width;
-            layout_host
-                .arena()
-                .update_layout_style(document_layout_node, |style| style.set_scrollbar_width(scrollbar_width));
+            layout_host.arena().update_layout_style(
+                document_layout_node,
+                crate::layout::ShellStyleChangeNotice::AfterTreeBuild,
+                |style| style.set_scrollbar_width(scrollbar_width),
+            );
         }
     }
 
@@ -3741,13 +3743,15 @@ fn stamp_pseudo_element_box_row(
         .stamp_pseudo_element_row(slot, kind, generator, pseudo_kind);
     layout_host.owe_styled_shell(slot, None);
     if decision == FfiPseudoElementDecision::Contents {
-        layout_host.arena().update_layout_style(slot, |style| {
-            style.set_display(FfiDisplay::outside_and_inside(
-                crate::css::css_enums::display_outside::INLINE,
-                crate::css::css_enums::display_inside::FLOW,
-                false,
-            ));
-        });
+        layout_host
+            .arena()
+            .update_layout_style(slot, crate::layout::ShellStyleChangeNotice::AfterTreeBuild, |style| {
+                style.set_display(FfiDisplay::outside_and_inside(
+                    crate::css::css_enums::display_outside::INLINE,
+                    crate::css::css_enums::display_inside::FLOW,
+                    false,
+                ));
+            });
     }
     if is_list_item_marker {
         // https://drafts.csswg.org/css-lists-3/#list-style-position-property
@@ -4334,13 +4338,17 @@ impl TreeBuilderHost {
             NodeKind::FieldSetBox => {
                 let display = self.style(slot).map(|style| style.display());
                 if let Some(display) = display.filter(FfiDisplay::is_flow_inside) {
-                    self.arena().update_layout_style(slot, |style| {
-                        style.set_display(FfiDisplay::outside_and_inside(
-                            display.outside,
-                            crate::css::css_enums::display_inside::FLOW_ROOT,
-                            false,
-                        ));
-                    });
+                    self.arena().update_layout_style(
+                        slot,
+                        crate::layout::ShellStyleChangeNotice::AfterTreeBuild,
+                        |style| {
+                            style.set_display(FfiDisplay::outside_and_inside(
+                                display.outside,
+                                crate::css::css_enums::display_inside::FLOW_ROOT,
+                                false,
+                            ));
+                        },
+                    );
                 }
             }
             // A media element renders the children of its shadow root, such as its controls.
@@ -5365,12 +5373,16 @@ fn wrap_fieldset_contents_if_needed(host: &TreeBuilderHost, layout_node: LayoutN
             overflow_x: style.box_values().overflow_x,
             overflow_y: style.box_values().overflow_y,
         };
-        host.arena().update_layout_style(layout_node, |style| {
-            style.set_overflow(
-                crate::css::css_enums::overflow::VISIBLE,
-                crate::css::css_enums::overflow::VISIBLE,
-            );
-        });
+        host.arena().update_layout_style(
+            layout_node,
+            crate::layout::ShellStyleChangeNotice::AfterTreeBuild,
+            |style| {
+                style.set_overflow(
+                    crate::css::css_enums::overflow::VISIBLE,
+                    crate::css::css_enums::overflow::VISIBLE,
+                );
+            },
+        );
         let wrapper = host.create_anonymous_box(
             layout_node,
             AnonymousStyleKind::FieldsetContentWrapper,
@@ -5768,7 +5780,10 @@ fn generate_missing_parents(host: &TreeBuilderHost, root: LayoutNode) -> Vec<Lay
                 AnonymousStyleOverrides::default(),
                 NodeKind::TableWrapper,
             );
-            host.arena().reset_table_box_style_used_by_wrapper(table_root);
+            host.arena().reset_table_box_style_used_by_wrapper(
+                table_root,
+                crate::layout::ShellStyleChangeNotice::AfterTreeBuild,
+            );
             let wrapper_slot = wrapper.slot();
             host.move_child(table_root, wrapper_slot, NodeSlotId::INVALID);
             host.attach_child(parent, wrapper, nearest_sibling);
