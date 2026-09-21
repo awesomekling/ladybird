@@ -1,0 +1,20 @@
+cancel-all: 20px
+cancel-last: 20px
+cancel-first: 20px
+cancel-middle: 30px
+reorder: 20px
+cancel-and-reorder: 30px
+animations before: 14
+cancel-all: 5px
+cancel-last: 10px
+cancel-first: 20px
+cancel-middle: 30px
+reorder: 10px
+cancel-and-reorder: 10px
+animations after: 8
+cancel-all holds: nothing
+cancel-last holds: a
+cancel-first holds: b
+cancel-middle holds: a c
+reorder holds: b a
+cancel-and-reorder holds: c a

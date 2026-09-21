@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    /* Each animation holds one constant value for its whole run, so what an element computes says
+       only which animations it holds and in which order, never how far along they are. */
+    @keyframes a {
+        from { margin-left: 10px; }
+        to { margin-left: 10px; }
+    }
+    @keyframes b {
+        from { margin-left: 20px; }
+        to { margin-left: 20px; }
+    }
+    @keyframes c {
+        from { margin-left: 30px; }
+        to { margin-left: 30px; }
+    }
+    div {
+        margin-left: 5px;
+        animation-duration: 10s;
+        animation-fill-mode: both;
+        animation-timing-function: linear;
+    }
+</style>
+<div id="cancel-all" style="animation-name: a, b"></div>
+<div id="cancel-last" style="animation-name: a, b"></div>
+<div id="cancel-first" style="animation-name: a, b"></div>
+<div id="cancel-middle" style="animation-name: a, b, c"></div>
+<div id="reorder" style="animation-name: a, b"></div>
+<div id="cancel-and-reorder" style="animation-name: a, b, c"></div>
+<script>
+    test(() => {
+        const cases = [
+            ["cancel-all", "none"],
+            ["cancel-last", "a"],
+            ["cancel-first", "b"],
+            ["cancel-middle", "a, c"],
+            ["reorder", "b, a"],
+            ["cancel-and-reorder", "c, a"],
+        ];
+        // Every animation exists, and each element composes the last one in its list, before a
+        // single name is changed.
+        for (const [id] of cases)
+            println(`${id}: ${getComputedStyle(document.getElementById(id)).marginLeft}`);
+        println(`animations before: ${document.getAnimations().length}`);
+
+        for (const [id, names] of cases) {
+            const element = document.getElementById(id);
+            element.style.animationName = names;
+            // The update that changes the names cancels the animations the new list dropped and
+            // moves the rest to their new places, and the value read here is the one the element
+            // has once that has happened. Recomputing afterwards - with the plan now really
+            // applied to the animations the element holds - has to arrive at the same value.
+            const first = getComputedStyle(element).marginLeft;
+            element.style.paddingLeft = "1px";
+            const second = getComputedStyle(element).marginLeft;
+            println(`${id}: ${first}${first === second ? "" : ` (recomputed to ${second})`}`);
+        }
+        // The cancellations really happened: the animations the new lists dropped are gone, and
+        // the ones that stayed report the places the new lists give them.
+        println(`animations after: ${document.getAnimations().length}`);
+        for (const [id] of cases) {
+            const names = document.getElementById(id).getAnimations().map(animation => animation.animationName);
+            println(`${id} holds: ${names.join(" ") || "nothing"}`);
+        }
+    });
+</script>
