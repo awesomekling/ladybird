@@ -3340,6 +3340,27 @@ fn stamp_generated_text(host: &TreeBuilderHost, node: NodeSlotId, text: Option<a
     unsafe { &mut *host.arena }.set_generated_text(node, text);
 }
 
+/// The row a piece of a pseudo-element's generated text is rendered from. Nothing about it is the
+/// document's business: the characters are what the build resolved, the row answers by its
+/// generator's name, and what is left of the shell the host used to allocate is the enrolment for
+/// content sync a text row arrives with.
+fn create_generated_text_item(
+    host: &TreeBuilderHost,
+    generator: StyleNodeID,
+    generated_for: u8,
+    text: ak::Utf16String,
+) -> NodeSlotId {
+    let slot = host.stamp_generated_text_box();
+    let arena = host.arena();
+    arena.set_node_generated_for(slot, generated_for, Some(generator));
+    let generator_unique_node_id = arena.with_style_store(|engine| engine.element_unique_node_id(generator));
+    arena.unique_node_ids().publish(slot, generator_unique_node_id);
+    stamp_generated_text(host, slot, Some(text));
+    // SAFETY: No arena borrow survives the stamp above.
+    unsafe { &mut *host.arena }.invalidate_text_content(slot);
+    slot
+}
+
 /// The item as the host allocates it, beside the characters a text item spells. The row the host
 /// allocates renders from what the build resolved rather than from the object it allocated, so the
 /// build keeps a reference to the same string it handed over.
@@ -3553,14 +3574,22 @@ fn create_pseudo_element(
             crate::layout::generated_content::resolve_nested_marker_content(layout_host.arena(), owner);
         report_list_item_counter_rendering(state, owner, &marker_content);
         for item in marker_content.items {
-            let (item, text) = generated_content_item(item, marker_slot);
-            super::tree_build_seal::note_host_call("pseudo.create_content_item");
-            // SAFETY: The builder remains live throughout content creation.
-            let content = unsafe {
-                (callbacks.create_content_item)(callbacks.builder, style_node, pseudo_element, item, layout_node)
+            let content = if let crate::layout::generated_content::ContentItem::Text(text) = item {
+                create_generated_text_item(
+                    &layout_host,
+                    element_identity,
+                    generated_for_of(pseudo_element),
+                    ak::Utf16String::from_utf16(&text),
+                )
+            } else {
+                let (item, _) = generated_content_item(item, marker_slot);
+                super::tree_build_seal::note_host_call("pseudo.create_content_item");
+                // SAFETY: The builder remains live throughout content creation.
+                unsafe {
+                    (callbacks.create_content_item)(callbacks.builder, style_node, pseudo_element, item, layout_node)
+                }
             };
             if !content.is_invalid() {
-                stamp_generated_text(&layout_host, content, text);
                 layout_host.attach_child(marker_slot, layout_host.created(content), NodeSlotId::INVALID);
             }
         }
@@ -3590,16 +3619,24 @@ fn create_pseudo_element(
             {
                 continue;
             }
-            let (item, text) = generated_content_item(item, NodeSlotId::INVALID);
-            super::tree_build_seal::note_host_call("pseudo.create_content_item");
-            // SAFETY: The builder remains live throughout content creation.
-            let content_item = unsafe {
-                (callbacks.create_content_item)(callbacks.builder, style_node, pseudo_element, item, layout_node)
+            let content_item = if let crate::layout::generated_content::ContentItem::Text(text) = item {
+                create_generated_text_item(
+                    &layout_host,
+                    element_identity,
+                    generated_for_of(pseudo_element),
+                    ak::Utf16String::from_utf16(&text),
+                )
+            } else {
+                let (item, _) = generated_content_item(item, NodeSlotId::INVALID);
+                super::tree_build_seal::note_host_call("pseudo.create_content_item");
+                // SAFETY: The builder remains live throughout content creation.
+                unsafe {
+                    (callbacks.create_content_item)(callbacks.builder, style_node, pseudo_element, item, layout_node)
+                }
             };
             if content_item.is_invalid() {
                 continue;
             }
-            stamp_generated_text(&layout_host, content_item, text);
             let current_parent = state.current_parent();
             let is_inline_outside = node_is_inline_outside(&layout_host, content_item);
             insert_node_into_inline_or_block_ancestor(
