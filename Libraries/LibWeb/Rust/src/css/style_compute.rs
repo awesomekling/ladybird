@@ -6671,9 +6671,14 @@ pub unsafe extern "C" fn rust_compute_properties(
     // `@keyframes` rule. Collected alongside, since the tail samples such an animation from the new
     // rule rather than from the description the host published for its effect.
     let mut keyframe_retimed_definitions = Vec::new();
+    // Whether one of the plan's definitions only plays or pauses the animation it claims. Such a
+    // definition leaves the row the stage samples alone, but the play or the pause is real work the
+    // host has to do, so the plan must still reach it.
+    let mut a_definition_changes_only_play_state = false;
     let animation_plan_new_indices =
         crate::css::style::tree::StyleNodeID::from_raw(input.style_node).and_then(|node| {
-            let applied = style_engine.element_applied_animation_definitions(node, animation_slot(input.pseudo_kind));
+            let slot = animation_slot(input.pseudo_kind);
+            let applied = style_engine.element_applied_animation_definitions(node, slot);
             let mut new_indices = vec![crate::css::style::animations::NO_MATCHED_ANIMATION; applied.len()];
             for (index, animation) in definitions.iter().enumerate() {
                 if animation.matched_existing_index == crate::css::style::animations::NO_MATCHED_ANIMATION {
@@ -6683,16 +6688,34 @@ pub unsafe extern "C" fn rust_compute_properties(
                 let computed = computed_animation_definitions.get(index)?;
                 let published = applied.get(matched)?;
                 if !computed.would_change_nothing(published) {
-                    if !computed.change_is_only_keyframes(published)
+                    if computed.change_is_only_play_state(published) {
+                        // The animation the definition claims is the one the element still lists at
+                        // `matched`, which is the place its class-specific composite order key
+                        // names.
+                        let matched_key = u32::try_from(matched).ok()?;
+                        let rows = style_engine.element_animation_timing_rows(node, slot);
+                        let row = rows
+                            .iter()
+                            .find(|row| row.owned_css_animation_index(node, slot) == Some(matched_key))?;
+                        let timeline_time = crate::css::style::animations::row_timeline_time(
+                            row,
+                            style_engine.animation_timeline_samples(),
+                        )?;
+                        if !crate::css::style::animations::row_absorbs_a_play_state_change(row, timeline_time) {
+                            return None;
+                        }
+                        a_definition_changes_only_play_state = true;
+                    } else if !computed.change_is_only_keyframes(published)
                         && !computed.change_is_only_simple_timing(published)
                     {
                         return None;
+                    } else {
+                        keyframe_retimed_definitions.push(KeyframeRetimedDefinition {
+                            animation_index: index as u32,
+                            definition: *animation,
+                            row_is_retimed: !computed.change_is_only_keyframes(published),
+                        });
                     }
-                    keyframe_retimed_definitions.push(KeyframeRetimedDefinition {
-                        animation_index: index as u32,
-                        definition: *animation,
-                        row_is_retimed: !computed.change_is_only_keyframes(published),
-                    });
                 }
                 new_indices[matched] = i32::try_from(index).ok()?;
             }
@@ -6709,6 +6732,7 @@ pub unsafe extern "C" fn rust_compute_properties(
     // there is no plan, and the plan never has to reach the host at all.
     let plan_would_change_nothing = has_animation_definitions
         && !a_definition_starts_an_animation
+        && !a_definition_changes_only_play_state
         && keyframe_retimed_definitions.is_empty()
         && animation_plan_new_indices.as_ref().is_some_and(|new_indices| {
             new_indices

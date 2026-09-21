@@ -1,0 +1,42 @@
+running initially: running 0.5
+running paused immediately: paused 0.5
+running paused after recompute: paused 0.5
+running running immediately: running 0.5
+running running after recompute: running 0.5
+delayed initially: running 1
+delayed paused immediately: paused 1
+delayed paused after recompute: paused 1
+delayed running immediately: running 1
+delayed running after recompute: running 1
+finished initially: finished 1
+finished paused immediately: paused 1
+finished paused after recompute: paused 1
+finished running immediately: finished 1
+finished running after recompute: finished 1
+paused initially: paused 0.5
+paused paused immediately: paused 0.5
+paused paused after recompute: paused 0.5
+paused running immediately: running 0.5
+paused running after recompute: running 0.5
+two initially: running+running 0.5
+two paused immediately: paused+paused 0.5
+two paused after recompute: paused+paused 0.5
+two running immediately: running+running 0.5
+two running after recompute: running+running 0.5
+pseudo initially: running 0.5
+pseudo paused immediately: running 0.5
+pseudo paused after recompute: running 0.5
+pseudo running immediately: running 0.5
+pseudo running after recompute: running 0.5
+two mixed immediately: running+paused 0.5
+two mixed after recompute: running+paused 0.5
+overridden paused by script: paused 0.5
+overridden then paused by css: paused 0.5
+overridden then run by css: paused 0.5
+overridden after recompute: paused 0.5
+combined running with new timing: running 0.5
+combined paused with same timing: paused 0.5
+combined run with new timing: running 0.5
+combined after recompute: running 0.5
+pending rate paused immediately: paused 1
+pending rate paused after recompute: paused 1

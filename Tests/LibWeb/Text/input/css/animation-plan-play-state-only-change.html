@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+    /* A negative delay of half the duration, snapped by `steps()`, puts every one of these
+       animations at exactly the same key however long the test takes to run. */
+    #running { animation: fade 1000s steps(4, end) -500s infinite; }
+    #delayed { animation: fade 1000s steps(4, end) 500s infinite; }
+    #finished { animation: fade 1s linear -5s forwards; }
+    #paused { animation: fade 1000s steps(4, end) -500s infinite paused; }
+    #two { animation: fade 1000s steps(4, end) -500s infinite, fade 1000s steps(4, end) -500s infinite; }
+    #pseudo::before { content: ""; animation: fade 1000s steps(4, end) -500s infinite; }
+</style>
+<div id="running"></div>
+<div id="delayed"></div>
+<div id="finished"></div>
+<div id="paused"></div>
+<div id="two"></div>
+<div id="pseudo"></div>
+<script>
+    test(() => {
+        let nudge = 0;
+        function report(label, element, pseudo) {
+            const animations = element.getAnimations({ subtree: true });
+            const states = animations.map(animation => animation.playState).join("+");
+            const opacity = getComputedStyle(element, pseudo ?? null).opacity;
+            println(`${label}: ${states} ${opacity}`);
+        }
+        // Force a style recomputation that has nothing to do with the animations.
+        function recompute(element) {
+            element.style.paddingLeft = `${++nudge}px`;
+            getComputedStyle(element).paddingLeft;
+        }
+
+        for (const [label, id, pseudo] of [["running", "running"], ["delayed", "delayed"], ["finished", "finished"], ["paused", "paused"], ["two", "two"], ["pseudo", "pseudo", "::before"]]) {
+            const element = document.getElementById(id);
+            report(`${label} initially`, element, pseudo);
+
+            element.style.animationPlayState = "paused";
+            report(`${label} paused immediately`, element, pseudo);
+            recompute(element);
+            report(`${label} paused after recompute`, element, pseudo);
+
+            element.style.animationPlayState = "running";
+            report(`${label} running immediately`, element, pseudo);
+            recompute(element);
+            report(`${label} running after recompute`, element, pseudo);
+        }
+
+        // Only the second of the two animations changes its play state; the first one's definition
+        // is unchanged, so the plan mixes a definition that does nothing with one that pauses.
+        const two = document.getElementById("two");
+        two.style.animationPlayState = "running, paused";
+        report("two mixed immediately", two);
+        recompute(two);
+        report("two mixed after recompute", two);
+
+        // A play state script has overridden is never reapplied from CSS.
+        const overridden = document.getElementById("running");
+        overridden.getAnimations()[0].pause();
+        report("overridden paused by script", overridden);
+        overridden.style.animationPlayState = "paused";
+        report("overridden then paused by css", overridden);
+        overridden.style.animationPlayState = "running";
+        report("overridden then run by css", overridden);
+        recompute(overridden);
+        report("overridden after recompute", overridden);
+
+        // A definition that pauses the animation *and* changes something else about it is not a
+        // play-state-only change, and neither of the two changes may be dropped.
+        const combined = document.getElementById("paused");
+        combined.style.animation = "fade 500s steps(4, end) -250s infinite";
+        report("combined running with new timing", combined);
+        combined.style.animation = "fade 500s steps(4, end) -250s infinite paused";
+        report("combined paused with same timing", combined);
+        combined.style.animation = "fade 2000s steps(4, end) -1000s infinite";
+        report("combined run with new timing", combined);
+        recompute(combined);
+        report("combined after recompute", combined);
+
+        // A pending playback rate is outside the envelope the stage reasons about.
+        const delayed = document.getElementById("delayed");
+        delayed.getAnimations()[0].updatePlaybackRate(2);
+        delayed.style.animationPlayState = "paused";
+        report("pending rate paused immediately", delayed);
+        recompute(delayed);
+        report("pending rate paused after recompute", delayed);
+    });
+</script>
