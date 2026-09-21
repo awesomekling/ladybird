@@ -2841,6 +2841,8 @@ impl LayoutNodeArena {
             return std::ptr::null_mut();
         }
         super::tree_build_seal::note_host_call("layout_node_shell_factory");
+        super::seal::note_host_call(self.layout_pass_is_running(), "layout_node_shell_factory");
+        crate::painting::seal::note_host_call("layout_node_shell_factory");
         // SAFETY: Registration and unregistration keep the factory context live; the factory binds a
         // shell to this live slot and writes nothing but the slot's shell cell.
         unsafe { factory(context, id, data.kind.get()) };
