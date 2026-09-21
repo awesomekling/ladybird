@@ -346,6 +346,7 @@ impl std::fmt::Debug for FontCascadeListHandle {
 unsafe extern "C" {
     fn ladybird_gfx_font_cascade_list_frozen(list: *const c_void) -> *const c_void;
     fn ladybird_gfx_resolve_pending_face(face_id: u64) -> bool;
+    fn ladybird_gfx_note_wanted_pending_face(face_id: u64);
     fn ladybird_gfx_cascade_snapshot_begin(list: *const c_void) -> *const c_void;
     fn ladybird_gfx_cascade_snapshot_header(snapshot: *const c_void, out_header: *mut FfiCascadeSnapshotHeader);
     fn ladybird_gfx_cascade_snapshot_fill(
@@ -501,8 +502,21 @@ impl FrozenEntry {
 }
 
 /// The faces a render pass wanted and could not have, waiting for the document to request their
-/// loads. Process-wide because a frozen cascade is shared by every document that resolved to it.
+/// loads.
+///
+/// This crate is linked into LibGfx and into LibWeb, so on a platform that binds each library to
+/// its own copy of a static there is one of these per library. The list has to be process-wide, so
+/// only LibGfx's copy is ever used: a pass pushes through `ladybird_gfx_note_wanted_pending_face`,
+/// which LibGfx defines in C++ and which forwards to the push below in LibGfx's own copy.
 static WANTED_PENDING_FACES: std::sync::Mutex<Vec<u64>> = std::sync::Mutex::new(Vec::new());
+
+/// Records a wanted face in this copy of the crate. Only LibGfx's C++ calls this, so only LibGfx's
+/// copy of [`WANTED_PENDING_FACES`] ever holds anything.
+#[unsafe(no_mangle)]
+pub extern "C" fn ladybird_gfx_push_wanted_pending_face(face_id: u64) {
+    let mut wanted = WANTED_PENDING_FACES.lock().unwrap_or_else(|error| error.into_inner());
+    wanted.push(face_id);
+}
 
 /// Drains the faces render passes have wanted since the last call. The document turns each number
 /// back into a face and resolves it, which is what starts the fetch and the display-period timer.
@@ -783,8 +797,8 @@ impl FrozenFontList {
         if entry.wanted.swap(true, std::sync::atomic::Ordering::Relaxed) {
             return;
         }
-        let mut wanted = WANTED_PENDING_FACES.lock().unwrap_or_else(|error| error.into_inner());
-        wanted.push(face_id);
+        // SAFETY: The push goes through LibGfx, which holds the one list; see its comment.
+        unsafe { ladybird_gfx_note_wanted_pending_face(face_id) };
     }
 
     fn finish(

@@ -15,6 +15,13 @@ extern "C" {
 void const* ladybird_gfx_frozen_font_list_build(void const* list);
 void ladybird_gfx_frozen_font_list_release(void const* frozen);
 size_t ladybird_gfx_request_wanted_pending_faces();
+void ladybird_gfx_push_wanted_pending_face(u64 face_id);
+// The Rust font crate is linked into LibGfx and into LibWeb, so each library binds to its own copy
+// of the crate's statics on a platform with a two-level namespace. The list of faces a render pass
+// wanted is process-wide, so the pass must not push into whichever copy it was compiled against:
+// it calls this, which LibGfx alone defines and which forwards to LibGfx's copy. The drain is
+// compiled into LibGfx as well, so both halves of the handover reach the same list.
+void ladybird_gfx_note_wanted_pending_face(u64 face_id);
 }
 
 namespace Gfx {
@@ -550,6 +557,11 @@ extern "C" void ladybird_gfx_cascade_snapshot_fill(void const* handle, bool fall
 extern "C" void ladybird_gfx_cascade_snapshot_end(void const* handle)
 {
     delete static_cast<CascadeSnapshot const*>(handle);
+}
+
+extern "C" void ladybird_gfx_note_wanted_pending_face(u64 face_id)
+{
+    ladybird_gfx_push_wanted_pending_face(face_id);
 }
 
 extern "C" bool ladybird_gfx_resolve_pending_face(u64 id)
