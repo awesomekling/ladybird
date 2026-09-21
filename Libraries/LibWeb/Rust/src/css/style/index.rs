@@ -372,6 +372,8 @@ impl<T: Clone + Default> ShallowCapacityBytes for PagedOwnedColumn<T> {
 #[derive(Clone, Default)]
 struct AttributeCatalogs {
     name_forms: PagedCopyColumn<AttributeNameForms>,
+    name_texts: PagedOwnedColumn<Option<Box<[u16]>>>,
+    names_without_namespace: PagedCopyColumn<bool>,
     value_texts: PagedOwnedColumn<Option<Box<[u16]>>>,
     language_texts: PagedOwnedColumn<Option<Box<[u16]>>>,
 }
@@ -4607,6 +4609,21 @@ impl ElementFactStore {
             .map(|attribute| attribute.name)
     }
 
+    pub fn substitution_attributes(&self, node: StyleNodeID) -> Vec<(&[u16], &[u16])> {
+        self.rows
+            .row_of(node)
+            .map_or(&[][..], |row| self.rows.attributes_of(row))
+            .iter()
+            .filter(|attribute| self.attribute_name_has_no_namespace(attribute.name))
+            .filter_map(|attribute| {
+                Some((
+                    self.attribute_name_text(attribute.name)?,
+                    self.attribute_value_text(attribute.value)?,
+                ))
+            })
+            .collect()
+    }
+
     #[must_use]
     pub fn states_of_node(&self, node: StyleNodeID) -> StateSet {
         if let Some(row) = self.staging.get(node) {
@@ -5139,9 +5156,25 @@ impl ElementFactStore {
     /// Published where the two atoms are minted, which is the only place that knows the pair. It is
     /// idempotent and total: every attribute name goes through it, including one in no namespace,
     /// whose local form is still an atom of its own.
-    pub fn note_attribute_name_forms(&mut self, name: StyleAtomID, forms: AttributeNameForms) {
+    pub fn note_attribute_name(
+        &mut self,
+        name: StyleAtomID,
+        forms: AttributeNameForms,
+        local_name: &[u16],
+        has_no_namespace: bool,
+    ) {
         self.memory_dirty = true;
-        self.attribute_catalogs_mut().name_forms.insert(name.0 as usize, forms);
+        let catalogs = self.attribute_catalogs_mut();
+        catalogs.name_forms.insert(name.0 as usize, forms);
+        catalogs.name_texts.insert(name.0 as usize, Some(local_name.into()));
+        catalogs
+            .names_without_namespace
+            .insert(name.0 as usize, has_no_namespace);
+    }
+
+    #[cfg(test)]
+    pub fn note_attribute_name_forms(&mut self, name: StyleAtomID, forms: AttributeNameForms) {
+        self.note_attribute_name(name, forms, &[], false);
     }
 
     /// The other names an attribute name answers to, all `NONE` if the name has not been published.
@@ -5153,6 +5186,30 @@ impl ElementFactStore {
             .unwrap_or_default()
     }
 
+    #[must_use]
+    pub fn attribute_name_text(&self, name: StyleAtomID) -> Option<&[u16]> {
+        self.attribute_catalogs
+            .name_texts
+            .get(name.0 as usize)
+            .and_then(Option::as_deref)
+    }
+
+    #[must_use]
+    pub fn attribute_name_has_no_namespace(&self, name: StyleAtomID) -> bool {
+        self.attribute_catalogs
+            .names_without_namespace
+            .get(name.0 as usize)
+            .unwrap_or(false)
+    }
+
+    #[must_use]
+    pub fn attribute_value_text(&self, value: StyleAtomID) -> Option<&[u16]> {
+        self.attribute_catalogs
+            .value_texts
+            .get(value.0 as usize)
+            .and_then(Option::as_deref)
+    }
+
     /// Every atom an attribute of this name is indexed under, without repeats.
     pub fn attribute_name_keys(&self, name: StyleAtomID) -> impl Iterator<Item = StyleAtomID> + use<> {
         let forms = self.attribute_name_forms(name);
@@ -5162,7 +5219,7 @@ impl ElementFactStore {
             .filter_map(move |(index, key)| (!key.is_none() && !keys[..index].contains(&key)).then_some(key))
     }
 
-    pub fn set_attribute_value_text(&mut self, value: StyleAtomID, text: &[u16]) {
+    pub fn set_attribute_value_text(&mut self, value: StyleAtomID, text: &[u16], affects_selector_catalog: bool) {
         let index = value.0 as usize;
         if value.is_none()
             || self
@@ -5177,10 +5234,12 @@ impl ElementFactStore {
         self.attribute_catalogs_mut()
             .value_texts
             .insert(index, Some(text.into()));
-        self.attribute_value_catalog_version = self
-            .attribute_value_catalog_version
-            .checked_add(1)
-            .expect("attribute-value catalog version overflow");
+        if affects_selector_catalog {
+            self.attribute_value_catalog_version = self
+                .attribute_value_catalog_version
+                .checked_add(1)
+                .expect("attribute-value catalog version overflow");
+        }
     }
 
     #[must_use]
@@ -5407,6 +5466,12 @@ impl ElementFactStore {
             if catalogs.name_forms.get(index).is_some() {
                 catalogs.name_forms.insert(index, AttributeNameForms::default());
             }
+            if let Some(text) = catalogs.name_texts.get_mut(index) {
+                *text = None;
+            }
+            if catalogs.names_without_namespace.get(index).is_some() {
+                catalogs.names_without_namespace.insert(index, false);
+            }
             if let Some(text) = catalogs.value_texts.get_mut(index) {
                 *text = None;
             }
@@ -5506,6 +5571,13 @@ impl ElementFactStore {
             .flatten()
             .map(|text| text.len() * size_of::<u16>())
             .sum::<usize>();
+        let attribute_name_payloads = self
+            .attribute_catalogs
+            .name_texts
+            .iter()
+            .flatten()
+            .map(|text| text.len() * size_of::<u16>())
+            .sum::<usize>();
 
         capacity_bytes! {
             shallow [
@@ -5520,6 +5592,8 @@ impl ElementFactStore {
                 self.attribute_catalogs.language_texts,
                 self.attribute_catalogs.value_texts,
                 self.attribute_catalogs.name_forms,
+                self.attribute_catalogs.name_texts,
+                self.attribute_catalogs.names_without_namespace,
             ];
             cached [];
             nested [
@@ -5529,6 +5603,7 @@ impl ElementFactStore {
                 custom_property_name_index_payloads,
                 language_payloads,
                 attribute_value_payloads,
+                attribute_name_payloads,
             ];
             skip [];
         }
@@ -5983,7 +6058,7 @@ mod tests {
 
         let metadata = facts.capacity_bytes();
         facts.set_language_text(StyleAtomID(10), &[1, 2, 3, 4]);
-        facts.set_attribute_value_text(StyleAtomID(11), &[5, 6, 7, 8]);
+        facts.set_attribute_value_text(StyleAtomID(11), &[5, 6, 7, 8], true);
         facts.note_attribute_name_forms(
             StyleAtomID(12),
             AttributeNameForms {
@@ -6063,7 +6138,7 @@ mod tests {
             facts.set_language_text(language, &[index as u16]);
             facts.set_language(node, language);
             facts.note_attribute_name_forms(attribute_name, name_forms);
-            facts.set_attribute_value_text(attribute_value, &[index as u16]);
+            facts.set_attribute_value_text(attribute_value, &[index as u16], true);
             facts.set_attribute(node, attribute_name, attribute_value, true, &mut memory);
             facts.set_custom_property_names(node, &[custom_property], &mut memory);
             facts.apply_staged(&mut memory);
@@ -6886,9 +6961,9 @@ mod tests {
         let new_text: Vec<u16> = "new".encode_utf16().collect();
         let newest_text: Vec<u16> = "newest".encode_utf16().collect();
         let mut store = ElementFactStore::new();
-        store.set_attribute_value_text(old, &old_text);
-        store.set_attribute_value_text(new, &new_text);
-        store.set_attribute_value_text(newest, &newest_text);
+        store.set_attribute_value_text(old, &old_text, true);
+        store.set_attribute_value_text(new, &new_text, true);
+        store.set_attribute_value_text(newest, &newest_text, true);
         store.set_attribute(node, name, old, true, &mut memory);
         store.apply_staged(&mut memory);
         store.release_staging(&mut memory);
@@ -6911,6 +6986,45 @@ mod tests {
     }
 
     #[test]
+    fn substitution_attributes_follow_committed_no_namespace_facts() {
+        let mut memory = MemoryController::new(DeviceClass::ForegroundDesktop);
+        let mut tree = StyleNodeTree::new(&mut memory);
+        let node = tree.allocate_element(&mut memory);
+        let plain_name = StyleAtomID(40);
+        let namespaced_name = StyleAtomID(41);
+        let old_value = StyleAtomID(50);
+        let new_value = StyleAtomID(51);
+        let namespaced_value = StyleAtomID(52);
+        let plain_text: Vec<u16> = "data-size".encode_utf16().collect();
+        let namespaced_text: Vec<u16> = "size".encode_utf16().collect();
+        let old_text: Vec<u16> = "10px".encode_utf16().collect();
+        let new_text: Vec<u16> = "20px".encode_utf16().collect();
+        let namespaced_value_text: Vec<u16> = "30px".encode_utf16().collect();
+        let mut store = ElementFactStore::new();
+        store.note_attribute_name(plain_name, AttributeNameForms::default(), &plain_text, true);
+        store.note_attribute_name(namespaced_name, AttributeNameForms::default(), &namespaced_text, false);
+        store.set_attribute_value_text(old_value, &old_text, true);
+        store.set_attribute_value_text(new_value, &new_text, true);
+        store.set_attribute_value_text(namespaced_value, &namespaced_value_text, true);
+        store.set_attribute(node, plain_name, old_value, true, &mut memory);
+        store.set_attribute(node, namespaced_name, namespaced_value, true, &mut memory);
+        store.apply_staged(&mut memory);
+
+        assert_eq!(
+            store.substitution_attributes(node),
+            vec![(plain_text.as_slice(), old_text.as_slice())]
+        );
+
+        store.release_staging(&mut memory);
+        store.set_attribute(node, plain_name, new_value, true, &mut memory);
+        store.apply_staged(&mut memory);
+        assert_eq!(
+            store.substitution_attributes(node),
+            vec![(plain_text.as_slice(), new_text.as_slice())]
+        );
+    }
+
+    #[test]
     fn reclaimed_atoms_leave_no_catalog_or_posting_rows_for_reuse() {
         let mut memory = MemoryController::new(DeviceClass::ForegroundDesktop);
         let mut store = ElementFactStore::new();
@@ -6923,7 +7037,7 @@ mod tests {
                 folded_local: StyleAtomID(43),
             },
         );
-        store.set_attribute_value_text(atom, &[1, 2, 3]);
+        store.set_attribute_value_text(atom, &[1, 2, 3], true);
         store.set_language_text(atom, &[4, 5, 6]);
         store
             .postings
@@ -6949,7 +7063,7 @@ mod tests {
                 ..AttributeNameForms::default()
             },
         );
-        store.set_attribute_value_text(atom, &[7, 8]);
+        store.set_attribute_value_text(atom, &[7, 8], true);
         store.set_language_text(atom, &[9, 10]);
         assert_eq!(store.attribute_name_forms(atom).local, StyleAtomID(60));
         assert_eq!(
@@ -7085,10 +7199,21 @@ mod tests {
 
         for raw in 1..=128 {
             let atom = StyleAtomID(raw);
-            store.set_attribute_value_text(atom, &[raw as u16]);
+            store.set_attribute_value_text(atom, &[raw as u16], true);
         }
 
         assert_eq!(store.attribute_catalog_copies(), 1);
+    }
+
+    #[test]
+    fn substitution_only_attribute_text_does_not_invalidate_selector_plans() {
+        let mut store = ElementFactStore::new();
+        let version = store.attribute_value_catalog_version;
+
+        store.set_attribute_value_text(StyleAtomID(1), &[1, 2, 3], false);
+
+        assert_eq!(store.attribute_value_catalog_version, version);
+        assert_eq!(store.attribute_value_text(StyleAtomID(1)), Some(&[1, 2, 3][..]));
     }
 
     #[test]
@@ -7096,7 +7221,7 @@ mod tests {
         let mut store = ElementFactStore::new();
         let atom = StyleAtomID(1_000_000);
         store.note_attribute_name_forms(atom, AttributeNameForms::default());
-        store.set_attribute_value_text(atom, &[1, 2, 3]);
+        store.set_attribute_value_text(atom, &[1, 2, 3], true);
         store.set_language_text(atom, &[4, 5, 6]);
         ElementFactStore::increment_atom_count(&mut store.atom_live_counts, atom);
         store.custom_property_set_ids_by_name.entry(atom.0 as usize).push(1);

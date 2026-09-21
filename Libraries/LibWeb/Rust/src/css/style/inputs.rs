@@ -8,6 +8,12 @@ use smallvec::SmallVec;
 
 use super::*;
 
+#[derive(Default)]
+pub(crate) struct SubstitutionAttributeSnapshot<'a> {
+    pub text: Vec<(&'a [u16], &'a [u16])>,
+    pub names_are_ascii_case_insensitive: bool,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FrozenLonghandInputRow {
     pub(crate) adjustment_facts: u32,
@@ -901,9 +907,21 @@ impl RetainedState {
         ))
     }
 
-    /// Record what an attribute-value atom spells, for the operators an atom cannot answer.
+    /// Record what an attribute-value atom spells, for the operators an atom cannot answer and for
+    /// custom-property substitution. Only values of selector-relevant names invalidate selector
+    /// query plans.
     pub fn set_attribute_value_text(&mut self, value: StyleAtomID, text: &[u16]) {
-        self.facts.set_attribute_value_text(value, text);
+        self.set_attribute_value_text_with_selector_effect(value, text, true);
+    }
+
+    pub fn set_attribute_value_text_with_selector_effect(
+        &mut self,
+        value: StyleAtomID,
+        text: &[u16],
+        affects_selector_catalog: bool,
+    ) {
+        self.facts
+            .set_attribute_value_text(value, text, affects_selector_catalog);
     }
 
     #[must_use]
@@ -918,8 +936,28 @@ impl RetainedState {
     }
 
     /// See `ElementFactStore::note_attribute_name_forms`.
+    pub fn note_attribute_name(
+        &mut self,
+        name: StyleAtomID,
+        forms: index::AttributeNameForms,
+        local_name: &[u16],
+        has_no_namespace: bool,
+    ) {
+        self.facts
+            .note_attribute_name(name, forms, local_name, has_no_namespace);
+    }
+
+    #[cfg(test)]
     pub fn note_attribute_name_forms(&mut self, name: StyleAtomID, forms: index::AttributeNameForms) {
         self.facts.note_attribute_name_forms(name, forms);
+    }
+
+    pub(crate) fn substitution_attributes(&self, node: StyleNodeID) -> SubstitutionAttributeSnapshot<'_> {
+        SubstitutionAttributeSnapshot {
+            text: self.facts.substitution_attributes(node),
+            names_are_ascii_case_insensitive: !self.html_element_namespace.is_none()
+                && self.facts.namespace_of(node) == self.html_element_namespace,
+        }
     }
 
     /// Record the id an element answers to, or clear it with atom zero.

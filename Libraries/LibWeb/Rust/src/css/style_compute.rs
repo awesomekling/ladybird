@@ -30,6 +30,7 @@ use crate::css::computed_longhand_table::{
 };
 use crate::css::css_pixels::CssPixels;
 use crate::css::display::FfiDisplay;
+use crate::css::ffi_support::FfiUtf16View;
 use crate::css::property_metadata::longhands_for_shorthand;
 use crate::css::property_metadata::property_id;
 use crate::css::property_metadata::property_is_inherited;
@@ -2678,6 +2679,7 @@ const COMPUTED_KIND_DISPLAY: u8 = 9;
 const COMPUTED_KIND_STYLE_VALUE: u8 = 10;
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct FfiLonghandTransactionInput {
     pub longhand_table: *mut ComputedLonghandTable,
     pub animated_overlay: *mut AnimatedOverlay,
@@ -6314,7 +6316,7 @@ pub unsafe extern "C" fn rust_prepare_longhand_transaction(
         longhand_table: longhand_table.into_raw_shared().cast_mut(),
         parent_has_animated_values,
         custom_property_resolution_is_callback_free: unsafe {
-            crate::css::cascaded_properties::custom_property_store_is_callback_free(
+            crate::css::cascaded_properties::custom_property_store_is_engine_resolvable(
                 input.custom_property_store,
                 input.custom_property_registry,
             )
@@ -6336,7 +6338,7 @@ pub unsafe extern "C" fn rust_compute_properties(
     crate::css::ffi_stats::bump(crate::css::ffi_stats::FfiOp::LonghandDriverEntry);
     let input = unsafe { &*input };
     let prepared = unsafe { &*prepared };
-    let drive_input = unsafe { &*input.transaction_input };
+    let mut drive_input = unsafe { *input.transaction_input };
     let random_base_values = {
         let node = crate::css::style::tree::StyleNodeID::from_raw(input.style_node);
         let sharings = match prepared.requirements.unfixed_random_sharing_count {
@@ -6384,6 +6386,35 @@ pub unsafe extern "C" fn rust_compute_properties(
     environment.style_sheet_resource_contexts = style_sheet_resource_contexts.as_ptr();
     environment.style_sheet_resource_context_count = style_sheet_resource_contexts.len();
     let style_engine = unsafe { &*input.style_engine.cast::<crate::css::style::StyleEngine>() };
+    let substitution_attribute_snapshot = crate::css::style::tree::StyleNodeID::from_raw(input.style_node)
+        .map(|node| style_engine.substitution_attributes(node))
+        .unwrap_or_default();
+    let substitution_attributes = substitution_attribute_snapshot
+        .text
+        .iter()
+        .map(
+            |&(name, value)| crate::css::custom_properties::FfiSubstitutionAttribute {
+                name: FfiUtf16View {
+                    ascii: std::ptr::null(),
+                    utf16: name.as_ptr(),
+                    length: name.len(),
+                },
+                value: FfiUtf16View {
+                    ascii: std::ptr::null(),
+                    utf16: value.as_ptr(),
+                    length: value.len(),
+                },
+            },
+        )
+        .collect::<Vec<_>>();
+    if drive_input.custom_property_resolution_context.attributes.is_null() {
+        drive_input.custom_property_resolution_context.attributes = substitution_attributes.as_ptr();
+        drive_input.custom_property_resolution_context.attribute_count = substitution_attributes.len();
+        drive_input
+            .custom_property_resolution_context
+            .attribute_names_are_ascii_case_insensitive =
+            substitution_attribute_snapshot.names_are_ascii_case_insensitive;
+    }
     let parent_snapshot = retained_inheritance_parent_snapshot(style_engine, input);
     let highlight = (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT
         && crate::css::property_metadata::pseudo_element_is_highlight(input.pseudo_kind))
@@ -6406,14 +6437,17 @@ pub unsafe extern "C" fn rust_compute_properties(
         .map_or(drive_input.animated_overlay, std::ptr::from_mut);
     let (mut result, finalization_line_height_metrics, animation_length_contexts, legacy_font) = unsafe {
         compute_longhands(
-            drive_input,
+            &drive_input,
             animated_overlay,
             &environment,
             parent_snapshot.as_ref(),
             highlight.as_ref(),
         )
     };
-    if prepared.custom_property_resolution_is_callback_free && result.custom_properties.did_resolve {
+    if prepared.custom_property_resolution_is_callback_free
+        && result.custom_properties.did_resolve
+        && !result.custom_properties.stats.substitution_usage.uses_attr
+    {
         let style_engine = unsafe { &mut *input.style_engine.cast_mut().cast::<crate::css::style::StyleEngine>() };
         result.custom_properties.environment_identity = unsafe {
             style_engine.retain_resolved_custom_property_environment(

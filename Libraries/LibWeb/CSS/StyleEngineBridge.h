@@ -169,8 +169,8 @@ public:
     // boundary again merely to recover an already published name.
     StyleAtomID intern_attribute_name(Utf16FlyString const& local_name, Optional<Utf16FlyString> const& namespace_uri);
 
-    // Interns an attribute value and records what it spells when a selector for this name needs
-    // text. Values repeat heavily, so demanded text crosses once per distinct value.
+    // Interns an attribute value and records what it spells for selector matching and substituted
+    // values. Values repeat heavily, so the text crosses once per distinct value.
     StyleAtomID intern_attribute_value(StyleAtomID name, Utf16String const& value);
     // Demand expansion already has every value identity. Check the name before interning the text
     // so attributes no selector reads do not pay another string hash.
@@ -302,7 +302,7 @@ private:
     void submit_recorded_input();
     bool refresh_attribute_value_text_requirements();
     [[nodiscard]] bool attribute_name_requires_value_text(StyleAtomID);
-    void publish_attribute_value_text(StyleAtomID, Utf16View);
+    void publish_attribute_value_text(StyleAtomID, Utf16View, bool affects_selector_catalog);
 
     void* m_impl { nullptr };
     GC::Ptr<StyleComputer> m_style_computer;
