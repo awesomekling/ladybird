@@ -5758,7 +5758,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     auto const highlight_inheritance_parent = abstract_element.highlight_inheritance_parent();
     auto const effective_highlight_parent_style_record = highlight_parent_style_record.value_or(
         highlight_inheritance_parent.has_value() ? highlight_inheritance_parent->style_record_identity() : StyleRecordID {});
-    auto prepare_longhand_transaction = [](void* context_pointer, ComputedValuesFFI::FfiStyleComputationRequirements const* computation_requirements, ComputedValuesFFI::ComputedLonghandTable* longhand_table, bool parent_has_animated_values, ComputedValuesFFI::FfiLonghandTransactionInput* output) {
+    auto prepare_longhand_transaction = [](void* context_pointer, ComputedValuesFFI::FfiStyleComputationRequirements const* computation_requirements, ComputedValuesFFI::ComputedLonghandTable* longhand_table, ComputedValuesFFI::FfiLonghandTransactionInput* output) {
         auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
         auto& style_computer = *context.style_computer;
         ++style_computer.document().style_invalidation_counters().computed_longhand_drives_started;
@@ -5901,9 +5901,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         }
         *output = {
             .longhand_table = computed_style.mutable_computed_longhand_table(),
-            .animated_overlay = parent_has_animated_values
-                ? computed_style.prepare_animated_overlay_for_rust_mutation(Badge<StyleComputer> {})
-                : nullptr,
+            .animated_overlay = nullptr,
             .store = context.cascaded_properties.rust_store(),
             .environment = &state.computation_environment,
             .computed_group_mask = computed_group_mask,
@@ -5924,6 +5922,8 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         auto& style_computer = *context.style_computer;
         auto& state = *context.state;
         auto& computed_style = *state.working_set;
+        if (longhand_result->inherited_animated_overlay)
+            computed_style.install_animated_overlay_from_rust(Badge<StyleComputer> {}, longhand_result->inherited_animated_overlay);
         if (state.attach_style_sheet_sources) {
             for (size_t slot = 0; slot < context.cascaded_properties.source_slot_count(); ++slot) {
                 if (auto source = context.cascaded_properties.source_for_slot(static_cast<u32>(slot))) {
@@ -6174,7 +6174,6 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         &native_context,
         &prepared_transaction.requirements,
         prepared_transaction.longhand_table,
-        prepared_transaction.parent_has_animated_values,
         &transaction_input);
     enum LonghandInputFreezeReason : u8 {
         WorkingSet = 1 << 0,
@@ -6182,15 +6181,12 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         RandomBaseRows = 1 << 2,
         StylesheetSourceWrappers = 1 << 3,
         CustomPropertyAdapter = 1 << 4,
-        ParentAnimatedOverlay = 1 << 5,
     };
     u8 late_freeze_reasons = WorkingSet;
     if (native_context.state->used_monospace_recascade_host_fallback)
         late_freeze_reasons |= MonospaceRecascade;
     if (native_context.state->custom_property_resolution)
         late_freeze_reasons |= CustomPropertyAdapter;
-    if (prepared_transaction.parent_has_animated_values)
-        late_freeze_reasons |= ParentAnimatedOverlay;
     StyleValueFFI::rust_style_ffi_note_longhand_input_freeze(late_freeze_reasons);
     input.transaction_input = &transaction_input;
     auto transaction_result = ComputedValuesFFI::rust_compute_properties(&input, &prepared_transaction);
