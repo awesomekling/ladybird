@@ -17,6 +17,7 @@
 //! one main thread, so a thread per process is also a thread per event loop.
 
 use std::any::Any;
+use std::cell::Cell;
 use std::panic::AssertUnwindSafe;
 use std::sync::OnceLock;
 use std::sync::mpsc::{Sender, channel};
@@ -49,6 +50,20 @@ impl StageThread {
             id: thread.thread().id(),
         }
     }
+}
+
+thread_local! {
+    // On the stage thread, the thread waiting for the stage it is running.
+    static WAITING_CALLER: Cell<Option<ThreadId>> = const { Cell::new(None) };
+}
+
+/// The thread the running code acts for: on the stage thread, the thread that handed it the stage
+/// it is running; anywhere else, the current thread. State owned by one thread may be used by a
+/// stage run for that thread.
+pub(crate) fn acting_thread() -> ThreadId {
+    WAITING_CALLER
+        .with(Cell::get)
+        .unwrap_or_else(|| std::thread::current().id())
 }
 
 fn stage_thread() -> Option<&'static StageThread> {
@@ -103,8 +118,11 @@ unsafe fn run_stage_on<R: Send>(thread: &StageThread, stage: impl FnOnce() -> R)
 
     let (reply, result) = channel::<Result<R, Box<dyn Any + Send>>>();
     let stage = CallerWaits(stage);
+    let caller = std::thread::current().id();
     let job: Box<dyn FnOnce() + Send + '_> = Box::new(move || {
+        WAITING_CALLER.with(|waiting| waiting.set(Some(caller)));
         let outcome = std::panic::catch_unwind(AssertUnwindSafe(stage.into_inner()));
+        WAITING_CALLER.with(|waiting| waiting.set(None));
         // The calling thread is waiting on this reply, so it cannot have gone away.
         let _ = reply.send(outcome);
     });
@@ -122,12 +140,22 @@ unsafe fn run_stage_on<R: Send>(thread: &StageThread, stage: impl FnOnce() -> R)
     }
 }
 
+/// Runs `stage` on a stage thread of the unit tests' own, whatever the environment says.
+///
+/// # Safety
+///
+/// As for [`run_stage`].
+#[cfg(test)]
+pub(crate) unsafe fn run_stage_for_test<R: Send>(stage: impl FnOnce() -> R) -> R {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { run_stage_on(tests::test_thread(), stage) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
 
-    fn test_thread() -> &'static StageThread {
+    pub(super) fn test_thread() -> &'static StageThread {
         static THREAD: OnceLock<StageThread> = OnceLock::new();
         THREAD.get_or_init(StageThread::spawn)
     }

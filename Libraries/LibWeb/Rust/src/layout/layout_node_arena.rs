@@ -1151,7 +1151,7 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn assert_owner_thread(&self) {
-        debug_assert_eq!(self.owner_thread, thread::current().id());
+        debug_assert_eq!(self.owner_thread, crate::stage_thread::acting_thread());
     }
 
     // Freshly created chunks are default-initialized and free() resets slots on release, so
@@ -6153,6 +6153,25 @@ mod tests {
             dom_paint_facts: 0,
             style_node: 0,
         }
+    }
+
+    #[test]
+    fn a_stage_on_the_stage_thread_acts_for_the_arenas_owner() {
+        let mut arena = LayoutNodeArena::new();
+        let parent = arena.allocate(test_construction_facts());
+        let child = arena.allocate(test_construction_facts());
+        let arena = &arena;
+        // SAFETY: The arena lives on this thread only.
+        unsafe {
+            crate::stage_thread::run_stage_for_test(|| {
+                arena.attach_child(
+                    parent,
+                    crate::layout::tree_mutation::UnplacedLayoutNode::new(child),
+                    NodeSlotId::INVALID,
+                );
+            })
+        };
+        assert_eq!(arena.data(child).parent.get(), parent);
     }
 
     #[test]
