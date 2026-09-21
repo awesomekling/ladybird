@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    /* Each animation holds one constant value for its whole run, so what an element computes says
+       only what the container unit in its keyframes resolved to. */
+    @keyframes cqw {
+        from { margin-left: 10cqw; }
+        to { margin-left: 10cqw; }
+    }
+    @keyframes cqi {
+        from { margin-left: 10cqi; }
+        to { margin-left: 10cqi; }
+    }
+    @keyframes cqmin {
+        from { margin-left: 10cqmin; }
+        to { margin-left: 10cqmin; }
+    }
+    @keyframes cqh {
+        from { margin-left: 10cqh; }
+        to { margin-left: 10cqh; }
+    }
+    #container {
+        container-type: size;
+        width: 400px;
+        height: 200px;
+    }
+    #container > div {
+        animation-duration: 10s;
+        animation-fill-mode: both;
+        animation-timing-function: linear;
+    }
+    /* The element's own declarations resolve the very container basis its keyframes need, so the
+       style stage has it in hand. */
+    #same-axis { animation-name: cqw; padding-left: 5cqw; }
+    #logical { animation-name: cqi; padding-left: 5cqi; }
+    #both-axes { animation-name: cqmin; padding-left: 5cqmin; }
+    /* The element's own declarations resolve one axis and the keyframes ask for the other. */
+    #other-axis { animation-name: cqh; padding-left: 5cqw; }
+    /* The element's own declarations resolve no container basis at all. */
+    #no-own-unit { animation-name: cqw; padding-left: 5px; }
+</style>
+<div id="container">
+    <div id="same-axis"></div>
+    <div id="logical"></div>
+    <div id="both-axes"></div>
+    <div id="other-axis"></div>
+    <div id="no-own-unit"></div>
+</div>
+<script>
+    test(() => {
+        for (const id of ["same-axis", "logical", "both-axes", "other-axis", "no-own-unit"]) {
+            const element = document.getElementById(id);
+            // The first read computes the element's style for the first time, which is where the
+            // animation is started and first sampled. Recomputing afterwards - with the animation
+            // now one the element holds - has to arrive at the same value.
+            const first = getComputedStyle(element).marginLeft;
+            element.style.paddingTop = "1px";
+            const second = getComputedStyle(element).marginLeft;
+            println(`${id}: ${first}${first === second ? "" : ` (recomputed to ${second})`}`);
+        }
+    });
+</script>
