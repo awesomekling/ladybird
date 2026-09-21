@@ -37,7 +37,6 @@
 #include <LibWeb/SVG/SVGElement.h>
 #include <LibWeb/SVG/SVGFilterElement.h>
 #include <LibWeb/SVG/SVGGradientElement.h>
-#include <LibWeb/SVG/SVGPatternElement.h>
 #include <LibWeb/SVG/SVGTextContentElement.h>
 
 namespace Web::Layout {
@@ -173,12 +172,6 @@ void Node::take_over_rows_of_dom_node(DOM::Node& node, AttachToDOMNode attach_to
     auto* row_already_bound_to_dom_node = node.unsafe_layout_node();
     if (row_already_bound_to_dom_node)
         RustFFI::layout_arena_note_rows_share_dom_node(m_arena->handle(), row_already_bound_to_dom_node->m_slot, m_slot);
-    // A <pattern> inherits the attributes it does not carry from the pattern its `href` names, so
-    // its published facts are not a pure function of its own attributes and its own change steps
-    // cannot keep them fresh. Republishing as a box is built covers the case, since a pattern is
-    // read through a box. Every other SVG element published once, when it was registered.
-    if (auto* pattern_element = as_if<SVG::SVGPatternElement>(&node))
-        pattern_element->publish_svg_attribute_facts();
     if (attach_to_dom_node == AttachToDOMNode::Yes) {
         if (row_already_bound_to_dom_node)
             row_already_bound_to_dom_node->pin_style_record_for_detachment();
@@ -195,12 +188,6 @@ Node::Node(DOM::Document& document, BindToPreparedArenaSlot, Compositing::RustFF
     , m_kind(kind)
 {
     RustFFI::layout_arena_attach_shell(m_arena->handle(), m_slot, this);
-    // A <pattern> inherits the attributes it does not carry from the pattern its `href` names, so
-    // its published facts are not a pure function of its own attributes and its own change steps
-    // cannot keep them fresh. Republishing as a box is built covers the case, since a pattern is
-    // read through a box. Every other SVG element published once, when it was registered.
-    if (auto* pattern_element = as_if<SVG::SVGPatternElement>(dom_node()))
-        pattern_element->publish_svg_attribute_facts();
 }
 
 Node::~Node()
