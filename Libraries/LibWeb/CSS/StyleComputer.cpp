@@ -418,6 +418,9 @@ StyleComputer::DocumentEnvironmentSnapshot const& StyleComputer::ensure_document
         }
         snapshot.serialized_base_url = document().serialized_base_url();
         snapshot.device_pixels_per_css_pixel = document().page().client().device_pixels_per_css_pixel();
+        snapshot.viewport_rect = viewport_rect();
+        auto const& initial_font = document().font_computer().initial_font();
+        snapshot.initial_font_metrics = Length::FontMetrics { CSSPixels { initial_font.pixel_size() }, initial_font.pixel_metrics(), InitialValues::line_height() };
         m_style_update_document_environment = move(snapshot);
     }
     return *m_style_update_document_environment;
@@ -5741,6 +5744,13 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         RefPtr<StyleValue const> new_font_size;
         ComputedValuesFFI::FfiEffectiveColorSchemeInput effective_color_scheme_input {};
         ComputedValuesFFI::FfiBoxTypeTransformationInput box_type_input {};
+        // Which live host reads this row's transaction preparation actually needed. Everything not
+        // named here came from state the engine already retained.
+        bool used_host_font_length_resolution_context { false };
+        bool used_host_box_type_parent_display { false };
+        bool used_host_element_adjustment_facts { false };
+        bool used_host_tree_counting_inputs { false };
+        bool used_host_custom_property_inheritance_walk { false };
         Optional<DOM::AbstractElement::TreeCountingFunctionResolutionContext> tree_counting_context;
         ComputedValuesFFI::FfiStyleComputationEnvironment computation_environment {};
         OwnPtr<CustomPropertyResolutionState> custom_property_resolution;
@@ -5845,7 +5855,9 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         Optional<u32> published_adjustment_facts;
         if (published_adjustment_fact_row >> 32)
             published_adjustment_facts = static_cast<u32>(published_adjustment_fact_row);
+        state.used_host_element_adjustment_facts = !published_adjustment_facts.has_value();
         auto retained_parent_display = retained_box_type_parent_display(style_computer.style_engine(), abstract_element);
+        state.used_host_box_type_parent_display = !retained_parent_display.available;
         state.box_type_input = make_box_type_transformation_input(
             abstract_element, retained_parent_display.display, published_adjustment_facts,
             retained_parent_display.available ? BoxTypeParentDisplaySource::Retained : BoxTypeParentDisplaySource::Host);
@@ -5860,6 +5872,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 };
             } else {
                 state.tree_counting_context = abstract_element.tree_counting_function_resolution_context();
+                state.used_host_tree_counting_inputs = true;
             }
         }
         state.attach_style_sheet_sources = (computation_requirements->environment_requirements & ComputedValuesFFI::CASCADED_ENVIRONMENT_NEEDS_STYLE_SHEET_CONTEXT) != 0;
@@ -5893,6 +5906,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             //               element it inherits them from, so the tree walk that names it waits
             //               until one does.
             auto inheritance_parent = abstract_element.element_to_inherit_style_from();
+            state.used_host_custom_property_inheritance_walk = true;
             bool shares_parent_data = inheritance_parent.has_value() && inheritable_custom_property_data(*inheritance_parent).ptr() == data.ptr();
             if (!shares_parent_data) {
                 auto parent_data = inheritance_parent.has_value() ? inheritable_custom_property_data(*inheritance_parent) : nullptr;
@@ -5931,7 +5945,29 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         }
 
         state.container_relative_length_unit_mask = computation_requirements->container_relative_length_unit_mask;
-        auto const& font_computation_context = style_computer.get_computation_context_for_property(PropertyID::FontFamily, computed_style, abstract_element);
+        // The context a row resolves its font properties against is the document's published
+        // environment plus the font metrics of the record it inherits from, so the engine answers
+        // it from retained state. Container-relative units still need the live container walk.
+        ComputedValuesFFI::FfiLengthResolutionContext font_length_resolution_context {};
+        ComputedValuesFFI::FfiFontLengthResolutionDocumentInputs const font_document_inputs {
+            .viewport_width = document_environment.viewport_rect.width().to_double(),
+            .viewport_height = document_environment.viewport_rect.height().to_double(),
+            .root_font_metrics = to_ffi_font_metrics(style_computer.m_root_element_font_metrics),
+            .root_font_metrics_depend_on_viewport_metrics = style_computer.m_root_element_font_metrics_depend_on_viewport_metrics,
+            .initial_font_metrics = to_ffi_font_metrics(*document_environment.initial_font_metrics),
+        };
+        bool const font_length_resolution_context_is_retained = computation_requirements->container_relative_length_unit_mask == 0
+            && ComputedValuesFFI::rust_retained_font_length_resolution_context(
+                style_computer.style_engine().rust_handle(),
+                abstract_element.element().style_node_id().value(),
+                pseudo_element_to_ffi(abstract_element.pseudo_element()),
+                &font_document_inputs,
+                &font_length_resolution_context);
+        if (!font_length_resolution_context_is_retained) {
+            auto const& font_computation_context = style_computer.get_computation_context_for_property(PropertyID::FontFamily, computed_style, abstract_element);
+            font_length_resolution_context = to_ffi_length_resolution_context_with_container_bases(font_computation_context.length_resolution_context, computation_requirements->container_relative_length_unit_mask);
+            state.used_host_font_length_resolution_context = true;
+        }
         void const* custom_property_store = nullptr;
         void const* resolved_parent_custom_property_store = nullptr;
         u64 resolved_parent_custom_property_environment = 0;
@@ -5958,7 +5994,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             .environment = &state.computation_environment,
             .computed_group_mask = computed_group_mask,
             .computed_property_words = computed_properties_to_evaluate,
-            .font_length_resolution_context = to_ffi_length_resolution_context_with_container_bases(font_computation_context.length_resolution_context, computation_requirements->container_relative_length_unit_mask),
+            .font_length_resolution_context = font_length_resolution_context,
             .font_environment_generation = style_computer.document().font_computer().environment_generation(),
             .style_engine = style_computer.style_engine().rust_handle(),
             .custom_property_store = custom_property_store,
@@ -6268,18 +6304,30 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         prepared_transaction.custom_property_resolution_is_callback_free,
         &transaction_input);
     enum LonghandInputFreezeReason : u8 {
-        WorkingSet = 1 << 0,
         MonospaceRecascade = 1 << 1,
-        RandomBaseRows = 1 << 2,
-        StylesheetSourceWrappers = 1 << 3,
         CustomPropertyAdapter = 1 << 4,
+        FontLengthResolutionContext = 1 << 5,
+        BoxTypeParentDisplay = 1 << 6,
+        ElementReads = 1 << 7,
     };
-    u8 late_freeze_reasons = WorkingSet;
+    // Which live host state this row's transaction preparation actually read. A row that reads
+    // none is frozen from the engine's own retained state: the working set it fills is created
+    // from the Rust longhand table and dropped inside the row, so building it is not a read.
+    u8 late_freeze_reasons = 0;
     if (native_context.state->used_monospace_recascade_host_fallback)
         late_freeze_reasons |= MonospaceRecascade;
     if (native_context.state->custom_property_resolution && native_context.state->custom_property_resolution->host_adapter)
         late_freeze_reasons |= CustomPropertyAdapter;
-    StyleValueFFI::rust_style_ffi_note_longhand_input_freeze(late_freeze_reasons);
+    if (native_context.state->used_host_font_length_resolution_context)
+        late_freeze_reasons |= FontLengthResolutionContext;
+    if (native_context.state->used_host_box_type_parent_display)
+        late_freeze_reasons |= BoxTypeParentDisplay;
+    if (native_context.state->used_host_element_adjustment_facts
+        || native_context.state->used_host_tree_counting_inputs
+        || native_context.state->used_host_custom_property_inheritance_walk)
+        late_freeze_reasons |= ElementReads;
+    if (late_freeze_reasons != 0)
+        StyleValueFFI::rust_style_ffi_note_longhand_input_freeze(late_freeze_reasons);
     input.transaction_input = &transaction_input;
     auto transaction_result = ComputedValuesFFI::rust_compute_properties(&input, &prepared_transaction);
     auto const& drive_result = *transaction_result.drive_result;

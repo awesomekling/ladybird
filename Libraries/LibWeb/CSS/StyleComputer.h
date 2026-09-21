@@ -153,6 +153,10 @@ public:
         Vector<u8> supported_color_scheme_codes;
         String serialized_base_url;
         double device_pixels_per_css_pixel { 1 };
+        // The document half of a row's font length-resolution context. Taken once per update so
+        // no row reads the navigable or the document's initial font.
+        CSSPixelRect viewport_rect;
+        Optional<Length::FontMetrics> initial_font_metrics;
     };
     [[nodiscard]] DocumentEnvironmentSnapshot const& ensure_document_environment_for_style_update() const;
 

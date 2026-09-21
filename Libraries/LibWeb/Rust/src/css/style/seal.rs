@@ -12,6 +12,11 @@
 //! reports each callback site once; `abort` makes the first callback fatal. Reports and census
 //! totals go to stderr or to the file named by `LIBWEB_SEAL_STYLE_STAGE_LOG`.
 //!
+//! `longhand_input_freeze` says that preparing one row's longhand transaction read live host
+//! state, and its reasons say which. A row that reads none is frozen from the engine's own
+//! retained state; the working set the row fills is created from the Rust longhand table and
+//! dropped inside the row, so building it is not a read of anything the host already held.
+//!
 //! `longhand_result_apply` says that applying one row's results reached the host: a GC object, a
 //! DOM node, or state the document exposes. A row that writes only the computation's own working
 //! set - created and dropped inside the stage - is not counted, because moving that row's
@@ -84,12 +89,14 @@ pub(crate) fn note_longhand_input_freeze(reasons: u8) {
         return;
     }
     let names = [
-        "working_set",
+        "unused_bit_0",
         "monospace_recascade",
-        "random_base_rows",
-        "stylesheet_source_wrappers",
+        "unused_bit_2",
+        "unused_bit_3",
         "custom_property_adapter",
-        "parent_animated_overlay",
+        "font_length_resolution_context",
+        "box_type_parent_display",
+        "element_reads",
     ];
     LONGHAND_INPUT_FREEZE_REASONS.with(|counts| {
         let mut counts = counts.borrow_mut();
