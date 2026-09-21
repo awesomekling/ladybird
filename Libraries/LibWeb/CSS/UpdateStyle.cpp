@@ -1285,6 +1285,8 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
         (void)document.style_computer().ensure_media_environment_for_style_update();
         (void)document.style_computer().ensure_document_environment_for_style_update();
         document.publish_animation_environment_for_style_update();
+        document.style_computer().style_engine().prepare_root_font_resolution(
+            document.font_computer().environment_generation());
         StyleValueFFI::rust_style_ffi_complete_style_update_begin();
         complete_style_update_started = true;
 
@@ -1308,6 +1310,8 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
         (void)document.style_computer().ensure_media_environment_for_style_update();
         (void)document.style_computer().ensure_document_environment_for_style_update();
         document.publish_animation_environment_for_style_update();
+        document.style_computer().style_engine().prepare_root_font_resolution(
+            document.font_computer().environment_generation());
         StyleValueFFI::rust_style_ffi_complete_style_update_begin();
         complete_style_update_started = true;
     }
