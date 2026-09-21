@@ -1626,8 +1626,6 @@ static bool compute_transitioned_properties(Vector<TransitionProperties> transit
     auto& element = abstract_element.element();
     auto pseudo_element = abstract_element.pseudo_element();
 
-    bool did_write = element.clear_registered_transitions(pseudo_element);
-
     // OPTIMIZATION: Registered transitions with a "combined duration" of less than or equal to 0s are equivalent to not
     //               having a transition registered at all, except in the case that we already have an associated
     //               transition for that property, so we can skip registering them. This implementation intentionally
@@ -1638,10 +1636,10 @@ static bool compute_transitioned_properties(Vector<TransitionProperties> transit
     if (
         element.property_ids_with_existing_transitions(pseudo_element).is_empty()
         && delay_and_duration_are_single_zero) {
-        return did_write;
+        return element.clear_registered_transitions(pseudo_element);
     }
 
-    return element.add_transitioned_properties(pseudo_element, move(transitions)) || did_write;
+    return element.set_registered_transitions(pseudo_element, transitions);
 }
 
 static void compute_transitioned_properties(ComputedValues const& style, DOM::AbstractElement abstract_element)
@@ -1651,10 +1649,10 @@ static void compute_transitioned_properties(ComputedValues const& style, DOM::Ab
 
     auto& element = abstract_element.element();
     auto pseudo_element = abstract_element.pseudo_element();
-    element.clear_registered_transitions(pseudo_element);
 
     if (element.property_ids_with_existing_transitions(pseudo_element).is_empty()
         && style.transition_delay_and_duration_are_single_zero()) {
+        element.clear_registered_transitions(pseudo_element);
         return;
     }
 
@@ -1698,7 +1696,7 @@ static void compute_transitioned_properties(ComputedValues const& style, DOM::Ab
             .transition_behavior = behaviors[i % behaviors.size()],
         });
     }
-    element.add_transitioned_properties(pseudo_element, transitions);
+    element.set_registered_transitions(pseudo_element, transitions);
 }
 
 // https://drafts.csswg.org/css-transitions/#starting
