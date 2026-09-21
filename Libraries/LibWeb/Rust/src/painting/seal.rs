@@ -178,6 +178,7 @@ impl Drop for PassScope {
 /// store and nothing else, so the callers need not be gated.
 #[must_use]
 pub(crate) fn enter(pass: Pass) -> PassScope {
+    crate::font_seal::install_once();
     PassScope(CURRENT_PASS.with(|current| current.replace(pass)))
 }
 
