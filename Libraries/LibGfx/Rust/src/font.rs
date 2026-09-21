@@ -362,6 +362,7 @@ unsafe extern "C" {
         slope: u8,
         prefer_color_emoji: bool,
         point_size: f32,
+        out_reached_document_thread: *mut bool,
     ) -> *const c_void;
     fn ladybird_gfx_font_invisible_variant(font: *const c_void) -> *const c_void;
 }
@@ -656,6 +657,7 @@ impl FrozenFontList {
 
     fn system_fallback_font(&self, code_point: u32, presentation: EmojiPresentation) -> Option<FontHandle> {
         let style = self.system_fallback?;
+        let mut reached_document_thread = false;
         // SAFETY: The service answers from a process-wide memo that keeps every font it hands back
         // live for the life of the process.
         let raw = unsafe {
@@ -666,8 +668,15 @@ impl FrozenFontList {
                 style.slope,
                 presentation.is_emoji,
                 style.point_size,
+                &mut reached_document_thread,
             )
         };
+        if reached_document_thread {
+            // A memo hit is thread-safe wherever it is asked for, but this one missed, and matching
+            // a code point leaves the process. Without a font service the render side owns, that
+            // leaves it on the connection the document thread owns and pumps.
+            note_host_reaching_call("WebContentClient::match_system_font_for_code_point");
+        }
         // SAFETY: A non-null answer names a font the memo keeps live.
         (!raw.is_null()).then(|| unsafe { FontHandle::intern(raw) })
     }

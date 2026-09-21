@@ -55,11 +55,21 @@
 //!
 //! A pass picks fonts out of `libgfx_rust::font::FrozenFontList`, a snapshot the document built
 //! before the pass began: no caches to fill, no faces to resolve, and `Send + Sync` without an
-//! `unsafe impl`. A code point no listed family covers goes to `Gfx::system_fallback_font`, a
-//! process-wide memo whose answer depends on the installed font set and nothing else. A face
-//! still on its `font-display` timeline is not resolved here at all: the frozen entry already
-//! carries which period it is in, and the pass leaves the face's number behind for
-//! `Gfx::request_wanted_pending_faces()` to request once the pass has ended.
+//! `unsafe impl`. A code point no listed family covers goes to
+//! `Gfx::system_fallback_font_from_render_side`, a process-wide memo whose answer depends on the
+//! installed font set and nothing else. A face still on its `font-display` timeline is not
+//! resolved here at all: the frozen entry already carries which period it is in, and the pass
+//! leaves the face's number behind for `Gfx::request_wanted_pending_faces()` to request once the
+//! pass has ended.
+//!
+//! A memo *miss* is the part that leaves the process: a renderer cannot match a code point itself
+//! and has to ask the UI process. That is a resource service the design permits, but only over a
+//! connection the render side owns; `WebView::RendererFontService` is that connection, and a
+//! renderer installs it at startup. Should it be missing, the miss falls back to the system font
+//! provider, which asks on the connection the document thread owns and pumps - a data race today
+//! and a deadlock once a pass runs on its own thread. LibGfx reports that case as
+//! `WebContentClient::match_system_font_for_code_point`, and the seal treats it like any other
+//! host call.
 //!
 //! The document's own `Gfx::FontCascadeList` is still reachable from Rust, because canvas and the
 //! font-relative length code use it. `crate::font_seal` makes a call to it report itself here,
