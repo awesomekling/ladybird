@@ -68,6 +68,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         legacy_finalized_longhand_rows,
         last_host_built_style_record,
         font_resolution,
+        root_font_request,
         layout_style_snapshots,
         container_query_inputs,
         layer_topology_version,
@@ -242,6 +243,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(fold_id_and_class_name_case);
     assert_member_is_sync(custom_property_environments);
     assert_member_is_sync(font_resolution);
+    assert_member_is_sync(root_font_request);
     assert_member_is_sync(computed_group_sets);
     #[cfg(test)]
     assert_member_is_sync(diagnostic_plan_capture);

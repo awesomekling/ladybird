@@ -16,6 +16,8 @@
 
 namespace Web::CSS {
 
+extern "C" void style_engine_prepare_root_font_resolution(void*, u64);
+
 static StyleEngineFFI::FfiResolvedFont resolve_font(void* context, StyleEngineFFI::FfiFontResolutionRequest request)
 {
     auto& style_computer = *static_cast<StyleComputer*>(context);
@@ -68,6 +70,11 @@ StyleEngine::StyleEngine(DeviceClass device_class, StyleComputer* style_computer
         set_pseudo_element_style_deferred(to_underlying(PseudoElement::Selection), true);
         StyleEngineFFI::style_engine_install_font_resolver(m_impl, m_style_computer.ptr(), resolve_fonts);
     }
+}
+
+void StyleEngine::prepare_root_font_resolution(u64 font_environment_generation)
+{
+    style_engine_prepare_root_font_resolution(m_impl, font_environment_generation);
 }
 
 StyleEngine::~StyleEngine()

@@ -864,6 +864,9 @@ pub struct RetainedState {
     /// Every font resolution this document has been given. An evaluation step reads it; only a
     /// host round between passes adds to it.
     font_resolution: Option<font_resolution::FontResolutionCache>,
+    /// The last request computed for the document element, retained so the next update can
+    /// publish its answer before evaluation begins.
+    root_font_request: Option<font_resolution::FontRequest>,
     /// The most recently committed layout outputs. Layout publishes a complete immutable
     /// generation; evaluation only reads it.
     layout_style_snapshots: std::sync::Arc<crate::layout::style_snapshot::LayoutStyleSnapshotStore>,

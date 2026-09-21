@@ -1254,6 +1254,39 @@ pub unsafe extern "C" fn style_engine_install_font_resolver(
     engine.retained.font_resolution = Some(super::font_resolution::FontResolutionCache::default());
 }
 
+/// Publishes the previous document-element font answer before style evaluation begins.
+///
+/// # Safety
+/// `engine` must point to a live style engine.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_prepare_root_font_resolution(engine: *mut c_void, generation: u64) {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    let state = &mut engine.state;
+    let Some(request) = state
+        .retained
+        .root_font_request
+        .as_ref()
+        .map(|request| request.for_generation(generation))
+    else {
+        return;
+    };
+    let resolver = state
+        .host
+        .font_resolver
+        .as_ref()
+        .expect("a root request has a font resolver");
+    let cache = state
+        .retained
+        .font_resolution
+        .as_mut()
+        .expect("a root request has a font resolution cache");
+    resolver.refill(
+        cache,
+        vec![request],
+        super::font_resolution::FontService::RootPreparation,
+    );
+}
+
 /// Creates a replay engine whose atom keys are opaque capture tokens rather than live fly strings.
 pub fn style_engine_create_for_replay(device_class: FfiDeviceClass) -> *mut c_void {
     abort_on_panic(|| Box::into_raw(Box::new(StyleEngine::new_for_replay(device_class.decode()))).cast())
