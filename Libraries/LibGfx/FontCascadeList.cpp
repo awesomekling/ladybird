@@ -6,6 +6,7 @@
 
 #include <AK/Atomic.h>
 #include <AK/HashMap.h>
+#include <AK/Mutex.h>
 #include <AK/Singleton.h>
 #include <LibGfx/Font/Typeface.h>
 #include <LibGfx/FontCascadeList.h>
@@ -26,15 +27,12 @@ void ladybird_gfx_note_wanted_pending_face(u64 face_id);
 
 namespace Gfx {
 
-// NB: Every pending face is created, destroyed and looked up on the document thread. A render pass
-//     never touches one: the frozen cascade it reads carries only the number, and the document
-//     turns numbers back into faces after the pass has ended.
+// NB: A render pass never touches a pending face: the frozen cascade it reads carries only the
+//     number, and the document turns numbers back into faces after the pass has ended. Faces are
+//     still created and destroyed from wherever a cascade is built, and that is no longer only the
+//     document thread, so the registry is guarded.
+static Singleton<Mutex> s_pending_faces_mutex;
 static Singleton<HashMap<u64, FontCascadeList::PendingFace*>> s_pending_faces_by_id;
-
-static HashMap<u64, FontCascadeList::PendingFace*>& pending_faces_by_id()
-{
-    return *s_pending_faces_by_id;
-}
 
 static Atomic<u64> s_next_pending_face_id { 1 };
 
@@ -46,18 +44,21 @@ FontCascadeList::PendingFace::PendingFace(UnicodeRange enclosing, Vector<Unicode
     , m_peek_state(move(peek_state))
     , m_id(s_next_pending_face_id.fetch_add(1, AK::MemoryOrder::memory_order_relaxed))
 {
-    pending_faces_by_id().set(m_id, this);
+    MutexLocker locker { *s_pending_faces_mutex };
+    s_pending_faces_by_id->set(m_id, this);
 }
 
 FontCascadeList::PendingFace::~PendingFace()
 {
-    pending_faces_by_id().remove(m_id);
+    MutexLocker locker { *s_pending_faces_mutex };
+    s_pending_faces_by_id->remove(m_id);
 }
 
 RefPtr<FontCascadeList::PendingFace> FontCascadeList::PendingFace::with_id(u64 id)
 {
-    auto it = pending_faces_by_id().find(id);
-    if (it == pending_faces_by_id().end())
+    MutexLocker locker { *s_pending_faces_mutex };
+    auto it = s_pending_faces_by_id->find(id);
+    if (it == s_pending_faces_by_id->end())
         return nullptr;
     return *it->value;
 }
