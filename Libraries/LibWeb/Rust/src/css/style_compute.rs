@@ -2750,9 +2750,11 @@ pub struct FfiAnimationLengthContexts {
 impl FfiAnimationLengthContexts {
     /// Put the kept contexts in the state the host's animation path would have built them in: the
     /// root font metrics are the row the host published rather than the root element's committed
-    /// style, the viewport dependence is the one the whole drive accumulated rather than the font
-    /// phase's, and the container bases are dropped - the drive derived them from the element's own
-    /// unit mask, while the host derives the animation ones from the animation batch's.
+    /// style, and the viewport dependence is the one the whole drive accumulated rather than the
+    /// font phase's.
+    ///
+    /// The container bases the drive resolved stay: which axes they cover is a question for
+    /// `covers_container_relative_units`, and what they hold is the same whoever asks.
     fn settle(
         &mut self,
         root_font_metrics: crate::css::style::animations::RootElementFontMetrics,
@@ -2767,12 +2769,6 @@ impl FfiAnimationLengthContexts {
             line_height: root_font_metrics.line_height,
         };
         for context in [&mut self.font, &mut self.line_height, &mut self.remaining] {
-            context.has_container_width_basis = false;
-            context.has_container_height_basis = false;
-            context.container_width_basis = 0.0;
-            context.container_height_basis = 0.0;
-            context.container_width_basis_depends_on_viewport_metrics = false;
-            context.container_height_basis_depends_on_viewport_metrics = false;
             context.resolved_viewport_relative_length = std::ptr::null_mut();
         }
         // The font context is `Length::ResolutionContext::for_element()` on both sides, root
@@ -2788,6 +2784,37 @@ impl FfiAnimationLengthContexts {
             self.line_height.root_font_metrics_depend_on_viewport_metrics = font_metrics_depend_on_viewport_metrics;
             self.remaining.root_font_metrics_depend_on_viewport_metrics = font_metrics_depend_on_viewport_metrics;
         }
+    }
+
+    /// Whether the container bases the drive left on these contexts answer every axis a batch that
+    /// uses these container-relative units would ask for.
+    ///
+    /// The host builds the animation contexts' bases from the *batch's* unit mask while the drive
+    /// built these from the element's own, but `100cqw` and `100cqh` are the same two numbers
+    /// whoever asks for them - they are a pure function of the resolution context, and these are
+    /// the very contexts the host would rebuild from. So a batch whose axes the drive already
+    /// resolved needs nothing the stage does not hold. A mirror of the axis logic of
+    /// `to_ffi_length_resolution_context_with_container_bases`.
+    fn covers_container_relative_units(&self, unit_mask: u8) -> bool {
+        const CQW: u8 = 1 << 0;
+        const CQH: u8 = 1 << 1;
+        const CQI: u8 = 1 << 2;
+        const CQB: u8 = 1 << 3;
+        /// `cqmin` and `cqmax`, which need both axes to be compared.
+        const BOTH_AXES: u8 = (1 << 4) | (1 << 5);
+
+        [&self.font, &self.line_height, &self.remaining]
+            .into_iter()
+            .all(|context| {
+                let (width_axis, height_axis) = match context.subject_inline_axis_is_horizontal {
+                    true => (CQI, CQB),
+                    false => (CQB, CQI),
+                };
+                let needs_width_basis = unit_mask & (CQW | BOTH_AXES | width_axis) != 0;
+                let needs_height_basis = unit_mask & (CQH | BOTH_AXES | height_axis) != 0;
+                (!needs_width_basis || context.has_container_width_basis)
+                    && (!needs_height_basis || context.has_container_height_basis)
+            })
     }
 }
 
@@ -3169,10 +3196,11 @@ unsafe fn try_stage_animation_tail(
     let properties = unsafe { std::slice::from_raw_parts(resolved.properties, resolved.count) };
     // The same terms the host's `cache_preparation` uses: everything outside them needs an input
     // the stage does not hold - a custom property to compute, the element's place among its
-    // siblings, a container's size, the document's base URL, a random base value.
+    // siblings, a container size no length context carries, the document's base URL, a random base
+    // value.
     let batch_is_fully_described = properties.iter().all(|property| property.custom_name_id == 0)
         && !resolved.uses_tree_counting_function
-        && resolved.container_relative_length_unit_mask == 0
+        && length_contexts.covers_container_relative_units(resolved.container_relative_length_unit_mask)
         && !resolved.needs_document_base_url
         && resolved.unfixed_random_sharing_count == 0;
     if !batch_is_fully_described {

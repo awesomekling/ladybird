@@ -1,0 +1,5 @@
+same-axis: 40px
+logical: 40px
+both-axes: 20px
+other-axis: 20px
+no-own-unit: 40px
