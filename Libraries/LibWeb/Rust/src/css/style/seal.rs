@@ -61,6 +61,21 @@ thread_local! {
     static STAGE_INTERLEAVES: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
     static LONGHAND_INPUT_FREEZE_REASONS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
     static BETWEEN_PASS_SERVICES: RefCell<HashMap<&'static str, (u64, u64)>> = RefCell::new(HashMap::new());
+    static HOST_DRIVEN_ROWS: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Record that one row's computation was entered from the host's per-element driver.
+///
+/// This is not a seal violation on its own: the row may neither read live host state nor write
+/// anything the host can see. It is counted because the end state is one sealed pass over the
+/// whole update, and a host loop that enters the engine once per element is not that - between
+/// two rows control is on the host side, holding host state. Driving this to zero is what makes
+/// the stage a single function rather than a sequence of calls.
+pub(crate) fn note_host_driven_row() {
+    if mode() == Mode::Off || UPDATE_DEPTH.with(|depth| depth.get() == 0) {
+        return;
+    }
+    HOST_DRIVEN_ROWS.with(|rows| rows.set(rows.get().wrapping_add(1)));
 }
 
 pub(crate) fn note_longhand_input_freeze(reasons: u8) {
@@ -224,6 +239,10 @@ pub(crate) fn flush_census() {
             "STYLE SEAL COUNT: callback={callback} calls={} during_style={}\n",
             counts.calls, counts.during_style
         ));
+    }
+    let host_driven_rows = HOST_DRIVEN_ROWS.with(|rows| rows.replace(0));
+    if host_driven_rows != 0 {
+        write_report(&format!("STYLE SEAL COUNT: host_driven_rows: {host_driven_rows}\n"));
     }
     let mut interleaves = STAGE_INTERLEAVES.with(|interleaves| {
         std::mem::take(&mut *interleaves.borrow_mut())

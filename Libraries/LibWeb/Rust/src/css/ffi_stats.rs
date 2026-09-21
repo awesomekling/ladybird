@@ -323,6 +323,11 @@ pub extern "C" fn rust_style_ffi_note_longhand_input_freeze(reasons: u8) {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn rust_style_ffi_note_host_driven_row() {
+    crate::css::style::seal::note_host_driven_row();
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_style_ffi_note_longhand_result_apply() {
     crate::css::style::seal::note_stage_interleave("longhand_result_apply");
 }

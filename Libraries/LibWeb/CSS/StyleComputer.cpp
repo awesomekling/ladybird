@@ -5675,6 +5675,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     begin_style_update();
     ScopeGuard end_style_update = [&] { this->end_style_update(); };
 
+    // One row of the update, entered from the host rather than computed inside a sealed pass over
+    // the whole update. Tracked, not a violation: see the style seal's note on host_driven_rows.
+    StyleValueFFI::rust_style_ffi_note_host_driven_row();
+
     ensure_style_metadata_tables_installed();
     VERIFY(computation_context_cache_is_empty());
 
