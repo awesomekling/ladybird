@@ -386,7 +386,12 @@ StyleAtomID StyleEngine::intern_attribute_name(Utf16FlyString const& local_name,
         folded_local = intern_qualified_atom(StyleEngine::any_namespace, folded_atom);
     }
 
-    note_attribute_name_forms(name, any_namespace, folded_name, folded_local);
+    auto local_name_view = local_name.view();
+    Vector<u16> local_name_code_units;
+    local_name_code_units.ensure_capacity(local_name_view.length_in_code_units());
+    for (size_t i = 0; i < local_name_view.length_in_code_units(); ++i)
+        local_name_code_units.unchecked_append(local_name_view.code_unit_at(i));
+    note_attribute_name_forms(name, any_namespace, folded_name, folded_local, local_name_code_units, namespace_atom == 0);
     names_by_namespace.set(namespace_atom, name);
     return name;
 }
@@ -394,10 +399,7 @@ StyleAtomID StyleEngine::intern_attribute_name(Utf16FlyString const& local_name,
 StyleAtomID StyleEngine::intern_attribute_value(StyleAtomID name, Utf16String const& value)
 {
     auto atom = intern_atom(Utf16FlyString { value });
-    if (!attribute_name_requires_value_text(name))
-        return atom;
-
-    publish_attribute_value_text(atom, value);
+    publish_attribute_value_text(atom, value, attribute_name_requires_value_text(name));
     return atom;
 }
 
@@ -407,10 +409,10 @@ void StyleEngine::backfill_attribute_value_text_if_required(StyleAtomID name, Ut
         return;
 
     auto atom = intern_atom(Utf16FlyString { value });
-    publish_attribute_value_text(atom, value);
+    publish_attribute_value_text(atom, value, true);
 }
 
-void StyleEngine::publish_attribute_value_text(StyleAtomID atom, Utf16View value)
+void StyleEngine::publish_attribute_value_text(StyleAtomID atom, Utf16View value, bool affects_selector_catalog)
 {
     // The engine holds one copy of the text per currently used value. Ask whether it survived
     // reclamation before copying it out of the attribute's representation again.
@@ -421,7 +423,7 @@ void StyleEngine::publish_attribute_value_text(StyleAtomID atom, Utf16View value
     code_units.ensure_capacity(value.length_in_code_units());
     for (size_t i = 0; i < value.length_in_code_units(); ++i)
         code_units.unchecked_append(value.code_unit_at(i));
-    StyleEngineFFI::style_engine_set_attribute_value_text(m_impl, atom.value(), code_units.data(), code_units.size());
+    StyleEngineFFI::style_engine_set_attribute_value_text(m_impl, atom.value(), code_units.data(), code_units.size(), affects_selector_catalog);
 }
 
 bool StyleEngine::refresh_attribute_value_text_requirements()

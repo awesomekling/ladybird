@@ -1421,10 +1421,10 @@ fn custom_property_needs_resolution(value: &StyleValueData) -> bool {
     )
 }
 
-/// Whether every value declared by this store can be resolved without any host substitution
-/// inputs. Registered properties still take the adapter path because their finalization reads
-/// registration-specific inheritance and syntax state.
-pub(crate) unsafe fn custom_property_store_is_callback_free(store: *const c_void, registry: *const c_void) -> bool {
+/// Whether every value declared by this store can be resolved from retained engine inputs. The
+/// longhand driver supplies the element's published attributes; the remaining substitution forms
+/// still require host state.
+pub(crate) unsafe fn custom_property_store_is_engine_resolvable(store: *const c_void, registry: *const c_void) -> bool {
     let Some(store) = (unsafe { store.cast::<CustomPropertyStore>().as_ref() }) else {
         return false;
     };
@@ -1443,7 +1443,17 @@ pub(crate) unsafe fn custom_property_store_is_callback_free(store: *const c_void
                 .expect("declared custom property must be an own value")
                 .value
                 .data();
-            custom_property_value_is_callback_free(value)
+            !matches!(
+                value,
+                StyleValueData::Unresolved {
+                    presence_dashed_function: true,
+                    ..
+                } | StyleValueData::Unresolved { presence_if: true, .. }
+                    | StyleValueData::Unresolved {
+                        presence_inherit: true,
+                        ..
+                    }
+            )
         })
 }
 
