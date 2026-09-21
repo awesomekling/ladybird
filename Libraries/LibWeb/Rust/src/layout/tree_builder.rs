@@ -3017,10 +3017,17 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: Guaranteed by the entry point's contract.
     let host = unsafe { dom_tree_builder_host(callbacks, arena) };
-    let TreeBuildStageOutput { outcome, reports } = run_tree_build_stage(&host, document_style_node);
+    let TreeBuildStageOutput {
+        outcome,
+        reports,
+        handbacks,
+    } = run_tree_build_stage(&host, document_style_node);
 
     let layout_host = host.layout();
     let arena = layout_host.arena();
+    // What the walk let go of goes back to the host first, as it would have while the walk ran:
+    // the boxes nodes gained or lost, and the host-owned objects of the rows it freed.
+    arena.pay_host_handbacks(handbacks);
     // What the build found out goes to the document now that the walk is complete and nothing can
     // clear a DOM update flag again, in the order the build found it out.
     if !reports.is_empty() {
@@ -3076,6 +3083,7 @@ pub unsafe extern "C" fn rust_build_layout_tree(
 struct TreeBuildStageOutput {
     outcome: FfiLayoutTreeBuildOutcome,
     reports: Vec<crate::layout::commit::FfiCommitMessage>,
+    handbacks: super::layout_node_arena::HostHandbacks,
 }
 
 /// The layout tree build stage: the walk that turns the style mirror's flat tree into layout
@@ -3084,6 +3092,7 @@ struct TreeBuildStageOutput {
 /// entry to pay once it returns.
 fn run_tree_build_stage(host: &DomTreeBuilderHost<'_>, document_style_node: u32) -> TreeBuildStageOutput {
     super::tree_build_seal::begin_build();
+    host.layout().arena().begin_deferring_host_handbacks();
     let mut state = TreeBuilderState::default();
     let mut context = TreeBuilderContext {
         document_style_node,
@@ -3199,6 +3208,7 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost<'_>, document_style_node: u32)
         arena.release_style_record_pinned_for_build(record);
     }
     arena.release_published_document_style();
+    let handbacks = arena.finish_deferring_host_handbacks();
 
     super::tree_build_seal::end_build();
     TreeBuildStageOutput {
@@ -3209,6 +3219,7 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost<'_>, document_style_node: u32)
             needs_another_build_pass: !state.layout_tree_rebuild_requests.is_empty(),
         },
         reports: state.reports,
+        handbacks,
     }
 }
 

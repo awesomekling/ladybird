@@ -64,7 +64,8 @@ pub(crate) fn free_subtree_and_destroy_shells(arena: *mut LayoutNodeArena, root:
     // SAFETY: Callers hold no reference derived from the arena across this call, and the
     // mutable borrow ends before the shells are destroyed.
     let freed = unsafe { &mut *arena }.free_subtree(root);
-    freed.destroy_shells_and_invoke_callbacks();
+    // SAFETY: As above; the mutable borrow has ended.
+    unsafe { &*arena }.hand_back_freed_subtree(freed);
 }
 
 #[must_use = "an unplaced layout node must be attached or freed"]
