@@ -1586,8 +1586,9 @@ pub unsafe extern "C" fn style_engine_committed_transform_reference_box(
 /// `engine` must be a pointer returned by `style_engine_create` and not yet destroyed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_destroy(engine: *mut c_void) {
-    super::seal::flush_census();
     let mut engine = unsafe { Box::from_raw(engine.cast::<StyleEngine>()) };
+    super::seal::flush_engine_decline_census(engine.counters().iter());
+    super::seal::flush_census();
     engine.end_recording();
 }
 

@@ -59,6 +59,12 @@ fn mode() -> Mode {
     })
 }
 
+/// Whether the seal keeps a census at all. The host asks once, so a row does not pay for
+/// instrumentation that nobody reads.
+pub(crate) fn is_reporting() -> bool {
+    mode() != Mode::Off
+}
+
 thread_local! {
     static UPDATE_DEPTH: Cell<u32> = const { Cell::new(0) };
     static REPORTED: RefCell<HashSet<&'static str>> = RefCell::new(HashSet::new());
@@ -68,6 +74,7 @@ thread_local! {
     static BETWEEN_PASS_SERVICES: RefCell<HashMap<&'static str, (u64, u64)>> = RefCell::new(HashMap::new());
     static HOST_DRIVEN_ROWS: Cell<u64> = const { Cell::new(0) };
     static HOST_SAMPLED_ANIMATION_ROWS: Cell<u64> = const { Cell::new(0) };
+    static HOST_DRIVEN_ROW_KINDS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
 }
 
 /// Record that one row's computation was entered from the host's per-element driver.
@@ -77,11 +84,42 @@ thread_local! {
 /// whole update, and a host loop that enters the engine once per element is not that - between
 /// two rows control is on the host side, holding host state. Driving this to zero is what makes
 /// the stage a single function rather than a sequence of calls.
-pub(crate) fn note_host_driven_row() {
+pub(crate) fn note_host_driven_row(kinds: u8) {
     if mode() == Mode::Off || UPDATE_DEPTH.with(|depth| depth.get() == 0) {
         return;
     }
     HOST_DRIVEN_ROWS.with(|rows| rows.set(rows.get().wrapping_add(1)));
+    let names = [
+        "in_frozen_batch",
+        "pseudo_element",
+        "no_previous_record",
+        "highlight_parent",
+        "longhand_drive_only",
+    ];
+    HOST_DRIVEN_ROW_KINDS.with(|counts| {
+        let mut counts = counts.borrow_mut();
+        for (index, name) in names.into_iter().enumerate() {
+            if kinds & (1 << index) != 0 {
+                let count = counts.entry(name).or_default();
+                *count = count.wrapping_add(1);
+            }
+        }
+    });
+}
+
+/// Report how often the engine declined to compute a record itself, by the reason it recorded.
+/// A host-driven row inside a published batch is a row one of these declined.
+pub(crate) fn flush_engine_decline_census<'a>(counters: impl Iterator<Item = (&'a str, u64)>) {
+    if mode() == Mode::Off {
+        return;
+    }
+    let mut rows = counters
+        .filter(|(name, value)| *value != 0 && name.starts_with("engineComputedRecord"))
+        .collect::<Vec<_>>();
+    rows.sort_unstable_by_key(|(name, _)| *name);
+    for (name, value) in rows {
+        write_report(&format!("STYLE SEAL COUNT: engine_record {name}: {value}\n"));
+    }
 }
 
 /// Record that one row's animations were sampled by the host after the stage returned.
@@ -104,14 +142,14 @@ pub(crate) fn note_longhand_input_freeze(reasons: u8) {
         return;
     }
     let names = [
-        "unused_bit_0",
+        "element_adjustment_facts",
         "monospace_recascade",
-        "unused_bit_2",
-        "unused_bit_3",
+        "tree_counting_inputs",
+        "custom_property_inheritance_walk",
         "custom_property_adapter",
         "font_length_resolution_context",
         "box_type_parent_display",
-        "element_reads",
+        "unused_bit_7",
     ];
     LONGHAND_INPUT_FREEZE_REASONS.with(|counts| {
         let mut counts = counts.borrow_mut();
@@ -269,6 +307,15 @@ pub(crate) fn flush_census() {
     let sampled = HOST_SAMPLED_ANIMATION_ROWS.with(|rows| rows.replace(0));
     if sampled != 0 {
         write_report(&format!("STYLE SEAL COUNT: host_sampled_animation_rows: {sampled}\n"));
+    }
+    let mut row_kinds = HOST_DRIVEN_ROW_KINDS.with(|counts| {
+        std::mem::take(&mut *counts.borrow_mut())
+            .into_iter()
+            .collect::<Vec<_>>()
+    });
+    row_kinds.sort_unstable_by_key(|(kind, _)| *kind);
+    for (kind, count) in row_kinds {
+        write_report(&format!("STYLE SEAL COUNT: host_driven_rows kind={kind}: {count}\n"));
     }
     let mut interleaves = STAGE_INTERLEAVES.with(|interleaves| {
         std::mem::take(&mut *interleaves.borrow_mut())

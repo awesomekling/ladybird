@@ -5680,7 +5680,30 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
 
     // One row of the update, entered from the host rather than computed inside a sealed pass over
     // the whole update. Tracked, not a violation: see the style seal's note on host_driven_rows.
-    StyleValueFFI::rust_style_ffi_note_host_driven_row();
+    // The kinds say where the row came from, so the census ranks what has to move first: a row
+    // the engine froze inputs for is one its own record computation declined.
+    enum HostDrivenRowKind : u8 {
+        InFrozenBatch = 1 << 0,
+        PseudoElement = 1 << 1,
+        NoPreviousRecord = 1 << 2,
+        HighlightParent = 1 << 3,
+        LonghandDriveOnly = 1 << 4,
+    };
+    static bool const style_seal_is_reporting = StyleValueFFI::rust_style_ffi_style_seal_is_reporting();
+    if (style_seal_is_reporting) {
+        u8 host_driven_row_kinds = 0;
+        if (m_style_engine.frozen_longhand_input(abstract_element.element().style_node_id()).is_present)
+            host_driven_row_kinds |= InFrozenBatch;
+        if (abstract_element.pseudo_element().has_value())
+            host_driven_row_kinds |= PseudoElement;
+        if (!previous_style_record)
+            host_driven_row_kinds |= NoPreviousRecord;
+        if (highlight_parent_style_record.has_value())
+            host_driven_row_kinds |= HighlightParent;
+        if (stop_after_longhand_drive)
+            host_driven_row_kinds |= LonghandDriveOnly;
+        StyleValueFFI::rust_style_ffi_note_host_driven_row(host_driven_row_kinds);
+    }
 
     ensure_style_metadata_tables_installed();
     VERIFY(computation_context_cache_is_empty());
@@ -6308,11 +6331,13 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         prepared_transaction.custom_property_resolution_is_callback_free,
         &transaction_input);
     enum LonghandInputFreezeReason : u8 {
+        ElementAdjustmentFacts = 1 << 0,
         MonospaceRecascade = 1 << 1,
+        TreeCountingInputs = 1 << 2,
+        CustomPropertyInheritanceWalk = 1 << 3,
         CustomPropertyAdapter = 1 << 4,
         FontLengthResolutionContext = 1 << 5,
         BoxTypeParentDisplay = 1 << 6,
-        ElementReads = 1 << 7,
     };
     // Which live host state this row's transaction preparation actually read. A row that reads
     // none is frozen from the engine's own retained state: the working set it fills is created
@@ -6326,10 +6351,12 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         late_freeze_reasons |= FontLengthResolutionContext;
     if (native_context.state->used_host_box_type_parent_display)
         late_freeze_reasons |= BoxTypeParentDisplay;
-    if (native_context.state->used_host_element_adjustment_facts
-        || native_context.state->used_host_tree_counting_inputs
-        || native_context.state->used_host_custom_property_inheritance_walk)
-        late_freeze_reasons |= ElementReads;
+    if (native_context.state->used_host_element_adjustment_facts)
+        late_freeze_reasons |= ElementAdjustmentFacts;
+    if (native_context.state->used_host_tree_counting_inputs)
+        late_freeze_reasons |= TreeCountingInputs;
+    if (native_context.state->used_host_custom_property_inheritance_walk)
+        late_freeze_reasons |= CustomPropertyInheritanceWalk;
     if (late_freeze_reasons != 0)
         StyleValueFFI::rust_style_ffi_note_longhand_input_freeze(late_freeze_reasons);
     input.transaction_input = &transaction_input;
