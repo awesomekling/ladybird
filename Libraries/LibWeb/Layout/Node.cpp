@@ -412,7 +412,6 @@ void NodeWithStyle::initialize_stamped_style_record()
     VERIFY(m_style_record_identity);
     VERIFY(m_style_payloads);
     did_update_style_record();
-    synchronize_table_span_data();
 }
 
 void NodeWithStyle::initialize_from_style_record()
@@ -829,24 +828,50 @@ void NodeWithStyle::did_update_style_record()
     document().forget_snapped_areas_of_scroll_container(*snap_container);
 }
 
+namespace {
+
+struct TableSpans {
+    u16 column_span { 1 };
+    u16 row_span { 1 };
+    u32 raw_column_span { 1 };
+};
+
+}
+
+static TableSpans table_spans_of(DOM::Node const* node)
+{
+    TableSpans spans;
+    if (auto const* cell = as_if<HTML::HTMLTableCellElement>(node)) {
+        spans.column_span = static_cast<u16>(cell->col_span());
+        spans.row_span = static_cast<u16>(cell->row_span());
+    } else if (auto const* column = as_if<HTML::HTMLTableColElement>(node)) {
+        spans.column_span = static_cast<u16>(column->span());
+        // The raw span keeps the unclamped attribute value; its only consumer is the
+        // table formatting context's column handling, so other elements' span
+        // attributes stay out of the arena map.
+        spans.raw_column_span = column->get_attribute_value(HTML::AttributeNames::span).to_number<u32>().value_or(1);
+    }
+    return spans;
+}
+
 bool NodeWithStyle::synchronize_table_span_data()
 {
-    u16 column_span = 1;
-    u16 row_span = 1;
-    u32 raw_column_span = 1;
-    if (auto const* node = dom_node()) {
-        if (auto const* cell = as_if<HTML::HTMLTableCellElement>(*node)) {
-            column_span = static_cast<u16>(cell->col_span());
-            row_span = static_cast<u16>(cell->row_span());
-        } else if (auto const* column = as_if<HTML::HTMLTableColElement>(*node)) {
-            column_span = static_cast<u16>(column->span());
-            // The raw span keeps the unclamped attribute value; its only consumer is the
-            // table formatting context's column handling, so other elements' span
-            // attributes stay out of the arena map.
-            raw_column_span = column->get_attribute_value(HTML::AttributeNames::span).to_number<u32>().value_or(1);
-        }
-    }
-    return RustFFI::layout_arena_set_table_spans(arena_handle(), slot_id(this), column_span, row_span, raw_column_span);
+    auto spans = table_spans_of(dom_node());
+    return RustFFI::layout_arena_set_table_spans(arena_handle(), slot_id(this), spans.column_span, spans.row_span, spans.raw_column_span);
+}
+
+// The spans a row built for a table cell or table column takes from its attributes, published
+// under the element's identity for the rows the build has yet to stamp. The rows the element
+// already has are synchronised by the attribute change that moved the spans.
+void publish_table_spans(DOM::Element const& element)
+{
+    if (!is<HTML::HTMLTableCellElement>(element) && !is<HTML::HTMLTableColElement>(element))
+        return;
+    auto identity = element.style_node_id();
+    if (identity.value() == 0)
+        return;
+    auto spans = table_spans_of(&element);
+    const_cast<DOM::Document&>(element.document()).style_computer().style_engine().set_element_table_spans(identity, spans.column_span, spans.row_span, spans.raw_column_span);
 }
 
 void NodeWithStyle::set_display(CSS::Display display)

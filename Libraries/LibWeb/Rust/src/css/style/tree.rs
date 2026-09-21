@@ -613,6 +613,24 @@ impl Iterator for FlatTreeChildren<'_> {
     }
 }
 
+/// The spans a table cell or table column takes from its attributes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TableSpans {
+    pub column_span: u16,
+    pub row_span: u16,
+    pub raw_column_span: u32,
+}
+
+impl Default for TableSpans {
+    fn default() -> Self {
+        Self {
+            column_span: 1,
+            row_span: 1,
+            raw_column_span: 1,
+        }
+    }
+}
+
 /// The Rust-owned projection of the tree relations selectors navigate.
 ///
 /// Element columns are indexed by element index, with slot 0 unused so that a `StyleNodeID` indexes
@@ -654,6 +672,11 @@ pub struct StyleNodeTree {
     /// holds none of them, so the absence of an entry is the answer for nearly the whole tree.
     /// Both element and text identities publish here, as both get rows.
     dom_paint_facts: HashMap<StyleNodeID, u8>,
+    /// The spans a table cell's or table column's attributes give it: the effective column and row
+    /// span, and the column span attribute's unclamped value, which only the table formatting
+    /// context's column handling reads. Every other element spans one of each, which is what the
+    /// absence of an entry means.
+    table_spans: HashMap<StyleNodeID, TableSpans>,
     /// The layout tree update mark elements hold. Text nodes hold one too, in `text.marks`.
     marks: LayoutTreeUpdateMarks,
     connected_element_count: u32,
@@ -713,6 +736,7 @@ impl StyleNodeTree {
             disables_descendants: BitColumn::default(),
             unique_node_ids: Vec::new(),
             dom_paint_facts: HashMap::default(),
+            table_spans: HashMap::default(),
             marks: LayoutTreeUpdateMarks::default(),
             connected_element_count: 0,
             pending_reuse: Vec::new(),
@@ -910,6 +934,7 @@ impl StyleNodeTree {
         self.disables_descendants.set(index as usize, false);
         self.set_unique_node_id_at(index, 0);
         self.dom_paint_facts.remove(&StyleNodeID::element(index));
+        self.table_spans.remove(&StyleNodeID::element(index));
         self.marks.clear(index as usize);
         if let Some(capacity_before_growth) = capacity_before_growth {
             let current = self.identity_capacity_bytes();
@@ -951,6 +976,7 @@ impl StyleNodeTree {
             self.disables_descendants.set(index as usize, false);
             self.set_unique_node_id_at(index, 0);
             self.dom_paint_facts.remove(&node);
+            self.table_spans.remove(&node);
             self.marks.clear(index as usize);
             self.parent[index as usize] = None;
             self.first_element_child[index as usize] = None;
@@ -1159,6 +1185,27 @@ impl StyleNodeTree {
             self.dom_paint_facts.remove(&node);
         } else {
             self.dom_paint_facts.insert(node, facts);
+        }
+        let current = self.identity_capacity_bytes();
+        self.record_capacity_change(memory, before, current);
+    }
+
+    // -- Table spans -----------------------------------------------------------------------------
+
+    /// The spans a row built for the element takes from its attributes.
+    #[must_use]
+    pub fn table_spans(&self, node: StyleNodeID) -> TableSpans {
+        self.table_spans.get(&node).copied().unwrap_or_default()
+    }
+
+    /// Record the spans a row built for the element takes from its attributes. Spanning one of
+    /// each is the absence of an entry.
+    pub fn set_table_spans(&mut self, node: StyleNodeID, spans: TableSpans, memory: &mut MemoryController) {
+        let before = self.identity_capacity_bytes();
+        if spans == TableSpans::default() {
+            self.table_spans.remove(&node);
+        } else {
+            self.table_spans.insert(node, spans);
         }
         let current = self.identity_capacity_bytes();
         self.record_capacity_change(memory, before, current);
@@ -2069,6 +2116,7 @@ impl StyleNodeTree {
                 self.next_sibling,
                 self.previous_sibling,
                 self.dom_paint_facts,
+                self.table_spans,
             ];
             cached [];
             nested [
