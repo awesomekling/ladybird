@@ -40,6 +40,8 @@ pub(crate) struct HostTables {
     /// Whether the document's invalidation journal holds marks the render side has not taken yet.
     /// The document only reports it while the main-side access census counts.
     pub(super) invalidation_journal_pending: Cell<bool>,
+    /// How the host names a node a layout trace mentions, set when tracing begins.
+    pub(super) layout_trace_describe_node: Cell<Option<super::trace::DescribeNode>>,
 }
 
 impl HostTables {

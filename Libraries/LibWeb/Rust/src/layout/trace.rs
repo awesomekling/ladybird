@@ -16,10 +16,9 @@ mod main_thread_entries;
 pub(crate) use main_thread_entries::MainThreadFfiEntry;
 
 type AppendText = unsafe extern "C" fn(*mut c_void, *const u8, usize);
-type DescribeNode = unsafe extern "C" fn(*mut c_void, *mut c_void, AppendText);
+pub(crate) type DescribeNode = unsafe extern "C" fn(*mut c_void, *mut c_void, AppendText);
 
 struct Trace {
-    describe_node: DescribeNode,
     lines: Vec<Line>,
     depth: usize,
 }
@@ -48,10 +47,9 @@ impl Drop for Scope<'_> {
 }
 
 impl LayoutTrace {
-    fn begin(&self, describe_node: DescribeNode) {
+    fn begin(&self) {
         assert!(self.0.borrow().as_ref().is_none_or(|trace| trace.depth == 0));
         *self.0.borrow_mut() = Some(Trace {
-            describe_node,
             lines: Vec::new(),
             depth: 0,
         });
@@ -80,9 +78,10 @@ impl LayoutTrace {
 
     /// Names the nodes the traced events name. This runs once a pass is over, while the nodes the
     /// pass ran for are still live: a subsequent mutation may remove them or reuse their arena
-    /// slots before JavaScript takes the trace.
+    /// slots before JavaScript takes the trace. The host describes them through the callback it
+    /// registered in the host tables when tracing began.
     pub(super) fn name_owners(&self, main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena) {
-        let (describe, unnamed) = {
+        let unnamed = {
             let state = self.0.borrow();
             let Some(trace) = state.as_ref() else {
                 return;
@@ -94,8 +93,15 @@ impl LayoutTrace {
                 .filter(|(_, line)| line.owner_name.is_none())
                 .filter_map(|(index, line)| line.owner.map(|owner| (index, owner)))
                 .collect();
-            (trace.describe_node, unnamed)
+            unnamed
         };
+        if unnamed.is_empty() {
+            return;
+        }
+        let describe = main_thread
+            .host_tables()
+            .and_then(|host_tables| host_tables.layout_trace_describe_node.get())
+            .expect("a layout trace names its nodes through the callback it began with");
         let names: Vec<(usize, String)> = unnamed
             .into_iter()
             .map(|(index, owner)| (index, owner_name(main_thread, arena, owner, describe)))
@@ -202,18 +208,15 @@ fn owner_name(
 /// must synchronously describe its live node shell without mutating layout.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_begin_layout_trace(arena: *mut c_void, describe_node: DescribeNode) {
-    unsafe { LayoutNodeArena::from_handle(arena) }
-        .layout_trace
-        .begin(describe_node);
+    unsafe { super::HostTables::from_handle(arena) }
+        .layout_trace_describe_node
+        .set(Some(describe_node));
+    unsafe { LayoutNodeArena::from_handle(arena) }.layout_trace.begin();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    unsafe extern "C" fn unused_description(_: *mut c_void, _: *mut c_void, _: AppendText) {
-        panic!("no nodes to describe in this test");
-    }
 
     #[test]
     fn disabled_trace_does_not_construct_labels() {
@@ -227,7 +230,7 @@ mod tests {
     fn preserves_nesting_repeated_runs_and_multiple_passes() {
         let arena = LayoutNodeArena::new();
         let trace = LayoutTrace::default();
-        trace.begin(unused_description);
+        trace.begin();
         {
             let _pass = trace.scope("layout FULL", None, String::new);
             let _run = trace.scope("", None, || "@viewport/block RUN (cache=bypass)".into());
@@ -251,9 +254,9 @@ mod tests {
     fn begin_discards_previous_events() {
         let arena = LayoutNodeArena::new();
         let trace = LayoutTrace::default();
-        trace.begin(unused_description);
+        trace.begin();
         drop(trace.scope("", None, || "old pass".into()));
-        trace.begin(unused_description);
+        trace.begin();
         assert_eq!(trace.take(&crate::stage::MainThread::for_test(), &arena), "");
     }
 }
