@@ -2794,6 +2794,34 @@ extern "C" fn ladybird_gfx_typeface_unref(_typeface: *const c_void) {}
 extern "C" fn ladybird_libweb_font_cascade_memo_ref(_memo: *const c_void) {}
 #[unsafe(no_mangle)]
 extern "C" fn ladybird_libweb_font_cascade_memo_unref(_memo: *const c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_set_host_reaching_call_hook(_hook: extern "C" fn(*const u8, usize)) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_note_host_reaching_call(_name: *const u8, _length: usize) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_note_wanted_pending_face(_face_id: u64) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_requeue_wanted_pending_face(_face_id: u64) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_take_wanted_pending_faces(
+    _context: *mut c_void,
+    _visit: extern "C" fn(*mut c_void, u64, bool),
+) {
+}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_next_path_identity() -> u64 {
+    1
+}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_register_image_frame(_id: u64, _frame: *const c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_forget_image_frame(_id: u64, _frame: *const c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_image_frame_for_id(_id: u64, _out: *mut c_void) -> *mut c_void {
+    std::ptr::null_mut()
+}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_note_crate_copy(_marker: *const c_void) {}
 
 // Replay publishes no element custom-property environments, so the engine holds no reference to a
 // C++ `CustomPropertyData` and there is none to take or give up here.

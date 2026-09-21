@@ -22,10 +22,20 @@
 
 pub(crate) fn install_once() {
     static INSTALLED: std::sync::Once = std::sync::Once::new();
-    INSTALLED.call_once(|| libgfx_rust::font::set_host_reaching_call_hook(report));
+    INSTALLED.call_once(|| {
+        // LibWeb's copy of the graphics crate, reporting itself to the one store LibGfx keeps.
+        libgfx_rust::ladybird_gfx_register_rust_crate_copy();
+        libgfx_rust::font::set_host_reaching_call_hook(report);
+    });
 }
 
-fn report(callback: &'static str) {
+/// The name arrives as bytes rather than as a `&'static str` because the hook is held by LibGfx's
+/// C++ side: the graphics crate is compiled into two libraries and must keep no state of its own.
+extern "C" fn report(name: *const u8, length: usize) {
+    // SAFETY: LibGfx passes back the bytes of the `&'static str` literal a call site named, so
+    // they are valid UTF-8 and outlive the process.
+    let callback: &'static str =
+        unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts::<'static, u8>(name, length)) };
     crate::layout::seal::note_host_call(crate::layout::seal::a_layout_pass_is_running(), callback);
     crate::painting::seal::note_host_call(callback);
 }
