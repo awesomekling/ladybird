@@ -2988,10 +2988,26 @@ unsafe fn try_stage_animation_tail(
         ),
         None => published_active_effects(style_engine, node, slot)?,
     };
-    // An element with nothing to sample has its overlay cleared rather than replaced, which is a
-    // different message to the host; it stays with the host for now.
+    // An element with nothing to sample says one of two different things. An element that holds no
+    // effect of its own at all - the published rows name none, or name only the provisional
+    // transitions no animation list holds - keeps the overlay it computed. An element that holds
+    // effects, every one of which turned out to be inactive, has its animated properties cleared
+    // instead, and an empty overlay is what that clearing leaves behind.
     if preparation_effects.is_empty() {
-        return None;
+        let holds_an_effect = style_engine
+            .element_animation_timing_rows(node, slot)
+            .iter()
+            .any(|row| !crate::css::style::animations::row_is_not_associated(row));
+        let overlay = match holds_an_effect || existing_overlay.is_null() {
+            true => crate::css::animated_overlay::rust_animated_overlay_create(),
+            false => unsafe { crate::css::animated_overlay::rust_animated_overlay_clone(existing_overlay) },
+        };
+        return Some(StageAnimationTail {
+            overlay,
+            depends_on_viewport_metrics: false,
+            font_metrics_depend_on_viewport_metrics: false,
+            keyframes_inherited_non_inherited_style_groups: 0,
+        });
     }
 
     let table = unsafe { &*drive_input.longhand_table };
