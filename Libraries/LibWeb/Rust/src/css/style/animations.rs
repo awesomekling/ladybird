@@ -1606,6 +1606,7 @@ pub(crate) struct PublishedKeyframe {
     pub(crate) easing: PublishedEasing,
     pub(crate) composite: u8,
     declaration_range: std::ops::Range<usize>,
+    custom_declaration_range: std::ops::Range<usize>,
 }
 
 /// The two holes a `@keyframes` rule's own description keeps, which only the animation running it
@@ -1645,6 +1646,17 @@ pub(crate) struct PublishedDeclaration {
     pub(crate) value: crate::css::style_value::RetainedStyleValueData,
 }
 
+/// One custom property a published keyframe declares. The name is retained, because a description
+/// outlives the call that published it and a fly string's raw representation is only an identity
+/// while the string is alive. `use_initial` marks the keyframe the host synthesized to hold the
+/// element's underlying value for the name, which is not known until the element is sampled, and
+/// then there is no value.
+pub(crate) struct PublishedCustomDeclaration {
+    pub(crate) name: crate::css::retained_fly_string::RetainedUtf16FlyString,
+    pub(crate) use_initial: bool,
+    pub(crate) value: crate::css::style_value::RetainedStyleValueData,
+}
+
 /// One of an element's animation effects, described for the style stage.
 pub(crate) struct PublishedEffect {
     pub(crate) identity: u64,
@@ -1653,6 +1665,7 @@ pub(crate) struct PublishedEffect {
     pub(crate) base_url: Box<[u8]>,
     pub(crate) keyframes: Box<[PublishedKeyframe]>,
     pub(crate) declarations: Box<[PublishedDeclaration]>,
+    pub(crate) custom_declarations: Box<[PublishedCustomDeclaration]>,
 }
 
 impl PublishedEffect {
@@ -1664,6 +1677,19 @@ impl PublishedEffect {
     #[must_use]
     pub(crate) fn declarations_of(&self, keyframe: &PublishedKeyframe) -> &[PublishedDeclaration] {
         &self.declarations[keyframe.declaration_range.clone()]
+    }
+
+    #[must_use]
+    pub(crate) fn custom_declarations_of(&self, keyframe: &PublishedKeyframe) -> &[PublishedCustomDeclaration] {
+        &self.custom_declarations[keyframe.custom_declaration_range.clone()]
+    }
+
+    /// Whether any keyframe of this effect declares a custom property. The host's own fast path
+    /// through a description resolves longhands alone, so it refuses such an effect and walks the
+    /// keyframe sets as it always has; the stage's tail samples it.
+    #[must_use]
+    pub(crate) fn declares_custom_properties(&self) -> bool {
+        !self.custom_declarations.is_empty()
     }
 
     #[must_use]
@@ -1682,6 +1708,7 @@ pub struct PublishedEffectBuffers<'a> {
     pub effects: &'a [super::bridge::FfiPublishedAnimationEffect],
     pub keyframes: &'a [super::bridge::FfiPublishedAnimationKeyframe],
     pub declarations: &'a [super::bridge::FfiPublishedAnimationDeclaration],
+    pub custom_declarations: &'a [super::bridge::FfiPublishedAnimationCustomDeclaration],
     pub linear_points: &'a [super::bridge::FfiPublishedLinearEasingPoint],
     pub base_url_bytes: &'a [u8],
 }
@@ -1709,6 +1736,7 @@ impl AnimationEffectDescriptions {
             effects,
             keyframes,
             declarations,
+            custom_declarations,
             linear_points,
             base_url_bytes,
         } = published_buffers;
@@ -1721,6 +1749,7 @@ impl AnimationEffectDescriptions {
                 effects,
                 keyframes,
                 declarations,
+                custom_declarations,
                 linear_points,
                 base_url_bytes,
             })
@@ -1754,6 +1783,7 @@ unsafe fn build_published_effects(published_buffers: PublishedEffectBuffers<'_>)
         effects,
         keyframes,
         declarations,
+        custom_declarations,
         linear_points,
         base_url_bytes,
     } = published_buffers;
@@ -1764,6 +1794,7 @@ unsafe fn build_published_effects(published_buffers: PublishedEffectBuffers<'_>)
                 effect.first_keyframe as usize..(effect.first_keyframe + effect.keyframe_count) as usize;
             let mut published_keyframes = Vec::with_capacity(keyframe_range.len());
             let mut published_declarations = Vec::new();
+            let mut published_custom_declarations = Vec::new();
             for keyframe in &keyframes[keyframe_range] {
                 let points = linear_points[keyframe.first_linear_point as usize..]
                     [..keyframe.linear_point_count as usize]
@@ -1793,6 +1824,30 @@ unsafe fn build_published_effects(published_buffers: PublishedEffectBuffers<'_>)
                         value,
                     });
                 }
+                let first_custom = published_custom_declarations.len();
+                for declaration in &custom_declarations[keyframe.first_custom_declaration as usize..]
+                    [..keyframe.custom_declaration_count as usize]
+                {
+                    // SAFETY: the caller holds a reference to the value and the name for the call,
+                    //         and each retain below takes one of its own for the engine.
+                    let value = match declaration.value.is_null() {
+                        true => crate::css::style_value::RetainedStyleValueData::none(),
+                        false => unsafe {
+                            crate::css::style_value::RetainedStyleValueData::from_retained_pointer(
+                                crate::css::style_value::rust_style_value_retain(declaration.value.cast()),
+                            )
+                        },
+                    };
+                    published_custom_declarations.push(PublishedCustomDeclaration {
+                        name: unsafe {
+                            crate::css::retained_fly_string::RetainedUtf16FlyString::from_borrowed_raw(
+                                declaration.name_raw,
+                            )
+                        },
+                        use_initial: declaration.use_initial,
+                        value,
+                    });
+                }
                 published_keyframes.push(PublishedKeyframe {
                     key: keyframe.key,
                     easing: PublishedEasing {
@@ -1807,6 +1862,7 @@ unsafe fn build_published_effects(published_buffers: PublishedEffectBuffers<'_>)
                     },
                     composite: keyframe.composite,
                     declaration_range: first..published_declarations.len(),
+                    custom_declaration_range: first_custom..published_custom_declarations.len(),
                 });
             }
             published.push(PublishedEffect {
@@ -1818,6 +1874,7 @@ unsafe fn build_published_effects(published_buffers: PublishedEffectBuffers<'_>)
                     .into_boxed_slice(),
                 keyframes: published_keyframes.into_boxed_slice(),
                 declarations: published_declarations.into_boxed_slice(),
+                custom_declarations: published_custom_declarations.into_boxed_slice(),
             });
         }
         published

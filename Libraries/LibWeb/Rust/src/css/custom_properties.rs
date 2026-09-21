@@ -533,6 +533,18 @@ impl CustomPropertyStore {
             .and_then(|name_raw| self.own_values.get(name_raw))
     }
 
+    /// The value this store answers for a name, retained for a caller that outlives the borrow.
+    pub(crate) fn retained_value(&self, name_raw: usize) -> Option<RetainedStyleValueData> {
+        self.get(name_raw).map(|entry| entry.value.clone_retained())
+    }
+
+    /// Whether the element this store belongs to declares `name_raw` itself, with `!important`.
+    /// Only the declared prefix counts: the rest of `own_values` is what structural sharing
+    /// absorbed from ancestors, which the element did not declare.
+    pub(crate) fn declares_important(&self, name_raw: usize) -> bool {
+        self.declared_names.contains(&name_raw) && self.own_values.get(&name_raw).is_some_and(|entry| entry.important)
+    }
+
     pub(crate) fn value_matches(&self, name_raw: usize, value: &StyleValueData) -> bool {
         self.get(name_raw).is_some_and(|entry| entry.value.data() == value)
     }
