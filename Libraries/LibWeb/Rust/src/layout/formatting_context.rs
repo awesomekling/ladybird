@@ -6,11 +6,9 @@
 
 use super::*;
 
-pub(crate) struct MainThreadFfiEntry {
-    _private: (),
-}
+mod main_thread_entries;
 
-const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
+pub(crate) use main_thread_entries::MainThreadFfiEntry;
 
 pub(super) const CALC_NUMERIC_KIND_LENGTH: u8 = 4;
 
@@ -2234,34 +2232,6 @@ pub(crate) fn treat_block_axis_percentage_insets_as_auto_beyond_anonymous_child_
     )
 }
 
-/// # Safety
-///
-/// `arena` must be a live handle with a registered layout host, used on the document thread,
-/// and `viewport` must be its live viewport box.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_run_root_layout(
-    arena: *mut c_void,
-    viewport: NodeSlotId,
-    viewport_inline_size_raw: i32,
-    viewport_block_size_raw: i32,
-    document_in_quirks_mode: bool,
-    should_collect_devtools_layout_data: bool,
-) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
-    // SAFETY: Guaranteed by the entry point's contract.
-    unsafe {
-        run_root_layout(
-            &main_thread,
-            arena,
-            viewport,
-            viewport_inline_size_raw,
-            viewport_block_size_raw,
-            document_in_quirks_mode,
-            should_collect_devtools_layout_data,
-        );
-    }
-}
-
 struct LayoutStageInput<'a> {
     arena: &'a LayoutNodeArena,
     root: NodeSlotId,
@@ -2505,24 +2475,6 @@ unsafe fn commit_entry_pass<'a>(
     arena.end_layout_pass();
     arena.reset_layout_update_flags_in_subtree(commit_root);
     arena
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle with a registered layout host, used on the document thread, and
-/// `root` must be a live partial relayout boundary.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_compute_subtree_layout(
-    arena: *mut c_void,
-    root: NodeSlotId,
-    viewport_inline_size_raw: i32,
-    document_in_quirks_mode: bool,
-) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
-    // SAFETY: Guaranteed by the entry point's contract.
-    unsafe {
-        compute_subtree_layout(&main_thread, arena, root, viewport_inline_size_raw, document_in_quirks_mode);
-    }
 }
 
 /// The host-free partial layout stage. Its input carries no host table or main-thread capability.

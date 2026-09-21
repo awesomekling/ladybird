@@ -1,0 +1,665 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! The FFI entries of the parent module that mint the main thread capability. Only this module can
+//! construct its marker, and the entries are private, so stage code in the parent module can neither
+//! mint the capability nor call an entry that does.
+
+use super::*;
+
+pub(crate) struct MainThreadFfiEntry {
+    _private: (),
+}
+
+const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread. The
+/// host callback receives live layout node shells.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_scrolling_box_for_scroll_step(
+    arena: *mut c_void,
+    target: NodeSlotId,
+    viewport: NodeSlotId,
+    delta: FfiCssPixelPoint,
+    viewport_wheel_overflow_x: u8,
+    viewport_wheel_overflow_y: u8,
+) -> *mut c_void {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let arena = unsafe { arena_from_handle(arena) };
+    let scrolling_box = crate::painting::scroll_chain::scrolling_box_for_scroll_step(
+        &arena.paintable_rows(),
+        target,
+        viewport,
+        delta.into(),
+        ViewportWheelOverflow {
+            x: viewport_wheel_overflow_x,
+            y: viewport_wheel_overflow_y,
+        },
+        &scroll_offset_reader(arena),
+    );
+    arena.shell_if_live(&main_thread, scrolling_box)
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread. The
+/// host callback receives live layout node shells.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_for_each_wheel_scrollable_box_in_containing_block_chain(
+    arena: *mut c_void,
+    start: NodeSlotId,
+    wheel_delta_x: f64,
+    wheel_delta_y: f64,
+    viewport_wheel_overflow_x: u8,
+    viewport_wheel_overflow_y: u8,
+    context: *mut c_void,
+    push_scrollable_box: unsafe extern "C" fn(*mut c_void, *mut c_void, f64, f64),
+) {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let arena = unsafe { arena_from_handle(arena) };
+    crate::painting::scroll_chain::for_each_wheel_scrollable_box_in_containing_block_chain(
+        &arena.paintable_rows(),
+        start,
+        wheel_delta_x,
+        wheel_delta_y,
+        ViewportWheelOverflow {
+            x: viewport_wheel_overflow_x,
+            y: viewport_wheel_overflow_y,
+        },
+        &scroll_offset_reader(arena),
+        |node, accepted_delta_x, accepted_delta_y| {
+            // SAFETY: The C++ callback appends the shell and deltas to a caller-owned collection.
+            unsafe {
+                push_scrollable_box(
+                    context,
+                    arena.node_shell(&main_thread, node),
+                    accepted_delta_x,
+                    accepted_delta_y,
+                );
+            }
+        },
+    );
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_first_wheel_scrollable_box_in_containing_block_chain(
+    arena: *mut c_void,
+    start: NodeSlotId,
+    viewport_wheel_overflow_x: u8,
+    viewport_wheel_overflow_y: u8,
+) -> *mut c_void {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let arena = unsafe { arena_from_handle(arena) };
+    let scrollable_box = crate::painting::scroll_chain::first_wheel_scrollable_box_in_containing_block_chain(
+        &arena.paintable_rows(),
+        start,
+        ViewportWheelOverflow {
+            x: viewport_wheel_overflow_x,
+            y: viewport_wheel_overflow_y,
+        },
+    );
+    arena.shell_if_live(&main_thread, scrollable_box)
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_paintable_cleared_from_node(arena: *mut c_void, layout_node: NodeSlotId) {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    // SAFETY: Guaranteed by the entry point's contract.
+    unsafe {
+        crate::layout::paying_host_handbacks(&main_thread, arena, || {
+            clear_paintable_row_of_node(arena, layout_node);
+        });
+    }
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_paintable_event_dispatch_node_shell(
+    arena: *mut c_void,
+    slot: NodeSlotId,
+) -> *mut c_void {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let arena = unsafe { arena_from_handle(arena) };
+    crate::painting::hit_test::resolve::event_dispatch_shell_for_paintable(&main_thread, arena, slot)
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_paintable_layout_node_shell(arena: *mut c_void, slot: NodeSlotId) -> *mut c_void {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let arena = unsafe { arena_from_handle(arena) };
+    if !arena.paintable_row_is_populated(slot) {
+        return std::ptr::null_mut();
+    }
+    arena.shell_if_live(&main_thread, slot)
+}
+
+/// # Safety
+///
+/// `tree` must be a live retained tree handle, `command_runs` must address `command_run_count`
+/// runs and `scroll_offsets` `scroll_offsets_len` points for the call, and `callbacks` must be
+/// live. The painter callbacks run synchronously and may re-enter this function for a nested
+/// display list. `effect_clip_plan` must remain live and must have been prepared
+/// for these runs and the tree's current structural epoch.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn display_list_replay(
+    tree: *const c_void,
+    effect_clip_plan: *const c_void,
+    command_runs: *const crate::painting::display_list::commands::DisplayListCommandRun,
+    command_run_count: usize,
+    scroll_offsets: *const libgfx_rust::FloatPoint,
+    scroll_offsets_len: usize,
+    callbacks: *const crate::painting::host::FfiDisplayListReplayCallbacks,
+) {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let tree = unsafe { tree_from_handle(tree) };
+    // SAFETY: The caller guarantees the slices address the stated number of values.
+    let (command_runs, scroll_offsets) = unsafe {
+        (
+            ffi_slice(command_runs, command_run_count),
+            ffi_slice(scroll_offsets, scroll_offsets_len),
+        )
+    };
+    // SAFETY: The caller guarantees `callbacks` is live for the call.
+    let mut painter = crate::painting::host::DisplayListReplayHost::new(unsafe { *callbacks }, &main_thread);
+    let effect_clip_plan =
+        unsafe { &*effect_clip_plan.cast::<crate::painting::display_list::effect_clip_plan::EffectClipPlan>() };
+    crate::painting::display_list::replay::replay_display_list(
+        tree,
+        command_runs,
+        effect_clip_plan,
+        scroll_offsets,
+        &mut painter,
+    );
+}
+
+/// # Safety
+///
+/// `arena` must be a live arena used on the document thread.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_prepare_for_rendering(
+    arena: *mut c_void,
+    root_background_source: crate::painting::host::FfiRootBackgroundSource,
+    visual_context_update_pending: bool,
+) -> FfiRenderingPreparationOutcome {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let arena = unsafe { arena_from_handle(arena) };
+    let background_source_changed = {
+        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
+        arena
+            .paint_state()
+            .borrow_mut()
+            .update_root_background_source(arena, root_background_source)
+    };
+    // The overflow recalculation is a pass of its own, and it hands the document the scroll
+    // offsets it settled only once that pass is over. Enter the visual context update after it,
+    // so that handover is not inside a pass either.
+    crate::painting::scrollable_overflow::update_scrollable_overflow(arena, &main_thread);
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
+    // The root background covers the viewport united with the root's scrollable overflow, which
+    // recording reads. Measure it here: measuring it lazily during recording could flip its
+    // scrollability while the paint state is borrowed, and the flip would miss this frame.
+    arena.ensure_scrollable_overflow(root_background_source.root_layout_node);
+    let changed = arena.scrollable_overflow.geometry_changed.replace(false);
+    let flipped = arena.scrollable_overflow.scrollability_changed.replace(false);
+    let mut visual_context_values_changed = false;
+    if changed && !flipped && !visual_context_update_pending {
+        let rows = arena.paintable_rows();
+        let mut state = arena.paint_state().borrow_mut();
+        let state = &mut state.visual_context;
+        if let Some(tree) = state.tree.as_mut() {
+            visual_context_values_changed = crate::painting::visual_context::refresh::refresh_sticky_constraints(
+                &rows,
+                &state.scroll_state,
+                tree,
+                &arena.visual_context_tree_inputs(),
+            );
+        }
+        state.needs_to_refresh_scroll_state = true;
+    }
+    FfiRenderingPreparationOutcome {
+        requires_display_list_recording: changed || background_source_changed,
+        requires_visual_context_update: flipped,
+        visual_context_values_changed,
+    }
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread. The
+/// host callback receives each snap area's geometry, valid for the duration of the call, and the
+/// area's live layout node shell.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_for_each_snap_area(
+    arena: *mut c_void,
+    snap_container: NodeSlotId,
+    context: *mut c_void,
+    push_snap_area: unsafe extern "C" fn(*mut c_void, *const crate::painting::host::FfiSnapAreaGeometry, *mut c_void),
+) {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let arena = unsafe { arena_from_handle(arena) };
+    crate::painting::scroll_snap::for_each_snap_area(&arena.paintable_rows(), snap_container, |slot, area| {
+        // SAFETY: The C++ callback copies the geometry into a caller-owned collection.
+        unsafe { push_snap_area(context, &raw const area, arena.node_shell(&main_thread, slot)) };
+    });
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`; the callbacks in `publish` are
+/// called synchronously with their context while the recording's resources are live.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_publish_recording(
+    arena: *mut c_void,
+    publish: crate::painting::host::FfiRecordingPublishCallbacks,
+) -> u64 {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let arena = unsafe { arena_from_handle(arena) };
+    let Some(pending) = arena.paint_state().borrow_mut().pending_recording.take() else {
+        return 0;
+    };
+    let publish = crate::painting::host::RecordingPublishHost::from(publish);
+    crate::painting::published_immutable::before_publication(arena);
+    let sequence = crate::painting::record::publish::publish_recording(arena, pending, &main_thread, &publish);
+    crate::painting::published_immutable::published(arena);
+    sequence
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`; `describe_node` and `append_text`
+/// are called synchronously with `context`, and the shells handed to `describe_node` are the
+/// last recording's live paintable shells.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_take_recording_trace(
+    arena: *mut c_void,
+    context: *mut c_void,
+    describe_node: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void),
+    append_text: unsafe extern "C" fn(*mut c_void, *const u8, usize),
+) -> bool {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let arena = unsafe { arena_from_handle(arena) };
+    let (pending, recording) = {
+        let mut paint_state = arena.paint_state().borrow_mut();
+        let Some(pending) = paint_state.pending_recording_trace.take() else {
+            return false;
+        };
+        let Some(recording) = paint_state.last_recording.clone() else {
+            return false;
+        };
+        (pending, recording)
+    };
+    let Some(log) = recording.capture_log_for_verification.as_ref() else {
+        return false;
+    };
+    let mut name = |slot| {
+        if slot == pending.viewport {
+            return "@viewport".into();
+        }
+        let mut name = Vec::<u8>::new();
+        // SAFETY: the last recording's paintable shells are still live, and the host copies the
+        // description synchronously into the sink.
+        unsafe { describe_node(context, arena.shell_if_live(&main_thread, slot), (&raw mut name).cast()) };
+        String::from_utf8(name).expect("trace label must be UTF-8")
+    };
+    let text = format!(
+        "recording (overlay={})\n{}",
+        pending.should_paint_overlay,
+        log.format(&mut name)
+    );
+    // SAFETY: the host copies the text synchronously.
+    unsafe { append_text(context, text.as_ptr(), text.len()) };
+    true
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document
+/// thread.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_text_caret_rect_for_position(
+    arena: *mut c_void,
+    primary: NodeSlotId,
+    offset: usize,
+    affinity_is_downstream: bool,
+) -> FfiCaretRectResult {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let mut result = FfiCaretRectResult {
+        found: false,
+        rect: FfiCssPixelRect::default(),
+        style_source: std::ptr::null_mut(),
+        owner_paintable: NodeSlotId::INVALID,
+        nearest_self_painting_inline: NodeSlotId::INVALID,
+    };
+    let arena = unsafe { arena_from_handle(arena) };
+    let paintable_rows = arena.paintable_rows();
+    let fragments = arena.text_fragments(primary);
+    let node_slots = fragments.as_slice();
+    let Some(answer) =
+        crate::painting::caret::caret_rect_for_position(&paintable_rows, node_slots, offset, affinity_is_downstream)
+    else {
+        return result;
+    };
+    result.found = true;
+    result.rect = answer.rect.into();
+    result.style_source = arena.shell_if_live(&main_thread, answer.style_source);
+    result.owner_paintable = answer.owner;
+    result.nearest_self_painting_inline =
+        crate::painting::fragment_ownership::nearest_self_painting_inline_box(&paintable_rows, answer.node)
+            .unwrap_or(NodeSlotId::INVALID);
+    result
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document
+/// thread.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_atomic_inline_caret_rect_for_position(
+    arena: *mut c_void,
+    primary: NodeSlotId,
+    after: bool,
+) -> FfiCaretRectResult {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let mut result = FfiCaretRectResult {
+        found: false,
+        rect: FfiCssPixelRect::default(),
+        style_source: std::ptr::null_mut(),
+        owner_paintable: NodeSlotId::INVALID,
+        nearest_self_painting_inline: NodeSlotId::INVALID,
+    };
+    let arena = unsafe { arena_from_handle(arena) };
+    let paintable_rows = arena.paintable_rows();
+    let Some(answer) = crate::painting::caret::caret_rect_for_atomic_inline(&paintable_rows, primary, after) else {
+        return result;
+    };
+    result.found = true;
+    result.rect = answer.rect.into();
+    result.style_source = arena.shell_if_live(&main_thread, answer.style_source);
+    result.owner_paintable = answer.owner;
+    result.nearest_self_painting_inline =
+        crate::painting::fragment_ownership::nearest_self_painting_inline_box(&paintable_rows, answer.node)
+            .unwrap_or(NodeSlotId::INVALID);
+    result
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document
+/// thread.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_paintable_empty_line_caret_rect(
+    arena: *mut c_void,
+    block: NodeSlotId,
+    primary: NodeSlotId,
+    offset: usize,
+) -> FfiEmptyLineCaretRect {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let mut result = FfiEmptyLineCaretRect {
+        has_value: false,
+        rect: FfiCssPixelRect::default(),
+        style_source: std::ptr::null_mut(),
+    };
+    let arena = unsafe { arena_from_handle(arena) };
+    let paintable_rows = arena.paintable_rows();
+    if !paintable_rows.paintable_row_is_populated(block) {
+        return result;
+    }
+    let fragments = arena.text_fragments(primary);
+    let node_slots = fragments.as_slice();
+    let side = arena.paintable_side_data(block);
+    let Some(first_fragment) = side.fragments().first() else {
+        return result;
+    };
+    if !node_slots.contains(&first_fragment.layout_node) {
+        return result;
+    }
+    for target in crate::painting::visual_lines::empty_line_caret_targets(&paintable_rows, block) {
+        if target.offset == offset {
+            result.has_value = true;
+            result.rect = target.rect.into();
+            result.style_source = arena.shell_if_live(
+                &main_thread,
+                crate::painting::text_fragment::style_source(&paintable_rows, first_fragment),
+            );
+            break;
+        }
+    }
+    result
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_for_each_subtree_fragment_rect(
+    arena: *mut c_void,
+    root: NodeSlotId,
+    context: *mut c_void,
+    consume: unsafe extern "C" fn(*mut c_void, *mut c_void, FfiCssPixelRect),
+) {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let arena = unsafe { arena_from_handle(arena) };
+    let paintable_rows = arena.paintable_rows();
+    if !paintable_rows.paintable_row_is_populated(root) {
+        return;
+    }
+    crate::painting::paint_order::for_each_in_paint_subtree(&paintable_rows, root, |current| {
+        for fragment in arena.paintable_side_data(current).fragments() {
+            let shell = arena.shell_if_live(&main_thread, fragment.layout_node);
+            let rect = crate::painting::text_fragment::absolute_rect(&paintable_rows, fragment).into();
+            crate::painting::seal::note_host_call("for_each_subtree_fragment_rect_consume");
+            // SAFETY: The consumer copies its plain-data arguments synchronously.
+            unsafe { consume(context, shell, rect) };
+        }
+    });
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread;
+/// `index` in range.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_hit_test_item_facts(
+    arena: *mut c_void,
+    index: usize,
+) -> crate::painting::host::FfiHitTestItemExport {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    with_hit_test_list_items_only(arena, None, |list, arena| {
+        let item = &list.items[index];
+        assert!(
+            arena.paintable_row_is_populated(item.paintable),
+            "exporting a hit-test item for a non-live paintable"
+        );
+        assert!(
+            arena.paintable_row_is_populated(item.hit_node),
+            "exporting a hit-test item that names a non-live paintable"
+        );
+        Some(crate::painting::host::FfiHitTestItemExport {
+            can_produce_caret_position: item.can_produce_caret_position,
+            paintable: item.paintable,
+            hit_node: item.hit_node,
+            chrome_widget_kind: item.chrome_widget_kind,
+            caret_node_shell: arena.shell_if_live(&main_thread, item.caret_node),
+            caret_rect: item.caret_rect.into(),
+            context: item.context,
+        })
+    })
+    .expect("no hit-test list")
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread;
+/// `item_index` must be in range for the current hit-test list.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_hit_test_item_target_shell(arena: *mut c_void, item_index: usize) -> *mut c_void {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    with_hit_test_list_items_only(arena, std::ptr::null_mut(), |list, arena| {
+        list.item_target_shell(&main_thread, arena, item_index)
+    })
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread;
+/// `item_index` must be in range for the current hit-test list and `out_allow_pseudo_fallback`
+/// must be writable.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_hit_test_item_dispatch_shell(
+    arena: *mut c_void,
+    item_index: usize,
+    out_allow_pseudo_fallback: *mut bool,
+) -> *mut c_void {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    with_hit_test_list_items_only(arena, std::ptr::null_mut(), |list, arena| {
+        let (shell, allow_pseudo_fallback) = list.item_dispatch_shell(&main_thread, arena, item_index);
+        // SAFETY: The caller provides writable storage for the synchronous result.
+        unsafe { *out_allow_pseudo_fallback = allow_pseudo_fallback };
+        shell
+    })
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread;
+/// `item_index` must be in range for the current hit-test list.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_hit_test_resolve_hit(
+    arena: *mut c_void,
+    item_index: usize,
+    local_point: FfiCssPixelPoint,
+) -> crate::painting::host::FfiResolvedHit {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    with_hit_test_list_items_only(arena, Default::default(), |list, arena| {
+        list.resolve_hit(&main_thread, arena, item_index, local_point.into())
+    })
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread;
+/// `item_index` must be in range for the current hit-test list.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_hit_test_resolve_caret(
+    arena: *mut c_void,
+    item_index: usize,
+    local_point: FfiCssPixelPoint,
+    position_type: u8,
+) -> crate::painting::host::FfiResolvedCaret {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    with_hit_test_list_items_only(arena, Default::default(), |list, arena| {
+        list.resolve_caret(
+            &main_thread,
+            arena,
+            item_index,
+            local_point.into(),
+            crate::painting::hit_test::caret::CaretPositionType::from_u8(position_type),
+        )
+    })
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread, and
+/// both resolvers must answer synchronously from a live layout node shell and only push into
+/// the sink whose pointer they receive.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_sync_svg_paint_resources(
+    arena: *mut c_void,
+    resolve_filter: unsafe extern "C" fn(*mut c_void, *const c_void, *mut c_void) -> bool,
+    resolve_paint_server: unsafe extern "C" fn(*mut c_void, bool, *mut c_void),
+) -> bool {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    use crate::painting::svg_paint_resources::{PublishedSvgFilter, PublishedSvgPaintServer, SvgPaintResourceKind};
+    let _writer =
+        crate::painting::published_immutable::enter_writer_if_unattributed("SVG paint resource synchronization");
+    let arena = unsafe { arena_from_handle(arena) };
+    let resources = arena.svg_paint_resources();
+    if !resources.take_needs_sync() {
+        return false;
+    }
+    let mut any_changed = false;
+    for (slot, kind) in resources.enrolled_entries() {
+        let Some(style) = arena.node_style_if_live(slot) else {
+            resources.forget_slot(slot);
+            continue;
+        };
+        if matches!(kind, SvgPaintResourceKind::Fill | SvgPaintResourceKind::Stroke) {
+            let is_stroke = kind == SvgPaintResourceKind::Stroke;
+            let mut published = PublishedSvgPaintServer::None;
+            crate::painting::seal::note_host_call("resolve_paint_server");
+            // SAFETY: The host resolves synchronously from the live shell and only pushes into
+            // the sink it is handed.
+            unsafe {
+                resolve_paint_server(
+                    arena.shell_if_live(&main_thread, slot),
+                    is_stroke,
+                    (&raw mut published).cast(),
+                );
+            }
+            if resources.publish_paint_server(slot, kind, published) {
+                any_changed = true;
+                use crate::painting::record::damage::PaintDamage;
+                arena.push_paint_damage(slot, PaintDamage::SVG | PaintDamage::SCOPE_PREAMBLE);
+            }
+            continue;
+        }
+        let effects = style.effects();
+        let filter_list = match kind {
+            SvgPaintResourceKind::Filter => &effects.filter,
+            SvgPaintResourceKind::BackdropFilter => &effects.backdrop_filter,
+            SvgPaintResourceKind::Fill | SvgPaintResourceKind::Stroke => unreachable!(),
+        };
+        if !crate::painting::css_filter::contains_url(filter_list) {
+            resources.withdraw(slot, kind);
+            continue;
+        }
+        let shell = arena.shell_if_live(&main_thread, slot);
+        let mut published = PublishedSvgFilter::default();
+        for operation in filter_list.operations.as_slice() {
+            if operation.kind != crate::painting::css_filter::FILTER_KIND_URL {
+                continue;
+            }
+            let mut primitives: Vec<SvgFilterPrimitive> = Vec::new();
+            crate::painting::seal::note_host_call("resolve_filter");
+            // SAFETY: The host resolves synchronously from the live shell and only pushes into the
+            // primitive list it is handed as its sink.
+            let resolved = unsafe { resolve_filter(shell, operation.url_value.pointer, (&raw mut primitives).cast()) };
+            published = PublishedSvgFilter {
+                failed: !resolved,
+                primitives: if resolved { primitives } else { Vec::new() },
+            };
+            if published.failed {
+                break;
+            }
+        }
+        if resources.publish_filter(slot, kind, published) {
+            any_changed = true;
+            if arena.paintable_row_is_populated(slot) {
+                arena.note_visual_context_box_dirty(
+                    slot,
+                    crate::painting::visual_context::dirty::VisualContextBoxDirtyKind::StyleValueChange,
+                );
+                use crate::painting::record::damage::PaintDamage;
+                arena.push_paint_damage(slot, PaintDamage::SVG | PaintDamage::SCOPE_PREAMBLE);
+            }
+        }
+    }
+    any_changed
+}
