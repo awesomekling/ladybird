@@ -6,7 +6,9 @@
  */
 
 #include <AK/ByteBuffer.h>
+#include <AK/Mutex.h>
 #include <AK/ScopeGuard.h>
+#include <AK/Singleton.h>
 #include <LibCore/Promise.h>
 #include <LibGC/Heap.h>
 #include <LibGC/Weak.h>
@@ -394,14 +396,98 @@ ParsedFontFace FontFaceState::parsed_font_face() const
     };
 }
 
+// NB: Faces are created, destroyed and looked up on the document thread alone. Everything else
+//     only ever carries the number, and hands it back here through request_wanted_web_faces().
+static Singleton<HashMap<u64, FontFaceState*>> s_font_faces_by_id;
+static Atomic<u64> s_next_font_face_id { 1 };
+
 FontFaceState::FontFaceState(GC::Ref<HTML::EnvironmentSettingsObject> environment, GC::Ptr<WebIDL::Promise> font_status_promise)
-    : m_environment(environment)
+    : m_id(s_next_font_face_id.fetch_add(1, AK::MemoryOrder::memory_order_relaxed))
+    , m_environment(environment)
     , m_status(FontFaceLoadStatus::Unloaded)
     , m_font_status_promise(font_status_promise)
 {
+    s_font_faces_by_id->set(m_id, this);
 }
 
-FontFaceState::~FontFaceState() = default;
+FontFaceState::~FontFaceState()
+{
+    s_font_faces_by_id->remove(m_id);
+}
+
+RefPtr<FontFaceState> FontFaceState::with_id(u64 id)
+{
+    auto it = s_font_faces_by_id->find(id);
+    if (it == s_font_faces_by_id->end())
+        return nullptr;
+    return *it->value;
+}
+
+// The faces something wanted and could not have. A style pass records a want instead of loading
+// a face, because loading one changes the face's status, appends it to every FontFaceSet it is
+// in - under an execution context that runs author callbacks - and starts a fetch. None of that
+// may happen while a style update is running.
+struct WantedWebFaceEntry {
+    u64 face_id { 0 };
+    WantedWebFace want { WantedWebFace::Load };
+};
+
+static Singleton<Mutex> s_wanted_web_faces_mutex;
+static Singleton<Vector<WantedWebFaceEntry>> s_wanted_web_faces;
+
+void note_wanted_web_face(u64 face_id, WantedWebFace want)
+{
+    MutexLocker locker { *s_wanted_web_faces_mutex };
+    for (auto& wanted : *s_wanted_web_faces) {
+        if (wanted.face_id != face_id)
+            continue;
+        if (to_underlying(want) > to_underlying(wanted.want))
+            wanted.want = want;
+        return;
+    }
+    s_wanted_web_faces->append({ face_id, want });
+}
+
+// Only a style update defers today, so this is document-thread state; a want recorded from
+// somewhere else is drained by whichever document-thread scope next asks for it.
+static u32 s_deferred_web_face_load_depth { 0 };
+
+void begin_deferred_web_face_loads()
+{
+    ++s_deferred_web_face_load_depth;
+}
+
+void end_deferred_web_face_loads()
+{
+    VERIFY(s_deferred_web_face_load_depth > 0);
+    if (--s_deferred_web_face_load_depth != 0)
+        return;
+    (void)request_wanted_web_faces();
+}
+
+size_t request_wanted_web_faces()
+{
+    if (s_deferred_web_face_load_depth != 0)
+        return 0;
+
+    Vector<WantedWebFaceEntry> wanted;
+    {
+        MutexLocker locker { *s_wanted_web_faces_mutex };
+        wanted = move(*s_wanted_web_faces);
+    }
+    size_t requested = 0;
+    for (auto const& entry : wanted) {
+        auto face = FontFaceState::with_id(entry.face_id);
+        if (!face)
+            continue;
+        if (entry.want == WantedWebFace::Render)
+            (void)face->resolve_for_rendering();
+        else
+            face->load_for_style();
+        ++requested;
+    }
+    return requested;
+}
 
 bool FontFaceState::should_be_registered_with_font_computer() const
 {

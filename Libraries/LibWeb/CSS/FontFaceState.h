@@ -102,6 +102,12 @@ public:
 
     RefPtr<Gfx::Typeface const> typeface() const { return m_parsed_font; }
 
+    // The number the document knows this face by. Something that cannot reach the face itself -
+    // a style pass that must not mutate it, or a cascade built away from the document thread -
+    // names it by this number and leaves the mutation for the drain below.
+    [[nodiscard]] u64 id() const { return m_id; }
+    [[nodiscard]] static RefPtr<FontFaceState> with_id(u64);
+
     FontWeightRange declared_weight_range() const { return m_cached_weight_range; }
     int declared_slope() const { return m_cached_slope; }
     int declared_width() const { return m_cached_width; }
@@ -150,6 +156,8 @@ private:
     RustDescriptorBlock connected_descriptors() const;
 
     [[nodiscard]] Optional<ComputationContext> computation_context() const;
+
+    u64 m_id { 0 };
 
     // FIXME: Should we be storing StyleValues instead?
     Utf16FlyString m_family;
@@ -204,5 +212,25 @@ private:
 };
 
 bool font_format_is_supported(Utf16View name);
+
+// What something wanted a web face for. Selecting a face in a style wants it loaded; picking it
+// for a rendered code point wants its font-display timeline started as well.
+enum class WantedWebFace : u8 {
+    Load,
+    Render,
+};
+
+// Record that something wanted a web face it could not reach. Callable from any thread.
+void note_wanted_web_face(u64 face_id, WantedWebFace);
+
+// Act on every face wanted since the last call. This runs on the document thread, and is what
+// starts the fetch - and for a render want, the download timer and the load-event delayer too.
+// Answers nothing while loads are deferred: the scope that deferred them drains at its end.
+size_t request_wanted_web_faces();
+
+// Loading a face runs author callbacks and starts a fetch, so a style update defers every load
+// its cascades want to its own end. Outside such a scope a want is acted on straight away.
+void begin_deferred_web_face_loads();
+void end_deferred_web_face_loads();
 
 }
