@@ -48,6 +48,7 @@ pub(crate) struct AppliedAnimationDefinition {
 /// kind whose materialization reads the tree.
 const APPLIED_DEFINITION_FLAGS_WORD: usize = 3;
 const APPLIED_DEFINITION_TIMELINE_KIND_SHIFT: u32 = 40;
+const APPLIED_DEFINITION_KEYFRAME_SET_WORD: usize = 4;
 const APPLIED_DEFINITION_TIMING_FUNCTION_WORD: usize = 5;
 /// `AnimationTimelineSource::Kind::Scroll`.
 const APPLIED_DEFINITION_TIMELINE_KIND_SCROLL: u64 = 2;
@@ -121,6 +122,25 @@ impl AppliedAnimationDefinition {
                 published.words[APPLIED_DEFINITION_TIMING_FUNCTION_WORD] as *const _,
             )
         }
+    }
+
+    /// Whether applying `self` to an animation that last had `published` applied would leave its
+    /// timing exactly as it is and only give its effect another keyframe set.
+    ///
+    /// The host applies such a definition by handing the effect its new keyframes and then taking
+    /// `apply_css_properties`' early return, since every property that function compares is
+    /// unchanged. Handing over keyframes moves no time, changes no play state and creates nothing:
+    /// the animation keeps its identity, its row and its place in the element's list, and the only
+    /// thing that changes about it is the `@keyframes` rule its declarations come from.
+    #[must_use]
+    pub(crate) fn change_is_only_keyframes(&self, published: &Self) -> bool {
+        if self.words[APPLIED_DEFINITION_KEYFRAME_SET_WORD] == published.words[APPLIED_DEFINITION_KEYFRAME_SET_WORD] {
+            return false;
+        }
+        let mut without_the_keyframes = *self;
+        without_the_keyframes.words[APPLIED_DEFINITION_KEYFRAME_SET_WORD] =
+            published.words[APPLIED_DEFINITION_KEYFRAME_SET_WORD];
+        without_the_keyframes.would_change_nothing(published)
     }
 }
 
