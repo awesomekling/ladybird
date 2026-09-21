@@ -628,6 +628,51 @@ fn detach_top_layer_element_layout_subtree(arena: *mut LayoutNodeArena, style_no
     clear_stale_assigned_slottables(host, style_node);
 }
 
+/// Detaches what is left of a node's boxes as the node leaves the document, while its identity
+/// still names them: its synthetic pseudo-elements' boxes, subtree and all, the paint state of its
+/// own box, and its box's top layer placement, which is a viewport child rather than part of the
+/// parent's box subtree, so the parent's rebuild would never detach it. The rows are found by
+/// identity, so no shell is made for any of this.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call, which must be made on the document
+/// thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_detach_remaining_layout_rows_for_removal(arena: *mut c_void, style_node: u32) {
+    assert!(!arena.is_null());
+    // SAFETY: The entry point's contract puts this call on the document thread.
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    // SAFETY: Guaranteed by the entry point's contract.
+    unsafe {
+        super::layout_node_arena::paying_host_handbacks(&main_thread, arena, || {
+            detach_remaining_layout_rows_for_removal(arena.cast(), style_node);
+        });
+    }
+}
+
+fn detach_remaining_layout_rows_for_removal(arena: *mut LayoutNodeArena, style_node: u32) {
+    let Some(node) = StyleNodeID::from_raw(style_node) else {
+        return;
+    };
+    if node.element_index().is_some() {
+        clear_synthetic_pseudo_element_boxes(arena, node);
+    }
+    // SAFETY: The arena outlives this call.
+    let row = unsafe { &*arena }.bound_row(node);
+    if row.is_invalid() {
+        return;
+    }
+    // SAFETY: As above; the clear borrows the arena for itself.
+    unsafe { crate::painting::ffi::clear_paintable_row_of_node(arena.cast(), row) };
+    let top_layer_placement = topmost_layout_node_of_top_layer_placement(arena, row);
+    if !top_layer_placement.is_invalid() {
+        prepare_subtree_for_detach(arena.cast(), top_layer_placement);
+        let was_attached = super::layout_node_arena::detach_and_free_subtree(arena, top_layer_placement);
+        assert!(was_attached, "a top layer placement is a viewport child");
+    }
+}
+
 /// Clears every stale layout node in the shadow-including subtree `root` names.
 ///
 /// The DOM walk this replaced visited a node, then its shadow root's subtree, then its DOM
