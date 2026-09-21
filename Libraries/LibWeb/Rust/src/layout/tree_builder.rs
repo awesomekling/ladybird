@@ -3247,6 +3247,8 @@ pub(crate) fn pseudo_element_decision(facts: PseudoElementFacts) -> FfiPseudoEle
 /// How the arena names the pseudo-element a box is generated for.
 /// The mirror numbers the pseudo-element kinds one below the generated-for encoding.
 const FIRST_LETTER_PSEUDO_KIND: u8 = GENERATED_FOR_FIRST_LETTER - 1;
+/// `CSS::PseudoElement::Selection`, which generates no box of its own.
+const SELECTION_PSEUDO_KIND: u8 = 6;
 
 fn generated_for_of(pseudo_element: FfiPseudoElement) -> u8 {
     match pseudo_element {
@@ -4192,8 +4194,36 @@ impl TreeBuilderHost {
     fn create_dom_box(&self, kind: NodeKind, style_node: Option<StyleNodeID>) -> NodeSlotId {
         let slot = self.stamp_dom_box(kind, style_node);
         self.arena().take_over_rows_of_bound_node(slot);
-        self.arena().defer_shell(slot);
+        self.owe_text_shell(slot, style_node);
         slot
+    }
+
+    /// A text row's content is synced from what the mirror publishes for it, so the row enrolls
+    /// itself. Its shell is owed only where materialising one tells the host something: in a
+    /// text control's shadow tree or directly under an editing host, where the shell lets an
+    /// empty text produce a line box fragment, and under an element with a `::selection` style,
+    /// whose paint facts the shell pushes onto a text whose parent has no box of its own.
+    fn owe_text_shell(&self, slot: NodeSlotId, style_node: Option<StyleNodeID>) {
+        // SAFETY: No arena borrow survives this call.
+        unsafe { &mut *self.arena }.invalidate_text_content(slot);
+        let owes_shell = style_node.is_some_and(|text| {
+            self.arena().node_flags(slot) & NodeFlag::IsInUserAgentShadowTree as u32 != 0
+                || self.arena().with_style_store(|engine| {
+                    engine
+                        .tree()
+                        .text_parent(text)
+                        .filter(|parent| parent.element_index().is_some())
+                        .is_some_and(|parent| {
+                            engine.element_construction_facts(parent)
+                                & crate::css::style::bridge::element_construction_fact::IS_EDITING_HOST
+                                != 0
+                                || engine.published_pseudo_record_mask(parent) & (1 << SELECTION_PSEUDO_KIND) != 0
+                        })
+                })
+        });
+        if owes_shell {
+            self.arena().defer_shell(slot);
+        }
     }
 
     /// The row a piece of generated text is rendered from. It names no DOM node and carries no
@@ -4909,10 +4939,14 @@ fn create_first_letter_boxes(host: &DomTreeBuilderHost<'_>, style_node: u32, tar
         let first_letter_slice_slot = layout_host.stamp_generated_text_box();
         (first_letter_slice_slot, remainder_slice_slot)
     };
-    // A text row renders what its shell enrolled for content sync, so every slice is owed one, as
-    // the rows the retired host path allocated were.
-    layout_host.arena().defer_shell(first_letter_slice_slot);
-    layout_host.arena().defer_shell(remainder_slice_slot);
+    layout_host.owe_text_shell(
+        first_letter_slice_slot,
+        layout_host.arena().node_style_node(first_letter_slice_slot),
+    );
+    layout_host.owe_text_shell(
+        remainder_slice_slot,
+        layout_host.arena().node_style_node(remainder_slice_slot),
+    );
     let first_letter_slice = layout_host.created(first_letter_slice_slot);
     let remainder_slice = layout_host.created(remainder_slice_slot);
 

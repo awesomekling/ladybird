@@ -5876,8 +5876,7 @@ pub(crate) unsafe fn sync_enrolled_content_for_layout(main_thread: &crate::stage
     let host = unsafe { &*arena.cast::<LayoutNodeArena>() }.guarded_layout_host();
     let enrolled_text_nodes = unsafe { &*arena.cast::<LayoutNodeArena>() }.pending_text_nodes_for_content_sync();
     for node in enrolled_text_nodes {
-        let shell = unsafe { &*arena.cast::<LayoutNodeArena>() }.shell_if_live(node);
-        if shell.is_null() {
+        if !unsafe { &*arena.cast::<LayoutNodeArena>() }.slot_is_live(node) {
             continue;
         }
         let parent = unsafe { &*arena.cast::<LayoutNodeArena>() }.data(node).parent.get();
