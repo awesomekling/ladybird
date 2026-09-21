@@ -3109,9 +3109,23 @@ unsafe fn try_stage_animation_tail(
         unsafe { anim::release_resolved_animation_declarations(resolved.storage) };
         give_up_on_overlay();
     };
-    if !covered || resolved.count == 0 {
+    // A description that does not cover every effect is one the host still walks its own keyframe
+    // sets for.
+    if !covered {
         give_up(&resolved);
         return None;
+    }
+    // Effects whose keyframes declare nothing this element animates compose nothing at all: the
+    // host returns before it evaluates them, leaving the overlay exactly as it found it and
+    // caching no preparation, and so does this.
+    if resolved.count == 0 {
+        unsafe { anim::release_resolved_animation_declarations(resolved.storage) };
+        return Some(StageAnimationTail {
+            overlay,
+            depends_on_viewport_metrics: false,
+            font_metrics_depend_on_viewport_metrics: false,
+            keyframes_inherited_non_inherited_style_groups: 0,
+        });
     }
     let properties = unsafe { std::slice::from_raw_parts(resolved.properties, resolved.count) };
     // The same terms the host's `cache_preparation` uses: everything outside them needs an input
