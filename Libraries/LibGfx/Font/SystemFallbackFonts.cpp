@@ -143,23 +143,24 @@ size_t system_fallback_font_cache_size()
 }
 
 extern "C" {
-void const* ladybird_gfx_system_fallback_font(u32, u16, u16, u8, bool, float);
+void const* ladybird_gfx_system_fallback_font(u32, u16, u16, u8, bool, float, bool*);
 void const* ladybird_gfx_font_invisible_variant(void const*);
 }
 
 // Only a render stage calls this; the document thread's callers go through the live cascade's own
 // fallback callback. The caller interns the answer, which takes its own reference; the memo keeps
 // it live until then, and forever after, so handing back a borrowed pointer is safe.
-extern "C" void const* ladybird_gfx_system_fallback_font(u32 code_point, u16 weight, u16 width, u8 slope, bool prefer_color_emoji, float point_size)
+extern "C" void const* ladybird_gfx_system_fallback_font(u32 code_point, u16 weight, u16 width, u8 slope, bool prefer_color_emoji, float point_size, bool* out_reached_document_thread)
 {
-    return Gfx::system_fallback_font_from_render_side({
-                                                          .code_point = code_point,
+    VERIFY(out_reached_document_thread);
+    *out_reached_document_thread = false;
+    return Gfx::system_fallback_font_from_render_side({ .code_point = code_point,
                                                           .weight = weight,
                                                           .width = width,
                                                           .slope = slope,
                                                           .prefer_color_emoji = prefer_color_emoji,
-                                                          .point_size = point_size,
-                                                      })
+                                                          .point_size = point_size },
+        *out_reached_document_thread)
         .ptr();
 }
 
