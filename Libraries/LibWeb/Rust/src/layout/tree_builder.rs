@@ -13,7 +13,9 @@ use crate::css::style::bridge::{ElementBoxKind, element_adjustment_fact};
 use crate::css::style::layout_style::{AnonymousStyleKind, AnonymousStyleOverrides};
 use crate::css::style::tree::StyleNodeID;
 use crate::css::style::tree::layout_tree_update_reuse_reason;
-use crate::layout::layout_node_arena::{LayoutNodeArena, StaleWalkFacts, layout_arena_prepare_subtree_for_detach};
+use crate::layout::layout_node_arena::{
+    LayoutNodeArena, OwedToHost, StaleWalkFacts, layout_arena_prepare_subtree_for_detach,
+};
 use crate::layout::node_data::{
     GENERATED_FOR_AFTER, GENERATED_FOR_BACKDROP, GENERATED_FOR_BEFORE, GENERATED_FOR_FIRST_LETTER,
     GENERATED_FOR_MARKER, NodeData, NodeFlag, NodeKind, NodeSlotId,
@@ -2608,16 +2610,9 @@ fn update_principal_node_after_entry(
                     .arena()
                     .style_resources_attach_can_change_anything(layout_node))
         {
-            super::tree_build_seal::note_host_call("attach_style_resources");
-            // SAFETY: The builder remains live, and the box is a live NodeWithStyle for elements
-            // and documents.
-            unsafe {
-                (host.callbacks.attach_style_resources)(
-                    host.callbacks.builder,
-                    layout_node,
-                    construction.owns_content_replacement_image,
-                );
-            };
+            host.layout()
+                .arena()
+                .defer_style_resources(layout_node, construction.owns_content_replacement_image);
         }
 
         let starts_new_subtree = entry_decision.should_create_layout_node && update.state.new_subtree_root.is_invalid();
@@ -3071,7 +3066,26 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     }
 
     super::tree_build_seal::end_build();
-    arena.materialize_deferred_shells();
+    for (row, owed) in arena.take_rows_owed_to_host() {
+        match owed {
+            OwedToHost::Shell => {
+                arena.node_shell(row);
+            }
+            OwedToHost::StyleResources {
+                owns_content_replacement_image,
+            } => {
+                super::tree_build_seal::note_host_call("attach_style_resources");
+                // SAFETY: The builder remains live, and the row is a live NodeWithStyle.
+                unsafe {
+                    (host.callbacks.attach_style_resources)(
+                        host.callbacks.builder,
+                        row,
+                        owns_content_replacement_image,
+                    );
+                };
+            }
+        }
+    }
     FfiLayoutTreeBuildOutcome {
         viewport,
         rebuilt_subtree_root_count,
@@ -3621,9 +3635,7 @@ fn create_pseudo_element(
         .arena()
         .style_resources_attach_can_change_anything(layout_node)
     {
-        super::tree_build_seal::note_host_call("attach_style_resources");
-        // SAFETY: The builder remains live, and the box the host just built is a live NodeWithStyle.
-        unsafe { (host.callbacks.attach_style_resources)(host.callbacks.builder, layout_node, false) };
+        layout_host.arena().defer_style_resources(layout_node, false);
     }
     if decision == FfiPseudoElementDecision::ContentReplacement {
         let adjustment = replaced_element_display_adjustment(&host.layout(), layout_node);
@@ -3661,9 +3673,7 @@ fn create_pseudo_element(
     // FIXME: This code actually computes style for element::marker, and shouldn't for element::pseudo::marker.
     if layout_node_kind == NodeKind::ListItemBox {
         let marker_slot = stamp_nested_list_marker_row(&layout_host, element_identity, pseudo_element, layout_node);
-        super::tree_build_seal::note_host_call("attach_style_resources");
-        // SAFETY: The builder remains live, and the row the build stamped is a live NodeWithStyle.
-        unsafe { (host.callbacks.attach_style_resources)(host.callbacks.builder, marker_slot, false) };
+        layout_host.arena().defer_style_resources(marker_slot, false);
         let marker = layout_host.created(marker_slot);
         let first_child = layout_host.first_child(layout_node);
         layout_host.attach_child(layout_node, marker, first_child);
@@ -5018,9 +5028,7 @@ fn create_first_letter_boxes(host: &DomTreeBuilderHost<'_>, style_node: u32, tar
     layout_host
         .arena()
         .stamp_pseudo_element_row(wrapper_slot, wrapper_kind, generator, FIRST_LETTER_PSEUDO_KIND);
-    super::tree_build_seal::note_host_call("attach_style_resources");
-    // SAFETY: The builder remains live, and the row the build stamped is a live NodeWithStyle.
-    unsafe { (host.callbacks.attach_style_resources)(host.callbacks.builder, wrapper_slot, false) };
+    layout_host.arena().defer_style_resources(wrapper_slot, false);
     layout_host
         .arena()
         .stamp_pseudo_element_box(wrapper_slot, generator, GENERATED_FOR_FIRST_LETTER);
