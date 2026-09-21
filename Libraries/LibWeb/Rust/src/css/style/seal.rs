@@ -67,6 +67,7 @@ thread_local! {
     static LONGHAND_INPUT_FREEZE_REASONS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
     static BETWEEN_PASS_SERVICES: RefCell<HashMap<&'static str, (u64, u64)>> = RefCell::new(HashMap::new());
     static HOST_DRIVEN_ROWS: Cell<u64> = const { Cell::new(0) };
+    static HOST_SAMPLED_ANIMATION_ROWS: Cell<u64> = const { Cell::new(0) };
 }
 
 /// Record that one row's computation was entered from the host's per-element driver.
@@ -81,6 +82,20 @@ pub(crate) fn note_host_driven_row() {
         return;
     }
     HOST_DRIVEN_ROWS.with(|rows| rows.set(rows.get().wrapping_add(1)));
+}
+
+/// Record that one row's animations were sampled by the host after the stage returned.
+///
+/// The stage could not sample the element for itself, so it hands the rest of its
+/// finalization back and the host samples between two sealed calls. That is no longer a
+/// callback out of sealed computation, but it is still main-side work inside the update, and
+/// it stays counted for the same reason `host_driven_rows` is: the end state is one sealed
+/// pass, and a row the host has to finish is not that.
+pub(crate) fn note_host_sampled_animation_row() {
+    if mode() == Mode::Off || UPDATE_DEPTH.with(|depth| depth.get() == 0) {
+        return;
+    }
+    HOST_SAMPLED_ANIMATION_ROWS.with(|rows| rows.set(rows.get().wrapping_add(1)));
 }
 
 pub(crate) fn note_longhand_input_freeze(reasons: u8) {
@@ -250,6 +265,10 @@ pub(crate) fn flush_census() {
     let host_driven_rows = HOST_DRIVEN_ROWS.with(|rows| rows.replace(0));
     if host_driven_rows != 0 {
         write_report(&format!("STYLE SEAL COUNT: host_driven_rows: {host_driven_rows}\n"));
+    }
+    let sampled = HOST_SAMPLED_ANIMATION_ROWS.with(|rows| rows.replace(0));
+    if sampled != 0 {
+        write_report(&format!("STYLE SEAL COUNT: host_sampled_animation_rows: {sampled}\n"));
     }
     let mut interleaves = STAGE_INTERLEAVES.with(|interleaves| {
         std::mem::take(&mut *interleaves.borrow_mut())
