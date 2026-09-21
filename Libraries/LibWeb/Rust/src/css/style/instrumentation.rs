@@ -402,13 +402,21 @@ impl Counters {
             .expect("the record-bail window has a fixed width")
     }
 
-    /// The first bail counter in that window that moved since `before`, by name.
+    /// The first counter in that window naming a way the computation ended without a record,
+    /// moved since `before`. A record it abandoned after building is as much a decline as one it
+    /// bailed out of, and the census must not leave that population unnamed.
     #[must_use]
     pub fn first_changed_record_bail(&self, before: &[u64; RECORD_BAIL_COUNT]) -> Option<&'static str> {
-        (RECORD_BAIL_FIRST..=RECORD_BAIL_LAST).find_map(|index| {
-            let name = COUNTER_NAMES[index];
-            (self.values[index] != before[index - RECORD_BAIL_FIRST] && name.contains("Bail")).then_some(name)
-        })
+        let moved = |index: usize| self.values[index] != before[index - RECORD_BAIL_FIRST];
+        let named = |wanted: fn(&str) -> bool| {
+            (RECORD_BAIL_FIRST..=RECORD_BAIL_LAST)
+                .find(|&index| moved(index) && wanted(COUNTER_NAMES[index]))
+                .map(|index| COUNTER_NAMES[index])
+        };
+        // A bail names the reason; abandoning names only what happened to the half-built record
+        // afterwards, so it answers for the rows no bail claimed rather than shadowing them.
+        named(|name| name.contains("Bail"))
+            .or_else(|| named(|name| name.contains("Abandoned") || name.contains("Declines")))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&'static str, u64)> {
