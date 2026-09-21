@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<style>
+    @keyframes redden {
+        from,
+        to {
+            color: red;
+        }
+    }
+
+    @keyframes ended {
+        from,
+        to {
+            color: green;
+        }
+    }
+
+    #parent {
+        color: blue;
+        animation: redden 10s both linear;
+    }
+
+    #zero-duration {
+        animation: ended 0s linear;
+    }
+
+    #negative-delay-done {
+        animation: ended 1s -5s linear;
+    }
+</style>
+<div id="parent">
+    <div id="plain"></div>
+    <div id="zero-duration"></div>
+    <div id="negative-delay-done"></div>
+</div>
+<script src="../include.js"></script>
+<script>
+    test(() => {
+        // An element whose own animation is no longer relevant contributes nothing of its own, but
+        // it still inherits its parent's animated value.
+        for (let id of ["parent", "plain", "zero-duration", "negative-delay-done"])
+            println(`${id}: ${getComputedStyle(document.getElementById(id)).color}`);
+    });
+</script>
