@@ -3522,7 +3522,7 @@ fn stamp_nested_list_marker_row(
     layout_host
         .arena()
         .set_node_flag(slot, NodeFlag::ListMarkerIsInside, marker_position_is_inside);
-    layout_host.arena().defer_shell(slot);
+    layout_host.owe_styled_shell(slot, None);
     slot
 }
 
@@ -3548,7 +3548,7 @@ fn stamp_pseudo_element_box_row(
     layout_host
         .arena()
         .stamp_pseudo_element_row(slot, kind, generator, pseudo_kind);
-    layout_host.arena().defer_shell(slot);
+    layout_host.owe_styled_shell(slot, None);
     if decision == FfiPseudoElementDecision::Contents {
         layout_host.arena().update_layout_style(slot, |style| {
             style.set_display(FfiDisplay::outside_and_inside(
@@ -4187,7 +4187,7 @@ impl TreeBuilderHost {
             // SAFETY: No arena borrow survives the writes above.
             unsafe { &mut *self.arena }.set_raw_table_column_span(slot, spans.raw_column_span);
         }
-        self.arena().defer_shell(slot);
+        self.owe_styled_shell(slot, Some(style_node));
         slot
     }
 
@@ -4196,6 +4196,27 @@ impl TreeBuilderHost {
         self.arena().take_over_rows_of_bound_node(slot);
         self.owe_text_shell(slot, style_node);
         slot
+    }
+
+    /// A styled row's shell is owed only where materialising one tells the host something about
+    /// the row's style: an element's `::selection` style, whose paint facts the shell pushes,
+    /// `content-visibility: auto`, a scroll snap type, or a box that may be the scroll container
+    /// snapping happens in, which the root element's box stands in for the viewport as.
+    fn owe_styled_shell(&self, slot: NodeSlotId, element: Option<StyleNodeID>) {
+        let owes_shell = self.arena().node_flags(slot) & NodeFlag::IsDocumentElement as u32 != 0
+            || self.style(slot).is_none_or(|style| {
+                style.content_visibility() == crate::css::css_enums::content_visibility::AUTO
+                    || style.misc_reset().scroll_snap_strictness != crate::css::css_enums::scroll_snap_strictness::NONE
+                    || node_facts::kind_and_style_make_scroll_container(self.data(slot).kind.get(), Some(style))
+            })
+            || element.is_some_and(|element| {
+                self.arena().with_style_store(|engine| {
+                    engine.published_pseudo_record_mask(element) & (1 << SELECTION_PSEUDO_KIND) != 0
+                })
+            });
+        if owes_shell {
+            self.arena().defer_shell(slot);
+        }
     }
 
     /// A text row's content is synced from what the mirror publishes for it, so the row enrolls
