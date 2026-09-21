@@ -3439,6 +3439,7 @@ pub struct FfiPreparedLonghandTransaction {
     pub requirements: crate::css::cascaded_properties::FfiStyleComputationRequirements,
     pub longhand_table: *mut ComputedLonghandTable,
     pub parent_has_animated_values: bool,
+    pub custom_property_resolution_is_callback_free: bool,
 }
 
 #[repr(C)]
@@ -5678,7 +5679,27 @@ unsafe fn compute_longhands(
         &raw const input_line_height_metrics,
         line_height_before_adjustments,
     );
+    let style_engine = unsafe { &*input.style_engine.cast::<crate::css::style::StyleEngine>() };
+    let mut random_function_index = 0;
+    let callback_free_parse_context = (input.has_custom_property_resolution
+        && input.custom_property_resolution_context.parse_context.is_null())
+    .then(|| {
+        let registry = unsafe {
+            &*input
+                .custom_property_resolution_context
+                .custom_property_registry
+                .cast::<crate::css::custom_properties::CustomPropertyRegistry>()
+        };
+        let mut parse_context = registry.parse_context(&mut random_function_index);
+        parse_context.in_quirks_mode = style_engine
+            .document_style_computation_inputs()
+            .is_some_and(|inputs| inputs.in_quirks_mode);
+        parse_context
+    });
     let mut custom_property_resolution_context = input.custom_property_resolution_context;
+    if let Some(parse_context) = callback_free_parse_context.as_ref() {
+        custom_property_resolution_context.parse_context = std::ptr::from_ref(parse_context).cast();
+    }
     custom_property_resolution_context.style_query_length_resolution_context = &raw const remaining_length_context;
     let custom_property_input = FfiCustomPropertyDriveInput {
         store: input.custom_property_store,
@@ -6240,6 +6261,12 @@ pub unsafe extern "C" fn rust_prepare_longhand_transaction(
         requirements,
         longhand_table: longhand_table.into_raw_shared().cast_mut(),
         parent_has_animated_values,
+        custom_property_resolution_is_callback_free: unsafe {
+            crate::css::cascaded_properties::custom_property_store_is_callback_free(
+                input.custom_property_store,
+                input.custom_property_registry,
+            )
+        },
     }
 }
 

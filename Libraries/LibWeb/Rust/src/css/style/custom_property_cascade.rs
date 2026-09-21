@@ -20,6 +20,7 @@ use std::sync::Arc;
 use super::*;
 use crate::css::cascaded_properties::{
     CallbackFreeParseOutcome, FfiCascadeResolutionContext, FfiCustomPropertyDriveInput,
+    custom_property_value_is_callback_free as custom_property_value_is_engine_resolvable,
     destroy_resolved_custom_properties, drive_custom_property_resolution, parse_substituted_source,
     parse_substituted_without_callbacks,
 };
@@ -71,26 +72,6 @@ fn engine_resolution_context(
 /// substitution functions are `var()` references.
 pub(super) fn value_is_engine_resolvable_substitution(value: &StyleValueData) -> bool {
     matches!(value, StyleValueData::Unresolved { .. }) && custom_property_value_is_engine_resolvable(value)
-}
-
-/// Whether a cascaded custom-property value is one the engine resolves: a plain value, or a
-/// token stream whose only substitutions are `var()` references.
-fn custom_property_value_is_engine_resolvable(value: &StyleValueData) -> bool {
-    !matches!(
-        value,
-        StyleValueData::Unresolved {
-            presence_attr: true,
-            ..
-        } | StyleValueData::Unresolved {
-            presence_dashed_function: true,
-            ..
-        } | StyleValueData::Unresolved { presence_env: true, .. }
-            | StyleValueData::Unresolved { presence_if: true, .. }
-            | StyleValueData::Unresolved {
-                presence_inherit: true,
-                ..
-            }
-    )
 }
 
 impl RetainedState {

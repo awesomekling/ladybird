@@ -5680,29 +5680,39 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     struct CustomPropertyResolutionState {
         AK_ALLOC_WITH_KMALLOC;
 
+        struct HostAdapter {
+            AK_ALLOC_WITH_KMALLOC;
+
+            AbstractOrHypotheticalElement resolution_element;
+            SubstitutionData substitution_data;
+            void* style_query_dependencies { ComputedValuesFFI::rust_style_query_dependencies_create() };
+
+            explicit HostAdapter(DOM::AbstractElement element)
+                : resolution_element(element)
+                , substitution_data(resolution_element, true, true)
+            {
+            }
+
+            ~HostAdapter()
+            {
+                ComputedValuesFFI::rust_style_query_dependencies_destroy(style_query_dependencies);
+            }
+        };
+
         NonnullRefPtr<CustomPropertyData const> data;
         RefPtr<CustomPropertyData const> parent_data;
-        AbstractOrHypotheticalElement resolution_element;
-        SubstitutionData substitution_data;
+        OwnPtr<HostAdapter> host_adapter;
         ComputedValuesFFI::FfiCascadeResolutionContext resolution_context {};
-        void* style_query_dependencies { ComputedValuesFFI::rust_style_query_dependencies_create() };
         FlatPtr document_identity;
         size_t registration_generation;
         Optional<PreferredColorScheme> color_scheme;
 
-        CustomPropertyResolutionState(NonnullRefPtr<CustomPropertyData const> data, RefPtr<CustomPropertyData const> parent_data, DOM::AbstractElement element, FlatPtr document_identity, size_t registration_generation)
+        CustomPropertyResolutionState(NonnullRefPtr<CustomPropertyData const> data, RefPtr<CustomPropertyData const> parent_data, FlatPtr document_identity, size_t registration_generation)
             : data(move(data))
             , parent_data(move(parent_data))
-            , resolution_element(element)
-            , substitution_data(resolution_element, true, true)
             , document_identity(document_identity)
             , registration_generation(registration_generation)
         {
-        }
-
-        ~CustomPropertyResolutionState()
-        {
-            ComputedValuesFFI::rust_style_query_dependencies_destroy(style_query_dependencies);
         }
     };
     struct NativeLonghandState {
@@ -5767,7 +5777,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     auto const highlight_inheritance_parent = abstract_element.highlight_inheritance_parent();
     auto const effective_highlight_parent_style_record = highlight_parent_style_record.value_or(
         highlight_inheritance_parent.has_value() ? highlight_inheritance_parent->style_record_identity() : StyleRecordID {});
-    auto prepare_longhand_transaction = [](void* context_pointer, ComputedValuesFFI::FfiStyleComputationRequirements const* computation_requirements, ComputedValuesFFI::ComputedLonghandTable* longhand_table, ComputedValuesFFI::FfiLonghandTransactionInput* output) {
+    auto prepare_longhand_transaction = [](void* context_pointer, ComputedValuesFFI::FfiStyleComputationRequirements const* computation_requirements, ComputedValuesFFI::ComputedLonghandTable* longhand_table, bool custom_property_resolution_is_callback_free, ComputedValuesFFI::FfiLonghandTransactionInput* output) {
         auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
         auto& style_computer = *context.style_computer;
         ++style_computer.document().style_invalidation_counters().computed_longhand_drives_started;
@@ -5862,30 +5872,36 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             bool shares_parent_data = inheritance_parent.has_value() && inheritable_custom_property_data(*inheritance_parent).ptr() == data.ptr();
             if (!shares_parent_data) {
                 auto parent_data = inheritance_parent.has_value() ? inheritable_custom_property_data(*inheritance_parent) : nullptr;
-                state.custom_property_resolution = make<CustomPropertyResolutionState>(data.release_nonnull(), move(parent_data), abstract_element, bit_cast<FlatPtr>(&style_computer.document()), style_computer.document().custom_property_registration_generation());
+                state.custom_property_resolution = make<CustomPropertyResolutionState>(data.release_nonnull(), move(parent_data), bit_cast<FlatPtr>(&style_computer.document()), style_computer.document().custom_property_registration_generation());
                 auto inheritance_data = inheritance_parent.has_value() ? inheritance_parent->custom_property_data() : nullptr;
                 auto& resolution = *state.custom_property_resolution;
+                if (!custom_property_resolution_is_callback_free)
+                    resolution.host_adapter = make<CustomPropertyResolutionState::HostAdapter>(abstract_element);
                 resolution.resolution_context = {
-                    .parse_context = &resolution.substitution_data.parse_context,
-                    .media_environment = style_computer.cached_media_environment_for_style_update(),
+                    .parse_context = resolution.host_adapter ? &resolution.host_adapter->substitution_data.parse_context : nullptr,
+                    .media_environment = resolution.host_adapter ? style_computer.cached_media_environment_for_style_update() : nullptr,
                     .load_media_environment = nullptr,
                     .custom_property_store = resolution.data->rust_store(),
                     .animated_custom_property_store = nullptr,
                     .animated_custom_property_base_store = nullptr,
-                    .inheritance_custom_property_store = inheritance_data ? inheritance_data->rust_store() : nullptr,
+                    .inheritance_custom_property_store = resolution.host_adapter
+                        ? inheritance_data ? inheritance_data->rust_store() : nullptr
+                        : resolution.parent_data    ? resolution.parent_data->rust_store()
+                        : resolution.data->parent() ? resolution.data->parent()->rust_store()
+                                                    : nullptr,
                     .custom_property_registry = style_computer.document().rust_custom_property_registry(),
                     .root_custom_property_name = {},
-                    .attributes = resolution.substitution_data.ffi_attributes.data(),
-                    .attribute_count = resolution.substitution_data.ffi_attributes.size(),
-                    .attribute_names_are_ascii_case_insensitive = abstract_element.element().namespace_uri() == Namespace::HTML && style_computer.document().is_html_document(),
-                    .custom_functions = resolution.substitution_data.ffi_functions.data(),
-                    .custom_function_count = resolution.substitution_data.ffi_functions.size(),
-                    .custom_function_scope_identity = bit_cast<FlatPtr>(&resolution.resolution_element.style_scope()),
-                    .custom_function_visibilities = resolution.substitution_data.function_visibilities.data(),
-                    .custom_function_visibility_count = resolution.substitution_data.function_visibilities.size(),
+                    .attributes = resolution.host_adapter ? resolution.host_adapter->substitution_data.ffi_attributes.data() : nullptr,
+                    .attribute_count = resolution.host_adapter ? resolution.host_adapter->substitution_data.ffi_attributes.size() : 0,
+                    .attribute_names_are_ascii_case_insensitive = resolution.host_adapter && abstract_element.element().namespace_uri() == Namespace::HTML && style_computer.document().is_html_document(),
+                    .custom_functions = resolution.host_adapter ? resolution.host_adapter->substitution_data.ffi_functions.data() : nullptr,
+                    .custom_function_count = resolution.host_adapter ? resolution.host_adapter->substitution_data.ffi_functions.size() : 0,
+                    .custom_function_scope_identity = resolution.host_adapter ? bit_cast<FlatPtr>(&resolution.host_adapter->resolution_element.style_scope()) : 0,
+                    .custom_function_visibilities = resolution.host_adapter ? resolution.host_adapter->substitution_data.function_visibilities.data() : nullptr,
+                    .custom_function_visibility_count = resolution.host_adapter ? resolution.host_adapter->substitution_data.function_visibilities.size() : 0,
                     .style_query_length_resolution_context = nullptr,
-                    .style_query_dependencies = resolution.style_query_dependencies,
-                    .callback_context = &resolution.resolution_element,
+                    .style_query_dependencies = resolution.host_adapter ? resolution.host_adapter->style_query_dependencies : nullptr,
+                    .callback_context = resolution.host_adapter ? &resolution.host_adapter->resolution_element : nullptr,
                 };
             }
         }
@@ -5979,8 +5995,8 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 resolution_state.data->set_cached_resolution(resolution_state.document_identity, resolution_state.registration_generation, resolution_state.color_scheme.value(), resolved);
             context.abstract_element.set_custom_property_data(move(resolved));
         }
-        if (state.custom_property_resolution)
-            report_style_query_dependencies(context.abstract_element, state.custom_property_resolution->style_query_dependencies);
+        if (state.custom_property_resolution && state.custom_property_resolution->host_adapter)
+            report_style_query_dependencies(context.abstract_element, state.custom_property_resolution->host_adapter->style_query_dependencies);
         state.transitions.ensure_capacity(longhand_result->transitions.count);
         for (auto const& transition : ReadonlySpan<ComputedValuesFFI::FfiComputedTransition> { longhand_result->transitions.transitions, longhand_result->transitions.count }) {
             Vector<PropertyID> properties;
@@ -6183,6 +6199,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         &native_context,
         &prepared_transaction.requirements,
         prepared_transaction.longhand_table,
+        prepared_transaction.custom_property_resolution_is_callback_free,
         &transaction_input);
     enum LonghandInputFreezeReason : u8 {
         WorkingSet = 1 << 0,
@@ -6194,7 +6211,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     u8 late_freeze_reasons = WorkingSet;
     if (native_context.state->used_monospace_recascade_host_fallback)
         late_freeze_reasons |= MonospaceRecascade;
-    if (native_context.state->custom_property_resolution)
+    if (native_context.state->custom_property_resolution && native_context.state->custom_property_resolution->host_adapter)
         late_freeze_reasons |= CustomPropertyAdapter;
     StyleValueFFI::rust_style_ffi_note_longhand_input_freeze(late_freeze_reasons);
     input.transaction_input = &transaction_input;
