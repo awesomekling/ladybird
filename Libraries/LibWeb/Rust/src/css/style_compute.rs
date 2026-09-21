@@ -2999,6 +2999,21 @@ fn tail_effects<'a>(
         if animations::row_is_not_associated(row) {
             continue;
         }
+        // An animation the plan gives another `@keyframes` rule or another specified timing keeps
+        // its place, its start time and its hold time; only what it is sampled from, and how far a
+        // given time is along it, changes. So it is sampled from the new rule, and from the row the
+        // new timing is stamped on.
+        let retime = row.owned_css_animation_index(node, slot).and_then(|index| {
+            planned
+                .keyframe_retimes
+                .iter()
+                .find(|retime| retime.animation_index == index)
+        });
+        let retimed_row = match retime.and_then(|retime| retime.retiming_definition.as_ref()) {
+            Some(definition) => Some(row.retimed_for_definition(definition)?),
+            None => None,
+        };
+        let row = retimed_row.as_ref().unwrap_or(row);
         let timeline_time = animations::row_timeline_time(row, samples)?;
         if !animations::row_is_relevant(row, timeline_time)? {
             continue;
@@ -3008,14 +3023,7 @@ fn tail_effects<'a>(
         let Some(current_key) = animations::row_current_key(row, timeline_time)? else {
             continue;
         };
-        // An animation the plan hands another `@keyframes` rule keeps its row and its timing, and
-        // only the rule its declarations come from changes, so the row is sampled from that rule.
-        if let Some(retime) = row.owned_css_animation_index(node, slot).and_then(|index| {
-            planned
-                .keyframe_retimes
-                .iter()
-                .find(|retime| retime.animation_index == index)
-        }) {
+        if let Some(retime) = retime {
             let Some(keyframes) = &retime.keyframes else {
                 continue;
             };
@@ -3089,13 +3097,16 @@ struct StartingDefinition {
     definition: FfiComputedAnimation,
 }
 
-/// One definition of a plan that gives the animation it claims another `@keyframes` rule and
-/// changes nothing else about it: the place `animation-name` order gives that animation, which is
+/// One definition of a plan that gives the animation it claims another `@keyframes` rule, another
+/// specified timing, or both, and changes nothing else about it: the place `animation-name` order gives that animation, which is
 /// the composite order key its row carries once the plan has been applied, and the definition.
 #[derive(Clone, Copy)]
 struct KeyframeRetimedDefinition {
     animation_index: u32,
     definition: FfiComputedAnimation,
+    /// Whether the definition also changed one of the timing properties that move no time, so the
+    /// animation's row is sampled with that timing stamped on it.
+    row_is_retimed: bool,
 }
 
 /// What the plan this computation carries would leave behind for the tail to sample around: the
@@ -3107,10 +3118,14 @@ struct PlannedAnimations<'a> {
     keyframe_retimes: &'a [KeyframeRetime<'a>],
 }
 
-/// What one animation whose definition only swapped its `@keyframes` rule would be sampled from
-/// once the plan has been applied.
+/// What one animation whose definition only swapped its `@keyframes` rule or its specified timing
+/// would be sampled from once the plan has been applied.
 struct KeyframeRetime<'a> {
     animation_index: u32,
+    /// The definition whose timing this animation's row is to be restamped with, for a definition
+    /// that changed one of the timing properties that move no time. `None` where the definition
+    /// left the timing alone and the published row already describes it.
+    retiming_definition: Option<FfiComputedAnimation>,
     /// `None` for a definition whose `animation-name` resolves to no `@keyframes` rule at all: the
     /// effect is handed no keyframes and composes nothing, while staying an animation the element
     /// holds.
@@ -6641,12 +6656,15 @@ pub unsafe extern "C" fn rust_compute_properties(
                 let computed = computed_animation_definitions.get(index)?;
                 let published = applied.get(matched)?;
                 if !computed.would_change_nothing(published) {
-                    if !computed.change_is_only_keyframes(published) {
+                    if !computed.change_is_only_keyframes(published)
+                        && !computed.change_is_only_simple_timing(published)
+                    {
                         return None;
                     }
                     keyframe_retimed_definitions.push(KeyframeRetimedDefinition {
                         animation_index: index as u32,
                         definition: *animation,
+                        row_is_retimed: !computed.change_is_only_keyframes(published),
                     });
                 }
                 new_indices[matched] = i32::try_from(index).ok()?;
@@ -6921,6 +6939,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
                     .map(|retimed| {
                         Some(KeyframeRetime {
                             animation_index: retimed.animation_index,
+                            retiming_definition: retimed.row_is_retimed.then_some(retimed.definition),
                             keyframes: match retimed.definition.keyframe_set.is_null() {
                                 true => None,
                                 false => Some(definition_keyframes(style_engine, input, node, &retimed.definition)?),

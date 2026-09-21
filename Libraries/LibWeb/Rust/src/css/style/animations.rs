@@ -47,7 +47,14 @@ pub(crate) struct AppliedAnimationDefinition {
 /// The word the timeline kind sits in, and its shift, so the stage can refuse to decide the one
 /// kind whose materialization reads the tree.
 const APPLIED_DEFINITION_FLAGS_WORD: usize = 3;
+/// `animation-duration: auto`, whose value is the effect's intrinsic duration rather than the
+/// definition's.
+const APPLIED_DEFINITION_DURATION_IS_AUTO: u64 = 1;
 const APPLIED_DEFINITION_TIMELINE_KIND_SHIFT: u32 = 40;
+/// The fields of the flags word a change to which moves no time: `animation-direction`,
+/// `animation-fill-mode` and `animation-composition`, each a byte. Everything else in that word -
+/// `duration_is_auto`, the play state and the timeline - is a change the retime cannot describe.
+const APPLIED_DEFINITION_RETIMABLE_FLAGS_MASK: u64 = (0xff << 8) | (0xff << 24) | (0xff << 32);
 const APPLIED_DEFINITION_KEYFRAME_SET_WORD: usize = 4;
 const APPLIED_DEFINITION_TIMING_FUNCTION_WORD: usize = 5;
 /// `AnimationTimelineSource::Kind::Scroll`.
@@ -141,6 +148,36 @@ impl AppliedAnimationDefinition {
         without_the_keyframes.words[APPLIED_DEFINITION_KEYFRAME_SET_WORD] =
             published.words[APPLIED_DEFINITION_KEYFRAME_SET_WORD];
         without_the_keyframes.would_change_nothing(published)
+    }
+
+    /// Whether applying `self` to an animation that last had `published` applied would change only
+    /// what its effect is sampled from and how far a given time is along it, and move no time.
+    ///
+    /// `apply_css_properties` hands such a definition to the effect's plain setters -
+    /// `set_specified_iteration_duration`, `set_specified_start_delay`, `set_iteration_count`,
+    /// `set_fill_mode`, `set_playback_direction`, `set_composite` - and then normalizes the
+    /// specified timing. None of them notifies the animation, so the start time, the hold time and
+    /// the pending tasks stay exactly as they are: the retimed row is the published row with those
+    /// three times restamped and those two flag fields replaced.
+    ///
+    /// Everything that *would* move time is refused: a play-state change runs `play_from_css()` or
+    /// `pause_from_css()`, and an `auto` duration is the effect's intrinsic one rather than the
+    /// definition's.
+    #[must_use]
+    pub(crate) fn change_is_only_simple_timing(&self, published: &Self) -> bool {
+        if !self.timeline_is_decidable() {
+            return false;
+        }
+        // An animation no plan has described yet publishes a null timing function, and nothing is
+        // known about the timing it is being retimed from.
+        if published.words[APPLIED_DEFINITION_TIMING_FUNCTION_WORD] == 0 {
+            return false;
+        }
+        if self.words[APPLIED_DEFINITION_FLAGS_WORD] & APPLIED_DEFINITION_DURATION_IS_AUTO != 0 {
+            return false;
+        }
+        self.words[APPLIED_DEFINITION_FLAGS_WORD] & !APPLIED_DEFINITION_RETIMABLE_FLAGS_MASK
+            == published.words[APPLIED_DEFINITION_FLAGS_WORD] & !APPLIED_DEFINITION_RETIMABLE_FLAGS_MASK
     }
 }
 
@@ -577,6 +614,51 @@ impl AnimationTimingRow {
             times,
             synthesized_index: Some(synthesized_index),
         })
+    }
+
+    /// This row with the timing a definition that moves no time would stamp on it: the three
+    /// specified times and the two flag fields `apply_css_properties` sets through the effect's
+    /// plain setters, which notify the animation of nothing.
+    ///
+    /// `None` for a definition whose direction or fill mode is not one of the CSS keywords.
+    #[must_use]
+    pub(crate) fn retimed_for_definition(
+        &self,
+        definition: &crate::css::style_compute::FfiComputedAnimation,
+    ) -> Option<Self> {
+        use timing_row_flag as flag;
+
+        // The same two IDL-order mappings `for_new_css_animation` makes.
+        let direction = match definition.direction {
+            0 => 2, // alternate
+            1 => 3, // alternate-reverse
+            2 => 0, // normal
+            3 => 1, // reverse
+            _ => return None,
+        };
+        let fill_mode = match definition.fill_mode {
+            0 => 2, // backwards
+            1 => 3, // both
+            2 => 1, // forwards
+            3 => 0, // none
+            _ => return None,
+        };
+        // A time the host holds as a percentage of a progress-based timeline is not the specified
+        // one the definition carries, so it is not restamped from it.
+        if self.flags
+            & (flag::START_DELAY_IS_PERCENTAGE | flag::ITERATION_DURATION_IS_PERCENTAGE | flag::END_DELAY_IS_PERCENTAGE)
+            != 0
+        {
+            return None;
+        }
+        let mut retimed = *self;
+        retimed.times[TIME_START_DELAY] = definition.delay;
+        retimed.times[TIME_ITERATION_DURATION] = definition.duration;
+        retimed.times[TIME_ITERATION_COUNT] = definition.iteration_count;
+        retimed.flags &= !((flag::FILL_MODE_MASK << flag::FILL_MODE_SHIFT)
+            | (flag::PLAYBACK_DIRECTION_MASK << flag::PLAYBACK_DIRECTION_SHIFT));
+        retimed.flags |= (fill_mode << flag::FILL_MODE_SHIFT) | (direction << flag::PLAYBACK_DIRECTION_SHIFT);
+        Some(retimed)
     }
 
     #[must_use]

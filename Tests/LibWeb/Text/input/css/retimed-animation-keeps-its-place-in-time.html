@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    @keyframes slide {
+        from { text-indent: 0px; }
+        to { text-indent: 100px; }
+    }
+    /* Every animation is paused from the moment it is created, so its current time is zero and a
+       negative delay alone says how far into the effect it sits. What each element computes is then
+       a pure function of the timing its declarations name. */
+    div {
+        text-indent: 1px;
+        animation-name: slide;
+        animation-duration: 10s;
+        animation-delay: -2.5s;
+        animation-timing-function: linear;
+        animation-fill-mode: both;
+        animation-play-state: paused;
+    }
+</style>
+<div id="easing"></div>
+<div id="duration"></div>
+<div id="delay"></div>
+<div id="iterations"></div>
+<div id="fill" style="animation-duration: 2s"></div>
+<div id="direction"></div>
+<script>
+    test(() => {
+        const read = element => getComputedStyle(element).textIndent;
+        const report = label => {
+            for (const element of document.querySelectorAll("div")) {
+                const first = read(element);
+                // A second read behind a change that forces the element's style to be computed
+                // again, which has to answer the same.
+                element.style.borderLeftWidth = `${1 + (parseInt(element.style.borderLeftWidth) || 0)}px`;
+                const second = read(element);
+                println(`${label} ${element.id}: ${first}${first === second ? "" : ` (recomputed to ${second})`}`);
+            }
+        };
+
+        report("start");
+
+        // Each of these re-normalizes the effect's specified timing and stamps a flag or two, and
+        // none of them moves the animation's time: the start time, the hold time and the pending
+        // task stay exactly as they are.
+        document.getElementById("easing").style.animationTimingFunction = "steps(3, end)";
+        document.getElementById("duration").style.animationDuration = "20s";
+        document.getElementById("delay").style.animationDelay = "-7.5s";
+        document.getElementById("iterations").style.animationIterationCount = "0.2";
+        document.getElementById("fill").style.animationFillMode = "none";
+        document.getElementById("direction").style.animationDirection = "reverse";
+        report("after retiming");
+
+        // And once more, to show that each animation is still the one it was: the second change
+        // composes on top of the first rather than starting anything over.
+        document.getElementById("easing").style.animationTimingFunction = "steps(2, start)";
+        document.getElementById("duration").style.animationDuration = "5s";
+        document.getElementById("delay").style.animationDelay = "-1s";
+        document.getElementById("iterations").style.animationIterationCount = "0.1";
+        document.getElementById("fill").style.animationFillMode = "forwards";
+        document.getElementById("direction").style.animationDirection = "alternate-reverse";
+        report("after retiming again");
+
+        println(`names: ${document.getElementById("duration").getAnimations().map(a => a.animationName).join(" ")}`);
+    });
+</script>

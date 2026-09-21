@@ -1,0 +1,19 @@
+start easing: 25px
+start duration: 25px
+start delay: 25px
+start iterations: 25px
+start fill: 100px
+start direction: 25px
+after retiming easing: 0px
+after retiming duration: 12.5px
+after retiming delay: 75px
+after retiming iterations: 20px
+after retiming fill: 1px
+after retiming direction: 75px
+after retiming again easing: 50px
+after retiming again duration: 50px
+after retiming again delay: 10px
+after retiming again iterations: 10px
+after retiming again fill: 100px
+after retiming again direction: 75px
+names: slide
