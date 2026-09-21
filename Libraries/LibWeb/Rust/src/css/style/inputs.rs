@@ -994,6 +994,7 @@ impl RetainedState {
         slot: animations::AnimationSlot,
         name_lengths: &[u32],
         name_units: &[u16],
+        definition_words: &[u64],
     ) {
         let mut names = Vec::with_capacity(name_lengths.len());
         let mut offset = 0usize;
@@ -1004,7 +1005,29 @@ impl RetainedState {
             names.push(crate::css::css_string::CssString::from_utf16(&name_units[offset..end]));
             offset = end;
         }
-        self.css_defined_animations.set(node, slot, names.into_boxed_slice());
+        assert!(
+            definition_words.len() == name_lengths.len() * animations::APPLIED_DEFINITION_WORD_COUNT,
+            "every published animation name must come with its applied definition"
+        );
+        let definitions = definition_words
+            .as_chunks::<{ animations::APPLIED_DEFINITION_WORD_COUNT }>()
+            .0
+            .iter()
+            .map(|words| animations::AppliedAnimationDefinition::from_words(words))
+            .collect::<Vec<_>>();
+        self.css_defined_animations
+            .set(node, slot, names.into_boxed_slice(), definitions.into_boxed_slice());
+    }
+
+    /// The definition the last plan applied to each of the CSS animations the host holds for one of
+    /// an element's animation lists, in the same order as the names.
+    #[must_use]
+    pub(crate) fn element_applied_animation_definitions(
+        &self,
+        node: StyleNodeID,
+        slot: animations::AnimationSlot,
+    ) -> &[animations::AppliedAnimationDefinition] {
+        self.css_defined_animations.applied_definitions(node, slot)
     }
 
     /// The names of the CSS animations the host holds for one of an element's animation lists.

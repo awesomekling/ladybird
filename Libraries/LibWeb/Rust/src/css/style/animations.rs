@@ -28,28 +28,138 @@ pub(crate) type AnimationSlot = u8;
 /// The definition that claimed no existing animation and asks for a new one.
 pub(crate) const NO_MATCHED_ANIMATION: i32 = -1;
 
+/// How many words of the published buffer one animation's applied definition occupies. A mirror of
+/// `CSS::AppliedAnimationDefinitionRow`.
+pub(crate) const APPLIED_DEFINITION_WORD_COUNT: usize = 6;
+
+/// One animation's applied definition, as the host published it: what the plan that last touched
+/// this animation computed for it. Two rows that compare equal describe a plan that would change
+/// nothing, which is a plan the stage does not have to cross to the host to apply.
+///
+/// The words are opaque except for the last one, which is a borrowed pointer to the computed
+/// `animation-timing-function` the animation retains. A recomputed style builds a fresh allocation
+/// for a declaration that has not changed, so that one is compared by value.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AppliedAnimationDefinition {
+    words: [u64; APPLIED_DEFINITION_WORD_COUNT],
+}
+
+/// The word the timeline kind sits in, and its shift, so the stage can refuse to decide the one
+/// kind whose materialization reads the tree.
+const APPLIED_DEFINITION_FLAGS_WORD: usize = 3;
+const APPLIED_DEFINITION_TIMELINE_KIND_SHIFT: u32 = 40;
+const APPLIED_DEFINITION_TIMING_FUNCTION_WORD: usize = 5;
+/// `AnimationTimelineSource::Kind::Scroll`.
+const APPLIED_DEFINITION_TIMELINE_KIND_SCROLL: u64 = 2;
+
+impl AppliedAnimationDefinition {
+    #[must_use]
+    pub(crate) fn from_words(words: &[u64]) -> Self {
+        let mut row = Self {
+            words: [0; APPLIED_DEFINITION_WORD_COUNT],
+        };
+        row.words.copy_from_slice(words);
+        row
+    }
+
+    /// The same packing the host does over the definition it applied, so that a definition just
+    /// computed and one published back compare word for word.
+    #[must_use]
+    pub(crate) fn from_definition(animation: &crate::css::style_compute::FfiComputedAnimation) -> Self {
+        Self {
+            words: [
+                animation.duration.to_bits(),
+                animation.iteration_count.to_bits(),
+                animation.delay.to_bits(),
+                u64::from(animation.duration_is_auto)
+                    | (u64::from(animation.direction) << 8)
+                    | (u64::from(animation.play_state) << 16)
+                    | (u64::from(animation.fill_mode) << 24)
+                    | (u64::from(animation.composition) << 32)
+                    | (u64::from(animation.timeline_kind as u8) << APPLIED_DEFINITION_TIMELINE_KIND_SHIFT)
+                    | (u64::from(animation.scroll_scroller) << 48)
+                    | (u64::from(animation.scroll_axis) << 56),
+                animation.keyframe_set as u64,
+                animation.timing_function as u64,
+            ],
+        }
+    }
+
+    /// Whether the timeline this definition asks for is one whose materialization the stage can
+    /// predict. A scroll timeline is rebuilt from the element's surroundings every time it is
+    /// applied, and whether the rebuilt one would replace the animation's is a question about the
+    /// tree, so a definition that names one is never called unchanged.
+    #[must_use]
+    fn timeline_is_decidable(&self) -> bool {
+        (self.words[APPLIED_DEFINITION_FLAGS_WORD] >> APPLIED_DEFINITION_TIMELINE_KIND_SHIFT) & 0xff
+            != APPLIED_DEFINITION_TIMELINE_KIND_SCROLL
+    }
+
+    /// Whether applying `self` to an animation that last had `published` applied would leave it
+    /// exactly as it is.
+    #[must_use]
+    pub(crate) fn would_change_nothing(&self, published: &Self) -> bool {
+        if !self.timeline_is_decidable() {
+            return false;
+        }
+        // An animation no plan has described yet publishes a null timing function, which no
+        // computed definition ever has.
+        if published.words[APPLIED_DEFINITION_TIMING_FUNCTION_WORD] == 0 {
+            return false;
+        }
+        for index in 0..APPLIED_DEFINITION_WORD_COUNT {
+            if index == APPLIED_DEFINITION_TIMING_FUNCTION_WORD {
+                continue;
+            }
+            if self.words[index] != published.words[index] {
+                return false;
+            }
+        }
+        unsafe {
+            crate::css::style_value::rust_style_value_equals(
+                self.words[APPLIED_DEFINITION_TIMING_FUNCTION_WORD] as *const _,
+                published.words[APPLIED_DEFINITION_TIMING_FUNCTION_WORD] as *const _,
+            )
+        }
+    }
+}
+
 /// Per element and pseudo-element, the names of the CSS animations the host holds for it, in the
-/// order the host holds them.
+/// order the host holds them, and the definition the last plan applied to each.
 #[derive(Default)]
 pub(crate) struct CssDefinedAnimations {
     /// Owning a CSS animation is rare, so only the elements that do have a row.
-    rows: HashMap<(StyleNodeID, AnimationSlot), Box<[CssString]>>,
+    rows: HashMap<(StyleNodeID, AnimationSlot), CssDefinedAnimationRow>,
 }
+
+/// One element's list: the animations' names, and the definition the last plan applied to each.
+type CssDefinedAnimationRow = (Box<[CssString]>, Box<[AppliedAnimationDefinition]>);
 
 impl CssDefinedAnimations {
     /// Replace one list. An empty list drops the row, so an element that stops animating stops
     /// costing anything.
-    pub(crate) fn set(&mut self, node: StyleNodeID, slot: AnimationSlot, names: Box<[CssString]>) {
+    pub(crate) fn set(
+        &mut self,
+        node: StyleNodeID,
+        slot: AnimationSlot,
+        names: Box<[CssString]>,
+        definitions: Box<[AppliedAnimationDefinition]>,
+    ) {
         if names.is_empty() {
             self.rows.remove(&(node, slot));
             return;
         }
-        self.rows.insert((node, slot), names);
+        self.rows.insert((node, slot), (names, definitions));
     }
 
     #[must_use]
     pub(crate) fn names(&self, node: StyleNodeID, slot: AnimationSlot) -> &[CssString] {
-        self.rows.get(&(node, slot)).map_or(&[][..], |names| &names[..])
+        self.rows.get(&(node, slot)).map_or(&[][..], |row| &row.0[..])
+    }
+
+    #[must_use]
+    pub(crate) fn applied_definitions(&self, node: StyleNodeID, slot: AnimationSlot) -> &[AppliedAnimationDefinition] {
+        self.rows.get(&(node, slot)).map_or(&[][..], |row| &row.1[..])
     }
 
     /// Give up the rows of identities that have been retired. An identity can be minted again for
