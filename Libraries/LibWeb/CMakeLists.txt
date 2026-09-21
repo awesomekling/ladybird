@@ -173,6 +173,7 @@ set(SOURCES
     CSS/FontFaceSet.cpp
     CSS/FontFaceSetLoadEvent.cpp
     CSS/FontFeatureData.cpp
+    CSS/FontResolution.cpp
     CSS/Frequency.cpp
     CSS/HypotheticalElement.cpp
     CSS/Invalidation/AdoptedStyleSheetInvalidator.cpp

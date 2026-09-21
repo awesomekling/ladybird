@@ -71,6 +71,7 @@ pub mod exact_matcher;
 pub use crate::fast_hash;
 mod flush;
 mod fnv;
+mod font_faces;
 mod font_resolution;
 pub mod impact;
 pub mod index;

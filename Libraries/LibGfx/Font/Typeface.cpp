@@ -15,6 +15,11 @@
 #include <LibIPC/Decoder.h>
 #include <LibIPC/Encoder.h>
 
+extern "C" {
+void ladybird_gfx_typeface_ref(void const*);
+void ladybird_gfx_typeface_unref(void const*);
+}
+
 namespace Gfx {
 
 ErrorOr<Vector<String>> Typeface::local_font_names() const
@@ -266,4 +271,19 @@ ErrorOr<NonnullRefPtr<Gfx::Typeface const>> decode(Decoder& decoder)
     return Error::from_string_literal("Typeface IPC data contained invalid font data format");
 }
 
+}
+
+// A published `@font-face` table holds the typefaces its loaded faces resolved to, as addresses,
+// so the snapshot that carries them is shareable without naming a C++ type. `Gfx::Typeface` is
+// atomically reference counted, so taking and giving up a reference is safe from any thread.
+extern "C" void ladybird_gfx_typeface_ref(void const* typeface)
+{
+    VERIFY(typeface);
+    static_cast<Gfx::Typeface const*>(typeface)->ref();
+}
+
+extern "C" void ladybird_gfx_typeface_unref(void const* typeface)
+{
+    VERIFY(typeface);
+    static_cast<Gfx::Typeface const*>(typeface)->unref();
 }

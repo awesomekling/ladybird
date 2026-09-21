@@ -448,26 +448,32 @@ void note_wanted_web_face(u64 face_id, WantedWebFace want)
     s_wanted_web_faces->append({ face_id, want });
 }
 
-// Only a style update defers today, so this is document-thread state; a want recorded from
-// somewhere else is drained by whichever document-thread scope next asks for it.
-static u32 s_deferred_web_face_load_depth { 0 };
+// A style update opens and closes this scope on the document thread. A cascade entry built for
+// that update asks whether it is open from wherever it is looked up, which is why it is atomic.
+static Atomic<u32> s_deferred_web_face_load_depth { 0 };
 
 void begin_deferred_web_face_loads()
 {
-    ++s_deferred_web_face_load_depth;
+    s_deferred_web_face_load_depth.fetch_add(1, AK::MemoryOrder::memory_order_acq_rel);
 }
 
 void end_deferred_web_face_loads()
 {
-    VERIFY(s_deferred_web_face_load_depth > 0);
-    if (--s_deferred_web_face_load_depth != 0)
+    auto previous_depth = s_deferred_web_face_load_depth.fetch_sub(1, AK::MemoryOrder::memory_order_acq_rel);
+    VERIFY(previous_depth > 0);
+    if (previous_depth != 1)
         return;
     (void)request_wanted_web_faces();
 }
 
+bool web_face_loads_are_deferred()
+{
+    return s_deferred_web_face_load_depth.load(AK::MemoryOrder::memory_order_acquire) != 0;
+}
+
 size_t request_wanted_web_faces()
 {
-    if (s_deferred_web_face_load_depth != 0)
+    if (web_face_loads_are_deferred())
         return 0;
 
     Vector<WantedWebFaceEntry> wanted;
@@ -616,6 +622,13 @@ RefPtr<Gfx::FontCascadeList const> FontFaceState::font_with_point_size(float poi
     if (font_list->is_empty())
         return {};
     return font_list;
+}
+
+RefPtr<Gfx::Font const> FontFaceState::font_for_rendering(float point_size, Gfx::FontVariationSettings const& variations, Gfx::ShapeFeatures const& shape_features) const
+{
+    if (!m_parsed_font || m_font_display_failed)
+        return {};
+    return m_parsed_font->font(point_size, variations, shape_features);
 }
 
 // https://drafts.csswg.org/css-fonts-4/#font-display-timeline
@@ -789,6 +802,9 @@ void FontFaceState::set_font_display_time_for_testing(u32 milliseconds)
 {
     m_font_display_time_for_testing = milliseconds;
     update_font_display_period();
+    // Moving the face along its timeline changes the state the published table records for it,
+    // even when the current display period does not change.
+    invalidate_font_display();
 }
 
 // https://drafts.csswg.org/css-font-loading/#dom-fontface-family
@@ -1170,6 +1186,11 @@ void FontFaceState::load_for_style()
         if (font.m_font_download_timer)
             font.m_font_download_timer->stop();
         font.m_parsed_font = maybe_typeface;
+        // The published table has to answer with this typeface from here on, not from the
+        // font-loading task below: a style computed in between would otherwise still see a
+        // pending face and resolve font-relative lengths against the fallback.
+        if (auto font_computer = font.font_computer(); font_computer.has_value())
+            font_computer->did_parse_font_face();
         HTML::queue_global_task(HTML::Task::Source::FontLoading, font.task_global_object(), GC::create_function(GC::Heap::the(), [font_root, maybe_typeface] {
             font_root->elements().first()->did_load(maybe_typeface);
         }));
