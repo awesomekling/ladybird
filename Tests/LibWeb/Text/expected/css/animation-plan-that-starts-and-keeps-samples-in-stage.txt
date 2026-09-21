@@ -1,0 +1,20 @@
+start-only: 5px
+start-after-existing: 10px
+start-before-existing: 10px
+start-two: 5px
+start-and-cancel: 20px
+with-transition: 5px
+animations before: 4
+start-only: 10px
+start-after-existing: 20px
+start-before-existing: 10px
+start-two: 20px
+start-and-cancel: 30px
+with-transition: 10px
+animations after: 10
+start-only holds: a
+start-after-existing holds: a b
+start-before-existing holds: b a
+start-two holds: a b
+start-and-cancel holds: b c
+with-transition holds: a

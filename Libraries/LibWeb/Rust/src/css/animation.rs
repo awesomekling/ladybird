@@ -7226,22 +7226,27 @@ fn describe_selected_effects(
     Some((ffi_effects, ffi_keyframes, ffi_declarations))
 }
 
-/// Resolve the animation declarations of the one CSS animation a computation is about to start,
-/// from the `@keyframes` rule the host published for the scope rather than from an effect it holds.
+/// Resolve the animation declarations of the effect stack a computation selected, in composite
+/// order.
 ///
-/// The rule's description keeps two holes only the animation can fill - a keyframe's own easing and
+/// The stack may mix effects the host described with ones taken from a `@keyframes` rule directly,
+/// for the animations the computation is about to start and that the host has not created yet. Such
+/// a rule's description keeps two holes only an animation can fill - a keyframe's own easing and
 /// `composite: auto` - and both come from the definition the computation just computed.
-pub(crate) fn resolve_new_animation_declarations(
-    starting: SelectedEffect<'_>,
+pub(crate) fn resolve_selected_animation_declarations(
+    selected: &[SelectedEffect<'_>],
     table: &crate::css::computed_longhand_table::ComputedLonghandTable,
     writing_mode: u8,
     direction: u8,
     important_property_bitmap: &[u8],
 ) -> Option<FfiResolvedAnimationProperties> {
-    if !starting.effect.is_covered() || starting.effect.keyframes.len() < 2 {
+    if selected
+        .iter()
+        .any(|selection| !selection.effect.is_covered() || selection.effect.keyframes.len() < 2)
+    {
         return None;
     }
-    let (ffi_effects, ffi_keyframes, ffi_declarations) = describe_selected_effects(&[starting], table)?;
+    let (ffi_effects, ffi_keyframes, ffi_declarations) = describe_selected_effects(selected, table)?;
     Some(finish_resolved_animation_properties(resolve_animation_declarations(
         &ffi_declarations,
         &ffi_effects,
