@@ -226,7 +226,7 @@ WEB_API void record_element_construction_facts(DOM::Element&);
 WEB_API bool record_element_presentational_hint_properties(DOM::Element&, ReadonlySpan<StyleProperty>);
 WEB_API void record_element_animation_names(DOM::Element&, ReadonlySpan<Utf16FlyString>);
 WEB_API void record_element_css_defined_animations(DOM::Element&, u8 slot, ReadonlySpan<Utf16FlyString> names, ReadonlySpan<u64> definition_words);
-WEB_API void record_element_animation_timing_rows(DOM::Element&, u8 slot, ReadonlySpan<u32> words, ReadonlySpan<u64> times);
+WEB_API void record_element_animation_timing_rows(DOM::Element&, u8 slot, ReadonlySpan<u32> words, ReadonlySpan<u64> times, ReadonlySpan<u64> linear_points);
 WEB_API void record_element_animation_effect_descriptions(DOM::Element&, u8 slot, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>);
 // The keyframe sets travel as the pointers the scope's name table names them by: naming their type
 // here would mean pulling `Animations::KeyframeEffect` into every translation unit that styles.

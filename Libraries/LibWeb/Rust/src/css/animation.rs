@@ -7006,7 +7006,8 @@ pub unsafe extern "C" fn rust_published_animation_current_key(
     let Some(timeline_time) = animations::row_timeline_time(row, engine.animation_timeline_samples()) else {
         return false;
     };
-    let Some(key) = animations::row_current_key(row, timeline_time) else {
+    let linear_points = engine.element_animation_timing_row_linear_points(node, slot);
+    let Some(key) = animations::row_current_key(row, linear_points, timeline_time) else {
         return false;
     };
     unsafe {

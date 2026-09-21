@@ -65,9 +65,6 @@ public:
         // `CSS::StepPosition`, which is also what the easing evaluator takes.
         static constexpr u32 easing_step_position_shift = 23;
         static constexpr u32 easing_step_position_mask = 0x7;
-        // A `linear()` easing that has control points of its own. The row spells out a curve, not a
-        // list of stops, so the mirror declines the key rather than answering with the wrong one.
-        static constexpr u32 easing_has_control_points = 1u << 26;
         // A provisionally started transition's row. Its effect is sampled by the pass that started
         // it, but the transition is not associated with its target yet, so it answers no question
         // about which effects the element holds.
@@ -82,7 +79,7 @@ public:
 
         // How many words of the buffer a published row occupies. Mirrored by `TIMING_ROW_WORDS` in
         // `Rust/src/css/style/animations.rs`; keep the two in step.
-        static constexpr size_t word_count = 9;
+        static constexpr size_t word_count = 11;
 
         enum Time : size_t {
             StartTime,
@@ -118,9 +115,16 @@ public:
         u32 composite_owning_node { 0 };
         u32 composite_class_key { 0 };
         u32 global_list_order { 0 };
+        // A `linear()` easing with control points of its own spells its stops out in the buffer
+        // published beside the rows, which this range names. A count of zero is the identity
+        // `linear(0, 1)`, which the mirror knows without being told any stops.
+        u32 first_linear_point { 0 };
+        u32 linear_point_count { 0 };
         double times[TimeCount] {};
     };
-    StyleTimingRow style_timing_row() const;
+    // `linear_points` is the buffer the row's `linear()` stops are appended to, input and output
+    // interleaved as raw `f64` bits, which the caller publishes beside the rows.
+    StyleTimingRow style_timing_row(Vector<u64>& linear_points) const;
 
     static constexpr size_t effect_offset() { return offsetof(Animation, m_effect); }
     enum class ShouldInvalidate {

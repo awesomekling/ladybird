@@ -535,6 +535,10 @@ void Animatable::publish_animation_timing_rows()
 
     Vector<u32> words;
     Vector<u64> times;
+    // The `linear()` stops the rows name by range, input and output interleaved as raw `f64` bits.
+    // The rows are reordered below and this buffer is not, so a range stays the one it was appended
+    // at.
+    Vector<u64> linear_points;
     Vector<GC::Ref<KeyframeEffect>> effects_in_order;
     // A CSS animation keeps the place in its owning element's `animation-name` list it was given
     // when a plan last applied a definition to it, and script can revive one the element has since
@@ -554,7 +558,7 @@ void Animatable::publish_animation_timing_rows()
         return Animation::StyleTimingRow::listed_by_owning_element;
     };
     auto append_row = [&](KeyframeEffect& keyframe_effect, Animation& animation, u32 extra_flags) {
-        auto row = animation.style_timing_row();
+        auto row = animation.style_timing_row(linear_points);
         row.effect_identity = keyframe_effect.animation_preparation_identity();
         words.append(row.flags | extra_flags | listed_by_owning_element(animation));
         words.append(row.timeline_identity);
@@ -567,6 +571,8 @@ void Animatable::publish_animation_timing_rows()
         words.append(row.composite_owning_node);
         words.append(row.composite_class_key);
         words.append(row.global_list_order);
+        words.append(row.first_linear_point);
+        words.append(row.linear_point_count);
         for (auto time : row.times)
             times.append(bit_cast<u64>(time));
         effects_in_order.append(keyframe_effect);
@@ -595,6 +601,7 @@ void Animatable::publish_animation_timing_rows()
     for (auto slot : slots_with_rows) {
         words.clear_with_capacity();
         times.clear_with_capacity();
+        linear_points.clear_with_capacity();
         effects_in_order.clear_with_capacity();
         for (auto& effect : provisional_effects) {
             if (slot_of(*effect) != slot)
@@ -612,13 +619,13 @@ void Animatable::publish_animation_timing_rows()
             append_row(keyframe_effect, *animation, 0);
         }
         put_rows_in_composite_order();
-        CSS::record_element_animation_timing_rows(*element, slot, ordered_words, ordered_times);
+        CSS::record_element_animation_timing_rows(*element, slot, ordered_words, ordered_times, linear_points);
         CSS::record_element_animation_effect_descriptions(*element, slot, ordered_effects);
     }
 
     for (auto slot : impl.published_timing_row_slots) {
         if (!slots_with_rows.contains_slow(slot)) {
-            CSS::record_element_animation_timing_rows(*element, slot, {}, {});
+            CSS::record_element_animation_timing_rows(*element, slot, {}, {}, {});
             CSS::record_element_animation_effect_descriptions(*element, slot, {});
         }
     }

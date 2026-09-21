@@ -1271,7 +1271,7 @@ void Animation::effect_timing_changed(Badge<AnimationEffect>)
 // The style stage decides which of an element's animations are relevant from its own inputs, so
 // what `is_relevant()` reads is published rather than asked for. Only the timing is published: the
 // phase computation is a pure function of it and of the timeline's sampled current time.
-Animation::StyleTimingRow Animation::style_timing_row() const
+Animation::StyleTimingRow Animation::style_timing_row(Vector<u64>& linear_points) const
 {
     StyleTimingRow row;
 
@@ -1348,8 +1348,14 @@ Animation::StyleTimingRow Animation::style_timing_row() const
             auto is_identity = linear.control_points.size() == 2
                 && linear.control_points[0] == CSS::LinearEasingFunction::ControlPoint { 0, 0 }
                 && linear.control_points[1] == CSS::LinearEasingFunction::ControlPoint { 1, 1 };
-            if (!is_identity)
-                row.flags |= StyleTimingRow::easing_has_control_points;
+            if (is_identity)
+                return;
+            row.first_linear_point = static_cast<u32>(linear_points.size() / 2);
+            row.linear_point_count = static_cast<u32>(linear.control_points.size());
+            for (auto const& point : linear.control_points) {
+                linear_points.append(bit_cast<u64>(static_cast<double>(point.input)));
+                linear_points.append(bit_cast<u64>(static_cast<double>(point.output)));
+            }
         },
         [&](CSS::CubicBezierEasingFunction const& bezier) {
             row.flags |= 1u << StyleTimingRow::easing_kind_shift;
