@@ -2331,7 +2331,7 @@ impl StyleEngineState {
                             .font_drive
                             .request
                             .take()
-                            .map(|request| (published_nodes[parked.published_index], request))
+                            .map(|request| (Some(published_nodes[parked.published_index]), request))
                     })
                     .collect();
                 self.refill_font_requests(requests, counters);

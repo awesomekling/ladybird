@@ -18,7 +18,6 @@ pub type ResolveFontsCallback =
 pub(super) enum FontService {
     ParkedBatch,
     RootPreparation,
-    LegacyLonghand,
 }
 
 impl FontService {
@@ -26,7 +25,6 @@ impl FontService {
         match self {
             Self::ParkedBatch => "resolve_font",
             Self::RootPreparation => "resolve_font_root",
-            Self::LegacyLonghand => "resolve_font_legacy",
         }
     }
 }
