@@ -388,6 +388,11 @@ pub(crate) mod timing_row_flag {
     /// The animation names an owning element, which is the first thing the class-specific composite
     /// order of a CSS animation or transition compares.
     pub(crate) const HAS_OWNING_ELEMENT: u32 = 1 << 28;
+    /// The owning element currently lists this CSS animation at the place its class-specific key
+    /// names. A CSS animation the element has stopped listing - one script revived after a plan
+    /// cancelled it - keeps the place it was last given, so the key alone does not say which of the
+    /// two animations claiming a place the element's plan works on.
+    pub(crate) const LISTED_BY_OWNING_ELEMENT: u32 = 1 << 29;
 }
 
 /// `Animations::AnimationClass`, in declaration order, which is also the inter-class composite
@@ -547,6 +552,9 @@ impl AnimationTimingRow {
                 | flag::HAS_TIMELINE
                 | flag::TIMELINE_IS_MONOTONICALLY_INCREASING
                 | flag::HAS_OWNING_ELEMENT
+                // The plan starts this animation into the place the definition holds, so the
+                // element lists it there for as long as the row stands for it.
+                | flag::LISTED_BY_OWNING_ELEMENT
                 | pending_task
                 | (fill_mode << flag::FILL_MODE_SHIFT)
                 | (direction << flag::PLAYBACK_DIRECTION_SHIFT),
@@ -585,14 +593,17 @@ impl AnimationTimingRow {
 
     /// The place in the element's `animation-name` list of the CSS animation this row describes,
     /// for a row that is one of the animations `(node, slot)`'s own plan works on. `None` for every
-    /// other row: a transition, an animation script started, a CSS animation another element owns.
+    /// other row: a transition, an animation script started, a CSS animation another element owns,
+    /// and a CSS animation whose owning element has stopped listing it.
     ///
     /// The host's class-specific composite order key for a CSS animation *is* that place, so the
-    /// row already carries it.
+    /// row already carries it - but only an animation the element still lists there really holds
+    /// it, and only one the element lists is an animation its plan works on.
     #[must_use]
     pub(crate) fn owned_css_animation_index(&self, node: StyleNodeID, slot: AnimationSlot) -> Option<u32> {
         if self.composite_class != animation_class::CSS_ANIMATION_WITH_OWNING_ELEMENT
             || !self.has(timing_row_flag::HAS_OWNING_ELEMENT)
+            || !self.has(timing_row_flag::LISTED_BY_OWNING_ELEMENT)
             || self.composite_owning_node != node.raw()
             || self.composite_owning_slot != slot
         {

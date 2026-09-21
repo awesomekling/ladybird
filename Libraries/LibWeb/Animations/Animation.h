@@ -75,6 +75,10 @@ public:
         // The animation names an owning element, which is the first thing the class-specific
         // composite order of a CSS animation or transition compares.
         static constexpr u32 has_owning_element = 1u << 28;
+        // The owning element currently lists this CSS animation at the place the class-specific key
+        // names. An animation the element has stopped listing keeps the place it was last given, so
+        // without this the key alone cannot say which animation really holds it.
+        static constexpr u32 listed_by_owning_element = 1u << 29;
 
         // How many words of the buffer a published row occupies. Mirrored by `TIMING_ROW_WORDS` in
         // `Rust/src/css/style/animations.rs`; keep the two in step.
