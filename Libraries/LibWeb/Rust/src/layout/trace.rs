@@ -11,11 +11,9 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::fmt::Write;
 
-pub(crate) struct MainThreadFfiEntry {
-    _private: (),
-}
+mod main_thread_entries;
 
-const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
+pub(crate) use main_thread_entries::MainThreadFfiEntry;
 
 type AppendText = unsafe extern "C" fn(*mut c_void, *const u8, usize);
 type DescribeNode = unsafe extern "C" fn(*mut c_void, *mut c_void, AppendText);
@@ -209,28 +207,9 @@ pub unsafe extern "C" fn layout_arena_begin_layout_trace(arena: *mut c_void, des
         .begin(describe_node);
 }
 
-/// # Safety
-/// The arena must be live, and append_text must synchronously copy the supplied bytes.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_take_layout_trace(
-    arena: *mut c_void,
-    context: *mut c_void,
-    append_text: AppendText,
-) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    let text = arena.layout_trace.take(&main_thread, arena);
-    unsafe { append_text(context, text.as_ptr(), text.len()) };
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn main_thread_for_test() -> crate::stage::MainThread {
-        // SAFETY: Tests run on the thread that owns their arena.
-        unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) }
-    }
 
     unsafe extern "C" fn unused_description(_: *mut c_void, _: *mut c_void, _: AppendText) {
         panic!("no nodes to describe in this test");
@@ -241,7 +220,7 @@ mod tests {
         let arena = LayoutNodeArena::new();
         let trace = LayoutTrace::default();
         assert!(trace.scope("", None, || panic!("disabled observation")).is_none());
-        assert_eq!(trace.take(&main_thread_for_test(), &arena), "");
+        assert_eq!(trace.take(&crate::stage::MainThread::for_test(), &arena), "");
     }
 
     #[test]
@@ -261,11 +240,11 @@ mod tests {
             let _pass = trace.scope("layout PARTIAL ", None, || "#boundary".into());
         }
         assert_eq!(
-            trace.take(&main_thread_for_test(), &arena),
+            trace.take(&crate::stage::MainThread::for_test(), &arena),
             "layout FULL\n  @viewport/block RUN (cache=bypass)\n    #child/block REUSE SUBTREE\n    #child/block RUN (cache=miss)\nlayout PARTIAL #boundary\n"
         );
         assert!(trace.scope("", None, || panic!("take must disable tracing")).is_none());
-        assert_eq!(trace.take(&main_thread_for_test(), &arena), "");
+        assert_eq!(trace.take(&crate::stage::MainThread::for_test(), &arena), "");
     }
 
     #[test]
@@ -275,6 +254,6 @@ mod tests {
         trace.begin(unused_description);
         drop(trace.scope("", None, || "old pass".into()));
         trace.begin(unused_description);
-        assert_eq!(trace.take(&main_thread_for_test(), &arena), "");
+        assert_eq!(trace.take(&crate::stage::MainThread::for_test(), &arena), "");
     }
 }

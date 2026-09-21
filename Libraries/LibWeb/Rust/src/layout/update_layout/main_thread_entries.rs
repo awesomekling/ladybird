@@ -1,0 +1,37 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! The FFI entries of the parent module that mint the main thread capability. Only this module can
+//! construct its marker, and the entries are private, so stage code in the parent module can neither
+//! mint the capability nor call an entry that does.
+
+use super::*;
+
+pub(crate) struct MainThreadFfiEntry {
+    _private: (),
+}
+
+const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
+
+/// Runs the document's layout update to a fixed point: style, then the layout tree build, then
+/// either a partial relayout of the registered boundaries or a full pass, until nothing is
+/// pending. The document-side steps run through the registered layout update host.
+///
+/// # Safety
+///
+/// `arena` must be a live handle with registered layout and layout update hosts, used on the
+/// document thread between `layout_arena_begin_update_layout` and its end, and `inputs` must
+/// remain valid for the call.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_update_layout(arena: *mut c_void, inputs: *const FfiLayoutUpdateInputs) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    assert!(!inputs.is_null());
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    abort_on_panic(|| {
+        // SAFETY: Guaranteed by the entry point's contract.
+        unsafe { update_layout(&main_thread, arena, &*inputs) };
+    });
+}

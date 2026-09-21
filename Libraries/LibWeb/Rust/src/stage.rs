@@ -34,12 +34,22 @@ impl MainThread {
             not_send_or_sync: PhantomData,
         }
     }
+
+    /// Mint a main-thread capability for a unit test, which runs on the thread that owns its arena.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self {
+            not_send_or_sync: PhantomData,
+        }
+    }
 }
 
 /// Mint a main-thread capability for a designated FFI entry module.
 ///
 /// The sealed marker must be constructed by the module that owns it, so a stage module cannot
-/// call this function safely with a marker of its own.
+/// call this function safely with a marker of its own. A module whose code a stage reaches keeps
+/// its marker in a `main_thread_entries` child that holds only the entries minting with it, and
+/// keeps those entries private, so its stage code can neither mint nor call an entry that does.
 ///
 /// ```compile_fail
 /// struct StageEntry;
