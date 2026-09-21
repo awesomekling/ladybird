@@ -2916,6 +2916,12 @@ impl LayoutNodeArena {
         }
     }
 
+    /// Hands the host the reset of a row whose paint state is being cleared, or queues it while a
+    /// tree build runs.
+    pub(crate) fn hand_back_paintable_row_reset(&self, reset: crate::painting::paintable_rows::PaintableRowReset) {
+        self.hand_back(HostHandback::PaintableRowReset(reset));
+    }
+
     fn hand_back(&self, handback: HostHandback) {
         if let Some(deferred) = self.deferred_host_handbacks.borrow_mut().as_mut() {
             deferred.push(handback);

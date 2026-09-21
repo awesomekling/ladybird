@@ -476,7 +476,7 @@ pub unsafe extern "C" fn layout_arena_paintable_cleared_from_node(arena: *mut c_
         arena.prepare_paintable_row_cleared_reset(layout_node)
     };
     if let Some(reset) = reset {
-        reset.invoke_callback();
+        unsafe { arena_from_handle(arena) }.hand_back_paintable_row_reset(reset);
         let arena = unsafe { arena_from_handle_mut(arena) };
         arena.paintable_row_cleared(reset);
     }
