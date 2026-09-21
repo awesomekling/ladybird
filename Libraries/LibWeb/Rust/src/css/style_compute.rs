@@ -7088,10 +7088,16 @@ pub unsafe extern "C" fn rust_set_longhand_animation_custom_property_environment
 }
 
 /// What a computation still has to do once its animations have been sampled, kept where the host
-/// can wait on it. Plain data: nothing in it borrows the stage's state.
+/// can wait on it. Nothing in it borrows the stage's state; what it does not own outright, it
+/// keeps alive for itself.
 struct PendingAnimationSampling {
     invalidated_longhands: u16,
     animated_overlay: *mut AnimatedOverlay,
+    /// An element that inherits animated values without animating anything itself is given an
+    /// overlay of the stage's own, and `animated_overlay` is a pointer into it. It is kept here so
+    /// that it outlives the call that hands this state back, since the host reads and resumes
+    /// after that call has returned.
+    inherited_animated_overlay: Option<Box<AnimatedOverlay>>,
     parent_text_align_input_is_animated: bool,
     finalization_line_height_metrics: FfiInputLineHeightMetrics,
     animation_length_contexts: FfiAnimationLengthContexts,
@@ -7119,6 +7125,8 @@ unsafe fn finish_longhand_finalization(
     let PendingAnimationSampling {
         mut invalidated_longhands,
         animated_overlay,
+        // Held for the whole tail: `animated_overlay` may point into it.
+        inherited_animated_overlay: _inherited_animated_overlay,
         parent_text_align_input_is_animated,
         finalization_line_height_metrics,
         animation_length_contexts,
@@ -7299,7 +7307,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         parent_text_align_input_is_animated,
         mut animation_length_contexts,
         legacy_font,
-        inherited_animated_overlay: _inherited_animated_overlay,
+        inherited_animated_overlay,
         starting_definitions,
         animation_plan_new_indices,
         keyframe_retimed_definitions,
@@ -7542,6 +7550,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
             let pending = Box::into_raw(Box::new(PendingAnimationSampling {
                 invalidated_longhands,
                 animated_overlay,
+                inherited_animated_overlay,
                 parent_text_align_input_is_animated,
                 finalization_line_height_metrics,
                 animation_length_contexts,
@@ -7594,6 +7603,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
             PendingAnimationSampling {
                 invalidated_longhands,
                 animated_overlay,
+                inherited_animated_overlay,
                 parent_text_align_input_is_animated,
                 finalization_line_height_metrics,
                 animation_length_contexts,
