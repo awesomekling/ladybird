@@ -1763,6 +1763,9 @@ impl StyleEngineState {
             .memory
             .release(MemoryCategory::BatchScratch, direct_action_node_bytes);
         published_match_answers.sort();
+        if seal::is_reporting() {
+            self.retained.host_entry_causes.clear();
+        }
         // A node settles against the record its flat-tree parent holds, so a subtree with no
         // records yet can only settle top-down: the parent has to be visited first. The batch
         // arrives in style-node identity order, which is not tree order, so a descendant is
@@ -2079,11 +2082,15 @@ impl StyleEngineState {
                                 display: parent_inputs_moved_nodes.contains(&node),
                             });
                     let mut retry_after_ancestor = false;
+                    // Why this row would reach the host, for the seal's by-cause census. Naming
+                    // it here is what lets the census rank entries instead of attempts.
+                    let mut decline_cause: &'static str = "";
                     // NB: Entry gates were already established for a suspended computation.
                     //     Its completed originating record must not change that decision.
                     let engine_computed_gate_passes = if resuming_font {
                         true
                     } else if direct_inherited_delta.is_some() {
+                        decline_cause = "DirectInheritedDelta";
                         false
                     } else if reaction == transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES
                         && !parent_inputs_moved.display
@@ -2091,20 +2098,24 @@ impl StyleEngineState {
                     {
                         // C++ only refreshes the inherited environment for a non-consumer. There
                         // is no element record to recompute or compare against the parent's groups.
+                        decline_cause = "InheritedCustomPropertiesNonConsumer";
                         false
                     } else if (named_rule_context_changed && old_style_record != 0)
                         || !(reaction_is_settleable
                             || (old_style_record == 0 && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
                     {
                         counters.bump(Counter::EngineComputedRecordGateReaction);
+                        decline_cause = "GateReaction";
                         false
                     } else if nodes_with_declaration_changes.binary_search(&node).is_ok() {
                         counters.bump(Counter::EngineComputedRecordGateDeclarations);
+                        decline_cause = "GateDeclarations";
                         false
                     } else if self.retained.custom_property_registrations_changed
                         && self.node_style_reads_custom_properties(node)
                     {
                         counters.bump(Counter::EngineComputedRecordBailSubstitution);
+                        decline_cause = "GateSubstitution";
                         false
                     } else if previous_answer_was_incomplete
                         || selector_truth_changes.deltas_for(node).iter().any(|delta| {
@@ -2116,6 +2127,7 @@ impl StyleEngineState {
                         // Custom declarations are resolved by the engine's environment computation.
                         // Other declarations missing from the winner columns still require C++.
                         counters.bump(Counter::EngineComputedRecordGateIncompleteAnswer);
+                        decline_cause = "GateIncompleteAnswer";
                         false
                     } else {
                         match self
@@ -2133,6 +2145,7 @@ impl StyleEngineState {
                         {
                             None => {
                                 counters.bump(Counter::EngineComputedRecordGateAncestors);
+                                decline_cause = "GateAncestors";
                                 retry_after_ancestor = self.retained.tree.tree_scope(node) == TreeScopeID::DOCUMENT
                                     && (answer_winners_are_complete
                                         || self.cascade_winners_are_complete_but_for_custom_properties(node));
@@ -2144,6 +2157,7 @@ impl StyleEngineState {
                             }
                         }
                     };
+                    let bail_marks = seal::is_reporting().then(|| counters.record_bail_marks());
                     let engine_computed_delta = engine_computed_gate_passes
                         .then(|| {
                             // Unchanged winners stand for an unchanged record only when the reaction
@@ -2212,6 +2226,19 @@ impl StyleEngineState {
                     // What this node tells its children, decided here, where it settles. Every
                     // processed node keeps a row, settled or not: that is what lets a
                     // descendant's fold stop at it instead of walking past it to the root.
+                    if let Some(bail_marks) = bail_marks
+                        && engine_computed_delta.is_none()
+                        && direct_inherited_delta.is_none()
+                    {
+                        if engine_computed_gate_passes {
+                            decline_cause = counters
+                                .first_changed_record_bail(&bail_marks)
+                                .unwrap_or("ComputationBailUnnamed");
+                        }
+                        self.retained
+                            .host_entry_causes
+                            .insert(node, (decline_cause, old_style_record == 0));
+                    }
                     let settled = direct_inherited_delta.is_some() || engine_computed_delta.is_some();
                     if let Some(index) = node.element_index() {
                         engine_computed_record_scratch.derived_child_inputs.insert(

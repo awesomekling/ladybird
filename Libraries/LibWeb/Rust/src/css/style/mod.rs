@@ -995,6 +995,9 @@ pub struct RetainedState {
     /// Complete compact answers owned by the scoped style transaction which the next traversal
     /// consumes. This is required Tier-4 scratch, not a persistent inverse match relation.
     published_match_answers: PublishedMatchAnswers,
+    /// Why the engine sent each element to the host this update, for the seal's census. Written
+    /// only while the seal reports, and read when the host enters the engine for that element.
+    host_entry_causes: HashMap<StyleNodeID, (&'static str, bool)>,
     transaction_fact_view: Option<TransactionFactView>,
     facts: ElementFactStore,
     programs: SelectorPrograms,

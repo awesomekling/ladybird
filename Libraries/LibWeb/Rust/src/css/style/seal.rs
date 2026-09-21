@@ -79,6 +79,72 @@ thread_local! {
     static HOST_RETRY_ENTRIES: Cell<u64> = const { Cell::new(0) };
     static HOST_SAMPLED_ANIMATION_ROWS: Cell<u64> = const { Cell::new(0) };
     static HOST_DRIVEN_ROW_KINDS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
+    static HOST_ENTRY_CAUSES: RefCell<HashMap<HostEntryKey, HostEntryCounts>> = RefCell::new(HashMap::new());
+    static CURRENT_HOST_ENTRY: RefCell<Option<HostEntryKey>> = const { RefCell::new(None) };
+}
+
+/// What one host entry is: the reason the engine sent this element to the host, which of the
+/// three ways in it took, and whether it had a record already.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct HostEntryKey {
+    pub(crate) cause: &'static str,
+    pub(crate) kind: HostEntryKind,
+    pub(crate) cold: bool,
+}
+
+/// The three ways one element is entered from the host during an update.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum HostEntryKind {
+    Row,
+    Retry,
+    Sampled,
+}
+
+impl HostEntryKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Row => "row",
+            Self::Retry => "retry",
+            Self::Sampled => "sampled",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct HostEntryCounts {
+    entries: u64,
+    applied: u64,
+}
+
+/// Record one host entry under the reason the engine declined the element, so the census ranks
+/// what reaches the host rather than what the engine attempted. An attempt that declines for a
+/// class the host then skips costs nothing; only an entry does.
+pub(crate) fn note_host_entry(cause: &'static str, kind: HostEntryKind, cold: bool) {
+    if mode() == Mode::Off || UPDATE_DEPTH.with(|depth| depth.get() == 0) {
+        return;
+    }
+    let key = HostEntryKey { cause, kind, cold };
+    HOST_ENTRY_CAUSES.with(|causes| {
+        causes.borrow_mut().entry(key).or_default().entries += 1;
+    });
+    // Counted here rather than from the engine's own counter: the counter dies with its engine
+    // while this census belongs to the thread, and the two must add up.
+    if kind == HostEntryKind::Retry {
+        HOST_RETRY_ENTRIES.with(|entries| entries.set(entries.get().wrapping_add(1)));
+    }
+    if kind == HostEntryKind::Row {
+        CURRENT_HOST_ENTRY.with(|current| *current.borrow_mut() = Some(key));
+    }
+}
+
+/// Record that the row the host is driving now applied its results to the main side.
+fn note_host_entry_applied() {
+    let Some(key) = CURRENT_HOST_ENTRY.with(|current| current.borrow_mut().take()) else {
+        return;
+    };
+    HOST_ENTRY_CAUSES.with(|causes| {
+        causes.borrow_mut().entry(key).or_default().applied += 1;
+    });
 }
 
 /// Record that one row's computation was entered from the host's per-element driver.
@@ -123,17 +189,9 @@ pub(crate) fn flush_engine_decline_census<'a>(counters: impl Iterator<Item = (&'
         })
         .collect::<Vec<_>>();
     rows.sort_unstable_by_key(|(name, _)| *name);
-    for (name, value) in &rows {
+    for (name, value) in rows {
         write_report(&format!("STYLE SEAL COUNT: engine_record {name}: {value}\n"));
     }
-    // The host's retry is a second way into the engine for one element, so `flush_census` adds it
-    // to the rows the host drove. It is reported here and totalled there because only this half
-    // sees the engine's counters.
-    let retries = rows
-        .iter()
-        .find(|(name, _)| *name == "retryAfterAncestorCalls")
-        .map_or(0, |(_, value)| *value);
-    HOST_RETRY_ENTRIES.with(|entries| entries.set(retries));
 }
 
 /// Record that one row's animations were sampled by the host after the stage returned.
@@ -148,6 +206,7 @@ pub(crate) fn note_host_sampled_animation_row() {
         return;
     }
     HOST_SAMPLED_ANIMATION_ROWS.with(|rows| rows.set(rows.get().wrapping_add(1)));
+    note_host_entry("animation_sampling", HostEntryKind::Sampled, false);
 }
 
 pub(crate) fn note_longhand_input_freeze(reasons: u8) {
@@ -213,6 +272,9 @@ pub(crate) fn note_stage_interleave(name: &'static str) {
         let count = interleaves.entry(name).or_default();
         *count = count.wrapping_add(1);
     });
+    if name == "longhand_result_apply" {
+        note_host_entry_applied();
+    }
     let allowed = match name {
         "longhand_input_freeze" => {
             std::env::var("LIBWEB_SEAL_STYLE_STAGE_ALLOW_LONGHAND_INPUT_FREEZE").as_deref() == Ok("1")
@@ -316,6 +378,34 @@ pub(crate) fn flush_census() {
     // one function.
     let host_retries = HOST_RETRY_ENTRIES.with(|entries| entries.replace(0));
     let host_entries = host_driven_rows + host_retries + sampled;
+    CURRENT_HOST_ENTRY.with(|current| *current.borrow_mut() = None);
+    let mut causes = HOST_ENTRY_CAUSES.with(|causes| {
+        std::mem::take(&mut *causes.borrow_mut())
+            .into_iter()
+            .collect::<Vec<_>>()
+    });
+    causes.sort_unstable_by(|(first, left), (second, right)| {
+        right.entries.cmp(&left.entries).then_with(|| first.cmp(second))
+    });
+    let attributed: u64 = causes.iter().map(|(_, counts)| counts.entries).sum();
+    for (key, counts) in &causes {
+        write_report(&format!(
+            "STYLE SEAL COUNT: host_entries cause={} kind={} cold={}: {} (applied {})\n",
+            key.cause,
+            key.kind.name(),
+            u8::from(key.cold),
+            counts.entries,
+            counts.applied
+        ));
+    }
+    if attributed != host_entries {
+        // Log-only: every host entry is meant to pass through one of the three notes, so a
+        // difference means a way in that the census does not know about.
+        write_report(&format!(
+            "STYLE SEAL COUNT: host_entries unattributed: {}\n",
+            host_entries as i64 - attributed as i64
+        ));
+    }
     if host_entries != 0 {
         write_report(&format!(
             "STYLE SEAL COUNT: host_entries: {host_entries} (rows {host_driven_rows} + retries {host_retries} + sampled {sampled})\n"
