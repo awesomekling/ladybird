@@ -3223,12 +3223,19 @@ fn starting_animation<'a>(
     }
     let row =
         animations::AnimationTimingRow::for_new_css_animation(definition, node, slot, name_index, synthesized_index)?;
-    // A key of `None` is an animation whose progress does not resolve, which the host samples
-    // nothing from; that is a cleared overlay rather than a replaced one, so it stays with the host.
     if !animations::row_is_relevant(&row, None)? {
         return None;
     }
-    let current_key = animations::row_current_key(&row, None)??;
+    // A key of `None` is an animation whose progress does not resolve - one still waiting out its
+    // delay with nothing to fill backwards from, say. The host creates it and the element reports
+    // it, but `collect_animation_effects_into` skips over it, so it composes nothing and takes no
+    // place in what is sampled: the same shape as an animation that names no `@keyframes` rule.
+    let Some(current_key) = animations::row_current_key(&row, None)? else {
+        return Some(StartingAnimationRow {
+            keyframes: None,
+            row: None,
+        });
+    };
 
     // The `@keyframes` the host resolved this name to.
     let keyframes = definition_keyframes(style_engine, input, node, definition)?;
