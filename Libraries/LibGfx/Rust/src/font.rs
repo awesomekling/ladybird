@@ -222,16 +222,18 @@ pub struct FontCascadeListHandle {
 /// Reports a LibGfx call that can reach the document. The render pipeline's seals live in LibWeb
 /// and count only calls through its own host tables, so they cannot see one made through here;
 /// LibWeb installs a hook that gives them the call's name.
-static HOST_REACHING_CALL_HOOK: std::sync::OnceLock<fn(&'static str)> = std::sync::OnceLock::new();
-
-pub fn set_host_reaching_call_hook(hook: fn(&'static str)) {
-    let _ = HOST_REACHING_CALL_HOOK.set(hook);
+///
+/// The hook is held by LibGfx's C++ side rather than by a `static` here: this crate is compiled
+/// into two libraries, and on a linker with two-level namespaces each of them would install into
+/// a hook of its own. See `LibGfx/RustProcessState.cpp`.
+pub fn set_host_reaching_call_hook(hook: extern "C" fn(*const u8, usize)) {
+    // SAFETY: The hook is a plain function pointer, and LibGfx only calls it back.
+    unsafe { ladybird_gfx_process_set_host_reaching_call_hook(hook) };
 }
 
 fn note_host_reaching_call(callback: &'static str) {
-    if let Some(hook) = HOST_REACHING_CALL_HOOK.get() {
-        hook(callback);
-    }
+    // SAFETY: A string literal's bytes outlive the process.
+    unsafe { ladybird_gfx_process_note_host_reaching_call(callback.as_ptr(), callback.len()) };
 }
 
 impl FontCascadeListHandle {
@@ -346,7 +348,6 @@ impl std::fmt::Debug for FontCascadeListHandle {
 unsafe extern "C" {
     fn ladybird_gfx_font_cascade_list_frozen(list: *const c_void) -> *const c_void;
     fn ladybird_gfx_resolve_pending_face(face_id: u64) -> bool;
-    fn ladybird_gfx_note_wanted_pending_face(face_id: u64);
     fn ladybird_gfx_cascade_snapshot_begin(list: *const c_void) -> *const c_void;
     fn ladybird_gfx_cascade_snapshot_header(snapshot: *const c_void, out_header: *mut FfiCascadeSnapshotHeader);
     fn ladybird_gfx_cascade_snapshot_fill(
@@ -366,6 +367,16 @@ unsafe extern "C" {
         out_reached_document_thread: *mut bool,
     ) -> *const c_void;
     fn ladybird_gfx_font_invisible_variant(font: *const c_void) -> *const c_void;
+
+    // The process-wide state this crate is not allowed to hold; see `LibGfx/RustProcessState.cpp`.
+    fn ladybird_gfx_process_set_host_reaching_call_hook(hook: extern "C" fn(*const u8, usize));
+    fn ladybird_gfx_process_note_host_reaching_call(name: *const u8, length: usize);
+    fn ladybird_gfx_process_note_wanted_pending_face(face_id: u64);
+    fn ladybird_gfx_process_requeue_wanted_pending_face(face_id: u64);
+    fn ladybird_gfx_process_take_wanted_pending_faces(
+        context: *mut c_void,
+        visit: extern "C" fn(*mut c_void, u64, bool),
+    );
 }
 
 #[repr(C)]
@@ -501,28 +512,22 @@ impl FrozenEntry {
     }
 }
 
-/// The faces a render pass wanted and could not have, waiting for the document to request their
-/// loads.
-///
-/// This crate is linked into LibGfx and into LibWeb, so on a platform that binds each library to
-/// its own copy of a static there is one of these per library. The list has to be process-wide, so
-/// only LibGfx's copy is ever used: a pass pushes through `ladybird_gfx_note_wanted_pending_face`,
-/// which LibGfx defines in C++ and which forwards to the push below in LibGfx's own copy.
-static WANTED_PENDING_FACES: std::sync::Mutex<Vec<u64>> = std::sync::Mutex::new(Vec::new());
-
-/// Records a wanted face in this copy of the crate. Only LibGfx's C++ calls this, so only LibGfx's
-/// copy of [`WANTED_PENDING_FACES`] ever holds anything.
-#[unsafe(no_mangle)]
-pub extern "C" fn ladybird_gfx_push_wanted_pending_face(face_id: u64) {
-    let mut wanted = WANTED_PENDING_FACES.lock().unwrap_or_else(|error| error.into_inner());
-    wanted.push(face_id);
-}
-
 /// Drains the faces render passes have wanted since the last call. The document turns each number
 /// back into a face and resolves it, which is what starts the fetch and the display-period timer.
-pub fn take_wanted_pending_faces() -> Vec<u64> {
-    let mut wanted = WANTED_PENDING_FACES.lock().unwrap_or_else(|error| error.into_inner());
-    std::mem::take(&mut *wanted)
+///
+/// The list itself is LibGfx's, for the reason `set_host_reaching_call_hook` gives: a list this
+/// crate pushed to would not be the list the other copy of it drains.
+pub fn take_wanted_pending_faces() -> Vec<(u64, bool)> {
+    extern "C" fn visit(context: *mut c_void, face_id: u64, has_been_retried: bool) {
+        // SAFETY: The context is the vector below, alive for the call.
+        unsafe { &mut *context.cast::<Vec<(u64, bool)>>() }.push((face_id, has_been_retried));
+    }
+    let mut wanted = Vec::new();
+    // SAFETY: The context outlives the call, and the callback only appends to it.
+    unsafe {
+        ladybird_gfx_process_take_wanted_pending_faces((&raw mut wanted).cast(), visit);
+    }
+    wanted
 }
 
 impl FrozenFontList {
@@ -797,8 +802,8 @@ impl FrozenFontList {
         if entry.wanted.swap(true, std::sync::atomic::Ordering::Relaxed) {
             return;
         }
-        // SAFETY: The push goes through LibGfx, which holds the one list; see its comment.
-        unsafe { ladybird_gfx_note_wanted_pending_face(face_id) };
+        // SAFETY: The list is LibGfx's, and the number is all it takes.
+        unsafe { ladybird_gfx_process_note_wanted_pending_face(face_id) };
     }
 
     fn finish(
@@ -968,12 +973,21 @@ pub unsafe fn frozen_font_list_of(list: *const c_void) -> FrozenFontListRef {
 #[unsafe(no_mangle)]
 pub extern "C" fn ladybird_gfx_request_wanted_pending_faces() -> usize {
     let mut requested = 0;
-    for face_id in take_wanted_pending_faces() {
-        // SAFETY: The id names a face the document registered; a face that has since been
-        // destroyed is simply no longer there.
+    for (face_id, has_been_retried) in take_wanted_pending_faces() {
+        // SAFETY: The id names a face the document registered.
         if unsafe { ladybird_gfx_resolve_pending_face(face_id) } {
             requested += 1;
+            continue;
         }
+        if has_been_retried {
+            continue;
+        }
+        // A frozen cascade wants a face once and never again, so a want the document could not
+        // act on is lost for good. Keep it for one more drain rather than drop it: the face may
+        // only have been out of reach for this one. A want is offered exactly twice, so a face
+        // that really is gone cannot make this spin.
+        // SAFETY: The list is LibGfx's, and the number is all it takes.
+        unsafe { ladybird_gfx_process_requeue_wanted_pending_face(face_id) };
     }
     requested
 }

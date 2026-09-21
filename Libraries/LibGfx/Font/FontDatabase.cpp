@@ -20,6 +20,8 @@
 #    include <LibGfx/Font/GlobalFontConfig.h>
 #endif
 
+extern "C" void ladybird_gfx_register_rust_crate_copy();
+
 namespace Gfx {
 
 RefPtr<Typeface> SystemFontProvider::get_typeface_by_local_name(String const&)
@@ -73,7 +75,12 @@ StringView FontDatabase::system_font_provider_name() const
     return m_system_font_provider->name();
 }
 
-FontDatabase::FontDatabase() = default;
+FontDatabase::FontDatabase()
+{
+    // LibGfx's copy of the graphics crate, reporting itself to the one store it keeps. See
+    // `LibGfx/RustProcessState.cpp`.
+    ladybird_gfx_register_rust_crate_copy();
+}
 
 RefPtr<Gfx::Font> FontDatabase::get(FlyString const& family, float point_size, unsigned weight, unsigned width, unsigned slope, Optional<FontVariationSettings> const& font_variation_settings, Optional<Gfx::ShapeFeatures> const& shape_features)
 {

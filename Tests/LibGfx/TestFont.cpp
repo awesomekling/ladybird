@@ -29,6 +29,7 @@
 extern "C" {
 void const* ladybird_gfx_frozen_font_list_font_for_code_point(void const*, u32, bool, bool);
 size_t ladybird_gfx_request_wanted_pending_faces();
+size_t ladybird_gfx_process_wanted_pending_face_count();
 }
 
 namespace {
@@ -628,6 +629,52 @@ TEST_CASE(frozen_cascade_renders_a_pending_face_without_resolving_it)
     // Both faces are waiting for the document to request their loads, which is what starts them.
     EXPECT_EQ(ladybird_gfx_request_wanted_pending_faces(), 2u);
     EXPECT_EQ(resolves, 2u);
+}
+
+// A frozen cascade wants a face once and never again, so a want the document could not act on
+// would be lost for good. It is offered a second time instead - and only a second, so that a face
+// that really is gone cannot make the drain spin.
+TEST_CASE(a_want_the_document_could_not_act_on_is_offered_exactly_twice)
+{
+    auto font = load_text_font(16);
+
+    // Drop anything an earlier case left waiting, so the counts below are only this case's.
+    (void)ladybird_gfx_request_wanted_pending_faces();
+    EXPECT_EQ(ladybird_gfx_process_wanted_pending_face_count(), 0u);
+
+    // A want for a face that is still there is acted on at the first offer and leaves nothing.
+    {
+        auto cascade = Gfx::FontCascadeList::create();
+        cascade->add_pending_face(
+            { { 'a', 'a' } }, [] { return Gfx::PendingFontState::Visible; }, {}, [] { return Gfx::PendingFontState::Visible; });
+        cascade->add(font);
+        cascade->set_last_resort_font(font);
+        cascade->freeze();
+        (void)ladybird_gfx_frozen_font_list_font_for_code_point(cascade->frozen_list(), 'a', false, false);
+        EXPECT_EQ(ladybird_gfx_process_wanted_pending_face_count(), 1u);
+        EXPECT_EQ(ladybird_gfx_request_wanted_pending_faces(), 1u);
+        EXPECT_EQ(ladybird_gfx_process_wanted_pending_face_count(), 0u);
+    }
+
+    // A want whose face went away with the cascade that made it cannot be acted on at all.
+    {
+        auto cascade = Gfx::FontCascadeList::create();
+        cascade->add_pending_face(
+            { { 'a', 'a' } }, [] { return Gfx::PendingFontState::Visible; }, {}, [] { return Gfx::PendingFontState::Visible; });
+        cascade->add(font);
+        cascade->set_last_resort_font(font);
+        cascade->freeze();
+        (void)ladybird_gfx_frozen_font_list_font_for_code_point(cascade->frozen_list(), 'a', false, false);
+        EXPECT_EQ(ladybird_gfx_process_wanted_pending_face_count(), 1u);
+    }
+
+    // Offered again, because a drain that could not reach a face may only have been this one.
+    EXPECT_EQ(ladybird_gfx_request_wanted_pending_faces(), 0u);
+    EXPECT_EQ(ladybird_gfx_process_wanted_pending_face_count(), 1u);
+
+    // And not a third time.
+    EXPECT_EQ(ladybird_gfx_request_wanted_pending_faces(), 0u);
+    EXPECT_EQ(ladybird_gfx_process_wanted_pending_face_count(), 0u);
 }
 
 // A face whose display period has already failed contributes nothing and does not block the

@@ -15,6 +15,13 @@ unsafe extern "C" {
         out_snapshot: *mut FfiImageFrameSnapshot,
     ) -> *mut c_void;
     fn ladybird_gfx_decoded_image_frame_release(frame: *mut c_void);
+
+    // The id-to-frame registry is LibGfx's: this crate is compiled into two libraries, and a
+    // frame registered through one copy has to be findable through the other. See
+    // `LibGfx/RustProcessState.cpp`.
+    fn ladybird_gfx_process_register_image_frame(id: u64, frame: *const c_void);
+    fn ladybird_gfx_process_forget_image_frame(id: u64, frame: *const c_void);
+    fn ladybird_gfx_process_image_frame_for_id(id: u64, out_snapshot: *mut FfiImageFrameSnapshot) -> *mut c_void;
 }
 
 #[repr(C)]
@@ -40,14 +47,23 @@ unsafe impl Sync for ImageFrameEntry {}
 impl Drop for ImageFrameEntry {
     fn drop(&mut self) {
         image_frame_storage().lock().unwrap().remove(&self.snapshot.id);
-        // SAFETY: ImageFrameHandle::retain took the copy this releases.
-        unsafe { ladybird_gfx_decoded_image_frame_release(self.raw.as_ptr()) };
+        // SAFETY: Forgetting the frame before releasing it is what keeps a concurrent lookup from
+        // retaining a copy that is on its way out.
+        unsafe {
+            ladybird_gfx_process_forget_image_frame(self.snapshot.id, self.raw.as_ptr());
+            // SAFETY: ImageFrameHandle::retain took the copy this releases.
+            ladybird_gfx_decoded_image_frame_release(self.raw.as_ptr());
+        }
     }
 }
 
 #[derive(Clone)]
 pub struct ImageFrameHandle(Arc<ImageFrameEntry>);
 
+/// This copy's handles, so that two handles for one frame are one `Arc`. Only the dedup is per
+/// copy, and duplicating it costs a redundant retain and nothing else; the id-to-frame map that
+/// `resolve` needs is LibGfx's, because a frame registered through the other copy of this crate
+/// has to be findable here.
 fn image_frame_storage() -> &'static Mutex<HashMap<u64, Weak<ImageFrameEntry>>> {
     static STORAGE: OnceLock<Mutex<HashMap<u64, Weak<ImageFrameEntry>>>> = OnceLock::new();
     STORAGE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -72,6 +88,8 @@ impl ImageFrameHandle {
         }
         let entry = Arc::new(ImageFrameEntry { snapshot, raw });
         storage.insert(snapshot.id, Arc::downgrade(&entry));
+        // SAFETY: The entry owns the copy this registers, and forgets it before releasing it.
+        unsafe { ladybird_gfx_process_register_image_frame(snapshot.id, raw.as_ptr()) };
         Self(entry)
     }
 
@@ -79,12 +97,26 @@ impl ImageFrameHandle {
         if id == 0 {
             return None;
         }
-        image_frame_storage()
-            .lock()
-            .unwrap()
-            .get(&id)
-            .and_then(Weak::upgrade)
-            .map(Self)
+        if let Some(entry) = image_frame_storage().lock().unwrap().get(&id).and_then(Weak::upgrade) {
+            return Some(Self(entry));
+        }
+        // The frame was registered through the other copy of this crate, which has an entry of its
+        // own. Take a copy of the frame and make one here too.
+        let mut snapshot = FfiImageFrameSnapshot::default();
+        // SAFETY: The registry retains the frame under its own lock, so the copy is live.
+        let raw = unsafe { ladybird_gfx_process_image_frame_for_id(id, &raw mut snapshot) };
+        let raw = NonNull::new(raw)?;
+        let mut storage = image_frame_storage().lock().unwrap();
+        if let Some(entry) = storage.get(&id).and_then(Weak::upgrade) {
+            // SAFETY: Another thread made the entry first; this copy is redundant.
+            unsafe { ladybird_gfx_decoded_image_frame_release(raw.as_ptr()) };
+            return Some(Self(entry));
+        }
+        let entry = Arc::new(ImageFrameEntry { snapshot, raw });
+        storage.insert(snapshot.id, Arc::downgrade(&entry));
+        // SAFETY: The entry owns the frame this registers, and forgets it before releasing it.
+        unsafe { ladybird_gfx_process_register_image_frame(snapshot.id, raw.as_ptr()) };
+        Some(Self(entry))
     }
 
     #[inline]
