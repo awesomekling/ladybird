@@ -558,7 +558,9 @@ impl RetainedState {
                 }
                 self.winner_groups.semantic_delta(Some(previous_state), state)
             }
-            None if winners_unchanged && (parent_inputs_moved.any() || root_inputs_moved) => {
+            None if winners_unchanged
+                && (parent_inputs_moved.any() || root_inputs_moved || scratch.document_environment_moved) =>
+            {
                 self.winner_groups.semantic_delta(Some(state), state)
             }
             None => {
@@ -640,7 +642,11 @@ impl RetainedState {
             // record: it is driven again in full against the parent as it is now. The record
             // does not say which parent display it was transformed under, and a winner's own
             // value may read the parent (a relative length, an inherit keyword).
-            if !parent_inputs_moved.any() && !root_inputs_moved && !environment_moved_under_substitutions {
+            if !parent_inputs_moved.any()
+                && !root_inputs_moved
+                && !environment_moved_under_substitutions
+                && !scratch.document_environment_moved
+            {
                 // A declaration in an inherited payload group does not prove that the other
                 // properties in that group still inherit from the current parent. Re-drive the
                 // record in full when its payloads cannot prove the relationship.
@@ -695,6 +701,7 @@ impl RetainedState {
         let full_drive = parent_inputs_moved.any()
             || root_inputs_moved
             || environment_moved_under_substitutions
+            || scratch.document_environment_moved
             || delta.properties().iter().any(|&property| {
                 !property_computes_in_remaining_phase(property) || property_feeds_box_type_transformation(property)
             });
@@ -4160,6 +4167,10 @@ impl EngineComputedRecordContinuation {
 #[derive(Default)]
 pub(super) struct EngineComputedRecordScratch {
     pub(super) continuation: EngineComputedRecordContinuation,
+    /// Whether this flush carries a document environment action. A record's winners can stand
+    /// through one while the values they computed to do not, so such a record is driven again in
+    /// full rather than kept - and rather than handed back to C++.
+    pub(super) document_environment_moved: bool,
     pub(super) prepared_root_font: Option<(StyleNodeID, ParentInputsMoved, drive::FontDriveScratch)>,
     cohorts: HashMap<(u64, CascadeStateID, u32, RecordDeltaParent, u64, RootFontInputs), computed::FinalStyleRecordID>,
     computability: EngineComputabilityScratch,

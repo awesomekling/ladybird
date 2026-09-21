@@ -223,6 +223,8 @@ impl StyleEngineState {
         self.host.externally_recorded_style_input_nodes.clear();
         // The nodes whose style input the C++ computation has to settle this transaction.
         let style_input_nodes_for_cpp = std::mem::take(&mut self.retained.style_input_nodes_for_cpp);
+        let environment_action_needs_host_computation =
+            std::mem::take(&mut self.retained.environment_action_needs_host_computation);
         let parent_inputs_moved_nodes = std::mem::take(&mut self.retained.parent_inputs_moved_nodes);
         self.host
             .deferred_element_style_input_memory
@@ -1830,6 +1832,8 @@ impl StyleEngineState {
             style_delta_memory.resize_required_to(&mut self.retained.memory, style_delta_bytes);
             let mut record_deltas = None::<Vec<Option<Vec<PublishedStyleDeltaRecord>>>>;
             let mut engine_computed_record_scratch = publication::EngineComputedRecordScratch::default();
+            engine_computed_record_scratch.document_environment_moved =
+                environment_changed && !environment_action_needs_host_computation;
             let computation_loop_timer = PassTimer::start();
             computation_scratch_memory.resize_required_to(
                 &mut self.retained.memory,
@@ -2181,7 +2185,7 @@ impl StyleEngineState {
                                         .map(|pseudo| pseudo.kind.0)
                                 })
                                 .collect();
-                            let winners_are_exact = !environment_changed
+                            let winners_are_exact = !(environment_changed && environment_action_needs_host_computation)
                                 && !rule_declarations_edited
                                 && selector_truth_changes.refreshes_for(node).is_empty()
                                 && (answer_is_unchanged

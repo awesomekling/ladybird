@@ -1771,13 +1771,13 @@ fn failed_posting_rebuild_does_not_condemn_resident_postings() {
         .memory
         .set_tier3_limit_for_test(engine.state.retained.memory.bytes_in_tier(memory::Tier::Acceleration));
 
-    engine.record_environment_change();
+    engine.record_environment_change(false);
     engine.take_style_transaction_nodes(nodes[0], |_| {});
     assert!(engine.memory.refusals(MemoryCategory::FeaturePosting) > 0);
     assert!(matches!(engine.facts.postings().lookup(resident_key), Lookup::Known(_)));
     let refusals = engine.memory.refusals(MemoryCategory::FeaturePosting);
 
-    engine.record_environment_change();
+    engine.record_environment_change(false);
     engine.take_style_transaction_nodes(nodes[0], |_| {});
     assert!(matches!(engine.facts.postings().lookup(resident_key), Lookup::Known(_)));
     assert_eq!(engine.memory.refusals(MemoryCategory::FeaturePosting), refusals);
