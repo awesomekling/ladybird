@@ -140,38 +140,6 @@ impl RetainedState {
             });
     }
 
-    fn legacy_record_difference(&self, assembled_style_record: u64, projected_style_record: u64) -> u8 {
-        let (Some(assembled), Some(projected)) = (
-            self.style_record_view(assembled_style_record),
-            self.style_record_view(projected_style_record),
-        ) else {
-            return u8::MAX;
-        };
-        let mut difference = 0;
-        if assembled.payloads != projected.payloads {
-            difference = 64
-                + assembled
-                    .payloads
-                    .iter()
-                    .zip(projected.payloads)
-                    .position(|(assembled, projected)| assembled != projected)
-                    .unwrap_or(31) as u8;
-        }
-        difference |= u8::from(
-            self.retained_style_record_custom_property_environment(assembled_style_record)
-                != self.retained_style_record_custom_property_environment(projected_style_record),
-        ) << 1;
-        difference |= u8::from(assembled.pseudo_element_styles != projected.pseudo_element_styles) << 2;
-        difference |=
-            u8::from(assembled.counter_style_environment_identity != projected.counter_style_environment_identity) << 3;
-        difference |= u8::from(assembled.dependency_flags != projected.dependency_flags) << 4;
-        difference |= u8::from(
-            !unsafe { assembled.longhand_table.deref() }
-                .publication_equals(unsafe { projected.longhand_table.deref() }),
-        ) << 5;
-        difference
-    }
-
     fn retained_inheritance_parent_node(&self, node: StyleNodeID, pseudo_kind: u8) -> Option<StyleNodeID> {
         let parent = if pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT {
             self.tree.inheritance_parent(node)?
@@ -3034,24 +3002,18 @@ impl RetainedState {
         );
         if is_base_record
             && let Some(target) = target
-            && let Some((table_matches, assembled_style_record, was_host_published)) =
+            && let Some((table_matches, was_host_published)) =
                 self.legacy_finalized_longhand_rows.get(&target).map(|row| {
                     (
                         self.style_record_view(publication.style_record_identity.raw())
                             .is_some_and(|record| {
                                 unsafe { record.longhand_table.deref() }.publication_equals(row.table())
                             }),
-                        row.assembled_style_record,
                         row.was_host_published,
                     )
                 })
         {
             if table_matches && !was_host_published {
-                if assembled_style_record != 0 {
-                    let difference =
-                        self.legacy_record_difference(assembled_style_record, publication.style_record_identity.raw());
-                    crate::css::style::seal::note_assembled_legacy_record(difference);
-                }
                 self.legacy_finalized_longhand_rows
                     .get_mut(&target)
                     .expect("the retained row was just found")

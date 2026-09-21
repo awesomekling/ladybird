@@ -3631,14 +3631,9 @@ fn retained_inheritance_parent_snapshot<'a>(
     input: &FfiComputePropertiesInput,
 ) -> Option<ParentSnapshot<'a>> {
     let style_node = crate::css::style::tree::StyleNodeID::from_raw(input.style_node);
-    if let Some((table, _previous_style_record, _assembled_style_record, projected_style_record)) =
+    if let Some((table, _previous_style_record, _assembled_style_record, _projected_style_record)) =
         style_node.and_then(|node| style_engine.retained_legacy_inheritance_parent_table(node, input.pseudo_kind))
     {
-        let projected_table_matches = projected_style_record != 0
-            && style_engine
-                .style_record_view(projected_style_record)
-                .is_some_and(|view| unsafe { view.longhand_table.deref() }.publication_equals(table));
-        crate::css::style::seal::note_retained_legacy_parent(projected_table_matches);
         let dependency_flags = table.publication_dependency_flags();
         return Some(ParentSnapshot::new(
             table,
