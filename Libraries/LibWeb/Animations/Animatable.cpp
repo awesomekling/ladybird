@@ -294,20 +294,36 @@ void Animatable::cancel_css_animations_and_transitions()
     publish_animation_timing_rows();
 }
 
-void Animatable::add_transitioned_properties(Optional<CSS::PseudoElement> pseudo_element, Vector<CSS::TransitionProperties> const& transitions)
+bool Animatable::add_transitioned_properties(Optional<CSS::PseudoElement> pseudo_element, Vector<CSS::TransitionProperties> const& transitions)
 {
+    // An entry naming no property is indexed by nothing, so registering it would grow the element's
+    // attribute list without any property ever reaching it. An element whose whole declaration
+    // names no property therefore registers nothing at all, and is not given a transition record.
+    bool any_entry_names_a_property = false;
+    for (auto const& entry : transitions) {
+        if (!entry.properties.is_empty()) {
+            any_entry_names_a_property = true;
+            break;
+        }
+    }
+    if (!any_entry_names_a_property)
+        return false;
+
     auto* maybe_transition = ensure_transition(pseudo_element);
     if (!maybe_transition)
-        return;
+        return false;
 
     auto& transition = *maybe_transition;
     for (size_t i = 0; i < transitions.size(); i++) {
+        if (transitions[i].properties.is_empty())
+            continue;
         size_t index_of_this_transition = transition.transition_attributes.size();
         transition.transition_attributes.empend(transitions[i].delay, transitions[i].duration, transitions[i].timing_function, transitions[i].transition_behavior);
 
         for (auto const& property : transitions[i].properties)
             transition.transition_attribute_indices.set(property, index_of_this_transition);
     }
+    return true;
 }
 
 Vector<CSS::PropertyID> Animatable::property_ids_with_matching_transition_property_entry(Optional<CSS::PseudoElement> pseudo_element) const
@@ -374,15 +390,21 @@ void Animatable::remove_transition(Optional<CSS::PseudoElement> pseudo_element, 
     removed_transition.value()->schedule_disassociation_from_target();
 }
 
-void Animatable::clear_registered_transitions(Optional<CSS::PseudoElement> pseudo_element)
+bool Animatable::clear_registered_transitions(Optional<CSS::PseudoElement> pseudo_element)
 {
-    auto maybe_transition = ensure_transition(pseudo_element);
+    // A transition record is made on demand, so an element that never registered one has nothing
+    // to clear - and asking for one here would give every element a record, and with it an
+    // animation list to publish, for a step that clears nothing.
+    auto* maybe_transition = const_cast<Transition*>(transition_if_exists(pseudo_element));
     if (!maybe_transition)
-        return;
+        return false;
 
     auto& transition = *maybe_transition;
+    if (transition.transition_attribute_indices.is_empty() && transition.transition_attributes.is_empty())
+        return false;
     transition.transition_attribute_indices.clear();
     transition.transition_attributes.clear();
+    return true;
 }
 
 void Animatable::visit_edges(JS::Cell::Visitor& visitor)
