@@ -61,7 +61,7 @@ pub struct FfiLayoutTreeDumpCallbacks {
 
 struct LayoutTreeDumpHost<'a> {
     callbacks: FfiLayoutTreeDumpCallbacks,
-    main_thread: &'a crate::stage::MainThread,
+    main_thread: &'a crate::stage::MainThread<'a>,
 }
 
 impl LayoutTreeDumpHost<'_> {
@@ -136,7 +136,7 @@ pub unsafe extern "C" fn layout_arena_dump_layout_tree(
     interactive: bool,
     callbacks: FfiLayoutTreeDumpCallbacks,
 ) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let callbacks = LayoutTreeDumpHost {
         callbacks,
         main_thread: &main_thread,

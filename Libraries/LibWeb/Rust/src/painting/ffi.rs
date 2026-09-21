@@ -257,8 +257,10 @@ pub unsafe extern "C" fn layout_arena_set_chrome_state_callback(
     context: *mut c_void,
     callback: unsafe extern "C" fn(*mut c_void, NodeSlotId, PaintableRowResetKind),
 ) {
-    let arena = unsafe { arena_from_handle(arena) };
-    arena.set_chrome_state_callback(context, callback);
+    unsafe { crate::layout::HostTables::from_handle(arena) }
+        .chrome_state_callback
+        .set(Some((context, callback)));
+    unsafe { arena_from_handle(arena) }.set_chrome_state_listens(true);
 }
 
 /// # Safety
@@ -266,8 +268,10 @@ pub unsafe extern "C" fn layout_arena_set_chrome_state_callback(
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_clear_chrome_state_callback(arena: *mut c_void) {
-    let arena = unsafe { arena_from_handle(arena) };
-    arena.clear_chrome_state_callback();
+    unsafe { crate::layout::HostTables::from_handle(arena) }
+        .chrome_state_callback
+        .set(None);
+    unsafe { arena_from_handle(arena) }.set_chrome_state_listens(false);
 }
 
 /// # Safety
@@ -462,9 +466,8 @@ pub unsafe extern "C" fn layout_arena_set_geometry_host(
     arena: *mut c_void,
     host: crate::painting::host::FfiGeometryHostCallbacks,
 ) {
-    unsafe { arena_from_handle(arena) }
-        .scrollable_overflow
-        .host
+    unsafe { crate::layout::HostTables::from_handle(arena) }
+        .geometry_host
         .set(Some(host.into()));
 }
 
@@ -3433,7 +3436,11 @@ mod tests {
 
     #[test]
     fn preparing_for_rendering_measures_root_overflow_before_recording_reads_it() {
-        let mut arena = LayoutNodeArena::new();
+        // The entry mints the main thread capability from the handle, so the arena must be in one.
+        let mut arena_handle = Box::new(crate::layout::ArenaHandle::new());
+        let handle: *mut c_void = std::ptr::from_mut(&mut *arena_handle).cast();
+        // SAFETY: The handle's arena is its first field, and nothing else borrows the handle.
+        let arena = unsafe { &mut *handle.cast::<LayoutNodeArena>() };
         let viewport = arena.allocate_for_test().slot;
         arena.data(viewport).kind.set(NodeKind::Viewport);
         arena.populate_paintable_row(viewport);
@@ -3460,7 +3467,6 @@ mod tests {
         arena.paintable_side_data(root).overflow_measured_this_commit.set(true);
         arena.paint_state().borrow_mut().visual_context.dirty_boxes.clear();
 
-        let handle = std::ptr::from_mut(&mut arena).cast();
         let outcome = unsafe {
             layout_arena_prepare_for_rendering(
                 handle,

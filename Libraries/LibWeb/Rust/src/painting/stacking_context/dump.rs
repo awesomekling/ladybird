@@ -30,7 +30,7 @@ pub struct FfiStackingContextDumpCallbacks {
 
 struct StackingContextDumpHost<'a> {
     callbacks: FfiStackingContextDumpCallbacks,
-    main_thread: &'a crate::stage::MainThread,
+    main_thread: &'a crate::stage::MainThread<'a>,
 }
 
 impl StackingContextDumpHost<'_> {
@@ -65,7 +65,7 @@ pub unsafe extern "C" fn layout_arena_dump_stacking_context_tree(
     viewport: NodeSlotId,
     callbacks: FfiStackingContextDumpCallbacks,
 ) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let callbacks = StackingContextDumpHost {
         callbacks,
         main_thread: &main_thread,

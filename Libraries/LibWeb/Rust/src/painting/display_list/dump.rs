@@ -47,7 +47,7 @@ pub struct FfiPaintingDumpCallbacks {
 
 struct PaintingDumpHost<'a> {
     callbacks: FfiPaintingDumpCallbacks,
-    _main_thread: &'a crate::stage::MainThread,
+    _main_thread: &'a crate::stage::MainThread<'a>,
 }
 
 impl PaintingDumpHost<'_> {
@@ -160,7 +160,7 @@ pub unsafe extern "C" fn painting_dump(
     display_list: *const c_void,
     callbacks: FfiPaintingDumpCallbacks,
 ) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let callbacks = PaintingDumpHost {
         callbacks,
         _main_thread: &main_thread,
