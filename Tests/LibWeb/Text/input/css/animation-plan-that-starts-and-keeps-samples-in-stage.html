@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    /* Each animation holds one constant value for its whole run, so what an element computes says
+       only which animations it holds and in which order, never how far along they are. */
+    @keyframes a {
+        from { margin-left: 10px; }
+        to { margin-left: 10px; }
+    }
+    @keyframes b {
+        from { margin-left: 20px; }
+        to { margin-left: 20px; }
+    }
+    @keyframes c {
+        from { margin-left: 30px; }
+        to { margin-left: 30px; }
+    }
+    div {
+        margin-left: 5px;
+        animation-duration: 10s;
+        animation-fill-mode: both;
+        animation-timing-function: linear;
+    }
+    /* A transition that spends this whole test in its delay, so that the row it publishes is one
+       more effect in the element's stack and its value never moves. */
+    #with-transition {
+        transition: margin-left 10s 100s linear;
+    }
+</style>
+<div id="start-only"></div>
+<div id="start-after-existing" style="animation-name: a"></div>
+<div id="start-before-existing" style="animation-name: a"></div>
+<div id="start-two"></div>
+<div id="start-and-cancel" style="animation-name: a, b"></div>
+<div id="with-transition"></div>
+<script>
+    test(() => {
+        const cases = [
+            ["start-only", "a"],
+            ["start-after-existing", "a, b"],
+            ["start-before-existing", "b, a"],
+            ["start-two", "a, b"],
+            ["start-and-cancel", "b, c"],
+            ["with-transition", "a"],
+        ];
+        for (const [id] of cases)
+            println(`${id}: ${getComputedStyle(document.getElementById(id)).marginLeft}`);
+        println(`animations before: ${document.getAnimations().length}`);
+
+        for (const [id, names] of cases) {
+            const element = document.getElementById(id);
+            if (id === "with-transition")
+                element.style.marginLeft = "50px";
+            element.style.animationName = names;
+            // The update that changes the names starts the animations the new list adds, cancels
+            // the ones it dropped and moves the rest to their new places, and the value read here
+            // is the one the element has once that has happened. Recomputing afterwards - with the
+            // plan now really applied to the animations the element holds - has to arrive at the
+            // same value.
+            const first = getComputedStyle(element).marginLeft;
+            element.style.paddingLeft = "1px";
+            const second = getComputedStyle(element).marginLeft;
+            println(`${id}: ${first}${first === second ? "" : ` (recomputed to ${second})`}`);
+        }
+        // The animations were really created, in the places the new lists give them.
+        println(`animations after: ${document.getAnimations().length}`);
+        for (const [id] of cases) {
+            const names = document.getElementById(id).getAnimations().map(animation => animation.animationName);
+            println(`${id} holds: ${names.join(" ") || "nothing"}`);
+        }
+    });
+</script>

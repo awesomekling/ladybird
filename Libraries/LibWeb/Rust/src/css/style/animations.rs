@@ -436,6 +436,9 @@ pub(crate) struct AnimationTimingRow {
     composite_class_key: u32,
     global_list_order: u32,
     times: [f64; TIMING_ROW_TIMES],
+    /// For a row this stage synthesized for an animation the host has not created yet, which of the
+    /// computation's starting animations it stands for. `None` for a row the host published.
+    synthesized_index: Option<u32>,
 }
 
 impl AnimationTimingRow {
@@ -456,6 +459,7 @@ impl AnimationTimingRow {
             composite_class_key: words[WORD_COMPOSITE_CLASS_KEY],
             global_list_order: words[WORD_GLOBAL_LIST_ORDER],
             times: [0.0; TIMING_ROW_TIMES],
+            synthesized_index: None,
         }
     }
 
@@ -476,6 +480,8 @@ impl AnimationTimingRow {
         definition: &crate::css::style_compute::FfiComputedAnimation,
         owning_node: StyleNodeID,
         owning_slot: AnimationSlot,
+        name_index: u32,
+        synthesized_index: u32,
     ) -> Option<Self> {
         use crate::css::style_compute::FfiAnimationTimelineKind;
         use timing_row_flag as flag;
@@ -534,16 +540,27 @@ impl AnimationTimingRow {
             composite_owning_slot: owning_slot,
             composite_transition_property: 0,
             composite_owning_node: owning_node.raw(),
-            composite_class_key: 0,
-            // The order among an element's animations, which a lone row needs no place in.
+            // The host's class-specific composite order key for a CSS animation is its place in the
+            // `animation-name` list, which is the place the plan gives this definition.
+            composite_class_key: name_index,
+            // Only two CSS transitions with no owning element are ordered by the global list, and a
+            // CSS animation this element owns is neither.
             global_list_order: 0,
             times,
+            synthesized_index: Some(synthesized_index),
         })
     }
 
     #[must_use]
     pub(crate) fn effect_identity(&self) -> u64 {
         self.effect_identity
+    }
+
+    /// Which of the computation's starting animations this row stands for, for a row the stage
+    /// synthesized rather than read from the published list.
+    #[must_use]
+    pub(crate) fn synthesized_index(&self) -> Option<u32> {
+        self.synthesized_index
     }
 
     /// The place in the element's `animation-name` list of the CSS animation this row describes,
@@ -1067,6 +1084,24 @@ pub(crate) fn rows_after_cancel_and_renumber(
     // of the rows the order declines to tell apart.
     planned.sort_by(composite_order);
     Some(planned)
+}
+
+/// The rows an element would publish once a plan that also starts animations has been applied: the
+/// rows the plan leaves behind, with the ones the stage synthesized for the animations it starts
+/// merged into the composite order.
+///
+/// The published list is already in composite order and no two of an element's own CSS animations
+/// can claim one place in its `animation-name` list, so a stable sort settles the merge.
+#[must_use]
+pub(crate) fn rows_with_synthesized(
+    published: &[AnimationTimingRow],
+    synthesized: &[AnimationTimingRow],
+) -> Vec<AnimationTimingRow> {
+    let mut rows = Vec::with_capacity(published.len() + synthesized.len());
+    rows.extend_from_slice(published);
+    rows.extend_from_slice(synthesized);
+    rows.sort_by(composite_order);
+    rows
 }
 
 /// The current time each of the document's animation timelines was sampled at when the style
