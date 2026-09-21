@@ -346,7 +346,10 @@ unsafe fn update_layout(
     inputs: &FfiLayoutUpdateInputs,
 ) {
     // SAFETY (for every derive below): Guaranteed by the caller; no borrow spans a host call.
-    let host = unsafe { arena(arena_handle) }.layout_update_host();
+    let host = main_thread
+        .host_tables()
+        .and_then(|host_tables| host_tables.layout_update_host.get())
+        .expect("layout node arena has no layout update host");
     assert!(
         unsafe { arena(arena_handle) }.update_layout_is_running(),
         "the layout update runs between layout_arena_begin_update_layout and its end"
@@ -485,7 +488,9 @@ pub unsafe extern "C" fn layout_arena_set_layout_update_host_callbacks(
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_layout_update_host(Some(callbacks.into()));
+    unsafe { crate::layout::HostTables::from_handle(arena) }
+        .layout_update_host
+        .set(Some(callbacks.into()));
 }
 
 /// # Safety
@@ -495,7 +500,9 @@ pub unsafe extern "C" fn layout_arena_set_layout_update_host_callbacks(
 pub unsafe extern "C" fn layout_arena_clear_layout_update_host_callbacks(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_layout_update_host(None);
+    unsafe { crate::layout::HostTables::from_handle(arena) }
+        .layout_update_host
+        .set(None);
 }
 
 /// # Safety

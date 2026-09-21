@@ -29,7 +29,7 @@ pub struct FfiDisplayListReplayCallbacks {
 
 pub(crate) struct DisplayListReplayHost<'a> {
     callbacks: FfiDisplayListReplayCallbacks,
-    _main_thread: &'a crate::stage::MainThread,
+    _main_thread: &'a crate::stage::MainThread<'a>,
 }
 
 impl<'a> DisplayListReplayHost<'a> {

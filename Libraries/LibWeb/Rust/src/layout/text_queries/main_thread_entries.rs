@@ -31,7 +31,7 @@ unsafe extern "C" fn layout_arena_find_matching_text(
     context: *mut c_void,
     append: unsafe extern "C" fn(*mut c_void, FfiDomTextRange),
 ) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: The host lends the query for this synchronous operation.
     let query = unsafe { query.to_utf16() }.expect("query carries no storage");
     if query.is_empty() {

@@ -25,7 +25,7 @@ const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private:
 unsafe extern "C" fn rust_detach_top_layer_element_layout_subtree(arena: *mut c_void, style_node: u32) {
     assert!(!arena.is_null());
     // SAFETY: The entry point's contract puts this call on the document thread.
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: Guaranteed by the entry point's contract.
     unsafe {
         super::layout_node_arena::paying_host_handbacks(&main_thread, arena, || {
@@ -48,7 +48,7 @@ unsafe extern "C" fn rust_detach_top_layer_element_layout_subtree(arena: *mut c_
 unsafe extern "C" fn rust_detach_remaining_layout_rows_for_removal(arena: *mut c_void, style_node: u32) {
     assert!(!arena.is_null());
     // SAFETY: The entry point's contract puts this call on the document thread.
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: Guaranteed by the entry point's contract.
     unsafe {
         super::layout_node_arena::paying_host_handbacks(&main_thread, arena, || {
@@ -72,7 +72,7 @@ unsafe extern "C" fn rust_build_layout_tree(
 ) -> FfiLayoutTreeBuildOutcome {
     assert!(!document.is_null());
     // SAFETY: The entry point's contract puts this call on the document thread.
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: Guaranteed by the entry point's contract.
     let host = unsafe { dom_tree_builder_host(callbacks, arena) };
     let TreeBuildStageOutput {
@@ -92,9 +92,7 @@ unsafe extern "C" fn rust_build_layout_tree(
         super::tree_build_seal::note_host_call("deliver_commit_messages");
         // SAFETY: The document outlives the build, and no arena borrow is held here.
         unsafe {
-            arena
-                .guarded_layout_host()
-                .deliver_commit_messages(&main_thread, &reports);
+            crate::layout::LayoutHost::of(&main_thread).deliver_commit_messages(&main_thread, &reports);
         };
     }
     for (row, owed) in arena.take_rows_owed_to_host() {

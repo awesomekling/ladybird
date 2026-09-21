@@ -29,7 +29,7 @@ unsafe extern "C" fn layout_arena_run_root_layout(
     document_in_quirks_mode: bool,
     should_collect_devtools_layout_data: bool,
 ) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: Guaranteed by the entry point's contract.
     unsafe {
         run_root_layout(
@@ -57,7 +57,7 @@ unsafe extern "C" fn layout_arena_compute_subtree_layout(
     viewport_block_size_raw: i32,
     document_in_quirks_mode: bool,
 ) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: Guaranteed by the entry point's contract.
     unsafe {
         compute_subtree_layout(

@@ -961,6 +961,15 @@ impl From<FfiLayoutHostCallbacks> for LayoutHost {
 }
 
 impl LayoutHost {
+    /// The layout host the arena the entry was called for answers to.
+    pub(crate) fn of(main_thread: &crate::stage::MainThread) -> Self {
+        main_thread
+            .host_tables()
+            .and_then(|host_tables| host_tables.layout_host.get())
+            .expect("layout node arena has no layout host")
+            .into()
+    }
+
     fn viewport_propagation_facts(
         &self,
         _: &crate::stage::MainThread,
@@ -995,7 +1004,9 @@ impl LayoutHost {
 pub unsafe extern "C" fn layout_arena_set_layout_host_callbacks(arena: *mut c_void, callbacks: FfiLayoutHostCallbacks) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_layout_host(Some(callbacks));
+    unsafe { crate::layout::HostTables::from_handle(arena) }
+        .layout_host
+        .set(Some(callbacks));
 }
 
 /// Records whether the document is an SVG file decoded as an image. It is fixed for the
@@ -1018,7 +1029,9 @@ pub unsafe extern "C" fn layout_arena_set_document_is_decoded_svg(arena: *mut c_
 pub unsafe extern "C" fn layout_arena_clear_layout_host_callbacks(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_layout_host(None);
+    unsafe { crate::layout::HostTables::from_handle(arena) }
+        .layout_host
+        .set(None);
 }
 
 pub(crate) struct FormattingContextRun<'pass> {
@@ -2486,7 +2499,7 @@ pub(crate) unsafe fn run_root_layout(
     assert!(!root.is_invalid());
     // SAFETY: The caller keeps the arena alive for this synchronous call. The host table is
     // copied out so no arena borrow spans a host callback.
-    let host = unsafe { LayoutNodeArena::from_handle(arena_handle) }.guarded_layout_host();
+    let host = LayoutHost::of(main_thread);
     seal::note_host_call(
         unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_pass_is_running(),
         "viewport_propagation_facts",
@@ -2666,7 +2679,7 @@ pub(crate) unsafe fn compute_subtree_layout(
     assert!(!root.is_invalid());
     // SAFETY: The caller keeps the arena alive for this synchronous call. The host table is
     // copied out so no arena borrow spans a host callback.
-    let host = unsafe { LayoutNodeArena::from_handle(arena_handle) }.guarded_layout_host();
+    let host = LayoutHost::of(main_thread);
     // SAFETY: The host keeps the arena and its published inputs alive and unchanged for the
     // synchronous stage run.
     let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };

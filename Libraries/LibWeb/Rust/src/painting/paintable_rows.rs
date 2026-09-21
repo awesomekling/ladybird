@@ -169,7 +169,7 @@ fn new_chunk() -> Box<PaintableRowChunk> {
     }
 }
 
-type ChromeStateCallback = (
+pub(crate) type ChromeStateCallback = (
     *mut c_void,
     unsafe extern "C" fn(*mut c_void, NodeSlotId, PaintableRowResetKind),
 );
@@ -178,12 +178,18 @@ type ChromeStateCallback = (
 pub(crate) struct PaintableRowReset {
     slot: NodeSlotId,
     kind: PaintableRowResetKind,
-    callback: Option<ChromeStateCallback>,
+    notifies_chrome_state: bool,
 }
 
 impl PaintableRowReset {
-    pub(crate) fn invoke_callback_on_main_thread(self, _: &crate::stage::MainThread) {
-        if let Some((context, callback)) = self.callback {
+    pub(crate) fn invoke_callback_on_main_thread(self, main_thread: &crate::stage::MainThread) {
+        if !self.notifies_chrome_state {
+            return;
+        }
+        if let Some((context, callback)) = main_thread
+            .host_tables()
+            .and_then(|host_tables| host_tables.chrome_state_callback.get())
+        {
             // SAFETY: Registration and unregistration keep the callback context live.
             unsafe { callback(context, self.slot, self.kind) };
         }
@@ -260,7 +266,9 @@ pub(crate) struct PaintableRowStore {
     absolute_rect_memo: RefCell<Vec<Option<(NodeSlotId, u64, crate::css::css_pixels::CssPixelRect)>>>,
     absolute_rect_memo_epoch: Cell<u64>,
     committed_fragment_links: RefCell<Vec<CommittedFragmentLinkSlot>>,
-    chrome_state_callback: Cell<Option<ChromeStateCallback>>,
+    /// Whether the chrome listens for paintable row resets. The callback itself is in the host
+    /// tables, which only the main thread reaches.
+    chrome_state_listens: Cell<bool>,
     paint_recording_in_progress: Cell<bool>,
     layout_commit_generation: Cell<u64>,
     scroll_offsets: crate::painting::visual_context::scroll_state::ScrollOffsetColumn,
@@ -691,16 +699,8 @@ impl LayoutNodeArena {
         PaintableRows { arena: self }
     }
 
-    pub(crate) fn set_chrome_state_callback(
-        &self,
-        context: *mut c_void,
-        callback: unsafe extern "C" fn(*mut c_void, NodeSlotId, PaintableRowResetKind),
-    ) {
-        self.paintable_rows.chrome_state_callback.set(Some((context, callback)));
-    }
-
-    pub(crate) fn clear_chrome_state_callback(&self) {
-        self.paintable_rows.chrome_state_callback.set(None);
+    pub(crate) fn set_chrome_state_listens(&self, listens: bool) {
+        self.paintable_rows.chrome_state_listens.set(listens);
     }
 
     pub(crate) fn with_committed_fragment_link<R>(
@@ -730,7 +730,7 @@ impl LayoutNodeArena {
         PaintableRowReset {
             slot,
             kind,
-            callback: self.paintable_rows.chrome_state_callback.get(),
+            notifies_chrome_state: self.paintable_rows.chrome_state_listens.get(),
         }
     }
 

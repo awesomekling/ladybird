@@ -6,8 +6,8 @@
 
 use super::abspos_inputs::AbsposLayoutInputs;
 use super::formatting_context::DerivedBaselines;
+use super::formatting_context::LayoutHost;
 use super::formatting_context::LayoutMode;
-use super::formatting_context::{FfiLayoutHostCallbacks, LayoutHost};
 use super::geometry::AvailableSize;
 use super::geometry::AvailableSpace;
 use super::rendered_text::{FfiTextSourceRange, RenderedTextBoundary, TextContent, TextFragments};
@@ -16,7 +16,7 @@ use super::svg_formatting_context::FfiSvgAttributeFacts;
 /// How many interned names one SVG element's publication can name.
 const PUBLISHED_REFERENCE_ATOM_COUNT: usize = 5;
 use super::tree_builder::FfiLayoutTreeBuildOutcome;
-use super::update_layout::{FfiLayoutTreeBuildStats, LayoutUpdateHost};
+use super::update_layout::FfiLayoutTreeBuildStats;
 use super::used_values::SizeConstraint;
 use super::used_values::UsedValues;
 use crate::css::style::bridge::ElementBoxKind;
@@ -399,12 +399,19 @@ enum AncestorInvalidation {
     ContentChange,
 }
 
-type ShellFactory = (*mut c_void, unsafe extern "C" fn(*mut c_void, NodeSlotId, NodeKind));
+pub(crate) type ShellFactory = (*mut c_void, unsafe extern "C" fn(*mut c_void, NodeSlotId, NodeKind));
 
 /// How the host learns what boxes a DOM node has. The identity is 0 for the document, which has
 /// none of its own. The callback must not reenter the arena: it runs while the arena is changing
 /// the bindings it would read.
-type BoxPresenceHost = (*mut c_void, unsafe extern "C" fn(*mut c_void, u32, u8));
+pub(crate) type BoxPresenceHost = (*mut c_void, unsafe extern "C" fn(*mut c_void, u32, u8));
+
+/// How a shell hears that its row's style changed: the shell, the new record and its payloads, and
+/// whether the shell attaches its style resources again.
+pub(crate) type ShellStyleChangedHost = (
+    *mut c_void,
+    unsafe extern "C" fn(*mut c_void, *mut c_void, u64, *const c_void, bool),
+);
 
 /// A row is bound to the node.
 pub const BOX_PRESENCE_HAS_LAYOUT_BOX: u8 = 1 << 0;
@@ -464,14 +471,14 @@ pub(crate) struct FreedSubtree {
     image_observer_sets: Vec<*mut c_void>,
     paintable_row_resets: Vec<crate::painting::paintable_rows::PaintableRowReset>,
     arena_pinned_style_records: Vec<u64>,
-    style_record_host: Option<FfiStyleRecordHostCallbacks>,
+    style_engine: *mut c_void,
 }
 
 /// Who hears that a shell's style changed: the host at once, which only the main thread can ask,
 /// or the tree build's handbacks, which its entry pays once the walk is over.
 #[derive(Clone, Copy)]
 pub(crate) enum ShellStyleChangeNotice<'a> {
-    Now(&'a crate::stage::MainThread),
+    Now(&'a crate::stage::MainThread<'a>),
     AfterTreeBuild,
 }
 
@@ -573,17 +580,14 @@ impl FreedSubtree {
         for reset in self.paintable_row_resets {
             reset.invoke_callback_on_main_thread(&main_thread);
         }
-        Self::unpin_arena_pinned_style_records(self.style_record_host, self.arena_pinned_style_records);
+        Self::unpin_arena_pinned_style_records(self.style_engine, self.arena_pinned_style_records);
     }
 
-    fn unpin_arena_pinned_style_records(
-        style_record_host: Option<FfiStyleRecordHostCallbacks>,
-        arena_pinned_style_records: Vec<u64>,
-    ) {
-        if let Some(host) = style_record_host {
+    fn unpin_arena_pinned_style_records(style_engine: *mut c_void, arena_pinned_style_records: Vec<u64>) {
+        if !style_engine.is_null() {
             for style_record in arena_pinned_style_records {
-                // SAFETY: Registration and unregistration keep the host context live.
-                unsafe { &mut *host.style_engine.cast::<StyleEngine>() }.unpin_layout_style_record(style_record);
+                // SAFETY: Registration and unregistration keep the style engine live.
+                unsafe { &mut *style_engine.cast::<StyleEngine>() }.unpin_layout_style_record(style_record);
             }
         }
     }
@@ -701,9 +705,12 @@ pub(crate) struct LayoutNodeArena {
     anchor_name_elements: RefCell<HashMap<(u32, usize), Vec<StyleNodeID>>>,
     /// The viewport row the document is bound to. The document has no identity of its own.
     bound_viewport_row: Cell<NodeSlotId>,
-    style_record_host: Cell<Option<FfiStyleRecordHostCallbacks>>,
-    shell_factory: Cell<Option<ShellFactory>>,
-    box_presence_host: Cell<Option<BoxPresenceHost>>,
+    /// The style engine whose mirror the arena's rows are built from, or null before the document
+    /// registers it.
+    style_engine: Cell<*mut c_void>,
+    /// Whether the host listens for box presence. The callback itself is in the host tables,
+    /// which only the main thread reaches; this says whether a change is worth handing back.
+    host_hears_box_presence: Cell<bool>,
     /// What the arena owes the host and has not handed over yet.
     host_handbacks: RefCell<HostHandbacks>,
     /// How many spans that pay the host, or the tree build's, are open.
@@ -711,7 +718,6 @@ pub(crate) struct LayoutNodeArena {
     /// Rows whose committed box appeared or went away since the host last heard. A commit changes
     /// them with the arena borrowed for writing, so the host hears about them when it drains this.
     rows_with_changed_committed_box: RefCell<Vec<NodeSlotId>>,
-    layout_host: Cell<Option<FfiLayoutHostCallbacks>>,
     /// Whether the document is an SVG file decoded as an image, which is fixed for its lifetime.
     document_is_decoded_svg: Cell<bool>,
     /// Depth of synchronous layout passes, including their commits, on the stack.
@@ -726,7 +732,6 @@ pub(crate) struct LayoutNodeArena {
     /// them.
     pending_rebuilt_subtree_roots: RefCell<Vec<NodeSlotId>>,
     pending_layout_tree_update_escaped_rebuild_roots: Cell<bool>,
-    layout_update_host: Cell<Option<LayoutUpdateHost>>,
     update_layout_running: Cell<bool>,
     /// Every box must be recreated by the next layout tree build; set when the tree is torn down
     /// or a build finds a box it cannot place among rebuilt roots, cleared by the full pass.
@@ -851,20 +856,17 @@ impl LayoutNodeArena {
             shadow_including_parent_elements: RefCell::new(Vec::new()),
             anchor_name_elements: RefCell::new(HashMap::default()),
             bound_viewport_row: Cell::new(NodeSlotId::INVALID),
-            style_record_host: Cell::new(None),
-            shell_factory: Cell::new(None),
-            box_presence_host: Cell::new(None),
+            style_engine: Cell::new(std::ptr::null_mut()),
+            host_hears_box_presence: Cell::new(false),
             host_handbacks: RefCell::new(HostHandbacks::default()),
             host_handback_spans: Cell::new(0),
             rows_with_changed_committed_box: RefCell::new(Vec::new()),
-            layout_host: Cell::new(None),
             document_is_decoded_svg: Cell::new(false),
             active_layout_pass_depth: Cell::new(0),
             fragment_cache_epoch_changed_during_layout_pass: Cell::new(false),
             layout_root: Cell::new(NodeSlotId::INVALID),
             pending_rebuilt_subtree_roots: RefCell::new(Vec::new()),
             pending_layout_tree_update_escaped_rebuild_roots: Cell::new(false),
-            layout_update_host: Cell::new(None),
             update_layout_running: Cell::new(false),
             needs_full_layout_tree_update: Cell::new(false),
             partial_layout_count: Cell::new(0),
@@ -1169,7 +1171,7 @@ impl LayoutNodeArena {
             image_observer_sets,
             paintable_row_resets,
             arena_pinned_style_records,
-            style_record_host: self.style_record_host.get(),
+            style_engine: self.style_engine.get(),
         }
     }
 
@@ -1788,26 +1790,13 @@ impl LayoutNodeArena {
         self.style_records_pinned_by_host[id.slot_index() as usize].get()
     }
 
-    pub(crate) fn set_style_record_host(&self, host: Option<FfiStyleRecordHostCallbacks>) {
-        self.style_record_host.set(host);
-        if let Some(host) = host {
-            assert!(!host.style_engine.is_null());
+    pub(crate) fn set_style_engine(&self, style_engine: *mut c_void) {
+        self.style_engine.set(style_engine);
+        if !style_engine.is_null() {
             // SAFETY: The registered style engine outlives this arena's live nodes.
-            unsafe { &mut *host.style_engine.cast::<StyleEngine>() }
+            unsafe { &mut *style_engine.cast::<StyleEngine>() }
                 .install_layout_style_snapshots(self.layout_style_snapshots.clone());
         }
-    }
-
-    pub(crate) fn set_layout_host(&self, host: Option<FfiLayoutHostCallbacks>) {
-        self.layout_host.set(host);
-    }
-
-    pub(crate) fn layout_host(&self) -> FfiLayoutHostCallbacks {
-        self.layout_host.get().expect("layout node arena has no layout host")
-    }
-
-    pub(crate) fn guarded_layout_host(&self) -> LayoutHost {
-        self.layout_host().into()
     }
 
     pub(crate) fn set_document_is_decoded_svg(&self, is_decoded_svg: bool) {
@@ -1886,16 +1875,6 @@ impl LayoutNodeArena {
         self.pending_layout_tree_update_escaped_rebuild_roots.set(false);
     }
 
-    pub(crate) fn set_layout_update_host(&self, host: Option<LayoutUpdateHost>) {
-        self.layout_update_host.set(host);
-    }
-
-    pub(crate) fn layout_update_host(&self) -> LayoutUpdateHost {
-        self.layout_update_host
-            .get()
-            .expect("layout node arena has no layout update host")
-    }
-
     /// A document runs one layout update at a time; a nested request is a caller bug.
     pub(crate) fn begin_update_layout(&self) {
         assert!(
@@ -1949,10 +1928,10 @@ impl LayoutNodeArena {
         self.needs_full_layout_tree_update.set(value);
     }
 
-    fn style_record_host(&self) -> FfiStyleRecordHostCallbacks {
-        self.style_record_host
-            .get()
-            .expect("layout node arena has no style record host")
+    fn style_engine(&self) -> *mut c_void {
+        let style_engine = self.style_engine.get();
+        assert!(!style_engine.is_null(), "layout node arena has no style record host");
+        style_engine
     }
 
     // The engine outlives the arena's live nodes. No host callback runs while this
@@ -1960,17 +1939,15 @@ impl LayoutNodeArena {
     /// Borrows the style store for one read-only query. Nothing the query calls may reach back
     /// into the arena for another style-store read: this borrow stands for the whole query.
     pub(crate) fn with_style_store<T>(&self, query: impl FnOnce(&StyleEngine) -> T) -> T {
-        let host = self.style_record_host();
-        assert!(!host.style_engine.is_null());
+        let style_engine = self.style_engine();
         // SAFETY: As with `with_style_engine`, the engine outlives the arena's live nodes and no
         // host callback runs while the borrow is active.
-        unsafe { query(&*host.style_engine.cast::<StyleEngine>()) }
+        unsafe { query(&*style_engine.cast::<StyleEngine>()) }
     }
 
     fn with_style_engine<T>(&self, callback: impl FnOnce(&mut StyleEngine) -> T) -> T {
-        let host = self.style_record_host();
-        assert!(!host.style_engine.is_null());
-        unsafe { callback(&mut *host.style_engine.cast::<StyleEngine>()) }
+        let style_engine = self.style_engine();
+        unsafe { callback(&mut *style_engine.cast::<StyleEngine>()) }
     }
 
     /// Everything one step of the stale-subtree walk reads out of the style mirror, taken in one
@@ -2152,13 +2129,13 @@ impl LayoutNodeArena {
     pub(crate) fn element_construction_facts(&self, style_node: Option<StyleNodeID>) -> u32 {
         match style_node {
             Some(style_node) => {
-                let Some(host) = self.style_record_host.get() else {
+                let style_engine = self.style_engine.get();
+                if style_engine.is_null() {
                     return 0;
-                };
-                assert!(!host.style_engine.is_null());
+                }
                 // SAFETY: As with `with_style_engine`, the engine outlives the arena's live nodes
                 // and no host callback runs while the borrow is active.
-                unsafe { &*host.style_engine.cast::<StyleEngine>() }.element_construction_facts(style_node)
+                unsafe { &*style_engine.cast::<StyleEngine>() }.element_construction_facts(style_node)
             }
             _ => 0,
         }
@@ -2170,15 +2147,13 @@ impl LayoutNodeArena {
     pub(crate) fn element_box_kind(&self, style_node: Option<StyleNodeID>) -> ElementBoxKind {
         match style_node {
             Some(style_node) if style_node.element_index().is_some() => {
-                let Some(host) = self.style_record_host.get() else {
+                let style_engine = self.style_engine.get();
+                if style_engine.is_null() {
                     return ElementBoxKind::FromDisplay;
-                };
-                assert!(!host.style_engine.is_null());
+                }
                 // SAFETY: As with `with_style_engine`, the engine outlives the arena's live nodes
                 // and no host callback runs while the borrow is active.
-                ElementBoxKind::from_raw(
-                    unsafe { &*host.style_engine.cast::<StyleEngine>() }.element_box_kind(style_node),
-                )
+                ElementBoxKind::from_raw(unsafe { &*style_engine.cast::<StyleEngine>() }.element_box_kind(style_node))
             }
             _ => ElementBoxKind::FromDisplay,
         }
@@ -2380,18 +2355,21 @@ impl LayoutNodeArena {
 
     fn tell_shell_of_style_change(
         &self,
-        _: &crate::stage::MainThread,
+        main_thread: &crate::stage::MainThread,
         slot: NodeSlotId,
         shell: *mut c_void,
         attach_resources: bool,
     ) {
-        let host = self.style_record_host();
+        let (context, shell_style_changed) = main_thread
+            .host_tables()
+            .and_then(|host_tables| host_tables.shell_style_changed_host.get())
+            .expect("layout node arena has no style record host");
         super::tree_build_seal::note_host_call("shell_style_changed");
         // SAFETY: The engine and shell remain live. Native style-store mutation has finished before
         // the host can reenter Rust through its resource consumers.
         unsafe {
-            (host.shell_style_changed)(
-                host.context,
+            shell_style_changed(
+                context,
                 shell,
                 self.node_style_record(slot),
                 self.data(slot).style.get(),
@@ -2899,13 +2877,10 @@ impl LayoutNodeArena {
             .unwrap_or(std::ptr::null_mut())
     }
 
-    pub(crate) fn set_shell_factory(&self, factory: Option<ShellFactory>) {
-        self.shell_factory.set(factory);
-    }
-
-    pub(crate) fn set_box_presence_host(&self, host: Option<BoxPresenceHost>) {
-        self.box_presence_host.set(host);
-        if host.is_none() {
+    /// Records whether the host listens for box presence, which it registers in the host tables.
+    pub(crate) fn set_host_hears_box_presence(&self, hears: bool) {
+        self.host_hears_box_presence.set(hears);
+        if !hears {
             self.rows_with_changed_committed_box.borrow_mut().clear();
         }
     }
@@ -2925,7 +2900,7 @@ impl LayoutNodeArena {
     /// Tells the host what boxes `node` has now. A pseudo-element's boxes stay unmirrored, since
     /// nothing on the DOM side reads them as a bit.
     fn notify_box_presence(&self, node: BoundNode) {
-        if self.box_presence_host.get().is_none() {
+        if !self.host_hears_box_presence.get() {
             return;
         }
         let style_node = match node {
@@ -2938,8 +2913,11 @@ impl LayoutNodeArena {
 
     /// Tells the host what boxes the node `style_node` names has now. No row list may be borrowed
     /// here.
-    fn tell_host_box_presence(&self, _: &crate::stage::MainThread, style_node: u32) {
-        let Some((context, callback)) = self.box_presence_host.get() else {
+    fn tell_host_box_presence(&self, main_thread: &crate::stage::MainThread, style_node: u32) {
+        let Some((context, callback)) = main_thread
+            .host_tables()
+            .and_then(|host_tables| host_tables.box_presence_host.get())
+        else {
             return;
         };
         let row = match StyleNodeID::from_raw(style_node) {
@@ -3060,7 +3038,7 @@ impl LayoutNodeArena {
             image_observer_sets,
             paintable_row_resets,
             arena_pinned_style_records,
-            style_record_host,
+            style_engine,
         } = freed;
         for shell in shells {
             self.hand_back(HostHandback::Shell(shell));
@@ -3074,13 +3052,13 @@ impl LayoutNodeArena {
         for reset in paintable_row_resets {
             self.hand_back(HostHandback::PaintableRowReset(reset));
         }
-        FreedSubtree::unpin_arena_pinned_style_records(style_record_host, arena_pinned_style_records);
+        FreedSubtree::unpin_arena_pinned_style_records(style_engine, arena_pinned_style_records);
     }
 
     /// Records that `row` is gaining or losing its committed box. The paint state is borrowed for
     /// writing while that happens, so the host hears about it from the flush that follows.
     pub(crate) fn note_committed_box_changed(&mut self, row: NodeSlotId) {
-        if self.box_presence_host.get().is_some() {
+        if self.host_hears_box_presence.get() {
             self.rows_with_changed_committed_box.get_mut().push(row);
         }
     }
@@ -3105,8 +3083,11 @@ impl LayoutNodeArena {
         }
     }
 
-    fn materialize_shell(&self, _: &crate::stage::MainThread, id: NodeSlotId) -> *mut c_void {
-        let Some((context, factory)) = self.shell_factory.get() else {
+    fn materialize_shell(&self, main_thread: &crate::stage::MainThread, id: NodeSlotId) -> *mut c_void {
+        let Some((context, factory)) = main_thread
+            .host_tables()
+            .and_then(|host_tables| host_tables.shell_factory.get())
+        else {
             return std::ptr::null_mut();
         };
         let data = self.data(id);
@@ -3486,13 +3467,13 @@ impl LayoutNodeArena {
         }
         // A document being torn down drops its style record host before the last publication is
         // cleared. The engine it named is going with it, so there is nothing left to retain for.
-        let Some(host) = self.style_record_host.get() else {
+        let style_engine = self.style_engine.get();
+        if style_engine.is_null() {
             return;
-        };
-        assert!(!host.style_engine.is_null());
+        }
         // SAFETY: As with `with_style_engine`, the engine outlives the arena's live nodes and no
         // host callback runs while the borrow is active.
-        let engine = unsafe { &mut *host.style_engine.cast::<StyleEngine>() };
+        let engine = unsafe { &mut *style_engine.cast::<StyleEngine>() };
         for atom in retained {
             engine.retain_published_atom(crate::css::style::index::StyleAtomID(atom));
         }
@@ -5291,7 +5272,7 @@ pub(crate) struct NodeAllocation {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn layout_arena_create() -> *mut c_void {
-    Box::into_raw(Box::new(LayoutNodeArena::new())).cast()
+    Box::into_raw(Box::new(super::ArenaHandle::new())).cast()
 }
 
 /// Records whether attaching a row's style resources loaded any image.
@@ -5314,10 +5295,11 @@ pub unsafe extern "C" fn layout_arena_destroy(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The handle came from layout_arena_create and ownership is
     // transferred back exactly once by the C++ RAII wrapper.
-    let arena = unsafe { Box::from_raw(arena.cast::<LayoutNodeArena>()) };
+    let handle = unsafe { Box::from_raw(arena.cast::<super::ArenaHandle>()) };
+    let arena = handle.arena();
     arena.assert_owner_thread();
     assert_eq!(arena.live_count, 0, "layout node arena destroyed with live slots");
-    crate::painting::published_immutable::finish(&arena);
+    crate::painting::published_immutable::finish(arena);
     super::tree_build_seal::flush_census();
 }
 
@@ -5921,7 +5903,9 @@ pub unsafe extern "C" fn layout_arena_set_shell_factory(
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_shell_factory(Some((context, factory)));
+    unsafe { super::HostTables::from_handle(arena) }
+        .shell_factory
+        .set(Some((context, factory)));
 }
 
 /// # Safety
@@ -5936,7 +5920,11 @@ pub unsafe extern "C" fn layout_arena_set_box_presence_host(
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_box_presence_host(Some((context, callback)));
+    unsafe { super::HostTables::from_handle(arena) }
+        .box_presence_host
+        .set(Some((context, callback)));
+    // SAFETY: As above.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_host_hears_box_presence(true);
 }
 
 /// # Safety
@@ -5946,14 +5934,18 @@ pub unsafe extern "C" fn layout_arena_set_box_presence_host(
 pub unsafe extern "C" fn layout_arena_clear_box_presence_host(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_box_presence_host(None);
+    unsafe { super::HostTables::from_handle(arena) }
+        .box_presence_host
+        .set(None);
+    // SAFETY: As above.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_host_hears_box_presence(false);
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_clear_shell_factory(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_shell_factory(None);
+    unsafe { super::HostTables::from_handle(arena) }.shell_factory.set(None);
 }
 
 #[unsafe(no_mangle)]
@@ -5970,14 +5962,23 @@ pub unsafe extern "C" fn layout_arena_set_style_record_host_callbacks(
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_style_record_host(Some(callbacks));
+    unsafe { super::HostTables::from_handle(arena) }
+        .shell_style_changed_host
+        .set(Some((callbacks.context, callbacks.shell_style_changed)));
+    assert!(!callbacks.style_engine.is_null());
+    // SAFETY: As above.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_style_engine(callbacks.style_engine);
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_clear_style_record_host_callbacks(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_style_record_host(None);
+    unsafe { super::HostTables::from_handle(arena) }
+        .shell_style_changed_host
+        .set(None);
+    // SAFETY: As above.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_style_engine(std::ptr::null_mut());
 }
 
 #[unsafe(no_mangle)]
@@ -6032,7 +6033,7 @@ pub(crate) unsafe fn sync_enrolled_content_for_layout(main_thread: &crate::stage
     if unsafe { &*arena.cast::<LayoutNodeArena>() }.layout_pass_is_running() {
         return;
     }
-    let host = unsafe { &*arena.cast::<LayoutNodeArena>() }.guarded_layout_host();
+    let host = LayoutHost::of(main_thread);
     let enrolled_text_nodes = unsafe { &*arena.cast::<LayoutNodeArena>() }.pending_text_nodes_for_content_sync();
     for node in enrolled_text_nodes {
         if !unsafe { &*arena.cast::<LayoutNodeArena>() }.slot_is_live(node) {
@@ -6232,14 +6233,18 @@ mod tests {
         use super::BOX_PRESENCE_HAS_LAYOUT_BOX;
         use crate::css::style::tree::StyleNodeID;
         let mut arena = LayoutNodeArena::new();
-        arena.set_box_presence_host(Some((std::ptr::null_mut(), record_box_presence)));
+        let host_tables = crate::layout::HostTables::default();
+        host_tables
+            .box_presence_host
+            .set(Some((std::ptr::null_mut(), record_box_presence)));
+        arena.set_host_hears_box_presence(true);
         let first = StyleNodeID::element(3);
         let second = StyleNodeID::element(4);
         let facts = |style_node: StyleNodeID| FfiNodeConstructionFacts {
             style_node: style_node.raw(),
             ..test_construction_facts()
         };
-        let main_thread = crate::stage::MainThread::for_test();
+        let main_thread = crate::stage::MainThread::for_test_with_host(&host_tables);
         arena.begin_paying_host_handbacks(&main_thread);
         let old_row = arena.allocate(facts(first));
         arena.bind_row(old_row);
@@ -6272,7 +6277,8 @@ mod tests {
             vec![(second.raw(), BOX_PRESENCE_HAS_LAYOUT_BOX)]
         );
 
-        arena.set_box_presence_host(None);
+        host_tables.box_presence_host.set(None);
+        arena.set_host_hears_box_presence(false);
         for row in [new_row, other_row] {
             arena.free_subtree(row).destroy_shells_and_invoke_callbacks();
         }
