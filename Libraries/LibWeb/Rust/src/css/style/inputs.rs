@@ -2837,6 +2837,11 @@ impl StyleEngineState {
     }
 
     /// Record an exact style reaction for every flat-tree descendant of a node.
+    ///
+    /// The reaction is one C++ derived from a reaction it applied to `root`, not a fact only C++
+    /// holds: a descendant is here because what it inherits moved, which the engine can settle
+    /// for itself wherever the record computation admits it. Recording these as inputs the C++
+    /// computation owes would decline the engine's own record for every one of them.
     pub fn record_flat_tree_descendant_style_inputs(
         &mut self,
         root: StyleNodeID,
@@ -2855,7 +2860,7 @@ impl StyleEngineState {
             {
                 self.record_deferred_pseudo_element_style_input(node);
             } else {
-                self.record_element_style_input(node, reaction, inherited_style_groups);
+                self.record_derived_element_style_input(node, reaction, inherited_style_groups);
             }
         }
     }
