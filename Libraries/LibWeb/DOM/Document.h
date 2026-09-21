@@ -60,6 +60,7 @@
 #include <LibWeb/Painting/HitTestResult.h>
 #include <LibWeb/Painting/ScrollSnap.h>
 #include <LibWeb/ResizeObserver/ResizeObserver.h>
+#include <LibWeb/SVG/SVGPatternElement.h>
 #include <LibWeb/SVG/SVGUseElement.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 #include <LibWeb/XPath/EvaluateResult.h>
@@ -1289,6 +1290,9 @@ public:
     };
     void set_needs_accumulated_visual_contexts_update(bool);
     void note_svg_paint_resources_changed();
+    void register_svg_pattern_element(Badge<SVG::SVGPatternElement>, SVG::SVGPatternElement&);
+    void unregister_svg_pattern_element(Badge<SVG::SVGPatternElement>, SVG::SVGPatternElement&);
+    void republish_inheriting_svg_pattern_attribute_facts();
     bool has_enrolled_svg_paint_resources() const;
     void schedule_full_accumulated_visual_context_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason);
     bool can_compute_client_rects_without_accumulated_visual_contexts_update(Layout::Node const&) const;
@@ -2039,6 +2043,10 @@ private:
     GC::Ptr<HTML::RadioButtonGroupRegistry> m_radio_button_group_registry;
 
     Vector<GC::Ref<DOM::Element>> m_potentially_named_elements;
+
+    // Every <pattern> in the document's node tree, which is what lets a pattern that inherits
+    // attributes from the pattern its `href` names be republished when the chain changes.
+    SVG::SVGPatternElement::DocumentPatternElementList m_svg_pattern_elements;
 
     AnchorNameMap m_anchor_name_map;
 
