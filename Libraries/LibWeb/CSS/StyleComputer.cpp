@@ -267,7 +267,9 @@ static constexpr u8 substitution_uses_if = 1 << 2;
 static constexpr u8 substitution_uses_inherit = 1 << 3;
 static constexpr u8 substitution_uses_custom_function = 1 << 4;
 
-static void report_substitution_usage(DOM::Element& element, ComputedValuesFFI::FfiSubstitutionUsage const& usage, u8* accumulated_usage = nullptr)
+// Says whether anything was posted. A computation that used no substitution has nothing to tell the
+// commit stream, and the accumulator it fills is the caller's own.
+static bool report_substitution_usage(DOM::Element& element, ComputedValuesFFI::FfiSubstitutionUsage const& usage, u8* accumulated_usage = nullptr)
 {
     u8 bits = (usage.uses_var ? substitution_uses_var : 0)
         | (usage.uses_attr ? substitution_uses_attr : 0)
@@ -276,8 +278,10 @@ static void report_substitution_usage(DOM::Element& element, ComputedValuesFFI::
         | (usage.uses_custom_function ? substitution_uses_custom_function : 0);
     if (accumulated_usage)
         *accumulated_usage |= bits;
-    if (bits != 0)
-        element.document().commit_messages().note_style_substitution_usage(DOM::NodeIdentity::of(element), bits);
+    if (bits == 0)
+        return false;
+    element.document().commit_messages().note_style_substitution_usage(DOM::NodeIdentity::of(element), bits);
+    return true;
 }
 
 static void report_style_query_dependencies(DOM::AbstractElement abstract_element, void const* dependencies)
@@ -3055,23 +3059,27 @@ static bool custom_property_data_are_equal(CustomPropertyData const& a, CustomPr
     return true;
 }
 
-NonnullRefPtr<CustomPropertyData const> StyleComputer::intern_custom_property_data(NonnullRefPtr<CustomPropertyData const> data) const
+NonnullRefPtr<CustomPropertyData const> StyleComputer::intern_custom_property_data(NonnullRefPtr<CustomPropertyData const> data, bool* did_keep_the_environment) const
 {
     auto& bucket = m_custom_property_environments.ensure(hash_custom_property_data(*data));
     for (auto const& existing : bucket) {
         if (custom_property_data_are_equal(*existing, *data))
             return existing;
     }
+    if (did_keep_the_environment)
+        *did_keep_the_environment = true;
     bucket.append(data);
     return data;
 }
 
-RefPtr<CustomPropertyData const> StyleComputer::engine_custom_property_environment(u64 identity, RefPtr<CustomPropertyData const> const& inherited) const
+RefPtr<CustomPropertyData const> StyleComputer::engine_custom_property_environment(u64 identity, RefPtr<CustomPropertyData const> const& inherited, bool* did_materialize) const
 {
     if (!StyleEngine::is_engine_custom_property_environment(identity))
         return {};
     if (auto existing = m_engine_custom_property_environments.get(identity); existing.has_value())
         return *existing;
+    if (did_materialize)
+        *did_materialize = true;
     u64 parent_identity = 0;
     auto const* store = m_style_engine.borrow_engine_custom_property_environment(identity, parent_identity);
     if (!store)
@@ -5779,6 +5787,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         // Whether this row's results actually moved the metrics a `rem` resolves against. Only the
         // document element can, and almost none of its recomputations do.
         bool did_write_root_element_font_metrics { false };
+        // Whether applying this row's resolved custom properties reached past the computation: the
+        // element's environment moved, a substitution-usage message was posted, a counter the
+        // document exposes moved, or an environment object had to be made and kept.
+        bool custom_property_application_wrote_main_side_state { false };
         // Whether this row's results actually widened the parent's record of which non-inherited
         // style groups its children take explicitly. A row that explicitly inherits the same
         // groups its siblings already did widens nothing.
@@ -6092,15 +6104,18 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             }
 
             auto& element = context.abstract_element.element();
-            report_substitution_usage(element, resolution.stats.substitution_usage, context.substitution_usage);
+            if (report_substitution_usage(element, resolution.stats.substitution_usage, context.substitution_usage))
+                state.custom_property_application_wrote_main_side_state = true;
+            if (resolution.stats.final_value_hits != 0 || resolution.stats.final_value_misses != 0 || resolution.stats.cycle_participants != 0)
+                state.custom_property_application_wrote_main_side_state = true;
             RefPtr<CustomPropertyData const> resolved;
             auto inherited_data = resolution_state.parent_data ? resolution_state.parent_data : resolution_state.data->parent();
             if (StyleEngine::is_engine_custom_property_environment(resolution.environment_identity)) {
                 if (resolution.rust_store) {
-                    resolved = style_computer.engine_custom_property_environment(resolution.environment_identity, inherited_data);
+                    resolved = style_computer.engine_custom_property_environment(resolution.environment_identity, inherited_data, &state.custom_property_application_wrote_main_side_state);
                     VERIFY(resolved);
                     ComputedValuesFFI::rust_custom_property_store_destroy(resolution.rust_store);
-                    resolved = style_computer.intern_custom_property_data(resolved.release_nonnull());
+                    resolved = style_computer.intern_custom_property_data(resolved.release_nonnull(), &state.custom_property_application_wrote_main_side_state);
                 } else {
                     VERIFY(inherited_data);
                     VERIFY(inherited_data->identity() == resolution.environment_identity);
@@ -6111,10 +6126,13 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             } else {
                 VERIFY(resolution.rust_store);
                 resolved = style_computer.intern_custom_property_data(
-                    CustomPropertyData::create(move(resolved_own), move(inherited_data), resolution.rust_store));
+                    CustomPropertyData::create(move(resolved_own), move(inherited_data), resolution.rust_store),
+                    &state.custom_property_application_wrote_main_side_state);
             }
             if (context.replaced_custom_property_data)
                 resolved = custom_property_data_keeping_identity(style_computer.document(), context.replaced_custom_property_data, resolved);
+            if (context.abstract_element.custom_property_data().ptr() != resolved.ptr())
+                state.custom_property_application_wrote_main_side_state = true;
             context.abstract_element.set_custom_property_data(move(resolved));
         }
         if (state.custom_property_resolution && state.custom_property_resolution->host_adapter)
@@ -6406,8 +6424,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     // Whether applying this row's results reaches the host: a GC object, a DOM node, or state the
     // document exposes. Everything else a row writes is the computation's own working set, which
     // is created and dropped inside the stage.
-    bool application_reaches_the_host = drive_result.custom_properties.did_resolve
-        || (native_context.state->custom_property_resolution && native_context.state->custom_property_resolution->host_adapter)
+    bool application_reaches_the_host = (native_context.state->custom_property_resolution && native_context.state->custom_property_resolution->host_adapter)
         || drive_result.animations.count != 0
         || drive_result.driver_results.uses_tree_counting_function;
     consume_longhand_transaction_result(&native_context, transaction_result.drive_result);
@@ -6415,7 +6432,8 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     // join once it has run: whether the document element's published metrics moved, and whether
     // this row widened what its parent records about explicitly inherited groups.
     application_reaches_the_host |= native_context.state->did_write_root_element_font_metrics
-        || native_context.state->did_widen_parent_explicit_inheritance;
+        || native_context.state->did_widen_parent_explicit_inheritance
+        || native_context.state->custom_property_application_wrote_main_side_state;
     if (transaction_result.drive_result->custom_properties.environment_identity != 0) {
         auto resolved = abstract_element.custom_property_data();
         ComputedValuesFFI::rust_set_longhand_custom_property_environment(transaction_result.storage, resolved ? resolved->identity() : 0);

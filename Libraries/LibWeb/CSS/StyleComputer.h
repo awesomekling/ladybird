@@ -191,12 +191,16 @@ public:
     // environment hold the same environment, so they are given one object rather than an object
     // each. What that buys is not the bytes: an environment resolves once, and a child naming its
     // parent's environment by identity is told the truth when two parents agree.
-    [[nodiscard]] NonnullRefPtr<CustomPropertyData const> intern_custom_property_data(NonnullRefPtr<CustomPropertyData const>) const;
+    // `did_keep_the_environment` reports that the environment handed in was the one kept, which
+    // is a row of the interning table nothing held before.
+    [[nodiscard]] NonnullRefPtr<CustomPropertyData const> intern_custom_property_data(NonnullRefPtr<CustomPropertyData const>, bool* did_keep_the_environment = nullptr) const;
     void sweep_custom_property_environments() const;
     // The environment the style engine resolved under `identity`, materialized over the data the
     // element inherits, which must be the environment the engine resolved it over. Nothing when
     // the identity is no engine environment or was resolved over another.
-    [[nodiscard]] RefPtr<CustomPropertyData const> engine_custom_property_environment(u64 identity, RefPtr<CustomPropertyData const> const& inherited) const;
+    // `did_materialize` reports that the environment object had to be made here, which is what an
+    // identity the engine has not been asked for before costs.
+    [[nodiscard]] RefPtr<CustomPropertyData const> engine_custom_property_environment(u64 identity, RefPtr<CustomPropertyData const> const& inherited, bool* did_materialize = nullptr) const;
 
     // Whether the collection refreshes a previously published style outside the drive; a refresh
     // re-runs the animated element style adjustments and leaves the non-inherited-property
