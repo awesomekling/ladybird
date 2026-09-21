@@ -6044,7 +6044,29 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
             .is_empty(),
         None => input.has_css_defined_animations,
     };
-    let plan_has_work = has_animation_definitions || element_has_css_defined_animations;
+    let plan_has_entries = has_animation_definitions || element_has_css_defined_animations;
+    // Whether a definition may start an animation is asked before the post-compute adjustments are
+    // undone, since the element's own display is one of the values such an adjustment can change.
+    let in_display_none_subtree = match plan_has_entries {
+        true => in_display_none_subtree_for_animations(
+            input,
+            drive_input,
+            animated_overlay,
+            a_definition_starts_an_animation,
+            style_engine,
+        ),
+        false => -1,
+    };
+    // A plan whose every definition would start an animation that the element is too unrendered to
+    // start, and that holds no existing animation to retime or to cancel, leaves nothing behind: it
+    // creates nothing, sets the element's animation list to the empty list it already was, and
+    // republishes the timing rows that are already published. Nothing about the element changes, so
+    // the stage may sample it for itself as if there were no plan at all.
+    // NB: An empty published list is also what an unknown pseudo-element slot has, and there the
+    //     host's plan returns before it does anything at all - inert either way.
+    let plan_is_inert =
+        has_animation_definitions && !element_has_css_defined_animations && in_display_none_subtree == 1;
+    let plan_has_work = plan_has_entries && !plan_is_inert;
     // What is left is whether the element has anything to sample, which is a question about the
     // WAAPI timing model: an animation is relevant when its effect is current or in effect. Both
     // are pure functions of the animation's timing and of the current time its timeline was sampled
@@ -6061,18 +6083,6 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
     };
     let element_has_animation_state =
         plan_has_work || element_has_relevant_effects.unwrap_or(element_has_associated_animations);
-    // Whether a definition may start an animation is asked before the post-compute adjustments are
-    // undone, since the element's own display is one of the values such an adjustment can change.
-    let in_display_none_subtree = match element_has_animation_state {
-        true => in_display_none_subtree_for_animations(
-            input,
-            drive_input,
-            animated_overlay,
-            a_definition_starts_an_animation,
-            style_engine,
-        ),
-        false => -1,
-    };
     // The values an animation composes over are the ones the drive computed before its post-compute
     // adjustments, so the adjustments are undone here and redone by the finalization below.
     if animation_values_applied || element_has_animation_state {
