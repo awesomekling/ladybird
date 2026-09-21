@@ -11,6 +11,8 @@
 //! `auto` ranges and the cascade between origins and layers all belong to the rule cache - and the
 //! result is published here, per tree scope, as the registry a fallback chain is looked up in.
 
+use crate::css::css_string::CssString;
+use crate::css::style_value::StyleValueData;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::{Arc, OnceLock};
@@ -146,6 +148,123 @@ pub(crate) fn decimal() -> Arc<CounterStyle> {
             })
         })
         .clone()
+}
+
+/// https://drafts.csswg.org/css-counter-styles-3/#typedef-symbols-type
+/// The `SymbolsType` a `symbols()` function names, as the C++ enum orders them.
+const SYMBOLS_TYPE_CYCLIC: u8 = 0;
+const SYMBOLS_TYPE_NUMERIC: u8 = 1;
+const SYMBOLS_TYPE_ALPHABETIC: u8 = 2;
+const SYMBOLS_TYPE_SYMBOLIC: u8 = 3;
+const SYMBOLS_TYPE_FIXED: u8 = 4;
+
+/// https://drafts.csswg.org/css-counter-styles-3/#counter-style-range
+/// The range `auto` resolves to, which depends on the counter system.
+fn auto_range(algorithm: &Algorithm) -> Vec<RangeEntry> {
+    let entry = match algorithm {
+        // For additive systems, the range is 0 to positive infinity.
+        Algorithm::Additive(_) => RangeEntry {
+            start: 0,
+            end: i32::MAX,
+        },
+        // For cyclic, numeric, and fixed systems, the range is negative infinity to positive infinity.
+        Algorithm::Fixed { .. }
+        | Algorithm::Generic {
+            system: GenericSystem::Cyclic | GenericSystem::Numeric,
+            ..
+        } => RangeEntry {
+            start: i32::MIN,
+            end: i32::MAX,
+        },
+        // For alphabetic and symbolic systems, the range is 1 to positive infinity.
+        Algorithm::Generic {
+            system: GenericSystem::Alphabetic | GenericSystem::Symbolic,
+            ..
+        } => RangeEntry {
+            start: 1,
+            end: i32::MAX,
+        },
+        // NB: All complex predefined counter styles define their range explicitly, never via auto.
+        Algorithm::EthiopicNumeric | Algorithm::ExtendedCjk(_) => {
+            unreachable!("a complex predefined counter style defines its range explicitly")
+        }
+    };
+    vec![entry]
+}
+
+/// https://drafts.csswg.org/css-counter-styles-3/#symbols-function
+/// The anonymous counter style a `symbols()` function defines: "a prefix of "" (empty string) and
+/// suffix of " " (U+0020 SPACE), a range of auto, a fallback of decimal, a negative of "\2D"
+/// ("-" hyphen-minus), a pad of 0 "", and a speak-as of auto."
+fn symbols_function_counter_style(symbols_type: u8, symbols: &[CssString]) -> Arc<CounterStyle> {
+    let symbol_list: Vec<Symbol> = symbols
+        .iter()
+        .map(|symbol| symbol.units().to_vec().into_boxed_slice())
+        .collect();
+    let algorithm = match symbols_type {
+        SYMBOLS_TYPE_CYCLIC => Algorithm::Generic {
+            system: GenericSystem::Cyclic,
+            symbols: symbol_list,
+        },
+        SYMBOLS_TYPE_NUMERIC => Algorithm::Generic {
+            system: GenericSystem::Numeric,
+            symbols: symbol_list,
+        },
+        SYMBOLS_TYPE_ALPHABETIC => Algorithm::Generic {
+            system: GenericSystem::Alphabetic,
+            symbols: symbol_list,
+        },
+        SYMBOLS_TYPE_SYMBOLIC => Algorithm::Generic {
+            system: GenericSystem::Symbolic,
+            symbols: symbol_list,
+        },
+        // If the system is fixed, the first symbol value is 1.
+        SYMBOLS_TYPE_FIXED => Algorithm::Fixed {
+            first_symbol: 1,
+            symbols: symbol_list,
+        },
+        other => panic!("unknown symbols() type {other}"),
+    };
+    let range = auto_range(&algorithm);
+    Arc::new(CounterStyle {
+        // NB: C++ uses the empty string rather than no name, which cannot clash with an authored
+        //     <counter-style-name>, and the name only shows up in serialization.
+        name: symbol(""),
+        algorithm,
+        negative_prefix: symbol("-"),
+        negative_suffix: symbol(""),
+        prefix: symbol(""),
+        suffix: symbol(" "),
+        range,
+        fallback: Some(symbol("decimal")),
+        pad_minimum_length: 0,
+        pad_symbol: symbol(""),
+    })
+}
+
+/// The counter style a `<counter-style>` value names, resolved from `tree_scope`: the style the
+/// registry holds under the name, or the anonymous style a `symbols()` function defines. `None`
+/// for a name no scope in the chain registers, which reads as `decimal`.
+///
+/// Port of `CounterStyleStyleValue::resolve_counter_style`.
+pub(crate) fn resolve_counter_style_value(
+    registry: &CounterStyleRegistry,
+    tree_scope: u32,
+    value: Option<&StyleValueData>,
+) -> Option<Arc<CounterStyle>> {
+    let Some(StyleValueData::CounterStyle {
+        is_symbols,
+        name,
+        symbols_type,
+        symbols,
+    }) = value
+    else {
+        return None;
+    };
+    if *is_symbols {
+        return Some(symbols_function_counter_style(*symbols_type, symbols.as_slice()));
+    }
+    registry.lookup(tree_scope, name.units())
 }
 
 // C++ computes `value % symbol_list.size()` and `value - 1 % ...` in the unsigned type the size

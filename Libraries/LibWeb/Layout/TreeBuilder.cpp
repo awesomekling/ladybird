@@ -251,8 +251,9 @@ static Vector<ValueComparingRefPtr<CSS::CounterStyle const>> publish_normal_mark
     return counter_style_dependencies;
 }
 
-// NB: The tree build resolves a pseudo-element's content. The counter styles it names are resolved here, when the
-//     box is built, since resolving a counter style name settles the style scope's counter styles.
+// NB: The counter styles a pseudo-element's `content` names are resolved by the build itself, out of
+//     the published record and the tree scope's registered counter styles. What is recorded here is
+//     only what a later style change compares against to decide whether the box has to be rebuilt.
 static void publish_generated_content(DOM::AbstractElement const& element_reference, NodeWithStyle& layout_node, BlockContainer const* originating_list_box)
 {
     auto const* payloads = element_reference.style_record_payloads();
@@ -264,18 +265,8 @@ static void publish_generated_content(DOM::AbstractElement const& element_refere
         return;
     }
 
-    auto const& style_scope = element_reference.style_scope();
-    auto value = content_values.computed_content_value();
-    auto counter_style_dependencies = CSS::content_counter_style_dependencies(*value, style_scope);
-    if (value->is_content()) {
-        Vector<void const*> counter_styles;
-        counter_styles.ensure_capacity(counter_style_dependencies.size());
-        for (auto const& counter_style : counter_style_dependencies)
-            counter_styles.unchecked_append(counter_style ? counter_style->rust_counter_style() : nullptr);
-        RustFFI::layout_arena_set_content_counter_styles(layout_node_arena_handle(element_reference), element_reference.element().style_node_id().value(),
-            generated_for(element_reference), style_scope.style_engine_tree_scope().value(), counter_styles.data(), counter_styles.size());
-    }
-    layout_node.set_content_counter_style_dependencies(move(counter_style_dependencies));
+    layout_node.set_content_counter_style_dependencies(
+        CSS::content_counter_style_dependencies(*content_values.computed_content_value(), element_reference.style_scope()));
 }
 
 // The node an identity the walk carries names. The document is the build's root and is not in the
