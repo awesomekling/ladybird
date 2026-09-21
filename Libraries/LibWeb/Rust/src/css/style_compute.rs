@@ -2861,10 +2861,11 @@ fn tail_effects<'a>(
     node: crate::css::style::tree::StyleNodeID,
     slot: u8,
     rows: &[crate::css::style::animations::AnimationTimingRow],
-    starting: Option<&'a StartingAnimations<'a>>,
+    planned: &PlannedAnimations<'a>,
 ) -> Option<Vec<TailEffect<'a>>> {
     use crate::css::style::animations;
 
+    let starting = planned.starting;
     let samples = style_engine.animation_timeline_samples();
     let descriptions = style_engine.element_animation_effect_descriptions(node, slot);
     let mut effects = Vec::new();
@@ -2874,16 +2875,16 @@ fn tail_effects<'a>(
             let Some(keyframes) = starting?.keyframes.get(synthesized as usize)?.as_ref() else {
                 continue;
             };
-            if keyframes.description.keyframes.len() < 2 {
+            if keyframes.keyframes.description.keyframes.len() < 2 {
                 continue;
             }
             effects.push(TailEffect {
                 identity: 0,
                 generation: 0,
                 current_key: keyframes.current_key,
-                description: keyframes.description,
-                easing_from_animation: Some(&keyframes.easing),
-                composite_from_animation: keyframes.composite,
+                description: keyframes.keyframes.description,
+                easing_from_animation: Some(&keyframes.keyframes.easing),
+                composite_from_animation: keyframes.keyframes.composite,
             });
             continue;
         }
@@ -2899,6 +2900,32 @@ fn tail_effects<'a>(
         let Some(current_key) = animations::row_current_key(row, timeline_time)? else {
             continue;
         };
+        // An animation the plan hands another `@keyframes` rule keeps its row and its timing, and
+        // only the rule its declarations come from changes, so the row is sampled from that rule.
+        if let Some(retime) = row.owned_css_animation_index(node, slot).and_then(|index| {
+            planned
+                .keyframe_retimes
+                .iter()
+                .find(|retime| retime.animation_index == index)
+        }) {
+            let Some(keyframes) = &retime.keyframes else {
+                continue;
+            };
+            if keyframes.description.keyframes.len() < 2 {
+                continue;
+            }
+            effects.push(TailEffect {
+                // The effect keeps its identity, but the keyframes it is about to be handed are not
+                // the ones its published description names, so nothing may be cached under it.
+                identity: 0,
+                generation: 0,
+                current_key,
+                description: keyframes.description,
+                easing_from_animation: Some(&keyframes.easing),
+                composite_from_animation: keyframes.composite,
+            });
+            continue;
+        }
         let identity = row.effect_identity();
         // An effect the host did not describe is one the stage cannot resolve declarations for.
         let description = descriptions.iter().find(|effect| effect.identity == identity)?;
@@ -2954,6 +2981,82 @@ struct StartingDefinition {
     definition: FfiComputedAnimation,
 }
 
+/// One definition of a plan that gives the animation it claims another `@keyframes` rule and
+/// changes nothing else about it: the place `animation-name` order gives that animation, which is
+/// the composite order key its row carries once the plan has been applied, and the definition.
+#[derive(Clone, Copy)]
+struct KeyframeRetimedDefinition {
+    animation_index: u32,
+    definition: FfiComputedAnimation,
+}
+
+/// What the plan this computation carries would leave behind for the tail to sample around: the
+/// rows the element would hold once it has been applied, the animations it starts, and the
+/// animations it hands another `@keyframes` rule. All empty for a computation with no plan.
+struct PlannedAnimations<'a> {
+    rows: Option<&'a [crate::css::style::animations::AnimationTimingRow]>,
+    starting: Option<&'a StartingAnimations<'a>>,
+    keyframe_retimes: &'a [KeyframeRetime<'a>],
+}
+
+/// What one animation whose definition only swapped its `@keyframes` rule would be sampled from
+/// once the plan has been applied.
+struct KeyframeRetime<'a> {
+    animation_index: u32,
+    /// `None` for a definition whose `animation-name` resolves to no `@keyframes` rule at all: the
+    /// effect is handed no keyframes and composes nothing, while staying an animation the element
+    /// holds.
+    keyframes: Option<DefinitionKeyframes<'a>>,
+}
+
+/// The `@keyframes` rule a definition names, with the two holes the rule keeps filled in from the
+/// definition that runs it.
+struct DefinitionKeyframes<'a> {
+    description: &'a crate::css::style::animations::PublishedEffect,
+    /// The animation's own `animation-timing-function`, which every keyframe that declares no
+    /// easing of its own runs.
+    easing: crate::css::style::animations::PublishedEasing,
+    /// The animation's `animation-composition`, which every keyframe that says `composite: auto`
+    /// composites with.
+    composite: u8,
+}
+
+/// The `@keyframes` rule a definition's `animation-name` resolves to, looked for in the same scope
+/// chain the definition's keyframe-set pointer was resolved in. `None` where the rule the host
+/// resolved is not the one this finds, or where the definition's easing is one the published
+/// descriptions cannot spell.
+fn definition_keyframes<'a>(
+    style_engine: &'a crate::css::style::StyleEngine,
+    input: &FfiComputePropertiesInput,
+    node: crate::css::style::tree::StyleNodeID,
+    definition: &FfiComputedAnimation,
+) -> Option<DefinitionKeyframes<'a>> {
+    use crate::css::style::animations;
+
+    let name = unsafe { &*definition.name.cast::<crate::css::css_string::CssString>() };
+    let declaration_shadow_root_identity = unsafe { &*input.store }
+        .winning_source_shadow_root_identity(crate::css::property_metadata::property_id::ANIMATION_NAME);
+    let element_tree_scope = style_engine.tree().tree_scope(node);
+    let set = style_engine
+        .animation_keyframes()
+        .resolve(declaration_shadow_root_identity, element_tree_scope, name)?;
+    // The lookup is redone here rather than carried from the drive, so it has to be the same one.
+    if set.pointer != definition.keyframe_set as usize {
+        return None;
+    }
+    let easing = animations::PublishedEasing::from_computed_timing_function(unsafe {
+        &*definition
+            .timing_function
+            .cast::<crate::css::style_value::StyleValueData>()
+    })?;
+    Some(DefinitionKeyframes {
+        description: &set.description,
+        easing,
+        // `animation-composition` is in the same order as `Bindings::CompositeOperation`.
+        composite: definition.composition,
+    })
+}
+
 /// The CSS animations a computation is about to start, described from the definitions it just
 /// computed and the `@keyframes` rules the host published for the scope, so that what they would
 /// apply can be sampled before the animations exist.
@@ -2967,13 +3070,7 @@ struct StartingAnimations<'a> {
 }
 
 struct StartingAnimationKeyframes<'a> {
-    description: &'a crate::css::style::animations::PublishedEffect,
-    /// The animation's own `animation-timing-function`, which every keyframe that declares no
-    /// easing of its own runs.
-    easing: crate::css::style::animations::PublishedEasing,
-    /// The animation's `animation-composition`, which every keyframe that says `composite: auto`
-    /// composites with.
-    composite: u8,
+    keyframes: DefinitionKeyframes<'a>,
     current_key: f64,
 }
 
@@ -3010,32 +3107,10 @@ fn starting_animation<'a>(
     }
     let current_key = animations::row_current_key(&row, None)??;
 
-    // The `@keyframes` the host resolved this name to, looked for in the same scope chain the
-    // definition's keyframe-set pointer was resolved in.
-    let name = unsafe { &*definition.name.cast::<crate::css::css_string::CssString>() };
-    let declaration_shadow_root_identity = unsafe { &*input.store }
-        .winning_source_shadow_root_identity(crate::css::property_metadata::property_id::ANIMATION_NAME);
-    let element_tree_scope = style_engine.tree().tree_scope(node);
-    let set = style_engine
-        .animation_keyframes()
-        .resolve(declaration_shadow_root_identity, element_tree_scope, name)?;
-    // The lookup is redone here rather than carried from the drive, so it has to be the same one.
-    if set.pointer != definition.keyframe_set as usize {
-        return None;
-    }
-    let easing = animations::PublishedEasing::from_computed_timing_function(unsafe {
-        &*definition
-            .timing_function
-            .cast::<crate::css::style_value::StyleValueData>()
-    })?;
+    // The `@keyframes` the host resolved this name to.
+    let keyframes = definition_keyframes(style_engine, input, node, definition)?;
     Some(StartingAnimationRow {
-        keyframes: Some(StartingAnimationKeyframes {
-            description: &set.description,
-            easing,
-            // `animation-composition` is in the same order as `Bindings::CompositeOperation`.
-            composite: definition.composition,
-            current_key,
-        }),
+        keyframes: Some(StartingAnimationKeyframes { keyframes, current_key }),
         row: Some(row),
     })
 }
@@ -3097,8 +3172,7 @@ unsafe fn try_stage_animation_tail(
     drive_input: &FfiLonghandTransactionInput,
     length_contexts: &FfiAnimationLengthContexts,
     existing_overlay: *const AnimatedOverlay,
-    starting: Option<&StartingAnimations<'_>>,
-    planned_rows: Option<&[crate::css::style::animations::AnimationTimingRow]>,
+    planned: &PlannedAnimations<'_>,
 ) -> Option<StageAnimationTail> {
     use crate::css::animation as anim;
 
@@ -3111,8 +3185,10 @@ unsafe fn try_stage_animation_tail(
     let slot = animation_slot(input.pseudo_kind);
     // The effect stack the element holds once the plan this computation carries has been applied,
     // which for an element with no plan is the one the host published.
-    let rows = planned_rows.unwrap_or_else(|| style_engine.element_animation_timing_rows(node, slot));
-    let selected = tail_effects(style_engine, node, slot, rows, starting)?;
+    let rows = planned
+        .rows
+        .unwrap_or_else(|| style_engine.element_animation_timing_rows(node, slot));
+    let selected = tail_effects(style_engine, node, slot, rows, planned)?;
     // An effect of an animation the host has not created yet has no identity, so a stack that holds
     // one is a stack no overlay can already hold a preparation for and none is cached under.
     let stack_is_published = selected.iter().all(|effect| effect.identity != 0);
@@ -3130,7 +3206,7 @@ unsafe fn try_stage_animation_tail(
     // effects, every one of which turned out to be inactive, has its animated properties cleared
     // instead, and clearing leaves behind exactly what the element inherited.
     if preparation_effects.is_empty() {
-        let holds_an_effect = starting.is_some_and(|starting| !starting.keyframes.is_empty())
+        let holds_an_effect = planned.starting.is_some_and(|starting| !starting.keyframes.is_empty())
             || rows
                 .iter()
                 .any(|row| !crate::css::style::animations::row_is_not_associated(row));
@@ -3354,6 +3430,8 @@ struct LonghandTransactionContinuation {
     starting_definitions: Vec<StartingDefinition>,
     /// See `animation_plan_new_indices` in `rust_compute_properties`.
     animation_plan_new_indices: Option<Vec<i32>>,
+    /// See `keyframe_retimed_definitions` in `rust_compute_properties`.
+    keyframe_retimed_definitions: Vec<KeyframeRetimedDefinition>,
 }
 
 #[repr(C)]
@@ -6284,6 +6362,10 @@ pub unsafe extern "C" fn rust_compute_properties(
     // in the `animation-name` list. Its whole effect on them is then this table: the place definition
     // order gives each animation the element holds, or `NO_MATCHED_ANIMATION` for one the plan
     // cancels. `None` for a plan that does anything else, which only the host can apply.
+    // The definitions of that plan that do one thing more: give the animation they claim another
+    // `@keyframes` rule. Collected alongside, since the tail samples such an animation from the new
+    // rule rather than from the description the host published for its effect.
+    let mut keyframe_retimed_definitions = Vec::new();
     let animation_plan_new_indices =
         crate::css::style::tree::StyleNodeID::from_raw(input.style_node).and_then(|node| {
             let applied = style_engine.element_applied_animation_definitions(node, animation_slot(input.pseudo_kind));
@@ -6293,16 +6375,25 @@ pub unsafe extern "C" fn rust_compute_properties(
                     continue;
                 }
                 let matched = usize::try_from(animation.matched_existing_index).ok()?;
-                if !computed_animation_definitions
-                    .get(index)?
-                    .would_change_nothing(applied.get(matched)?)
-                {
-                    return None;
+                let computed = computed_animation_definitions.get(index)?;
+                let published = applied.get(matched)?;
+                if !computed.would_change_nothing(published) {
+                    if !computed.change_is_only_keyframes(published) {
+                        return None;
+                    }
+                    keyframe_retimed_definitions.push(KeyframeRetimedDefinition {
+                        animation_index: index as u32,
+                        definition: *animation,
+                    });
                 }
                 new_indices[matched] = i32::try_from(index).ok()?;
             }
             Some(new_indices)
         });
+    // A plan the table above declines to describe carries no keyframe swap for the tail either.
+    if animation_plan_new_indices.is_none() {
+        keyframe_retimed_definitions.clear();
+    }
     // A plan every one of whose definitions claims the animation already sitting in its own place
     // leaves the element's list and every animation in it untouched: no animation is created, none
     // is cancelled, none is reordered, and each one's timing, keyframes and name index are set to
@@ -6310,6 +6401,7 @@ pub unsafe extern "C" fn rust_compute_properties(
     // there is no plan, and the plan never has to reach the host at all.
     let plan_would_change_nothing = has_animation_definitions
         && !a_definition_starts_an_animation
+        && keyframe_retimed_definitions.is_empty()
         && animation_plan_new_indices.as_ref().is_some_and(|new_indices| {
             new_indices
                 .iter()
@@ -6343,6 +6435,7 @@ pub unsafe extern "C" fn rust_compute_properties(
         inherited_animated_overlay,
         starting_definitions,
         animation_plan_new_indices,
+        keyframe_retimed_definitions,
     });
     let drive_result = &raw const continuation.drive_result;
     let storage = Box::into_raw(continuation);
@@ -6379,6 +6472,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         inherited_animated_overlay: _inherited_animated_overlay,
         starting_definitions,
         animation_plan_new_indices,
+        keyframe_retimed_definitions,
     } = *continuation;
     // NB: The root element's own computation refreshes the host's root font metrics in the callback
     //     that applies the drive result, which runs between the drive and this tail - so the
@@ -6543,9 +6637,33 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
             Some(rows) => Some(rows.as_slice()),
             None => planned_animation_rows.as_deref(),
         };
+        // A plan that only gives an animation another `@keyframes` rule is one the stage can sample
+        // around as well: the animation keeps its row, its identity and its place, and only the
+        // rule the stage resolves its declarations from changes. The swap itself rides back to the
+        // host with the rest of the plan.
+        let keyframe_retimes = match plan_has_work && !keyframe_retimed_definitions.is_empty() {
+            true => crate::css::style::tree::StyleNodeID::from_raw(input.style_node).and_then(|node| {
+                keyframe_retimed_definitions
+                    .iter()
+                    .map(|retimed| {
+                        Some(KeyframeRetime {
+                            animation_index: retimed.animation_index,
+                            keyframes: match retimed.definition.keyframe_set.is_null() {
+                                true => None,
+                                false => Some(definition_keyframes(style_engine, input, node, &retimed.definition)?),
+                            },
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()
+            }),
+            false => Some(Vec::new()),
+        };
         // A plan the stage could not describe in full - a start it cannot settle, an animation it
-        // cannot renumber - is one the host applies and samples as before.
-        let plan_is_described = planned_rows.is_some() && (starting_definitions.is_empty() || starting.is_some());
+        // cannot renumber, a keyframe set it cannot find - is one the host applies and samples as
+        // before.
+        let plan_is_described = planned_rows.is_some()
+            && (starting_definitions.is_empty() || starting.is_some())
+            && keyframe_retimes.is_some();
         stage_animation_tail = match plan_has_work && !plan_is_described {
             true => None,
             false => unsafe {
@@ -6555,8 +6673,11 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
                     drive_input,
                     &animation_length_contexts,
                     animated_overlay,
-                    starting.as_ref(),
-                    planned_rows,
+                    &PlannedAnimations {
+                        rows: planned_rows,
+                        starting: starting.as_ref(),
+                        keyframe_retimes: keyframe_retimes.as_deref().unwrap_or_default(),
+                    },
                 )
             },
         };

@@ -1,0 +1,11 @@
+one: 10px 5px
+two: 10px 20px
+dropped: 30px 5px
+animations before: 4
+one: 40px 5px
+two: 40px 20px
+dropped: 5px 5px
+animations after: 4
+one holds: a
+two holds: a b
+dropped holds: gone
