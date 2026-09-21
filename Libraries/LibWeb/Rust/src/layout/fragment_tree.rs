@@ -29,11 +29,11 @@ pub(crate) struct Fragment {
     pub(crate) table_column_index: u32,
     pub(crate) table_column_span: u32,
     pub(crate) hidden_by_collapsed_columns: bool,
-    pub(crate) collapsed_table_borders: Option<std::rc::Rc<table_formatting_context::OwnedCollapsedTableBorders>>,
-    pub(crate) line_data: Option<std::rc::Rc<inline_content::InlineContent>>,
-    pub(crate) grid_layout_data: Option<std::rc::Rc<grid_formatting_context::GridLayoutData>>,
-    pub(crate) flex_layout_data: Option<std::rc::Rc<formatting_context::FlexLayoutData>>,
-    pub(crate) used_grid_tracks: Option<std::rc::Rc<grid_formatting_context::OwnedUsedGridTracks>>,
+    pub(crate) collapsed_table_borders: Option<std::sync::Arc<table_formatting_context::OwnedCollapsedTableBorders>>,
+    pub(crate) line_data: Option<std::sync::Arc<inline_content::InlineContent>>,
+    pub(crate) grid_layout_data: Option<std::sync::Arc<grid_formatting_context::GridLayoutData>>,
+    pub(crate) flex_layout_data: Option<std::sync::Arc<formatting_context::FlexLayoutData>>,
+    pub(crate) used_grid_tracks: Option<std::sync::Arc<grid_formatting_context::OwnedUsedGridTracks>>,
     pub(crate) svg: CommittedSvgFacts,
     pub(crate) computed_svg_path: Option<std::sync::Arc<libgfx_rust::path::OwnedPath>>,
     pub(crate) has_line_clamp_point: bool,
@@ -43,7 +43,7 @@ pub(crate) struct Fragment {
 
 #[derive(Clone)]
 pub(crate) struct FragmentLink {
-    pub(crate) fragment: std::rc::Rc<Fragment>,
+    pub(crate) fragment: std::sync::Arc<Fragment>,
     pub(crate) committed_offset: FfiCssPixelPoint,
     pub(crate) inset_left: CssPixels,
     pub(crate) inset_right: CssPixels,
@@ -54,10 +54,10 @@ pub(crate) struct FragmentLink {
     pub(crate) containing_block: crate::layout::node_data::NodeSlotId,
 }
 
-fn same_allocation<T>(left: Option<&std::rc::Rc<T>>, right: Option<&std::rc::Rc<T>>) -> bool {
+fn same_allocation<T>(left: Option<&std::sync::Arc<T>>, right: Option<&std::sync::Arc<T>>) -> bool {
     match (left, right) {
         (None, None) => true,
-        (Some(left), Some(right)) => std::rc::Rc::ptr_eq(left, right),
+        (Some(left), Some(right)) => std::sync::Arc::ptr_eq(left, right),
         _ => false,
     }
 }
@@ -139,7 +139,7 @@ impl Fragment {
 
 impl FragmentLink {
     fn places_same_fragment_identically_to(&self, previous: &FragmentLink) -> bool {
-        std::rc::Rc::ptr_eq(&self.fragment, &previous.fragment) && self.has_same_placement(previous)
+        std::sync::Arc::ptr_eq(&self.fragment, &previous.fragment) && self.has_same_placement(previous)
     }
 
     pub(crate) fn has_same_placement(&self, previous: &FragmentLink) -> bool {
@@ -267,7 +267,7 @@ fn propagate_payload_toward_run_root_space<Payload: PropagatedPayload>(
 fn previously_committed_fragment_matching(
     callbacks: &LayoutPass<'_>,
     candidate: &Fragment,
-) -> Option<std::rc::Rc<Fragment>> {
+) -> Option<std::sync::Arc<Fragment>> {
     if !callbacks.has_committed_fragment_link(candidate.node) {
         return None;
     }
@@ -282,10 +282,10 @@ fn previously_committed_fragment_matching(
 
 #[derive(Default)]
 struct CommittedRarePayloads {
-    collapsed_table_borders: Option<std::rc::Rc<table_formatting_context::OwnedCollapsedTableBorders>>,
-    grid_layout_data: Option<std::rc::Rc<grid_formatting_context::GridLayoutData>>,
-    flex_layout_data: Option<std::rc::Rc<formatting_context::FlexLayoutData>>,
-    used_grid_tracks: Option<std::rc::Rc<grid_formatting_context::OwnedUsedGridTracks>>,
+    collapsed_table_borders: Option<std::sync::Arc<table_formatting_context::OwnedCollapsedTableBorders>>,
+    grid_layout_data: Option<std::sync::Arc<grid_formatting_context::GridLayoutData>>,
+    flex_layout_data: Option<std::sync::Arc<formatting_context::FlexLayoutData>>,
+    used_grid_tracks: Option<std::sync::Arc<grid_formatting_context::OwnedUsedGridTracks>>,
     svg: CommittedSvgFacts,
     computed_svg_path: Option<std::sync::Arc<libgfx_rust::path::OwnedPath>>,
 }
@@ -295,7 +295,7 @@ fn snapshot_fragment(
     node: crate::layout::node_data::NodeSlotId,
     children: Vec<FragmentLink>,
     used: &UsedValues,
-) -> std::rc::Rc<Fragment> {
+) -> std::sync::Arc<Fragment> {
     static NEXT_IDENTITY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let line_data = used.finish_line_data(callbacks);
     let rare_payloads = used
@@ -358,7 +358,7 @@ fn snapshot_fragment(
         return previous;
     }
     fragment.identity = NEXT_IDENTITY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    std::rc::Rc::new(fragment)
+    std::sync::Arc::new(fragment)
 }
 
 pub(crate) struct PlacementData {
@@ -391,7 +391,7 @@ impl PlacementData {
     }
 }
 
-fn link_fragment(fragment: std::rc::Rc<Fragment>, placement: PlacementData) -> FragmentLink {
+fn link_fragment(fragment: std::sync::Arc<Fragment>, placement: PlacementData) -> FragmentLink {
     FragmentLink {
         fragment,
         committed_offset: placement.committed_offset,
