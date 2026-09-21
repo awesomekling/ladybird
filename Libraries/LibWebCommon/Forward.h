@@ -104,6 +104,8 @@ struct StorageEndpoint;
 
 namespace WebView {
 
+class RendererFontService;
+
 struct Attribute;
 struct ConsoleOutput;
 struct DOMNodeProperties;

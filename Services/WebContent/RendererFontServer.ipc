@@ -1,0 +1,7 @@
+#include <LibGfx/Font/SharedFontProvider.h>
+
+endpoint RendererFontServer
+{
+    init_transport(int peer_pid) => (int peer_pid)
+    match_system_font_for_code_point(u32 code_point, u16 weight, u16 width, u8 slope, bool prefer_color_emoji) => (Gfx::BrokeredFont font, u64 generation)
+}

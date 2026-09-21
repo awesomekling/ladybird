@@ -96,6 +96,7 @@ private:
 
     virtual Messages::WebContentServer::InitTransportResponse init_transport(int peer_pid) override;
     virtual void set_font_catalog(IPC::File, u64 size, u64 generation) override;
+    virtual void set_renderer_font_service_transport(IPC::TransportHandle) override;
     virtual void initialize(Compositing::PageId initial_page_id, Vector<Web::HTML::RemoteNavigableDescriptor> remote_navigables, Web::HTML::CrossProcessId root_navigable_id, Web::HTML::CrossProcessIdAllocator cross_process_id_allocator, Web::HTML::SessionHistoryEntryDescriptor initial_history_entry, Web::HTML::VisibilityState system_visibility_state) override;
     virtual void create_representing_page(Compositing::PageId page_id, Vector<Web::HTML::RemoteNavigableDescriptor> remote_navigables) override;
     virtual void create_embedded_page(Compositing::PageId page_id, Vector<Web::HTML::RemoteNavigableDescriptor> remote_navigables, Web::HTML::CrossProcessId root_navigable_id, Web::HTML::SessionHistoryEntryDescriptor initial_history_entry, Web::HTML::VisibilityState system_visibility_state) override;

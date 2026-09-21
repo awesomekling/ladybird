@@ -186,6 +186,12 @@ ErrorOr<IPC::File> FontService::create_immutable_font_data(ReadonlyBytes bytes)
 #endif
 }
 
+u64 FontService::catalog_generation()
+{
+    MutexLocker locker(m_mutex);
+    return m_generation;
+}
+
 Gfx::BrokeredFont FontService::open_font(u64 generation, u64 face_id)
 {
     MutexLocker locker(m_mutex);

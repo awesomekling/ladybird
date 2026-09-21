@@ -59,6 +59,7 @@ set(SOURCES
     WebView/Geolocation.cpp
     WebView/Mutation.cpp
     WebView/ProcessHandle.cpp
+    WebView/RendererFontService.cpp
     WebView/SiteIsolation.cpp
     WebView/Utilities.cpp
 )
@@ -93,6 +94,8 @@ invoke_py_generator(
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/Services/WebContent)
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/Services/WebDriver)
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/Services/WebWorker)
+compile_ipc(${LADYBIRD_SOURCE_DIR}/Services/WebContent/RendererFontClient.ipc ${CMAKE_BINARY_DIR}/Services/WebContent/RendererFontClientEndpoint.h)
+compile_ipc(${LADYBIRD_SOURCE_DIR}/Services/WebContent/RendererFontServer.ipc ${CMAKE_BINARY_DIR}/Services/WebContent/RendererFontServerEndpoint.h)
 compile_ipc(${LADYBIRD_SOURCE_DIR}/Services/WebContent/WebContentClient.ipc ${CMAKE_BINARY_DIR}/Services/WebContent/WebContentClientEndpoint.h)
 compile_ipc(${LADYBIRD_SOURCE_DIR}/Services/WebContent/WebContentServer.ipc ${CMAKE_BINARY_DIR}/Services/WebContent/WebContentServerEndpoint.h)
 compile_ipc(${LADYBIRD_SOURCE_DIR}/Services/WebContent/WebContentTestClient.ipc ${CMAKE_BINARY_DIR}/Services/WebContent/WebContentTestClientEndpoint.h)
@@ -107,6 +110,8 @@ compile_ipc(${LADYBIRD_SOURCE_DIR}/Services/WebWorker/WebWorkerServer.ipc ${CMAK
 set(GENERATED_SOURCES
     CSS/PropertyList.cpp
     CSS/PseudoElement.h
+    ../../Services/WebContent/RendererFontClientEndpoint.h
+    ../../Services/WebContent/RendererFontServerEndpoint.h
     ../../Services/WebContent/WebContentClientEndpoint.h
     ../../Services/WebContent/WebContentServerEndpoint.h
     ../../Services/WebContent/WebContentTestClientEndpoint.h
@@ -127,7 +132,7 @@ ladybird_lib(LibWebCommon webcommon EXPLICIT_SYMBOL_EXPORT)
 target_link_libraries(LibWebCommon PUBLIC LibCompositing)
 # NB: The enumerations of LibWeb's IDL modules are generated into LibWebCommon along with LibWeb's bindings.
 add_dependencies(LibWebCommon generate_bindings)
-target_link_libraries(LibWebCommon PRIVATE LibCore LibCrypto LibFileSystem LibGfx LibHTTP LibIPC LibURL)
+target_link_libraries(LibWebCommon PRIVATE LibCore LibCrypto LibFileSystem LibGfx LibHTTP LibIPC LibThreading LibURL)
 
 if (ENABLE_INSTALL_HEADERS)
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/CSS/PropertyList.h" "${CMAKE_CURRENT_BINARY_DIR}/CSS/PseudoElement.h" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/LibWebCommon/CSS")
