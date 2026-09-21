@@ -2422,6 +2422,7 @@ pub(crate) unsafe fn run_root_layout(
     // follows them, and both precede the pass, which caches decoded style.
     // SAFETY: As above; the propagation borrows the arena only for its own call.
     viewport_propagation::propagate_root_styles_to_viewport(
+        main_thread,
         unsafe { LayoutNodeArena::from_handle(arena_handle) },
         root,
         &propagation_facts,

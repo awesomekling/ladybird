@@ -469,6 +469,14 @@ pub(crate) struct FreedSubtree {
     style_record_host: Option<FfiStyleRecordHostCallbacks>,
 }
 
+/// Who hears that a shell's style changed: the host at once, which only the main thread can ask,
+/// or the tree build's handbacks, which its entry pays once the walk is over.
+#[derive(Clone, Copy)]
+pub(crate) enum ShellStyleChangeNotice<'a> {
+    Now(&'a crate::stage::MainThread),
+    AfterTreeBuild,
+}
+
 /// One thing the arena owes the host: a node's box presence, or an object of a row's that the host
 /// owns the memory of and that the row has let go of. The arena only queues these; a main-thread
 /// caller pays them, and a tree build returns them as part of its output.
@@ -481,6 +489,13 @@ enum HostHandback {
     ImageObservers(*mut c_void),
     OwnedImageProviderDetach(*mut c_void),
     PaintableRowReset(crate::painting::paintable_rows::PaintableRowReset),
+    /// A shell whose row's style changed while the tree build ran. The host is handed the style
+    /// the row has when this is paid, and nothing if the row has gone by then.
+    ShellStyleChanged {
+        slot: NodeSlotId,
+        shell: *mut c_void,
+        attach_resources: bool,
+    },
 }
 
 /// What the arena owes the host, in the order it let go of it.
@@ -506,7 +521,7 @@ impl HostHandbacks {
                     return;
                 }
             }
-            HostHandback::PaintableRowReset(_) => {}
+            HostHandback::PaintableRowReset(_) | HostHandback::ShellStyleChanged { .. } => {}
         }
         self.handbacks.push(handback);
     }
@@ -2229,7 +2244,12 @@ impl LayoutNodeArena {
         })
     }
 
-    pub(crate) fn update_layout_style(&self, node: NodeSlotId, update: impl FnOnce(&mut LayoutStyle)) {
+    pub(crate) fn update_layout_style(
+        &self,
+        node: NodeSlotId,
+        notice: ShellStyleChangeNotice<'_>,
+        update: impl FnOnce(&mut LayoutStyle),
+    ) {
         let derived = self.with_style_engine(|engine| {
             let mut style = LayoutStyle::from_record(engine, self.node_style_record(node));
             update(&mut style);
@@ -2240,15 +2260,15 @@ impl LayoutNodeArena {
         });
         if let Some(derived) = derived {
             self.set_node_flag(node, NodeFlag::FollowsPrincipalStyle, false);
-            self.apply_reinherited_style_record(node, derived);
+            self.apply_reinherited_style_record(node, derived, notice);
         }
     }
 
-    pub(crate) fn reset_table_box_style_used_by_wrapper(&self, node: NodeSlotId) {
-        self.update_layout_style(node, LayoutStyle::reset_table_properties);
+    pub(crate) fn reset_table_box_style_used_by_wrapper(&self, node: NodeSlotId, notice: ShellStyleChangeNotice<'_>) {
+        self.update_layout_style(node, notice, LayoutStyle::reset_table_properties);
     }
 
-    pub(crate) fn reinherit_anonymous_descendants(&self, node: NodeSlotId) {
+    pub(crate) fn reinherit_anonymous_descendants(&self, node: NodeSlotId, notice: ShellStyleChangeNotice<'_>) {
         self.assert_owner_thread();
         if self.node_style_record(node) == 0 {
             return;
@@ -2265,13 +2285,18 @@ impl LayoutNodeArena {
                 AnonymousStyleKind::TableWrapper,
                 AnonymousStyleOverrides::default(),
             );
-            self.apply_reinherited_style_record(parent, derived);
-            self.reset_table_box_style_used_by_wrapper(node);
+            self.apply_reinherited_style_record(parent, derived, notice);
+            self.reset_table_box_style_used_by_wrapper(node, notice);
         }
-        self.reinherit_anonymous_children(node, self.node_style_record(node));
+        self.reinherit_anonymous_children(node, self.node_style_record(node), notice);
     }
 
-    fn reinherit_anonymous_children(&self, parent: NodeSlotId, parent_style_record: u64) {
+    fn reinherit_anonymous_children(
+        &self,
+        parent: NodeSlotId,
+        parent_style_record: u64,
+        notice: ShellStyleChangeNotice<'_>,
+    ) {
         let mut child = self.data(parent).first_child.get();
         while !child.is_invalid() {
             let next_sibling = self.data(child).next_sibling.get();
@@ -2302,22 +2327,27 @@ impl LayoutNodeArena {
                                 .cast(),
                         }
                     });
-                    self.apply_reinherited_style_record(child, derived);
+                    self.apply_reinherited_style_record(child, derived, notice);
                     self.set_node_flag(child, NodeFlag::FollowsPrincipalStyle, true);
-                    self.reinherit_anonymous_descendants(child);
-                    self.notify_shell_of_style_change(child, true);
+                    self.reinherit_anonymous_descendants(child, notice);
+                    self.notify_shell_of_style_change(child, true, notice);
                 } else {
                     let derived =
                         self.reinherit_anonymous_style_record(self.node_style_record(child), parent_style_record);
-                    self.apply_reinherited_style_record(child, derived);
-                    self.reinherit_anonymous_children(child, derived.record);
+                    self.apply_reinherited_style_record(child, derived, notice);
+                    self.reinherit_anonymous_children(child, derived.record, notice);
                 }
             }
             child = next_sibling;
         }
     }
 
-    fn apply_reinherited_style_record(&self, slot: NodeSlotId, derived: DerivedStyleRecord) {
+    fn apply_reinherited_style_record(
+        &self,
+        slot: NodeSlotId,
+        derived: DerivedStyleRecord,
+        notice: ShellStyleChangeNotice<'_>,
+    ) {
         let previous_payloads = self.data(slot).style.get();
         let changes_layout_affecting_style =
             !style_payloads_equal_in_layout_affecting_groups(previous_payloads, derived.payloads);
@@ -2326,26 +2356,51 @@ impl LayoutNodeArena {
             self.bump_fragment_cache_epoch_of_self_and_ancestors(slot);
             self.reset_cached_intrinsic_sizes_of_self_and_ancestors(slot);
         }
-        self.notify_shell_of_style_change(slot, false);
+        self.notify_shell_of_style_change(slot, false, notice);
     }
 
-    fn notify_shell_of_style_change(&self, slot: NodeSlotId, attach_resources: bool) {
+    fn notify_shell_of_style_change(
+        &self,
+        slot: NodeSlotId,
+        attach_resources: bool,
+        notice: ShellStyleChangeNotice<'_>,
+    ) {
         let shell = self.data(slot).shell.get();
-        if !shell.is_null() {
-            let host = self.style_record_host();
-            super::tree_build_seal::note_host_call("shell_style_changed");
-            // SAFETY: The engine and shell remain live. Native style-store mutation has
-            // finished before the host can reenter Rust through its resource consumers.
-            unsafe {
-                (host.shell_style_changed)(
-                    host.context,
-                    shell,
-                    self.node_style_record(slot),
-                    self.data(slot).style.get(),
-                    attach_resources,
-                );
-            };
+        if shell.is_null() {
+            return;
         }
+        match notice {
+            ShellStyleChangeNotice::Now(main_thread) => {
+                self.tell_shell_of_style_change(main_thread, slot, shell, attach_resources);
+            }
+            ShellStyleChangeNotice::AfterTreeBuild => self.hand_back(HostHandback::ShellStyleChanged {
+                slot,
+                shell,
+                attach_resources,
+            }),
+        }
+    }
+
+    fn tell_shell_of_style_change(
+        &self,
+        _: &crate::stage::MainThread,
+        slot: NodeSlotId,
+        shell: *mut c_void,
+        attach_resources: bool,
+    ) {
+        let host = self.style_record_host();
+        super::tree_build_seal::note_host_call("shell_style_changed");
+        // SAFETY: The engine and shell remain live. Native style-store mutation has finished before
+        // the host can reenter Rust through its resource consumers.
+        unsafe {
+            (host.shell_style_changed)(
+                host.context,
+                shell,
+                self.node_style_record(slot),
+                self.data(slot).style.get(),
+                attach_resources,
+            );
+        };
     }
 
     pub(crate) fn continue_containing_block_search(
@@ -2986,6 +3041,15 @@ impl LayoutNodeArena {
             HostHandback::PaintableRowReset(reset) => {
                 super::tree_build_seal::note_host_call("paintable_row_reset");
                 reset.invoke_callback_on_main_thread(main_thread);
+            }
+            HostHandback::ShellStyleChanged {
+                slot,
+                shell,
+                attach_resources,
+            } => {
+                if self.slot_is_live(slot) && self.data(slot).shell.get() == shell {
+                    self.tell_shell_of_style_change(main_thread, slot, shell, attach_resources);
+                }
             }
         }
     }
@@ -5086,7 +5150,7 @@ impl LayoutNodeArena {
             .published_document_style
             .take()
             .expect("a build that builds the viewport is handed the document's style");
-        self.apply_reinherited_style_record(viewport, derived);
+        self.apply_reinherited_style_record(viewport, derived, ShellStyleChangeNotice::AfterTreeBuild);
     }
 
     /// Releases the document's style if the build did not build a viewport to take it.
@@ -6061,7 +6125,8 @@ pub unsafe extern "C" fn layout_arena_adopt_derived_node_style(arena: *mut c_voi
             payloads: engine.style_record_payloads(record).unwrap().as_ptr().cast(),
         }
     });
-    arena.apply_reinherited_style_record(node, derived);
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    arena.apply_reinherited_style_record(node, derived, ShellStyleChangeNotice::Now(&main_thread));
 }
 
 #[unsafe(no_mangle)]
@@ -6071,9 +6136,14 @@ pub unsafe extern "C" fn layout_arena_node_has_derived_style(arena: *mut c_void,
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_layout_display(arena: *mut c_void, node: NodeSlotId, display: u32) {
-    unsafe { LayoutNodeArena::from_handle(arena) }.update_layout_style(node, |style| {
-        style.set_display(crate::css::display::FfiDisplay::from_raw(display));
-    });
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    unsafe { LayoutNodeArena::from_handle(arena) }.update_layout_style(
+        node,
+        ShellStyleChangeNotice::Now(&main_thread),
+        |style| {
+            style.set_display(crate::css::display::FfiDisplay::from_raw(display));
+        },
+    );
 }
 
 #[unsafe(no_mangle)]
@@ -6087,7 +6157,10 @@ pub unsafe extern "C" fn layout_arena_node_style_record(arena: *mut c_void, id: 
 pub unsafe extern "C" fn layout_arena_reinherit_anonymous_descendants(arena: *mut c_void, node: NodeSlotId) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.reinherit_anonymous_descendants(node);
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    // SAFETY: As above.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }
+        .reinherit_anonymous_descendants(node, ShellStyleChangeNotice::Now(&main_thread));
 }
 
 #[unsafe(no_mangle)]

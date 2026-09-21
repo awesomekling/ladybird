@@ -64,6 +64,7 @@ use crate::layout::layout_node_arena::IntrinsicSizeCacheKey;
 use crate::layout::layout_node_arena::IntrinsicSizeCacheKind;
 pub(crate) use crate::layout::layout_node_arena::LayoutNodeArena;
 pub(crate) use crate::layout::layout_node_arena::MainThreadFfiEntry as ArenaMainThreadFfiEntry;
+pub(crate) use crate::layout::layout_node_arena::ShellStyleChangeNotice;
 pub(crate) use crate::layout::layout_node_arena::paying_host_handbacks;
 use crate::layout::layout_node_arena::{TableCellMeasurement, TableCellMeasurementKey};
 use crate::layout::node_data::AncestorFact;
