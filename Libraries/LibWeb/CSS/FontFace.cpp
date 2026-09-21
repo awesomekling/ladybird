@@ -1190,7 +1190,7 @@ void FontFaceState::load_for_style()
         // font-loading task below: a style computed in between would otherwise still see a
         // pending face and resolve font-relative lengths against the fallback.
         if (auto font_computer = font.font_computer(); font_computer.has_value())
-            font_computer->did_parse_font_face();
+            font_computer->did_parse_font_face(font.matching_key());
         HTML::queue_global_task(HTML::Task::Source::FontLoading, font.task_global_object(), GC::create_function(GC::Heap::the(), [font_root, maybe_typeface] {
             font_root->elements().first()->did_load(maybe_typeface);
         }));

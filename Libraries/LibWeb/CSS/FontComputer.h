@@ -139,8 +139,8 @@ public:
     void did_load_font(FontFaceKey const&);
 
     // A face's typeface becomes available one task before the font-loading task announces it, and
-    // a resolution in between must see it. That is a new font environment on its own.
-    void did_parse_font_face() { bump_environment_generation(); }
+    // a resolution in between must see it rather than the pending face it replaces.
+    void did_parse_font_face(FontFaceKey const& key) { did_load_font(key); }
 
     // The one funnel: every change to what a font resolution would answer passes through here.
     void bump_environment_generation();
@@ -171,6 +171,7 @@ private:
     void end_font_face_change_batch();
     void clear_computed_font_cache_for_families(Vector<Utf16FlyString> const& family_names);
 
+    [[nodiscard]] void const* build_font_face_snapshot() const;
     void publish_font_faces();
 
     NonnullRefPtr<Gfx::FontCascadeList const> compute_font_for_style_values_impl(ReadonlySpan<ComputedFontFamily const> font_families, CSSPixels const& font_size, int font_slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<Utf16FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data) const;
