@@ -243,6 +243,8 @@ public:
     // Says whether a baseline was recorded, which is a main-side write.
     bool record_transition_stabilization_baseline(DOM::AbstractElement) const;
     bool pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(DOM::AbstractElement) const;
+    // Applies the transition registration a record the engine settled left for the host.
+    void register_transitions_for_settled_record(DOM::AbstractElement) const;
     void commit_transition_stabilization_epoch();
     void for_each_provisional_transition_effect(DOM::AbstractElement const&, Function<void(Animations::KeyframeEffect&)> const&) const;
     void for_each_provisional_transition_effect_on_element(DOM::Element const&, Function<void(Animations::KeyframeEffect&)> const&) const;

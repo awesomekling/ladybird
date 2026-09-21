@@ -489,6 +489,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
     // change asks for one. SVG resources and existing animations can still consume style while
     // hidden, so retain their inheritance prerequisites in this batch.
     HashTable<StyleNodeID> required_in_hidden_subtrees;
+    // The effects the batch's rows leave for the host. A row the engine settled can carry work
+    // the C++ computation would have done beside the record it computed; the host applies it once
+    // the whole batch is installed, in the order the batch applied the rows, which is flat-tree
+    // order. Nothing a later row in the batch computes may depend on one of these being applied.
+    Vector<StyleNodeID> transition_registration_effect_rows;
     for (auto const& reaction : reactions) {
         auto element = document.style_computer().element_for_style_node(reaction.style_node);
         if (!element || (!element->is_svg_element() && !element->has_relevant_animations()))
@@ -740,6 +745,10 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 auto pseudo_element_records = retried_pseudo_element_records.value_or({});
                 for (auto next = reaction_index + 1; next < reactions.size() && reactions[next].style_node == published_reaction.style_node && reactions[next].pseudo_kind != NumericLimits<u8>::max(); ++next)
                     pseudo_element_records[reactions[next].pseudo_kind] = StyleRecordID { reactions[next].new_style_record };
+                // The row's own effects come with the decision that settled it, whether or not
+                // the record is the one that installs: a C++ computation of this element runs the
+                // transition step itself, so the debt is discharged either way.
+                bool const owes_a_transition_registration = document.style_computer().style_engine().take_transition_registration_debt(StyleNodeID { reaction.style_node });
                 if (!engine_computed_record_environment_is_installable(*element, StyleRecordID { reaction.new_style_record })) {
                     // The engine resolved the record's environment over the parent's own; when the
                     // parent's inheritable environment differs, C++ computes the style.
@@ -747,6 +756,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     invalidation = element->apply_style_engine_reaction(did_change_custom_properties);
                 } else {
                     apply_engine_computed_records(pseudo_element_records, true);
+                    if (owes_a_transition_registration)
+                        transition_registration_effect_rows.append(StyleNodeID { reaction.style_node });
                 }
             } else if (needs_regular_style_recompute || needs_inherited_style_recompute || needs_full_custom_property_recompute) {
                 if (needs_regular_style_recompute)
@@ -825,6 +836,17 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             }
             style_engine.note_style_reaction_applied(reaction.style_node, reaction.reaction, invalidation.inherited_style_groups_changed(), facts);
         }
+    }
+
+    // The batch is installed: drain what its rows left behind, in the order they were applied.
+    for (auto style_node : transition_registration_effect_rows) {
+        auto element = document.style_computer().element_for_style_node(style_node);
+        if (!element || !element->is_connected() || &element->document() != &document)
+            continue;
+        DOM::AbstractElement abstract_element { *element };
+        if (!abstract_element.has_style())
+            continue;
+        document.style_computer().register_transitions_for_settled_record(abstract_element);
     }
 
     return transaction_invalidation;

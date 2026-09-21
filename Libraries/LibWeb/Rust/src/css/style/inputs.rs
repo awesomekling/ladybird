@@ -1837,6 +1837,7 @@ impl StyleEngineState {
                 computed_group_sets: ComputedGroupSets::default(),
                 custom_property_environments: Default::default(),
                 nodes_with_substituted_records: HashSet::default(),
+                nodes_owing_a_transition_registration: HashSet::default(),
                 css_defined_animations: Default::default(),
                 animation_timing_rows: Default::default(),
                 animation_effect_descriptions: Default::default(),
@@ -2606,6 +2607,7 @@ impl StyleEngineState {
             self.retained.pending_element_style_computation_selections.remove(&node);
             self.retained.pending_pseudo_style_computation_selections.remove(&node);
             self.retained.nodes_with_substituted_records.remove(&node);
+            self.retained.nodes_owing_a_transition_registration.remove(&node);
             retired_nodes.push(node);
         }
         if !retired_nodes.is_empty() {

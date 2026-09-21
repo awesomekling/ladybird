@@ -699,6 +699,19 @@ impl RetainedState {
                 !property_computes_in_remaining_phase(property) || property_feeds_box_type_transformation(property)
             });
         let delta_property_count = delta.properties().len() as u64;
+        // A delta that moves only the longhands declaring the element's CSS transitions moves no
+        // value a transition could run on: every other group is copied from the record the delta
+        // starts at, so the before-change and after-change styles agree everywhere a transition
+        // reads. Nothing can start, and nothing the element already holds can be cancelled -
+        // which is what the record's animation state is asked about here, not somewhere else's.
+        // What is left is the registration, and the host applies it from the record itself.
+        let owes_a_transition_registration = !full_drive
+            && !delta.properties().is_empty()
+            && delta
+                .properties()
+                .iter()
+                .all(|&property| longhand_only_declares_a_css_transition(property))
+            && !self.record_requires_cpp_animation(old_style_record);
         // Partial drives can share across parents whose inherited inputs agree. Keep the full
         // parent record in the key when a non-inherited property explicitly inherits, including
         // through substitution, or when a full drive may read more of the parent's style.
@@ -730,6 +743,9 @@ impl RetainedState {
             }
             self.note_engine_computed_record(node, delta, (generation, state), delta_property_count, 0, counters);
             counters.bump(Counter::EngineComputedRecordCohortHits);
+            if owes_a_transition_registration {
+                self.nodes_owing_a_transition_registration.insert(node);
+            }
             return Some(delta);
         }
 
@@ -756,8 +772,10 @@ impl RetainedState {
         };
         for &property in delta.properties() {
             // Animations and transitions start from the C++ computation, and the counter-style
-            // environment behind `content` and `list-style-type` is resolved there.
-            if property_starts_animation_or_counter_environment(property) {
+            // environment behind `content` and `list-style-type` is resolved there. A delta that
+            // only re-declares the element's transitions starts nothing: it owes the host the
+            // registration, which rides out of the batch as an effect of the row.
+            if property_starts_animation_or_counter_environment(property) && !owes_a_transition_registration {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
             }
@@ -949,6 +967,9 @@ impl RetainedState {
         if !driver_input_moved {
             scratch.cohorts.insert(cohort, delta.1);
         }
+        if owes_a_transition_registration {
+            self.nodes_owing_a_transition_registration.insert(node);
+        }
         Some(delta)
     }
 
@@ -957,6 +978,13 @@ impl RetainedState {
     /// to, without recomputing anything: what an inherited-custom-properties reaction C++ settled
     /// by refreshing the data alone publishes. The new record's identity, or nothing when the node
     /// holds no base record to move.
+    /// Whether the engine-computed record the host is about to install for this node leaves the
+    /// element's transition registration to be applied after the batch, taking the debt with the
+    /// answer so that exactly one application drains it.
+    pub(crate) fn take_transition_registration_debt(&mut self, node: StyleNodeID) -> bool {
+        self.nodes_owing_a_transition_registration.remove(&node)
+    }
+
     pub(crate) fn republish_record_environment(&mut self, node: StyleNodeID, environment: u64) -> Option<u64> {
         let (_, new_style_record) = self
             .computed_group_sets
@@ -4540,6 +4568,22 @@ fn counter_style_name_is_non_overridable(name: &[u16]) -> bool {
                 .zip(name)
                 .all(|(expected, &unit)| unit < 128 && (unit as u8).eq_ignore_ascii_case(&expected))
     })
+}
+
+/// Whether the longhand is one of the five that declare an element's CSS transitions. The
+/// `transition` shorthand is not one: a shorthand is never a longhand delta's property, and a
+/// property outside the longhand range keeps its record in C++ for its own reasons.
+fn longhand_only_declares_a_css_transition(property: u16) -> bool {
+    use crate::css::property_metadata::{FIRST_LONGHAND_PROPERTY_ID, LAST_LONGHAND_PROPERTY_ID, property_id as prop};
+    (FIRST_LONGHAND_PROPERTY_ID..=LAST_LONGHAND_PROPERTY_ID).contains(&property)
+        && matches!(
+            property,
+            prop::TRANSITION_BEHAVIOR
+                | prop::TRANSITION_DELAY
+                | prop::TRANSITION_DURATION
+                | prop::TRANSITION_PROPERTY
+                | prop::TRANSITION_TIMING_FUNCTION
+        )
 }
 
 fn property_starts_animation_or_counter_environment(property: u16) -> bool {
