@@ -9257,6 +9257,10 @@ pub(crate) mod ffi_test_stubs {
         FONT_CASCADE_LIST_UNREFS.set(FONT_CASCADE_LIST_UNREFS.get() + 1);
     }
     #[unsafe(no_mangle)]
+    extern "C" fn ladybird_gfx_font_cascade_list_frozen(_raw: *const std::ffi::c_void) -> *const std::ffi::c_void {
+        std::ptr::null()
+    }
+    #[unsafe(no_mangle)]
     extern "C" fn ladybird_gfx_font_ref(_raw: *const std::ffi::c_void) {}
     #[unsafe(no_mangle)]
     extern "C" fn ladybird_gfx_font_unref(_raw: *const std::ffi::c_void) {}

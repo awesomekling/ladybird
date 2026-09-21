@@ -53,16 +53,17 @@
 //! thread-local shaping cache) are the one purity exception a render thread is meant to keep.
 //! They are not host calls and the seal does not see them.
 //!
-//! DEBT: today they are not yet a thread-safe service, so the exception is a claim rather than a
-//! fact. `Gfx::FontCascadeList::font_for_code_point`, which the text chunker calls per code
-//! point, is a `const` method that writes `m_ascii_cache`, `m_first_available_font_cache`,
-//! `m_invisible_fonts` (a `HashMap` insert) and `m_fallback_fonts` (a `Vector` append), all of
-//! them readable from the document thread through `first_available_font()`. It can also call a
-//! pending face's resolve closure, which holds a `GC::Root<CSS::FontFace>` inside the cascade
-//! list and synchronously starts a fetch and an event-loop timer: a read *and* a mutation of the
-//! document that this seal cannot see, because it is reached through LibGfx rather than through a
-//! host callback table. A resolved, immutable font list published before the pass is what would
-//! make this entry true.
+//! A pass picks fonts out of `libgfx_rust::font::FrozenFontList`, a snapshot the document built
+//! before the pass began: no caches to fill, no faces to resolve, and `Send + Sync` without an
+//! `unsafe impl`. A code point no listed family covers goes to `Gfx::system_fallback_font`, a
+//! process-wide memo whose answer depends on the installed font set and nothing else. A face
+//! still on its `font-display` timeline is not resolved here at all: the frozen entry already
+//! carries which period it is in, and the pass leaves the face's number behind for
+//! `Gfx::request_wanted_pending_faces()` to request once the pass has ended.
+//!
+//! DEBT: The document's own `Gfx::FontCascadeList` is still reachable from Rust, because canvas
+//! and the font-relative length code use it, and a call to it would pass this seal unseen: it is
+//! a LibGfx call, not a host callback. Nothing in a stage makes one today.
 //!
 //! Anything else a running pass asks the document is a regression. Add a `note_host_call` beside
 //! any new host call rather than leaving it uncounted.

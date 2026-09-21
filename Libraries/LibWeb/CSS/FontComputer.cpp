@@ -361,9 +361,11 @@ struct FontComputer::MatchingFontCandidate {
             // fires once font_for_code_point() sees a codepoint in its unicode-range.
             if (face->has_urls() && face->has_non_default_unicode_range()) {
                 auto rooted_face = GC::make_root(face->keep_alive_during_load());
-                font_list->add_pending_face(face->unicode_ranges(), [rooted_face = move(rooted_face)] {
-                    return rooted_face->elements().first()->resolve_for_rendering();
-                });
+                font_list->add_pending_face(
+                    face->unicode_ranges(),
+                    [rooted_face] { return rooted_face->elements().first()->resolve_for_rendering(); },
+                    {},
+                    [rooted_face] { return rooted_face->elements().first()->rendering_state_without_requesting(); });
             }
         }
         if (font_list->is_empty())
@@ -786,6 +788,10 @@ NonnullRefPtr<Gfx::FontCascadeList const> FontComputer::compute_font_for_style_v
             });
         });
     }
+
+    // The cascade is complete. Freeze it here, on the document thread, so that every render pass
+    // that receives it reads a snapshot instead of the live list.
+    font_list->freeze();
 
     return font_list;
 }
