@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+    <style>
+        div {
+            transition-property: width, height;
+            transition-duration: 1s;
+            width: 0px;
+            height: 0px;
+        }
+    </style>
+    <div id="a">
+        <div id="b"></div>
+    </div>
+    <div id="c"></div>
+    <script src="../include.js"></script>
+    <script>
+        // The order in which one style update starts transitions on several elements, and the
+        // order of the events that start and cancel them. A style update that applied each row's
+        // transition step somewhere other than where the row is computed - after the batch, say -
+        // would reorder these, so they are pinned here.
+        promiseTest(async () => {
+            const log = [];
+            // A transition event bubbles, so #b's events also reach #a; only the element the
+            // event is for records it.
+            for (const id of ["a", "b", "c"]) {
+                const element = document.getElementById(id);
+                for (const type of ["transitionrun", "transitionstart", "transitioncancel"]) {
+                    element.addEventListener(type, event => {
+                        if (event.target === element)
+                            log.push(`${event.type} #${id} ${event.propertyName}`);
+                    });
+                }
+            }
+
+            await animationFrame();
+            await animationFrame();
+
+            // One update that starts a transition on all three, in a tree whose flat-tree order
+            // (a, b, c) differs from nothing in particular - what matters is that it is one update.
+            document.getElementById("c").style.width = "10px";
+            document.getElementById("a").style.width = "10px";
+            document.getElementById("b").style.width = "10px";
+            println("started: " + document.getAnimations().map(a => `#${a.effect.target.id} ${a.transitionProperty}`).join(", "));
+
+            await animationFrame();
+            await animationFrame();
+
+            // And one update that cancels two of them and starts another, so a cancel and a run
+            // are queued by the same update.
+            document.getElementById("a").style.transitionProperty = "none";
+            document.getElementById("b").style.transitionProperty = "none";
+            document.getElementById("c").style.height = "10px";
+
+            await animationFrame();
+            await animationFrame();
+            await timeout(0);
+
+            println("events:");
+            for (const line of log)
+                println("  " + line);
+            println("remaining: " + document.getAnimations().map(a => `#${a.effect.target.id} ${a.transitionProperty}`).join(", "));
+        });
+    </script>
+</html>
