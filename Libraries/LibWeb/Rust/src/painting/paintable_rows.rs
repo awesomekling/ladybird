@@ -182,15 +182,11 @@ pub(crate) struct PaintableRowReset {
 }
 
 impl PaintableRowReset {
-    pub(crate) fn invoke_callback(self) {
+    pub(crate) fn invoke_callback_on_main_thread(self, _: &crate::stage::MainThread) {
         if let Some((context, callback)) = self.callback {
             // SAFETY: Registration and unregistration keep the callback context live.
             unsafe { callback(context, self.slot, self.kind) };
         }
-    }
-
-    pub(crate) fn invoke_callback_on_main_thread(self, _: &crate::stage::MainThread) {
-        self.invoke_callback();
     }
 }
 

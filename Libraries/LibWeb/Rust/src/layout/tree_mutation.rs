@@ -15,7 +15,7 @@ unsafe extern "C" {
     fn ladybird_layout_owned_image_provider_notify_detach(provider: *mut c_void);
 }
 
-pub(crate) fn destroy_shell(shell: *mut c_void) {
+pub(crate) fn destroy_shell(_: &crate::stage::MainThread, shell: *mut c_void) {
     if shell.is_null() {
         return;
     }
@@ -28,7 +28,7 @@ pub(crate) fn destroy_shell(shell: *mut c_void) {
 /// An image provider a row owns outlives no row: the arena hands it back when the row is freed and
 /// the host deletes it. Deleting one never reads a layout node, so the order against the shells is
 /// free.
-pub(crate) fn destroy_owned_image_provider(provider: *mut c_void) {
+pub(crate) fn destroy_owned_image_provider(_: &crate::stage::MainThread, provider: *mut c_void) {
     if provider.is_null() {
         return;
     }
@@ -39,7 +39,7 @@ pub(crate) fn destroy_owned_image_provider(provider: *mut c_void) {
 }
 
 /// An image observer set a row holds outlives no row, and deleting one never reads a layout node.
-pub(crate) fn destroy_image_observers(observers: *mut c_void) {
+pub(crate) fn destroy_image_observers(_: &crate::stage::MainThread, observers: *mut c_void) {
     if observers.is_null() {
         return;
     }
@@ -51,7 +51,7 @@ pub(crate) fn destroy_image_observers(observers: *mut c_void) {
 
 /// Tells the provider a row owns that the row is leaving the layout tree. An element's provider
 /// outlives its box and keeps nothing about it, so only a provider a row owns hears about this.
-pub(crate) fn notify_owned_image_provider_of_detach(provider: *mut c_void) {
+pub(crate) fn notify_owned_image_provider_of_detach(_: &crate::stage::MainThread, provider: *mut c_void) {
     if provider.is_null() {
         return;
     }
@@ -60,9 +60,11 @@ pub(crate) fn notify_owned_image_provider_of_detach(provider: *mut c_void) {
     unsafe { ladybird_layout_owned_image_provider_notify_detach(provider) };
 }
 
-pub(crate) fn free_subtree_and_destroy_shells(arena: *mut LayoutNodeArena, root: NodeSlotId) {
+/// Frees the subtree `root` heads and hands back what its rows held, for whoever pays the arena's
+/// handbacks to destroy.
+pub(crate) fn free_subtree_and_hand_back(arena: *mut LayoutNodeArena, root: NodeSlotId) {
     // SAFETY: Callers hold no reference derived from the arena across this call, and the
-    // mutable borrow ends before the shells are destroyed.
+    // mutable borrow ends before what the rows held is handed back.
     let freed = unsafe { &mut *arena }.free_subtree(root);
     // SAFETY: As above; the mutable borrow has ended.
     unsafe { &*arena }.hand_back_freed_subtree(freed);

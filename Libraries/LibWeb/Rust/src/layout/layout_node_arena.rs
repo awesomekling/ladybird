@@ -470,8 +470,8 @@ pub(crate) struct FreedSubtree {
 }
 
 /// One thing the arena owes the host: a node's box presence, or an object of a row's that the host
-/// owns the memory of and that the row has let go of. A running tree build cannot reach the host,
-/// so it queues these and its entry hands them over once the walk has returned.
+/// owns the memory of and that the row has let go of. The arena only queues these; a main-thread
+/// caller pays them, and a tree build returns them as part of its output.
 enum HostHandback {
     /// The node whose boxes changed, named the way the box presence host names it. The bits are
     /// read when the handback is paid, so a node a build changes several times is told once.
@@ -483,7 +483,7 @@ enum HostHandback {
     PaintableRowReset(crate::painting::paintable_rows::PaintableRowReset),
 }
 
-/// What a tree build owes the host, in the order the build let go of it.
+/// What the arena owes the host, in the order it let go of it.
 #[derive(Default)]
 pub(crate) struct HostHandbacks {
     handbacks: Vec<HostHandback>,
@@ -545,19 +545,21 @@ impl FreedSubtree {
         self.arena_pinned_style_records.len()
     }
 
+    #[cfg(test)]
     pub(crate) fn destroy_shells_and_invoke_callbacks(self) {
+        // SAFETY: Tests run on the thread that owns their arena.
+        let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
         for shell in self.shells {
-            crate::layout::tree_mutation::destroy_shell(shell);
+            crate::layout::tree_mutation::destroy_shell(&main_thread, shell);
         }
         for provider in self.owned_image_providers {
-            crate::layout::tree_mutation::destroy_owned_image_provider(provider);
+            crate::layout::tree_mutation::destroy_owned_image_provider(&main_thread, provider);
         }
         for observers in self.image_observer_sets {
-            crate::layout::tree_mutation::destroy_image_observers(observers);
+            crate::layout::tree_mutation::destroy_image_observers(&main_thread, observers);
         }
         for reset in self.paintable_row_resets {
-            super::tree_build_seal::note_host_call("paintable_row_reset");
-            reset.invoke_callback();
+            reset.invoke_callback_on_main_thread(&main_thread);
         }
         Self::unpin_arena_pinned_style_records(self.style_record_host, self.arena_pinned_style_records);
     }
@@ -690,8 +692,10 @@ pub(crate) struct LayoutNodeArena {
     style_record_host: Cell<Option<FfiStyleRecordHostCallbacks>>,
     shell_factory: Cell<Option<ShellFactory>>,
     box_presence_host: Cell<Option<BoxPresenceHost>>,
-    /// What a running tree build owes the host, or `None` outside one.
-    deferred_host_handbacks: RefCell<Option<HostHandbacks>>,
+    /// What the arena owes the host and has not handed over yet.
+    host_handbacks: RefCell<HostHandbacks>,
+    /// How many spans that pay the host, or the tree build's, are open.
+    host_handback_spans: Cell<u32>,
     /// Rows whose committed box appeared or went away since the host last heard. A commit changes
     /// them with the arena borrowed for writing, so the host hears about them when it drains this.
     rows_with_changed_committed_box: RefCell<Vec<NodeSlotId>>,
@@ -838,7 +842,8 @@ impl LayoutNodeArena {
             style_record_host: Cell::new(None),
             shell_factory: Cell::new(None),
             box_presence_host: Cell::new(None),
-            deferred_host_handbacks: RefCell::new(None),
+            host_handbacks: RefCell::new(HostHandbacks::default()),
+            host_handback_spans: Cell::new(0),
             rows_with_changed_committed_box: RefCell::new(Vec::new()),
             layout_host: Cell::new(None),
             document_is_decoded_svg: Cell::new(false),
@@ -2881,7 +2886,7 @@ impl LayoutNodeArena {
 
     /// Tells the host what boxes the node `style_node` names has now. No row list may be borrowed
     /// here.
-    fn tell_host_box_presence(&self, style_node: u32) {
+    fn tell_host_box_presence(&self, _: &crate::stage::MainThread, style_node: u32) {
         let Some((context, callback)) = self.box_presence_host.get() else {
             return;
         };
@@ -2895,66 +2900,99 @@ impl LayoutNodeArena {
         unsafe { callback(context, style_node, self.box_presence_bits(row)) };
     }
 
-    /// Starts queueing what the arena owes the host instead of handing it over, for the tree build
-    /// that is about to run.
-    pub(crate) fn begin_deferring_host_handbacks(&self) {
-        let previous = self.deferred_host_handbacks.replace(Some(HostHandbacks::default()));
-        assert!(previous.is_none(), "tree builds on one arena do not nest");
+    /// Opens a span of work whose handbacks the main thread pays once the span is over. Every
+    /// handback is made inside one, so none waits for a payer that is not coming.
+    pub(crate) fn begin_paying_host_handbacks(&self, _: &crate::stage::MainThread) {
+        self.open_host_handback_span();
     }
 
-    /// Stops queueing, and returns what the finished build owes the host.
-    pub(crate) fn finish_deferring_host_handbacks(&self) -> HostHandbacks {
-        self.deferred_host_handbacks
-            .take()
-            .expect("no tree build was deferring host handbacks")
+    /// Closes the span [`Self::begin_paying_host_handbacks`] opened, and pays what is owed.
+    pub(crate) fn finish_paying_host_handbacks(&self, main_thread: &crate::stage::MainThread) {
+        self.pay_host_handbacks(main_thread);
+        self.close_host_handback_span();
     }
 
-    /// Hands the host what a finished tree build owes it, in the order the build let go of it.
-    pub(crate) fn pay_host_handbacks(&self, handbacks: HostHandbacks) {
-        for handback in handbacks.handbacks {
-            self.pay_host_handback(handback);
+    /// Opens the tree build's span. The build cannot pay the host, so what it owes becomes part of
+    /// its output instead; it starts with nothing owed from before it.
+    pub(crate) fn begin_tree_build_handbacks(&self) {
+        assert!(
+            self.host_handbacks.borrow().handbacks.is_empty(),
+            "a tree build started while the host was still owed something"
+        );
+        self.open_host_handback_span();
+    }
+
+    /// Closes the tree build's span, and returns what the build owes the host.
+    pub(crate) fn take_tree_build_handbacks(&self) -> HostHandbacks {
+        self.close_host_handback_span();
+        std::mem::take(&mut *self.host_handbacks.borrow_mut())
+    }
+
+    fn open_host_handback_span(&self) {
+        let spans = &self.host_handback_spans;
+        spans.set(spans.get().checked_add(1).expect("host handback spans overflowed"));
+    }
+
+    fn close_host_handback_span(&self) {
+        let spans = &self.host_handback_spans;
+        spans.set(spans.get().checked_sub(1).expect("unbalanced host handback span"));
+    }
+
+    /// Pays what the arena owes the host, in the order it was handed back.
+    pub(crate) fn pay_host_handbacks(&self, main_thread: &crate::stage::MainThread) {
+        loop {
+            let handbacks = std::mem::take(&mut *self.host_handbacks.borrow_mut());
+            if handbacks.handbacks.is_empty() {
+                return;
+            }
+            self.pay_tree_build_handbacks(main_thread, handbacks);
         }
     }
 
-    /// Hands the host the reset of a row whose paint state is being cleared, or queues it while a
-    /// tree build runs.
+    /// Pays what a finished tree build owes the host, in the order the build let go of it.
+    pub(crate) fn pay_tree_build_handbacks(&self, main_thread: &crate::stage::MainThread, handbacks: HostHandbacks) {
+        for handback in handbacks.handbacks {
+            self.pay_host_handback(main_thread, handback);
+        }
+    }
+
+    /// Hands back the reset of a row whose paint state is being cleared.
     pub(crate) fn hand_back_paintable_row_reset(&self, reset: crate::painting::paintable_rows::PaintableRowReset) {
         self.hand_back(HostHandback::PaintableRowReset(reset));
     }
 
+    /// Queues what the arena owes the host. Nothing here can reach the host: only a main-thread
+    /// payer hands the queue over.
     fn hand_back(&self, handback: HostHandback) {
-        if let Some(deferred) = self.deferred_host_handbacks.borrow_mut().as_mut() {
-            deferred.push(handback);
-            return;
-        }
-        self.pay_host_handback(handback);
+        assert!(
+            self.host_handback_spans.get() != 0,
+            "the arena owes the host something outside any span that pays it"
+        );
+        self.host_handbacks.borrow_mut().push(handback);
     }
 
-    fn pay_host_handback(&self, handback: HostHandback) {
+    fn pay_host_handback(&self, main_thread: &crate::stage::MainThread, handback: HostHandback) {
+        use crate::layout::tree_mutation::{
+            destroy_image_observers, destroy_owned_image_provider, destroy_shell, notify_owned_image_provider_of_detach,
+        };
         match handback {
-            HostHandback::BoxPresence(style_node) => self.tell_host_box_presence(style_node),
-            HostHandback::Shell(shell) => crate::layout::tree_mutation::destroy_shell(shell),
-            HostHandback::OwnedImageProvider(provider) => {
-                crate::layout::tree_mutation::destroy_owned_image_provider(provider);
-            }
-            HostHandback::ImageObservers(observers) => crate::layout::tree_mutation::destroy_image_observers(observers),
+            HostHandback::BoxPresence(style_node) => self.tell_host_box_presence(main_thread, style_node),
+            HostHandback::Shell(shell) => destroy_shell(main_thread, shell),
+            HostHandback::OwnedImageProvider(provider) => destroy_owned_image_provider(main_thread, provider),
+            HostHandback::ImageObservers(observers) => destroy_image_observers(main_thread, observers),
             HostHandback::OwnedImageProviderDetach(provider) => {
-                crate::layout::tree_mutation::notify_owned_image_provider_of_detach(provider);
+                notify_owned_image_provider_of_detach(main_thread, provider);
             }
             HostHandback::PaintableRowReset(reset) => {
                 super::tree_build_seal::note_host_call("paintable_row_reset");
-                reset.invoke_callback();
+                reset.invoke_callback_on_main_thread(main_thread);
             }
         }
     }
 
-    /// Hands the host the objects a freed subtree's rows held, or queues them while a tree build
-    /// runs. The style records the arena pinned for the rows are released now either way.
+    /// Hands back the objects a freed subtree's rows held. The style records the arena pinned for
+    /// the rows are released now.
     pub(crate) fn hand_back_freed_subtree(&self, freed: FreedSubtree) {
-        if self.deferred_host_handbacks.borrow().is_none() {
-            freed.destroy_shells_and_invoke_callbacks();
-            return;
-        }
         let FreedSubtree {
             shells,
             owned_image_providers,
@@ -5217,9 +5255,14 @@ pub unsafe extern "C" fn layout_arena_allocate(
     construction_facts: FfiNodeConstructionFacts,
 ) -> NodeSlotId {
     assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
-    unsafe { &mut *arena.cast::<LayoutNodeArena>() }.allocate(construction_facts)
+    unsafe {
+        paying_host_handbacks(&main_thread, arena, || {
+            (&mut *arena.cast::<LayoutNodeArena>()).allocate(construction_facts)
+        })
+    }
 }
 
 /// # Safety
@@ -5230,9 +5273,14 @@ pub unsafe extern "C" fn layout_arena_allocate(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_free_subtree(arena: *mut c_void, root: NodeSlotId) {
     assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on
     // the document thread.
-    crate::layout::tree_mutation::free_subtree_and_destroy_shells(arena.cast::<LayoutNodeArena>(), root);
+    unsafe {
+        paying_host_handbacks(&main_thread, arena, || {
+            crate::layout::tree_mutation::free_subtree_and_hand_back(arena.cast::<LayoutNodeArena>(), root);
+        });
+    }
 }
 
 /// # Safety
@@ -5243,12 +5291,40 @@ pub unsafe extern "C" fn layout_arena_free_subtree(arena: *mut c_void, root: Nod
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_detach_and_free_subtree(arena: *mut c_void, node: NodeSlotId) -> bool {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    let arena = arena.cast::<LayoutNodeArena>();
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on
-    // the document thread; the shared borrow ends before the subtree is freed.
+    // the document thread.
+    unsafe { paying_host_handbacks(&main_thread, arena, || detach_and_free_subtree(arena.cast(), node)) }
+}
+
+/// Detaches `node` from its parent and frees its subtree, handing back what the rows held. Answers
+/// whether the node was attached.
+pub(crate) fn detach_and_free_subtree(arena: *mut LayoutNodeArena, node: NodeSlotId) -> bool {
+    // SAFETY: The caller keeps the arena alive; the shared borrow ends before the subtree is freed.
     let was_attached = unsafe { &*arena }.detach_from_parent(node);
-    crate::layout::tree_mutation::free_subtree_and_destroy_shells(arena, node);
+    crate::layout::tree_mutation::free_subtree_and_hand_back(arena, node);
     was_attached
+}
+
+/// Runs `operation`, an arena change a main-thread entry makes, and pays what it hands back once it
+/// returns, which is where the host heard about it when the arena called the host directly.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread, and no
+/// borrow of it may be live across this call other than the ones `operation` takes.
+pub(crate) unsafe fn paying_host_handbacks<R>(
+    main_thread: &crate::stage::MainThread,
+    arena: *mut c_void,
+    operation: impl FnOnce() -> R,
+) -> R {
+    // SAFETY: Guaranteed by the caller; each borrow here ends before `operation` runs or after it
+    // has returned.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.begin_paying_host_handbacks(main_thread);
+    let result = operation();
+    // SAFETY: As above.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.finish_paying_host_handbacks(main_thread);
+    result
 }
 
 fn counter_owner(style_node: u32, generated_for: u8) -> Option<super::counters::CounterOwner> {
@@ -5585,15 +5661,25 @@ pub unsafe extern "C" fn layout_arena_bound_viewport_shell(arena: *mut c_void) -
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_bind_row(arena: *mut c_void, id: NodeSlotId) {
     assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.bind_row(id);
+    unsafe {
+        paying_host_handbacks(&main_thread, arena, || {
+            (&*arena.cast::<LayoutNodeArena>()).bind_row(id);
+        });
+    }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_unbind_row(arena: *mut c_void, id: NodeSlotId) {
     assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.unbind_row(id);
+    unsafe {
+        paying_host_handbacks(&main_thread, arena, || {
+            (&*arena.cast::<LayoutNodeArena>()).unbind_row(id);
+        });
+    }
 }
 
 /// Visits the live shell of every row built for the same DOM node as `id`, that row included.
@@ -5676,9 +5762,14 @@ pub unsafe extern "C" fn layout_arena_set_style_node_of_rows_sharing_dom_node_wi
     style_node: u32,
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }
-        .set_style_node_of_rows_sharing_dom_node_with(id, StyleNodeID::from_raw(style_node));
+    unsafe {
+        paying_host_handbacks(&main_thread, arena, || {
+            (&*arena.cast::<LayoutNodeArena>())
+                .set_style_node_of_rows_sharing_dom_node_with(id, StyleNodeID::from_raw(style_node));
+        });
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -5688,9 +5779,14 @@ pub unsafe extern "C" fn layout_arena_set_style_node_of_generated_subtree(
     style_node: u32,
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }
-        .set_style_node_of_generated_subtree(root, StyleNodeID::from_raw(style_node));
+    unsafe {
+        paying_host_handbacks(&main_thread, arena, || {
+            (&*arena.cast::<LayoutNodeArena>())
+                .set_style_node_of_generated_subtree(root, StyleNodeID::from_raw(style_node));
+        });
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -5785,7 +5881,7 @@ const PAINT_CACHE_INVALIDATION_STAGE_DETACH_CLEANUP: u8 = 2;
 /// its style record is pinned for the host and its paint cache is cleaned here rather than through
 /// the journal, which would resolve the identity after a replacement row had been bound. The image
 /// resources the row holds go with it.
-fn prepare_row_for_detach(arena: *mut c_void, row: NodeSlotId) {
+pub(crate) fn prepare_row_for_detach(arena: *mut c_void, row: NodeSlotId) {
     // SAFETY: The handle came from layout_arena_create and outlives this call.
     let arena_ref = unsafe { &*arena.cast::<LayoutNodeArena>() };
     let kind = arena_ref.data(row).kind.get();
@@ -5821,16 +5917,26 @@ fn prepare_row_for_detach(arena: *mut c_void, row: NodeSlotId) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_prepare_node_for_detach(arena: *mut c_void, row: NodeSlotId) {
     assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: The handle came from layout_arena_create and outlives this call.
     unsafe { &*arena.cast::<LayoutNodeArena>() }.assert_owner_thread();
-    prepare_row_for_detach(arena, row);
+    // SAFETY: As above.
+    unsafe { paying_host_handbacks(&main_thread, arena, || prepare_row_for_detach(arena, row)) }
 }
 
 /// Prepares every row in the layout subtree `root` heads for leaving the tree.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_prepare_subtree_for_detach(arena: *mut c_void, root: NodeSlotId) {
     assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: The handle came from layout_arena_create and outlives this call.
+    unsafe { paying_host_handbacks(&main_thread, arena, || prepare_subtree_for_detach(arena, root)) }
+}
+
+/// Prepares every row in the layout subtree `root` heads for leaving the tree, handing back the
+/// image resources the rows hold.
+pub(crate) fn prepare_subtree_for_detach(arena: *mut c_void, root: NodeSlotId) {
+    // SAFETY: The caller keeps the arena alive for this call.
     let arena_ref = unsafe { &*arena.cast::<LayoutNodeArena>() };
     arena_ref.assert_owner_thread();
     let mut rows = Vec::new();
@@ -5899,8 +6005,13 @@ pub unsafe extern "C" fn layout_arena_forget_style_node(arena: *mut c_void, styl
     let Some(style_node) = StyleNodeID::from_raw(style_node) else {
         return;
     };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.forget_style_node(style_node);
+    unsafe {
+        paying_host_handbacks(&main_thread, arena, || {
+            (&*arena.cast::<LayoutNodeArena>()).forget_style_node(style_node);
+        });
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -6359,29 +6470,35 @@ mod tests {
             style_node: style_node.raw(),
             ..test_construction_facts()
         };
+        // SAFETY: Tests run on the thread that owns their arena.
+        let main_thread = unsafe { crate::stage::from_ffi_entry(&super::MAIN_THREAD_FFI_ENTRY) };
+        arena.begin_paying_host_handbacks(&main_thread);
         let old_row = arena.allocate(facts(first));
         arena.bind_row(old_row);
+        arena.finish_paying_host_handbacks(&main_thread);
         TOLD_BOX_PRESENCE.with(|told| told.borrow_mut().clear());
 
-        arena.begin_deferring_host_handbacks();
+        arena.begin_tree_build_handbacks();
         arena.free_subtree(old_row).destroy_shells_and_invoke_callbacks();
         let new_row = arena.allocate(facts(first));
         arena.bind_row(new_row);
         let other_row = arena.allocate(facts(second));
         arena.bind_row(other_row);
         arena.unbind_row(other_row);
-        let handbacks = arena.finish_deferring_host_handbacks();
+        let handbacks = arena.take_tree_build_handbacks();
         assert!(TOLD_BOX_PRESENCE.with(|told| told.borrow().is_empty()));
 
         // Each node is told once, with what it has once the build is over.
-        arena.pay_host_handbacks(handbacks);
+        arena.pay_tree_build_handbacks(&main_thread, handbacks);
         assert_eq!(
             TOLD_BOX_PRESENCE.with(|told| std::mem::take(&mut *told.borrow_mut())),
             vec![(first.raw(), BOX_PRESENCE_HAS_LAYOUT_BOX), (second.raw(), 0)]
         );
 
-        // Outside a build the host hears at once.
+        // Outside a build the host hears as the change's payer returns.
+        arena.begin_paying_host_handbacks(&main_thread);
         arena.bind_row(other_row);
+        arena.finish_paying_host_handbacks(&main_thread);
         assert_eq!(
             TOLD_BOX_PRESENCE.with(|told| std::mem::take(&mut *told.borrow_mut())),
             vec![(second.raw(), BOX_PRESENCE_HAS_LAYOUT_BOX)]
@@ -6391,6 +6508,7 @@ mod tests {
         for row in [new_row, other_row] {
             arena.free_subtree(row).destroy_shells_and_invoke_callbacks();
         }
+        assert!(TOLD_BOX_PRESENCE.with(|told| told.borrow().is_empty()));
     }
 
     #[test]
