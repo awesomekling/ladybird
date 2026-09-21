@@ -868,7 +868,10 @@ impl InlineLevelIterator {
         atomic_sizing: AtomicInlineSizing,
     ) -> Option<Self> {
         let callbacks = context.callbacks;
-        match callbacks.arena().take_inline_item_stash(context.containing_block) {
+        match callbacks
+            .layout_scratch()
+            .take_inline_item_stash(context.containing_block)
+        {
             Some(stash) => Some(Self::from_stash(context, stash)),
             None => InlineLevelIteratorGenerator::generate(context, atomic_sizing),
         }
@@ -904,7 +907,7 @@ impl InlineLevelIterator {
                 return;
             }
         }
-        context.callbacks.arena().store_inline_item_stash(
+        context.callbacks.layout_scratch().store_inline_item_stash(
             context.containing_block,
             StashedInlineItems {
                 items: self.items.collect(),

@@ -20,6 +20,9 @@ pub(crate) struct LayoutScratch {
     run_record_stack: RunRecordStack,
     /// The intrinsic sizes passes measured, kept for the passes after them.
     pub(crate) intrinsic_size_caches: super::layout_node_arena::IntrinsicSizeCaches,
+    /// The inline items a block container generated, kept for its next run in the same pass. The
+    /// items borrow fonts for the current pass, so the stashes are cleared when the pass ends.
+    inline_item_stashes: RefCell<HashMap<NodeSlotId, super::inline_level_iterator::StashedInlineItems>>,
 }
 
 #[derive(Default)]
@@ -36,11 +39,31 @@ impl Default for LayoutScratch {
             live_run_nonces: RefCell::new(Vec::new()),
             run_record_stack: RunRecordStack::default(),
             intrinsic_size_caches: Default::default(),
+            inline_item_stashes: RefCell::new(HashMap::default()),
         }
     }
 }
 
 impl LayoutScratch {
+    pub(crate) fn store_inline_item_stash(
+        &self,
+        block_container: NodeSlotId,
+        stash: super::inline_level_iterator::StashedInlineItems,
+    ) {
+        self.inline_item_stashes.borrow_mut().insert(block_container, stash);
+    }
+
+    pub(crate) fn take_inline_item_stash(
+        &self,
+        block_container: NodeSlotId,
+    ) -> Option<super::inline_level_iterator::StashedInlineItems> {
+        self.inline_item_stashes.borrow_mut().remove(&block_container)
+    }
+
+    pub(crate) fn clear_inline_item_stashes(&self) {
+        self.inline_item_stashes.borrow_mut().clear();
+    }
+
     /// The layout scratch of the arena `handle` names.
     ///
     /// # Safety

@@ -2500,6 +2500,8 @@ unsafe fn commit_entry_pass<'a>(
     // SAFETY: Host callbacks have returned; borrow the arena again for the epilogue, which
     // performs no host callbacks.
     let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+    // SAFETY: The scratch lives beside the arena for as long as the handle does.
+    unsafe { LayoutScratch::from_handle(arena_handle) }.clear_inline_item_stashes();
     arena.end_layout_pass();
     // SAFETY: The scratch lives beside the arena for as long as the handle does.
     unsafe { LayoutScratch::from_handle(arena_handle) }.end_layout_pass();

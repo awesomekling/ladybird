@@ -968,10 +968,6 @@ pub(crate) struct LayoutNodeArena {
     next_rows_built_for_same_node: Vec<Cell<NodeSlotId>>,
     fc_run_cache_store: super::fc_run_cache::FcRunCacheArenaStore,
     pub(super) layout_trace: super::trace::LayoutTrace,
-    #[cfg(debug_assertions)]
-    pub(super) read_scope: Cell<super::read_scope::ReadScope>,
-    pub(super) innermost_run: Cell<(NodeSlotId, NodeSlotId)>,
-    inline_item_stashes: RefCell<HashMap<NodeSlotId, super::inline_level_iterator::StashedInlineItems>>,
     pub(crate) paintable_rows: crate::painting::paintable_rows::PaintableRowStore,
     paint_state: RefCell<crate::painting::paint_state::PaintState>,
     // Hit testing can measure overflow and invalidate painting state while querying this list.
@@ -1080,10 +1076,6 @@ impl LayoutNodeArena {
             next_rows_built_for_same_node: Vec::new(),
             fc_run_cache_store: super::fc_run_cache::FcRunCacheArenaStore::default(),
             layout_trace: super::trace::LayoutTrace::default(),
-            #[cfg(debug_assertions)]
-            read_scope: Cell::new(super::read_scope::ReadScope::default()),
-            innermost_run: Cell::new((NodeSlotId::INVALID, NodeSlotId::INVALID)),
-            inline_item_stashes: RefCell::new(HashMap::default()),
             paintable_rows: crate::painting::paintable_rows::PaintableRowStore::default(),
             paint_state: RefCell::new(crate::painting::paint_state::PaintState::default()),
             hit_test_list: RefCell::new(None),
@@ -1138,24 +1130,7 @@ impl LayoutNodeArena {
         &self.fc_run_cache_store
     }
 
-    /// The items borrow fonts for the current layout pass, so the stash is cleared when the pass ends.
-    pub(crate) fn store_inline_item_stash(
-        &self,
-        block_container: NodeSlotId,
-        stash: super::inline_level_iterator::StashedInlineItems,
-    ) {
-        self.inline_item_stashes.borrow_mut().insert(block_container, stash);
-    }
-
-    pub(crate) fn take_inline_item_stash(
-        &self,
-        block_container: NodeSlotId,
-    ) -> Option<super::inline_level_iterator::StashedInlineItems> {
-        self.inline_item_stashes.borrow_mut().remove(&block_container)
-    }
-
     pub(crate) fn end_layout_pass(&self) {
-        self.inline_item_stashes.borrow_mut().clear();
         self.sweep_stale_fc_run_cache_entries();
     }
 
