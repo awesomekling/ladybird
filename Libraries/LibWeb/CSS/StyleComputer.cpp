@@ -5543,8 +5543,9 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
 //       instead of the default font size (16px).
 //       See this blog post for a lot more details about this weirdness:
 //       https://manishearth.github.io/blog/2017/08/10/font-size-an-unexpectedly-complex-css-property/
-RefPtr<StyleValue const> StyleComputer::recascade_font_size_if_needed(DOM::AbstractElement abstract_element, bool has_monospace_font_family, bool& depends_on_viewport_metrics) const
+RefPtr<StyleValue const> StyleComputer::recascade_font_size_if_needed(DOM::AbstractElement abstract_element, bool has_monospace_font_family, bool& depends_on_viewport_metrics, bool& used_host_fallback) const
 {
+    used_host_fallback = false;
     // Some CSS frameworks use `font-family: monospace, monospace` to work around this behavior.
     if (!has_monospace_font_family)
         return nullptr;
@@ -5554,24 +5555,11 @@ RefPtr<StyleValue const> StyleComputer::recascade_font_size_if_needed(DOM::Abstr
     static auto const& monospace_font_family_name = *new String(Platform::FontPlugin::the().generic_font_name(Platform::GenericFont::Monospace, 400, 0));
     static auto const& monospace_font = Gfx::FontDatabase::the().get(monospace_font_family_name, default_monospace_font_size_in_px * 0.75f, 400, Gfx::FontWidth::Normal, 0).release_nonnull().leak_ref();
 
-    // Reconstruct the line of ancestor elements we need to inherit style from, and then do the cascade again
-    // but only for the font-size property.
-    GC::ConservativeVector<DOM::AbstractElement> ancestors;
-    for (auto ancestor = abstract_element.element_to_inherit_style_from(); ancestor.has_value(); ancestor = ancestor->element_to_inherit_style_from())
-        ancestors.append(*ancestor);
-
-    GC::ConservativeVector<DOM::AbstractElement> recascade_ancestors;
-    Vector<u64> ancestor_style_records;
-    for (auto& ancestor : ancestors.in_reverse()) {
-        recascade_ancestors.append(ancestor);
-        ancestor_style_records.append(ancestor.style_record_identity().value());
-    }
-
     auto run_recascade_batch = [&](size_t start_index, CSSPixels current_size, bool current_size_depends_on_viewport_metrics, ComputedValuesFFI::FfiLengthResolutionContext const* length_resolution_context) {
         return ComputedValuesFFI::rust_recascade_font_size_batch(
             m_style_engine.rust_handle(),
-            ancestor_style_records.data(),
-            ancestor_style_records.size(),
+            abstract_element.element().style_node_id().value(),
+            pseudo_element_to_ffi(abstract_element.pseudo_element()),
             start_index,
             current_size.raw_value(),
             current_size_depends_on_viewport_metrics,
@@ -5581,7 +5569,16 @@ RefPtr<StyleValue const> StyleComputer::recascade_font_size_if_needed(DOM::Abstr
 
     auto batch = run_recascade_batch(0, default_monospace_font_size_in_px, false, nullptr);
     bool skipped_calculated_value = batch.skipped_calculated_value;
+    GC::ConservativeVector<DOM::AbstractElement> recascade_ancestors;
     while (batch.status != ComputedValuesFFI::FontSizeRecascadeStatus::Complete) {
+        if (!used_host_fallback) {
+            used_host_fallback = true;
+            GC::ConservativeVector<DOM::AbstractElement> ancestors;
+            for (auto ancestor = abstract_element.element_to_inherit_style_from(); ancestor.has_value(); ancestor = ancestor->element_to_inherit_style_from())
+                ancestors.append(*ancestor);
+            for (auto& ancestor : ancestors.in_reverse())
+                recascade_ancestors.append(ancestor);
+        }
         VERIFY(batch.status == ComputedValuesFFI::FontSizeRecascadeStatus::NeedsLengthResolution);
         VERIFY(batch.next_index < recascade_ancestors.size());
         auto& ancestor = recascade_ancestors[batch.next_index];
@@ -5723,6 +5720,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         bool transition_delay_and_duration_are_single_zero { false };
         u64 container_relative_length_unit_mask { 0 };
         bool attach_style_sheet_sources { false };
+        bool used_monospace_recascade_host_fallback { false };
 
         explicit NativeLonghandState(NonnullRefPtr<ComputedStyleWorkingSet> working_set)
             : working_set(move(working_set))
@@ -5782,7 +5780,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         computed_style.set_has_pseudo_element_styles(context.matching_pseudo_element_styles);
 
         bool recascaded_font_size_depends_on_viewport_metrics = false;
-        state.new_font_size = style_computer.recascade_font_size_if_needed(abstract_element, computation_requirements->has_monospace_font_family, recascaded_font_size_depends_on_viewport_metrics);
+        state.new_font_size = style_computer.recascade_font_size_if_needed(abstract_element, computation_requirements->has_monospace_font_family, recascaded_font_size_depends_on_viewport_metrics, state.used_monospace_recascade_host_fallback);
         if (state.new_font_size) {
             computed_style.set_property(PropertyID::FontSize, *state.new_font_size, ComputedStyleWorkingSet::Inherited::No, Important::No);
             if (recascaded_font_size_depends_on_viewport_metrics) {
@@ -6187,7 +6185,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         ParentAnimatedOverlay = 1 << 5,
     };
     u8 late_freeze_reasons = WorkingSet;
-    if (prepared_transaction.requirements.has_monospace_font_family)
+    if (native_context.state->used_monospace_recascade_host_fallback)
         late_freeze_reasons |= MonospaceRecascade;
     if (native_context.state->custom_property_resolution)
         late_freeze_reasons |= CustomPropertyAdapter;
