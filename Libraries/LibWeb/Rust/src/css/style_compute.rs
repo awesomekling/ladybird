@@ -9921,3 +9921,46 @@ mod tests {
         assert!(dependency_was_recorded);
     }
 }
+
+/// The document-level half of a row's font length-resolution context: the parts that belong to the
+/// document rather than to the element it inherits from. The host snapshots these once per style
+/// update, so no row reads them from the navigable or from the root element.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiFontLengthResolutionDocumentInputs {
+    pub viewport_width: f64,
+    pub viewport_height: f64,
+    pub root_font_metrics: FfiFontMetrics,
+    pub root_font_metrics_depend_on_viewport_metrics: bool,
+    pub initial_font_metrics: FfiFontMetrics,
+}
+
+/// The font length-resolution context one row resolves its font properties against, answered from
+/// the style engine's retained state instead of built by the host from the live DOM: the element
+/// it inherits from comes from the retained tree, and its font metrics from that element's
+/// retained record.
+///
+/// Returns false only for an identity the retained tree does not hold, where the host must build
+/// the context itself. A row whose inheritance parent has no record still gets an answer: the
+/// document's initial font, which is what `Length::ResolutionContext::for_document` gives.
+///
+/// # Safety
+/// `style_engine` must name a live `StyleEngine`, `document` a readable input block and `output` a
+/// writable context.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_retained_font_length_resolution_context(
+    style_engine: *const std::ffi::c_void,
+    style_node: u32,
+    pseudo_kind: u8,
+    document: *const FfiFontLengthResolutionDocumentInputs,
+    output: *mut FfiLengthResolutionContext,
+) -> bool {
+    let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
+        return false;
+    };
+    let style_engine = unsafe { &*style_engine.cast::<crate::css::style::StyleEngine>() };
+    let document = unsafe { &*document };
+    let context = style_engine.retained_font_length_resolution_context(node, pseudo_kind, document);
+    unsafe { output.write(context) };
+    true
+}

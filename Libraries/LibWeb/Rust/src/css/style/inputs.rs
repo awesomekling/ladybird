@@ -3240,3 +3240,88 @@ impl StyleEngineState {
         counters.bump(Counter::StyleRulesCompiled);
     }
 }
+
+// The font length-resolution context one row resolves its font properties against, answered from
+// retained state alone. The host used to build this per row from live state: the navigable's
+// viewport, the inheriting element's `ComputedValues` and its platform font's pixel metrics, and
+// the root element's `ComputedValues`. Every one of those is already retained - the host's
+// per-update document environment holds the viewport, the root metrics and the initial font, and
+// a record's font group holds the five metrics `Length::FontMetrics` carries - so the row can be
+// answered without reading the DOM.
+impl RetainedState {
+    pub(crate) fn retained_font_length_resolution_context(
+        &self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+        document: &crate::css::style_compute::FfiFontLengthResolutionDocumentInputs,
+    ) -> crate::css::style_compute::FfiLengthResolutionContext {
+        use crate::css::computed_value_views::ComputedValuesView;
+        use crate::css::css_enums::writing_mode;
+        use crate::css::host_shared::SharedPayload;
+        use crate::css::style_compute::{FfiFontMetrics, FfiLengthResolutionContext};
+
+        let values_for = |record: u64| -> Option<ComputedValuesView<'_>> {
+            let payloads = self.computed_group_sets.style_record_payloads(record)?;
+            Some(ComputedValuesView::new(SharedPayload::as_pointer_slice(payloads)))
+        };
+        let parent_record = self
+            .retained_inheritance_parent_style_record(node, pseudo_kind)
+            .map_or(0, |record| record.raw());
+        let parent_values = if parent_record == 0 {
+            None
+        } else {
+            values_for(parent_record)
+        };
+
+        // The row's own inline axis comes from the record it still holds, the way the host read it
+        // from the same record; a row with no record of its own borrows its parent's answer.
+        let own_record = self
+            .computed_group_sets
+            .assigned_style_record(node)
+            .map_or(0, |record| record.raw());
+        let inline_axis_is_horizontal = (own_record != 0)
+            .then(|| values_for(own_record))
+            .flatten()
+            .or(parent_values)
+            .is_none_or(|values| values.writing_mode() == writing_mode::HORIZONTAL_TB);
+
+        let font_metrics = match parent_values {
+            Some(values) => FfiFontMetrics {
+                font_size: values.font_size().to_double(),
+                x_height: super::publication::drive_font_metric(values.font_x_height()),
+                cap_height: super::publication::drive_font_metric(values.font_ascent()),
+                zero_advance: super::publication::drive_font_metric(values.font_zero_advance()),
+                line_height: values.line_height().to_double(),
+            },
+            // No element to inherit from: the document's initial font, with the initial line
+            // height, exactly as `Length::ResolutionContext::for_document` builds it.
+            None => document.initial_font_metrics,
+        };
+        let font_metrics_depend_on_viewport_metrics = parent_record != 0
+            && self
+                .computed_group_sets
+                .style_record_dependency_flags(parent_record)
+                .is_some_and(|flags| flags & (1 << 1) != 0);
+        let root_font_metrics = match parent_values {
+            Some(_) => document.root_font_metrics,
+            None => font_metrics,
+        };
+        FfiLengthResolutionContext {
+            viewport_width: document.viewport_width,
+            viewport_height: document.viewport_height,
+            font_metrics,
+            root_font_metrics,
+            font_metrics_depend_on_viewport_metrics,
+            root_font_metrics_depend_on_viewport_metrics: parent_values.is_some()
+                && document.root_font_metrics_depend_on_viewport_metrics,
+            has_container_width_basis: false,
+            has_container_height_basis: false,
+            container_width_basis: 0.0,
+            container_height_basis: 0.0,
+            container_width_basis_depends_on_viewport_metrics: false,
+            container_height_basis_depends_on_viewport_metrics: false,
+            subject_inline_axis_is_horizontal: inline_axis_is_horizontal,
+            resolved_viewport_relative_length: std::ptr::null_mut(),
+        }
+    }
+}
