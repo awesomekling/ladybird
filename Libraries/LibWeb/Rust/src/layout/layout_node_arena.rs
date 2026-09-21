@@ -38,6 +38,7 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 use std::thread;
 
 mod main_thread_entries;
@@ -952,8 +953,8 @@ pub(crate) struct LayoutNodeArena {
     /// `<path>` inside a `<defs>` a `<textPath>` follows - has no row at all, and one that is a
     /// mask, a clip or a pattern has a row per referencing element; both fall out of keying the
     /// column by the element rather than by the box.
-    svg_attribute_facts: RefCell<HashMap<StyleNodeID, Box<FfiSvgAttributeFacts>>>,
-    svg_points: RefCell<HashMap<StyleNodeID, std::rc::Rc<[super::svg_formatting_context::FfiFloatPoint]>>>,
+    svg_attribute_facts: HashMap<StyleNodeID, Box<FfiSvgAttributeFacts>>,
+    svg_points: HashMap<StyleNodeID, Arc<[super::svg_formatting_context::FfiFloatPoint]>>,
     /// The counter styles each tree scope registers. The rule cache that settles them is C++'s,
     /// and the document owns the result because a fallback chain is followed from the scope the
     /// counter is used in, not from the scope the style was written in.
@@ -1068,8 +1069,8 @@ impl LayoutNodeArena {
             replaced_paint_facts: RefCell::new(HashMap::default()),
             layer_image_paint_facts: RefCell::new(HashMap::default()),
             svg_paint_resources: crate::painting::svg_paint_resources::SvgPaintResources::default(),
-            svg_attribute_facts: RefCell::new(HashMap::default()),
-            svg_points: RefCell::new(HashMap::default()),
+            svg_attribute_facts: HashMap::default(),
+            svg_points: HashMap::default(),
             counter_styles: RefCell::new(crate::css::counter_representation::CounterStyleRegistry::default()),
             counters_sets: RefCell::new(super::counters::CountersSets::default()),
             generated_content: RefCell::new(super::generated_content::GeneratedContent::default()),
@@ -3490,35 +3491,31 @@ impl LayoutNodeArena {
     /// the document never published for - anything that is not an SVG element - answers with the
     /// default facts, whose `geometry_kind` says it draws no shape.
     pub(crate) fn style_node_svg_attribute_facts(&self, style_node: StyleNodeID) -> FfiSvgAttributeFacts {
-        match self.svg_attribute_facts.borrow().get(&style_node) {
+        match self.svg_attribute_facts.get(&style_node) {
             Some(facts) => **facts,
             None => FfiSvgAttributeFacts::default(),
         }
     }
 
     /// The `points` list a <polyline> or <polygon> parsed.
-    pub(crate) fn svg_points(
-        &self,
-        id: NodeSlotId,
-    ) -> Option<std::rc::Rc<[super::svg_formatting_context::FfiFloatPoint]>> {
+    pub(crate) fn svg_points(&self, id: NodeSlotId) -> Option<Arc<[super::svg_formatting_context::FfiFloatPoint]>> {
         self.style_node_svg_points(self.node_style_node(id)?)
     }
 
     pub(crate) fn style_node_svg_points(
         &self,
         style_node: StyleNodeID,
-    ) -> Option<std::rc::Rc<[super::svg_formatting_context::FfiFloatPoint]>> {
-        self.svg_points.borrow().get(&style_node).cloned()
+    ) -> Option<Arc<[super::svg_formatting_context::FfiFloatPoint]>> {
+        self.svg_points.get(&style_node).cloned()
     }
 
     /// Replace only the four names a graphics element's style carries. An element that has not
     /// published its attributes yet has no place to put them, and will carry them itself when it
     /// does: the publication is made when the style tree names the element, which is before any
     /// style of its own is installed.
-    pub(crate) fn set_style_node_svg_style_references(&self, style_node: StyleNodeID, references: [u32; 4]) {
+    pub(crate) fn set_style_node_svg_style_references(&mut self, style_node: StyleNodeID, references: [u32; 4]) {
         self.assert_owner_thread();
-        let mut published = self.svg_attribute_facts.borrow_mut();
-        let Some(facts) = published.get_mut(&style_node) else {
+        let Some(facts) = self.svg_attribute_facts.get_mut(&style_node) else {
             return;
         };
         let replaced = Self::published_reference_atoms(facts);
@@ -3529,7 +3526,6 @@ impl LayoutNodeArena {
             facts.stroke_reference_atom,
         ] = references;
         let retained = Self::published_reference_atoms(facts);
-        drop(published);
         self.retain_published_reference_atoms(retained, replaced);
     }
 
@@ -3563,13 +3559,13 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn set_style_node_svg_attribute_facts(
-        &self,
+        &mut self,
         style_node: StyleNodeID,
         facts: FfiSvgAttributeFacts,
         points: &[super::svg_formatting_context::FfiFloatPoint],
     ) {
         self.assert_owner_thread();
-        let replaced = match self.svg_attribute_facts.borrow_mut().entry(style_node) {
+        let replaced = match self.svg_attribute_facts.entry(style_node) {
             std::collections::hash_map::Entry::Occupied(mut published) => {
                 let replaced = Self::published_reference_atoms(published.get());
                 **published.get_mut() = facts;
@@ -3581,11 +3577,10 @@ impl LayoutNodeArena {
             }
         };
         self.retain_published_reference_atoms(Self::published_reference_atoms(&facts), replaced);
-        let mut column = self.svg_points.borrow_mut();
         if points.is_empty() {
-            column.remove(&style_node);
+            self.svg_points.remove(&style_node);
         } else {
-            column.insert(style_node, points.into());
+            self.svg_points.insert(style_node, points.into());
         }
     }
 
@@ -3634,16 +3629,16 @@ impl LayoutNodeArena {
         })
     }
 
-    pub(crate) fn clear_style_node_svg_attribute_facts(&self, style_node: StyleNodeID) {
+    pub(crate) fn clear_style_node_svg_attribute_facts(&mut self, style_node: StyleNodeID) {
         self.assert_owner_thread();
-        let removed = self.svg_attribute_facts.borrow_mut().remove(&style_node);
+        let removed = self.svg_attribute_facts.remove(&style_node);
         if let Some(removed) = removed {
             self.retain_published_reference_atoms(
                 [0; PUBLISHED_REFERENCE_ATOM_COUNT],
                 Self::published_reference_atoms(&removed),
             );
         }
-        self.svg_points.borrow_mut().remove(&style_node);
+        self.svg_points.remove(&style_node);
     }
 
     /// The names a publication holds a sweep retention on: the one an `href` names, and the four

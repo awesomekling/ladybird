@@ -174,7 +174,7 @@ pub unsafe extern "C" fn layout_arena_set_style_node_svg_attribute_facts(
     points: *const FfiFloatPoint,
     count: usize,
 ) {
-    let arena = unsafe { crate::painting::ffi::arena_from_handle(arena) };
+    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
     let Some(style_node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
         return;
     };
@@ -203,7 +203,7 @@ pub unsafe extern "C" fn layout_arena_set_style_node_svg_style_references(
     fill: u32,
     stroke: u32,
 ) {
-    let arena = unsafe { crate::painting::ffi::arena_from_handle(arena) };
+    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
     let Some(style_node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
         return;
     };
@@ -215,7 +215,7 @@ pub unsafe extern "C" fn layout_arena_set_style_node_svg_style_references(
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_clear_style_node_svg_attribute_facts(arena: *mut c_void, style_node: u32) {
-    let arena = unsafe { crate::painting::ffi::arena_from_handle(arena) };
+    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
     let Some(style_node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
         return;
     };
