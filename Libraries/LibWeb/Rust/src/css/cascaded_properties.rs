@@ -1418,6 +1418,50 @@ fn custom_property_needs_resolution(value: &StyleValueData) -> bool {
     )
 }
 
+/// Whether every value declared by this store can be resolved without any host substitution
+/// inputs. Registered properties still take the adapter path because their finalization reads
+/// registration-specific inheritance and syntax state.
+pub(crate) unsafe fn custom_property_store_is_callback_free(store: *const c_void, registry: *const c_void) -> bool {
+    let Some(store) = (unsafe { store.cast::<CustomPropertyStore>().as_ref() }) else {
+        return false;
+    };
+    let Some(registry) = (unsafe {
+        registry
+            .cast::<crate::css::custom_properties::CustomPropertyRegistry>()
+            .as_ref()
+    }) else {
+        return false;
+    };
+    !registry.has_registrations()
+        && store.declared_names.iter().all(|name_raw| {
+            let value = store
+                .own_values
+                .get(name_raw)
+                .expect("declared custom property must be an own value")
+                .value
+                .data();
+            custom_property_value_is_callback_free(value)
+        })
+}
+
+pub(crate) fn custom_property_value_is_callback_free(value: &StyleValueData) -> bool {
+    !matches!(
+        value,
+        StyleValueData::Unresolved {
+            presence_attr: true,
+            ..
+        } | StyleValueData::Unresolved {
+            presence_dashed_function: true,
+            ..
+        } | StyleValueData::Unresolved { presence_env: true, .. }
+            | StyleValueData::Unresolved { presence_if: true, .. }
+            | StyleValueData::Unresolved {
+                presence_inherit: true,
+                ..
+            }
+    )
+}
+
 struct CustomPropertyFinalizerContext<'a> {
     input: &'a FfiCustomPropertyDriveInput,
     names: &'a [usize],
