@@ -55,6 +55,7 @@ impl RetainedState {
 
     pub(crate) fn freeze_longhand_inputs(&mut self, nodes: &[StyleNodeID]) {
         self.frozen_longhand_inputs.clear();
+        self.legacy_finalized_longhand_rows.clear();
         self.frozen_longhand_inputs.reserve(nodes.len());
         for &node in nodes {
             if self.frozen_longhand_inputs.contains_key(&node) || !self.tree().is_live(node) {
@@ -1643,6 +1644,7 @@ impl StyleEngineState {
                 document_style_computation_inputs: None,
                 custom_property_registry: None,
                 frozen_longhand_inputs: HashMap::default(),
+                legacy_finalized_longhand_rows: HashMap::default(),
                 font_resolution: None,
                 layout_style_snapshots: Default::default(),
                 container_query_inputs: Default::default(),

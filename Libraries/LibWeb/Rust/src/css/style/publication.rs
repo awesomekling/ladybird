@@ -88,6 +88,30 @@ impl RetainedState {
         self.computed_group_sets.assigned_style_record(parent)
     }
 
+    pub(crate) fn retained_legacy_inheritance_parent_table(
+        &self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+    ) -> Option<(&crate::css::computed_longhand_table::ComputedLonghandTable, u64)> {
+        let parent = self.retained_inheritance_parent_node(node, pseudo_kind)?;
+        self.legacy_finalized_longhand_rows
+            .get(&computed::ComputedStyleTarget::new(parent, u8::MAX))
+            .map(|row| (row.table(), row.previous_style_record))
+    }
+
+    pub(crate) unsafe fn retain_legacy_finalized_longhand_row(
+        &mut self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+        table: *const crate::css::computed_longhand_table::ComputedLonghandTable,
+        previous_style_record: u64,
+    ) {
+        self.legacy_finalized_longhand_rows
+            .insert(computed::ComputedStyleTarget::new(node, pseudo_kind), unsafe {
+                LegacyFinalizedLonghandRow::retain(table, previous_style_record)
+            });
+    }
+
     fn retained_inheritance_parent_node(&self, node: StyleNodeID, pseudo_kind: u8) -> Option<StyleNodeID> {
         let parent = if pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT {
             self.tree.inheritance_parent(node)?

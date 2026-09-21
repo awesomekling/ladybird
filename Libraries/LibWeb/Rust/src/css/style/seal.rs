@@ -55,6 +55,20 @@ thread_local! {
     static STAGE_INTERLEAVES: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
     static LONGHAND_INPUT_FREEZE_REASONS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
     static BETWEEN_PASS_SERVICES: RefCell<HashMap<&'static str, (u64, u64)>> = RefCell::new(HashMap::new());
+    static RETAINED_LEGACY_PARENT_CHECKS: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
+}
+
+pub(crate) fn note_retained_legacy_parent(matches_projected_record: bool) {
+    if std::env::var_os("LIBWEB_VERIFY_RETAINED_LEGACY_PARENT").is_none() {
+        return;
+    }
+    RETAINED_LEGACY_PARENT_CHECKS.with(|counts| {
+        let (comparisons, mismatches) = counts.get();
+        counts.set((
+            comparisons.wrapping_add(1),
+            mismatches.wrapping_add(u64::from(!matches_projected_record)),
+        ));
+    });
 }
 
 pub(crate) fn note_longhand_input_freeze(reasons: u8) {
@@ -248,6 +262,12 @@ pub(crate) fn flush_census() {
     for (service, (requests, rounds)) in services {
         write_report(&format!(
             "STYLE SEAL COUNT: between_pass_service {service}: {requests} requests in {rounds} rounds\n"
+        ));
+    }
+    let (comparisons, mismatches) = RETAINED_LEGACY_PARENT_CHECKS.with(|counts| counts.replace((0, 0)));
+    if comparisons != 0 {
+        write_report(&format!(
+            "STYLE SEAL CHECK: retained_legacy_parent comparisons={comparisons} mismatches={mismatches}\n"
         ));
     }
 }
