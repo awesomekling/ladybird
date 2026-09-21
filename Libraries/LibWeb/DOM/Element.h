@@ -616,7 +616,6 @@ public:
     Layout::NodeWithStyle* pseudo_element_unsafe_layout_node(CSS::PseudoElement) const;
 
     bool has_synthetic_pseudo_elements() const;
-    void clear_synthetic_pseudo_element_layout_nodes(Badge<Node>) { clear_synthetic_pseudo_element_layout_nodes(); }
 
     void serialize_children_as_json(JsonObjectSerializer<Utf16StringBuilder>&) const;
 
