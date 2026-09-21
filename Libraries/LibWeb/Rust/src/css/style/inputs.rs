@@ -997,6 +997,16 @@ impl RetainedState {
         self.tree.set_dom_paint_facts(node, facts, &mut self.memory);
     }
 
+    /// The spans a row built for the element takes from its attributes.
+    #[must_use]
+    pub fn element_table_spans(&self, node: StyleNodeID) -> super::tree::TableSpans {
+        self.tree.table_spans(node)
+    }
+
+    pub fn set_element_table_spans(&mut self, node: StyleNodeID, spans: super::tree::TableSpans) {
+        self.tree.set_table_spans(node, spans, &mut self.memory);
+    }
+
     pub fn set_element_form_control_disabled_facts(&mut self, node: StyleNodeID, facts: u8) {
         self.tree.set_form_control_disabled_facts(node, facts, &mut self.memory);
     }

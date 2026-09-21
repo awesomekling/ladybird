@@ -4170,6 +4170,20 @@ impl TreeBuilderHost {
             }
             _ => {}
         }
+        // The spans a table cell or column takes from its attributes, which table fixup reads
+        // before the build is over.
+        let spans = self
+            .arena()
+            .with_style_store(|engine| engine.element_table_spans(style_node));
+        if spans != crate::css::style::tree::TableSpans::default() {
+            {
+                let data = self.arena().data(slot);
+                data.table_column_span.set(spans.column_span);
+                data.table_row_span.set(spans.row_span);
+            }
+            // SAFETY: No arena borrow survives the writes above.
+            unsafe { &mut *self.arena }.set_raw_table_column_span(slot, spans.raw_column_span);
+        }
         assert!(!self.arena().node_shell(slot).is_null());
         slot
     }

@@ -34,6 +34,7 @@
 #include <LibWeb/HTML/HTMLSelectElement.h>
 #include <LibWeb/HTML/HTMLSlotElement.h>
 #include <LibWeb/HTML/HTMLTextAreaElement.h>
+#include <LibWeb/Layout/Node.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
 #include <LibWeb/SVG/SVGElement.h>
 #include <LibWeb/SVG/SVGMaskElement.h>
@@ -294,6 +295,7 @@ void record_element_connected(DOM::Element& element)
     // The name the document knows the element by arrives with the identity. A box built for one of
     // the element's pseudo-elements answers by it even when the element itself has no box.
     style_engine->set_element_unique_node_id(element.style_node_id(), static_cast<u64>(element.unique_id().value()));
+    Layout::publish_table_spans(element);
     record_element_arrival_delta(element, *style_engine, tree_scope_of(element.root()));
     ensure_dom_order_parent_identity(element.parent(), *style_engine);
 
@@ -416,6 +418,7 @@ void record_subtree_connecting(DOM::Node& root)
                 element->set_style_node_id(identity);
                 style_computer.register_style_node(identity, *element);
                 style_engine.set_element_unique_node_id(identity, static_cast<u64>(element->unique_id().value()));
+                Layout::publish_table_spans(*element);
             } else {
                 auto identity = identities[next_shadow_root_identity++];
                 auto& shadow_root = as<DOM::ShadowRoot>(*arrival.node);
