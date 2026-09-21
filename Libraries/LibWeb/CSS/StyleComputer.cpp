@@ -5786,6 +5786,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         // Whether this row's results actually moved the metrics a `rem` resolves against. Only the
         // document element can, and almost none of its recomputations do.
         bool did_write_root_element_font_metrics { false };
+        // Whether this row's results actually widened the parent's record of which non-inherited
+        // style groups its children take explicitly. A row that explicitly inherits the same
+        // groups its siblings already did widens nothing.
+        bool did_widen_parent_explicit_inheritance { false };
         Optional<DOM::AbstractElement::TreeCountingFunctionResolutionContext> tree_counting_context;
         ComputedValuesFFI::FfiStyleComputationEnvironment computation_environment {};
         OwnPtr<CustomPropertyResolutionState> custom_property_resolution;
@@ -6184,8 +6188,16 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             auto style_groups = driver_results.explicitly_inherited_non_inherited_style_groups;
             if (style_groups == NumericLimits<u32>::max())
                 style_groups = ComputedValues::all_style_groups;
-            if (auto* parent = context.abstract_element.element().parent())
+            // OPTIMIZATION: The parent's record of which groups its children inherit explicitly is
+            //               a union, and a row whose groups are already in it adds nothing. Leaving
+            //               the write out keeps this row's result application from reaching the
+            //               host for a value that does not move.
+            if (auto* parent = context.abstract_element.element().parent();
+                parent && (parent->children_explicitly_inherited_non_inherited_style_groups() & style_groups) != style_groups) {
                 parent->add_children_explicitly_inherited_non_inherited_style_groups(style_groups);
+                state.did_widen_parent_explicit_inheritance = true;
+            }
+            // The caller's own accumulator is its local scratch, not state this update can read.
             if (context.explicitly_inherited_non_inherited_style_groups)
                 *context.explicitly_inherited_non_inherited_style_groups |= style_groups;
         }
@@ -6389,12 +6401,13 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         || (native_context.state->custom_property_resolution && native_context.state->custom_property_resolution->host_adapter)
         || drive_result.animations.count != 0
         || drive_result.driver_results.uses_tree_counting_function
-        || drive_result.driver_results.explicitly_inherited_non_inherited_style_groups != 0
         || row_transition_or_animation_state_of(native_context, !drive_result.transitions.delay_and_duration_are_single_zero);
     consume_longhand_transaction_result(&native_context, transaction_result.drive_result);
-    // The document element's row only reaches the host when the metrics it publishes moved, which
-    // the application itself decides, so that term joins once the application has run.
-    application_reaches_the_host |= native_context.state->did_write_root_element_font_metrics;
+    // Two terms are decided by the application itself rather than by the row's results, so they
+    // join once it has run: whether the document element's published metrics moved, and whether
+    // this row widened what its parent records about explicitly inherited groups.
+    application_reaches_the_host |= native_context.state->did_write_root_element_font_metrics
+        || native_context.state->did_widen_parent_explicit_inheritance;
     if (transaction_result.drive_result->custom_properties.environment_identity != 0) {
         auto resolved = abstract_element.custom_property_data();
         ComputedValuesFFI::rust_set_longhand_custom_property_environment(transaction_result.storage, resolved ? resolved->identity() : 0);
