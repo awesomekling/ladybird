@@ -742,6 +742,9 @@ pub(crate) struct LayoutNodeArena {
     /// What a running tree build owes the host for the rows it stamped once the build is over, in
     /// the order the build came to owe it.
     rows_owed_to_host: RefCell<Vec<(NodeSlotId, OwedToHost)>>,
+    /// The document's style, handed to a build that may build the viewport before it starts, and
+    /// pinned until the viewport's row takes it or the build ends without one.
+    published_document_style: Cell<Option<DerivedStyleRecord>>,
     nodes_enrolled_for_replaced_content_facts_sync: RefCell<Vec<NodeSlotId>>,
     /// What the running pass has to tell the document, waiting for the commit that delivers it.
     messages_reported_during_pass: RefCell<Vec<super::commit::FfiCommitMessage>>,
@@ -843,6 +846,7 @@ impl LayoutNodeArena {
             needs_full_scrollable_overflow_recalculation: Cell::new(false),
             text_nodes_enrolled_for_content_sync: RefCell::new(HashSet::default()),
             rows_owed_to_host: RefCell::new(Vec::new()),
+            published_document_style: Cell::new(None),
             nodes_enrolled_for_replaced_content_facts_sync: RefCell::new(Vec::new()),
             messages_reported_during_pass: RefCell::new(Vec::new()),
             layout_style_snapshots: Default::default(),
@@ -4855,6 +4859,47 @@ impl LayoutNodeArena {
         ));
     }
 
+    /// Whether the build about to run may build the viewport, which is what needs the document's
+    /// style: there is no viewport row yet, the whole tree is to be rebuilt, or the document is.
+    pub(crate) fn tree_build_may_create_viewport(&self, document_style_node: Option<StyleNodeID>) -> bool {
+        self.bound_viewport_row().is_invalid()
+            || self.needs_full_layout_tree_update()
+            || self.needs_layout_tree_update(document_style_node)
+    }
+
+    /// Holds the document's style for the build about to run.
+    pub(crate) fn publish_document_style(&self, record: u64) {
+        let derived = self.with_style_engine(|engine| {
+            engine.pin_layout_style_record(record);
+            DerivedStyleRecord {
+                record,
+                payloads: engine
+                    .style_record_payloads(record)
+                    .expect("the document's style must be live")
+                    .as_ptr()
+                    .cast(),
+            }
+        });
+        self.release_published_document_style();
+        self.published_document_style.set(Some(derived));
+    }
+
+    /// Stamps the viewport's row with the document's style the build was handed.
+    pub(crate) fn adopt_published_document_style(&self, viewport: NodeSlotId) {
+        let derived = self
+            .published_document_style
+            .take()
+            .expect("a build that builds the viewport is handed the document's style");
+        self.apply_reinherited_style_record(viewport, derived);
+    }
+
+    /// Releases the document's style if the build did not build a viewport to take it.
+    pub(crate) fn release_published_document_style(&self) {
+        if let Some(derived) = self.published_document_style.take() {
+            self.with_style_engine(|engine| engine.unpin_layout_style_record(derived.record));
+        }
+    }
+
     /// What the finished build owes the host, in the order it came to owe it. A row the build
     /// freed again, such as whitespace table fixup removed, is owed nothing.
     pub(crate) fn take_rows_owed_to_host(&self) -> Vec<(NodeSlotId, OwedToHost)> {
@@ -5677,6 +5722,26 @@ pub unsafe extern "C" fn layout_arena_set_node_style(
         arena.refresh_style_flags(id);
     }
     arena.enroll_node_for_svg_paint_resources_sync(id);
+}
+
+/// # Safety
+///
+/// The arena must be live on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_tree_build_may_create_viewport(
+    arena: *mut c_void,
+    document_style_node: u32,
+) -> bool {
+    unsafe { LayoutNodeArena::from_handle(arena) }
+        .tree_build_may_create_viewport(StyleNodeID::from_raw(document_style_node))
+}
+
+/// # Safety
+///
+/// The arena and record must be live on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_publish_document_style_record(arena: *mut c_void, record: u64) {
+    unsafe { LayoutNodeArena::from_handle(arena) }.publish_document_style(record);
 }
 
 /// The arena and record must be live on the document thread.

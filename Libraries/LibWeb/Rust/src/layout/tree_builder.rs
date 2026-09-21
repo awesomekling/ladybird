@@ -3064,6 +3064,7 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     for record in state.pinned_style_records {
         arena.release_style_record_pinned_for_build(record);
     }
+    arena.release_published_document_style();
 
     super::tree_build_seal::end_build();
     for (row, owed) in arena.take_rows_owed_to_host() {
@@ -4127,9 +4128,9 @@ impl TreeBuilderHost {
     }
 
     /// The row the document's viewport is built in. The document names no identity of its own, so
-    /// the row is stamped out of its kind alone; the shell it is materialised into is what asks
-    /// the style computer for the document's style. The name the row answers by is the document's,
-    /// which the mirror publishes under the document's identity rather than on the row's.
+    /// the row is stamped out of its kind and the document's style, which the build was handed
+    /// before it started. The name the row answers by is the document's, which the mirror
+    /// publishes under the document's identity rather than on the row's.
     fn create_document_box(&self, document_style_node: u32) -> NodeSlotId {
         let slot = self.stamp_dom_box(NodeKind::Viewport, None);
         if let Some(document_style_node) = StyleNodeID::from_raw(document_style_node) {
@@ -4143,9 +4144,8 @@ impl TreeBuilderHost {
             self.arena().set_constructed_row_dom_paint_facts(slot, dom_paint_facts);
         }
         self.arena().take_over_rows_of_bound_node(slot);
-        // The viewport's shell is what asks the style computer for the document's style, which
-        // the build reads before it is over.
-        assert!(!self.arena().node_shell(slot).is_null());
+        self.arena().adopt_published_document_style(slot);
+        self.arena().defer_shell(slot);
         slot
     }
 

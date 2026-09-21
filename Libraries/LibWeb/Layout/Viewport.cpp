@@ -4,19 +4,17 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Layout/Viewport.h>
 
 namespace Web::Layout {
 
-// The build stamps the viewport's row and materialises this shell for it. The row carries no
-// style, since the document has no identity in the style mirror to hold one: the shell is what
-// asks the style computer for the document's style, where the build used to ask before it built
-// the box.
+// The build stamps the viewport's row with the document's style, which it is handed before it
+// starts, and materialises this shell for it once it is over.
 Viewport::Viewport(DOM::Document& document, BindToPreparedArenaSlot bind, Compositing::RustFFI::NodeSlotId slot, RustFFI::NodeKind kind)
-    : Box(document, bind, slot, kind, CSS::LayoutStyle { document.style_computer().create_document_style() })
+    : Box(document, bind, slot, kind)
 {
+    initialize_stamped_style_record();
     // As in the DOM-backed constructor: the base constructor could not have asked for the
     // navigable's offset, because `is_viewport()` does not answer yes until this box's own
     // constructor runs. The rows the document already has take the navigable's offset along with
