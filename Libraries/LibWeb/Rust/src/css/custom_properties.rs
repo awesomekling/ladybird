@@ -130,6 +130,16 @@ struct RegisteredCustomProperty {
     computed_initial: Option<RetainedStyleValueData>,
 }
 
+/// What a `@property` registration decides about a name, for a caller that answers for it without
+/// the host: whether it inherits, whether its specified value has to be computed against the
+/// registered syntax at all, and what the registration's initial value computed to. The initial
+/// value is absent only where the registry was filled without the host's published one.
+pub(crate) struct RegistrationFacts {
+    pub(crate) inherits: bool,
+    pub(crate) computes_a_specified_value: bool,
+    pub(crate) initial_value: Option<RetainedStyleValueData>,
+}
+
 type CustomFunctionIdentity = u64;
 
 #[derive(Clone)]
@@ -220,10 +230,15 @@ impl CustomPropertyRegistry {
         !self.registrations.is_empty()
     }
 
-    /// Whether this name is registered with `@property`. A registered name has a computed initial
-    /// value and a typed interpolation; an unregistered one has neither.
-    pub(crate) fn is_registered(&self, name: &[u16]) -> bool {
-        self.registrations.contains_key(name)
+    /// What a registration says about a name, for a caller that has to answer for it without the
+    /// host: `None` where the name is not registered at all.
+    pub(crate) fn registration_facts(&self, name: &[u16]) -> Option<RegistrationFacts> {
+        let registration = self.registrations.get(name)?;
+        Some(RegistrationFacts {
+            inherits: registration.inherits,
+            computes_a_specified_value: !matches!(registration.syntax, SyntaxNode::Universal),
+            initial_value: registration.computed_initial.clone(),
+        })
     }
 
     pub(crate) fn parse_context(&self, random_function_index: &mut usize) -> ParseContext {

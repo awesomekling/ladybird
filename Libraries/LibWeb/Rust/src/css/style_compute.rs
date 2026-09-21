@@ -3527,10 +3527,10 @@ unsafe fn try_stage_animation_tail(
         style_engine.document_style_computation_inputs(),
     );
     // A custom property a keyframe declares is sampled against the element's own environment and
-    // handed back for the host to install. Only unregistered names: a registration gives a name a
-    // computed initial value and a typed interpolation, neither of which this channel carries. The
-    // collector asks the registry as it mints each name, so a document that registers a name it
-    // never animates is no obstacle to animating the names it does.
+    // handed back for the host to install. The collector asks the registry about each name as it
+    // mints it: a registered one takes its initial value and its `inherits` from the registration
+    // and has its specified value computed against the registered syntax, which is what makes its
+    // interpolation typed.
     let stack_declares_custom_properties = selected
         .iter()
         .any(|effect| effect.description.declares_custom_properties());
@@ -3560,7 +3560,7 @@ unsafe fn try_stage_animation_tail(
     };
     if custom
         .as_ref()
-        .is_some_and(anim::AnimatedCustomProperties::animates_a_registered_name)
+        .is_some_and(anim::AnimatedCustomProperties::refuses_a_name)
     {
         give_up(&resolved);
         return None;
@@ -3595,9 +3595,21 @@ unsafe fn try_stage_animation_tail(
     // tree, which is the same walk `tree_counting_function_resolution_context()` makes over the
     // DOM: every element child of the element's parent element, in tree order. Zero is an identity
     // the retained tree does not hold, and then the host walks the DOM as before.
-    let tree_counting_inputs = match resolved.uses_tree_counting_function {
+    // A custom property's declaration is a token stream until it is parsed against the registered
+    // syntax, so what it will ask for cannot be read off the published value the way a longhand's
+    // can. Its inputs are therefore taken whenever the batch samples one at all, and what the
+    // computed value still carries is checked afterwards.
+    let batch_samples_custom_properties = custom.is_some();
+    let batch_uses_tree_counting_function = resolved.uses_tree_counting_function
+        || resolved.custom_dependencies.uses_tree_counting_function
+        || batch_samples_custom_properties;
+    let tree_counting_inputs = match batch_uses_tree_counting_function {
         true => style_engine.element_tree_counting_inputs(node),
         false => 0,
+    };
+    let has_tree_counting_context = match batch_samples_custom_properties {
+        true => batch_uses_tree_counting_function && tree_counting_inputs != 0,
+        false => resolved.uses_tree_counting_function,
     };
     // The same terms the host's `cache_preparation` uses: everything outside them needs an input
     // the stage does not hold - a custom property to compute, a container size no length context
@@ -3608,7 +3620,12 @@ unsafe fn try_stage_animation_tail(
         && (!resolved.uses_tree_counting_function || tree_counting_inputs != 0)
         && length_contexts.covers_container_relative_units(resolved.container_relative_length_unit_mask)
         && !resolved.needs_document_base_url
-        && resolved.unfixed_random_sharing_count == 0;
+        && resolved.unfixed_random_sharing_count == 0
+        // The same questions again for the custom-property declarations, which the host answers
+        // out of a computation context rather than out of the batch's terms above.
+        && length_contexts.covers_container_relative_units(resolved.custom_dependencies.container_relative_length_unit_mask)
+        && !resolved.custom_dependencies.needs_document_base_url
+        && !resolved.custom_dependencies.has_unfixed_random_sharing;
     if !batch_is_fully_described {
         give_up(&resolved);
         return None;
@@ -3648,7 +3665,7 @@ unsafe fn try_stage_animation_tail(
         has_new_font_size: false,
         // The host builds this context only for a batch that uses a tree-counting function, so this
         // one is built exactly there too.
-        has_tree_counting_context: resolved.uses_tree_counting_function,
+        has_tree_counting_context,
         sibling_count: tree_counting_inputs >> 32,
         sibling_index: tree_counting_inputs & 0xffff_ffff,
         random_base_values: std::ptr::null(),
@@ -3663,8 +3680,17 @@ unsafe fn try_stage_animation_tail(
     };
     // The keyframe drive reads one computed value per resolved custom-property declaration, and
     // the evaluation one underlying and one initial value per minted name. All of them are the
-    // element's own environment's answers, which is where the host reads them too; for an
-    // unregistered name computing a specified value is the identity, so the two are the same.
+    // element's own environment's answers, which is where the host reads them too. A registered
+    // name's declaration is computed against the registered syntax in the element's context; the
+    // host builds that context for `PropertyID::Custom`, which falls in the same generic bucket as
+    // `color`, so it is the settled remaining context and the table's effective colour scheme.
+    let custom_computation_context = anim::CustomPropertyComputationContext {
+        length: &length_contexts.remaining,
+        environment: &environment,
+        scheme: unsafe { &*(drive_input.longhand_table as *const ComputedLonghandTable) }.effective_color_scheme()
+            as u8,
+    };
+    let mut custom_declaration_needs_the_host = false;
     let mut custom_value_storage = Vec::new();
     let mut custom_keyframe_values = Vec::new();
     let (mut custom_underlying_pointers, mut custom_initial_pointers) = (Vec::new(), Vec::new());
@@ -3674,7 +3700,20 @@ unsafe fn try_stage_animation_tail(
             if property.custom_name_id == 0 {
                 continue;
             }
-            let value = custom.specified_value(property);
+            let value = custom.specified_value(property, &custom_computation_context);
+            // What the parse against the registered syntax turned out to need. Anything still
+            // asking for the element's place among its siblings, a container size, the document's
+            // base URL or a random base is something this computation did not answer, so the
+            // element goes back to the host rather than composing an unresolved value.
+            let dependencies = collect_external_value_dependencies(value.data());
+            if dependencies.uses_tree_counting_function
+                || dependencies.container_relative_length_unit_mask != 0
+                || dependencies.needs_document_base_url
+                || dependencies.has_unfixed_random_sharing
+                || dependencies.uses_random_function
+            {
+                custom_declaration_needs_the_host = true;
+            }
             custom_keyframe_values[index] = value.pointer().cast();
             custom_value_storage.push(value);
         }
@@ -3683,6 +3722,11 @@ unsafe fn try_stage_animation_tail(
         custom_initial_pointers = initial.iter().map(RetainedStyleValueData::pointer).collect();
         custom_value_storage.extend(underlying);
         custom_value_storage.extend(initial);
+    }
+    if custom_declaration_needs_the_host {
+        drop(custom_value_storage);
+        give_up(&resolved);
+        return None;
     }
     let keyframe_input = FfiAnimationKeyframeLonghandInput {
         underlying_longhand_table: drive_input.longhand_table,

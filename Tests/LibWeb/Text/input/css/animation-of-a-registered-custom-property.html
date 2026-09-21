@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    div { width: 10px; height: 10px; }
+    @property --len { syntax: "<length>"; inherits: true; initial-value: 5px; }
+    @property --own { syntax: "<length>"; inherits: false; initial-value: 7px; }
+    @property --col { syntax: "<color>"; inherits: true; initial-value: rgb(0, 0, 0); }
+    @property --num { syntax: "<number>"; inherits: true; initial-value: 0; }
+    @property --pct { syntax: "<percentage>"; inherits: true; initial-value: 0%; }
+    @property --lp { syntax: "<length-percentage>"; inherits: true; initial-value: 0px; }
+    @property --list { syntax: "<length>+"; inherits: true; initial-value: 1px 2px; }
+    @property --bare { syntax: "<length>"; inherits: true; }
+    @property --star { syntax: "*"; inherits: true; initial-value: nothing; }
+
+    @keyframes len { from { --len: 10px; } to { --len: 40px; } }
+    @keyframes len-late { to { --len: 90px; } }
+    @keyframes own { from { --own: 10px; } to { --own: 40px; } }
+    @keyframes col { from { --col: rgb(0, 0, 0); } to { --col: rgb(100, 200, 40); } }
+    @keyframes num { from { --num: 1; } to { --num: 5; } }
+    @keyframes pct { from { --pct: 10%; } to { --pct: 50%; } }
+    @keyframes lp { from { --lp: 10px; } to { --lp: calc(20px + 50%); } }
+    @keyframes list { from { --list: 10px 20px; } to { --list: 30px 60px; } }
+    @keyframes bare { from { --bare: 10px; } to { --bare: 40px; } }
+    @keyframes star { from { --star: alpha; } to { --star: omega; } }
+    @keyframes bad { from { --len: 10px; } to { --len: banana; } }
+    @keyframes wide { from { --len: inherit; } to { --len: initial; } }
+    @keyframes mixed { from { --len: 10px; width: 10px; } to { --len: 40px; width: 40px; } }
+    @keyframes late { from { --late: 10px; } to { --late: 50px; } }
+    @keyframes unset-own { from { --own: unset; } to { --own: 47px; } }
+    @keyframes unset-len { from { --len: unset; } to { --len: 47px; } }
+
+    .reads-len { width: var(--len); }
+    .reads-own { width: var(--own); }
+</style>
+<div id="len"></div>
+<div id="len-parent"><div class="reads-len" id="len-child"></div></div>
+<div id="own-parent"><div class="reads-own" id="own-child"></div></div>
+<div id="col"></div>
+<div id="num"></div>
+<div id="pct"></div>
+<div id="lp"></div>
+<div id="list"></div>
+<div id="bare"></div>
+<div id="star"></div>
+<div id="bad"></div>
+<div id="wide-parent" style="--len: 80px"><div id="wide"></div></div>
+<div id="unset-parent" style="--own: 80px; --len: 80px"><div id="unset-own"></div><div id="unset-len"></div></div>
+<div id="mixed"></div>
+<div id="important" style="--len: 7px !important"></div>
+<div id="synthesized" style="--len: 3px"></div>
+<div id="late-registration"></div>
+<div id="drops"></div>
+<script>
+    // A custom property a `@property` rule registers, animated by a `@keyframes` rule: the
+    // registration gives the name a computed initial value, a typed interpolation and, when it says
+    // `inherits: false`, an environment its descendants do not see. Every value is read on the
+    // mutating style update AND after a recomputation the animation had nothing to do with.
+    test(() => {
+        let nudge = 0;
+        function recompute(element) {
+            element.style.wordSpacing = `${++nudge}px`;
+            getComputedStyle(element).wordSpacing;
+        }
+        function read(element, properties) {
+            const style = getComputedStyle(element);
+            return properties
+                .map(property => (property.startsWith("--") ? style.getPropertyValue(property).trim() || "(none)" : style[property]))
+                .join(" ");
+        }
+        function check(label, element, properties) {
+            println(`${label}: ${read(element, properties)}`);
+            recompute(element);
+            println(`${label} after recompute: ${read(element, properties)}`);
+        }
+        function animate(id, name, options) {
+            const element = document.getElementById(id);
+            element.style.animation = `${name} 1000s linear ${options ?? ""}paused`;
+            return element;
+        }
+        function seek(element, time) {
+            for (const animation of element.getAnimations())
+                animation.currentTime = time;
+        }
+
+        // A registered `<length>` interpolates numerically rather than flipping at the halfway
+        // point, which is what an unregistered name does.
+        const len = animate("len", "len");
+        seek(len, 250000);
+        check("length at 25%", len, ["--len"]);
+        seek(len, 600000);
+        check("length at 60%", len, ["--len"]);
+
+        // `inherits: true`: the descendant sees the sampled value.
+        const lenParent = document.getElementById("len-parent");
+        const lenChild = document.getElementById("len-child");
+        animate("len-parent", "len");
+        seek(lenParent, 500000);
+        recompute(lenChild);
+        println(`inheriting child: ${read(lenChild, ["--len", "width"])}`);
+
+        // `inherits: false`: the descendant sees the registration's initial value, never the
+        // value its parent's animation settled on.
+        const ownParent = document.getElementById("own-parent");
+        const ownChild = document.getElementById("own-child");
+        animate("own-parent", "own");
+        seek(ownParent, 500000);
+        check("non-inherited parent", ownParent, ["--own"]);
+        recompute(ownChild);
+        println(`non-inherited child: ${read(ownChild, ["--own", "width"])}`);
+
+        // The typed interpolations: colour, number, percentage, a calc mixing a length and a
+        // percentage, and a list syntax whose members interpolate pairwise.
+        const col = animate("col", "col");
+        seek(col, 500000);
+        check("color at 50%", col, ["--col"]);
+        const num = animate("num", "num");
+        seek(num, 500000);
+        check("number at 50%", num, ["--num"]);
+        const pct = animate("pct", "pct");
+        seek(pct, 500000);
+        check("percentage at 50%", pct, ["--pct"]);
+        const lp = animate("lp", "lp");
+        seek(lp, 500000);
+        check("length-percentage at 50%", lp, ["--lp"]);
+        const list = animate("list", "list");
+        seek(list, 500000);
+        check("list at 50%", list, ["--list"]);
+
+        // A registration with no `initial-value` at all, and a universal syntax, which keeps the
+        // discrete interpolation an unregistered name has.
+        const bare = animate("bare", "bare");
+        seek(bare, 500000);
+        check("no initial value at 50%", bare, ["--bare"]);
+        const star = animate("star", "star");
+        seek(star, 250000);
+        check("universal syntax at 25%", star, ["--star"]);
+        seek(star, 750000);
+        check("universal syntax at 75%", star, ["--star"]);
+
+        // A keyframe value that does not parse against the registered syntax is invalid at
+        // computed-value time, so the declaration falls back the way the registration says.
+        const bad = animate("bad", "bad");
+        seek(bad, 250000);
+        check("invalid keyframe at 25%", bad, ["--len"]);
+        seek(bad, 750000);
+        check("invalid keyframe at 75%", bad, ["--len"]);
+
+        // CSS-wide keywords in a keyframe: `inherit` takes the parent's value even for a
+        // registered name, and `initial` takes the registration's computed initial value.
+        const wide = animate("wide", "wide");
+        seek(wide, 250000);
+        check("wide keywords at 25%", wide, ["--len"]);
+        seek(wide, 750000);
+        check("wide keywords at 75%", wide, ["--len"]);
+
+        // `unset` in a keyframe reads the registration's `inherits`: a name registered
+        // `inherits: false` takes the registration's initial value where one that inherits takes
+        // the parent's. Both parents here declare the name, so the two differ.
+        const unsetOwn = animate("unset-own", "unset-own");
+        seek(unsetOwn, 250000);
+        check("unset on a non-inherited name", unsetOwn, ["--own"]);
+        const unsetLen = animate("unset-len", "unset-len");
+        seek(unsetLen, 250000);
+        check("unset on an inherited name", unsetLen, ["--len"]);
+
+        // A longhand riding along with the registered name in the same rule.
+        const mixed = animate("mixed", "mixed");
+        seek(mixed, 500000);
+        check("mixed", mixed, ["--len", "width"]);
+
+        // An `!important` declaration of the element's own suppresses animating the name, which
+        // then keeps the declared value.
+        const important = animate("important", "len");
+        seek(important, 500000);
+        check("important", important, ["--len"]);
+
+        // A `to`-only rule: the synthesized `from` keyframe composes over what the element itself
+        // declares, not over the registration's initial value.
+        const synthesized = animate("synthesized", "len-late");
+        seek(synthesized, 500000);
+        check("synthesized", synthesized, ["--len"]);
+
+        // A registration that arrives while the animation is already running: the same keyframes
+        // flip discretely while the name is unregistered and interpolate once it is registered.
+        const late = animate("late-registration", "late");
+        seek(late, 250000);
+        check("late registration before", late, ["--late"]);
+        CSS.registerProperty({ name: "--late", syntax: "<length>", inherits: true, initialValue: "3px" });
+        check("late registration after", late, ["--late"]);
+
+        // Ending the animation takes the sampled environment away and leaves the initial value.
+        const drops = animate("drops", "len");
+        seek(drops, 500000);
+        check("drops while running", drops, ["--len"]);
+        drops.style.animation = "";
+        check("drops after the animation is removed", drops, ["--len"]);
+    });
+</script>
