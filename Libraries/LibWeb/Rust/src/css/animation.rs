@@ -497,6 +497,10 @@ pub struct FfiResolvedAnimationProperties {
     pub needs_document_base_url: bool,
     pub unfixed_random_sharings: *const FfiAnimationUnfixedRandomSharing,
     pub unfixed_random_sharing_count: usize,
+    /// What the batch's custom-property declarations need from outside the element, which the four
+    /// terms above do not cover; see `CustomDeclarationDependencies`. The host answers all of them
+    /// from its computation context and ignores this.
+    pub custom_dependencies: CustomDeclarationDependencies,
     pub storage: *mut std::ffi::c_void,
 }
 
@@ -636,11 +640,9 @@ fn resolve_animation_declarations(
     let mut container_relative_length_unit_mask = 0;
     let mut needs_document_base_url = false;
     let mut random_sharing_sources = Vec::new();
+    let mut custom_dependencies = CustomDeclarationDependencies::default();
     for property in &properties {
         if property.value_source != FfiAnimationSpecifiedValueSource::Value {
-            continue;
-        }
-        if property.custom_name_id != 0 {
             continue;
         }
         let value = unsafe { &*property.value };
@@ -651,6 +653,16 @@ fn resolve_animation_declarations(
             continue;
         }
         let dependencies = crate::css::style_compute::external_value_dependencies(value);
+        // A custom property's declaration is computed against the registered syntax rather than
+        // driven with the longhands, so what it needs from outside the element is summarized
+        // separately: the three terms below are the host's, and the host counts longhands alone.
+        if property.custom_name_id != 0 {
+            custom_dependencies.uses_tree_counting_function |= dependencies.uses_tree_counting_function;
+            custom_dependencies.container_relative_length_unit_mask |= dependencies.container_relative_length_unit_mask;
+            custom_dependencies.needs_document_base_url |= dependencies.needs_document_base_url;
+            custom_dependencies.has_unfixed_random_sharing |= dependencies.has_unfixed_random_sharing;
+            continue;
+        }
         uses_tree_counting_function |= dependencies.uses_tree_counting_function;
         container_relative_length_unit_mask |= dependencies.container_relative_length_unit_mask;
         needs_document_base_url |= dependencies.needs_document_base_url;
@@ -687,6 +699,7 @@ fn resolve_animation_declarations(
         container_relative_length_unit_mask,
         needs_document_base_url,
         unfixed_random_sharings,
+        custom_dependencies,
     }
 }
 
@@ -699,6 +712,21 @@ struct ResolvedAnimationDeclarations {
     container_relative_length_unit_mask: u8,
     needs_document_base_url: bool,
     unfixed_random_sharings: Vec<FfiAnimationUnfixedRandomSharing>,
+    custom_dependencies: CustomDeclarationDependencies,
+}
+
+/// What a batch's *custom* property declarations need from outside the element. The host's three
+/// terms beside them count longhands alone, because a custom property's declaration is not driven
+/// with the longhands: the host computes it against the registered syntax in a computation context
+/// that answers these questions on demand. The stage has no such context, so it summarizes them
+/// here and either answers them or leaves the element to the host.
+#[derive(Clone, Copy, Default)]
+#[repr(C)]
+pub struct CustomDeclarationDependencies {
+    pub(crate) uses_tree_counting_function: bool,
+    pub(crate) container_relative_length_unit_mask: u8,
+    pub(crate) needs_document_base_url: bool,
+    pub(crate) has_unfixed_random_sharing: bool,
 }
 
 struct AnimationValuePlan {
@@ -6901,6 +6929,7 @@ pub unsafe extern "C" fn rust_resolve_animation_declarations(
             needs_document_base_url: false,
             unfixed_random_sharings: std::ptr::null(),
             unfixed_random_sharing_count: 0,
+            custom_dependencies: CustomDeclarationDependencies::default(),
             storage: std::ptr::null_mut(),
         };
     }
@@ -6917,6 +6946,7 @@ pub unsafe extern "C" fn rust_resolve_animation_declarations(
         needs_document_base_url: resolved.needs_document_base_url,
         unfixed_random_sharings: resolved.unfixed_random_sharings.as_ptr(),
         unfixed_random_sharing_count: resolved.unfixed_random_sharings.len(),
+        custom_dependencies: resolved.custom_dependencies,
         storage: Box::into_raw(resolved).cast(),
     }
 }
@@ -6960,6 +6990,7 @@ fn no_resolved_animation_properties() -> FfiResolvedAnimationProperties {
         needs_document_base_url: false,
         unfixed_random_sharings: std::ptr::null(),
         unfixed_random_sharing_count: 0,
+        custom_dependencies: CustomDeclarationDependencies::default(),
         storage: std::ptr::null_mut(),
     }
 }
@@ -6979,6 +7010,7 @@ fn finish_resolved_animation_properties(resolved: ResolvedAnimationDeclarations)
         needs_document_base_url: resolved.needs_document_base_url,
         unfixed_random_sharings: resolved.unfixed_random_sharings.as_ptr(),
         unfixed_random_sharing_count: resolved.unfixed_random_sharings.len(),
+        custom_dependencies: resolved.custom_dependencies,
         storage: Box::into_raw(resolved).cast(),
     }
 }
@@ -7190,20 +7222,34 @@ pub(crate) struct SelectedEffect<'a> {
 /// the element's own environment with this frame's animation overlay peeled off, and whether the
 /// element declares the name `!important`, which suppresses animating it.
 ///
-/// Unregistered names only. A registered name's initial value is the registration's computed one
-/// and its interpolation is typed, neither of which this channel carries, so a stack that animates
-/// one is refused - but only that stack: a document that registers a name it never animates is no
-/// obstacle to animating the names it does.
+/// A registered name is carried too: the registration decides whether the name inherits, what its
+/// initial value is - the computed one the host publishes with the registration - and whether its
+/// specified value has to be computed against the registered syntax, which is what gives it a typed
+/// interpolation. The whole element still goes back to the host where the registry cannot be
+/// consulted at all, or where a registration arrived without a published initial value.
 pub(crate) struct AnimatedCustomProperties<'a> {
     base_store: *const std::ffi::c_void,
     inheritance_store: *const std::ffi::c_void,
     element_declares_own: bool,
     registry: Option<&'a crate::css::custom_properties::CustomPropertyRegistry>,
-    /// Set where a minted name turned out to be registered, or where the registry could not be
-    /// consulted at all. The whole element then goes back to the host.
-    animates_a_registered_name: bool,
+    /// Set where the channel cannot answer for a minted name.
+    refuses_a_name: bool,
     names: Vec<crate::css::retained_fly_string::RetainedUtf16FlyString>,
+    /// The UTF-16 units of each minted name, which is how the registry is keyed and what the
+    /// finalization of a registered value takes.
+    name_units: Vec<Vec<u16>>,
+    /// What the registry said about each minted name, and `None` for an unregistered one.
+    registrations: Vec<Option<crate::css::custom_properties::RegistrationFacts>>,
     important: Vec<bool>,
+}
+
+/// The element context a registered name's specified value is computed in: exactly the inputs the
+/// host's `get_computation_context_for_property(PropertyID::Custom, ...)` carries, which for a
+/// custom property is the same generic context the keyframe drive resolves `color` in.
+pub(crate) struct CustomPropertyComputationContext<'a> {
+    pub(crate) length: &'a crate::css::style_compute::FfiLengthResolutionContext,
+    pub(crate) environment: &'a crate::css::style_compute::FfiStyleComputationEnvironment,
+    pub(crate) scheme: u8,
 }
 
 impl<'a> AnimatedCustomProperties<'a> {
@@ -7218,15 +7264,17 @@ impl<'a> AnimatedCustomProperties<'a> {
             inheritance_store,
             element_declares_own,
             registry,
-            animates_a_registered_name: registry.is_none(),
+            refuses_a_name: registry.is_none(),
             names: Vec::new(),
+            name_units: Vec::new(),
+            registrations: Vec::new(),
             important: Vec::new(),
         }
     }
 
     /// Whether this stack animates a name the channel cannot carry.
-    pub(crate) fn animates_a_registered_name(&self) -> bool {
-        self.animates_a_registered_name
+    pub(crate) fn refuses_a_name(&self) -> bool {
+        self.refuses_a_name
     }
 
     fn store(store: *const std::ffi::c_void) -> Option<&'static crate::css::custom_properties::CustomPropertyStore> {
@@ -7249,7 +7297,14 @@ impl<'a> AnimatedCustomProperties<'a> {
             ak::Utf16StringUnits::Ascii(bytes) => bytes.iter().map(|&unit| u16::from(unit)).collect::<Vec<_>>(),
             ak::Utf16StringUnits::Utf16(units) => units.to_vec(),
         };
-        self.animates_a_registered_name |= self.registry.is_none_or(|registry| registry.is_registered(&units));
+        let registration = self.registry.and_then(|registry| registry.registration_facts(&units));
+        // A registration the host published without a computed initial value is one the channel
+        // cannot answer the fallbacks from, so the element goes back to the host.
+        self.refuses_a_name |= registration
+            .as_ref()
+            .is_some_and(|registration| registration.initial_value.is_none());
+        self.registrations.push(registration);
+        self.name_units.push(units);
         self.names.push(name.clone());
         self.important.push(
             self.element_declares_own
@@ -7266,8 +7321,26 @@ impl<'a> AnimatedCustomProperties<'a> {
         self.names[name_id as usize - 1].raw()
     }
 
-    /// An unregistered custom property's initial value is the guaranteed-invalid value.
-    fn initial_value() -> crate::css::style_value::RetainedStyleValueData {
+    fn registration(&self, name_id: u32) -> Option<&crate::css::custom_properties::RegistrationFacts> {
+        self.registrations[name_id as usize - 1].as_ref()
+    }
+
+    /// Whether an animation of this name inherits, which decides what a keyframe saying `unset`
+    /// takes. Only a registration can say no; an unregistered custom property always inherits.
+    fn is_inherited(&self, name_id: u32) -> bool {
+        self.registration(name_id)
+            .is_none_or(|registration| registration.inherits)
+    }
+
+    /// A registered name's initial value is what its registration computed to, published with it.
+    /// An unregistered one's is the guaranteed-invalid value.
+    fn initial_value(&self, name_id: u32) -> crate::css::style_value::RetainedStyleValueData {
+        self.registration(name_id)
+            .and_then(|registration| registration.initial_value.clone())
+            .unwrap_or_else(Self::guaranteed_invalid)
+    }
+
+    fn guaranteed_invalid() -> crate::css::style_value::RetainedStyleValueData {
         crate::css::style_value::RetainedStyleValueData::from_owned(
             crate::css::style_value::StyleValueData::GuaranteedInvalid,
         )
@@ -7278,15 +7351,18 @@ impl<'a> AnimatedCustomProperties<'a> {
     fn underlying_value(&self, name_id: u32) -> crate::css::style_value::RetainedStyleValueData {
         Self::store(self.base_store)
             .and_then(|store| store.retained_value(self.name_raw(name_id)))
-            .unwrap_or_else(Self::initial_value)
+            .unwrap_or_else(|| self.initial_value(name_id))
     }
 
     /// What a keyframe that says `inherit` takes: the value the environment the element inherits
-    /// from answers, and otherwise the initial value.
+    /// from answers, and otherwise the initial value. That environment is the inheritance parent's
+    /// *whole* store, not the inheritable part of it, which is what makes `inherit` on a name
+    /// registered `inherits: false` take the parent's value the way the host's
+    /// `inherited_custom_property_value` does.
     fn inherited_value(&self, name_id: u32) -> crate::css::style_value::RetainedStyleValueData {
         Self::store(self.inheritance_store)
             .and_then(|store| store.retained_value(self.name_raw(name_id)))
-            .unwrap_or_else(Self::initial_value)
+            .unwrap_or_else(|| self.initial_value(name_id))
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -7306,21 +7382,27 @@ impl<'a> AnimatedCustomProperties<'a> {
         Vec<crate::css::style_value::RetainedStyleValueData>,
     ) {
         (1..=self.names.len() as u32)
-            .map(|name_id| (self.underlying_value(name_id), Self::initial_value()))
+            .map(|name_id| (self.underlying_value(name_id), self.initial_value(name_id)))
             .unzip()
     }
 
-    /// The specified value of one resolved custom-property declaration, which is also its computed
-    /// value: `compute_animated_custom_property_value` computes nothing for an unregistered name.
-    /// A mirror of the `value_source` switch in `StyleComputer.cpp`'s `compute_animation_values`.
+    /// The computed value of one resolved custom-property declaration. A mirror of the
+    /// `value_source` switch in `StyleComputer.cpp`'s `compute_animation_values` followed by
+    /// `compute_animated_custom_property_value`, which is the identity for an unregistered name
+    /// and for a registration whose syntax is universal, and a parse against the registered syntax
+    /// in the element's computation context otherwise. That parse is what gives a registered name
+    /// its typed interpolation: the animation core interpolates the typed value as it does a
+    /// longhand's.
     pub(crate) fn specified_value(
         &self,
         property: &FfiResolvedAnimationProperty,
+        context: &CustomPropertyComputationContext<'_>,
     ) -> crate::css::style_value::RetainedStyleValueData {
-        match property.value_source {
-            FfiAnimationSpecifiedValueSource::Inherited => self.inherited_value(property.custom_name_id),
-            FfiAnimationSpecifiedValueSource::Initial => Self::initial_value(),
-            FfiAnimationSpecifiedValueSource::Underlying => self.underlying_value(property.custom_name_id),
+        let name_id = property.custom_name_id;
+        let value = match property.value_source {
+            FfiAnimationSpecifiedValueSource::Inherited => self.inherited_value(name_id),
+            FfiAnimationSpecifiedValueSource::Initial => self.initial_value(name_id),
+            FfiAnimationSpecifiedValueSource::Underlying => self.underlying_value(name_id),
             // SAFETY: a resolved declaration's value is retained by the resolution's storage,
             //         which outlives the keyframe drive this value feeds.
             FfiAnimationSpecifiedValueSource::Value => unsafe {
@@ -7328,7 +7410,27 @@ impl<'a> AnimatedCustomProperties<'a> {
                     crate::css::style_value::retain_style_value(property.value),
                 )
             },
+        };
+        if !self
+            .registration(name_id)
+            .is_some_and(|registration| registration.computes_a_specified_value)
+        {
+            return value;
         }
+        // The host takes the viewport dependency of an animated element's style from the longhand
+        // keyframe batch alone, so the one this reports is dropped here as it is there.
+        crate::css::custom_properties::finalize_custom_property_value(
+            self.registry,
+            Self::store(self.inheritance_store),
+            self.name_raw(name_id),
+            &self.name_units[name_id as usize - 1],
+            value,
+            None,
+            Some(context.length),
+            Some(context.environment),
+            context.scheme,
+        )
+        .0
     }
 }
 
@@ -7491,9 +7593,9 @@ fn describe_selected_effects(
                     // interpolates it under `PropertyID::Custom` as the host's walk does.
                     property_id: crate::css::property_metadata::property_id::CUSTOM,
                     custom_name_id,
-                    // Only unregistered names reach this channel, and an unregistered custom
-                    // property always inherits.
-                    custom_is_inherited: true,
+                    // What a keyframe saying `unset` takes: a registration can say the name does
+                    // not inherit, and an unregistered custom property always does.
+                    custom_is_inherited: custom.is_inherited(custom_name_id),
                     custom_is_important: custom.is_important(custom_name_id),
                     value,
                     style_sheet_resource_context,
