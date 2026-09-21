@@ -112,6 +112,30 @@ impl RetainedState {
         scratch: &mut EngineComputedRecordScratch,
         counters: &mut Counters,
     ) -> Option<()> {
+        self.settle_engine_pseudo_records(
+            node,
+            old_element_record,
+            None,
+            new_element_record,
+            generation,
+            scratch,
+            counters,
+        )
+    }
+
+    /// `old_is_list_item` says whether the element was a list item when the old record it no
+    /// longer holds is unknown: C++ computed the new one over it.
+    #[allow(clippy::too_many_arguments)]
+    fn settle_engine_pseudo_records(
+        &mut self,
+        node: StyleNodeID,
+        old_element_record: Option<computed::FinalStyleRecordID>,
+        old_is_list_item: Option<bool>,
+        new_element_record: computed::FinalStyleRecordID,
+        generation: u64,
+        scratch: &mut EngineComputedRecordScratch,
+        counters: &mut Counters,
+    ) -> Option<()> {
         use pseudo_kind::{AFTER, BACKDROP, BEFORE, FIRST_LETTER, MARKER, SELECTION};
 
         let Some(mut inputs) = self.document_style_computation_inputs else {
@@ -174,15 +198,16 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailRecord);
             return None;
         };
-        let old_is_list_item = match old_element_record {
-            Some(record) => {
+        let old_is_list_item = match (old_is_list_item, old_element_record) {
+            (Some(old_is_list_item), _) => old_is_list_item,
+            (None, Some(record)) => {
                 let Some(list_item) = display_is_list_item(self, record) else {
                     counters.bump(Counter::EngineComputedRecordBailRecord);
                     return None;
                 };
                 list_item
             }
-            None => false,
+            (None, None) => false,
         };
         // What a pseudo-element inherits from its element: an element record that kept its
         // inherited groups left them alone.
@@ -577,6 +602,120 @@ impl RetainedState {
         self.match_answers.answer(identity)?;
         self.match_answers.synthetic_pseudo_mask(identity)
     }
+
+    /// One attempt at the synthetic pseudo-elements of an element whose record C++ computed: the
+    /// engine settles them against that record exactly as it settles them beside one of its own.
+    /// A resumed attempt has already passed the entry checks.
+    fn settle_pseudo_records_after_host_record_step(
+        &mut self,
+        node: StyleNodeID,
+        old_is_list_item: bool,
+        scratch: &mut EngineComputedRecordScratch,
+        counters: &mut Counters,
+    ) -> Option<computed::FinalStyleRecordID> {
+        let record = self.computed_group_sets.assigned_style_record(node)?;
+        if !scratch.font_drive.is_pending() {
+            // A record the engine derived for the element itself carries its pseudo-elements,
+            // and an element standing for its host's pseudo-element is that pseudo-element.
+            if self.engine_computed_records_pending.contains_key(&node)
+                || self.computed_group_sets.adjustment_facts(node)
+                    & bridge::element_adjustment_fact::IS_SHADOW_HOST_PSEUDO_ELEMENT
+                    != 0
+            {
+                return None;
+            }
+            // Every declaration the pseudo-elements' rules make has to be a winner the engine
+            // holds, as it has for any record it derives. What the element's own declarations
+            // make is in the record C++ computed.
+            if !self.pseudo_winners_are_complete(node) {
+                counters.bump(Counter::EngineComputedRecordBailIncompleteWinners);
+                return None;
+            }
+            if !self.engine_pseudo_inputs_available(node, Some(record), counters) {
+                return None;
+            }
+            // The default marker's tabular numerals are not a font the engine resolves yet: a
+            // list item's marker would be derived only to be discarded at its font.
+            let is_list_item = self
+                .computed_group_sets
+                .style_record_view(record.raw())
+                .and_then(|view| unsafe { view.longhand_table.as_ref() })
+                .is_none_or(|table| table.display_is_list_item());
+            if (old_is_list_item || is_list_item) && self.marker_declares_unresolvable_numerals(node) {
+                counters.bump(Counter::EngineComputedRecordBailFontPhase);
+                return None;
+            }
+        }
+        let generation = self.winner_groups.generation();
+        if self
+            .settle_engine_pseudo_records(
+                node,
+                None,
+                Some(old_is_list_item),
+                record,
+                generation,
+                scratch,
+                counters,
+            )
+            .is_none()
+        {
+            if scratch.font_drive.request.is_none() {
+                // The element's record is C++'s and stays; only what was settled beside it goes.
+                for pending in self.engine_computed_records_pending.remove(&node).into_iter().flatten() {
+                    let derived = pending.new_style_record;
+                    self.revert_engine_computed_pseudo_record(&pending, counters);
+                    scratch.pseudo_cohorts.retain(|_, record| *record != derived);
+                    self.engine_pseudo_record_cache.retain(|_, record| *record != derived);
+                }
+                scratch.pseudo_deltas.clear();
+                self.settle_computed_memory();
+            }
+            return None;
+        }
+        Some(record)
+    }
+
+    fn marker_declares_unresolvable_numerals(&self, node: StyleNodeID) -> bool {
+        use crate::css::property_metadata::property_id::FONT_VARIANT_NUMERIC;
+        self.current_winner_groups()
+            .pseudo_states(node)
+            .find(|(pseudo, ..)| pseudo.kind.0 == u16::from(pseudo_kind::MARKER))
+            .and_then(|(_, _, state, _)| self.winner_groups.winner_in_state(state, FONT_VARIANT_NUMERIC))
+            .and_then(|winner| self.winner_groups.resolved_winner(winner))
+            .is_some_and(|winner| {
+                !matches!(self.specified_values.value(winner.key.value),
+                    Lookup::Known(StyleValueData::Keyword { keyword }) if *keyword == crate::css::style_compute::keyword::NORMAL)
+            })
+    }
+
+    /// Whether every rule the node's answer matches for a pseudo-element declares only what the
+    /// winner columns hold, with no container query deciding it: the strict reading
+    /// `cascade_winners_are_complete_but_for_custom_properties` gives pseudo-element rules.
+    fn pseudo_winners_are_complete(&self, node: StyleNodeID) -> bool {
+        let rule_is_complete = |rule: RuleID| {
+            !self.program.rule_is_gated_by_container_query(rule) && self.program.declarations_are_complete_for(rule)
+        };
+        if let Some((published, answer)) = Self::published_answer_lookup(
+            &self.published_match_answers,
+            self.batch_matching_traversal.as_deref(),
+            node,
+        ) && let Some(matches) = published.matches_for(answer)
+        {
+            return matches
+                .iter()
+                .filter(|entry| entry.pseudo_element.is_some())
+                .all(|entry| rule_is_complete(entry.rule));
+        }
+        let Lookup::Known(answer) = self.retained_match_answer(node) else {
+            return false;
+        };
+        answer.iter().all(|rule_match| {
+            self.programs.get(rule_match.program).entries()[rule_match.entry as usize]
+                .pseudo_element
+                .is_none()
+                || rule_is_complete(rule_match.rule)
+        })
+    }
 }
 
 /// Whether a pseudo-element's winning `content` generates no box: `none` for every kind, and
@@ -594,5 +733,56 @@ fn pseudo_content_generates_nothing(store: &impl crate::css::cascaded_properties
             *keyword == keyword::NONE || (*keyword == keyword::NORMAL && generated)
         }
         Some(_) => false,
+    }
+}
+
+impl StyleEngineState {
+    /// Settle the synthetic pseudo-elements of an element whose record C++ has just computed and
+    /// installed, so C++ installs the engine's records for them instead of computing each one:
+    /// their inputs are the element's record and the published winner states, all current once
+    /// the element's own computation has published its record. `old_is_list_item` is whether the
+    /// element generated a marker before. A zero `style_record` leaves the pseudo-elements to C++;
+    /// the flag says whether a settled one substituted custom properties.
+    pub(crate) fn settle_pseudo_records_after_host_record(
+        &mut self,
+        node: StyleNodeID,
+        old_is_list_item: bool,
+        counters: &mut Counters,
+    ) -> (RetriedEngineRecord, bool) {
+        if let Some(inputs) = self.retained.document_style_computation_inputs
+            && let Some(resolver) = &mut self.retained.font_resolution
+        {
+            resolver.prepare(inputs.font_environment_generation);
+        }
+        let mut scratch = EngineComputedRecordScratch::default();
+        let mut suspended_memory = MemoryLease::new(MemoryCategory::BatchScratch);
+        let record = loop {
+            let record = self.retained.settle_pseudo_records_after_host_record_step(
+                node,
+                old_is_list_item,
+                &mut scratch,
+                counters,
+            );
+            let Some(request) = scratch.font_drive.request.take() else {
+                break record;
+            };
+            suspended_memory.resize_required_to(&mut self.memory, scratch.font_drive.capacity_bytes());
+            self.refill_font_requests(vec![(Some(node), request)], counters);
+        };
+        let mut settled = RetriedEngineRecord::default();
+        let Some(record) = record else {
+            counters.bump(Counter::EngineComputedRecordHostPseudoDeclines);
+            return (settled, false);
+        };
+        counters.bump(Counter::EngineComputedRecordHostPseudoSettles);
+        settled.style_record = record.raw();
+        for delta in &scratch.pseudo_deltas {
+            let kind = usize::from(delta.kind);
+            if kind < bridge::RETRY_PSEUDO_RECORD_SLOTS {
+                settled.pseudo_records_present |= 1 << kind;
+                settled.pseudo_records[kind] = delta.new_style_record.raw();
+            }
+        }
+        (settled, scratch.pseudo_uses_substitution)
     }
 }
