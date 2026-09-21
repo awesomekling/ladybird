@@ -20,6 +20,50 @@ pub(crate) struct FrozenLonghandInputRow {
     pub(crate) tree_counting_inputs: u64,
 }
 
+unsafe extern "C" {
+    fn web_css_custom_property_data_reference(data: *const std::ffi::c_void);
+    fn web_css_custom_property_data_unreference(data: *const std::ffi::c_void);
+}
+
+/// The custom-property environment one element holds, kept by the engine so that a row inheriting
+/// custom properties answers from here instead of walking the flat tree to the element and reading
+/// its environment off it.
+///
+/// The row is written where the element's environment is installed, which is the only place it
+/// moves, and released when the node is retired.
+pub(crate) struct RetainedCustomPropertyData {
+    data: crate::css::host_shared::HostShared<std::ffi::c_void>,
+    store: crate::css::host_shared::HostShared<std::ffi::c_void>,
+}
+
+impl RetainedCustomPropertyData {
+    /// # Safety
+    /// `data` must be a live `Web::CSS::CustomPropertyData`, and `store` must be the one it
+    /// carries.
+    unsafe fn retain(data: *const std::ffi::c_void, store: *const std::ffi::c_void) -> Self {
+        unsafe { web_css_custom_property_data_reference(data) };
+        Self {
+            data: crate::css::host_shared::HostShared::new(data),
+            store: crate::css::host_shared::HostShared::new(store),
+        }
+    }
+
+    pub(crate) fn data(&self) -> *const std::ffi::c_void {
+        self.data.as_ptr()
+    }
+
+    pub(crate) fn store(&self) -> *const std::ffi::c_void {
+        self.store.as_ptr()
+    }
+}
+
+impl Drop for RetainedCustomPropertyData {
+    fn drop(&mut self) {
+        // SAFETY: The row owns exactly one reference, taken in `retain`.
+        unsafe { web_css_custom_property_data_unreference(self.data.as_ptr()) };
+    }
+}
+
 impl StyleEngine {
     pub(crate) fn install_layout_style_snapshots(
         &mut self,
@@ -89,6 +133,59 @@ impl RetainedState {
 
     pub(crate) fn frozen_longhand_input(&self, node: StyleNodeID) -> Option<FrozenLonghandInputRow> {
         self.frozen_longhand_inputs.get(&node).copied()
+    }
+
+    /// Keep the custom-property environment an element now holds. A null `data` records that the
+    /// element holds none, which is an answer like any other - unlike having never been told,
+    /// which is what a missing entry means.
+    ///
+    /// # Safety
+    /// `data` must be null or a live `Web::CSS::CustomPropertyData` carrying `store`.
+    pub(crate) unsafe fn set_element_custom_property_data(
+        &mut self,
+        node: StyleNodeID,
+        data: *const std::ffi::c_void,
+        store: *const std::ffi::c_void,
+    ) {
+        if data.is_null() {
+            self.element_custom_property_data.insert(node, None);
+            return;
+        }
+        if let Some(Some(existing)) = self.element_custom_property_data.get(&node)
+            && existing.data() == data
+        {
+            return;
+        }
+        self.element_custom_property_data
+            .insert(node, Some(unsafe { RetainedCustomPropertyData::retain(data, store) }));
+    }
+
+    /// Which element a row inherits custom properties from. A pseudo-element row inherits from its
+    /// own originating element, exactly as `element_to_inherit_style_from` says.
+    fn custom_property_inheritance_parent(&self, node: StyleNodeID, pseudo_kind: u8) -> Option<StyleNodeID> {
+        if pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT {
+            self.tree.inheritance_parent(node)
+        } else {
+            Some(node)
+        }
+    }
+
+    /// What a row inherits custom properties from: `Some(row)` when the engine knows, where the
+    /// row's own `Option` is `None` for an element holding no environment, and `None` when the
+    /// engine has not been told and the host has to walk for itself.
+    pub(crate) fn retained_inheritance_custom_property_data(
+        &self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+    ) -> Option<Option<&RetainedCustomPropertyData>> {
+        if !self.tree.is_live(node) {
+            return None;
+        }
+        // A row with no inheritance parent inherits nothing, and that needs nothing retained.
+        let Some(parent) = self.custom_property_inheritance_parent(node, pseudo_kind) else {
+            return Some(None);
+        };
+        self.element_custom_property_data.get(&parent).map(Option::as_ref)
     }
 
     pub(crate) fn resolved_font(&self, request: bridge::FfiFontResolutionRequest) -> Option<bridge::FfiResolvedFont> {
@@ -1725,6 +1822,7 @@ impl StyleEngineState {
                 document_style_computation_inputs: None,
                 custom_property_registry: None,
                 frozen_longhand_inputs: HashMap::default(),
+                element_custom_property_data: HashMap::default(),
                 legacy_finalized_longhand_rows: HashMap::default(),
                 font_resolution: None,
                 root_font_request: None,
@@ -2506,6 +2604,9 @@ impl StyleEngineState {
             self.retained.layout_style_snapshots.retire(&retired_nodes);
             for &node in &retired_nodes {
                 self.retained.container_query_inputs.clear(node);
+                // An identity can be minted again for another element, so a retained environment
+                // must not outlive the element that installed it.
+                self.retained.element_custom_property_data.remove(&node);
             }
             self.retained
                 .tree

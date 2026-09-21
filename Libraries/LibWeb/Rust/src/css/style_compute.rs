@@ -9274,6 +9274,12 @@ pub(crate) mod ffi_test_stubs {
     extern "C" fn ladybird_gfx_font_ref(_raw: *const std::ffi::c_void) {}
     #[unsafe(no_mangle)]
     extern "C" fn ladybird_gfx_font_unref(_raw: *const std::ffi::c_void) {}
+    // No test publishes an element custom-property environment, so there is no C++ object here to
+    // take a reference on or to give one up.
+    #[unsafe(no_mangle)]
+    extern "C" fn web_css_custom_property_data_reference(_data: *const std::ffi::c_void) {}
+    #[unsafe(no_mangle)]
+    extern "C" fn web_css_custom_property_data_unreference(_data: *const std::ffi::c_void) {}
     #[unsafe(no_mangle)]
     unsafe extern "C" fn ladybird_gfx_decoded_image_frame_retain(
         frame: *const std::ffi::c_void,

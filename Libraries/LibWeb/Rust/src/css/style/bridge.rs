@@ -564,6 +564,17 @@ pub struct FfiElementArrival {
     pub construction_facts: u32,
 }
 
+/// The custom-property environment a row inherits from, answered from retained state. `is_present`
+/// false means the engine holds no answer and the host has to walk for itself; a present row with
+/// a null `data` is an element that holds no environment.
+#[derive(Clone, Copy, Default)]
+#[repr(C)]
+pub struct FfiRetainedCustomPropertyData {
+    pub data: *const c_void,
+    pub store: *const c_void,
+    pub is_present: bool,
+}
+
 /// Inputs independent of results produced earlier in the same preorder style batch.
 #[derive(Clone, Copy, Default)]
 #[repr(C)]
@@ -4502,6 +4513,57 @@ pub unsafe extern "C" fn style_engine_frozen_longhand_input(
         adjustment_facts: row.adjustment_facts,
         is_present: true,
         tree_counting_inputs: row.tree_counting_inputs,
+    }
+}
+
+/// Keeps the custom-property environment an element now holds. A null `data` records that the
+/// element holds none.
+///
+/// # Safety
+/// `engine` must be live, and `data` must be null or a live `Web::CSS::CustomPropertyData`
+/// carrying `store`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_set_element_custom_property_data(
+    engine: *mut c_void,
+    node: u32,
+    data: *const c_void,
+    store: *const c_void,
+) {
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return;
+    };
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    unsafe { engine.set_element_custom_property_data(node, data, store) };
+}
+
+/// What a row inherits custom properties from, taken from the engine's retained environments
+/// rather than from a walk to the element it inherits from.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_retained_inheritance_custom_property_data(
+    engine: *const c_void,
+    node: u32,
+    pseudo_kind: u8,
+) -> FfiRetainedCustomPropertyData {
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return FfiRetainedCustomPropertyData::default();
+    };
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    let Some(row) = engine.retained_inheritance_custom_property_data(node, pseudo_kind) else {
+        return FfiRetainedCustomPropertyData::default();
+    };
+    match row {
+        None => FfiRetainedCustomPropertyData {
+            is_present: true,
+            ..Default::default()
+        },
+        Some(row) => FfiRetainedCustomPropertyData {
+            is_present: true,
+            data: row.data(),
+            store: row.store(),
+        },
     }
 }
 

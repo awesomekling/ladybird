@@ -44,6 +44,9 @@ public:
     Optional<AbstractElement> highlight_inheritance_parent() const;
 
     void set_inheritance_override(GC::Ref<Element> element) { m_inheritance_override = element; }
+    // Whether this element inherits from somewhere the flat tree does not say, which the style
+    // engine's own answer to that question cannot know about.
+    [[nodiscard]] bool has_inheritance_override() const { return !!m_inheritance_override; }
 
     [[nodiscard]] CSS::ComputedStyleRecordView computed_style() const;
     [[nodiscard]] CSS::StyleRecordID style_record_identity() const;

@@ -214,3 +214,18 @@ bool CustomPropertyData::is_empty() const
 }
 
 }
+
+// The style engine retains an element's custom-property environment so that a row inheriting from
+// that element does not have to walk to it. The reference is taken and given up on the document
+// thread, by the engine's serial installer; a sealed pass only ever reads the pointer back out.
+extern "C" void web_css_custom_property_data_reference(void const* data)
+{
+    if (data)
+        static_cast<Web::CSS::CustomPropertyData const*>(data)->ref();
+}
+
+extern "C" void web_css_custom_property_data_unreference(void const* data)
+{
+    if (data)
+        static_cast<Web::CSS::CustomPropertyData const*>(data)->unref();
+}
