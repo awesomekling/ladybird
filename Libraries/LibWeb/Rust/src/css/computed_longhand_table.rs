@@ -949,15 +949,6 @@ impl ComputedLonghandTable {
         table
     }
 
-    /// Copy every published value and flag into a uniquely owned, unfrozen table. This is used
-    /// when a legacy drive keeps its host-owned table while the retained engine assembles the
-    /// same immutable record.
-    pub(crate) fn copied_for_publication(source: &ComputedLonghandTable) -> Self {
-        let mut table = Self::new();
-        table.copy_from(source);
-        table
-    }
-
     pub(crate) fn with_inherited_values_from(&self, inherited_source: &ComputedLonghandTable) -> Self {
         self.with_inherited_values_and_flags_from(inherited_source, &self.important_bits, &self.inherited_bits)
     }
