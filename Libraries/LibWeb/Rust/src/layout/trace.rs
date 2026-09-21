@@ -11,6 +11,12 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::fmt::Write;
 
+pub(crate) struct MainThreadFfiEntry {
+    _private: (),
+}
+
+const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
+
 type AppendText = unsafe extern "C" fn(*mut c_void, *const u8, usize);
 type DescribeNode = unsafe extern "C" fn(*mut c_void, *mut c_void, AppendText);
 
@@ -53,8 +59,8 @@ impl LayoutTrace {
         });
     }
 
-    fn take(&self, arena: &LayoutNodeArena) -> String {
-        self.name_owners(arena);
+    fn take(&self, main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena) -> String {
+        self.name_owners(main_thread, arena);
         let Some(trace) = self.0.borrow_mut().take() else {
             return String::new();
         };
@@ -77,7 +83,7 @@ impl LayoutTrace {
     /// Names the nodes the traced events name. This runs once a pass is over, while the nodes the
     /// pass ran for are still live: a subsequent mutation may remove them or reuse their arena
     /// slots before JavaScript takes the trace.
-    pub(super) fn name_owners(&self, arena: &LayoutNodeArena) {
+    pub(super) fn name_owners(&self, main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena) {
         let (describe, unnamed) = {
             let state = self.0.borrow();
             let Some(trace) = state.as_ref() else {
@@ -94,7 +100,7 @@ impl LayoutTrace {
         };
         let names: Vec<(usize, String)> = unnamed
             .into_iter()
-            .map(|(index, owner)| (index, owner_name(arena, owner, describe)))
+            .map(|(index, owner)| (index, owner_name(main_thread, arena, owner, describe)))
             .collect();
         if let Some(trace) = self.0.borrow_mut().as_mut() {
             for (index, name) in names {
@@ -161,7 +167,12 @@ impl LayoutTrace {
     }
 }
 
-fn owner_name(arena: &LayoutNodeArena, root: NodeSlotId, describe: DescribeNode) -> String {
+fn owner_name(
+    main_thread: &crate::stage::MainThread,
+    arena: &LayoutNodeArena,
+    root: NodeSlotId,
+    describe: DescribeNode,
+) -> String {
     if arena.data(root).kind.get() == NodeKind::Viewport {
         return "@viewport".into();
     }
@@ -184,7 +195,7 @@ fn owner_name(arena: &LayoutNodeArena, root: NodeSlotId, describe: DescribeNode)
     let mut bytes = Vec::<u8>::new();
     // SAFETY: the traced run holds the arena and its shells alive; describe copies
     // the node's description synchronously without changing layout.
-    unsafe { describe(arena.shell_if_live(root), (&raw mut bytes).cast(), append) };
+    unsafe { describe(arena.shell_if_live(main_thread, root), (&raw mut bytes).cast(), append) };
     String::from_utf8(bytes).expect("layout trace label must be UTF-8")
 }
 
@@ -206,14 +217,20 @@ pub unsafe extern "C" fn layout_arena_take_layout_trace(
     context: *mut c_void,
     append_text: AppendText,
 ) {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    let text = arena.layout_trace.take(arena);
+    let text = arena.layout_trace.take(&main_thread, arena);
     unsafe { append_text(context, text.as_ptr(), text.len()) };
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn main_thread_for_test() -> crate::stage::MainThread {
+        // SAFETY: Tests run on the thread that owns their arena.
+        unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) }
+    }
 
     unsafe extern "C" fn unused_description(_: *mut c_void, _: *mut c_void, _: AppendText) {
         panic!("no nodes to describe in this test");
@@ -224,7 +241,7 @@ mod tests {
         let arena = LayoutNodeArena::new();
         let trace = LayoutTrace::default();
         assert!(trace.scope("", None, || panic!("disabled observation")).is_none());
-        assert_eq!(trace.take(&arena), "");
+        assert_eq!(trace.take(&main_thread_for_test(), &arena), "");
     }
 
     #[test]
@@ -244,11 +261,11 @@ mod tests {
             let _pass = trace.scope("layout PARTIAL ", None, || "#boundary".into());
         }
         assert_eq!(
-            trace.take(&arena),
+            trace.take(&main_thread_for_test(), &arena),
             "layout FULL\n  @viewport/block RUN (cache=bypass)\n    #child/block REUSE SUBTREE\n    #child/block RUN (cache=miss)\nlayout PARTIAL #boundary\n"
         );
         assert!(trace.scope("", None, || panic!("take must disable tracing")).is_none());
-        assert_eq!(trace.take(&arena), "");
+        assert_eq!(trace.take(&main_thread_for_test(), &arena), "");
     }
 
     #[test]
@@ -258,6 +275,6 @@ mod tests {
         trace.begin(unused_description);
         drop(trace.scope("", None, || "old pass".into()));
         trace.begin(unused_description);
-        assert_eq!(trace.take(&arena), "");
+        assert_eq!(trace.take(&main_thread_for_test(), &arena), "");
     }
 }

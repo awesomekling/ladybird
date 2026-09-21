@@ -909,7 +909,7 @@ pub(crate) fn update_scrollable_overflow(arena: &LayoutNodeArena, main_thread: &
         return;
     };
     for (slot, offset) in clamped {
-        let shell = arena.shell_if_live(slot);
+        let shell = arena.shell_if_live(main_thread, slot);
         if !shell.is_null() {
             // SAFETY: The registered host receives a live shell. No mutable arena or cache
             // borrow is held while it re-enters geometry queries to store the offset.

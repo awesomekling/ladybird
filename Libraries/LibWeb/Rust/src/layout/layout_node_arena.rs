@@ -1836,12 +1836,12 @@ impl LayoutNodeArena {
         self.active_layout_pass_depth.set(depth + 1);
     }
 
-    pub(crate) fn end_active_layout_pass(&self) {
+    pub(crate) fn end_active_layout_pass(&self, main_thread: &crate::stage::MainThread) {
         let depth = self.active_layout_pass_depth.get();
         assert!(depth > 0, "layout pass depth underflow");
         self.active_layout_pass_depth.set(depth - 1);
         if depth == 1 {
-            self.layout_trace.name_owners(self);
+            self.layout_trace.name_owners(main_thread, self);
         }
     }
 
@@ -3108,7 +3108,7 @@ impl LayoutNodeArena {
         }
     }
 
-    fn materialize_shell(&self, id: NodeSlotId) -> *mut c_void {
+    fn materialize_shell(&self, _: &crate::stage::MainThread, id: NodeSlotId) -> *mut c_void {
         let Some((context, factory)) = self.shell_factory.get() else {
             return std::ptr::null_mut();
         };
@@ -5062,11 +5062,11 @@ impl LayoutNodeArena {
         self.live_count
     }
 
-    pub(crate) fn shell_if_live(&self, id: NodeSlotId) -> *mut c_void {
+    pub(crate) fn shell_if_live(&self, main_thread: &crate::stage::MainThread, id: NodeSlotId) -> *mut c_void {
         if !self.slot_is_live(id) {
             return std::ptr::null_mut();
         }
-        self.node_shell(id)
+        self.node_shell(main_thread, id)
     }
 
     pub(crate) fn node_link_slot(&self, id: NodeSlotId, link: FfiNodeLink) -> NodeSlotId {
@@ -5080,18 +5080,27 @@ impl LayoutNodeArena {
         }
     }
 
-    pub(crate) fn node_link_shell(&self, id: NodeSlotId, link: FfiNodeLink) -> *mut c_void {
+    pub(crate) fn node_link_shell(
+        &self,
+        main_thread: &crate::stage::MainThread,
+        id: NodeSlotId,
+        link: FfiNodeLink,
+    ) -> *mut c_void {
         let linked = self.node_link_slot(id, link);
         if linked.is_invalid() {
             return std::ptr::null_mut();
         }
-        self.node_shell(linked)
+        self.node_shell(main_thread, linked)
     }
 
-    pub(crate) fn node_containing_block_shell_if_live(&self, id: NodeSlotId) -> *mut c_void {
+    pub(crate) fn node_containing_block_shell_if_live(
+        &self,
+        main_thread: &crate::stage::MainThread,
+        id: NodeSlotId,
+    ) -> *mut c_void {
         self.node_containing_block_if_live(id)
             .map_or(std::ptr::null_mut(), |containing_block| {
-                self.shell_if_live(containing_block)
+                self.shell_if_live(main_thread, containing_block)
             })
     }
 
@@ -5203,12 +5212,14 @@ impl LayoutNodeArena {
         owed
     }
 
-    pub(crate) fn node_shell(&self, id: NodeSlotId) -> *mut c_void {
+    /// The shell of `id`, made now if nothing has asked for it before. Making one runs the host's
+    /// shell factory, so only the main thread can ask.
+    pub(crate) fn node_shell(&self, main_thread: &crate::stage::MainThread, id: NodeSlotId) -> *mut c_void {
         let shell = self.data(id).shell.get();
         if !shell.is_null() {
             return shell;
         }
-        self.materialize_shell(id)
+        self.materialize_shell(main_thread, id)
     }
 
     pub(crate) fn dom_offset_for_rendered_text_offset(
@@ -5521,7 +5532,8 @@ pub unsafe extern "C" fn layout_arena_pre_order_label_violation_count(arena: *mu
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
     let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
-    if arena.shell_if_live(root).is_null() {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    if arena.shell_if_live(&main_thread, root).is_null() {
         return 0;
     }
     let mut violation_count = 0u64;
@@ -5554,7 +5566,9 @@ pub unsafe extern "C" fn layout_arena_pre_order_relabel_count(arena: *mut c_void
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_shell_if_live(arena: *mut c_void, id: NodeSlotId) -> *mut c_void {
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.shell_if_live(id)
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    // SAFETY: As above.
+    unsafe { LayoutNodeArena::from_handle(arena) }.shell_if_live(&main_thread, id)
 }
 
 #[unsafe(no_mangle)]
@@ -5563,8 +5577,9 @@ pub unsafe extern "C" fn layout_arena_node_link_shell(
     id: NodeSlotId,
     link: FfiNodeLink,
 ) -> *mut c_void {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.node_link_shell(id, link)
+    unsafe { LayoutNodeArena::from_handle(arena) }.node_link_shell(&main_thread, id, link)
 }
 
 #[unsafe(no_mangle)]
@@ -5582,8 +5597,9 @@ pub unsafe extern "C" fn layout_arena_node_containing_block_shell_if_live(
     arena: *mut c_void,
     id: NodeSlotId,
 ) -> *mut c_void {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.node_containing_block_shell_if_live(id)
+    unsafe { LayoutNodeArena::from_handle(arena) }.node_containing_block_shell_if_live(&main_thread, id)
 }
 
 #[unsafe(no_mangle)]
@@ -5673,6 +5689,7 @@ pub unsafe extern "C" fn layout_arena_note_rows_share_dom_node(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_bound_shell(arena: *mut c_void, style_node: u32) -> *mut c_void {
     assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     let Some(style_node) = StyleNodeID::from_raw(style_node) else {
         return std::ptr::null_mut();
     };
@@ -5683,7 +5700,7 @@ pub unsafe extern "C" fn layout_arena_bound_shell(arena: *mut c_void, style_node
     if row.is_invalid() {
         return std::ptr::null_mut();
     }
-    arena.node_shell(row)
+    arena.node_shell(&main_thread, row)
 }
 
 /// The shell of the row the pseudo-element of kind `generated_for` on the element with
@@ -5695,6 +5712,7 @@ pub unsafe extern "C" fn layout_arena_bound_pseudo_element_shell(
     generated_for: u8,
 ) -> *mut c_void {
     assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     let Some(style_node) = StyleNodeID::from_raw(style_node) else {
         return std::ptr::null_mut();
     };
@@ -5705,7 +5723,7 @@ pub unsafe extern "C" fn layout_arena_bound_pseudo_element_shell(
     if row.is_invalid() {
         return std::ptr::null_mut();
     }
-    arena.node_shell(row)
+    arena.node_shell(&main_thread, row)
 }
 
 /// The shell of the viewport row the document is bound to, materialised if nothing has asked for
@@ -5713,13 +5731,14 @@ pub unsafe extern "C" fn layout_arena_bound_pseudo_element_shell(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_bound_viewport_shell(arena: *mut c_void) -> *mut c_void {
     assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: As above.
     let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
     let row = arena.bound_viewport_row();
     if row.is_invalid() {
         return std::ptr::null_mut();
     }
-    arena.node_shell(row)
+    arena.node_shell(&main_thread, row)
 }
 
 #[unsafe(no_mangle)]
@@ -5763,10 +5782,11 @@ pub unsafe extern "C" fn layout_arena_for_each_row_built_for_same_node(
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on
     // the document thread.
     let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // The ring is a column of links rather than a borrow, so the host may re-enter the arena
     // from `visit`. What it must not do is change which rows are built for the node.
     arena.for_each_row_built_for_same_node(id, |row| {
-        let shell = arena.shell_if_live(row);
+        let shell = arena.shell_if_live(&main_thread, row);
         if !shell.is_null() {
             // SAFETY: The host answers synchronously and does not free the shell.
             unsafe { visit(context, shell) };
@@ -6296,6 +6316,7 @@ pub unsafe extern "C" fn layout_arena_for_each_pending_rebuilt_subtree_root(
     visit: unsafe extern "C" fn(*mut c_void, *mut c_void),
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: As above; the roots are copied out so no borrow spans the callback.
     let roots = unsafe { &*arena.cast::<LayoutNodeArena>() }
         .pending_rebuilt_subtree_roots
@@ -6308,7 +6329,7 @@ pub unsafe extern "C" fn layout_arena_for_each_pending_rebuilt_subtree_root(
             continue;
         }
         // SAFETY: The callback receives a layout node the arena keeps alive.
-        unsafe { visit(context, arena.node_shell(root)) };
+        unsafe { visit(context, arena.node_shell(&main_thread, root)) };
     }
 }
 
@@ -6357,7 +6378,7 @@ pub(crate) unsafe fn sync_enrolled_content_for_layout(main_thread: &crate::stage
         .clone();
     let mut live_replaced_nodes = Vec::with_capacity(enrolled_replaced_nodes.len());
     for node in enrolled_replaced_nodes {
-        let shell = unsafe { &*arena.cast::<LayoutNodeArena>() }.shell_if_live(node);
+        let shell = unsafe { &*arena.cast::<LayoutNodeArena>() }.shell_if_live(main_thread, node);
         if shell.is_null() {
             continue;
         }
@@ -6617,7 +6638,9 @@ mod tests {
         let mut arena = LayoutNodeArena::new();
         let slot = arena.allocate_unbound();
         assert!(arena.slot_is_live(slot));
-        assert!(arena.node_shell(slot).is_null());
+        // SAFETY: Tests run on the thread that owns their arena.
+        let main_thread = unsafe { crate::stage::from_ffi_entry(&super::MAIN_THREAD_FFI_ENTRY) };
+        assert!(arena.node_shell(&main_thread, slot).is_null());
         assert_eq!(arena.data(slot).kind.get(), NodeKind::Unset);
 
         let unbound_freed = arena.free_subtree(slot);

@@ -69,6 +69,8 @@ ffi_entry!(crate::layout::formatting_context::MainThreadFfiEntry);
 ffi_entry!(crate::layout::ArenaMainThreadFfiEntry);
 ffi_entry!(crate::layout::UpdateMainThreadFfiEntry);
 ffi_entry!(crate::layout::TreeBuildMainThreadFfiEntry);
+ffi_entry!(crate::layout::TextQueriesMainThreadFfiEntry);
+ffi_entry!(crate::layout::TraceMainThreadFfiEntry);
 ffi_entry!(crate::painting::display_list::dump::MainThreadFfiEntry);
 ffi_entry!(crate::painting::ffi::MainThreadFfiEntry);
 ffi_entry!(crate::painting::layout_tree_dump::MainThreadFfiEntry);

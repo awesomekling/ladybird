@@ -3044,7 +3044,7 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     for (row, owed) in arena.take_rows_owed_to_host() {
         match owed {
             OwedToHost::Shell => {
-                arena.node_shell(row);
+                arena.node_shell(&main_thread, row);
             }
             OwedToHost::StyleResources {
                 owns_content_replacement_image,
