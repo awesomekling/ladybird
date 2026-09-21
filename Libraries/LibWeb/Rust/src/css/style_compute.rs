@@ -7115,6 +7115,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
             0
         } else {
             let font = legacy_font.group_inputs(table, animation_length_contexts.remaining.font_metrics.line_height);
+            style_engine.prepare_root_font_metrics_from_legacy(node, table, &font);
             style_engine
                 .assemble_legacy_record_for_verification(
                     node,
