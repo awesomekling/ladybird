@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<style>
+    @keyframes grow {
+        from {
+            width: 20px;
+        }
+        to {
+            width: 50px;
+        }
+    }
+
+    #forwards {
+        width: 10px;
+        animation-name: grow;
+        animation-fill-mode: forwards;
+    }
+
+    #backwards {
+        width: 10px;
+        animation-name: grow;
+        animation-delay: 10s;
+        animation-fill-mode: backwards;
+    }
+</style>
+<div id="forwards"></div>
+<div id="backwards"></div>
+<script src="../include.js"></script>
+<script>
+    test(() => {
+        // `animation-duration` is `auto`, whose intrinsic iteration duration is zero against a
+        // monotonic timeline: the animation is over before the update that starts it.
+        println(getComputedStyle(forwards).width);
+        println(forwards.getAnimations().length);
+        // A delay still applies, so this one has not begun and fills backwards.
+        println(getComputedStyle(backwards).width);
+        println(backwards.getAnimations().length);
+    });
+</script>
