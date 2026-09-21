@@ -12,6 +12,12 @@
 //! reports each callback site once; `abort` makes the first callback fatal. Reports and census
 //! totals go to stderr or to the file named by `LIBWEB_SEAL_STYLE_STAGE_LOG`.
 //!
+//! `longhand_result_apply` says that applying one row's results reached the host: a GC object, a
+//! DOM node, or state the document exposes. A row that writes only the computation's own working
+//! set - created and dropped inside the stage - is not counted, because moving that row's
+//! application after the batch would change nothing. The working set itself is still a crossing,
+//! and `longhand_input_freeze` still counts it for every row.
+//!
 //! A font cache miss is not the shared font resource service: the installed resolver can
 //! synchronously enter the font loader and resolve a pending web face, including its GC-visible
 //! callbacks. Likewise, callbacks that prepare C++ longhand state or report computed results are

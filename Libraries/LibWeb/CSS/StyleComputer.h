@@ -420,6 +420,9 @@ private:
     mutable Optional<MediaEnvironmentSnapshot> m_style_update_media_environment;
     mutable Optional<Parser::ValueParserFFI::FfiMediaEnvironment> m_style_update_ffi_media_environment;
     mutable Optional<DocumentEnvironmentSnapshot> m_style_update_document_environment;
+    // A row's longhand evaluations are document-visible state, so they are added up while the
+    // update runs and handed to the document once it is over rather than one row at a time.
+    mutable u64 m_deferred_longhand_evaluations { 0 };
     // The style most recently built, kept as a payload donor: a run of elements computing the same
     // style shares group payloads through it, which no parent or previous-style adoption can do.
     mutable RefPtr<ComputedValues const> m_last_built_computed_values;
