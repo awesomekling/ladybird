@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<style>
+    #subject {
+        width: 10px;
+        animation: no-such-rule 1s infinite;
+    }
+
+    #late {
+        width: 10px;
+        animation: appears-later 1s infinite;
+    }
+</style>
+<div id="subject"></div>
+<div id="late"></div>
+<script src="../include.js"></script>
+<script>
+    test(() => {
+        // An animation whose name matches no `@keyframes` rule is started all the same, and it
+        // composes nothing over the style the element computed.
+        println(getComputedStyle(subject).width);
+        println(subject.getAnimations().length);
+
+        // The very same animation composes as soon as the rule it names exists.
+        println(getComputedStyle(late).width);
+        const sheet = document.styleSheets[0];
+        sheet.insertRule("@keyframes appears-later { from, to { width: 40px; } }", sheet.cssRules.length);
+        println(getComputedStyle(late).width);
+        println(late.getAnimations().length);
+    });
+</script>
