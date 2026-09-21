@@ -48,6 +48,12 @@ static StyleEngineFFI::FfiResolvedFont resolve_font(void* context, StyleEngineFF
     };
 }
 
+static void resolve_fonts(void* context, StyleEngineFFI::FfiFontResolutionRequest const* requests, StyleEngineFFI::FfiResolvedFont* resolved_fonts, size_t count)
+{
+    for (size_t index = 0; index < count; ++index)
+        resolved_fonts[index] = resolve_font(context, requests[index]);
+}
+
 static_assert(StyleEngineFFI::LAST_SYNTHETIC_PSEUDO_ELEMENT_KIND == to_underlying(last_synthetic_pseudo_element));
 static_assert(!IsMoveConstructible<StyleEngine>);
 static_assert(!IsMoveAssignable<StyleEngine>);
@@ -60,7 +66,7 @@ StyleEngine::StyleEngine(DeviceClass device_class, StyleComputer* style_computer
 {
     if (m_style_computer) {
         set_pseudo_element_style_deferred(to_underlying(PseudoElement::Selection), true);
-        StyleEngineFFI::style_engine_install_font_resolver(m_impl, m_style_computer.ptr(), resolve_font);
+        StyleEngineFFI::style_engine_install_font_resolver(m_impl, m_style_computer.ptr(), resolve_fonts);
     }
 }
 

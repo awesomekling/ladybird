@@ -1246,7 +1246,7 @@ pub extern "C" fn style_engine_create(device_class: FfiDeviceClass) -> *mut c_vo
 pub unsafe extern "C" fn style_engine_install_font_resolver(
     engine: *mut c_void,
     context: *mut c_void,
-    resolve: unsafe extern "C" fn(*mut c_void, FfiFontResolutionRequest) -> FfiResolvedFont,
+    resolve: unsafe extern "C" fn(*mut c_void, *const FfiFontResolutionRequest, *mut FfiResolvedFont, usize),
 ) {
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     assert!(engine.host.font_resolver.is_none(), "font resolver is installed once");

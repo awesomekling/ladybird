@@ -1912,6 +1912,8 @@ impl StyleEngineState {
                 chain
             };
             let mut completed_record_count = 0;
+            // Resumptions share the transaction scratch above, so complete them one at a time in
+            // canonical order. The requests discovered by a pass are still serviced together.
             let mut ready_record = None::<publication::pending::ParkedEngineComputedRecord>;
             let mut waiting_records = Vec::<publication::pending::ParkedEngineComputedRecord>::new();
             while completed_record_count < published_nodes.len() {
@@ -2245,19 +2247,20 @@ impl StyleEngineState {
                 }
                 debug_assert!(ready_record.is_none());
                 next_parked_records.sort_unstable_by_key(|parked| parked.published_index);
+                let requests = next_parked_records
+                    .iter_mut()
+                    .filter_map(|parked| {
+                        parked
+                            .continuation
+                            .font_drive
+                            .request
+                            .take()
+                            .map(|request| (published_nodes[parked.published_index], request))
+                    })
+                    .collect();
+                self.refill_font_requests(requests, counters);
                 if !next_parked_records.is_empty() {
-                    let mut parked = next_parked_records.remove(0);
-                    let request = parked.continuation.font_drive.request.take().unwrap();
-                    if !self
-                        .retained
-                        .font_resolution
-                        .as_ref()
-                        .is_some_and(|cache| request.is_resolved_by(cache))
-                    {
-                        let node = published_nodes[parked.published_index];
-                        self.refill_font_request(node, request, counters);
-                    }
-                    ready_record = Some(parked);
+                    ready_record = Some(next_parked_records.remove(0));
                 }
                 waiting_records = next_parked_records;
             }
