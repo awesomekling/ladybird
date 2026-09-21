@@ -45,6 +45,7 @@ unsafe fn arena_from_handle_inside_render_pass<'a>(arena: *mut c_void) -> &'a La
 
 /// SAFETY: `arena` must be a live handle from `layout_arena_create`, exclusively borrowed for
 /// this call on the document thread. No C++ callback may re-enter the arena during the borrow.
+#[track_caller]
 unsafe fn arena_from_handle_mut<'a>(arena: *mut c_void) -> &'a mut LayoutNodeArena {
     unsafe { LayoutNodeArena::from_handle_mut(arena) }
 }
@@ -1261,6 +1262,7 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
     viewport: NodeSlotId,
     inputs: crate::painting::host::FfiRecordingInputs,
 ) -> bool {
+    crate::layout::main_side_census::note_rendering_update(arena);
     let arena = unsafe { arena_from_handle(arena) };
     {
         let mut paint_state = arena.paint_state().borrow_mut();

@@ -5229,15 +5229,19 @@ impl LayoutNodeArena {
             .rendered_text_offset_for_dom_offset(offset, boundary)
     }
 
+    #[track_caller]
     pub(crate) unsafe fn from_handle<'a>(arena: *mut c_void) -> &'a Self {
         assert!(!arena.is_null(), "layout node arena handle is null");
         // SAFETY: Layout passes borrow the document's arena synchronously,
         // and the document keeps it alive for the duration of the pass.
+        super::main_side_census::note_arena_access(std::panic::Location::caller(), arena);
         unsafe { &*arena.cast::<Self>() }
     }
 
+    #[track_caller]
     pub(crate) unsafe fn from_handle_mut<'a>(arena: *mut c_void) -> &'a mut Self {
         assert!(!arena.is_null(), "layout node arena handle is null");
+        super::main_side_census::note_arena_access(std::panic::Location::caller(), arena);
         // SAFETY: The caller guarantees exclusive access to the arena for the
         // duration of the returned borrow.
         unsafe { &mut *arena.cast::<Self>() }
@@ -5302,6 +5306,7 @@ pub unsafe extern "C" fn layout_arena_destroy(arena: *mut c_void) {
     assert_eq!(arena.live_count, 0, "layout node arena destroyed with live slots");
     crate::painting::published_immutable::finish(arena);
     super::tree_build_seal::flush_census();
+    super::main_side_census::flush();
 }
 
 /// Detaches `node` from its parent and frees its subtree, handing back what the rows held. Answers
@@ -5320,6 +5325,7 @@ pub(crate) fn detach_and_free_subtree(arena: *mut LayoutNodeArena, node: NodeSlo
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread, and no
 /// borrow of it may be live across this call other than the ones `operation` takes.
+#[track_caller]
 pub(crate) unsafe fn paying_host_handbacks<R>(
     main_thread: &crate::stage::MainThread,
     arena: *mut c_void,
@@ -5327,8 +5333,10 @@ pub(crate) unsafe fn paying_host_handbacks<R>(
 ) -> R {
     // SAFETY: Guaranteed by the caller; each borrow here ends before `operation` runs or after it
     // has returned.
+    super::main_side_census::note_arena_access(std::panic::Location::caller(), arena);
     unsafe { &*arena.cast::<LayoutNodeArena>() }.begin_paying_host_handbacks(main_thread);
-    let result = operation();
+    // The operation is the passage just counted, however many times it turns the handle around.
+    let result = super::main_side_census::within_counted_passage(operation);
     // SAFETY: As above.
     unsafe { &*arena.cast::<LayoutNodeArena>() }.finish_paying_host_handbacks(main_thread);
     result
@@ -5358,7 +5366,7 @@ pub unsafe extern "C" fn layout_arena_content_counter_styles_changed(
     };
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the
     // document thread.
-    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     match super::generated_content::content_counter_styles_changed(arena, owner) {
         None => CONTENT_COUNTER_STYLES_NOT_RECORDED,
         Some(false) => CONTENT_COUNTER_STYLES_UNCHANGED,
@@ -5389,7 +5397,7 @@ pub unsafe extern "C" fn layout_arena_generated_content_accessible_text(
     };
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the
     // document thread.
-    let generated_content = unsafe { &*arena.cast::<LayoutNodeArena>() }
+    let generated_content = unsafe { LayoutNodeArena::from_handle(arena) }
         .generated_content()
         .borrow();
     ak::Utf16String::from_utf16(generated_content.accessible_text(owner)).into_raw()
@@ -5412,7 +5420,7 @@ pub unsafe extern "C" fn layout_arena_innermost_list_item_counter_is_own_forward
     };
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the
     // document thread.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }
+    unsafe { LayoutNodeArena::from_handle(arena) }
         .counters_sets()
         .borrow()
         .innermost_list_item_counter_is_own_forward_counter(element)
@@ -5423,7 +5431,7 @@ pub unsafe extern "C" fn layout_arena_live_slot_count(arena: *mut c_void) -> u32
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.live_slot_count()
+    unsafe { LayoutNodeArena::from_handle(arena) }.live_slot_count()
 }
 
 #[unsafe(no_mangle)]
@@ -5431,7 +5439,7 @@ pub unsafe extern "C" fn layout_arena_table_cell_measurement_cache_miss_count(ar
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.table_cell_measurement_cache_miss_count()
+    unsafe { LayoutNodeArena::from_handle(arena) }.table_cell_measurement_cache_miss_count()
 }
 
 /// # Safety
@@ -5442,7 +5450,7 @@ pub unsafe extern "C" fn layout_arena_intrinsic_measurement_count(arena: *mut c_
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.intrinsic_measurement_count()
+    unsafe { LayoutNodeArena::from_handle(arena) }.intrinsic_measurement_count()
 }
 
 /// # Safety
@@ -5452,7 +5460,7 @@ pub unsafe extern "C" fn layout_arena_intrinsic_measurement_count(arena: *mut c_
 pub unsafe extern "C" fn layout_arena_intrinsic_inline_measurement_count(arena: *mut c_void) -> u64 {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive and serializes access on the document thread.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.intrinsic_inline_measurement_count()
+    unsafe { LayoutNodeArena::from_handle(arena) }.intrinsic_inline_measurement_count()
 }
 
 /// # Safety
@@ -5463,7 +5471,7 @@ pub unsafe extern "C" fn layout_arena_pre_order_relabel_count(arena: *mut c_void
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.pre_order_relabel_count()
+    unsafe { LayoutNodeArena::from_handle(arena) }.pre_order_relabel_count()
 }
 
 #[unsafe(no_mangle)]
@@ -5535,7 +5543,7 @@ pub unsafe extern "C" fn layout_arena_set_anchor_name_elements(
             .collect()
     };
     // SAFETY: The C++ wrapper keeps the arena alive for this call.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_anchor_name_elements(scope_host, anchor_name, &elements);
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_anchor_name_elements(scope_host, anchor_name, &elements);
 }
 
 #[unsafe(no_mangle)]
@@ -5543,7 +5551,7 @@ pub unsafe extern "C" fn layout_arena_set_node_dom_paint_facts(arena: *mut c_voi
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_node_dom_paint_facts(id, facts)
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_node_dom_paint_facts(id, facts)
 }
 
 #[unsafe(no_mangle)]
@@ -5555,7 +5563,7 @@ pub unsafe extern "C" fn layout_arena_note_rows_share_dom_node(
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.note_rows_share_dom_node(bound_row, added_row);
+    unsafe { LayoutNodeArena::from_handle(arena) }.note_rows_share_dom_node(bound_row, added_row);
 }
 
 /// The row the element or text node with `style_node` is bound to, or an invalid slot if it has
@@ -5568,7 +5576,7 @@ pub unsafe extern "C" fn layout_arena_bound_row(arena: *mut c_void, style_node: 
     };
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.bound_row(style_node)
+    unsafe { LayoutNodeArena::from_handle(arena) }.bound_row(style_node)
 }
 
 /// Pins, for the host, the style record of the box the element or text node with `style_node` is
@@ -5586,7 +5594,7 @@ pub unsafe extern "C" fn layout_arena_pin_bound_box_style_record_for_detachment(
     };
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
-    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     let row = if generated_for == 0 {
         arena.bound_row(style_node)
     } else {
@@ -5603,7 +5611,7 @@ pub unsafe extern "C" fn layout_arena_set_node_flag(arena: *mut c_void, id: Node
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_node_flag(id, flag, value);
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_node_flag(id, flag, value);
 }
 
 #[unsafe(no_mangle)]
@@ -5615,7 +5623,7 @@ pub unsafe extern "C" fn layout_arena_set_node_needs_compositor_animation_frame(
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the document thread.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_node_needs_compositor_animation_frame(id, kind, value);
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_node_needs_compositor_animation_frame(id, kind, value);
 }
 
 #[unsafe(no_mangle)]
@@ -5627,7 +5635,7 @@ pub unsafe extern "C" fn layout_arena_set_node_generated_for(
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_node_generated_for(
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_node_generated_for(
         id,
         generated_for,
         StyleNodeID::from_raw(generator_style_node),
@@ -5638,7 +5646,7 @@ pub unsafe extern "C" fn layout_arena_set_node_generated_for(
 pub unsafe extern "C" fn layout_arena_node_style_node(arena: *mut c_void, id: NodeSlotId) -> u32 {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }
+    unsafe { LayoutNodeArena::from_handle(arena) }
         .node_style_node(id)
         .map_or(0, StyleNodeID::raw)
 }
@@ -5654,7 +5662,7 @@ pub unsafe extern "C" fn layout_arena_pseudo_element_scroll_offset(
         return FfiCssPixelPoint::default();
     };
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.pseudo_element_scroll_offset(generator, pseudo_kind)
+    unsafe { LayoutNodeArena::from_handle(arena) }.pseudo_element_scroll_offset(generator, pseudo_kind)
 }
 
 #[unsafe(no_mangle)]
@@ -5669,7 +5677,7 @@ pub unsafe extern "C" fn layout_arena_set_pseudo_element_scroll_offset(
         return;
     };
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset);
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset);
 }
 
 /// # Safety
@@ -5682,7 +5690,7 @@ pub unsafe extern "C" fn layout_arena_set_identity_in_focused_text_control(arena
         return;
     };
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_identity_in_focused_text_control(node, value);
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_identity_in_focused_text_control(node, value);
 }
 
 /// # Safety
@@ -5699,7 +5707,7 @@ pub unsafe extern "C" fn layout_arena_set_element_scroll_offset(
         return;
     };
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_element_scroll_offset(element, offset);
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_element_scroll_offset(element, offset);
 }
 
 #[unsafe(no_mangle)]
@@ -5710,21 +5718,21 @@ pub unsafe extern "C" fn layout_arena_pin_node_style_record_for_host(
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The handle came from layout_arena_create and outlives this call.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.pin_node_style_record_for_host(slot, record);
+    unsafe { LayoutNodeArena::from_handle(arena) }.pin_node_style_record_for_host(slot, record);
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_release_node_style_record_pin_for_host(arena: *mut c_void, slot: NodeSlotId) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The handle came from layout_arena_create and outlives this call.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.release_node_style_record_pin_for_host(slot);
+    unsafe { LayoutNodeArena::from_handle(arena) }.release_node_style_record_pin_for_host(slot);
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_style_record_pinned_by_host(arena: *mut c_void, slot: NodeSlotId) -> u64 {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The handle came from layout_arena_create and outlives this call.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.node_style_record_pinned_by_host(slot)
+    unsafe { LayoutNodeArena::from_handle(arena) }.node_style_record_pinned_by_host(slot)
 }
 
 /// `Painting::PaintCacheInvalidationStage::DetachCleanup`, which is what the retired host-side
@@ -5785,7 +5793,7 @@ pub unsafe extern "C" fn layout_arena_replace_image_observers(
 ) -> *mut c_void {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The handle came from layout_arena_create and outlives this call.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.replace_image_observers(
+    unsafe { LayoutNodeArena::from_handle(arena) }.replace_image_observers(
         unsafe { super::HostTables::from_handle(arena) },
         slot,
         observers,
@@ -5796,7 +5804,8 @@ pub unsafe extern "C" fn layout_arena_replace_image_observers(
 pub unsafe extern "C" fn layout_arena_image_observers(arena: *mut c_void, slot: NodeSlotId) -> *mut c_void {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The handle came from layout_arena_create and outlives this call.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.image_observers(unsafe { super::HostTables::from_handle(arena) }, slot)
+    unsafe { LayoutNodeArena::from_handle(arena) }
+        .image_observers(unsafe { super::HostTables::from_handle(arena) }, slot)
 }
 
 #[unsafe(no_mangle)]
@@ -5807,7 +5816,7 @@ pub unsafe extern "C" fn layout_arena_set_owned_image_provider(
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The handle came from layout_arena_create and outlives this call.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_owned_image_provider(
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_owned_image_provider(
         unsafe { super::HostTables::from_handle(arena) },
         slot,
         provider,
@@ -5818,7 +5827,7 @@ pub unsafe extern "C" fn layout_arena_set_owned_image_provider(
 pub unsafe extern "C" fn layout_arena_owned_image_provider(arena: *mut c_void, slot: NodeSlotId) -> *mut c_void {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The handle came from layout_arena_create and outlives this call.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }
+    unsafe { LayoutNodeArena::from_handle(arena) }
         .owned_image_provider(unsafe { super::HostTables::from_handle(arena) }, slot)
 }
 
@@ -5836,7 +5845,7 @@ pub unsafe extern "C" fn layout_arena_move_pseudo_element_scroll_offsets(
         return;
     };
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.move_pseudo_element_scroll_offsets(old_generator, new_generator);
+    unsafe { LayoutNodeArena::from_handle(arena) }.move_pseudo_element_scroll_offsets(old_generator, new_generator);
 }
 
 #[unsafe(no_mangle)]
@@ -5848,7 +5857,7 @@ pub unsafe extern "C" fn layout_arena_set_node_style(
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     if arena.set_node_style(id, style_record, payloads) {
         arena.refresh_style_flags(id);
     }
@@ -5884,21 +5893,21 @@ pub unsafe extern "C" fn layout_arena_node_has_derived_style(arena: *mut c_void,
 pub unsafe extern "C" fn layout_arena_node_style_record(arena: *mut c_void, id: NodeSlotId) -> u64 {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.node_style_record(id)
+    unsafe { LayoutNodeArena::from_handle(arena) }.node_style_record(id)
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_style_payloads(arena: *mut c_void, id: NodeSlotId) -> *const c_void {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.data(id).style.get()
+    unsafe { LayoutNodeArena::from_handle(arena) }.data(id).style.get()
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_shell_count(arena: *mut c_void) -> u32 {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.shell_count()
+    unsafe { LayoutNodeArena::from_handle(arena) }.shell_count()
 }
 
 #[unsafe(no_mangle)]
@@ -5930,7 +5939,7 @@ pub unsafe extern "C" fn layout_arena_set_box_presence_host(
         .box_presence_host
         .set(Some((context, callback)));
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_host_hears_box_presence(true);
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_host_hears_box_presence(true);
 }
 
 /// # Safety
@@ -5944,7 +5953,7 @@ pub unsafe extern "C" fn layout_arena_clear_box_presence_host(arena: *mut c_void
         .box_presence_host
         .set(None);
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_host_hears_box_presence(false);
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_host_hears_box_presence(false);
 }
 
 #[unsafe(no_mangle)]
@@ -5958,7 +5967,7 @@ pub unsafe extern "C" fn layout_arena_clear_shell_factory(arena: *mut c_void) {
 pub unsafe extern "C" fn layout_arena_attach_shell(arena: *mut c_void, id: NodeSlotId, shell: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.attach_shell(id, shell);
+    unsafe { LayoutNodeArena::from_handle(arena) }.attach_shell(id, shell);
 }
 
 #[unsafe(no_mangle)]
@@ -5973,7 +5982,7 @@ pub unsafe extern "C" fn layout_arena_set_style_record_host_callbacks(
         .set(Some((callbacks.context, callbacks.shell_style_changed)));
     assert!(!callbacks.style_engine.is_null());
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_style_engine(callbacks.style_engine);
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_style_engine(callbacks.style_engine);
 }
 
 #[unsafe(no_mangle)]
@@ -5984,35 +5993,35 @@ pub unsafe extern "C" fn layout_arena_clear_style_record_host_callbacks(arena: *
         .shell_style_changed_host
         .set(None);
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_style_engine(std::ptr::null_mut());
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_style_engine(std::ptr::null_mut());
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_layout_pass_is_running(arena: *mut c_void) -> bool {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.layout_pass_is_running()
+    unsafe { LayoutNodeArena::from_handle(arena) }.layout_pass_is_running()
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_needs_full_layout_tree_update(arena: *mut c_void) -> bool {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.needs_full_layout_tree_update()
+    unsafe { LayoutNodeArena::from_handle(arena) }.needs_full_layout_tree_update()
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_needs_full_layout_tree_update(arena: *mut c_void, value: bool) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.set_needs_full_layout_tree_update(value);
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_needs_full_layout_tree_update(value);
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_layout_root(arena: *mut c_void) -> NodeSlotId {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.layout_root()
+    unsafe { LayoutNodeArena::from_handle(arena) }.layout_root()
 }
 
 #[unsafe(no_mangle)]
@@ -6022,7 +6031,7 @@ pub unsafe extern "C" fn layout_arena_layout_is_up_to_date(
 ) -> bool {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.layout_is_up_to_date(document_needs_layout_tree_build)
+    unsafe { LayoutNodeArena::from_handle(arena) }.layout_is_up_to_date(document_needs_layout_tree_build)
 }
 
 /// Refreshes the text content and replaced-content facts of every node enrolled since the last
@@ -6100,7 +6109,7 @@ pub unsafe extern "C" fn layout_arena_set_table_spans(
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
-    let arena = unsafe { &mut *arena.cast::<LayoutNodeArena>() };
+    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
     let data = arena.data(id);
     let effective_spans_changed = data.table_column_span.get() != column_span || data.table_row_span.get() != row_span;
     data.table_column_span.set(column_span);

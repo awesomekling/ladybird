@@ -73,7 +73,7 @@ unsafe extern "C" fn layout_arena_pre_order_label_violation_count(arena: *mut c_
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
-    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     if arena.shell_if_live(&main_thread, root).is_null() {
         return 0;
     }
@@ -133,7 +133,7 @@ unsafe extern "C" fn layout_arena_bound_shell(arena: *mut c_void, style_node: u3
     };
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
-    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     let row = arena.bound_row(style_node);
     if row.is_invalid() {
         return std::ptr::null_mut();
@@ -156,7 +156,7 @@ unsafe extern "C" fn layout_arena_bound_pseudo_element_shell(
     };
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
-    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     let row = arena.bound_pseudo_element_row(style_node, generated_for);
     if row.is_invalid() {
         return std::ptr::null_mut();
@@ -171,7 +171,7 @@ unsafe extern "C" fn layout_arena_bound_viewport_shell(arena: *mut c_void) -> *m
     assert!(!arena.is_null(), "layout node arena handle is null");
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: As above.
-    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     let row = arena.bound_viewport_row();
     if row.is_invalid() {
         return std::ptr::null_mut();
@@ -186,7 +186,7 @@ unsafe extern "C" fn layout_arena_bind_row(arena: *mut c_void, id: NodeSlotId) {
     // SAFETY: As above.
     unsafe {
         paying_host_handbacks(&main_thread, arena, || {
-            (&*arena.cast::<LayoutNodeArena>()).bind_row(id);
+            (LayoutNodeArena::from_handle(arena)).bind_row(id);
         });
     }
 }
@@ -198,7 +198,7 @@ unsafe extern "C" fn layout_arena_unbind_row(arena: *mut c_void, id: NodeSlotId)
     // SAFETY: As above.
     unsafe {
         paying_host_handbacks(&main_thread, arena, || {
-            (&*arena.cast::<LayoutNodeArena>()).unbind_row(id);
+            (LayoutNodeArena::from_handle(arena)).unbind_row(id);
         });
     }
 }
@@ -220,7 +220,7 @@ unsafe extern "C" fn layout_arena_for_each_row_built_for_same_node(
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on
     // the document thread.
-    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     // The ring is a column of links rather than a borrow, so the host may re-enter the arena
     // from `visit`. What it must not do is change which rows are built for the node.
     arena.for_each_row_built_for_same_node(id, |row| {
@@ -243,7 +243,7 @@ unsafe extern "C" fn layout_arena_set_style_node_of_rows_sharing_dom_node_with(
     // SAFETY: As above.
     unsafe {
         paying_host_handbacks(&main_thread, arena, || {
-            (&*arena.cast::<LayoutNodeArena>())
+            (LayoutNodeArena::from_handle(arena))
                 .set_style_node_of_rows_sharing_dom_node_with(id, StyleNodeID::from_raw(style_node));
         });
     }
@@ -260,7 +260,7 @@ unsafe extern "C" fn layout_arena_set_style_node_of_generated_subtree(
     // SAFETY: As above.
     unsafe {
         paying_host_handbacks(&main_thread, arena, || {
-            (&*arena.cast::<LayoutNodeArena>())
+            (LayoutNodeArena::from_handle(arena))
                 .set_style_node_of_generated_subtree(root, StyleNodeID::from_raw(style_node));
         });
     }
@@ -271,7 +271,7 @@ unsafe extern "C" fn layout_arena_prepare_node_for_detach(arena: *mut c_void, ro
     assert!(!arena.is_null(), "layout node arena handle is null");
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: The handle came from layout_arena_create and outlives this call.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.assert_owner_thread();
+    unsafe { LayoutNodeArena::from_handle(arena) }.assert_owner_thread();
     // SAFETY: As above.
     unsafe { paying_host_handbacks(&main_thread, arena, || prepare_row_for_detach(arena, row)) }
 }
@@ -295,7 +295,7 @@ unsafe extern "C" fn layout_arena_forget_style_node(arena: *mut c_void, style_no
     // SAFETY: As above.
     unsafe {
         paying_host_handbacks(&main_thread, arena, || {
-            (&*arena.cast::<LayoutNodeArena>()).forget_style_node(style_node);
+            (LayoutNodeArena::from_handle(arena)).forget_style_node(style_node);
         });
     }
 }
@@ -333,7 +333,7 @@ unsafe extern "C" fn layout_arena_reinherit_anonymous_descendants(arena: *mut c_
     // SAFETY: As above.
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: As above.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }
+    unsafe { LayoutNodeArena::from_handle(arena) }
         .reinherit_anonymous_descendants(node, ShellStyleChangeNotice::Now(&main_thread));
 }
 
@@ -353,13 +353,13 @@ unsafe extern "C" fn layout_arena_for_each_pending_rebuilt_subtree_root(
     assert!(!arena.is_null(), "layout node arena handle is null");
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: As above; the roots are copied out so no borrow spans the callback.
-    let roots = unsafe { &*arena.cast::<LayoutNodeArena>() }
+    let roots = unsafe { LayoutNodeArena::from_handle(arena) }
         .pending_rebuilt_subtree_roots
         .borrow()
         .clone();
     for root in roots {
         // SAFETY: As above.
-        let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+        let arena = unsafe { LayoutNodeArena::from_handle(arena) };
         if !arena.node_is_dom_backed(root) {
             continue;
         }

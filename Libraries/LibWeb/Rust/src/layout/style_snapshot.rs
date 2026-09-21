@@ -175,7 +175,7 @@ pub unsafe extern "C" fn layout_arena_publish_style_snapshot_scroll_states(
         assert!(!states.is_null(), "layout style scroll states are null");
         unsafe { std::slice::from_raw_parts(states, count) }
     };
-    unsafe { &*arena.cast::<LayoutNodeArena>() }
+    unsafe { LayoutNodeArena::from_handle(arena) }
         .layout_style_snapshots
         .publish_scroll_states(states);
 }

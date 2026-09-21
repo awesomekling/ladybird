@@ -112,6 +112,11 @@ fn write_report(report: &str) {
 
 /// Opens the tree build scope. A build can nest inside another document's build, since building a
 /// navigable container's box can build the content document's tree, so the scope counts.
+/// Whether a tree build's walk is running on this thread.
+pub(crate) fn build_is_running() -> bool {
+    BUILD_DEPTH.with(|depth| depth.get() != 0)
+}
+
 pub(crate) fn begin_build() {
     if mode() == Mode::Off {
         return;
