@@ -62,6 +62,69 @@ void SVGPatternElement::attribute_changed(Utf16FlyString const& name, Optional<U
     } else if (name == AttributeNames::height) {
         m_height = parse_number_percentage(value.value_or({}));
     }
+
+    // A pattern that names this one inherits the attributes it does not carry, so a change here is
+    // a change to every pattern whose chain passes through this one.
+    document().republish_inheriting_svg_pattern_attribute_facts();
+}
+
+// Only a pattern in the document's node tree takes part: a pattern's `href` resolves in the
+// document scope, so a pattern inside a shadow tree can neither be named by one nor name one.
+void SVGPatternElement::inserted()
+{
+    Base::inserted();
+
+    if (root().is_document())
+        register_in_document_pattern_list();
+}
+
+void SVGPatternElement::removed_from(IsSubtreeRoot is_subtree_root, Node* old_ancestor, Node& old_root)
+{
+    Base::removed_from(is_subtree_root, old_ancestor, old_root);
+
+    if (old_root.is_document())
+        unregister_from_document_pattern_list();
+}
+
+void SVGPatternElement::moved_from(IsSubtreeRoot is_subtree_root, GC::Ptr<Node> old_ancestor)
+{
+    Base::moved_from(is_subtree_root, old_ancestor);
+
+    if (!old_ancestor)
+        return;
+
+    auto was_in_document_tree = old_ancestor->root().is_document();
+    auto is_in_document_tree = root().is_document();
+    if (was_in_document_tree == is_in_document_tree)
+        return;
+
+    if (was_in_document_tree)
+        unregister_from_document_pattern_list();
+    else
+        register_in_document_pattern_list();
+}
+
+void SVGPatternElement::finalize()
+{
+    Base::finalize();
+
+    // A GC'ed pattern may never run its removal steps, so unlink it here rather than leave the
+    // document's list holding a destroyed node.
+    unregister_from_document_pattern_list();
+}
+
+void SVGPatternElement::register_in_document_pattern_list()
+{
+    if (m_list_node.is_in_list())
+        return;
+    document().register_svg_pattern_element({}, *this);
+}
+
+void SVGPatternElement::unregister_from_document_pattern_list()
+{
+    if (!m_list_node.is_in_list())
+        return;
+    document().unregister_svg_pattern_element({}, *this);
 }
 
 Optional<Utf16String> SVGPatternElement::href_attribute_value() const
