@@ -219,6 +219,21 @@ pub struct FontCascadeListHandle {
     pointer: *const c_void,
 }
 
+/// Reports a LibGfx call that can reach the document. The render pipeline's seals live in LibWeb
+/// and count only calls through its own host tables, so they cannot see one made through here;
+/// LibWeb installs a hook that gives them the call's name.
+static HOST_REACHING_CALL_HOOK: std::sync::OnceLock<fn(&'static str)> = std::sync::OnceLock::new();
+
+pub fn set_host_reaching_call_hook(hook: fn(&'static str)) {
+    let _ = HOST_REACHING_CALL_HOOK.set(hook);
+}
+
+fn note_host_reaching_call(callback: &'static str) {
+    if let Some(hook) = HOST_REACHING_CALL_HOOK.get() {
+        hook(callback);
+    }
+}
+
 impl FontCascadeListHandle {
     pub const fn null() -> Self {
         Self {
@@ -265,6 +280,11 @@ impl FontCascadeListHandle {
         font_hint: Option<&FontHandle>,
     ) -> FontHandle {
         assert!(!self.pointer.is_null(), "Gfx::FontCascadeList pointer must not be null");
+        // This is the document's own cascade, not a frozen snapshot: the lookup writes four
+        // unsynchronized caches, and it can resolve a pending face, which starts a fetch and arms
+        // an event-loop timer. A render stage reaching it is a regression, and the seals cannot
+        // see a LibGfx call on their own, so the hook below tells them.
+        note_host_reaching_call("FontCascadeList::font_for_code_point");
         // SAFETY: This handle keeps the list live, and the list owns every
         // font it resolves.
         let raw = unsafe {

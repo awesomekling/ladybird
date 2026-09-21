@@ -2296,6 +2296,7 @@ const _: () = {
 /// The host-free full layout stage. Host callbacks require a `MainThread` capability, which this
 /// function neither receives nor stores in its input.
 fn run_root_layout_stage(stage: LayoutStageInput<'_>) -> LayoutStageOutput {
+    let _pass = seal::enter_pass();
     let LayoutStageInput {
         arena,
         root,
@@ -2526,6 +2527,7 @@ pub unsafe extern "C" fn layout_arena_compute_subtree_layout(
 
 /// The host-free partial layout stage. Its input carries no host table or main-thread capability.
 fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>) -> LayoutStageOutput {
+    let _pass = seal::enter_pass();
     let LayoutStageInput {
         arena,
         root,

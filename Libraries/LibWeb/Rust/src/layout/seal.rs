@@ -61,13 +61,14 @@
 //! carries which period it is in, and the pass leaves the face's number behind for
 //! `Gfx::request_wanted_pending_faces()` to request once the pass has ended.
 //!
-//! DEBT: The document's own `Gfx::FontCascadeList` is still reachable from Rust, because canvas
-//! and the font-relative length code use it, and a call to it would pass this seal unseen: it is
-//! a LibGfx call, not a host callback. Nothing in a stage makes one today.
+//! The document's own `Gfx::FontCascadeList` is still reachable from Rust, because canvas and the
+//! font-relative length code use it. `crate::font_seal` makes a call to it report itself here,
+//! since a LibGfx call would otherwise pass both seals unseen.
 //!
 //! Anything else a running pass asks the document is a regression. Add a `note_host_call` beside
 //! any new host call rather than leaving it uncounted.
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -90,6 +91,29 @@ fn mode() -> Mode {
 
 thread_local! {
     static REPORTED: RefCell<HashSet<&'static str>> = RefCell::new(HashSet::new());
+    static PASS_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Ends the pass [`enter_pass`] began.
+pub(crate) struct PassScope;
+
+impl Drop for PassScope {
+    fn drop(&mut self) {
+        PASS_DEPTH.with(|depth| depth.set(depth.get() - 1));
+    }
+}
+
+/// Marks a layout pass as running on this thread until the returned scope is dropped, so that a
+/// call made through LibGfx - which never sees the arena - can still be attributed to a pass.
+#[must_use]
+pub(crate) fn enter_pass() -> PassScope {
+    crate::font_seal::install_once();
+    PASS_DEPTH.with(|depth| depth.set(depth.get() + 1));
+    PassScope
+}
+
+pub(crate) fn a_layout_pass_is_running() -> bool {
+    PASS_DEPTH.with(Cell::get) > 0
 }
 
 /// Records that the layout stage asked the document something named `callback`. Callers pass
