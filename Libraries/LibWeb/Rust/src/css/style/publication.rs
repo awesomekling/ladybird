@@ -140,6 +140,38 @@ impl RetainedState {
             });
     }
 
+    fn legacy_record_difference(&self, assembled_style_record: u64, projected_style_record: u64) -> u8 {
+        let (Some(assembled), Some(projected)) = (
+            self.style_record_view(assembled_style_record),
+            self.style_record_view(projected_style_record),
+        ) else {
+            return u8::MAX;
+        };
+        let mut difference = 0;
+        if assembled.payloads != projected.payloads {
+            difference = 64
+                + assembled
+                    .payloads
+                    .iter()
+                    .zip(projected.payloads)
+                    .position(|(assembled, projected)| assembled != projected)
+                    .unwrap_or(31) as u8;
+        }
+        difference |= u8::from(
+            self.retained_style_record_custom_property_environment(assembled_style_record)
+                != self.retained_style_record_custom_property_environment(projected_style_record),
+        ) << 1;
+        difference |= u8::from(assembled.pseudo_element_styles != projected.pseudo_element_styles) << 2;
+        difference |=
+            u8::from(assembled.counter_style_environment_identity != projected.counter_style_environment_identity) << 3;
+        difference |= u8::from(assembled.dependency_flags != projected.dependency_flags) << 4;
+        difference |= u8::from(
+            !unsafe { assembled.longhand_table.deref() }
+                .publication_equals(unsafe { projected.longhand_table.deref() }),
+        ) << 5;
+        difference
+    }
+
     fn retained_inheritance_parent_node(&self, node: StyleNodeID, pseudo_kind: u8) -> Option<StyleNodeID> {
         let parent = if pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT {
             self.tree.inheritance_parent(node)?
@@ -1714,6 +1746,7 @@ impl RetainedState {
         table: &ComputedLonghandTable,
         length: &crate::css::style_compute::FfiLengthResolutionContext,
         font: &crate::css::table_group_builder::FfiFontGroupBuildInputs,
+        resolved_custom_property_environment: Option<u64>,
         counters: &mut Counters,
     ) -> Option<computed::FinalStyleRecordID> {
         use crate::css::property_metadata::property_id as prop;
@@ -1757,26 +1790,20 @@ impl RetainedState {
             .tree
             .inheritance_parent(node)
             .and_then(|parent| self.computed_group_sets.custom_property_environment_identity(parent));
-        let environment = if self.node_declares_custom_properties(node) {
-            self.computed_group_sets
-                .custom_property_environment_identity(node)
-                .or(inherited_environment)
-        } else {
-            inherited_environment
-        }
-        .unwrap_or(0);
-        // A C++ custom-property wrapper and an engine-owned environment can describe the same
-        // store with different identities. The custom-property result slice will transfer that
-        // identity explicitly; until then only assemble rows with no environment.
-        if environment != 0 {
-            return None;
-        }
+        let environment = resolved_custom_property_environment.unwrap_or_else(|| {
+            if self.node_declares_custom_properties(node) {
+                self.computed_group_sets
+                    .custom_property_environment_identity(node)
+                    .or(inherited_environment)
+            } else {
+                inherited_environment
+            }
+            .unwrap_or(0)
+        });
         let pseudo_styles = table.pseudo_element_styles();
-        let counter_style_environment_identity = self
-            .computed_group_sets
-            .assigned_style_record(node)
-            .and_then(|record| self.computed_group_sets.style_record_view(record.raw()))
-            .map_or(0, |view| view.counter_style_environment_identity);
+        // Rows which read the counter-style environment returned above. Every other row publishes
+        // no environment, even if the record it replaces did.
+        let counter_style_environment_identity = 0;
         let table = ComputedLonghandTable::copied_for_publication(table);
         let mut scratch = EngineComputabilityScratch::default();
         let record = self
@@ -1896,9 +1923,6 @@ impl RetainedState {
             .computed_group_sets
             .style_record_view(self.last_host_built_style_record)
             .map(|view| view.payloads.to_vec());
-        let last_host_font_payload = last_host_payloads
-            .as_ref()
-            .map(|payloads| payloads[STYLE_GROUP_INDEX_FONT]);
         if let Some(last_host_payloads) = &last_host_payloads {
             for (group, (payload, &last_host_payload)) in payloads.iter_mut().zip(last_host_payloads).enumerate() {
                 if *payload == last_host_payload
@@ -1924,9 +1948,8 @@ impl RetainedState {
             let font_payload = payloads[STYLE_GROUP_INDEX_FONT];
             let parent_font_payload = parent_payloads[STYLE_GROUP_INDEX_FONT];
             let default_font_payload = crate::css::computed_values::default_group_payload(STYLE_GROUP_INDEX_FONT);
-            let uses_exact_font_donor = font_payload.as_ptr() == parent_font_payload.as_ptr()
-                || font_payload.as_ptr() == default_font_payload
-                || last_host_font_payload.is_some_and(|payload| payload == font_payload);
+            let uses_exact_font_donor =
+                font_payload.as_ptr() == parent_font_payload.as_ptr() || font_payload.as_ptr() == default_font_payload;
             if !uses_exact_font_donor {
                 for (group, payload) in payloads.into_iter().enumerate() {
                     crate::css::computed_values::release_group_payload(group, payload.as_ptr());
@@ -3106,6 +3129,38 @@ impl RetainedState {
             metadata_input,
             owned,
         );
+        if is_base_record
+            && let Some(target) = target
+            && let Some((table_matches, assembled_style_record, was_host_published)) =
+                self.legacy_finalized_longhand_rows.get(&target).map(|row| {
+                    (
+                        self.style_record_view(publication.style_record_identity.raw())
+                            .is_some_and(|record| {
+                                unsafe { record.longhand_table.deref() }.publication_equals(row.table())
+                            }),
+                        row.assembled_style_record,
+                        row.was_host_published,
+                    )
+                })
+        {
+            if table_matches && !was_host_published {
+                if assembled_style_record != 0 {
+                    let difference =
+                        self.legacy_record_difference(assembled_style_record, publication.style_record_identity.raw());
+                    crate::css::style::seal::note_assembled_legacy_record(difference);
+                }
+                self.legacy_finalized_longhand_rows
+                    .get_mut(&target)
+                    .expect("the retained row was just found")
+                    .assembled_style_record = publication.style_record_identity.raw();
+                self.legacy_finalized_longhand_rows
+                    .get_mut(&target)
+                    .expect("the retained row was just found")
+                    .was_host_published = true;
+            } else {
+                self.legacy_finalized_longhand_rows.remove(&target);
+            }
+        }
         if let Some(target) = target
             && !target.is_pseudo()
             && self.computed_group_sets.adjustment_facts(target.node())

@@ -34,6 +34,18 @@ impl std::ops::DerefMut for StyleEngine {
 }
 
 impl StyleEngine {
+    pub(crate) unsafe fn retain_resolved_custom_property_environment(
+        &mut self,
+        store: *const std::ffi::c_void,
+        parent: u64,
+    ) -> u64 {
+        unsafe {
+            self.state
+                .custom_property_environments
+                .retain_engine_environment(store, parent)
+        }
+    }
+
     pub(crate) fn note_host_built_style_record(&mut self, style_record: u64) {
         self.state.last_host_built_style_record = style_record;
     }
@@ -44,9 +56,17 @@ impl StyleEngine {
         table: &crate::css::computed_longhand_table::ComputedLonghandTable,
         length: &crate::css::style_compute::FfiLengthResolutionContext,
         font: &crate::css::table_group_builder::FfiFontGroupBuildInputs,
+        custom_property_environment: Option<u64>,
     ) -> Option<u64> {
         self.state
-            .assemble_legacy_record_for_verification(node, table, length, font, &mut self.counters)
+            .assemble_legacy_record_for_verification(
+                node,
+                table,
+                length,
+                font,
+                custom_property_environment,
+                &mut self.counters,
+            )
             .map(super::computed::FinalStyleRecordID::raw)
     }
 
