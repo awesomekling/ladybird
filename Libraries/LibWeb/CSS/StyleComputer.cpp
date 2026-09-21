@@ -6030,6 +6030,8 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 .composition = static_cast<AnimationComposition>(animation.composition),
                 .name = css_string_from_rust(animation.name),
                 .timeline = timeline,
+                .timing_function_value = RustStyleValueHandle::retained(
+                    static_cast<StyleValueFFI::StyleValueData const*>(animation.timing_function)),
             });
         }
         auto const& driver_results = longhand_result->driver_results;

@@ -1168,7 +1168,7 @@ void record_element_animation_names(DOM::Element& element, ReadonlySpan<Utf16Fly
 //
 // This one is an input: the animation stage matches an element's newly computed animation
 // definitions against the animations it already has, and this is what it matches them against.
-void record_element_css_defined_animations(DOM::Element& element, u8 slot, ReadonlySpan<Utf16FlyString> names)
+void record_element_css_defined_animations(DOM::Element& element, u8 slot, ReadonlySpan<Utf16FlyString> names, ReadonlySpan<u64> definition_words)
 {
     auto* style_engine = style_engine_for(element);
     if (!style_engine || element.style_node_id() == no_style_node)
@@ -1186,7 +1186,7 @@ void record_element_css_defined_animations(DOM::Element& element, u8 slot, Reado
         for (size_t index = 0; index < view.length_in_code_units(); ++index)
             units.unchecked_append(static_cast<u16>(view.code_unit_at(index)));
     }
-    style_engine->set_element_css_defined_animations(element.style_node_id(), slot, lengths, units);
+    style_engine->set_element_css_defined_animations(element.style_node_id(), slot, lengths, units, definition_words);
 }
 
 // The timing of the animations the element holds a keyframe effect for, in one of its per-pseudo-element

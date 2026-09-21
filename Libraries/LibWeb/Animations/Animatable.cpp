@@ -474,12 +474,20 @@ void Animatable::publish_css_defined_animations(size_t index)
         return;
 
     Vector<Utf16FlyString> names;
+    // Beside each name, the definition the plan last applied to that animation. A plan whose
+    // definitions all equal these changes nothing when it is applied, and the computation that
+    // decides that needs no help from the host to see it.
+    Vector<u64> definition_words;
     if (auto const& animations = m_impl->css_defined_animations[index]) {
         names.ensure_capacity(animations->size());
-        for (auto const& animation : *animations)
+        definition_words.ensure_capacity(animations->size() * CSS::AppliedAnimationDefinitionRow::word_count);
+        for (auto const& animation : *animations) {
             names.unchecked_append(animation->animation_name());
+            auto row = animation->applied_definition_row();
+            definition_words.append(row.words, CSS::AppliedAnimationDefinitionRow::word_count);
+        }
     }
-    CSS::record_element_css_defined_animations(*element, static_cast<u8>(index), names);
+    CSS::record_element_css_defined_animations(*element, static_cast<u8>(index), names, definition_words);
 }
 
 // Which of the animations an element holds are relevant is a question about the WAAPI timing

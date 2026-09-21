@@ -3041,6 +3041,7 @@ struct LonghandTransactionContinuation {
     finalization_line_height_metrics: FfiInputLineHeightMetrics,
     has_animation_definitions: bool,
     a_definition_starts_an_animation: bool,
+    plan_would_change_nothing: bool,
     animated_overlay: *mut AnimatedOverlay,
     animation_values_applied: bool,
     parent_text_align_input_is_animated: bool,
@@ -5614,6 +5615,7 @@ fn build_computed_animation_list(
     keyframes: &crate::css::style::animations::AnimationKeyframes,
     declaration_shadow_root_identity: usize,
     element_tree_scope: crate::css::style::tree::TreeScopeID,
+    computed_definitions: &mut Vec<crate::css::style::animations::AppliedAnimationDefinition>,
 ) -> FfiComputedAnimationList {
     use crate::css::property_metadata::property_id as prop;
 
@@ -5655,26 +5657,39 @@ fn build_computed_animation_list(
         };
         let (timeline_kind, scroll_scroller, scroll_axis) =
             animation_timeline_descriptor(timeline_values[index % timeline_values.len()].data());
+        let timing_function: *const c_void = timing_function_values[index % timing_function_values.len()]
+            .pointer()
+            .cast();
+        let direction = keyword_to_animation_direction(keyword_value(direction_values)).unwrap();
+        let play_state = keyword_to_animation_play_state(keyword_value(play_state_values)).unwrap();
+        let delay = time_value_to_milliseconds(delay_values[index % delay_values.len()].data());
+        let fill_mode = keyword_to_animation_fill_mode(keyword_value(fill_mode_values)).unwrap();
+        let composition = keyword_to_animation_composition(keyword_value(composition_values)).unwrap();
+        let keyframe_set = keyframes.resolve(declaration_shadow_root_identity, element_tree_scope, name_string);
         animations.push(FfiComputedAnimation {
             duration_is_auto,
             duration,
-            timing_function: timing_function_values[index % timing_function_values.len()]
-                .pointer()
-                .cast(),
+            timing_function,
             iteration_count,
-            direction: keyword_to_animation_direction(keyword_value(direction_values)).unwrap(),
-            play_state: keyword_to_animation_play_state(keyword_value(play_state_values)).unwrap(),
-            delay: time_value_to_milliseconds(delay_values[index % delay_values.len()].data()),
-            fill_mode: keyword_to_animation_fill_mode(keyword_value(fill_mode_values)).unwrap(),
-            composition: keyword_to_animation_composition(keyword_value(composition_values)).unwrap(),
+            direction,
+            play_state,
+            delay,
+            fill_mode,
+            composition,
             name,
             timeline_kind,
             scroll_scroller,
             scroll_axis,
             matched_existing_index: crate::css::style::animations::NO_MATCHED_ANIMATION,
-            keyframe_set: keyframes.resolve(declaration_shadow_root_identity, element_tree_scope, name_string)
-                as *const c_void,
+            keyframe_set: keyframe_set as *const c_void,
         });
+        // The same definition, in the shape the host publishes back the one it applied, so the next
+        // computation can tell a plan that would change nothing from one that has work to do.
+        computed_definitions.push(
+            crate::css::style::animations::AppliedAnimationDefinition::from_definition(
+                animations.last().expect("the definition was just pushed"),
+            ),
+        );
     }
 
     // Which animation each definition claims is decided here, from the names the host published,
@@ -5901,6 +5916,7 @@ pub unsafe extern "C" fn rust_compute_properties(
     let (mut result, finalization_line_height_metrics, animation_length_contexts) =
         unsafe { compute_longhands(drive_input, &environment, parent_snapshot.as_ref(), highlight.as_ref()) };
 
+    let mut computed_animation_definitions = Vec::new();
     if !input.stop_after_longhand_drive {
         result.transitions = build_computed_transition_list(unsafe { &*drive_input.longhand_table });
         // The sticky flag is the host's own precondition for holding any CSS animation, so an
@@ -5926,16 +5942,36 @@ pub unsafe extern "C" fn rust_compute_properties(
             style_engine.animation_keyframes(),
             declaration_shadow_root_identity,
             element_tree_scope,
+            &mut computed_animation_definitions,
         );
     }
     let has_animation_definitions = result.animations.count != 0;
     // Whether the element is in a `display: none` subtree only decides whether a definition that
     // claimed no existing animation may start a new one, and the result is destroyed before the
     // animation stage runs, so the question is asked of the plan here and answered below.
-    let a_definition_starts_an_animation = has_animation_definitions
-        && unsafe { std::slice::from_raw_parts(result.animations.animations, result.animations.count) }
-            .iter()
-            .any(|animation| animation.matched_existing_index == crate::css::style::animations::NO_MATCHED_ANIMATION);
+    let definitions = match has_animation_definitions {
+        true => unsafe { std::slice::from_raw_parts(result.animations.animations, result.animations.count) },
+        false => &[],
+    };
+    let a_definition_starts_an_animation = definitions
+        .iter()
+        .any(|animation| animation.matched_existing_index == crate::css::style::animations::NO_MATCHED_ANIMATION);
+    // A plan every one of whose definitions claims the animation already sitting in its own place,
+    // and computes for it exactly what that animation last had applied, leaves the element's list
+    // and every animation in it untouched: no animation is created, none is cancelled, none is
+    // reordered, and each one's timing, keyframes and name index are set to what they already are.
+    // The stage may then sample the element for itself, the way it does when there is no plan.
+    let plan_would_change_nothing = has_animation_definitions
+        && !a_definition_starts_an_animation
+        && crate::css::style::tree::StyleNodeID::from_raw(input.style_node).is_some_and(|node| {
+            let applied = style_engine.element_applied_animation_definitions(node, animation_slot(input.pseudo_kind));
+            // An existing animation no definition claims is one the plan would cancel.
+            applied.len() == definitions.len()
+                && definitions.iter().enumerate().all(|(index, animation)| {
+                    animation.matched_existing_index == index as i32
+                        && computed_animation_definitions[index].would_change_nothing(&applied[index])
+                })
+        });
     let animated_overlay = drive_input.animated_overlay;
     let animation_values_applied = unsafe { animated_overlay.as_ref() }.is_some_and(|overlay| !overlay.is_empty());
     unsafe { crate::css::cascaded_properties::destroy_style_computation_requirements(prepared.requirements.storage) };
@@ -5944,6 +5980,7 @@ pub unsafe extern "C" fn rust_compute_properties(
         finalization_line_height_metrics,
         has_animation_definitions,
         a_definition_starts_an_animation,
+        plan_would_change_nothing,
         animated_overlay,
         animation_values_applied,
         parent_text_align_input_is_animated,
@@ -5976,6 +6013,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         mut finalization_line_height_metrics,
         has_animation_definitions,
         a_definition_starts_an_animation,
+        plan_would_change_nothing,
         mut animated_overlay,
         mut animation_values_applied,
         parent_text_align_input_is_animated,
@@ -6064,8 +6102,8 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
     // the stage may sample it for itself as if there were no plan at all.
     // NB: An empty published list is also what an unknown pseudo-element slot has, and there the
     //     host's plan returns before it does anything at all - inert either way.
-    let plan_is_inert =
-        has_animation_definitions && !element_has_css_defined_animations && in_display_none_subtree == 1;
+    let plan_is_inert = plan_would_change_nothing
+        || (has_animation_definitions && !element_has_css_defined_animations && in_display_none_subtree == 1);
     let plan_has_work = plan_has_entries && !plan_is_inert;
     // What is left is whether the element has anything to sample, which is a question about the
     // WAAPI timing model: an animation is relevant when its effect is current or in effect. Both
