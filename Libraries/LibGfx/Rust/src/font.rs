@@ -66,8 +66,14 @@ struct FontEntry {
     facts: FontFacts,
 }
 
-// SAFETY: Gfx::Font is immutable after construction and atomically reference counted. The
-// entry's FFI calls only perform const queries, and its retained reference keeps the font live.
+// SAFETY: Gfx::Font is atomically reference counted, and the retained reference this entry owns
+// keeps it live. Everything the entry answers with is fixed at construction: the snapshot it
+// copied, and the typeface tables the glyph queries read. The font's lazily filled members are
+// each internally synchronized - the HarfBuzz font behind `call_once`, the emoji verdict and the
+// hinting memo behind an atomic word - and `m_bold_variant`, which is not, is unreachable from
+// the FFI entry points this handle exposes. NB: none of this holds for `Gfx::FontCascadeList`,
+// which writes several unsynchronized caches from its `const` lookups; `FontCascadeListHandle`
+// below is deliberately neither `Send` nor `Sync`.
 unsafe impl Send for FontEntry {}
 // SAFETY: See the Send implementation above.
 unsafe impl Sync for FontEntry {}
