@@ -11,13 +11,13 @@ PASS: stress cold pseudo-element child mutation: document: :empty becomes false 
 PASS: detached child mutation: document: :empty becomes false after textContent | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: document: :empty becomes false after textContent | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: stress warm child mutation: document: mixed-case SVG type selector with :empty becomes false after element append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: document: mixed-case SVG type selector with :empty becomes false after element append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: document: mixed-case SVG type selector with :empty becomes false after element append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: document: mixed-case SVG type selector with :empty becomes false after element append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: document: mixed-case SVG type selector with :not(:empty) becomes true after element append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: document: mixed-case SVG type selector with :not(:empty) becomes true after element append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: detached child mutation: document: mixed-case SVG type selector with :not(:empty) becomes true after element append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: document: mixed-case SVG foreignObject type selector with :empty becomes false after element append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: document: mixed-case SVG foreignObject type selector with :empty becomes false after element append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: document: mixed-case SVG foreignObject type selector with :empty becomes false after element append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: document: mixed-case SVG foreignObject type selector with :empty becomes false after element append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: document: :has(.hit) after direct child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: document: :has(.hit) after direct child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
