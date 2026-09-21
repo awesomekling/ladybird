@@ -33,7 +33,7 @@ pub(super) fn compute_inline_sizes(
     {
         return None;
     }
-    RunRecords::with_root(callbacks.arena(), node, node_containing_block, root, |records| {
+    RunRecords::with_root(callbacks.layout_scratch(), callbacks.arena(), node, node_containing_block, root, |records| {
         let run = FormattingContextRun {
             purpose: formatting_context::LayoutPurpose::Measurement,
             records,

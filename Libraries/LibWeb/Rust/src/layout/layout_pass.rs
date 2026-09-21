@@ -13,6 +13,7 @@ use super::*;
 #[derive(Clone, Copy)]
 pub(crate) struct LayoutPass<'arena> {
     arena: &'arena LayoutNodeArena,
+    scratch: &'arena LayoutScratch,
     pub(crate) initial_containing_block_inline_size: CssPixels,
     pub(crate) initial_containing_block_block_size: CssPixels,
     pub(crate) document_in_quirks_mode: bool,
@@ -21,12 +22,14 @@ pub(crate) struct LayoutPass<'arena> {
 impl<'arena> LayoutPass<'arena> {
     pub(crate) fn new(
         arena: &'arena LayoutNodeArena,
+        scratch: &'arena LayoutScratch,
         initial_containing_block_inline_size: CssPixels,
         initial_containing_block_block_size: CssPixels,
         document_in_quirks_mode: bool,
     ) -> Self {
         Self {
             arena,
+            scratch,
             initial_containing_block_inline_size,
             initial_containing_block_block_size,
             document_in_quirks_mode,
@@ -35,6 +38,11 @@ impl<'arena> LayoutPass<'arena> {
 
     pub(crate) fn arena(&self) -> &'arena LayoutNodeArena {
         self.arena
+    }
+
+    /// The scratch the pass's runs lend their records through.
+    pub(crate) fn layout_scratch(&self) -> &'arena LayoutScratch {
+        self.scratch
     }
 
     pub(crate) fn node_data(&self, node: Node) -> &'arena NodeData {

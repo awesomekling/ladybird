@@ -8,15 +8,106 @@ use super::*;
 use std::mem::MaybeUninit;
 use std::ptr::NonNull;
 
+/// The slot-indexed table the runs of a layout pass lend their records through, and the stack their records
+/// live on. It is the stage runner's scratch rather than an arena column: nothing outside a running pass reads
+/// it, and every run releases its records before it ends, so between passes it holds no live record.
+pub(crate) struct LayoutScratch {
+    run_used_records: RefCell<Vec<RunRecordSlot>>,
+    next_run_nonce: Cell<u64>,
+    live_run_nonces: RefCell<Vec<u64>>,
+    run_record_stack: RunRecordStack,
+}
+
+#[derive(Default)]
+struct RunRecordSlot {
+    nonce: u64, // 0 = vacant
+    record: Option<NonNull<UsedValues>>,
+}
+
+impl Default for LayoutScratch {
+    fn default() -> Self {
+        Self {
+            run_used_records: RefCell::new(Vec::new()),
+            next_run_nonce: Cell::new(1),
+            live_run_nonces: RefCell::new(Vec::new()),
+            run_record_stack: RunRecordStack::default(),
+        }
+    }
+}
+
+impl LayoutScratch {
+    /// The layout scratch of the arena `handle` names.
+    ///
+    /// # Safety
+    ///
+    /// `handle` must come from `layout_arena_create` and stay live for `'a`.
+    pub(crate) unsafe fn from_handle<'a>(handle: *mut std::ffi::c_void) -> &'a Self {
+        // SAFETY: Guaranteed by the caller.
+        unsafe { super::ArenaHandle::layout_scratch_of(handle) }
+    }
+
+    pub(crate) fn end_layout_pass(&self) {
+        self.run_record_stack.release_spare_chunks();
+    }
+
+    fn begin_run(&self) -> u64 {
+        let nonce = self.next_run_nonce.get();
+        self.next_run_nonce
+            .set(nonce.checked_add(1).expect("layout run nonce space exhausted"));
+        self.live_run_nonces.borrow_mut().push(nonce);
+        nonce
+    }
+
+    fn end_run(&self, nonce: u64) {
+        let ended = self.live_run_nonces.borrow_mut().pop();
+        assert_eq!(ended, Some(nonce), "layout runs ended out of order");
+    }
+
+    fn innermost_run_nonce(&self) -> Option<u64> {
+        self.live_run_nonces.borrow().last().copied()
+    }
+
+    fn run_record(&self, slot_index: u32, run_nonce: u64) -> Option<NonNull<UsedValues>> {
+        let records = self.run_used_records.borrow();
+        let slot = records.get(slot_index as usize)?;
+        if slot.nonce != run_nonce {
+            return None;
+        }
+        slot.record
+    }
+
+    fn claim_run_record(&self, slot_index: u32, run_nonce: u64, record: NonNull<UsedValues>) -> RunRecordClaim {
+        let mut records = self.run_used_records.borrow_mut();
+        // The table grows with the slot space: nearly every slot gets a run record each layout
+        // pass, and the table outlives the pass, so this resizes rarely.
+        if records.len() <= slot_index as usize {
+            records.resize_with(slot_index as usize + 1, RunRecordSlot::default);
+        }
+        let slot = &mut records[slot_index as usize];
+        if slot.nonce == run_nonce {
+            return RunRecordClaim::AlreadyClaimed;
+        }
+        // Runs nest, so the nonces of the runs in progress ascend. An entry left by a run that returned is free.
+        if slot.nonce != 0 && self.live_run_nonces.borrow().binary_search(&slot.nonce).is_ok() {
+            return RunRecordClaim::HeldByEnclosingRun;
+        }
+        *slot = RunRecordSlot {
+            nonce: run_nonce,
+            record: Some(record),
+        };
+        RunRecordClaim::Claimed
+    }
+}
+
 /// The per-run registry of UsedValues records, backed by the slot-indexed side
-/// table in the layout node arena. A run holds its root's record itself and
-/// allocates every other record on the arena's record stack, which releases them
+/// table in the layout stage's scratch. A run holds its root's record itself and
+/// allocates every other record on the scratch's record stack, which releases them
 /// when the run returns. The scoped constructors lend records to the run, so
 /// callers cannot extend the registry's lifetime.
 pub(crate) struct RunRecords<'arena> {
     root: Node,
     root_used: Option<&'arena UsedValues>,
-    arena: &'arena LayoutNodeArena,
+    scratch: &'arena LayoutScratch,
     nonce: u64,
     stack_length_at_start: usize,
     records_outside_table: RefCell<HashMap<Node, NonNull<UsedValues>>>,
@@ -38,7 +129,7 @@ impl Drop for InnermostRunGuard<'_> {
     }
 }
 
-pub(crate) enum RunRecordClaim {
+enum RunRecordClaim {
     Claimed,
     AlreadyClaimed,
     HeldByEnclosingRun,
@@ -46,25 +137,28 @@ pub(crate) enum RunRecordClaim {
 
 impl<'arena> RunRecords<'arena> {
     pub(crate) fn with_root<R>(
+        scratch: &'arena LayoutScratch,
         arena: &'arena LayoutNodeArena,
         root: Node,
         root_containing_block: Node,
         root_used: &'arena UsedValues,
         run: impl FnOnce(&Self) -> R,
     ) -> R {
-        Self::enter(arena, root, root_containing_block, Some(root_used), run)
+        Self::enter(scratch, arena, root, root_containing_block, Some(root_used), run)
     }
 
     pub(crate) fn with_unrooted<R>(
+        scratch: &'arena LayoutScratch,
         arena: &'arena LayoutNodeArena,
         root: Node,
         root_containing_block: Node,
         run: impl FnOnce(&Self) -> R,
     ) -> R {
-        Self::enter(arena, root, root_containing_block, None, run)
+        Self::enter(scratch, arena, root, root_containing_block, None, run)
     }
 
     fn enter<R>(
+        scratch: &'arena LayoutScratch,
         arena: &'arena LayoutNodeArena,
         root: Node,
         root_containing_block: Node,
@@ -79,9 +173,9 @@ impl<'arena> RunRecords<'arena> {
         let records = Self {
             root,
             root_used,
-            arena,
-            nonce: arena.begin_run(),
-            stack_length_at_start: arena.run_record_stack.length(),
+            scratch,
+            nonce: scratch.begin_run(),
+            stack_length_at_start: scratch.run_record_stack.length(),
             records_outside_table: RefCell::new(HashMap::default()),
             table_inline_layouts: RefCell::new(HashMap::default()),
             omitted_line_layout: Cell::new(false),
@@ -110,12 +204,12 @@ impl<'arena> RunRecords<'arena> {
             registered_twice();
         }
         assert_eq!(
-            self.arena.innermost_run_nonce(),
+            self.scratch.innermost_run_nonce(),
             Some(self.nonce),
             "only the innermost layout run may register records"
         );
-        let record = self.arena.run_record_stack.push(used);
-        match self.arena.claim_run_record(slot_index, self.nonce, record) {
+        let record = self.scratch.run_record_stack.push(used);
+        match self.scratch.claim_run_record(slot_index, self.nonce, record) {
             RunRecordClaim::Claimed => {}
             RunRecordClaim::AlreadyClaimed => registered_twice(),
             RunRecordClaim::HeldByEnclosingRun => {
@@ -155,7 +249,7 @@ impl<'arena> RunRecords<'arena> {
         {
             return Some(root_used);
         }
-        let record = self.arena.run_record(node.slot_index(), self.nonce).or_else(|| {
+        let record = self.scratch.run_record(node.slot_index(), self.nonce).or_else(|| {
             let records = self.records_outside_table.borrow();
             if records.is_empty() {
                 return None;
@@ -183,8 +277,8 @@ impl Drop for RunRecords<'_> {
     fn drop(&mut self) {
         // SAFETY: Only the innermost run registers records, so every record above this run's start is its own.
         //         References to them borrow this run, which is being dropped.
-        unsafe { self.arena.run_record_stack.truncate(self.stack_length_at_start) };
-        self.arena.end_run(self.nonce);
+        unsafe { self.scratch.run_record_stack.truncate(self.stack_length_at_start) };
+        self.scratch.end_run(self.nonce);
     }
 }
 
@@ -249,7 +343,7 @@ impl RunRecordStack {
 
 impl Drop for RunRecordStack {
     fn drop(&mut self) {
-        // SAFETY: Records borrow the runs that registered them, and no run outlives the arena.
+        // SAFETY: Records borrow the runs that registered them, and no run outlives the scratch.
         unsafe { self.truncate(0) };
         for chunk in self.chunks.get_mut().drain(..) {
             // SAFETY: The stack is empty, so the chunk holds no records.
@@ -278,18 +372,19 @@ mod tests {
     #[test]
     fn nested_runs_leave_their_parents_records_in_place() {
         let mut arena = LayoutNodeArena::new();
+        let scratch = LayoutScratch::default();
         let root = arena.allocate_for_test().slot;
         let child = arena.allocate_for_test().slot;
         let root_used = UsedValues::default();
         let nested_used = UsedValues::default();
-        let parent_nonce = RunRecords::with_root(&arena, root, NodeSlotId::INVALID, &root_used, |parent| {
+        let parent_nonce = RunRecords::with_root(&scratch, &arena, root, NodeSlotId::INVALID, &root_used, |parent| {
             let child_used: *const UsedValues = parent.register(child, UsedValues::default());
-            RunRecords::with_root(&arena, child, root, &nested_used, |nested| {
+            RunRecords::with_root(&scratch, &arena, child, root, &nested_used, |nested| {
                 assert!(std::ptr::eq(parent.used_values(child), child_used));
                 assert!(std::ptr::eq(parent.used_values(root), &raw const root_used));
                 assert!(std::ptr::eq(nested.used_values(child), &raw const nested_used));
                 assert!(nested.used_values_if_owned(root).is_none());
-                RunRecords::with_unrooted(&arena, child, root, |measurement| {
+                RunRecords::with_unrooted(&scratch, &arena, child, root, |measurement| {
                     let measured: *const UsedValues = measurement.register(child, UsedValues::default());
                     assert!(std::ptr::eq(measurement.used_values(child), measured));
                     assert!(std::ptr::eq(parent.used_values(child), child_used));
@@ -300,25 +395,26 @@ mod tests {
             assert!(std::ptr::eq(parent.used_values(child), child_used));
             parent.nonce
         });
-        assert!(arena.run_record(root.slot_index(), parent_nonce).is_none());
-        assert_eq!(arena.run_record_stack.length(), 0);
+        assert!(scratch.run_record(root.slot_index(), parent_nonce).is_none());
+        assert_eq!(scratch.run_record_stack.length(), 0);
     }
 
     #[test]
     fn returning_runs_release_their_records_and_reuse_the_storage() {
         let mut arena = LayoutNodeArena::new();
+        let scratch = LayoutScratch::default();
         let root = arena.allocate_for_test().slot;
         let child = arena.allocate_for_test().slot;
         let lines = Rc::new(crate::layout::inline_content::InlineContent::default());
         let weak_lines = Rc::downgrade(&lines);
         let root_used = UsedValues::default();
-        let first_record = RunRecords::with_root(&arena, root, NodeSlotId::INVALID, &root_used, |records| {
+        let first_record = RunRecords::with_root(&scratch, &arena, root, NodeSlotId::INVALID, &root_used, |records| {
             let used = records.register(child, UsedValues::default());
             used.set_finished_line_data(lines);
             std::ptr::from_ref(used)
         });
         assert!(weak_lines.upgrade().is_none());
-        let second_record = RunRecords::with_root(&arena, root, NodeSlotId::INVALID, &root_used, |records| {
+        let second_record = RunRecords::with_root(&scratch, &arena, root, NodeSlotId::INVALID, &root_used, |records| {
             std::ptr::from_ref(records.register(child, UsedValues::default()))
         });
         assert_eq!(first_record, second_record);
@@ -326,23 +422,24 @@ mod tests {
         let nodes: Vec<_> = (0..RECORDS_PER_STACK_CHUNK * 2 + 1)
             .map(|_| arena.allocate_for_test().slot)
             .collect();
-        RunRecords::with_unrooted(&arena, root, NodeSlotId::INVALID, |records| {
+        RunRecords::with_unrooted(&scratch, &arena, root, NodeSlotId::INVALID, |records| {
             for node in nodes {
                 records.register(node, UsedValues::default());
             }
         });
-        assert_eq!(arena.run_record_stack.chunks.borrow().len(), 3);
-        arena.end_layout_pass();
-        assert_eq!(arena.run_record_stack.chunks.borrow().len(), 1);
+        assert_eq!(scratch.run_record_stack.chunks.borrow().len(), 3);
+        scratch.end_layout_pass();
+        assert_eq!(scratch.run_record_stack.chunks.borrow().len(), 1);
     }
 
     #[test]
     fn a_box_registered_by_a_returned_run_can_be_freed() {
         let mut arena = LayoutNodeArena::new();
+        let scratch = LayoutScratch::default();
         let root = arena.allocate_for_test().slot;
         let child = arena.allocate_for_test().slot;
         let root_used = UsedValues::default();
-        RunRecords::with_root(&arena, root, NodeSlotId::INVALID, &root_used, |records| {
+        RunRecords::with_root(&scratch, &arena, root, NodeSlotId::INVALID, &root_used, |records| {
             records.register(child, UsedValues::default());
         });
         let _ = arena.free_subtree(child);
@@ -352,9 +449,10 @@ mod tests {
     #[should_panic(expected = "registered twice")]
     fn registering_the_root_of_a_rooted_run_panics() {
         let mut arena = LayoutNodeArena::new();
+        let scratch = LayoutScratch::default();
         let root = arena.allocate_for_test().slot;
         let root_used = UsedValues::default();
-        RunRecords::with_root(&arena, root, NodeSlotId::INVALID, &root_used, |records| {
+        RunRecords::with_root(&scratch, &arena, root, NodeSlotId::INVALID, &root_used, |records| {
             records.register(root, UsedValues::default());
         });
     }
@@ -363,11 +461,12 @@ mod tests {
     #[should_panic(expected = "only the innermost layout run may register records")]
     fn an_enclosing_run_cannot_register_while_a_nested_run_is_in_progress() {
         let mut arena = LayoutNodeArena::new();
+        let scratch = LayoutScratch::default();
         let root = arena.allocate_for_test().slot;
         let child = arena.allocate_for_test().slot;
         let root_used = UsedValues::default();
-        RunRecords::with_unrooted(&arena, root, NodeSlotId::INVALID, |parent| {
-            RunRecords::with_root(&arena, root, NodeSlotId::INVALID, &root_used, |_| {
+        RunRecords::with_unrooted(&scratch, &arena, root, NodeSlotId::INVALID, |parent| {
+            RunRecords::with_root(&scratch, &arena, root, NodeSlotId::INVALID, &root_used, |_| {
                 parent.register(child, UsedValues::default());
             });
         });
@@ -376,14 +475,15 @@ mod tests {
     #[test]
     fn unwinding_a_nested_run_restores_its_parent() {
         let mut arena = LayoutNodeArena::new();
+        let scratch = LayoutScratch::default();
         let root = arena.allocate_for_test().slot;
         let child = arena.allocate_for_test().slot;
         let root_used = UsedValues::default();
         let nested_used = UsedValues::default();
-        RunRecords::with_root(&arena, root, NodeSlotId::INVALID, &root_used, |parent| {
+        RunRecords::with_root(&scratch, &arena, root, NodeSlotId::INVALID, &root_used, |parent| {
             let child_used: *const UsedValues = parent.register(child, UsedValues::default());
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                RunRecords::with_root(&arena, child, root, &nested_used, |nested| {
+                RunRecords::with_root(&scratch, &arena, child, root, &nested_used, |nested| {
                     nested.register(root, UsedValues::default());
                     panic!("abort the nested measurement");
                 });
