@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<style>
+    @keyframes colour {
+        from,
+        to {
+            color: red;
+        }
+    }
+
+    @keyframes nothing {
+        from {
+        }
+        to {
+        }
+    }
+
+    #parent {
+        animation: colour 1s infinite;
+    }
+
+    #child {
+        width: 10px;
+        animation: nothing 1s infinite;
+    }
+</style>
+<div id="parent"><div id="child"></div></div>
+<script src="../include.js"></script>
+<script>
+    test(() => {
+        // An animation whose keyframes declare nothing composes nothing, so the element keeps the
+        // style it computed...
+        println(getComputedStyle(child).width);
+        // ...including the colour it inherits from its animated parent.
+        println(getComputedStyle(child).color);
+        // It is still an animation of the element's own.
+        println(child.getAnimations().length);
+    });
+</script>
