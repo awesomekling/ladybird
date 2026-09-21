@@ -4138,7 +4138,7 @@ impl TreeBuilderHost {
 
     /// The row an element's principal box is built in. The row is stamped out of the element's
     /// identity: the kind the mirror's published display asks for, and the record the mirror
-    /// published beside it.
+    /// published beside it, adjusted as the rendering section asks of a box of that kind.
     fn create_element_box(&self, style_node: u32, kind: NodeKind) -> NodeSlotId {
         let style_node = StyleNodeID::from_raw(style_node).expect("an element's box is built for its identity");
         // SAFETY: Entry points guarantee that the arena remains live, and callers hold no reference
@@ -4146,6 +4146,30 @@ impl TreeBuilderHost {
         let slot = unsafe { &mut *self.arena }.allocate_unbound();
         self.arena().stamp_dom_element_row(slot, kind, style_node);
         self.arena().take_over_rows_of_bound_node(slot);
+        match kind {
+            // https://html.spec.whatwg.org/multipage/rendering.html#the-fieldset-and-legend-elements
+            // If the computed outer display type is inline, the fieldset is expected to behave as inline-block.
+            // Otherwise, it is expected to behave as flow-root. This does not change the computed value.
+            NodeKind::FieldSetBox => {
+                let display = self.style(slot).map(|style| style.display());
+                if let Some(display) = display.filter(FfiDisplay::is_flow_inside) {
+                    self.arena().update_layout_style(slot, |style| {
+                        style.set_display(FfiDisplay::outside_and_inside(
+                            display.outside,
+                            crate::css::css_enums::display_inside::FLOW_ROOT,
+                            false,
+                        ));
+                    });
+                }
+            }
+            // A media element renders the children of its shadow root, such as its controls.
+            NodeKind::AudioBox | NodeKind::VideoBox => {
+                let has_shadow_root = self.arena().shadow_root_of(Some(style_node)).is_some();
+                self.arena()
+                    .set_node_flag(slot, NodeFlag::ReplacedBoxCanHaveChildren, has_shadow_root);
+            }
+            _ => {}
+        }
         assert!(!self.arena().node_shell(slot).is_null());
         slot
     }
