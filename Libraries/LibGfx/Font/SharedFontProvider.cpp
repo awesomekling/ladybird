@@ -256,20 +256,44 @@ RefPtr<Typeface> SharedFontProvider::load_brokered_font(BrokeredFont brokered_fo
         [&](SystemFontReference const& reference) { return load_font_reference(brokered_font.face_id, reference); });
 }
 
+RefPtr<Typeface> load_typeface_from_system_font_reference(SystemFontReference const& reference)
+{
+    auto typeface_or_error = TypefaceSkia::match_family_style(reference.family, reference.weight, reference.width, reference.slope);
+    if (typeface_or_error.is_error() || !typeface_or_error.value())
+        return nullptr;
+    return typeface_or_error.release_value().release_nonnull();
+}
+
+RefPtr<Typeface> load_typeface_from_font_file(u32 ttc_index, FontFileFormat format, IPC::File file)
+{
+    auto mapped_file = Core::MappedFile::map_from_fd_and_close(file.take_fd(), "brokered font"sv);
+    if (mapped_file.is_error())
+        return nullptr;
+
+    ErrorOr<NonnullRefPtr<Typeface>> typeface_or_error = Error::from_string_literal("Unsupported font file format");
+    if (format == FontFileFormat::WOFF)
+        typeface_or_error = WOFF::try_load_from_bytes(mapped_file.value()->bytes(), ttc_index);
+    else
+        typeface_or_error = Typeface::try_load_from_mapped_file(mapped_file.release_value(), ttc_index);
+
+    if (typeface_or_error.is_error())
+        return nullptr;
+    return typeface_or_error.release_value();
+}
+
 RefPtr<Typeface> SharedFontProvider::load_font_reference(u64 face_id, SystemFontReference const& reference)
 {
     if (m_failed_face_ids.contains(face_id))
         return nullptr;
 
-    auto typeface_or_error = TypefaceSkia::match_family_style(reference.family, reference.weight, reference.width, reference.slope);
-    if (typeface_or_error.is_error() || !typeface_or_error.value()) {
+    auto typeface = load_typeface_from_system_font_reference(reference);
+    if (!typeface) {
         m_failed_face_ids.set(face_id);
         return nullptr;
     }
 
-    auto typeface = typeface_or_error.release_value().release_nonnull();
     typeface->set_system_font_identifier({ m_catalog->generation(), face_id });
-    m_typeface_cache.set(face_id, typeface);
+    m_typeface_cache.set(face_id, *typeface);
     return typeface;
 }
 
@@ -278,26 +302,14 @@ RefPtr<Typeface> SharedFontProvider::load_font_file(u64 face_id, u32 ttc_index, 
     if (m_failed_face_ids.contains(face_id))
         return nullptr;
 
-    auto mapped_file = Core::MappedFile::map_from_fd_and_close(file.take_fd(), "brokered font"sv);
-    if (mapped_file.is_error()) {
+    auto typeface = load_typeface_from_font_file(ttc_index, format, move(file));
+    if (!typeface) {
         m_failed_face_ids.set(face_id);
         return nullptr;
     }
 
-    ErrorOr<NonnullRefPtr<Typeface>> typeface_or_error = Error::from_string_literal("Unsupported font file format");
-    if (format == FontFileFormat::WOFF)
-        typeface_or_error = WOFF::try_load_from_bytes(mapped_file.value()->bytes(), ttc_index);
-    else
-        typeface_or_error = Typeface::try_load_from_mapped_file(mapped_file.release_value(), ttc_index);
-
-    if (typeface_or_error.is_error()) {
-        m_failed_face_ids.set(face_id);
-        return nullptr;
-    }
-
-    auto typeface = typeface_or_error.release_value();
     typeface->set_system_font_identifier({ m_catalog->generation(), face_id });
-    m_typeface_cache.set(face_id, typeface);
+    m_typeface_cache.set(face_id, *typeface);
     return typeface;
 }
 

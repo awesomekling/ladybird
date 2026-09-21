@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Format.h>
 #include <AK/HashMap.h>
 #include <AK/Mutex.h>
+#include <AK/OwnPtr.h>
 #include <AK/Singleton.h>
+#include <AK/StringView.h>
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/Font/FontDatabase.h>
 #include <LibGfx/Font/SystemFallbackFonts.h>
@@ -28,6 +31,7 @@ struct SystemFallbackFontCache {
     // A miss is an answer too: without it every code point no family covers asks the provider again
     // on every lookup, and for the shared provider that is an IPC round trip.
     HashMap<SystemFallbackFontKey, RefPtr<Font const>, SystemFallbackFontKeyTraits> fonts;
+    OwnPtr<SystemFallbackFontService> render_side_service;
 };
 
 Singleton<SystemFallbackFontCache> s_system_fallback_font_cache;
@@ -37,23 +41,87 @@ SystemFallbackFontCache& system_fallback_font_cache()
     return *s_system_fallback_font_cache;
 }
 
+// Matching goes through the process's system font provider, and a renderer's provider answers a
+// code point by asking the UI process on whichever connection the calling thread owns.
+bool matching_a_code_point_leaves_the_process()
+{
+    auto& database = FontDatabase::the();
+    return database.has_system_font_provider() && database.system_font_provider_name() == "Shared"sv;
 }
 
-RefPtr<Font const> system_fallback_font(SystemFallbackFontKey const& key)
+void report_miss(SystemFallbackFontKey const& key, bool served_by_the_render_side)
+{
+    static bool const census = getenv("LADYBIRD_FONT_FALLBACK_CENSUS") != nullptr;
+    if (!census)
+        return;
+    dbgln("FONT FALLBACK MISS: path={} code_point=U+{:04X} weight={} width={} slope={} emoji={} size={}",
+        served_by_the_render_side ? "render_side"sv : "document_thread"sv,
+        key.code_point, key.weight, key.width, key.slope, key.prefer_color_emoji, key.point_size);
+}
+
+enum class MissPath {
+    DocumentThread,
+    RenderSide,
+};
+
+RefPtr<Font const> system_fallback_font(SystemFallbackFontKey const& key, MissPath path, bool* reached_document_thread)
 {
     auto& cache = system_fallback_font_cache();
     // NB: The lookup runs under the lock rather than beside it, so one code point is matched once
     //     even when several threads want it. The cost falls on misses only.
-    // DEBT: SharedFontProvider answers a miss with a synchronous IPC round trip on the client's
-    //       connection, which belongs to the document thread. Until the render side has a font
-    //       service connection of its own, only cache hits are genuinely available off it.
     MutexLocker locker(cache.mutex);
     if (auto cached = cache.fonts.get(key); cached.has_value())
         return *cached;
-    RefPtr<Font const> font = FontDatabase::the().get_font_for_code_point(
-        key.code_point, key.point_size, key.weight, key.width, key.slope, key.prefer_color_emoji);
+
+    auto* service = path == MissPath::RenderSide ? cache.render_side_service.ptr() : nullptr;
+    RefPtr<Font const> font;
+    if (service) {
+        font = service->match_font_for_code_point(key);
+    } else {
+        font = FontDatabase::the().get_font_for_code_point(
+            key.code_point, key.point_size, key.weight, key.width, key.slope, key.prefer_color_emoji);
+        if (reached_document_thread)
+            *reached_document_thread = matching_a_code_point_leaves_the_process();
+    }
     cache.fonts.set(key, font);
+    report_miss(key, service != nullptr);
     return font;
+}
+
+}
+
+// Key function for SystemFallbackFontService, to emit the vtable here.
+SystemFallbackFontService::~SystemFallbackFontService() = default;
+
+void install_render_side_system_fallback_font_service(NonnullOwnPtr<SystemFallbackFontService> service)
+{
+    auto& cache = system_fallback_font_cache();
+    MutexLocker locker(cache.mutex);
+    VERIFY(!cache.render_side_service);
+    cache.render_side_service = move(service);
+}
+
+bool has_render_side_system_fallback_font_service()
+{
+    auto& cache = system_fallback_font_cache();
+    MutexLocker locker(cache.mutex);
+    return cache.render_side_service;
+}
+
+RefPtr<Font const> system_fallback_font(SystemFallbackFontKey const& key)
+{
+    return system_fallback_font(key, MissPath::DocumentThread, nullptr);
+}
+
+RefPtr<Font const> system_fallback_font_from_render_side(SystemFallbackFontKey const& key)
+{
+    bool reached_document_thread = false;
+    return system_fallback_font_from_render_side(key, reached_document_thread);
+}
+
+RefPtr<Font const> system_fallback_font_from_render_side(SystemFallbackFontKey const& key, bool& reached_document_thread)
+{
+    return system_fallback_font(key, MissPath::RenderSide, &reached_document_thread);
 }
 
 void clear_system_fallback_font_cache()
@@ -61,6 +129,8 @@ void clear_system_fallback_font_cache()
     auto& cache = system_fallback_font_cache();
     MutexLocker locker(cache.mutex);
     cache.fonts.clear();
+    if (cache.render_side_service)
+        cache.render_side_service->did_change_font_set();
 }
 
 size_t system_fallback_font_cache_size()
@@ -77,18 +147,19 @@ void const* ladybird_gfx_system_fallback_font(u32, u16, u16, u8, bool, float);
 void const* ladybird_gfx_font_invisible_variant(void const*);
 }
 
-// The caller interns the answer, which takes its own reference; the memo below keeps it live until
-// then, and forever after, so handing back a borrowed pointer is safe.
+// Only a render stage calls this; the document thread's callers go through the live cascade's own
+// fallback callback. The caller interns the answer, which takes its own reference; the memo keeps
+// it live until then, and forever after, so handing back a borrowed pointer is safe.
 extern "C" void const* ladybird_gfx_system_fallback_font(u32 code_point, u16 weight, u16 width, u8 slope, bool prefer_color_emoji, float point_size)
 {
-    return Gfx::system_fallback_font({
-                                         .code_point = code_point,
-                                         .weight = weight,
-                                         .width = width,
-                                         .slope = slope,
-                                         .prefer_color_emoji = prefer_color_emoji,
-                                         .point_size = point_size,
-                                     })
+    return Gfx::system_fallback_font_from_render_side({
+                                                          .code_point = code_point,
+                                                          .weight = weight,
+                                                          .width = width,
+                                                          .slope = slope,
+                                                          .prefer_color_emoji = prefer_color_emoji,
+                                                          .point_size = point_size,
+                                                      })
         .ptr();
 }
 
