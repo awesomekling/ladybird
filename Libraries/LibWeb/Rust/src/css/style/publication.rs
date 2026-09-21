@@ -5170,11 +5170,47 @@ impl StyleEngineState {
     /// Retry a record after C++ has installed earlier records in the same preorder batch. A record
     /// rejected while the batch was planned may become computable once its inheritance parent is
     /// authoritative.
+    /// Record one way the host entered the engine for one element, under the reason the engine
+    /// sent it there. The engine knows the reason; the host knows when the entry happens, so the
+    /// two halves meet here. `row_kinds` is what the host's own row census already carries.
+    pub(crate) fn note_host_entry(&mut self, node: StyleNodeID, kind: u8, row_kinds: u8) {
+        if !seal::is_reporting() {
+            return;
+        }
+        let kind = match kind {
+            1 => seal::HostEntryKind::Retry,
+            2 => seal::HostEntryKind::Sampled,
+            _ => seal::HostEntryKind::Row,
+        };
+        let recorded = self.retained.host_entry_causes.get(&node).copied();
+        let (cause, cold) = recorded.unwrap_or_else(|| {
+            // The record loop was never offered this element, so no gate declined it. Name the
+            // way in instead: this population has never been ranked beside the declines.
+            let cause = if row_kinds & (1 << 1) != 0 {
+                "NotOfferedPseudoElement"
+            } else if row_kinds & (1 << 3) != 0 {
+                "NotOfferedHighlightParent"
+            } else if row_kinds & (1 << 4) != 0 {
+                "NotOfferedLonghandDriveOnly"
+            } else if row_kinds & (1 << 0) != 0 {
+                "InBatchWithoutDecline"
+            } else {
+                "NotOfferedOutOfBatch"
+            };
+            (
+                cause,
+                self.retained.computed_group_sets.assigned_style_record(node).is_none(),
+            )
+        });
+        seal::note_host_entry(cause, kind, cold);
+    }
+
     pub(crate) fn retry_engine_record_after_ancestor(
         &mut self,
         node: StyleNodeID,
         counters: &mut Counters,
     ) -> RetriedEngineRecord {
+        self.note_host_entry(node, 1, 0);
         if let Some(inputs) = self.retained.document_style_computation_inputs
             && let Some(resolver) = &mut self.retained.font_resolution
         {

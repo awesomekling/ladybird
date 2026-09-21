@@ -5746,6 +5746,9 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         if (stop_after_longhand_drive)
             host_driven_row_kinds |= LonghandDriveOnly;
         StyleValueFFI::rust_style_ffi_note_host_driven_row(host_driven_row_kinds);
+        // The engine knows why it sent this element here; the census pairs the two so it can rank
+        // what reaches the host instead of what the engine attempted.
+        m_style_engine.note_host_entry(abstract_element.element().style_node_id(), 0, host_driven_row_kinds);
     }
 
     ensure_style_metadata_tables_installed();

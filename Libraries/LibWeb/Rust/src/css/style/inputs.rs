@@ -1876,6 +1876,7 @@ impl StyleEngineState {
                 force_bounded_prefix_completion: false,
                 prepared_batch_matching_traversal: None,
                 published_match_answers: PublishedMatchAnswers::default(),
+                host_entry_causes: HashMap::default(),
                 transaction_fact_view: None,
                 facts: ElementFactStore::new(),
                 programs,

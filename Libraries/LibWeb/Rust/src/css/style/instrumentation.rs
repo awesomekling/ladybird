@@ -351,6 +351,10 @@ define_counters! {
     SharedStyleRecordHits => "sharedStyleRecordHits",
 }
 
+const RECORD_BAIL_FIRST: usize = Counter::EngineComputedRecordDeltas as usize;
+const RECORD_BAIL_LAST: usize = Counter::EngineComputedRecordBailRecordTable as usize;
+const RECORD_BAIL_COUNT: usize = RECORD_BAIL_LAST - RECORD_BAIL_FIRST + 1;
+
 /// The counter set for one document.
 #[derive(Clone, Debug)]
 pub struct Counters {
@@ -386,6 +390,25 @@ impl Counters {
     #[must_use]
     pub fn get(&self, counter: Counter) -> u64 {
         self.values[counter as usize]
+    }
+
+    /// The counters a record computation bails with, as one contiguous window. The census reads
+    /// this window around a row to name the bail that declined it, which costs nothing when the
+    /// seal is off because nobody reads it then.
+    #[must_use]
+    pub fn record_bail_marks(&self) -> [u64; RECORD_BAIL_COUNT] {
+        self.values[RECORD_BAIL_FIRST..=RECORD_BAIL_LAST]
+            .try_into()
+            .expect("the record-bail window has a fixed width")
+    }
+
+    /// The first bail counter in that window that moved since `before`, by name.
+    #[must_use]
+    pub fn first_changed_record_bail(&self, before: &[u64; RECORD_BAIL_COUNT]) -> Option<&'static str> {
+        (RECORD_BAIL_FIRST..=RECORD_BAIL_LAST).find_map(|index| {
+            let name = COUNTER_NAMES[index];
+            (self.values[index] != before[index - RECORD_BAIL_FIRST] && name.contains("Bail")).then_some(name)
+        })
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&'static str, u64)> {

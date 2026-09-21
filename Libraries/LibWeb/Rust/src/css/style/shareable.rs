@@ -118,6 +118,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         force_bounded_prefix_completion,
         prepared_batch_matching_traversal,
         published_match_answers,
+        host_entry_causes,
         transaction_fact_view,
         facts,
         programs,
@@ -224,6 +225,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(force_bounded_prefix_completion);
     assert_member_is_sync(prepared_batch_matching_traversal);
     assert_member_is_sync(published_match_answers);
+    assert_member_is_sync(host_entry_causes);
     assert_member_is_sync(transaction_fact_view);
     assert_member_is_sync(facts);
     assert_member_is_sync(programs);
