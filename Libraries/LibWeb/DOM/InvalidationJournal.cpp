@@ -14,8 +14,22 @@
 
 namespace Web::DOM {
 
+// The main-side access census counts how often the DOM side reaches render-owned state while the
+// journal holds marks the render side has not taken yet. It learns that from here, and only while
+// it counts.
+static void report_journal_pending_to_census(Document& document, bool pending)
+{
+    static bool const census_enabled = Layout::RustFFI::layout_main_side_census_enabled();
+    if (!census_enabled)
+        return;
+    if (auto* arena = document.layout_node_arena_if_created())
+        Layout::RustFFI::layout_arena_note_invalidation_journal_pending(arena->handle(), pending);
+}
+
 InvalidationJournal::Entry& InvalidationJournal::entry_for(NodeIdentity identity)
 {
+    if (m_entries.is_empty())
+        report_journal_pending_to_census(m_document, true);
     auto index = m_entry_index_by_identity.ensure(identity, [&] {
         m_entries.append(Entry {
             .identity = identity,
@@ -235,6 +249,7 @@ void InvalidationJournal::drain()
 
     if (publication_arena)
         Layout::RustFFI::layout_arena_after_invalidation_journal_drain(publication_arena->handle());
+    report_journal_pending_to_census(m_document, false);
 }
 
 }

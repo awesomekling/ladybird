@@ -32,6 +32,7 @@ mod layout_pass;
 pub(crate) mod line_box;
 pub(crate) mod line_box_fragment;
 pub(crate) mod line_builder;
+pub(crate) mod main_side_census;
 pub mod node_data;
 pub(crate) mod node_facts;
 pub use libcompositing_rust::node_slot_id;
