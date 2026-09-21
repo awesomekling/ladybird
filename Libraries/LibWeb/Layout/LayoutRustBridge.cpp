@@ -351,12 +351,17 @@ static RustFFI::FfiViewportPropagationFacts viewport_propagation_facts(DOM::Docu
     facts.root_layout_node = Compositing::RustFFI::NodeSlotId_INVALID;
     facts.body_layout_node = Compositing::RustFFI::NodeSlotId_INVALID;
     auto* root_element = document.document_element();
-    if (!root_element || !root_element->unsafe_layout_node())
+    auto* arena = document.layout_node_arena_if_created();
+    if (!root_element || !arena)
+        return facts;
+    // The rows are found by identity, so no shell is made just to name them.
+    auto root_row = RustFFI::layout_arena_bound_row(arena->handle(), root_element->style_node_id().value());
+    if (root_row.index == RustFFI::NodeSlotId_INVALID.index)
         return facts;
     auto const* root_box_values = root_element->style_group<CSS::ComputedValues::BoxValues>();
     auto const* root_inherited_box_values = root_element->style_group<CSS::ComputedValues::InheritedBoxValues>();
     VERIFY(root_box_values && root_inherited_box_values);
-    facts.root_layout_node = Node::slot_id(root_element->unsafe_layout_node());
+    facts.root_layout_node = root_row;
     facts.root_is_html_html_element = root_element->is_html_html_element();
     facts.root_overflow_x = root_box_values->overflow_x;
     facts.root_overflow_y = root_box_values->overflow_y;
@@ -370,7 +375,7 @@ static RustFFI::FfiViewportPropagationFacts viewport_propagation_facts(DOM::Docu
     if (!body_box_values || !body_inherited_box_values)
         return facts;
     facts.has_styled_body = true;
-    facts.body_layout_node = Node::slot_id(body_element->unsafe_layout_node());
+    facts.body_layout_node = RustFFI::layout_arena_bound_row(arena->handle(), body_element->style_node_id().value());
     facts.body_display_is_none = CSS::display_from_ffi_display(body_box_values->display).is_none();
     facts.body_overflow_x = body_box_values->overflow_x;
     facts.body_overflow_y = body_box_values->overflow_y;

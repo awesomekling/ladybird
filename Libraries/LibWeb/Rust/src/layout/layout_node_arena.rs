@@ -5684,6 +5684,19 @@ pub unsafe extern "C" fn layout_arena_note_rows_share_dom_node(
     unsafe { &*arena.cast::<LayoutNodeArena>() }.note_rows_share_dom_node(bound_row, added_row);
 }
 
+/// The row the element or text node with `style_node` is bound to, or an invalid slot if it has
+/// none. Unlike its shell, asking for the row makes nothing.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_bound_row(arena: *mut c_void, style_node: u32) -> NodeSlotId {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(style_node) = StyleNodeID::from_raw(style_node) else {
+        return NodeSlotId::INVALID;
+    };
+    // SAFETY: The C++ wrapper keeps the arena alive for this call and
+    // serializes all access on the document thread.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.bound_row(style_node)
+}
+
 /// The shell of the row the element or text node with `style_node` is bound to, materialised if
 /// nothing has asked for it yet, or null if the node has no row.
 #[unsafe(no_mangle)]
