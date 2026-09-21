@@ -205,6 +205,56 @@ static bool engine_computed_record_environment_is_installable(DOM::Element& elem
     return installable;
 }
 
+// The cascade a record resolved, as something two records can be compared by. The handles
+// themselves are pointers, so two independently resolved cascades never compare equal even when
+// they name the same fonts; this is what they say instead.
+static String describe_resolved_font(Gfx::FontCascadeList const& font_list)
+{
+    StringBuilder builder;
+    auto describe_entries = [&](Vector<Gfx::FontCascadeList::SnapshotEntry> const& entries) {
+        for (auto const& entry : entries) {
+            builder.appendff("[{}", entry.font ? entry.font->id() : 0);
+            for (auto const& range : entry.unicode_ranges)
+                builder.appendff(" {:x}-{:x}", range.min_code_point(), range.max_code_point());
+            if (entry.pending_face_id != 0)
+                builder.appendff(" pending={}", to_underlying(entry.pending_state));
+            builder.append(']');
+        }
+    };
+    describe_entries(font_list.snapshot_entries());
+    builder.append('|');
+    describe_entries(font_list.snapshot_fallback_entries());
+    builder.appendff("|last={}", font_list.last_resort_font() ? font_list.last_resort_font()->id() : 0);
+    auto const& first_available_font = font_list.first_available_font();
+    auto metrics = first_available_font.pixel_metrics();
+    builder.appendff("|metrics={},{},{},{}", metrics.ascent, metrics.descent, metrics.x_height, metrics.advance_of_ascii_zero);
+    return MUST(builder.to_string());
+}
+
+// Under verification, the font the engine resolved for a record must be the font the C++
+// computation resolved for the same element. The record comparison beside this one does not cover
+// it: the resolved cascade is an input the record holds a handle to, not a computed value in it,
+// so a record settled against the wrong `@font-face` table passes that comparison unnoticed.
+static void verify_engine_computed_record_font(DOM::Element& element, StyleRecordID engine_record)
+{
+    auto& style_engine = element.document().style_computer().style_engine();
+    auto engine_view = style_engine.style_record_view(engine_record);
+    if (!engine_view.present)
+        return;
+    constexpr auto font_group_index = ComputedValues::FontValues::style_group_index;
+    if (font_group_index >= engine_view.payload_count)
+        return;
+    auto const* engine_font_values = static_cast<ComputedValues::FontValues const*>(engine_view.payloads[font_group_index]);
+    auto const* installed_font_values = element.style_group<ComputedValues::FontValues>();
+    if (!engine_font_values || !installed_font_values)
+        return;
+    auto engine_font = describe_resolved_font(engine_font_values->font_list_value());
+    auto installed_font = describe_resolved_font(installed_font_values->font_list_value());
+    if (engine_font != installed_font)
+        dbgln("Engine record resolved {} where the computation resolved {}", engine_font, installed_font);
+    VERIFY(engine_font == installed_font);
+}
+
 // Under verification, the environment the engine resolved for a record must hold, name for name,
 // what the C++ computation installed on the element.
 static void verify_engine_computed_record_environment(DOM::Element& element, StyleRecordID style_record)
@@ -659,6 +709,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     bool const legacy_environment_is_complete = !needs_custom_property_recompute;
                     if (legacy_environment_is_complete)
                         verify_engine_computed_record_environment(*element, StyleRecordID { reaction.new_style_record });
+                    verify_engine_computed_record_font(*element, StyleRecordID { reaction.new_style_record });
                     for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
                         auto const& engine_record = pseudo_element_records[kind];
                         if (!engine_record.has_value())
