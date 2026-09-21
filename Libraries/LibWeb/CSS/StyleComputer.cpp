@@ -1723,6 +1723,23 @@ static void compute_transitioned_properties(ComputedValues const& style, DOM::Ab
     element.set_registered_transitions(pseudo_element, transitions);
 }
 
+// The transition registration a record the engine settled leaves for the host.
+//
+// The engine settles such a record only when the delta that produced it moved nothing but the
+// longhands declaring the element's transitions, and only when the record it starts from holds no
+// animation of its own. Every other computed value is copied from that record, so the
+// before-change and after-change styles agree everywhere a transition reads: nothing can start,
+// and the element holds nothing that could be cancelled. What is left is the registration, which
+// is a function of the installed record alone - the same function `compute_transitioned_properties`
+// runs for a style the sharing cache hands over.
+void StyleComputer::register_transitions_for_settled_record(DOM::AbstractElement abstract_element) const
+{
+    auto style = abstract_element.computed_style();
+    if (!style)
+        return;
+    compute_transitioned_properties(*style, abstract_element);
+}
+
 // https://drafts.csswg.org/css-transitions/#starting
 Vector<GC::Ref<Animations::KeyframeEffect>> StyleComputer::start_needed_transitions(ComputedStyleWorkingSet& new_style, DOM::AbstractElement abstract_element, bool* did_write_main_side_state) const
 {
