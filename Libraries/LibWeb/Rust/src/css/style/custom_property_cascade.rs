@@ -541,76 +541,101 @@ impl RetainedState {
                 store
             }
         };
-        let registry_ref = unsafe { &*registry.as_pointer().cast::<CustomPropertyRegistry>() };
-        let mut random_function_index = 0_usize;
-        let mut parse_context = registry_ref.parse_context(&mut random_function_index);
-        parse_context.in_quirks_mode = inputs.in_quirks_mode;
-        let Some(mut resolution_environment) = (unsafe {
-            prepare_var_resolution_environment(std::ptr::null(), 0, std::ptr::null(), 0, 0, std::ptr::null(), 0)
-        }) else {
-            counters.bump(Counter::EngineComputedRecordBailSubstitution);
-            return None;
-        };
-        // SAFETY: The store is live while a record names its environment, and the written value
-        // is retained by the declaration that carries it.
-        let resolution = unsafe {
-            crate::css::custom_properties::resolve_vars(
-                store,
-                std::ptr::null(),
-                registry.as_pointer(),
-                Some(&parse_context),
-                None,
-                None,
-                property,
-                FfiUtf16View {
-                    ascii: std::ptr::null(),
-                    utf16: std::ptr::null(),
-                    length: 0,
-                },
-                written.pointer().cast(),
-                &mut resolution_environment,
-                false,
-                std::ptr::null_mut(),
-                std::ptr::null(),
-                std::ptr::null_mut(),
-                None,
-            )
-        };
-        // The substituted source parses as the C++ cascade parses it: without callbacks first,
-        // then with the parse context's. A grammar the Rust parser does not handle parses in C++;
-        // the value is C++'s to compute.
-        let value = match resolution {
-            NativeVarResolution::Resolved {
-                source,
-                contains_attr_tainted_values,
-            } => {
-                let CallbackFreeParseOutcome { outcome, source } =
-                    parse_substituted_without_callbacks(&parse_context, property, source, contains_attr_tainted_values);
-                let outcome = match outcome {
-                    ParseOutcome::NotHandled => {
-                        parse_substituted_source(&parse_context, property, &source, contains_attr_tainted_values)
-                    }
-                    outcome => outcome,
-                };
-                match outcome {
-                    ParseOutcome::Parsed(value) => unsafe {
-                        RetainedStyleValueData::from_retained_pointer(std::sync::Arc::into_raw(value))
-                    },
-                    ParseOutcome::Invalid => RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid),
-                    ParseOutcome::NotHandled => {
-                        counters.bump(Counter::EngineComputedRecordBailSubstitution);
-                        return None;
-                    }
-                }
-            }
-            NativeVarResolution::Invalid => RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid),
-            NativeVarResolution::NotHandled => {
-                counters.bump(Counter::EngineComputedRecordBailSubstitution);
-                return None;
-            }
-        };
+        let value = substitute_written_value_against_store(store, inputs, property, &written, counters)?;
         counters.bump(Counter::EngineComputedRecordSubstitutions);
         environments.remember_substitution(written, property, environment, value.clone_retained());
         Some(value)
     }
+}
+
+/// What a written value with `var()` references substitutes to for a property against a resolved
+/// custom-property store, parsed as the property's value: what the C++ cascade computes for the
+/// declaration. Memo-free, for a caller that holds the store rather than the environment table.
+/// `None` when the value holds a substitution the engine does not resolve, or the substituted
+/// source is a grammar the Rust parser does not handle.
+pub(crate) fn substitute_written_value_against_store(
+    store: *const c_void,
+    inputs: bridge::FfiDocumentStyleComputationInputs,
+    property: u16,
+    written: &RetainedStyleValueData,
+    counters: &mut Counters,
+) -> Option<RetainedStyleValueData> {
+    if !custom_property_value_is_engine_resolvable(written.data()) {
+        counters.bump(Counter::EngineComputedRecordBailSubstitution);
+        return None;
+    }
+    let registry = inputs.custom_property_registry;
+    if registry.is_none() {
+        counters.bump(Counter::EngineComputedRecordBailSubstitution);
+        return None;
+    }
+    let registry_ref = unsafe { &*registry.as_pointer().cast::<CustomPropertyRegistry>() };
+    let mut random_function_index = 0_usize;
+    let mut parse_context = registry_ref.parse_context(&mut random_function_index);
+    parse_context.in_quirks_mode = inputs.in_quirks_mode;
+    let Some(mut resolution_environment) = (unsafe {
+        prepare_var_resolution_environment(std::ptr::null(), 0, std::ptr::null(), 0, 0, std::ptr::null(), 0)
+    }) else {
+        counters.bump(Counter::EngineComputedRecordBailSubstitution);
+        return None;
+    };
+    // SAFETY: The store is live while a record names its environment, and the written value
+    // is retained by the declaration that carries it.
+    let resolution = unsafe {
+        crate::css::custom_properties::resolve_vars(
+            store,
+            std::ptr::null(),
+            registry.as_pointer(),
+            Some(&parse_context),
+            None,
+            None,
+            property,
+            FfiUtf16View {
+                ascii: std::ptr::null(),
+                utf16: std::ptr::null(),
+                length: 0,
+            },
+            written.pointer().cast(),
+            &mut resolution_environment,
+            false,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            None,
+        )
+    };
+    // The substituted source parses as the C++ cascade parses it: without callbacks first,
+    // then with the parse context's. A grammar the Rust parser does not handle parses in C++;
+    // the value is C++'s to compute.
+    let value = match resolution {
+        NativeVarResolution::Resolved {
+            source,
+            contains_attr_tainted_values,
+        } => {
+            let CallbackFreeParseOutcome { outcome, source } =
+                parse_substituted_without_callbacks(&parse_context, property, source, contains_attr_tainted_values);
+            let outcome = match outcome {
+                ParseOutcome::NotHandled => {
+                    parse_substituted_source(&parse_context, property, &source, contains_attr_tainted_values)
+                }
+                outcome => outcome,
+            };
+            match outcome {
+                ParseOutcome::Parsed(value) => unsafe {
+                    RetainedStyleValueData::from_retained_pointer(std::sync::Arc::into_raw(value))
+                },
+                ParseOutcome::Invalid => RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid),
+                ParseOutcome::NotHandled => {
+                    counters.bump(Counter::EngineComputedRecordBailSubstitution);
+                    return None;
+                }
+            }
+        }
+        NativeVarResolution::Invalid => RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid),
+        NativeVarResolution::NotHandled => {
+            counters.bump(Counter::EngineComputedRecordBailSubstitution);
+            return None;
+        }
+    };
+    Some(value)
 }

@@ -6938,9 +6938,15 @@ pub struct FfiPublishedAnimationSample {
     pub direction: u8,
     pub important_property_bitmap: *const u8,
     pub important_property_bitmap_length: usize,
+    /// The store behind the custom-property environment the element holds, which a keyframe written
+    /// as a token stream substitutes against.
+    pub custom_property_store: *const std::ffi::c_void,
     /// Set when the published description covered every effect and the result stands. Where it is
     /// left false the stage has to collect the effects from the host the way it always has.
     pub covered: *mut bool,
+    /// Set when a keyframe's value substituted a `var()` reference, which the element records the
+    /// way it records one its own cascade substituted.
+    pub substituted_var: *mut bool,
 }
 
 #[must_use]
@@ -7134,9 +7140,14 @@ pub unsafe extern "C" fn rust_resolve_animation_declarations_from_published(
             composite_from_animation: 0,
         })
         .collect::<Vec<_>>();
-    let Some((ffi_effects, ffi_keyframes, ffi_declarations)) = describe_selected_effects(&selected, table) else {
+    let mut substitution =
+        KeyframeSubstitutionContext::new(input.custom_property_store, engine.document_style_computation_inputs());
+    let Some((ffi_effects, ffi_keyframes, ffi_declarations, _substituted_values)) =
+        describe_selected_effects(&selected, table, &mut substitution)
+    else {
         return no_resolved_animation_properties();
     };
+    unsafe { *input.substituted_var = substitution.substituted_var };
 
     let important_property_bitmap =
         unsafe { std::slice::from_raw_parts(input.important_property_bitmap, input.important_property_bitmap_length) };
@@ -7162,22 +7173,73 @@ pub(crate) struct SelectedEffect<'a> {
     pub(crate) composite_from_animation: u8,
 }
 
+/// What a keyframe declaration written as a token stream substitutes against on the element being
+/// sampled: the element's own custom-property store and the document inputs the parse needs, which
+/// together are what the host's `resolve_unresolved_style_value` resolves such a value against.
+pub(crate) struct KeyframeSubstitutionContext {
+    custom_property_store: *const std::ffi::c_void,
+    inputs: Option<crate::css::style::bridge::FfiDocumentStyleComputationInputs>,
+    /// Set where a substituted value included a `var()` reference: the element records that the
+    /// same way it records one its own cascade substituted.
+    pub(crate) substituted_var: bool,
+    /// Made on the first substitution and thrown away with the context: the substitution counters
+    /// belong to a document the sampling side holds no mutable borrow of.
+    discarded_counters: Option<Box<crate::css::style::instrumentation::Counters>>,
+}
+
+impl KeyframeSubstitutionContext {
+    pub(crate) fn new(
+        custom_property_store: *const std::ffi::c_void,
+        inputs: Option<crate::css::style::bridge::FfiDocumentStyleComputationInputs>,
+    ) -> Self {
+        Self {
+            custom_property_store,
+            inputs,
+            substituted_var: false,
+            discarded_counters: None,
+        }
+    }
+
+    /// What `written` substitutes to for `property`, or `None` where the stage declines it.
+    fn substitute(
+        &mut self,
+        property: u16,
+        written: &crate::css::style_value::RetainedStyleValueData,
+    ) -> Option<crate::css::style_value::RetainedStyleValueData> {
+        let inputs = self.inputs?;
+        let counters = self.discarded_counters.get_or_insert_with(Box::default);
+        crate::css::style::custom_property_cascade::substitute_written_value_against_store(
+            self.custom_property_store,
+            inputs,
+            property,
+            written,
+            counters,
+        )
+    }
+}
+
 /// Turn the selected descriptions, in composite order, into the flat buffers the animation core
 /// resolves declarations from. `None` where a keyframe wants the element's own computed value for a
-/// longhand the drive did not compute.
+/// longhand the drive did not compute, or holds a token stream the stage cannot substitute.
+///
+/// The fourth member keeps the substituted values alive: `resolve_animation_declarations` retains
+/// every value it keeps, so they only have to outlive that call.
 type DescribedEffects = (
     Vec<FfiAnimationEffect>,
     Vec<FfiAnimationKeyframe>,
     Vec<FfiAnimationDeclaration>,
+    Vec<crate::css::style_value::RetainedStyleValueData>,
 );
 
 fn describe_selected_effects(
     selected: &[SelectedEffect<'_>],
     table: &crate::css::computed_longhand_table::ComputedLonghandTable,
+    substitution: &mut KeyframeSubstitutionContext,
 ) -> Option<DescribedEffects> {
     let mut ffi_keyframes = Vec::new();
     let mut ffi_declarations = Vec::new();
     let mut ffi_effects = Vec::with_capacity(selected.len());
+    let mut substituted_values = Vec::new();
     for selection in selected {
         let effect = selection.effect;
         let first_keyframe_index = ffi_keyframes.len();
@@ -7204,6 +7266,36 @@ fn describe_selected_effects(
                     true => table.get(declaration.property_id)?.pointer(),
                     false => declaration.value.pointer(),
                 };
+                // A keyframe written as a token stream is substituted against the element being
+                // sampled, exactly where the host's `collect_animation_effects_into` substitutes it.
+                // A `use_initial` declaration carries no value of its own to look at.
+                let substituted = match declaration.use_initial {
+                    true => None,
+                    false => match declaration.value.data() {
+                        crate::css::style_value::StyleValueData::Unresolved { presence_var, .. } => {
+                            let substituted = substitution.substitute(declaration.property_id, &declaration.value)?;
+                            substitution.substituted_var |= *presence_var;
+                            Some(substituted)
+                        }
+                        _ => None,
+                    },
+                };
+                let value = match &substituted {
+                    // https://drafts.csswg.org/css-values-5/#invalid-at-computed-value-time
+                    // A substitution that came out guaranteed-invalid leaves the keyframe without
+                    // the declaration at all, which is what the host does with it.
+                    Some(substituted)
+                        if matches!(
+                            substituted.data(),
+                            crate::css::style_value::StyleValueData::GuaranteedInvalid
+                        ) =>
+                    {
+                        continue;
+                    }
+                    Some(substituted) => substituted.pointer(),
+                    None => value,
+                };
+                substituted_values.extend(substituted);
                 ffi_declarations.push(FfiAnimationDeclaration {
                     keyframe_index,
                     property_id: declaration.property_id,
@@ -7224,7 +7316,7 @@ fn describe_selected_effects(
             result_of_transition: is_transition,
         });
     }
-    Some((ffi_effects, ffi_keyframes, ffi_declarations))
+    Some((ffi_effects, ffi_keyframes, ffi_declarations, substituted_values))
 }
 
 /// Resolve the animation declarations of the effect stack a computation selected, in composite
@@ -7240,6 +7332,7 @@ pub(crate) fn resolve_selected_animation_declarations(
     writing_mode: u8,
     direction: u8,
     important_property_bitmap: &[u8],
+    substitution: &mut KeyframeSubstitutionContext,
 ) -> Option<FfiResolvedAnimationProperties> {
     if selected
         .iter()
@@ -7247,7 +7340,8 @@ pub(crate) fn resolve_selected_animation_declarations(
     {
         return None;
     }
-    let (ffi_effects, ffi_keyframes, ffi_declarations) = describe_selected_effects(selected, table)?;
+    let (ffi_effects, ffi_keyframes, ffi_declarations, _substituted_values) =
+        describe_selected_effects(selected, table, substitution)?;
     Some(finish_resolved_animation_properties(resolve_animation_declarations(
         &ffi_declarations,
         &ffi_effects,

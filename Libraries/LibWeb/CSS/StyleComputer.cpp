@@ -983,6 +983,7 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
         effect_generations.unchecked_append(active_effect.effect->animation_preparation_generation());
     }
     bool published_description_covers_effects = false;
+    bool published_description_substituted_var = false;
     StyleValueFFI::FfiPublishedAnimationSample published_sample {
         .style_engine = m_style_engine.rust_handle(),
         .style_node = abstract_element.element().style_node_id().value(),
@@ -996,9 +997,18 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
         .direction = to_underlying(computed_properties.direction()),
         .important_property_bitmap = important_property_bitmap.data(),
         .important_property_bitmap_length = important_property_bitmap.size(),
+        .custom_property_store = [&]() -> void const* {
+            auto data = abstract_element.custom_property_data();
+            return data ? data->rust_store() : nullptr;
+        }(),
         .covered = &published_description_covers_effects,
+        .substituted_var = &published_description_substituted_var,
     };
     auto resolved_properties = StyleValueFFI::rust_resolve_animation_declarations_from_published(&published_sample);
+    // A keyframe the description carried as a token stream was substituted against this element,
+    // which is a var() read of its environment just as `resolve_unresolved_style_value` is below.
+    if (published_description_substituted_var)
+        abstract_element.element().set_style_uses_var_css_function();
     // Only where the description did not cover every effect does the stage still walk the host's
     // keyframe sets for itself.
     for (size_t active_effect_index = 0; !published_description_covers_effects && active_effect_index < active_effects.size(); ++active_effect_index) {
@@ -5935,6 +5945,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             .resolved_parent_custom_property_store = resolved_parent_custom_property_store,
             .resolved_parent_custom_property_environment = resolved_parent_custom_property_environment,
             .current_custom_property_environment = context.custom_property_data ? context.custom_property_data->identity() : 0,
+            .current_custom_property_store = [&]() -> void const* {
+                auto data = context.abstract_element.custom_property_data();
+                return data ? data->rust_store() : nullptr;
+            }(),
             .reuse_resolved_parent_custom_property_store_if_empty = reuse_resolved_parent_custom_property_store_if_empty,
             .has_custom_property_resolution = state.custom_property_resolution != nullptr,
             .check_input_line_height = state.box_type_input.check_input_line_height,
@@ -6258,6 +6272,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         // element's style now depends on where it sits among its siblings.
         if (finalization_result.animation_uses_tree_counting_function)
             const_cast<DOM::Element&>(abstract_element.element()).set_style_uses_tree_counting_function();
+        // A keyframe of what the stage sampled substituted a `var()` reference of this element, so
+        // the mark `resolve_unresolved_style_value` leaves behind for one is left here instead.
+        if (finalization_result.animation_substituted_var)
+            const_cast<DOM::Element&>(abstract_element.element()).set_style_uses_var_css_function();
         if (finalization_result.animation_subject_depends_on_size_container_query) {
             // The stage resolved the batch's container units against the published container-query
             // inputs, so what `Length::container_relative_length_to_px_without_rounding` records

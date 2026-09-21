@@ -1349,9 +1349,20 @@ static u32 describe_keyframe_set(Animations::KeyframeEffect::KeyFrameSet const& 
                 if (!data || data->tag == StyleValueFFI::StyleValueData::Tag::PendingSubstitution)
                     continue;
                 if (data->tag == StyleValueFFI::StyleValueData::Tag::Unresolved) {
-                    // Substitution runs against the element being sampled.
-                    flags |= published_effect_flag_not_covered;
-                    continue;
+                    // Substitution runs against the element being sampled. A token stream whose
+                    // only substitution functions are `var()` and `env()` is one the stage resolves
+                    // for itself, against the custom-property store the computation already holds,
+                    // so it travels unchanged; anything asking for a callback - `attr()`, `if()`,
+                    // `inherit()`, a dashed function - is still the host's to resolve.
+                    // Mirrored by `custom_property_value_is_callback_free` in
+                    // `Rust/src/css/cascaded_properties.rs`, which decides the same question again
+                    // on the stage side; disagreeing only costs a fallback.
+                    auto const& unresolved = data->unresolved;
+                    if (unresolved.presence_attr || unresolved.presence_dashed_function
+                        || unresolved.presence_if || unresolved.presence_inherit) {
+                        flags |= published_effect_flag_not_covered;
+                        continue;
+                    }
                 }
                 // https://drafts.csswg.org/css-values-5/#invalid-at-computed-value-time
                 if (data->tag == StyleValueFFI::StyleValueData::Tag::GuaranteedInvalid)
