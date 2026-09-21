@@ -4999,52 +4999,6 @@ pub struct FfiMarkerContent {
     pub text_depends_on_list_item_counter: bool,
 }
 
-/// Records the counter styles the `content` of the pseudo-element `generated_for` of the element
-/// `style_node` names, one per `counter()` or `counters()` in `content` and then in its alt text, as
-/// the host resolved them from the style scope `tree_scope` when it built the box. A null style is a
-/// name that resolves to none.
-///
-/// # Safety
-///
-/// The arena must remain valid for the duration of the call, and `counter_styles` must address
-/// `count` null or live handles from `rust_counter_style_create`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_set_content_counter_styles(
-    arena: *mut c_void,
-    style_node: u32,
-    generated_for: u8,
-    tree_scope: u32,
-    counter_styles: *const *const c_void,
-    count: usize,
-) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let owner = counter_owner(style_node, generated_for).expect("a pseudo-element's element has an identity");
-    let counter_styles = if count == 0 {
-        Vec::new()
-    } else {
-        // SAFETY: The caller passes `count` handles.
-        unsafe { std::slice::from_raw_parts(counter_styles, count) }
-            .iter()
-            // SAFETY: Each handle is null or live for the duration of the call.
-            .map(|&counter_style| unsafe {
-                crate::css::counter_representation::counter_style_from_handle(counter_style)
-            })
-            .collect()
-    };
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the
-    // document thread.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }
-        .generated_content()
-        .borrow_mut()
-        .set_content_counter_styles(
-            owner,
-            super::generated_content::ContentCounterStyles {
-                tree_scope,
-                counter_styles,
-            },
-        );
-}
-
 /// Records what the list marker the pseudo-element `generated_for` of the element `style_node`
 /// generates, or nests, shows when its `content` is `normal`, as the host resolved it from the style
 /// scope `tree_scope` when it built the marker box.

@@ -18,14 +18,6 @@ use crate::css::style_compute::keyword;
 use crate::css::style_value::StyleValueData;
 use std::sync::Arc;
 
-/// The counter styles a pseudo-element's `content` names, as the host resolved them when it built the
-/// box: one per `counter()` or `counters()`, in the order they appear in `content` and then in its
-/// alt text. A style the name does not resolve to is `None`, which is `decimal`.
-pub(crate) struct ContentCounterStyles {
-    pub(crate) tree_scope: u32,
-    pub(crate) counter_styles: Vec<Option<Arc<CounterStyle>>>,
-}
-
 /// What a list marker whose `content` is `normal` shows, as the host resolved its `list-style-type` and
 /// `list-style-image` when it built the marker box.
 pub(crate) enum MarkerContent {
@@ -45,16 +37,11 @@ pub(crate) struct MarkerContentStyles {
 /// the tree build resolves that content, and the text each one's content resolved to.
 #[derive(Default)]
 pub(crate) struct GeneratedContent {
-    content_counter_styles: HashMap<CounterOwner, ContentCounterStyles>,
     marker_content_styles: HashMap<CounterOwner, MarkerContentStyles>,
     accessible_texts: HashMap<CounterOwner, Vec<u16>>,
 }
 
 impl GeneratedContent {
-    pub(crate) fn set_content_counter_styles(&mut self, owner: CounterOwner, styles: ContentCounterStyles) {
-        self.content_counter_styles.insert(owner, styles);
-    }
-
     pub(crate) fn set_marker_content_styles(&mut self, owner: CounterOwner, styles: MarkerContentStyles) {
         self.marker_content_styles.insert(owner, styles);
     }
@@ -68,7 +55,6 @@ impl GeneratedContent {
     /// Drops everything kept for an element's pseudo-elements, once its identity is retired.
     pub(crate) fn forget(&mut self, element: StyleNodeID) {
         let belongs_to_element = |owner: &CounterOwner| owner.element != element;
-        self.content_counter_styles.retain(|owner, _| belongs_to_element(owner));
         self.marker_content_styles.retain(|owner, _| belongs_to_element(owner));
         self.accessible_texts.retain(|owner, _| belongs_to_element(owner));
     }
@@ -217,7 +203,7 @@ fn quote_string<'a>(quotes: &QuotesData<'a>, open: bool, depth: u32) -> &'a [u16
 struct CounterItemResolver<'a> {
     arena: &'a LayoutNodeArena,
     element: CounterOwner,
-    styles: ContentCounterStyles,
+    tree_scope: u32,
     next_counter_style: usize,
     renders_list_item_counter_value: bool,
 }
@@ -225,11 +211,23 @@ struct CounterItemResolver<'a> {
 impl CounterItemResolver<'_> {
     // counter( <counter-name>, <counter-style>? )
     // counters( <counter-name>, <string>, <counter-style>? )
-    fn resolve(&mut self, function: u8, counter_name: &CssString, join_string: &CssString) -> Vec<u16> {
+    fn resolve(
+        &mut self,
+        function: u8,
+        counter_name: &CssString,
+        counter_style_value: Option<&StyleValueData>,
+        join_string: &CssString,
+    ) -> Vec<u16> {
         if counter_name.units() == LIST_ITEM_COUNTER_NAME {
             self.renders_list_item_counter_value = true;
         }
-        let counter_style = self.styles.counter_styles[self.next_counter_style].clone();
+        let counter_style = self.arena.with_counter_style_registry(|registry| {
+            crate::css::counter_representation::resolve_counter_style_value(
+                registry,
+                self.tree_scope,
+                counter_style_value,
+            )
+        });
         self.next_counter_style += 1;
 
         // "If no counter named <counter-name> exists on an element where counter() or counters() is used,
@@ -244,7 +242,7 @@ impl CounterItemResolver<'_> {
                 .counters_sets()
                 .borrow_mut()
                 .counter_value_for_use(self.element, &name);
-            return representation(self.arena, self.styles.tree_scope, counter_style, value);
+            return representation(self.arena, self.tree_scope, counter_style, value);
         }
 
         // "Represents the values of all the counters in the element’s CSS counters set named <counter-name>
@@ -257,7 +255,7 @@ impl CounterItemResolver<'_> {
             .counter_values_for_use(self.element, &name);
         let mut result = Vec::new();
         for value in values {
-            let counter_string = representation(self.arena, self.styles.tree_scope, counter_style.clone(), value);
+            let counter_string = representation(self.arena, self.tree_scope, counter_style.clone(), value);
             if !result.is_empty() {
                 result.extend_from_slice(join_string.units());
             }
@@ -318,16 +316,10 @@ pub(crate) fn resolve_content(
             };
         };
 
-        let styles = arena
-            .generated_content()
-            .borrow_mut()
-            .content_counter_styles
-            .remove(&element)
-            .expect("a pseudo-element with content has its counter styles");
         let mut counters = CounterItemResolver {
             arena,
             element,
-            styles,
+            tree_scope: engine.tree().tree_scope(element.element).0,
             next_counter_style: 0,
             renders_list_item_counter_value: false,
         };
@@ -375,13 +367,14 @@ pub(crate) fn resolve_content(
                 Some(StyleValueData::Counter {
                     function,
                     counter_name,
+                    counter_style,
                     join_string,
-                    ..
                 }) => {
                     flush_pending_text(&mut items, &mut pending_text);
                     items.push(ContentItem::Text(counters.resolve(
                         *function,
                         counter_name,
+                        counter_style.optional_data(),
                         join_string,
                     )));
                 }
@@ -406,9 +399,14 @@ pub(crate) fn resolve_content(
                     Some(StyleValueData::Counter {
                         function,
                         counter_name,
+                        counter_style,
                         join_string,
-                        ..
-                    }) => accessible_text.extend(counters.resolve(*function, counter_name, join_string)),
+                    }) => accessible_text.extend(counters.resolve(
+                        *function,
+                        counter_name,
+                        counter_style.optional_data(),
+                        join_string,
+                    )),
                     _ => {}
                 }
             }
