@@ -7097,42 +7097,15 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         && let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(input.style_node)
     {
         let table = unsafe { &*drive_input.longhand_table };
-        let custom_property_environment = if drive_input.has_custom_property_resolution {
-            drive_result.custom_properties.environment_identity
-        } else {
-            drive_input.current_custom_property_environment
-        };
-        let inherited_custom_property_environment = match retained_inheritance_parent_style_record(style_engine, input)
-        {
-            0 => 0,
-            record => style_engine.retained_style_record_custom_property_environment(record),
-        };
-        let assembled_style_record = if (drive_input.has_custom_property_resolution && custom_property_environment == 0)
-            || (!drive_input.has_custom_property_resolution
-                && (custom_property_environment != 0
-                    || inherited_custom_property_environment != custom_property_environment))
-        {
-            0
-        } else {
-            let font = legacy_font.group_inputs(table, animation_length_contexts.remaining.font_metrics.line_height);
-            style_engine.prepare_root_font_metrics_from_legacy(node, table, &font);
-            style_engine
-                .assemble_legacy_record_for_verification(
-                    node,
-                    table,
-                    &animation_length_contexts.remaining,
-                    &font,
-                    Some(custom_property_environment),
-                )
-                .unwrap_or(0)
-        };
+        let font = legacy_font.group_inputs(table, animation_length_contexts.remaining.font_metrics.line_height);
+        style_engine.prepare_root_font_metrics_from_legacy(node, table, &font);
         unsafe {
             style_engine.retain_legacy_finalized_longhand_row(
                 node,
                 input.pseudo_kind,
                 drive_input.longhand_table,
                 input.previous_style_record,
-                assembled_style_record,
+                0,
             );
         };
     }
