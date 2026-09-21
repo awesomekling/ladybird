@@ -99,7 +99,11 @@ impl StyleEngine {
             .font_resolution
             .as_mut()
             .expect("a legacy longhand request has a font resolution cache");
-        resolver.refill(cache, vec![font_resolution::FontRequest::new(request)]);
+        resolver.refill(
+            cache,
+            vec![font_resolution::FontRequest::new(request)],
+            font_resolution::FontService::LegacyLonghand,
+        );
         cache
             .lookup(request)
             .expect("the font resolver must install its answer")

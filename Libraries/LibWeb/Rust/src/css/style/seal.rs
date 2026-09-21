@@ -141,27 +141,27 @@ pub(crate) fn note_stage_interleave(name: &'static str) {
 /// Unlike an allow-listed callback, this remains a visible dependency of the style update. Abort
 /// mode therefore rejects it unless the service-specific escape hatch is set. The escape hatch is
 /// useful for proving that every other crossing is gone while the resource service remains.
-pub(crate) fn between_pass_font_service<T>(requests: u64, service: impl FnOnce() -> T) -> T {
+pub(crate) fn between_pass_font_service<T>(name: &'static str, requests: u64, service: impl FnOnce() -> T) -> T {
     let mode = mode();
     if mode == Mode::Off {
         return service();
     }
     if UPDATE_DEPTH.with(|depth| depth.get() == 0) {
-        note_host_call("resolve_font");
+        note_host_call(name);
         return service();
     }
     let suspended_depth = UPDATE_DEPTH.with(|depth| depth.replace(0));
     debug_assert_ne!(suspended_depth, 0);
     BETWEEN_PASS_SERVICES.with(|services| {
         let mut services = services.borrow_mut();
-        let counts = services.entry("resolve_font").or_default();
+        let counts = services.entry(name).or_default();
         counts.0 = counts.0.wrapping_add(requests);
         counts.1 = counts.1.wrapping_add(1);
     });
     let allowed = std::env::var("LIBWEB_SEAL_STYLE_STAGE_ALLOW_FONT_SERVICE").as_deref() == Ok("1");
     assert!(
         mode != Mode::Abort || allowed,
-        "style stage is sealed, but requires the between-pass resolve_font service"
+        "style stage is sealed, but requires the between-pass {name} service"
     );
     let result = service();
     UPDATE_DEPTH.with(|depth| {

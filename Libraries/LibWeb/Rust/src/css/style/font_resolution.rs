@@ -13,6 +13,25 @@ use std::ffi::c_void;
 pub type ResolveFontsCallback =
     unsafe extern "C" fn(*mut c_void, *const FfiFontResolutionRequest, *mut FfiResolvedFont, usize);
 
+#[derive(Clone, Copy)]
+pub(super) enum FontService {
+    ParkedBatch,
+    RootPreparation,
+    AncestorRetry,
+    LegacyLonghand,
+}
+
+impl FontService {
+    fn name(self) -> &'static str {
+        match self {
+            Self::ParkedBatch => "resolve_font",
+            Self::RootPreparation => "resolve_font_root",
+            Self::AncestorRetry => "resolve_font_retry",
+            Self::LegacyLonghand => "resolve_font_legacy",
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, Hash)]
 struct FontResolutionKey {
     font_family: usize,
@@ -133,7 +152,12 @@ impl FontResolverHost {
 
     /// Service synchronous requests in one round between evaluation passes. Pending web faces
     /// remain in the returned cascades and retain the host's rendering-triggered loading behavior.
-    pub fn refill(&self, cache: &mut FontResolutionCache, mut requests: Vec<FontRequest>) -> usize {
+    pub fn refill(
+        &self,
+        cache: &mut FontResolutionCache,
+        mut requests: Vec<FontRequest>,
+        service: FontService,
+    ) -> usize {
         let Some(first) = requests.first() else {
             return 0;
         };
@@ -153,7 +177,7 @@ impl FontResolverHost {
         }
         let ffi_requests = requests.iter().map(|request| request.ffi).collect::<Vec<_>>();
         let mut resolved = vec![FfiResolvedFont::default(); requests.len()];
-        super::seal::between_pass_font_service(requests.len() as u64, || unsafe {
+        super::seal::between_pass_font_service(service.name(), requests.len() as u64, || unsafe {
             (self.resolve)(
                 self.context,
                 ffi_requests.as_ptr(),
@@ -216,7 +240,7 @@ mod tests {
         resolver.prepare(1);
         assert!(resolver.lookup(request).is_none());
         assert_eq!(RESOLVES.load(Ordering::Relaxed), 0);
-        host.refill(&mut resolver, vec![FontRequest::new(request)]);
+        host.refill(&mut resolver, vec![FontRequest::new(request)], FontService::ParkedBatch);
         let first = resolver.lookup(request).unwrap();
         assert_eq!(
             resolver.lookup(request).unwrap().font_cascade_list,
@@ -229,7 +253,7 @@ mod tests {
         assert!(resolver.lookup(request).is_none());
         resolver.prepare(2);
         assert_eq!(font_cascade_list_unref_count(), unrefs_before + 1);
-        host.refill(&mut resolver, vec![FontRequest::new(request)]);
+        host.refill(&mut resolver, vec![FontRequest::new(request)], FontService::ParkedBatch);
         resolver.lookup(request).unwrap();
         assert_eq!(RESOLVES.load(Ordering::Relaxed), 2);
         assert_eq!(font_cascade_list_unref_count(), unrefs_before + 1);
@@ -266,7 +290,7 @@ mod tests {
         let owned = FontRequest::new(request);
         drop(family);
         assert!(resolver.lookup(request).is_none());
-        host.refill(&mut resolver, vec![owned]);
+        host.refill(&mut resolver, vec![owned], FontService::ParkedBatch);
         assert!(resolver.lookup(request).unwrap().font_cascade_list.is_none());
         assert!(resolver.lookup(request).unwrap().font_cascade_list.is_none());
         // A failed synchronous result must not cause an endless refill loop.
