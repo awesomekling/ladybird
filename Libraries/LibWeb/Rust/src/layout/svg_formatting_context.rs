@@ -1235,15 +1235,14 @@ impl<'pass> SvgFormattingContext<'pass> {
         if text.is_empty() {
             return (runs, advance);
         }
-        let cascade_list = style.font_cascade_list();
+        let frozen_font_list = style.frozen_font_list();
         let font_for = |offset: usize| {
-            cascade_list.font_for_code_point(
+            frozen_font_list.font_for_code_point(
                 code_point_at(text, offset),
                 libgfx_rust::font::EmojiPresentation {
                     is_emoji: false,
                     forced: false,
                 },
-                None,
             )
         };
         let mut add_run = |font: &libgfx_rust::font::FontHandle, range: std::ops::Range<usize>, advance: &mut f32| {

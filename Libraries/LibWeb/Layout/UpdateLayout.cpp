@@ -5,6 +5,7 @@
  */
 
 #include <AK/ScopeGuard.h>
+#include <LibGfx/FontCascadeList.h>
 #include <LibWeb/CSS/Invalidation/ContainerQueryInvalidator.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineBridge.h>
@@ -117,6 +118,12 @@ void Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
 
         // Whatever the pass told the document takes effect before the read that joined for it.
         apply_commit_messages();
+
+        // A pass that reached a web face still waiting on its load cannot start the fetch itself:
+        // the fetch, the font-display timer and the load-event delayer are all document state. It
+        // leaves the face's number behind instead, and the request happens here, once the pass has
+        // ended and in the same rendering update.
+        Gfx::request_wanted_pending_faces();
 
         if (m_needs_scroll_container_resnap) {
             if (auto navigable = this->navigable(); navigable && navigable->active_document().ptr() == this)

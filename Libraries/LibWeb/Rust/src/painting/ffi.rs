@@ -1345,12 +1345,11 @@ struct RecordingStageInput<'a> {
 }
 
 // SAFETY: DEBT: The recording's own inputs are already shareable - its fonts and image frames
-// are `Arc`-backed handles over atomically reference-counted resources. What is not is the
-// document-owned arena this borrows: its columns are `Cell` and `RefCell`, and its text rows
-// name a `Gfx::FontCascadeList` through a raw pointer whose `const` lookups write four
-// unsynchronized caches. The FFI caller freezes the arena for this synchronous stage run.
-// Replace this boundary with immutable paint rows and a resolved, thread-safe font list before
-// moving recording to another thread.
+// are `Arc`-backed handles over atomically reference-counted resources, and its text rows now
+// name an `Arc<libgfx_rust::font::FrozenFontList>` rather than a raw `Gfx::FontCascadeList`.
+// What is not shareable is the document-owned arena this borrows: its columns are `Cell` and
+// `RefCell`. The FFI caller freezes the arena for this synchronous stage run. Replace this
+// boundary with immutable paint rows before moving recording to another thread.
 unsafe impl Sync for RecordingStageInput<'_> {}
 
 struct RecordingStageOutput {

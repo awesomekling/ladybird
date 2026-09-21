@@ -120,13 +120,13 @@ struct SharedFontCascadeList(#[expect(dead_code, reason = "held for the referenc
 // reference-counted, so that pair is safe. Keeping final destruction on the host also keeps it away
 // from concurrently used mutable font and typeface caches.
 //
-// DEBT: This argues only about the reference count. It is not an argument that the pointee may be
-// read from two threads, and today it may not: `FontCascadeList::font_for_code_point` and
-// `first_available_font` are `const` methods that write `m_ascii_cache`,
-// `m_first_available_font_cache`, `m_invisible_fonts` and `m_fallback_fonts`, and the first can
-// re-enter the document through a pending face's resolve closure. `Sync` holds here only because
-// every reader of this handle is on the engine's thread. Publishing a resolved, immutable font
-// list is what would make it true.
+// NB: This argues only about the reference count, and that is all it has to argue. The list's own
+// lookups are still not safe to run from two threads - `font_for_code_point` writes
+// `m_ascii_cache`, `m_first_available_font_cache`, `m_invisible_fonts` and `m_fallback_fonts`,
+// and can re-enter the document through a pending face - but nothing reads this handle other than
+// to keep the list alive. What the render pipeline reads is the frozen snapshot the list carries
+// (`Gfx::FontCascadeList::freeze`, `libgfx_rust::font::FrozenFontList`), which is `Send + Sync`
+// with no `unsafe impl` at all.
 unsafe impl Sync for SharedFontCascadeList {}
 
 struct ResolvedFont {

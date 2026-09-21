@@ -2275,6 +2275,8 @@ struct LayoutStageInput<'a> {
 // SAFETY: DEBT: Layout still reads and mutates the document-owned arena through Cell and RefCell.
 // The FFI caller gives the stage exclusive logical ownership for this synchronous run. Split the
 // immutable layout-tree input and per-run scratch from the arena before moving layout to a thread.
+// NB: The text rows the pass shapes from are no longer part of this debt: they carry an
+// `Arc<libgfx_rust::font::FrozenFontList>`, which is `Sync` on its own terms.
 unsafe impl Sync for LayoutStageInput<'_> {}
 
 struct LayoutStageOutput(fragment_tree::CompletedPassFragments);
