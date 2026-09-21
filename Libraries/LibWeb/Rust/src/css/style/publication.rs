@@ -5129,15 +5129,26 @@ impl StyleEngineState {
         request: font_resolution::FontRequest,
         counters: &mut Counters,
     ) {
-        counters.bump(Counter::FontRefillRounds);
-        counters.bump(Counter::FontResolutionRequests);
-        // NB: Use resident selector-tree depth for this diagnostic. It is not a flat-tree
-        //     dependency-span proof and must not buy an ancestor traversal just for counting.
+        self.refill_font_requests(vec![(node, request)], counters);
+    }
+
+    pub(super) fn refill_font_requests(
+        &mut self,
+        requests: Vec<(StyleNodeID, font_resolution::FontRequest)>,
+        counters: &mut Counters,
+    ) {
+        if requests.is_empty() {
+            return;
+        }
+        // NB: Use resident selector-tree depths for this diagnostic. They are not flat-tree
+        //     dependency-span proofs and must not buy ancestor traversals just for counting.
         counters.set(
             Counter::FontRefillBlockedDepth,
-            counters
-                .get(Counter::FontRefillBlockedDepth)
-                .max(u64::from(self.tree.depth(node)) + 1),
+            requests
+                .iter()
+                .fold(counters.get(Counter::FontRefillBlockedDepth), |depth, (node, _)| {
+                    depth.max(u64::from(self.tree.depth(*node)) + 1)
+                }),
         );
         let resolver = self.host.font_resolver.as_ref().expect("a request has a font resolver");
         let resolutions = self
@@ -5145,7 +5156,11 @@ impl StyleEngineState {
             .font_resolution
             .as_mut()
             .expect("a request has a font resolution cache");
-        resolver.refill(resolutions, request);
+        let request_count = resolver.refill(resolutions, requests.into_iter().map(|(_, request)| request).collect());
+        if request_count != 0 {
+            counters.bump(Counter::FontRefillRounds);
+            counters.add(Counter::FontResolutionRequests, request_count as u64);
+        }
     }
 }
 

@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-use super::HashMap;
 use super::bridge::{FfiFontResolutionRequest, FfiResolvedFont};
+use super::{HashMap, HashSet};
 use crate::css::style_value::{RetainedStyleValueData, retain_style_value};
 use libgfx_rust::font::FontCascadeListHandle;
 use std::ffi::c_void;
 
-pub type ResolveFontCallback = unsafe extern "C" fn(*mut c_void, FfiFontResolutionRequest) -> FfiResolvedFont;
+pub type ResolveFontsCallback =
+    unsafe extern "C" fn(*mut c_void, *const FfiFontResolutionRequest, *mut FfiResolvedFont, usize);
 
 #[derive(PartialEq, Eq, Hash)]
 struct FontResolutionKey {
@@ -47,10 +48,6 @@ impl FontRequest {
             RetainedStyleValueData::from_retained_pointer(retain_style_value(ffi.font_family.as_pointer().cast()))
         };
         Self { ffi, family }
-    }
-
-    pub(super) fn is_resolved_by(&self, cache: &FontResolutionCache) -> bool {
-        cache.lookup(self.ffi).is_some()
     }
 }
 
@@ -126,20 +123,49 @@ impl FontResolutionCache {
 /// the callback into it, and only a round between evaluation passes may call it.
 pub(super) struct FontResolverHost {
     context: *mut c_void,
-    resolve: ResolveFontCallback,
+    resolve: ResolveFontsCallback,
 }
 
 impl FontResolverHost {
-    pub fn new(context: *mut c_void, resolve: ResolveFontCallback) -> Self {
+    pub fn new(context: *mut c_void, resolve: ResolveFontsCallback) -> Self {
         Self { context, resolve }
     }
 
-    /// Service a synchronous request between evaluation passes. Pending web faces remain in
-    /// the returned cascade and retain the host's rendering-triggered loading behavior.
-    pub fn refill(&self, cache: &mut FontResolutionCache, request: FontRequest) {
-        cache.prepare(request.ffi.font_environment_generation);
-        let ffi = super::seal::between_pass_font_service(1, || unsafe { (self.resolve)(self.context, request.ffi) });
-        cache.insert(request, ffi);
+    /// Service synchronous requests in one round between evaluation passes. Pending web faces
+    /// remain in the returned cascades and retain the host's rendering-triggered loading behavior.
+    pub fn refill(&self, cache: &mut FontResolutionCache, mut requests: Vec<FontRequest>) -> usize {
+        let Some(first) = requests.first() else {
+            return 0;
+        };
+        let generation = first.ffi.font_environment_generation;
+        debug_assert!(
+            requests
+                .iter()
+                .all(|request| request.ffi.font_environment_generation == generation)
+        );
+        cache.prepare(generation);
+        let mut unique = HashSet::default();
+        requests.retain(|request| {
+            cache.lookup(request.ffi).is_none() && unique.insert(FontResolutionKey::new(request.ffi))
+        });
+        if requests.is_empty() {
+            return 0;
+        }
+        let ffi_requests = requests.iter().map(|request| request.ffi).collect::<Vec<_>>();
+        let mut resolved = vec![FfiResolvedFont::default(); requests.len()];
+        super::seal::between_pass_font_service(requests.len() as u64, || unsafe {
+            (self.resolve)(
+                self.context,
+                ffi_requests.as_ptr(),
+                resolved.as_mut_ptr(),
+                requests.len(),
+            );
+        });
+        let count = requests.len();
+        for (request, resolved) in requests.into_iter().zip(resolved) {
+            cache.insert(request, resolved);
+        }
+        count
     }
 }
 
@@ -152,12 +178,21 @@ mod tests {
 
     static RESOLVES: AtomicUsize = AtomicUsize::new(0);
 
-    unsafe extern "C" fn resolve_font(_context: *mut c_void, _request: FfiFontResolutionRequest) -> FfiResolvedFont {
-        RESOLVES.fetch_add(1, Ordering::Relaxed);
-        FfiResolvedFont {
-            first_available_font: crate::css::style::bridge::FfiHostHandle::from_pointer(std::ptr::dangling()),
-            font_cascade_list: crate::css::style::bridge::FfiHostHandle::from_pointer(std::ptr::dangling()),
-            ..Default::default()
+    unsafe extern "C" fn resolve_fonts(
+        _context: *mut c_void,
+        _requests: *const FfiFontResolutionRequest,
+        resolved: *mut FfiResolvedFont,
+        count: usize,
+    ) {
+        RESOLVES.fetch_add(count, Ordering::Relaxed);
+        for index in 0..count {
+            unsafe {
+                resolved.add(index).write(FfiResolvedFont {
+                    first_available_font: crate::css::style::bridge::FfiHostHandle::from_pointer(std::ptr::dangling()),
+                    font_cascade_list: crate::css::style::bridge::FfiHostHandle::from_pointer(std::ptr::dangling()),
+                    ..Default::default()
+                });
+            }
         }
     }
 
@@ -166,7 +201,7 @@ mod tests {
         RESOLVES.store(0, Ordering::Relaxed);
         let unrefs_before = font_cascade_list_unref_count();
         let family = RetainedStyleValueData::from_owned(StyleValueData::Keyword { keyword: 1 });
-        let host = FontResolverHost::new(std::ptr::null_mut(), resolve_font);
+        let host = FontResolverHost::new(std::ptr::null_mut(), resolve_fonts);
         let mut resolver = FontResolutionCache::default();
         let mut request = FfiFontResolutionRequest {
             font_family: crate::css::style::bridge::FfiHostHandle::from_pointer(family.pointer().cast()),
@@ -181,7 +216,7 @@ mod tests {
         resolver.prepare(1);
         assert!(resolver.lookup(request).is_none());
         assert_eq!(RESOLVES.load(Ordering::Relaxed), 0);
-        host.refill(&mut resolver, FontRequest::new(request));
+        host.refill(&mut resolver, vec![FontRequest::new(request)]);
         let first = resolver.lookup(request).unwrap();
         assert_eq!(
             resolver.lookup(request).unwrap().font_cascade_list,
@@ -194,7 +229,7 @@ mod tests {
         assert!(resolver.lookup(request).is_none());
         resolver.prepare(2);
         assert_eq!(font_cascade_list_unref_count(), unrefs_before + 1);
-        host.refill(&mut resolver, FontRequest::new(request));
+        host.refill(&mut resolver, vec![FontRequest::new(request)]);
         resolver.lookup(request).unwrap();
         assert_eq!(RESOLVES.load(Ordering::Relaxed), 2);
         assert_eq!(font_cascade_list_unref_count(), unrefs_before + 1);
@@ -205,8 +240,15 @@ mod tests {
 
     #[test]
     fn unavailable_resolution_is_a_completed_answer_until_the_environment_changes() {
-        unsafe extern "C" fn unavailable(_: *mut c_void, _: FfiFontResolutionRequest) -> FfiResolvedFont {
-            FfiResolvedFont::default()
+        unsafe extern "C" fn unavailable(
+            _: *mut c_void,
+            _: *const FfiFontResolutionRequest,
+            resolved: *mut FfiResolvedFont,
+            count: usize,
+        ) {
+            for index in 0..count {
+                unsafe { resolved.add(index).write(FfiResolvedFont::default()) };
+            }
         }
         let family = RetainedStyleValueData::from_owned(StyleValueData::Keyword { keyword: 1 });
         let request = FfiFontResolutionRequest {
@@ -224,7 +266,7 @@ mod tests {
         let owned = FontRequest::new(request);
         drop(family);
         assert!(resolver.lookup(request).is_none());
-        host.refill(&mut resolver, owned);
+        host.refill(&mut resolver, vec![owned]);
         assert!(resolver.lookup(request).unwrap().font_cascade_list.is_none());
         assert!(resolver.lookup(request).unwrap().font_cascade_list.is_none());
         // A failed synchronous result must not cause an endless refill loop.
