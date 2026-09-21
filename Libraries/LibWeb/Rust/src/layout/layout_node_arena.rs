@@ -469,6 +469,49 @@ pub(crate) struct FreedSubtree {
     style_record_host: Option<FfiStyleRecordHostCallbacks>,
 }
 
+/// One thing the arena owes the host: a node's box presence, or an object of a row's that the host
+/// owns the memory of and that the row has let go of. A running tree build cannot reach the host,
+/// so it queues these and its entry hands them over once the walk has returned.
+enum HostHandback {
+    /// The node whose boxes changed, named the way the box presence host names it. The bits are
+    /// read when the handback is paid, so a node a build changes several times is told once.
+    BoxPresence(u32),
+    Shell(*mut c_void),
+    OwnedImageProvider(*mut c_void),
+    ImageObservers(*mut c_void),
+    OwnedImageProviderDetach(*mut c_void),
+    PaintableRowReset(crate::painting::paintable_rows::PaintableRowReset),
+}
+
+/// What a tree build owes the host, in the order the build let go of it.
+#[derive(Default)]
+pub(crate) struct HostHandbacks {
+    handbacks: Vec<HostHandback>,
+    nodes_with_box_presence: HashSet<u32>,
+}
+
+impl HostHandbacks {
+    fn push(&mut self, handback: HostHandback) {
+        match handback {
+            HostHandback::BoxPresence(node) => {
+                if !self.nodes_with_box_presence.insert(node) {
+                    return;
+                }
+            }
+            HostHandback::Shell(object)
+            | HostHandback::OwnedImageProvider(object)
+            | HostHandback::ImageObservers(object)
+            | HostHandback::OwnedImageProviderDetach(object) => {
+                if object.is_null() {
+                    return;
+                }
+            }
+            HostHandback::PaintableRowReset(_) => {}
+        }
+        self.handbacks.push(handback);
+    }
+}
+
 /// The node a layout row can be bound to: an element or text node, named by its identity, a
 /// pseudo-element, which has no identity of its own and is named by its generator's identity and
 /// its kind, or the document, which is bound to a viewport row.
@@ -516,8 +559,15 @@ impl FreedSubtree {
             super::tree_build_seal::note_host_call("paintable_row_reset");
             reset.invoke_callback();
         }
-        if let Some(host) = self.style_record_host {
-            for style_record in self.arena_pinned_style_records {
+        Self::unpin_arena_pinned_style_records(self.style_record_host, self.arena_pinned_style_records);
+    }
+
+    fn unpin_arena_pinned_style_records(
+        style_record_host: Option<FfiStyleRecordHostCallbacks>,
+        arena_pinned_style_records: Vec<u64>,
+    ) {
+        if let Some(host) = style_record_host {
+            for style_record in arena_pinned_style_records {
                 // SAFETY: Registration and unregistration keep the host context live.
                 unsafe { &mut *host.style_engine.cast::<StyleEngine>() }.unpin_layout_style_record(style_record);
             }
@@ -640,6 +690,8 @@ pub(crate) struct LayoutNodeArena {
     style_record_host: Cell<Option<FfiStyleRecordHostCallbacks>>,
     shell_factory: Cell<Option<ShellFactory>>,
     box_presence_host: Cell<Option<BoxPresenceHost>>,
+    /// What a running tree build owes the host, or `None` outside one.
+    deferred_host_handbacks: RefCell<Option<HostHandbacks>>,
     /// Rows whose committed box appeared or went away since the host last heard. A commit changes
     /// them with the arena borrowed for writing, so the host hears about them when it drains this.
     rows_with_changed_committed_box: RefCell<Vec<NodeSlotId>>,
@@ -786,6 +838,7 @@ impl LayoutNodeArena {
             style_record_host: Cell::new(None),
             shell_factory: Cell::new(None),
             box_presence_host: Cell::new(None),
+            deferred_host_handbacks: RefCell::new(None),
             rows_with_changed_committed_box: RefCell::new(Vec::new()),
             layout_host: Cell::new(None),
             document_is_decoded_svg: Cell::new(false),
@@ -2812,21 +2865,111 @@ impl LayoutNodeArena {
         bits
     }
 
-    /// Tells the host what boxes `node` has now. No row list may be borrowed here. A
-    /// pseudo-element's boxes stay unmirrored, since nothing on the DOM side reads them as a bit.
+    /// Tells the host what boxes `node` has now. A pseudo-element's boxes stay unmirrored, since
+    /// nothing on the DOM side reads them as a bit.
     fn notify_box_presence(&self, node: BoundNode) {
+        if self.box_presence_host.get().is_none() {
+            return;
+        }
+        let style_node = match node {
+            BoundNode::Identity(style_node) => style_node.raw(),
+            BoundNode::Document => 0,
+            BoundNode::PseudoElement(..) => return,
+        };
+        self.hand_back(HostHandback::BoxPresence(style_node));
+    }
+
+    /// Tells the host what boxes the node `style_node` names has now. No row list may be borrowed
+    /// here.
+    fn tell_host_box_presence(&self, style_node: u32) {
         let Some((context, callback)) = self.box_presence_host.get() else {
             return;
         };
-        let (style_node, row) = match node {
-            BoundNode::Identity(style_node) => (style_node.raw(), self.bound_row(style_node)),
-            BoundNode::Document => (0, self.bound_viewport_row()),
-            BoundNode::PseudoElement(..) => return,
+        let row = match StyleNodeID::from_raw(style_node) {
+            Some(style_node) => self.bound_row(style_node),
+            None => self.bound_viewport_row(),
         };
         super::tree_build_seal::note_host_call("notify_box_presence");
         // SAFETY: Registration and unregistration keep the host context live, and the host does
         // not reenter the arena.
         unsafe { callback(context, style_node, self.box_presence_bits(row)) };
+    }
+
+    /// Starts queueing what the arena owes the host instead of handing it over, for the tree build
+    /// that is about to run.
+    pub(crate) fn begin_deferring_host_handbacks(&self) {
+        let previous = self.deferred_host_handbacks.replace(Some(HostHandbacks::default()));
+        assert!(previous.is_none(), "tree builds on one arena do not nest");
+    }
+
+    /// Stops queueing, and returns what the finished build owes the host.
+    pub(crate) fn finish_deferring_host_handbacks(&self) -> HostHandbacks {
+        self.deferred_host_handbacks
+            .take()
+            .expect("no tree build was deferring host handbacks")
+    }
+
+    /// Hands the host what a finished tree build owes it, in the order the build let go of it.
+    pub(crate) fn pay_host_handbacks(&self, handbacks: HostHandbacks) {
+        for handback in handbacks.handbacks {
+            self.pay_host_handback(handback);
+        }
+    }
+
+    fn hand_back(&self, handback: HostHandback) {
+        if let Some(deferred) = self.deferred_host_handbacks.borrow_mut().as_mut() {
+            deferred.push(handback);
+            return;
+        }
+        self.pay_host_handback(handback);
+    }
+
+    fn pay_host_handback(&self, handback: HostHandback) {
+        match handback {
+            HostHandback::BoxPresence(style_node) => self.tell_host_box_presence(style_node),
+            HostHandback::Shell(shell) => crate::layout::tree_mutation::destroy_shell(shell),
+            HostHandback::OwnedImageProvider(provider) => {
+                crate::layout::tree_mutation::destroy_owned_image_provider(provider);
+            }
+            HostHandback::ImageObservers(observers) => crate::layout::tree_mutation::destroy_image_observers(observers),
+            HostHandback::OwnedImageProviderDetach(provider) => {
+                crate::layout::tree_mutation::notify_owned_image_provider_of_detach(provider);
+            }
+            HostHandback::PaintableRowReset(reset) => {
+                super::tree_build_seal::note_host_call("paintable_row_reset");
+                reset.invoke_callback();
+            }
+        }
+    }
+
+    /// Hands the host the objects a freed subtree's rows held, or queues them while a tree build
+    /// runs. The style records the arena pinned for the rows are released now either way.
+    pub(crate) fn hand_back_freed_subtree(&self, freed: FreedSubtree) {
+        if self.deferred_host_handbacks.borrow().is_none() {
+            freed.destroy_shells_and_invoke_callbacks();
+            return;
+        }
+        let FreedSubtree {
+            shells,
+            owned_image_providers,
+            image_observer_sets,
+            paintable_row_resets,
+            arena_pinned_style_records,
+            style_record_host,
+        } = freed;
+        for shell in shells {
+            self.hand_back(HostHandback::Shell(shell));
+        }
+        for provider in owned_image_providers {
+            self.hand_back(HostHandback::OwnedImageProvider(provider));
+        }
+        for observers in image_observer_sets {
+            self.hand_back(HostHandback::ImageObservers(observers));
+        }
+        for reset in paintable_row_resets {
+            self.hand_back(HostHandback::PaintableRowReset(reset));
+        }
+        FreedSubtree::unpin_arena_pinned_style_records(style_record_host, arena_pinned_style_records);
     }
 
     /// Records that `row` is gaining or losing its committed box. The paint state is borrowed for
@@ -5658,12 +5801,14 @@ fn prepare_row_for_detach(arena: *mut c_void, row: NodeSlotId) {
         );
     }
     if is_node_with_style {
-        crate::layout::tree_mutation::destroy_image_observers(
+        arena_ref.hand_back(HostHandback::ImageObservers(
             arena_ref.replace_image_observers(row, std::ptr::null_mut()),
-        );
+        ));
     }
     if kind == NodeKind::ImageBox {
-        crate::layout::tree_mutation::notify_owned_image_provider_of_detach(arena_ref.owned_image_provider(row));
+        arena_ref.hand_back(HostHandback::OwnedImageProviderDetach(
+            arena_ref.owned_image_provider(row),
+        ));
     }
 }
 
@@ -6184,6 +6329,60 @@ mod tests {
         assert!(arena.bound_viewport_row().is_invalid());
 
         for row in [old_row, referencer_row] {
+            arena.free_subtree(row).destroy_shells_and_invoke_callbacks();
+        }
+    }
+
+    thread_local! {
+        static TOLD_BOX_PRESENCE: std::cell::RefCell<Vec<(u32, u8)>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    unsafe extern "C" fn record_box_presence(_: *mut c_void, style_node: u32, bits: u8) {
+        TOLD_BOX_PRESENCE.with(|told| told.borrow_mut().push((style_node, bits)));
+    }
+
+    #[test]
+    fn a_tree_build_tells_the_host_each_node_s_boxes_once_it_is_over() {
+        use super::BOX_PRESENCE_HAS_LAYOUT_BOX;
+        use crate::css::style::tree::StyleNodeID;
+        let mut arena = LayoutNodeArena::new();
+        arena.set_box_presence_host(Some((std::ptr::null_mut(), record_box_presence)));
+        let first = StyleNodeID::element(3);
+        let second = StyleNodeID::element(4);
+        let facts = |style_node: StyleNodeID| FfiNodeConstructionFacts {
+            style_node: style_node.raw(),
+            ..test_construction_facts()
+        };
+        let old_row = arena.allocate(facts(first));
+        arena.bind_row(old_row);
+        TOLD_BOX_PRESENCE.with(|told| told.borrow_mut().clear());
+
+        arena.begin_deferring_host_handbacks();
+        arena.free_subtree(old_row).destroy_shells_and_invoke_callbacks();
+        let new_row = arena.allocate(facts(first));
+        arena.bind_row(new_row);
+        let other_row = arena.allocate(facts(second));
+        arena.bind_row(other_row);
+        arena.unbind_row(other_row);
+        let handbacks = arena.finish_deferring_host_handbacks();
+        assert!(TOLD_BOX_PRESENCE.with(|told| told.borrow().is_empty()));
+
+        // Each node is told once, with what it has once the build is over.
+        arena.pay_host_handbacks(handbacks);
+        assert_eq!(
+            TOLD_BOX_PRESENCE.with(|told| std::mem::take(&mut *told.borrow_mut())),
+            vec![(first.raw(), BOX_PRESENCE_HAS_LAYOUT_BOX), (second.raw(), 0)]
+        );
+
+        // Outside a build the host hears at once.
+        arena.bind_row(other_row);
+        assert_eq!(
+            TOLD_BOX_PRESENCE.with(|told| std::mem::take(&mut *told.borrow_mut())),
+            vec![(second.raw(), BOX_PRESENCE_HAS_LAYOUT_BOX)]
+        );
+
+        arena.set_box_presence_host(None);
+        for row in [new_row, other_row] {
             arena.free_subtree(row).destroy_shells_and_invoke_callbacks();
         }
     }
