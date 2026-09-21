@@ -8631,6 +8631,21 @@ static void insert_in_tree_order(Vector<GC::Ref<DOM::Element>>& elements, DOM::E
         elements.append(element);
 }
 
+// A pattern's `href` chain decides which pattern's children the boxes that reference it render,
+// and the tree build resolves the chain when it builds those boxes. An id that appears, goes away
+// or changes can make a chain resolve to a different pattern, or to one where it resolved to
+// none, so the boxes built on behalf of every pattern that names another are built again. A chain
+// can pass through several patterns, which is why this is not limited to the patterns naming the
+// id that changed.
+static void rebuild_boxes_referencing_linked_svg_patterns(SVG::SVGPatternElement::DocumentPatternElementList& patterns)
+{
+    for (auto& pattern : patterns) {
+        auto href = pattern.href_attribute_value();
+        if (href.has_value() && !href->is_empty())
+            pattern.mark_resource_box_referencing_elements_for_content_change();
+    }
+}
+
 void Document::element_id_changed(Badge<DOM::Element>, GC::Ref<DOM::Element> element, Optional<Utf16FlyString> old_id)
 {
     for (auto* form_associated_element : m_form_associated_elements_with_form_attribute)
@@ -8653,6 +8668,7 @@ void Document::element_id_changed(Badge<DOM::Element>, GC::Ref<DOM::Element> ele
     }
     note_svg_paint_resources_changed();
     republish_inheriting_svg_pattern_attribute_facts();
+    rebuild_boxes_referencing_linked_svg_patterns(m_svg_pattern_elements);
 }
 
 void Document::element_with_id_was_added(Badge<DOM::Element>, GC::Ref<DOM::Element> element)
@@ -8670,6 +8686,7 @@ void Document::element_with_id_was_added(Badge<DOM::Element>, GC::Ref<DOM::Eleme
         element->document_or_shadow_root_element_by_id_map().add(id.value(), element);
         note_svg_paint_resources_changed();
         republish_inheriting_svg_pattern_attribute_facts();
+        rebuild_boxes_referencing_linked_svg_patterns(m_svg_pattern_elements);
     }
 }
 
@@ -8684,6 +8701,7 @@ void Document::element_with_id_was_removed(Badge<DOM::Element>, GC::Ref<DOM::Ele
         element->document_or_shadow_root_element_by_id_map().remove(id.value(), element);
         note_svg_paint_resources_changed();
         republish_inheriting_svg_pattern_attribute_facts();
+        rebuild_boxes_referencing_linked_svg_patterns(m_svg_pattern_elements);
     }
 }
 

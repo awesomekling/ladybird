@@ -2283,6 +2283,10 @@ unsafe fn update_principal_node_descendants(
                     };
                     let pattern = pattern.raw();
                     let Some(content_element) = svg_pattern_content_element(host, pattern) else {
+                        // A pattern whose chain leads nowhere draws nothing yet, but an id that
+                        // appears later can give it children to draw, so it still has to know which
+                        // boxes to build again when that happens.
+                        report_svg_resource_reference(state, pattern, update.style_node);
                         continue;
                     };
                     if seen_content_elements.contains(&content_element) {
