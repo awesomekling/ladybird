@@ -1842,6 +1842,7 @@ impl StyleEngineState {
                 root_element_font_metrics: Default::default(),
                 animation_keyframes: Default::default(),
                 custom_property_registrations_changed: false,
+                environment_action_needs_host_computation: false,
                 pending_element_style_computation_selections: HashMap::default(),
                 pending_pseudo_style_computation_selections: HashMap::default(),
                 engine_computed_records_pending: HashMap::default(),
@@ -2087,8 +2088,12 @@ impl StyleEngineState {
 
     /// Record a change to style inputs which are properties of the document environment rather
     /// than of an element or stylesheet rule.
-    pub fn record_environment_change(&mut self, counters: &mut Counters) {
+    pub fn record_environment_change(&mut self, needs_host_computation: bool, counters: &mut Counters) {
         self.discard_prepared_batch_matching_traversal();
+        // An environment action whose consequences the engine's own drive cannot compute - the
+        // document's supported colour schemes, the user style sheets, the quirks mode - keeps its
+        // records in C++. One it can drive, such as the viewport metrics, does not.
+        self.retained.environment_action_needs_host_computation |= needs_host_computation;
         self.host
             .journal
             .record_complete_scope_action(InputKind::Environment, &mut self.retained.memory, counters);

@@ -621,12 +621,12 @@ CSS::StyleScope& Node::style_scope()
     return document().style_scope();
 }
 
-void Node::record_style_environment_change()
+void Node::record_style_environment_change(EnvironmentActionDrive drive)
 {
     document().bump_style_environment_version();
 
     if (is_document()) {
-        document().style_computer().style_engine().record_environment_change();
+        document().style_computer().style_engine().record_environment_change(drive == EnvironmentActionDrive::Host);
         return;
     }
 

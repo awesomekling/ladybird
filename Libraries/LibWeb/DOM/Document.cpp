@@ -2408,7 +2408,7 @@ void Document::invalidate_style_for_viewport_change()
         m_rust_custom_property_registry_synced = false;
         // A registered initial value is shared by every element that does not specify the custom
         // property, so its consumers cannot be identified from their computed styles.
-        record_style_environment_change();
+        record_style_environment_change(EnvironmentActionDrive::Engine);
         return;
     }
 

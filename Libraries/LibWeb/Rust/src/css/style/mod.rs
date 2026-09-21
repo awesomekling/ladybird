@@ -912,6 +912,9 @@ pub struct RetainedState {
     /// previously substituted record must then be recomputed by C++, which implements registered
     /// custom properties, even when its cascade winners did not move.
     custom_property_registrations_changed: bool,
+    /// Whether an environment action since the last flush changed a document fact the engine's own
+    /// record drive does not hold, so a record that stands on its winners still recomputes in C++.
+    environment_action_needs_host_computation: bool,
     /// Pending selections for elements, and separately for the few pseudo-elements that hold one.
     /// Both are keyed by the element so that retiring it releases every selection by key.
     pending_element_style_computation_selections: HashMap<StyleNodeID, StyleComputationSelection>,
