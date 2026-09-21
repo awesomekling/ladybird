@@ -50,9 +50,19 @@
 //!   decides from, read once at the layout entry before the pass begins.
 //!
 //! **The shared resource service.** Fonts and text shaping (`libgfx_rust::text_layout`, the
-//! thread-local shaping cache) are the one purity exception a render thread keeps: a
-//! thread-safe service, not a read of the document. They are not host calls and the seal does
-//! not see them.
+//! thread-local shaping cache) are the one purity exception a render thread is meant to keep.
+//! They are not host calls and the seal does not see them.
+//!
+//! DEBT: today they are not yet a thread-safe service, so the exception is a claim rather than a
+//! fact. `Gfx::FontCascadeList::font_for_code_point`, which the text chunker calls per code
+//! point, is a `const` method that writes `m_ascii_cache`, `m_first_available_font_cache`,
+//! `m_invisible_fonts` (a `HashMap` insert) and `m_fallback_fonts` (a `Vector` append), all of
+//! them readable from the document thread through `first_available_font()`. It can also call a
+//! pending face's resolve closure, which holds a `GC::Root<CSS::FontFace>` inside the cascade
+//! list and synchronously starts a fetch and an event-loop timer: a read *and* a mutation of the
+//! document that this seal cannot see, because it is reached through LibGfx rather than through a
+//! host callback table. A resolved, immutable font list published before the pass is what would
+//! make this entry true.
 //!
 //! Anything else a running pass asks the document is a regression. Add a `note_host_call` beside
 //! any new host call rather than leaving it uncounted.
