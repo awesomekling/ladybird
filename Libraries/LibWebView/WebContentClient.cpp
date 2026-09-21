@@ -37,6 +37,7 @@
 #include <LibWebView/HelperProcess.h>
 #include <LibWebView/HistoryStore.h>
 #include <LibWebView/NavigationLoader.h>
+#include <LibWebView/RendererFontServiceConnection.h>
 #include <LibWebView/ViewImplementation.h>
 #include <LibWebView/WebContentClient.h>
 #include <LibWebView/WebContentTestClient.h>
@@ -114,6 +115,11 @@ void WebContentClient::did_retain_blob_url_token(Web::HTML::CrossProcessId navig
 Messages::WebContentClient::DidRequestBlobUrlEntryResponse WebContentClient::did_request_blob_url_entry(Utf16String url, Optional<URL::BlobURLEntry::Token> token)
 {
     return m_session->blob_url_store->resolve(url, token);
+}
+
+void WebContentClient::set_renderer_font_service_connection(NonnullRefPtr<RendererFontServiceConnection> connection)
+{
+    m_renderer_font_service_connection = move(connection);
 }
 
 void WebContentClient::connect_test_endpoint(NonnullOwnPtr<IPC::Transport> transport)

@@ -35,6 +35,7 @@ public:
     ~FontService();
 
     ErrorOr<FontCatalogDescriptor> clone_catalog();
+    u64 catalog_generation();
     Gfx::BrokeredFont open_font(u64 generation, u64 face_id);
     Gfx::BrokeredFont match_local_font(String const& name);
     Gfx::BrokeredFont match_font(String const& family, u16 weight, u16 width, u8 slope);

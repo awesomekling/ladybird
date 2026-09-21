@@ -25,6 +25,7 @@ set(SOURCES
     DownloadSegmentation.cpp
     DownloadStore.cpp
     ExternalURLHandler.cpp
+    RendererFontServiceConnection.cpp
     FaviconStore.cpp
     FileDownloader.cpp
     FontService.cpp

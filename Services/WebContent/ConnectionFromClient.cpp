@@ -26,6 +26,7 @@
 #include <LibGfx/Color.h>
 #include <LibGfx/Font/FontDatabase.h>
 #include <LibGfx/Font/SharedFontProvider.h>
+#include <LibGfx/Font/SystemFallbackFonts.h>
 #include <LibGfx/SystemTheme.h>
 #include <LibIPC/Transport.h>
 #include <LibJS/Runtime/ConsoleObject.h>
@@ -93,6 +94,7 @@
 #include <LibWebCommon/WebDriver/Error.h>
 #include <LibWebCommon/WebView/Attribute.h>
 #include <LibWebCommon/WebView/DictionaryLookup.h>
+#include <LibWebCommon/WebView/RendererFontService.h>
 #include <WebContent/ConnectionFromClient.h>
 #include <WebContent/DevToolsDebugger.h>
 #include <WebContent/DevToolsIndexedDB.h>
@@ -192,6 +194,16 @@ void ConnectionFromClient::set_font_catalog(IPC::File file, u64 size, u64 genera
     m_font_provider = provider.value().ptr();
     Gfx::FontDatabase::the().install_system_font_provider(provider.release_value());
     Web::Platform::FontPlugin::install(*new Web::Platform::FontPlugin(m_enable_test_mode, m_font_provider));
+}
+
+void ConnectionFromClient::set_renderer_font_service_transport(IPC::TransportHandle handle)
+{
+    auto service = WebView::RendererFontService::create(move(handle));
+    if (service.is_error()) {
+        dbgln("WebContent: Unable to connect the render side's font service: {}", service.error());
+        return;
+    }
+    Gfx::install_render_side_system_fallback_font_service(service.release_value());
 }
 
 void ConnectionFromClient::initialize(Compositing::PageId initial_page_id, Vector<Web::HTML::RemoteNavigableDescriptor> remote_navigables, Web::HTML::CrossProcessId root_navigable_id, Web::HTML::CrossProcessIdAllocator cross_process_id_allocator, Web::HTML::SessionHistoryEntryDescriptor initial_history_entry, Web::HTML::VisibilityState system_visibility_state)
