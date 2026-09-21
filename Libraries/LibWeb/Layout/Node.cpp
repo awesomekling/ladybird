@@ -461,8 +461,9 @@ void NodeWithStyle::ImageObserver::image_style_value_did_update(CSS::ImageStyleV
 
 NodeWithStyle::~NodeWithStyle()
 {
-    clear_image_observers();
-    release_pinned_style_record();
+    // NB: The arena destroys a shell only after it has freed the shell's row, and freeing the row
+    //     took its image observers and released its host-pinned style record. Nothing is left to
+    //     release by slot, and asking would reach whichever row holds the slot next.
 }
 
 void NodeWithStyle::clear_image_observers()
