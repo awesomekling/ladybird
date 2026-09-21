@@ -23,9 +23,12 @@
 //! application after the batch would change nothing. The working set itself is still a crossing,
 //! and `longhand_input_freeze` still counts it for every row.
 //!
-//! A font cache miss is not the shared font resource service: the installed resolver can
-//! synchronously enter the font loader and resolve a pending web face, including its GC-visible
-//! callbacks. Likewise, callbacks that prepare C++ longhand state or report computed results are
+//! A font cache miss is no longer a host service. The installed resolver answers from the
+//! document's published `@font-face` table and the process-wide font services, reads no document
+//! and holds no pointer to one, so `between_pass_batch resolve_font` is a stage-local computation
+//! the stage's own thread performs. It is still counted, because it is a round *between* passes
+//! that a single sealed pass would have to absorb. Callbacks that prepare C++ longhand state or
+//! report computed results are
 //! crossings of the future thread boundary until they become published inputs or commit messages.
 //!
 //! UTF-16 fly-string releases are deferred by the complete-update scope and drained after it.
@@ -71,7 +74,7 @@ thread_local! {
     static COUNTS: RefCell<HashMap<&'static str, Counts>> = RefCell::new(HashMap::new());
     static STAGE_INTERLEAVES: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
     static LONGHAND_INPUT_FREEZE_REASONS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
-    static BETWEEN_PASS_SERVICES: RefCell<HashMap<&'static str, (u64, u64)>> = RefCell::new(HashMap::new());
+    static BETWEEN_PASS_BATCHES: RefCell<HashMap<&'static str, (u64, u64)>> = RefCell::new(HashMap::new());
     static HOST_DRIVEN_ROWS: Cell<u64> = const { Cell::new(0) };
     static HOST_SAMPLED_ANIMATION_ROWS: Cell<u64> = const { Cell::new(0) };
     static HOST_DRIVEN_ROW_KINDS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
@@ -219,43 +222,24 @@ pub(crate) fn note_stage_interleave(name: &'static str) {
     }
 }
 
-/// Run a main-thread resource service between sealed evaluation passes.
+/// Run the between-pass font batch.
 ///
-/// Unlike an allow-listed callback, this remains a visible dependency of the style update. Abort
-/// mode therefore rejects it unless the service-specific escape hatch is set. The escape hatch is
-/// useful for proving that every other crossing is gone while the resource service remains.
-pub(crate) fn between_pass_font_service<T>(name: &'static str, requests: u64, service: impl FnOnce() -> T) -> T {
-    let mode = mode();
-    if mode == Mode::Off {
-        return service();
+/// This used to be a main-thread resource service: the batch entered the document's font computer,
+/// which could resolve a pending web face and run its GC-visible callbacks. It is now a stage-local
+/// computation over the published `@font-face` table and the process-wide font services, so it is
+/// counted but not a crossing. The count stays because the batch is still a round *between* passes
+/// rather than part of one, and that is what a single sealed pass would have to absorb.
+pub(crate) fn between_pass_font_batch<T>(name: &'static str, requests: u64, batch: impl FnOnce() -> T) -> T {
+    if mode() == Mode::Off || UPDATE_DEPTH.with(|depth| depth.get() == 0) {
+        return batch();
     }
-    if UPDATE_DEPTH.with(|depth| depth.get() == 0) {
-        note_host_call(name);
-        return service();
-    }
-    let suspended_depth = UPDATE_DEPTH.with(|depth| depth.replace(0));
-    debug_assert_ne!(suspended_depth, 0);
-    BETWEEN_PASS_SERVICES.with(|services| {
-        let mut services = services.borrow_mut();
-        let counts = services.entry(name).or_default();
+    BETWEEN_PASS_BATCHES.with(|batches| {
+        let mut batches = batches.borrow_mut();
+        let counts = batches.entry(name).or_default();
         counts.0 = counts.0.wrapping_add(requests);
         counts.1 = counts.1.wrapping_add(1);
     });
-    let allowed = std::env::var("LIBWEB_SEAL_STYLE_STAGE_ALLOW_FONT_SERVICE").as_deref() == Ok("1");
-    assert!(
-        mode != Mode::Abort || allowed,
-        "style stage is sealed, but requires the between-pass {name} service"
-    );
-    let result = service();
-    UPDATE_DEPTH.with(|depth| {
-        assert_eq!(
-            depth.get(),
-            0,
-            "unbalanced style update scope in a between-pass service"
-        );
-        depth.set(suspended_depth);
-    });
-    result
+    batch()
 }
 
 /// Record one Rust-to-C++ call. Calls outside sealed computation are input preparation, output
@@ -339,15 +323,15 @@ pub(crate) fn flush_census() {
             "STYLE SEAL COUNT: longhand_input_freeze reason={reason}: {count}\n"
         ));
     }
-    let mut services = BETWEEN_PASS_SERVICES.with(|services| {
-        std::mem::take(&mut *services.borrow_mut())
+    let mut batches = BETWEEN_PASS_BATCHES.with(|batches| {
+        std::mem::take(&mut *batches.borrow_mut())
             .into_iter()
             .collect::<Vec<_>>()
     });
-    services.sort_unstable_by_key(|(service, _)| *service);
-    for (service, (requests, rounds)) in services {
+    batches.sort_unstable_by_key(|(batch, _)| *batch);
+    for (batch, (requests, rounds)) in batches {
         write_report(&format!(
-            "STYLE SEAL COUNT: between_pass_service {service}: {requests} requests in {rounds} rounds\n"
+            "STYLE SEAL COUNT: between_pass_batch {batch}: {requests} requests in {rounds} rounds\n"
         ));
     }
 }

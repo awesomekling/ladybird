@@ -26,6 +26,8 @@
 
 namespace Web::CSS {
 
+class FontCascadeMemo;
+
 struct FontWeightRange {
     int min { 0 };
     int max { 0 };
@@ -160,6 +162,7 @@ public:
     // one font-environment generation, owned by an `Arc` on the Rust side. Rebuilt by the single
     // funnel that bumps the generation, and nowhere else.
     [[nodiscard]] void const* published_font_faces() const { return m_published_font_faces; }
+    [[nodiscard]] FontCascadeMemo& font_cascade_memo() const { return *m_font_cascade_memo; }
 
 private:
     virtual void visit_edges(Visitor&) override;
@@ -179,7 +182,8 @@ private:
     HashMap<FontFaceKey, Vector<NonnullRefPtr<FontFaceState>>> m_font_faces;
     HashMap<String, GC::Ref<FontLoader>> m_loaders_by_source;
 
-    mutable HashMap<ComputedFontCacheKey, NonnullRefPtr<Gfx::FontCascadeList const>> m_computed_font_cache;
+    // Shared rather than owned: the style stage's between-pass batch fills this too.
+    NonnullRefPtr<FontCascadeMemo> m_font_cascade_memo;
     mutable HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>> m_font_feature_values_cache;
 
     bool m_has_completed_initial_paint { false };
@@ -190,6 +194,42 @@ private:
 
     // An owned `Arc<FontFaceSnapshot>` from the Rust style engine.
     void const* m_published_font_faces { nullptr };
+};
+
+}
+
+namespace AK {
+
+template<>
+struct Traits<Web::CSS::FontFaceKey> : public DefaultTraits<Web::CSS::FontFaceKey> {
+    static unsigned hash(Web::CSS::FontFaceKey const& key) { return key.hash(); }
+};
+
+template<>
+struct Traits<Web::CSS::ComputedFontCacheKey> : public DefaultTraits<Web::CSS::ComputedFontCacheKey> {
+    static unsigned hash(Web::CSS::ComputedFontCacheKey const& key)
+    {
+        unsigned hash = 0;
+        for (auto const& family : key.font_families) {
+            if (family.has<Web::CSS::GenericFontFamily>()) {
+                hash = pair_int_hash(hash, to_underlying(family.get<Web::CSS::GenericFontFamily>()));
+            } else {
+                auto const& name = family.get<Web::CSS::ComputedFontFamilyName>();
+                hash = pair_int_hash(hash, pair_int_hash(name.name.hash(), to_underlying(name.syntax)));
+            }
+        }
+
+        hash = pair_int_hash(hash, to_underlying(key.font_optical_sizing));
+        hash = pair_int_hash(hash, Traits<Web::CSSPixels>::hash(key.font_size));
+        hash = pair_int_hash(hash, key.font_slope);
+        hash = pair_int_hash(hash, Traits<double>::hash(key.font_weight));
+        hash = pair_int_hash(hash, Traits<double>::hash(key.font_width.value()));
+        for (auto const& [variation_name, variation_value] : key.font_variation_settings)
+            hash = pair_int_hash(hash, pair_int_hash(variation_name.hash(), Traits<double>::hash(variation_value)));
+        hash = pair_int_hash(hash, Traits<Web::CSS::FontFeatureData>::hash(key.font_feature_data));
+
+        return hash;
+    }
 };
 
 }

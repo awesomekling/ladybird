@@ -5065,12 +5065,20 @@ impl StyleEngineState {
                 }),
         );
         let resolver = self.host.font_resolver.as_ref().expect("a request has a font resolver");
+        let snapshot = self.retained.font_face_snapshot.clone();
+        let memo = self
+            .retained
+            .font_cascade_memo
+            .as_ref()
+            .map_or(0, |memo| memo.address());
         let resolutions = self
             .retained
             .font_resolution
             .as_mut()
             .expect("a request has a font resolution cache");
         let request_count = resolver.refill(
+            memo,
+            snapshot.as_ref(),
             resolutions,
             requests.into_iter().map(|(_, request)| request).collect(),
             service,

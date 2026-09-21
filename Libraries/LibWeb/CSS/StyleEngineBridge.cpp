@@ -7,6 +7,7 @@
 #include <AK/StdLibExtras.h>
 #include <AK/Time.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
+#include <LibWeb/CSS/FontResolution.h>
 #include <LibWeb/CSS/RustDeclarationBlock.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineBridge.h>
@@ -18,24 +19,30 @@
 namespace Web::CSS {
 
 extern "C" void style_engine_prepare_root_font_resolution(void*, u64);
+extern "C" void style_engine_publish_font_face_snapshot(void*, void const*, uintptr_t);
+extern "C" void rust_font_face_snapshot_view(void const*, FontFaceSnapshotView*);
 
-static StyleEngineFFI::FfiResolvedFont resolve_font(void* context, StyleEngineFFI::FfiFontResolutionRequest request)
+// The style stage's between-pass font batch. It is a function of the document's published
+// `@font-face` table and the request, and of the process-wide font services behind them: no
+// document is reachable from here, and no pointer to one is passed in. That is what lets the
+// stage's own thread run this batch instead of joining the document's.
+static StyleEngineFFI::FfiResolvedFont resolve_font(FontCascadeMemo& memo, FontFaceSnapshotView const& font_faces, StyleEngineFFI::FfiFontResolutionRequest request)
 {
-    auto& style_computer = *static_cast<StyleComputer*>(context);
-    auto& font_computer = style_computer.document().font_computer();
     // The engine holds the family value as an opaque handle, never as a pointer it could
     // follow; the bridge is where it becomes one again.
     auto font_family = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
         reinterpret_cast<StyleValueFFI::StyleValueData const*>(request.font_family)));
-    auto font_list = font_computer.compute_font_for_style_values(
-        *font_family,
-        CSSPixels::from_raw(request.font_size_raw),
-        request.font_slope,
-        request.font_weight,
-        Percentage(request.font_width),
-        static_cast<FontOpticalSizing>(request.font_optical_sizing),
-        {},
-        {});
+    ComputedFontCacheKey key {
+        .font_families = computed_font_families_from_style_value(*font_family),
+        .font_optical_sizing = static_cast<FontOpticalSizing>(request.font_optical_sizing),
+        .font_size = CSSPixels::from_raw(request.font_size_raw),
+        .font_slope = request.font_slope,
+        .font_weight = request.font_weight,
+        .font_width = Percentage(request.font_width),
+        .font_variation_settings = {},
+        .font_feature_data = {},
+    };
+    auto font_list = memo.resolve(font_faces, key);
     // The metric probe must not load a face: the first available font answers without one.
     auto const& first_available_font = font_list->first_available_font();
     auto const metrics = first_available_font.pixel_metrics();
@@ -51,10 +58,13 @@ static StyleEngineFFI::FfiResolvedFont resolve_font(void* context, StyleEngineFF
     };
 }
 
-static void resolve_fonts(void* context, StyleEngineFFI::FfiFontResolutionRequest const* requests, StyleEngineFFI::FfiResolvedFont* resolved_fonts, size_t count)
+static void resolve_fonts(uintptr_t font_cascade_memo, void const* font_face_snapshot, StyleEngineFFI::FfiFontResolutionRequest const* requests, StyleEngineFFI::FfiResolvedFont* resolved_fonts, size_t count)
 {
+    FontFaceSnapshotView font_faces;
+    rust_font_face_snapshot_view(font_face_snapshot, &font_faces);
+    auto& memo = *reinterpret_cast<FontCascadeMemo*>(font_cascade_memo);
     for (size_t index = 0; index < count; ++index)
-        resolved_fonts[index] = resolve_font(context, requests[index]);
+        resolved_fonts[index] = resolve_font(memo, font_faces, requests[index]);
 }
 
 static_assert(StyleEngineFFI::LAST_SYNTHETIC_PSEUDO_ELEMENT_KIND == to_underlying(last_synthetic_pseudo_element));
@@ -69,13 +79,24 @@ StyleEngine::StyleEngine(DeviceClass device_class, StyleComputer* style_computer
 {
     if (m_style_computer) {
         set_pseudo_element_style_deferred(to_underlying(PseudoElement::Selection), true);
-        StyleEngineFFI::style_engine_install_font_resolver(m_impl, m_style_computer.ptr(), resolve_fonts);
+        StyleEngineFFI::style_engine_install_font_resolver(m_impl, resolve_fonts);
     }
 }
 
 void StyleEngine::prepare_root_font_resolution(u64 font_environment_generation)
 {
+    publish_font_faces();
     style_engine_prepare_root_font_resolution(m_impl, font_environment_generation);
+}
+
+// The document's `@font-face` table, handed to the engine for the generation it is about to
+// compute against. Publishing here and before a transaction covers every entry into the stage.
+void StyleEngine::publish_font_faces()
+{
+    if (!m_style_computer)
+        return;
+    auto& font_computer = m_style_computer->document().font_computer();
+    style_engine_publish_font_face_snapshot(m_impl, font_computer.published_font_faces(), reinterpret_cast<uintptr_t>(&font_computer.font_cascade_memo()));
 }
 
 StyleEngine::~StyleEngine()
@@ -689,6 +710,7 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
 {
     auto submission_started_at = MonotonicTime::now();
     submit_recorded_input();
+    publish_font_faces();
     StyleEngineFFI::FfiDocumentStyleComputationInputs computation_inputs {};
     if (m_style_computer) {
         auto const viewport_rect = m_style_computer->viewport_rect_for_style_environment();

@@ -230,12 +230,71 @@ pub unsafe extern "C" fn rust_font_face_snapshot_view(snapshot: *const c_void, o
 
 // The standalone cargo test binary has no C++ side, so the typeface a published record names is
 // an address nobody dereferences and its reference counting is stubbed out here.
+unsafe extern "C" {
+    fn ladybird_libweb_font_cascade_memo_ref(memo: *const c_void);
+    fn ladybird_libweb_font_cascade_memo_unref(memo: *const c_void);
+}
+
+/// One reference to the host's `Web::CSS::FontCascadeMemo`, held as an address so that the handle
+/// is `Send + Sync` by construction. The memo is the resolver's own memo, not document state: it
+/// remembers answers to a pure function of a published table and a request, and it is guarded by
+/// its own lock so that the stage can fill it from wherever it runs.
+pub(crate) struct RetainedFontCascadeMemo(usize);
+
+impl RetainedFontCascadeMemo {
+    /// # Safety
+    ///
+    /// `address` must be zero, or the address of a live `Web::CSS::FontCascadeMemo`.
+    pub unsafe fn retain(address: usize) -> Option<Self> {
+        if address == 0 {
+            return None;
+        }
+        // SAFETY: The caller guarantees the memo is live for this call.
+        unsafe { ladybird_libweb_font_cascade_memo_ref(address as *const c_void) };
+        Some(Self(address))
+    }
+
+    pub fn address(&self) -> usize {
+        self.0
+    }
+}
+
+impl Drop for RetainedFontCascadeMemo {
+    fn drop(&mut self) {
+        // SAFETY: `retain` took the reference this releases.
+        unsafe { ladybird_libweb_font_cascade_memo_unref(self.0 as *const c_void) };
+    }
+}
+
+/// Takes one more reference to a published table, for a holder that outlives the publisher's own.
+///
+/// # Safety
+///
+/// `snapshot` must be a live pointer from [`rust_font_face_snapshot_build`].
+pub(crate) unsafe fn retained(snapshot: *const c_void) -> Option<Arc<FontFaceSnapshot>> {
+    if snapshot.is_null() {
+        return None;
+    }
+    // SAFETY: The caller guarantees this is a live pointer; the clone below is the caller's own.
+    let borrowed = std::mem::ManuallyDrop::new(unsafe { Arc::from_raw(snapshot.cast::<FontFaceSnapshot>()) });
+    Some(Arc::clone(&borrowed))
+}
+
+/// The address a held table is named by, so the resolver can ask it for its view.
+pub(crate) fn as_pointer(snapshot: &Arc<FontFaceSnapshot>) -> *const c_void {
+    Arc::as_ptr(snapshot).cast()
+}
+
 #[cfg(test)]
 mod ffi_test_stubs {
     #[unsafe(no_mangle)]
     extern "C" fn ladybird_gfx_typeface_ref(_typeface: *const std::ffi::c_void) {}
     #[unsafe(no_mangle)]
     extern "C" fn ladybird_gfx_typeface_unref(_typeface: *const std::ffi::c_void) {}
+    #[unsafe(no_mangle)]
+    extern "C" fn ladybird_libweb_font_cascade_memo_ref(_memo: *const std::ffi::c_void) {}
+    #[unsafe(no_mangle)]
+    extern "C" fn ladybird_libweb_font_cascade_memo_unref(_memo: *const std::ffi::c_void) {}
 }
 
 #[cfg(test)]
@@ -302,7 +361,13 @@ mod tests {
         let range = unsafe { *read_back.ranges };
         assert_eq!(range.last_code_point, 0x5a);
 
+        let held = unsafe { retained(published) }.unwrap();
+        assert_eq!(as_pointer(&held), published);
         unsafe { rust_font_face_snapshot_release(published) };
+        // The publisher let go; the holder's own reference still answers.
+        let mut held_view = FfiFontFaceSnapshotView::default();
+        unsafe { rust_font_face_snapshot_view(as_pointer(&held), &raw mut held_view) };
+        assert_eq!(held_view.generation, 5);
     }
 
     #[test]
@@ -314,6 +379,7 @@ mod tests {
         unsafe { rust_font_face_snapshot_view(std::ptr::null(), &raw mut view) };
         assert_eq!(view.generation, 0);
         assert_eq!(view.record_count, 0);
+        assert!(unsafe { retained(std::ptr::null()) }.is_none());
         unsafe { rust_font_face_snapshot_release(std::ptr::null()) };
     }
 }

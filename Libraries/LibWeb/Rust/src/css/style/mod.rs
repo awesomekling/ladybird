@@ -865,8 +865,14 @@ pub struct RetainedState {
     /// Descendants inherit from these stage results before the host projects them onto elements.
     legacy_finalized_longhand_rows: HashMap<computed::ComputedStyleTarget, LegacyFinalizedLonghandRow>,
     /// Every font resolution this document has been given. An evaluation step reads it; only a
-    /// host round between passes adds to it.
+    /// round between passes adds to it.
     font_resolution: Option<font_resolution::FontResolutionCache>,
+    /// The document's `@font-face` table at the generation this update is computing for. Held for
+    /// the whole update so that resolving a font needs nothing the document owns.
+    font_face_snapshot: Option<std::sync::Arc<font_faces::FontFaceSnapshot>>,
+    /// The resolver's memo of answers it has already given, shared with the host so that the
+    /// document can read back the cascades a change to the table makes stale.
+    font_cascade_memo: Option<font_faces::RetainedFontCascadeMemo>,
     /// The last request computed for the document element, retained so the next update can
     /// publish its answer before evaluation begins.
     root_font_request: Option<font_resolution::FontRequest>,
@@ -1054,8 +1060,9 @@ pub struct RetainedState {
 /// Host-facing engine state: C++ ownership, journal intake and the record/replay adapters.
 /// Never reachable from an evaluation step.
 pub struct HostState {
-    /// The host's synchronous font resolver. A step that misses the cache returns `NeedsInput`;
-    /// the round outside the step calls this and the node is retried.
+    /// The font resolver the host installed. A step that misses the cache returns `NeedsInput`;
+    /// the round outside the step resolves from the published table and the node is retried.
+    /// This is not a host service: it reads no document, and carries no context that could.
     font_resolver: Option<font_resolution::FontResolverHost>,
     /// Random bases allocated while freezing style inputs. Named sharing scopes are document-wide;
     /// `auto` scopes include the element. This is host preparation state, not part of a sealed step.

@@ -68,6 +68,8 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         element_custom_property_data,
         legacy_finalized_longhand_rows,
         font_resolution,
+        font_face_snapshot,
+        font_cascade_memo,
         root_font_request,
         layout_style_snapshots,
         container_query_inputs,
@@ -175,6 +177,10 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(frozen_longhand_inputs);
     assert_member_is_sync(element_custom_property_data);
     assert_member_is_sync(legacy_finalized_longhand_rows);
+    // The published `@font-face` table is the one piece of document state a font resolution reads,
+    // so it has to be shareable for the stage's own thread to resolve from it.
+    assert_member_is_sync(font_face_snapshot);
+    assert_member_is_sync(font_cascade_memo);
     assert_member_is_sync(layout_style_snapshots);
     assert_member_is_sync(container_query_inputs);
     assert_member_is_sync(layer_topology_version);
