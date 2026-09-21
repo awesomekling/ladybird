@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    /* Each animation holds one constant value for its whole run, so what an element computes says
+       which basis its container units resolved against, never how far along the animation is. */
+    @keyframes cqw { from { text-indent: 10cqw; } to { text-indent: 10cqw; } }
+    @keyframes cqh { from { text-indent: 10cqh; } to { text-indent: 10cqh; } }
+    @keyframes cqi { from { text-indent: 10cqi; } to { text-indent: 10cqi; } }
+    @keyframes cqb { from { text-indent: 10cqb; } to { text-indent: 10cqb; } }
+    @keyframes cqmin { from { text-indent: 10cqmin; } to { text-indent: 10cqmin; } }
+    @keyframes cqmax { from { text-indent: 10cqmax; } to { text-indent: 10cqmax; } }
+
+    /* The subject's own declarations name no container unit at all: the drive resolves no basis
+       for either axis, and only the keyframe asks for one. */
+    .animated {
+        text-indent: 1px;
+        animation-duration: 100s;
+        animation-fill-mode: both;
+        animation-timing-function: linear;
+    }
+
+    #outer { container-type: size; width: 400px; height: 200px; }
+    /* Horizontal writing mode, so this one answers for the width axis only. */
+    #inline-only { container-type: inline-size; width: 130px; }
+    #inner { container-type: size; width: 100px; height: 50px; }
+    /* Vertical writing mode, so its inline axis is the vertical one: it answers for the height
+       axis, and the width axis walks past it. */
+    #vertical-container { container-type: inline-size; writing-mode: vertical-rl; width: 90px; height: 70px; }
+    .vertical-subject { writing-mode: vertical-rl; }
+</style>
+<div id="outer">
+    <div id="inline-only">
+        <div class="animated" id="inline-only-cqw" style="animation-name: cqw"></div>
+        <div class="animated" id="inline-only-cqh" style="animation-name: cqh"></div>
+        <div class="animated" id="inline-only-cqmin" style="animation-name: cqmin"></div>
+        <div class="animated" id="inline-only-cqmax" style="animation-name: cqmax"></div>
+    </div>
+    <div id="inner">
+        <div class="animated" id="inner-cqw" style="animation-name: cqw"></div>
+        <div class="animated" id="inner-cqh" style="animation-name: cqh"></div>
+        <div class="animated" id="inner-cqi" style="animation-name: cqi"></div>
+        <div class="animated" id="inner-cqb" style="animation-name: cqb"></div>
+        <div class="animated vertical-subject" id="inner-vertical-cqi" style="animation-name: cqi"></div>
+        <div class="animated vertical-subject" id="inner-vertical-cqb" style="animation-name: cqb"></div>
+        <div class="animated" id="inner-cqmin" style="animation-name: cqmin"></div>
+        <div class="animated" id="inner-cqmax" style="animation-name: cqmax"></div>
+    </div>
+    <div id="vertical-container">
+        <div class="animated" id="vertical-container-cqh" style="animation-name: cqh"></div>
+        <div class="animated" id="vertical-container-cqw" style="animation-name: cqw"></div>
+    </div>
+</div>
+<div class="animated" id="no-container-cqw" style="animation-name: cqw"></div>
+<div class="animated" id="no-container-cqh" style="animation-name: cqh"></div>
+<script>
+    test(() => {
+        const read = element => getComputedStyle(element).textIndent;
+        const report = label => {
+            for (const element of document.querySelectorAll(".animated")) {
+                const first = read(element);
+                // A second read behind a change that forces the element's style to be computed
+                // again, which has to answer the same.
+                element.style.borderLeftWidth = `${1 + (parseInt(element.style.borderLeftWidth) || 0)}px`;
+                const second = read(element);
+                println(`${label} ${element.id}: ${first}${first === second ? "" : ` (recomputed to ${second})`}`);
+            }
+        };
+
+        report("start");
+
+        // The container's size is an input of every container unit under it, so moving it has to
+        // move what the keyframes resolve to - which is only true if resolving them said that this
+        // element is queried about its size.
+        document.getElementById("inner").style.width = "200px";
+        document.getElementById("inner").style.height = "150px";
+        document.body.offsetHeight;
+        report("after resize");
+
+        // And the walk itself: making the nearest container ineligible for an axis sends that axis
+        // to the next one out.
+        document.getElementById("inner").style.containerType = "inline-size";
+        document.body.offsetHeight;
+        report("after inner becomes inline-size");
+    });
+</script>

@@ -1,0 +1,48 @@
+start inline-only-cqw: 13px
+start inline-only-cqh: 20px
+start inline-only-cqmin: 13px
+start inline-only-cqmax: 20px
+start inner-cqw: 10px
+start inner-cqh: 5px
+start inner-cqi: 10px
+start inner-cqb: 5px
+start inner-vertical-cqi: 5px
+start inner-vertical-cqb: 10px
+start inner-cqmin: 5px
+start inner-cqmax: 10px
+start vertical-container-cqh: 7px
+start vertical-container-cqw: 40px
+start no-container-cqw: 80px
+start no-container-cqh: 60px
+after resize inline-only-cqw: 13px
+after resize inline-only-cqh: 20px
+after resize inline-only-cqmin: 13px
+after resize inline-only-cqmax: 20px
+after resize inner-cqw: 20px
+after resize inner-cqh: 15px
+after resize inner-cqi: 20px
+after resize inner-cqb: 15px
+after resize inner-vertical-cqi: 15px
+after resize inner-vertical-cqb: 20px
+after resize inner-cqmin: 15px
+after resize inner-cqmax: 20px
+after resize vertical-container-cqh: 7px
+after resize vertical-container-cqw: 40px
+after resize no-container-cqw: 80px
+after resize no-container-cqh: 60px
+after inner becomes inline-size inline-only-cqw: 13px
+after inner becomes inline-size inline-only-cqh: 20px
+after inner becomes inline-size inline-only-cqmin: 13px
+after inner becomes inline-size inline-only-cqmax: 20px
+after inner becomes inline-size inner-cqw: 20px
+after inner becomes inline-size inner-cqh: 20px
+after inner becomes inline-size inner-cqi: 20px
+after inner becomes inline-size inner-cqb: 20px
+after inner becomes inline-size inner-vertical-cqi: 20px
+after inner becomes inline-size inner-vertical-cqb: 20px
+after inner becomes inline-size inner-cqmin: 20px
+after inner becomes inline-size inner-cqmax: 20px
+after inner becomes inline-size vertical-container-cqh: 7px
+after inner becomes inline-size vertical-container-cqw: 40px
+after inner becomes inline-size no-container-cqw: 80px
+after inner becomes inline-size no-container-cqh: 60px

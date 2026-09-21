@@ -2732,6 +2732,19 @@ pub struct FfiLonghandFinalizationResult {
     ///     main-side effect of the computation, which the host applies as soon as it returns. Set
     ///     only together with `animated_overlay`.
     pub applies_animation_plan_after_return: bool,
+    /// NB: Additive, and the last thing on this result: what the container units the stage's own
+    ///     animation tail resolved say about the DOM, which the host records as soon as the
+    ///     computation returns - the subject's style depends on a size container query, and each
+    ///     container the walk landed on is queried about its size. The two containers are style
+    ///     node identities, zero where the walk answered from the viewport instead. Set only
+    ///     together with `animated_overlay`.
+    pub animation_subject_depends_on_size_container_query: bool,
+    pub animation_width_size_query_container: u32,
+    pub animation_height_size_query_container: u32,
+    /// Whether that container has no committed box yet, so its size is an answer only layout can
+    /// give.
+    pub animation_width_size_query_container_has_no_box: bool,
+    pub animation_height_size_query_container_has_no_box: bool,
 }
 
 /// The three length-resolution contexts a keyframe value is computed in.
@@ -2790,6 +2803,69 @@ impl FfiAnimationLengthContexts {
         }
     }
 
+    /// Resolve, for the axes a batch using these container-relative units asks about, the bases the
+    /// drive did not leave behind - it resolved the ones the element's *own* unit mask asked for,
+    /// and a keyframe that uses `cqw` where the element's style does not leaves that axis empty.
+    ///
+    /// A mirror of `to_ffi_length_resolution_context_with_container_bases`: the axis logic is the
+    /// one `covers_container_relative_units` already states, and the basis of each axis is the
+    /// query-container walk, taken from published inputs by `StyleEngine::container_unit_basis`.
+    /// What the host's walk also does to the DOM comes back in the returned effects, for the
+    /// post-stage step to apply.
+    fn resolve_container_relative_units(
+        &mut self,
+        style_engine: &crate::css::style::StyleEngine,
+        subject: crate::css::style::tree::StyleNodeID,
+        unit_mask: u8,
+    ) -> StageContainerUnitEffects {
+        let mut effects = StageContainerUnitEffects::default();
+        let mut resolved_axes: [Option<crate::css::style::animations::ContainerUnitBasis>; 2] = [None, None];
+        for context in [&mut self.font, &mut self.line_height, &mut self.remaining] {
+            let (needs_width_basis, needs_height_basis) =
+                container_relative_axes_needed(unit_mask, context.subject_inline_axis_is_horizontal);
+            for axis_is_horizontal in [true, false] {
+                let needs_basis = if axis_is_horizontal {
+                    needs_width_basis
+                } else {
+                    needs_height_basis
+                };
+                let has_basis = if axis_is_horizontal {
+                    context.has_container_width_basis
+                } else {
+                    context.has_container_height_basis
+                };
+                if !needs_basis || has_basis {
+                    continue;
+                }
+                let viewport = if axis_is_horizontal {
+                    context.viewport_width
+                } else {
+                    context.viewport_height
+                };
+                let slot = &mut resolved_axes[usize::from(!axis_is_horizontal)];
+                let basis = *slot
+                    .get_or_insert_with(|| style_engine.container_unit_basis(subject, axis_is_horizontal, viewport));
+                if axis_is_horizontal {
+                    context.container_width_basis = basis.basis;
+                    context.container_width_basis_depends_on_viewport_metrics = basis.depends_on_viewport_metrics;
+                    context.has_container_width_basis = true;
+                    effects.width_query_container = basis.container.map_or(0, |node| node.raw());
+                    effects.width_query_container_has_no_box = basis.container_has_no_box;
+                } else {
+                    context.container_height_basis = basis.basis;
+                    context.container_height_basis_depends_on_viewport_metrics = basis.depends_on_viewport_metrics;
+                    context.has_container_height_basis = true;
+                    effects.height_query_container = basis.container.map_or(0, |node| node.raw());
+                    effects.height_query_container_has_no_box = basis.container_has_no_box;
+                }
+                // The host marks the subject for every container unit it resolves, whether or not
+                // the walk found a container to answer it.
+                effects.subject_depends_on_size_container_query = true;
+            }
+        }
+        effects
+    }
+
     /// Whether the container bases the drive left on these contexts answer every axis a batch that
     /// uses these container-relative units would ask for.
     ///
@@ -2800,26 +2876,51 @@ impl FfiAnimationLengthContexts {
     /// resolved needs nothing the stage does not hold. A mirror of the axis logic of
     /// `to_ffi_length_resolution_context_with_container_bases`.
     fn covers_container_relative_units(&self, unit_mask: u8) -> bool {
-        const CQW: u8 = 1 << 0;
-        const CQH: u8 = 1 << 1;
-        const CQI: u8 = 1 << 2;
-        const CQB: u8 = 1 << 3;
-        /// `cqmin` and `cqmax`, which need both axes to be compared.
-        const BOTH_AXES: u8 = (1 << 4) | (1 << 5);
-
         [&self.font, &self.line_height, &self.remaining]
             .into_iter()
             .all(|context| {
-                let (width_axis, height_axis) = match context.subject_inline_axis_is_horizontal {
-                    true => (CQI, CQB),
-                    false => (CQB, CQI),
-                };
-                let needs_width_basis = unit_mask & (CQW | BOTH_AXES | width_axis) != 0;
-                let needs_height_basis = unit_mask & (CQH | BOTH_AXES | height_axis) != 0;
+                let (needs_width_basis, needs_height_basis) =
+                    container_relative_axes_needed(unit_mask, context.subject_inline_axis_is_horizontal);
                 (!needs_width_basis || context.has_container_width_basis)
                     && (!needs_height_basis || context.has_container_height_basis)
             })
     }
+}
+
+/// Which physical axes a batch using these container-relative units asks a basis for, for a subject
+/// whose inline axis is or is not the horizontal one. The axis logic of
+/// `to_ffi_length_resolution_context_with_container_bases`.
+fn container_relative_axes_needed(unit_mask: u8, subject_inline_axis_is_horizontal: bool) -> (bool, bool) {
+    const CQW: u8 = 1 << 0;
+    const CQH: u8 = 1 << 1;
+    const CQI: u8 = 1 << 2;
+    const CQB: u8 = 1 << 3;
+    /// `cqmin` and `cqmax`, which need both axes to be compared.
+    const BOTH_AXES: u8 = (1 << 4) | (1 << 5);
+
+    let (width_axis, height_axis) = match subject_inline_axis_is_horizontal {
+        true => (CQI, CQB),
+        false => (CQB, CQI),
+    };
+    (
+        unit_mask & (CQW | BOTH_AXES | width_axis) != 0,
+        unit_mask & (CQH | BOTH_AXES | height_axis) != 0,
+    )
+}
+
+/// What resolving a keyframe batch's container units for itself left for the host to record on the
+/// DOM: the same bookkeeping `Length::container_relative_length_to_px_without_rounding` does inline
+/// while it resolves, which is what bounds the re-style a container's resize triggers.
+///
+/// Style node identities, with zero for "the walk found no container and answered from the
+/// viewport".
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct StageContainerUnitEffects {
+    pub(crate) subject_depends_on_size_container_query: bool,
+    pub(crate) width_query_container: u32,
+    pub(crate) height_query_container: u32,
+    pub(crate) width_query_container_has_no_box: bool,
+    pub(crate) height_query_container_has_no_box: bool,
 }
 
 /// What the stage's own animation tail produced for an element it could sample without the host:
@@ -2830,6 +2931,9 @@ pub(crate) struct StageAnimationTail {
     pub(crate) depends_on_viewport_metrics: bool,
     pub(crate) font_metrics_depend_on_viewport_metrics: bool,
     pub(crate) keyframes_inherited_non_inherited_style_groups: u32,
+    /// What the container units this batch resolved say about the DOM, which the post-stage step
+    /// records. Empty wherever the batch used none, or the drive had already resolved them.
+    pub(crate) container_unit_effects: StageContainerUnitEffects,
 }
 
 /// The effects of one of an element's animation lists that the stage would sample, taken from the
@@ -3226,6 +3330,7 @@ unsafe fn try_stage_animation_tail(
             depends_on_viewport_metrics: false,
             font_metrics_depend_on_viewport_metrics: false,
             keyframes_inherited_non_inherited_style_groups: 0,
+            container_unit_effects: StageContainerUnitEffects::default(),
         });
     }
 
@@ -3284,6 +3389,7 @@ unsafe fn try_stage_animation_tail(
             depends_on_viewport_metrics: false,
             font_metrics_depend_on_viewport_metrics: false,
             keyframes_inherited_non_inherited_style_groups: 0,
+            container_unit_effects: StageContainerUnitEffects::default(),
         });
     }
 
@@ -3321,9 +3427,19 @@ unsafe fn try_stage_animation_tail(
             depends_on_viewport_metrics: false,
             font_metrics_depend_on_viewport_metrics: false,
             keyframes_inherited_non_inherited_style_groups: 0,
+            container_unit_effects: StageContainerUnitEffects::default(),
         });
     }
     let properties = unsafe { std::slice::from_raw_parts(resolved.properties, resolved.count) };
+    // The drive resolved the container bases the element's *own* units asked for, and a keyframe
+    // can ask about an axis the element's style never mentions. Those are resolved here, from the
+    // same published inputs the host's walk would read, rather than leaving the batch to the host.
+    let mut length_contexts = *length_contexts;
+    let container_unit_effects = length_contexts.resolve_container_relative_units(
+        style_engine,
+        node,
+        resolved.container_relative_length_unit_mask,
+    );
     // The same terms the host's `cache_preparation` uses: everything outside them needs an input
     // the stage does not hold - a custom property to compute, the element's place among its
     // siblings, a container size no length context carries, the document's base URL, a random base
@@ -3415,6 +3531,7 @@ unsafe fn try_stage_animation_tail(
         depends_on_viewport_metrics: computed_keyframes.depends_on_viewport_metrics,
         font_metrics_depend_on_viewport_metrics: computed_keyframes.font_metrics_depend_on_viewport_metrics,
         keyframes_inherited_non_inherited_style_groups,
+        container_unit_effects,
     })
 }
 
@@ -6657,6 +6774,11 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
             font_metrics_depend_on_viewport_metrics: false,
             keyframes_inherited_non_inherited_style_groups: 0,
             applies_animation_plan_after_return: false,
+            animation_subject_depends_on_size_container_query: false,
+            animation_width_size_query_container: 0,
+            animation_height_size_query_container: 0,
+            animation_width_size_query_container_has_no_box: false,
+            animation_height_size_query_container_has_no_box: false,
         };
     }
     let mut invalidated_longhands = 0;
@@ -6942,6 +7064,9 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
             );
         };
     }
+    let stage_container_unit_effects = stage_animation_tail
+        .as_ref()
+        .map_or_else(StageContainerUnitEffects::default, |tail| tail.container_unit_effects);
     FfiLonghandFinalizationResult {
         parent_style_in_display_none_subtree,
         invalidated_longhands,
@@ -6958,6 +7083,13 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
             .as_ref()
             .map_or(0, |tail| tail.keyframes_inherited_non_inherited_style_groups),
         applies_animation_plan_after_return,
+        animation_subject_depends_on_size_container_query: stage_container_unit_effects
+            .subject_depends_on_size_container_query,
+        animation_width_size_query_container: stage_container_unit_effects.width_query_container,
+        animation_height_size_query_container: stage_container_unit_effects.height_query_container,
+        animation_width_size_query_container_has_no_box: stage_container_unit_effects.width_query_container_has_no_box,
+        animation_height_size_query_container_has_no_box: stage_container_unit_effects
+            .height_query_container_has_no_box,
     }
 }
 
