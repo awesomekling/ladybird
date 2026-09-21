@@ -395,7 +395,6 @@ unsafe fn free_stack_chunk(chunk: NonNull<UsedValues>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::rc::Rc;
 
     #[test]
     fn nested_runs_leave_their_parents_records_in_place() {
@@ -433,8 +432,8 @@ mod tests {
         let scratch = LayoutScratch::default();
         let root = arena.allocate_for_test().slot;
         let child = arena.allocate_for_test().slot;
-        let lines = Rc::new(crate::layout::inline_content::InlineContent::default());
-        let weak_lines = Rc::downgrade(&lines);
+        let lines = std::sync::Arc::new(crate::layout::inline_content::InlineContent::default());
+        let weak_lines = std::sync::Arc::downgrade(&lines);
         let root_used = UsedValues::default();
         let first_record = RunRecords::with_root(&scratch, &arena, root, NodeSlotId::INVALID, &root_used, |records| {
             let used = records.register(child, UsedValues::default());
