@@ -1422,8 +1422,8 @@ fn custom_property_needs_resolution(value: &StyleValueData) -> bool {
 }
 
 /// Whether every value declared by this store can be resolved from retained engine inputs. The
-/// longhand driver supplies the element's published attributes; the remaining substitution forms
-/// still require host state.
+/// longhand driver supplies the element's published attributes and the full parent environment;
+/// style queries and custom functions still require host state.
 pub(crate) unsafe fn custom_property_store_is_engine_resolvable(store: *const c_void, registry: *const c_void) -> bool {
     let Some(store) = (unsafe { store.cast::<CustomPropertyStore>().as_ref() }) else {
         return false;
@@ -1449,10 +1449,6 @@ pub(crate) unsafe fn custom_property_store_is_engine_resolvable(store: *const c_
                     presence_dashed_function: true,
                     ..
                 } | StyleValueData::Unresolved { presence_if: true, .. }
-                    | StyleValueData::Unresolved {
-                        presence_inherit: true,
-                        ..
-                    }
             )
         })
 }
