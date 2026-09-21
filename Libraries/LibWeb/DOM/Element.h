@@ -545,6 +545,11 @@ public:
     void set_style_uses_attr_css_function() { m_style_uses_attr_css_function = true; }
     bool style_uses_var_css_function() const { return m_style_uses_var_css_function; }
     void set_style_uses_var_css_function() { m_style_uses_var_css_function = true; }
+    // Whether a `var()` reference of one of this element's `@keyframes` values was substituted
+    // against its custom-property environment. Such a read belongs to no cascade declaration, so
+    // the style input record cannot name it: the record reports its reads as incomplete instead,
+    // and a moved environment above the element recomputes it whichever names moved.
+    void set_animation_uses_var_css_function() { m_animation_uses_var_css_function = true; }
     // A tree-counting function is answered from the element's position among its siblings, so what
     // has to be remembered is on the parent: a child list mutation there moves the answer.
     void set_style_uses_tree_counting_function()
@@ -945,6 +950,7 @@ private:
     // Authoritative dependency marks left by this element's latest style computation.
     bool m_style_uses_attr_css_function : 1 { false };
     bool m_style_uses_var_css_function : 1 { false };
+    bool m_animation_uses_var_css_function : 1 { false };
     bool m_style_uses_if_css_function : 1 { false };
     bool m_style_depends_on_viewport_metrics : 1 { false };
     bool m_style_uses_custom_function : 1 { false };

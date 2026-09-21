@@ -94,9 +94,8 @@
         check("changing after the name moves", changing, ["opacity"]);
         changing.style.removeProperty("--own");
         check("changing after the name is dropped", changing, ["opacity"]);
-        // NB: The value read on the mutating update is the one from before it. A custom property an
-        //     element reads *only* through its keyframes does not invalidate that element, which is
-        //     a host bug this pins rather than fixes - see the write-up in the airlock note.
+        // A custom property the element reads *only* through its keyframes, moved on the root.
+        // See animation-keyframe-var-invalidation.html for that invalidation in full.
         document.documentElement.style.setProperty("--root-opacity", "0.15");
         check("inherited after the root moves", document.getElementById("inherited"), ["opacity"]);
 
