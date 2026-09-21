@@ -1344,9 +1344,13 @@ struct RecordingStageInput<'a> {
     inputs: crate::painting::record::RecordingInputs<'a>,
 }
 
-// SAFETY: DEBT: Recording still reads the document-owned arena and Rc-backed font handles. The
-// FFI caller freezes both for this synchronous stage run. Replace this boundary with immutable
-// paint rows and thread-safe resource handles before moving recording to another thread.
+// SAFETY: DEBT: The recording's own inputs are already shareable - its fonts and image frames
+// are `Arc`-backed handles over atomically reference-counted resources. What is not is the
+// document-owned arena this borrows: its columns are `Cell` and `RefCell`, and its text rows
+// name a `Gfx::FontCascadeList` through a raw pointer whose `const` lookups write four
+// unsynchronized caches. The FFI caller freezes the arena for this synchronous stage run.
+// Replace this boundary with immutable paint rows and a resolved, thread-safe font list before
+// moving recording to another thread.
 unsafe impl Sync for RecordingStageInput<'_> {}
 
 struct RecordingStageOutput {
