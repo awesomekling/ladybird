@@ -5235,7 +5235,7 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
         verify_reused_style([&] {
             auto cascaded = compute_cascaded_values(abstract_element, cascade_input, include_inline_style, nullptr,
                 collected_presentational_hints ? &presentational_hint_properties : nullptr);
-            return compute_properties(abstract_element, cascaded, cascade_input.matching_pseudo_element_styles, nullptr, {}, ComputedValues::all_style_groups, false, false, nullptr, nullptr, nullptr, highlight_parent_style_record);
+            return compute_properties(abstract_element, cascaded, cascade_input.matching_pseudo_element_styles, nullptr, {}, ComputedValues::all_style_groups, false, false, nullptr, nullptr, nullptr, highlight_parent_style_record, nullptr, old_custom_property_data);
         });
         // The style is the one the last cascade produced from these same inputs, so the winner
         // state that cascade bound still stands behind the publication about to reuse it.
@@ -5413,7 +5413,7 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
         new_style_input_record->explicitly_inherited_non_inherited_style_groups = previous_computation->explicitly_inherited_non_inherited_style_groups;
         reuse_last_computed_style();
         verify_reused_style([&] {
-            return compute_properties(abstract_element, cascaded_properties, cascade_input.matching_pseudo_element_styles, nullptr, {}, ComputedValues::all_style_groups, false, false, nullptr, nullptr, nullptr, highlight_parent_style_record);
+            return compute_properties(abstract_element, cascaded_properties, cascade_input.matching_pseudo_element_styles, nullptr, {}, ComputedValues::all_style_groups, false, false, nullptr, nullptr, nullptr, highlight_parent_style_record, nullptr, old_custom_property_data);
         });
         return {};
     }
@@ -5485,7 +5485,8 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
         sharing ? &sharing->computation_reads_unkeyed_context : nullptr,
         sharing ? &sharing->computation_reads_resource_context : nullptr,
         highlight_parent_style_record,
-        sharing ? &sharing->substitution_usage : nullptr);
+        sharing ? &sharing->substitution_usage : nullptr,
+        old_custom_property_data);
     if (new_style_input_record)
         new_style_input_record->bind_next_published_style = true;
     static bool const verify_computed_closure = getenv("LIBWEB_VERIFY_COMPUTED_CLOSURE") != nullptr;
@@ -5646,7 +5647,7 @@ void StyleComputer::ensure_style_metadata_tables_installed()
     (void)installed;
 }
 
-NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::AbstractElement abstract_element, CascadedProperties& cascaded_properties, u64 matching_pseudo_element_styles, u32* explicitly_inherited_non_inherited_style_groups, StyleRecordID previous_style_record, u32 initial_computed_group_mask, bool use_retained_style_computation_selection, bool stop_after_longhand_drive, u32* selected_computed_group_mask, bool* computation_reads_unkeyed_context, bool* computation_reads_resource_context, Optional<StyleRecordID> highlight_parent_style_record, u8* substitution_usage) const
+NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::AbstractElement abstract_element, CascadedProperties& cascaded_properties, u64 matching_pseudo_element_styles, u32* explicitly_inherited_non_inherited_style_groups, StyleRecordID previous_style_record, u32 initial_computed_group_mask, bool use_retained_style_computation_selection, bool stop_after_longhand_drive, u32* selected_computed_group_mask, bool* computation_reads_unkeyed_context, bool* computation_reads_resource_context, Optional<StyleRecordID> highlight_parent_style_record, u8* substitution_usage, RefPtr<CustomPropertyData const> replaced_custom_property_data) const
 {
     begin_style_update();
     ScopeGuard end_style_update = [&] { this->end_style_update(); };
@@ -5749,6 +5750,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         bool* computation_reads_unkeyed_context;
         bool* computation_reads_resource_context;
         u8* substitution_usage;
+        RefPtr<CustomPropertyData const> replaced_custom_property_data;
         OwnPtr<NativeLonghandState> state;
     };
     NativeComputePropertiesContext native_context {
@@ -5763,6 +5765,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         .computation_reads_unkeyed_context = computation_reads_unkeyed_context,
         .computation_reads_resource_context = computation_reads_resource_context,
         .substitution_usage = substitution_usage,
+        .replaced_custom_property_data = move(replaced_custom_property_data),
         .state = nullptr,
     };
     auto const highlight_inheritance_parent = abstract_element.highlight_inheritance_parent();
@@ -5901,6 +5904,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         auto const& font_computation_context = style_computer.get_computation_context_for_property(PropertyID::FontFamily, computed_style, abstract_element);
         void const* custom_property_store = nullptr;
         void const* resolved_parent_custom_property_store = nullptr;
+        u64 resolved_parent_custom_property_environment = 0;
         bool reuse_resolved_parent_custom_property_store_if_empty = false;
         ComputedValuesFFI::FfiCascadeResolutionContext custom_property_resolution_context {};
         if (state.custom_property_resolution) {
@@ -5908,6 +5912,8 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             custom_property_store = resolution.data->rust_store();
             resolved_parent_custom_property_store = resolution.parent_data ? resolution.parent_data->rust_store() : resolution.data->parent() ? resolution.data->parent()->rust_store()
                                                                                                                                               : nullptr;
+            resolved_parent_custom_property_environment = resolution.parent_data ? resolution.parent_data->identity() : resolution.data->parent() ? resolution.data->parent()->identity()
+                                                                                                                                                  : 0;
             reuse_resolved_parent_custom_property_store_if_empty = resolution.parent_data != nullptr;
             custom_property_resolution_context = resolution.resolution_context;
             auto& counters = style_computer.document().style_invalidation_counters();
@@ -5927,6 +5933,8 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             .style_engine = style_computer.style_engine().rust_handle(),
             .custom_property_store = custom_property_store,
             .resolved_parent_custom_property_store = resolved_parent_custom_property_store,
+            .resolved_parent_custom_property_environment = resolved_parent_custom_property_environment,
+            .current_custom_property_environment = context.custom_property_data ? context.custom_property_data->identity() : 0,
             .reuse_resolved_parent_custom_property_store_if_empty = reuse_resolved_parent_custom_property_store_if_empty,
             .has_custom_property_resolution = state.custom_property_resolution != nullptr,
             .check_input_line_height = state.box_type_input.check_input_line_height,
@@ -5974,16 +5982,30 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 && !resolution.stats.substitution_usage.uses_custom_function
                 && !element.style_uses_tree_counting_function();
             RefPtr<CustomPropertyData const> resolved;
-            if (resolved_own.is_empty() && resolution_state.parent_data) {
+            auto inherited_data = resolution_state.parent_data ? resolution_state.parent_data : resolution_state.data->parent();
+            if (StyleEngine::is_engine_custom_property_environment(resolution.environment_identity)) {
+                if (resolution.rust_store) {
+                    resolved = style_computer.engine_custom_property_environment(resolution.environment_identity, inherited_data);
+                    VERIFY(resolved);
+                    ComputedValuesFFI::rust_custom_property_store_destroy(resolution.rust_store);
+                    resolved = style_computer.intern_custom_property_data(resolved.release_nonnull());
+                } else {
+                    VERIFY(inherited_data);
+                    VERIFY(inherited_data->identity() == resolution.environment_identity);
+                    resolved = inherited_data;
+                }
+            } else if (resolved_own.is_empty() && resolution_state.parent_data) {
                 resolved = resolution_state.parent_data;
             } else {
                 VERIFY(resolution.rust_store);
                 resolved = style_computer.intern_custom_property_data(
-                    CustomPropertyData::create(move(resolved_own), resolution_state.parent_data ? resolution_state.parent_data : resolution_state.data->parent(), resolution.rust_store));
+                    CustomPropertyData::create(move(resolved_own), move(inherited_data), resolution.rust_store));
             }
             resolution_state.color_scheme = computed_style.color_scheme(style_computer.document().page().preferred_color_scheme(), style_computer.document().supported_color_schemes());
             if (resolution_read_only_the_environment)
                 resolution_state.data->set_cached_resolution(resolution_state.document_identity, resolution_state.registration_generation, resolution_state.color_scheme.value(), resolved);
+            if (context.replaced_custom_property_data)
+                resolved = custom_property_data_keeping_identity(style_computer.document(), context.replaced_custom_property_data, resolved);
             context.abstract_element.set_custom_property_data(move(resolved));
         }
         if (state.custom_property_resolution && state.custom_property_resolution->host_adapter)
@@ -6209,6 +6231,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     auto transaction_result = ComputedValuesFFI::rust_compute_properties(&input, &prepared_transaction);
     StyleValueFFI::rust_style_ffi_note_longhand_result_apply();
     consume_longhand_transaction_result(&native_context, transaction_result.drive_result);
+    if (transaction_result.drive_result->custom_properties.environment_identity != 0) {
+        auto resolved = abstract_element.custom_property_data();
+        ComputedValuesFFI::rust_set_longhand_custom_property_environment(transaction_result.storage, resolved ? resolved->identity() : 0);
+    }
     auto finalization_result = ComputedValuesFFI::rust_finalize_longhand_transaction(&input, transaction_result);
     native_context.state->working_set->did_apply_style_finalization_from_rust(finalization_result.invalidated_longhands);
     if (finalization_result.animated_overlay) {

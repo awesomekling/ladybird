@@ -1395,6 +1395,9 @@ pub struct FfiResolvedCustomProperties {
     pub did_resolve: bool,
     /// Transfers one strong custom-property store reference to C++.
     pub rust_store: *const c_void,
+    /// The retained engine environment that owns the same resolved store, or zero when host
+    /// inputs participated in resolution.
+    pub environment_identity: u64,
     pub stats: FfiCustomPropertyResolutionStats,
     pub storage: *mut c_void,
 }
@@ -1621,6 +1624,7 @@ pub(crate) unsafe fn drive_custom_property_resolution(
         count,
         did_resolve: true,
         rust_store,
+        environment_identity: 0,
         stats,
         storage: storage.cast(),
     }

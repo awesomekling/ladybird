@@ -2690,6 +2690,8 @@ pub struct FfiLonghandTransactionInput {
     pub style_engine: *const c_void,
     pub custom_property_store: *const c_void,
     pub resolved_parent_custom_property_store: *const c_void,
+    pub resolved_parent_custom_property_environment: u64,
+    pub current_custom_property_environment: u64,
     pub reuse_resolved_parent_custom_property_store_if_empty: bool,
     pub has_custom_property_resolution: bool,
     pub check_input_line_height: bool,
@@ -3629,44 +3631,9 @@ fn retained_inheritance_parent_snapshot<'a>(
     input: &FfiComputePropertiesInput,
 ) -> Option<ParentSnapshot<'a>> {
     let style_node = crate::css::style::tree::StyleNodeID::from_raw(input.style_node);
-    if let Some((table, _previous_style_record, assembled_style_record, projected_style_record)) =
+    if let Some((table, _previous_style_record, _assembled_style_record, projected_style_record)) =
         style_node.and_then(|node| style_engine.retained_legacy_inheritance_parent_table(node, input.pseudo_kind))
     {
-        if assembled_style_record != 0 {
-            let difference = match (
-                style_engine.style_record_view(assembled_style_record),
-                style_engine.style_record_view(projected_style_record),
-            ) {
-                (Some(assembled), Some(projected)) => {
-                    let mut difference = 0;
-                    if assembled.payloads != projected.payloads {
-                        difference = 64
-                            + assembled
-                                .payloads
-                                .iter()
-                                .zip(projected.payloads)
-                                .position(|(assembled, projected)| assembled != projected)
-                                .unwrap_or(31) as u8;
-                    }
-                    difference |= u8::from(
-                        style_engine.retained_style_record_custom_property_environment(assembled_style_record)
-                            != style_engine.retained_style_record_custom_property_environment(projected_style_record),
-                    ) << 1;
-                    difference |= u8::from(assembled.pseudo_element_styles != projected.pseudo_element_styles) << 2;
-                    difference |= u8::from(
-                        assembled.counter_style_environment_identity != projected.counter_style_environment_identity,
-                    ) << 3;
-                    difference |= u8::from(assembled.dependency_flags != projected.dependency_flags) << 4;
-                    difference |= u8::from(
-                        !unsafe { assembled.longhand_table.deref() }
-                            .publication_equals(unsafe { projected.longhand_table.deref() }),
-                    ) << 5;
-                    difference
-                }
-                _ => u8::MAX,
-            };
-            crate::css::style::seal::note_assembled_legacy_record(difference);
-        }
         let projected_table_matches = projected_style_record != 0
             && style_engine
                 .style_record_view(projected_style_record)
@@ -5797,6 +5764,7 @@ unsafe fn compute_longhands(
             count: 0,
             did_resolve: false,
             rust_store: std::ptr::null(),
+            environment_identity: 0,
             stats: FfiCustomPropertyResolutionStats {
                 final_value_hits: 0,
                 final_value_misses: 0,
@@ -6450,6 +6418,15 @@ pub unsafe extern "C" fn rust_compute_properties(
             highlight.as_ref(),
         )
     };
+    if prepared.custom_property_resolution_is_callback_free && result.custom_properties.did_resolve {
+        let style_engine = unsafe { &mut *input.style_engine.cast_mut().cast::<crate::css::style::StyleEngine>() };
+        result.custom_properties.environment_identity = unsafe {
+            style_engine.retain_resolved_custom_property_environment(
+                result.custom_properties.rust_store,
+                drive_input.resolved_parent_custom_property_environment,
+            )
+        };
+    }
     result.inherited_animated_overlay = inherited_animated_overlay
         .as_deref()
         .map_or(std::ptr::null_mut(), |overlay| unsafe {
@@ -6584,6 +6561,17 @@ pub unsafe extern "C" fn rust_compute_properties(
         drive_result,
         storage: storage.cast(),
     }
+}
+
+/// Replace the provisional environment of a callback-free custom-property result with the exact
+/// identity C++ kept while consuming that result.
+///
+/// # Safety
+/// `storage` must name a live `LonghandTransactionContinuation` which has not been finalized.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_set_longhand_custom_property_environment(storage: *mut c_void, environment: u64) {
+    let continuation = unsafe { &mut *storage.cast::<LonghandTransactionContinuation>() };
+    continuation.drive_result.custom_properties.environment_identity = environment;
 }
 
 /// Resumes the animation and finalization tail after native code has consumed
@@ -6887,12 +6875,32 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         && let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(input.style_node)
     {
         let table = unsafe { &*drive_input.longhand_table };
-        let assembled_style_record = if drive_input.has_custom_property_resolution {
+        let custom_property_environment = if drive_input.has_custom_property_resolution {
+            drive_result.custom_properties.environment_identity
+        } else {
+            drive_input.current_custom_property_environment
+        };
+        let inherited_custom_property_environment = match retained_inheritance_parent_style_record(style_engine, input)
+        {
+            0 => 0,
+            record => style_engine.retained_style_record_custom_property_environment(record),
+        };
+        let assembled_style_record = if (drive_input.has_custom_property_resolution && custom_property_environment == 0)
+            || (!drive_input.has_custom_property_resolution
+                && (custom_property_environment != 0
+                    || inherited_custom_property_environment != custom_property_environment))
+        {
             0
         } else {
             let font = legacy_font.group_inputs(table, animation_length_contexts.remaining.font_metrics.line_height);
             style_engine
-                .assemble_legacy_record_for_verification(node, table, &animation_length_contexts.remaining, &font)
+                .assemble_legacy_record_for_verification(
+                    node,
+                    table,
+                    &animation_length_contexts.remaining,
+                    &font,
+                    Some(custom_property_environment),
+                )
                 .unwrap_or(0)
         };
         unsafe {

@@ -1124,6 +1124,7 @@ struct LegacyFinalizedLonghandRow {
     table: crate::css::host_shared::HostShared<crate::css::computed_longhand_table::ComputedLonghandTable>,
     previous_style_record: u64,
     assembled_style_record: u64,
+    was_host_published: bool,
 }
 
 impl LegacyFinalizedLonghandRow {
@@ -1137,6 +1138,7 @@ impl LegacyFinalizedLonghandRow {
             table: crate::css::host_shared::HostShared::new(table),
             previous_style_record,
             assembled_style_record,
+            was_host_published: false,
         }
     }
 

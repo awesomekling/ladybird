@@ -268,6 +268,18 @@ impl CustomPropertyEnvironments {
         identity
     }
 
+    /// Give an engine environment its own reference to a store that remains owned by its caller.
+    ///
+    /// # Safety
+    /// `store` must be null or a live raw `Arc` pointer to a `CustomPropertyStore`.
+    pub(super) unsafe fn retain_engine_environment(&mut self, store: *const c_void, parent: u64) -> u64 {
+        if store.is_null() {
+            return parent;
+        }
+        unsafe { Arc::increment_strong_count(store.cast::<CustomPropertyStore>()) };
+        unsafe { self.adopt_engine_environment(store, parent) }
+    }
+
     pub(super) fn substitution(
         &self,
         written: &RetainedStyleValueData,
