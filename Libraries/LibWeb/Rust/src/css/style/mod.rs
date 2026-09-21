@@ -62,7 +62,7 @@ mod column;
 pub mod compiler;
 mod computed;
 mod counter_context;
-mod custom_property_cascade;
+pub(crate) mod custom_property_cascade;
 mod custom_property_environments;
 mod deferred_pseudo;
 #[cfg(test)]

@@ -2694,6 +2694,11 @@ pub struct FfiLonghandTransactionInput {
     pub resolved_parent_custom_property_store: *const c_void,
     pub resolved_parent_custom_property_environment: u64,
     pub current_custom_property_environment: u64,
+    /// The store behind the environment the element holds, which is what a `var()` reference of the
+    /// element reads - the host's `resolve_unresolved_style_value` resolves against exactly this.
+    /// Unlike `custom_property_store` it is set whatever the element declares itself, and it keeps
+    /// an animation overlay the element already carries, again as the host's resolution does.
+    pub current_custom_property_store: *const c_void,
     pub reuse_resolved_parent_custom_property_store_if_empty: bool,
     pub has_custom_property_resolution: bool,
     pub check_input_line_height: bool,
@@ -2749,6 +2754,12 @@ pub struct FfiLonghandFinalizationResult {
     ///     animation tail sampled used a tree-counting function, which the host records on the
     ///     element as soon as the computation returns. Set only together with `animated_overlay`.
     pub animation_uses_tree_counting_function: bool,
+    /// NB: Additive, and the last thing on this result: a keyframe of what the stage's own
+    ///     animation tail sampled substituted a `var()` reference of the element, which the host
+    ///     records on the element as soon as the computation returns - the same mark
+    ///     `resolve_unresolved_style_value` leaves when it substitutes one. Set only together with
+    ///     `animated_overlay`.
+    pub animation_substituted_var: bool,
 }
 
 /// The three length-resolution contexts a keyframe value is computed in.
@@ -2941,6 +2952,9 @@ pub(crate) struct StageAnimationTail {
     /// Whether a keyframe of this batch used a tree-counting function, which the post-stage step
     /// records on the element the same way the host's own sampling does.
     pub(crate) uses_tree_counting_function: bool,
+    /// Whether a keyframe of this batch substituted a `var()` reference of the element, which the
+    /// post-stage step records the same way the host's `resolve_unresolved_style_value` does.
+    pub(crate) substituted_var: bool,
 }
 
 /// The effects of one of an element's animation lists that the stage would sample, taken from the
@@ -3366,6 +3380,7 @@ unsafe fn try_stage_animation_tail(
             keyframes_inherited_non_inherited_style_groups: 0,
             container_unit_effects: StageContainerUnitEffects::default(),
             uses_tree_counting_function: false,
+            substituted_var: false,
         });
     }
 
@@ -3426,6 +3441,7 @@ unsafe fn try_stage_animation_tail(
             keyframes_inherited_non_inherited_style_groups: 0,
             container_unit_effects: StageContainerUnitEffects::default(),
             uses_tree_counting_function: false,
+            substituted_var: false,
         });
     }
 
@@ -3442,10 +3458,19 @@ unsafe fn try_stage_animation_tail(
         })
         .collect::<Vec<_>>();
     // A description that does not cover every effect is one the host still walks its own keyframe
-    // sets for.
-    let Some(resolved) =
-        anim::resolve_selected_animation_declarations(&selected_effects, table, writing_mode, direction, importance)
-    else {
+    // sets for, and so is one whose keyframes hold a token stream this element cannot substitute.
+    let mut substitution = anim::KeyframeSubstitutionContext::new(
+        drive_input.current_custom_property_store,
+        style_engine.document_style_computation_inputs(),
+    );
+    let Some(resolved) = anim::resolve_selected_animation_declarations(
+        &selected_effects,
+        table,
+        writing_mode,
+        direction,
+        importance,
+        &mut substitution,
+    ) else {
         give_up_on_overlay();
         return None;
     };
@@ -3465,6 +3490,7 @@ unsafe fn try_stage_animation_tail(
             keyframes_inherited_non_inherited_style_groups: 0,
             container_unit_effects: StageContainerUnitEffects::default(),
             uses_tree_counting_function: false,
+            substituted_var: false,
         });
     }
     let properties = unsafe { std::slice::from_raw_parts(resolved.properties, resolved.count) };
@@ -3579,6 +3605,7 @@ unsafe fn try_stage_animation_tail(
         keyframes_inherited_non_inherited_style_groups,
         container_unit_effects,
         uses_tree_counting_function: resolved.uses_tree_counting_function,
+        substituted_var: substitution.substituted_var,
     })
 }
 
@@ -6854,6 +6881,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
             animation_width_size_query_container_has_no_box: false,
             animation_height_size_query_container_has_no_box: false,
             animation_uses_tree_counting_function: false,
+            animation_substituted_var: false,
         };
     }
     let mut invalidated_longhands = 0;
@@ -7143,6 +7171,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         animation_uses_tree_counting_function: stage_animation_tail
             .as_ref()
             .is_some_and(|tail| tail.uses_tree_counting_function),
+        animation_substituted_var: stage_animation_tail.as_ref().is_some_and(|tail| tail.substituted_var),
     }
 }
 
