@@ -349,10 +349,11 @@ struct FontComputer::MatchingFontCandidate {
             // necessary to render something on the page. When this happens, they must act as if they had called the
             // corresponding FontFace’s load() method described here.
             // NB: An unloaded face with no subsetting unicode-range starts loading once a style actually selects
-            //     it. Loading happens via FontFace::load(). The font_with_point_size() call below then observes the
-            //     fetch in flight — and so delays the document load event until the fetch has settled.
+            //     it. Loading happens via FontFace::load(), which mutates the face, its FontFaceSets and the
+            //     document, so a style pass only leaves the face's number behind; request_wanted_web_faces()
+            //     performs the load once the update has finished.
             if (face->has_urls() && !face->has_non_default_unicode_range() && face->status() == FontFaceLoadStatus::Unloaded)
-                face->load_for_style();
+                note_wanted_web_face(face->id(), WantedWebFace::Load);
             if (auto face_fonts = face->font_with_point_size(point_size, variations, shape_features)) {
                 font_list->extend(*face_fonts);
                 continue;
@@ -590,9 +591,16 @@ NonnullRefPtr<Gfx::FontCascadeList const> FontComputer::compute_font_for_style_v
         .font_feature_data = font_feature_data,
     };
 
-    return m_computed_font_cache.ensure(cache_key, [&]() {
+    NonnullRefPtr<Gfx::FontCascadeList const> font_list = m_computed_font_cache.ensure(cache_key, [&]() {
         return compute_font_for_style_values_impl(cache_key.font_families.span(), font_size, font_slope, font_weight, font_width, font_optical_sizing, font_variation_settings, font_feature_data);
     });
+
+    // A cascade this computed may have wanted a web face loaded. Inside a style update the loads
+    // wait for its end; everywhere else - canvas, getComputedStyle - they happen right here, which
+    // is where the cascade build used to perform them itself.
+    (void)request_wanted_web_faces();
+
+    return font_list;
 }
 
 NonnullRefPtr<Gfx::FontCascadeList const> FontComputer::compute_font_for_style_values(StyleValue const& font_family, CSSPixels const& font_size, int font_slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<Utf16FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data) const
