@@ -552,7 +552,6 @@ struct ShadowData {
 
 // The counter styles a `content` value names, in the order they appear in it and then in its alt text. A name that
 // resolves to no counter style is kept as a null reference, which stands for `decimal` wherever it is used.
-Vector<ValueComparingRefPtr<CounterStyle const>> content_counter_style_dependencies(StyleValue const&, StyleScope const&);
 
 struct CounterData {
     Utf16FlyString name;
@@ -906,7 +905,6 @@ public:
     NonnullRefPtr<StyleValue const> computed_content() const { return m_noninherited.content_data->computed_content_value(); }
     bool content_is_normal() const { return m_noninherited.content_data->content_is_normal(); }
     bool content_uses_list_item_counter() const { return m_noninherited.content_data->content_uses_list_item_counter(); }
-    Vector<ValueComparingRefPtr<CounterStyle const>> content_counter_style_dependencies(StyleScope const&) const;
     Vector<CounterData, 0> counter_increment() const { return m_noninherited.content_data->counter_increment_value(); }
     Vector<CounterData, 0> counter_reset() const { return m_noninherited.content_data->counter_reset_value(); }
     Vector<CounterData, 0> counter_set() const { return m_noninherited.content_data->counter_set_value(); }

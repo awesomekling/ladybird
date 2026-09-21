@@ -1869,28 +1869,4 @@ RefPtr<StyleValue const> ComputedValues::computed_style_value(PropertyID propert
     return value;
 }
 
-Vector<ValueComparingRefPtr<CounterStyle const>> content_counter_style_dependencies(StyleValue const& content_value, StyleScope const& style_scope)
-{
-    Vector<ValueComparingRefPtr<CounterStyle const>> dependencies;
-    if (!content_value.is_content())
-        return dependencies;
-    auto append_dependencies_of = [&](StyleValue const& item) {
-        if (item.is_counter())
-            dependencies.append(item.as_counter().counter_style()->as_counter_style().resolve_counter_style(style_scope));
-    };
-    auto const& content_style_value = content_value.as_content();
-    for (auto const& item : content_style_value.content().values())
-        append_dependencies_of(*item);
-    if (auto alt_text = content_style_value.alt_text()) {
-        for (auto const& item : alt_text->values())
-            append_dependencies_of(*item);
-    }
-    return dependencies;
-}
-
-Vector<ValueComparingRefPtr<CounterStyle const>> ComputedValues::content_counter_style_dependencies(StyleScope const& style_scope) const
-{
-    return CSS::content_counter_style_dependencies(*m_noninherited.content_data->computed_content_value(), style_scope);
-}
-
 }
