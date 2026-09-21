@@ -1620,17 +1620,16 @@ pub(super) fn run_formatting_context(
         Ok(attempt) => attempt,
         Err(entry) => {
             let reuses_committed_subtree = entry.can_reuse_committed_subtree();
-            let _trace =
-                callbacks
-                    .arena()
-                    .layout_trace
-                    .run(callbacks.arena(), box_, fc_type, purpose, layout_mode, || {
-                        if reuses_committed_subtree {
-                            "REUSE SUBTREE"
-                        } else {
-                            "REPLAY FRAGMENTS"
-                        }
-                    });
+            let _trace = callbacks
+                .arena()
+                .layout_trace
+                .run(box_, fc_type, purpose, layout_mode, || {
+                    if reuses_committed_subtree {
+                        "REUSE SUBTREE"
+                    } else {
+                        "REPLAY FRAGMENTS"
+                    }
+                });
             let outputs = entry.outputs_to_replay(&cache_key);
             if entry.is_uncommitted() {
                 fc_run_cache::store_replayed_uncommitted_entry(&callbacks, box_, cache_key, &entry, &outputs);
@@ -1645,9 +1644,7 @@ pub(super) fn run_formatting_context(
     let _trace = callbacks
         .arena()
         .layout_trace
-        .run(callbacks.arena(), box_, fc_type, purpose, layout_mode, || {
-            cache_attempt.trace_action()
-        });
+        .run(box_, fc_type, purpose, layout_mode, || cache_attempt.trace_action());
     let previous_line_data = cache_attempt.previous_line_data();
     let outputs = execute_formatting_context_run(
         purpose,
@@ -2435,7 +2432,7 @@ fn run_root_layout_stage(stage: LayoutStageInput<'_>) -> LayoutStageOutput {
         ..ContainingBlockConstraints::default()
     };
     let pass_fragments = RunRecords::with_unrooted(arena, root, NodeSlotId::INVALID, |entry_records| {
-        let _trace = arena.layout_trace.pass(arena, None);
+        let _trace = arena.layout_trace.pass(None);
         let viewport_used = entry_records.create_used_values(&callbacks, root, root_constraints);
         let entry_fragments = std::rc::Rc::new(fragment_tree::RunFragmentBuilder::new_entry_accumulator(root));
         let entry_run = FormattingContextRun {
@@ -2664,7 +2661,7 @@ fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>) -> LayoutStageOutpu
         (root, containing_block)
     };
     let pass_fragments = RunRecords::with_unrooted(arena, entry_root, entry_root_containing_block, |entry_records| {
-        let _trace = arena.layout_trace.pass(arena, Some(root));
+        let _trace = arena.layout_trace.pass(Some(root));
         let entry_fragments = std::rc::Rc::new(fragment_tree::RunFragmentBuilder::new_entry_accumulator(entry_root));
         let entry_run = FormattingContextRun {
             purpose: LayoutPurpose::Commit,

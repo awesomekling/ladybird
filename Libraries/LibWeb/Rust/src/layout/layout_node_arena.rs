@@ -1745,6 +1745,9 @@ impl LayoutNodeArena {
         let depth = self.active_layout_pass_depth.get();
         assert!(depth > 0, "layout pass depth underflow");
         self.active_layout_pass_depth.set(depth - 1);
+        if depth == 1 {
+            self.layout_trace.name_owners(self);
+        }
     }
 
     pub(crate) fn set_layout_root(&self, viewport: NodeSlotId) {
