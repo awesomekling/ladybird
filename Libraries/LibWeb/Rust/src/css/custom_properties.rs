@@ -122,6 +122,12 @@ struct RegisteredCustomProperty {
     syntax: SyntaxNode,
     inherits: bool,
     initial_source: Option<Vec<u16>>,
+    /// What `compute_registered_custom_property_initial_value` settled for this registration,
+    /// published with it. The computation resolves lengths against the *document* - the initial
+    /// font and the viewport, not the element - so it is a fact about the registration rather than
+    /// about whoever reads it, and the host already memoizes it on the registration and drops the
+    /// memo when the viewport moves. Absent only where the registry was filled without one.
+    computed_initial: Option<RetainedStyleValueData>,
 }
 
 type CustomFunctionIdentity = u64;
@@ -168,6 +174,9 @@ pub struct FfiCustomPropertyRegistration {
     pub inherits: bool,
     pub has_initial_value: bool,
     pub initial_value: FfiUtf16View,
+    /// The computed initial value the host derived from `initial_value` against the document,
+    /// borrowed for the call and retained by the registry. Null where the host has none.
+    pub computed_initial_value: *const c_void,
 }
 
 #[repr(C)]
@@ -284,6 +293,11 @@ fn registered_initial_value(
     length: &crate::css::style_compute::FfiLengthResolutionContext,
     scheme: u8,
 ) -> RetainedStyleValueData {
+    // The host publishes what it computed for the registration itself, against the document. That
+    // is what every reader of an initial value gets from the host, so it is what this answers too.
+    if let Some(computed_initial) = registration.computed_initial.as_ref() {
+        return computed_initial.clone();
+    }
     let Some(source) = registration.initial_source.as_ref() else {
         return RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid);
     };
@@ -3745,12 +3759,20 @@ pub unsafe extern "C" fn rust_custom_property_registry_update(
         let Some(syntax) = (unsafe { clone_syntax_handle(registration.syntax) }) else {
             continue;
         };
+        // SAFETY: a published computed initial value is a live style value for the call; the
+        //         registry holds one reference of its own for as long as it names the registration.
+        let computed_initial = (!registration.computed_initial_value.is_null()).then(|| unsafe {
+            RetainedStyleValueData::from_retained_pointer(crate::css::style_value::retain_style_value(
+                registration.computed_initial_value.cast(),
+            ))
+        });
         registry.registrations.insert(
             name,
             RegisteredCustomProperty {
                 syntax,
                 inherits: registration.inherits,
                 initial_source,
+                computed_initial,
             },
         );
     }
