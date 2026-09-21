@@ -480,7 +480,10 @@ impl AnimationTimingRow {
         use crate::css::style_compute::FfiAnimationTimelineKind;
         use timing_row_flag as flag;
 
-        if definition.timeline_kind != FfiAnimationTimelineKind::Document || definition.duration_is_auto {
+        // NB: `animation-duration: auto` - the initial value - has the intrinsic iteration duration
+        //     of the effect, which against a monotonic timeline is zero; the drive already computed
+        //     the definition's duration as zero for it.
+        if definition.timeline_kind != FfiAnimationTimelineKind::Document {
             return None;
         }
         // `Bindings::PlaybackDirection` and `Bindings::FillMode` are in IDL order, which is not the
