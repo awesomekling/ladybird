@@ -61,8 +61,6 @@ private:
     RustFFI::FfiDomTreeBuilderCallbacks make_ffi_dom_tree_builder_callbacks();
     RustFFI::FfiPseudoTreeBuilderCallbacks make_ffi_pseudo_tree_builder_callbacks();
 
-    static Box& create_list_item_marker(Box& list_box, CSS::LayoutStyle marker_style);
-
     void pin_style_record_for_build(CSS::StyleRecordID);
 
     GC::Ptr<DOM::Document> m_document;
@@ -191,13 +189,6 @@ static void attach_content_replacement_image(Box& image_box)
     attach_owned_image_provider(image_box, const_cast<CSS::AbstractImageStyleValue&>(*replacement_image));
 }
 
-Box& LayoutTreeBuildBridge::create_list_item_marker(Box& list_box, CSS::LayoutStyle marker_style)
-{
-    auto& list_item_marker = allocate_layout_node<Box>(list_box.document(), nullptr, move(marker_style), RustFFI::NodeKind::ListItemMarkerBox);
-    list_item_marker.set_list_marker_is_inside(list_box.list_style_position() == CSS::ListStylePosition::Inside);
-    return list_item_marker;
-}
-
 // The node an identity the walk carries names. The document is the build's root and is not in the
 // style computer's node index, because a document holding a reference back to itself there would
 // keep itself alive; every other identity resolves through the index.
@@ -261,19 +252,7 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
             CSS::LayoutStyle style { style_record_identity };
             auto& image_box = create_content_image_box(element.document(), nullptr, style, const_cast<CSS::AbstractImageStyleValue&>(*replacement_image));
             return Node::slot_id(&image_box); },
-        .create_nested_list_marker = [](void* builder_pointer, u32 style_node, RustFFI::FfiPseudoElement originating_pseudo, Compositing::RustFFI::NodeSlotId pseudo_element_box_slot) -> Compositing::RustFFI::NodeSlotId {
-            VERIFY(builder_pointer);
-            auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
-            auto& element = as<DOM::Element>(dom_node_for_style_node(*builder.m_document, style_node));
-            auto& list_item_box = as<BlockContainer>(*pseudo_element_build_node(element.document(), pseudo_element_box_slot));
-            auto marker_style = element.document().style_computer().materialize_style_record({ element, CSS::PseudoElement::Marker });
-            auto& list_item_marker = create_list_item_marker(list_item_box, move(marker_style));
-            list_item_marker.attach_style_resources();
-            // NB: The marker of a list-item ::before or ::after belongs to that pseudo-element, not to the element's own
-            //     ::marker, so it is generated for the originating pseudo-element and never becomes the ::marker's box.
-            list_item_marker.set_generated_for(css_pseudo_element(originating_pseudo), element);
-            return Node::slot_id(&list_item_marker); },
-        .create_content_item = [](void* builder_pointer, u32 style_node, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiGeneratedContentItem item, Compositing::RustFFI::NodeSlotId pseudo_element_box_slot) -> Compositing::RustFFI::NodeSlotId {
+        .create_content_item = [](void* builder_pointer, u32 style_node, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiGeneratedContentItem item, RustFFI::NodeSlotId pseudo_element_box_slot) -> RustFFI::NodeSlotId {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
             auto& element = as<DOM::Element>(dom_node_for_style_node(*builder.m_document, style_node));
