@@ -375,9 +375,12 @@ void StyleComputer::end_style_update() const
     m_style_update_ffi_media_environment.clear();
     m_style_update_media_environment.clear();
     m_style_update_document_environment.clear();
-    if (m_deferred_longhand_evaluations != 0) {
-        document().style_invalidation_counters().computed_longhand_evaluations += m_deferred_longhand_evaluations;
+    if (m_deferred_longhand_evaluations != 0 || m_deferred_longhand_drives_started != 0) {
+        auto& counters = document().style_invalidation_counters();
+        counters.computed_longhand_evaluations += m_deferred_longhand_evaluations;
+        counters.computed_longhand_drives_started += m_deferred_longhand_drives_started;
         m_deferred_longhand_evaluations = 0;
+        m_deferred_longhand_drives_started = 0;
     }
 }
 
@@ -5794,7 +5797,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     auto prepare_longhand_transaction = [](void* context_pointer, ComputedValuesFFI::FfiStyleComputationRequirements const* computation_requirements, ComputedValuesFFI::ComputedLonghandTable* longhand_table, bool custom_property_resolution_is_callback_free, ComputedValuesFFI::FfiLonghandTransactionInput* output) {
         auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
         auto& style_computer = *context.style_computer;
-        ++style_computer.document().style_invalidation_counters().computed_longhand_drives_started;
+        ++style_computer.m_deferred_longhand_drives_started;
         auto abstract_element = context.abstract_element;
         auto computed_group_mask = computation_requirements->computed_group_mask;
         if (context.selected_computed_group_mask)
@@ -5822,7 +5825,6 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             }
         }
 
-        auto inheritance_parent = abstract_element.element_to_inherit_style_from();
         auto const& document_environment = style_computer.ensure_document_environment_for_style_update();
         state.effective_color_scheme_input = {
             .preferred_color_scheme = document_environment.preferred_color_scheme,
@@ -5883,6 +5885,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
 
         auto data = context.custom_property_data;
         if (data && data->declared_count() > 0) {
+            // OPTIMIZATION: Only a row that declares custom properties of its own reads the
+            //               element it inherits them from, so the tree walk that names it waits
+            //               until one does.
+            auto inheritance_parent = abstract_element.element_to_inherit_style_from();
             bool shares_parent_data = inheritance_parent.has_value() && inheritable_custom_property_data(*inheritance_parent).ptr() == data.ptr();
             if (!shares_parent_data) {
                 auto parent_data = inheritance_parent.has_value() ? inheritable_custom_property_data(*inheritance_parent) : nullptr;
