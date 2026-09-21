@@ -1685,6 +1685,7 @@ impl StyleEngineState {
                 legacy_finalized_longhand_rows: HashMap::default(),
                 last_host_built_style_record: 0,
                 font_resolution: None,
+                root_font_request: None,
                 layout_style_snapshots: Default::default(),
                 container_query_inputs: Default::default(),
                 layer_topology_version: 0,

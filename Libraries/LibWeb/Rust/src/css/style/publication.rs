@@ -5181,8 +5181,6 @@ impl StyleEngineState {
 impl StyleEngineState {
     /// Establish the document element's font input before the consumer pass. The root's
     /// remaining properties and pseudos complete in their normal canonical position.
-    /// Establish the document element's font input before the consumer pass. The root's
-    /// remaining properties and pseudos complete in their normal canonical position.
     pub(super) fn prepare_root_font_inputs(
         &mut self,
         node: StyleNodeID,
@@ -5214,9 +5212,10 @@ impl StyleEngineState {
             counters,
         );
         if let Some(request) = scratch.font_drive.request.take() {
-            // NB: A root font miss completes at this preparation boundary. Consumers need
-            //     current metrics even when their first records install in this same pass.
-            self.refill_font_request(node, request, font_resolution::FontService::RootPreparation, counters);
+            self.root_font_request = Some(request.for_generation(inputs.font_environment_generation));
+            // This update computed a new root request after the begin boundary. Complete that
+            // exceptional miss through the shared between-pass service before consumers run.
+            self.refill_font_requests(vec![(node, request)], counters);
             self.engine_computed_element_record_delta(
                 node,
                 cascade_winners_are_complete,

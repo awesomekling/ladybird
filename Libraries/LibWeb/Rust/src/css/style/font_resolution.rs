@@ -6,9 +6,10 @@
 
 use super::bridge::{FfiFontResolutionRequest, FfiResolvedFont};
 use super::{HashMap, HashSet};
-use crate::css::style_value::{RetainedStyleValueData, retain_style_value};
+use crate::css::style_value::{RetainedStyleValueData, retain_style_value, style_value_content_hash};
 use libgfx_rust::font::FontCascadeListHandle;
 use std::ffi::c_void;
+use std::hash::{Hash, Hasher};
 
 pub type ResolveFontsCallback =
     unsafe extern "C" fn(*mut c_void, *const FfiFontResolutionRequest, *mut FfiResolvedFont, usize);
@@ -32,9 +33,8 @@ impl FontService {
     }
 }
 
-#[derive(PartialEq, Eq, Hash)]
 struct FontResolutionKey {
-    font_family: usize,
+    font_family: RetainedStyleValueData,
     font_size_raw: i32,
     font_slope: i32,
     font_weight: u64,
@@ -45,13 +45,41 @@ struct FontResolutionKey {
 impl FontResolutionKey {
     fn new(request: FfiFontResolutionRequest) -> Self {
         Self {
-            font_family: request.font_family.address,
+            font_family: unsafe {
+                RetainedStyleValueData::from_retained_pointer(retain_style_value(
+                    request.font_family.as_pointer().cast(),
+                ))
+            },
             font_size_raw: request.font_size_raw,
             font_slope: request.font_slope,
             font_weight: request.font_weight.to_bits(),
             font_width: request.font_width.to_bits(),
             font_optical_sizing: request.font_optical_sizing,
         }
+    }
+}
+
+impl PartialEq for FontResolutionKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.font_family == other.font_family
+            && self.font_size_raw == other.font_size_raw
+            && self.font_slope == other.font_slope
+            && self.font_weight == other.font_weight
+            && self.font_width == other.font_width
+            && self.font_optical_sizing == other.font_optical_sizing
+    }
+}
+
+impl Eq for FontResolutionKey {}
+
+impl Hash for FontResolutionKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        unsafe { style_value_content_hash(self.font_family.pointer()) }.hash(state);
+        self.font_size_raw.hash(state);
+        self.font_slope.hash(state);
+        self.font_weight.hash(state);
+        self.font_width.hash(state);
+        self.font_optical_sizing.hash(state);
     }
 }
 
@@ -67,6 +95,15 @@ impl FontRequest {
             RetainedStyleValueData::from_retained_pointer(retain_style_value(ffi.font_family.as_pointer().cast()))
         };
         Self { ffi, family }
+    }
+
+    pub fn for_generation(&self, generation: u64) -> Self {
+        let mut ffi = self.ffi;
+        ffi.font_environment_generation = generation;
+        Self {
+            ffi,
+            family: self.family.clone(),
+        }
     }
 }
 
@@ -89,8 +126,6 @@ struct SharedFontCascadeList(#[expect(dead_code, reason = "held for the referenc
 unsafe impl Sync for SharedFontCascadeList {}
 
 struct ResolvedFont {
-    // Keep the family alive for the pointer identity in the cache key.
-    _font_family: RetainedStyleValueData,
     _font_cascade_list: Option<SharedFontCascadeList>,
     ffi: FfiResolvedFont,
 }
@@ -130,7 +165,6 @@ impl FontResolutionCache {
         self.cache.insert(
             FontResolutionKey::new(request.ffi),
             ResolvedFont {
-                _font_family: request.family,
                 _font_cascade_list: font_cascade_list,
                 ffi,
             },
@@ -224,7 +258,7 @@ mod tests {
     fn font_resolution_cache_is_engine_owned_and_generation_scoped() {
         RESOLVES.store(0, Ordering::Relaxed);
         let unrefs_before = font_cascade_list_unref_count();
-        let family = RetainedStyleValueData::from_owned(StyleValueData::Keyword { keyword: 1 });
+        let family = RetainedStyleValueData::from_owned(StyleValueData::Number { value: 1.5 });
         let host = FontResolverHost::new(std::ptr::null_mut(), resolve_fonts);
         let mut resolver = FontResolutionCache::default();
         let mut request = FfiFontResolutionRequest {
@@ -248,6 +282,18 @@ mod tests {
         );
         assert_eq!(RESOLVES.load(Ordering::Relaxed), 1);
         assert_eq!(font_cascade_list_unref_count(), unrefs_before);
+
+        let equivalent_family = RetainedStyleValueData::from_owned(StyleValueData::Number { value: 1.5 });
+        assert_ne!(family.pointer(), equivalent_family.pointer());
+        let equivalent_request = FfiFontResolutionRequest {
+            font_family: crate::css::style::bridge::FfiHostHandle::from_pointer(equivalent_family.pointer().cast()),
+            ..request
+        };
+        assert_eq!(
+            resolver.lookup(equivalent_request).unwrap().font_cascade_list,
+            first.font_cascade_list
+        );
+        assert_eq!(RESOLVES.load(Ordering::Relaxed), 1);
 
         request.font_environment_generation = 2;
         assert!(resolver.lookup(request).is_none());
