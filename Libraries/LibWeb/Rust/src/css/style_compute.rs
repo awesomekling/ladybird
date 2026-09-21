@@ -2745,6 +2745,10 @@ pub struct FfiLonghandFinalizationResult {
     /// give.
     pub animation_width_size_query_container_has_no_box: bool,
     pub animation_height_size_query_container_has_no_box: bool,
+    /// NB: Additive, and the last thing on this result: a keyframe of what the stage's own
+    ///     animation tail sampled used a tree-counting function, which the host records on the
+    ///     element as soon as the computation returns. Set only together with `animated_overlay`.
+    pub animation_uses_tree_counting_function: bool,
 }
 
 /// The three length-resolution contexts a keyframe value is computed in.
@@ -2934,6 +2938,9 @@ pub(crate) struct StageAnimationTail {
     /// What the container units this batch resolved say about the DOM, which the post-stage step
     /// records. Empty wherever the batch used none, or the drive had already resolved them.
     pub(crate) container_unit_effects: StageContainerUnitEffects,
+    /// Whether a keyframe of this batch used a tree-counting function, which the post-stage step
+    /// records on the element the same way the host's own sampling does.
+    pub(crate) uses_tree_counting_function: bool,
 }
 
 /// The effects of one of an element's animation lists that the stage would sample, taken from the
@@ -3353,6 +3360,7 @@ unsafe fn try_stage_animation_tail(
             font_metrics_depend_on_viewport_metrics: false,
             keyframes_inherited_non_inherited_style_groups: 0,
             container_unit_effects: StageContainerUnitEffects::default(),
+            uses_tree_counting_function: false,
         });
     }
 
@@ -3412,6 +3420,7 @@ unsafe fn try_stage_animation_tail(
             font_metrics_depend_on_viewport_metrics: false,
             keyframes_inherited_non_inherited_style_groups: 0,
             container_unit_effects: StageContainerUnitEffects::default(),
+            uses_tree_counting_function: false,
         });
     }
 
@@ -3450,6 +3459,7 @@ unsafe fn try_stage_animation_tail(
             font_metrics_depend_on_viewport_metrics: false,
             keyframes_inherited_non_inherited_style_groups: 0,
             container_unit_effects: StageContainerUnitEffects::default(),
+            uses_tree_counting_function: false,
         });
     }
     let properties = unsafe { std::slice::from_raw_parts(resolved.properties, resolved.count) };
@@ -3462,12 +3472,19 @@ unsafe fn try_stage_animation_tail(
         node,
         resolved.container_relative_length_unit_mask,
     );
+    // A keyframe that asks where the element sits among its siblings is answered from the retained
+    // tree, which is the same walk `tree_counting_function_resolution_context()` makes over the
+    // DOM: every element child of the element's parent element, in tree order. Zero is an identity
+    // the retained tree does not hold, and then the host walks the DOM as before.
+    let tree_counting_inputs = match resolved.uses_tree_counting_function {
+        true => style_engine.element_tree_counting_inputs(node),
+        false => 0,
+    };
     // The same terms the host's `cache_preparation` uses: everything outside them needs an input
-    // the stage does not hold - a custom property to compute, the element's place among its
-    // siblings, a container size no length context carries, the document's base URL, a random base
-    // value.
+    // the stage does not hold - a custom property to compute, a container size no length context
+    // carries, the document's base URL, a random base value.
     let batch_is_fully_described = properties.iter().all(|property| property.custom_name_id == 0)
-        && !resolved.uses_tree_counting_function
+        && (!resolved.uses_tree_counting_function || tree_counting_inputs != 0)
         && length_contexts.covers_container_relative_units(resolved.container_relative_length_unit_mask)
         && !resolved.needs_document_base_url
         && resolved.unfixed_random_sharing_count == 0;
@@ -3503,9 +3520,11 @@ unsafe fn try_stage_animation_tail(
         color_scheme_input: drive_environment.color_scheme_input,
         is_th_element: false,
         has_new_font_size: false,
-        has_tree_counting_context: false,
-        sibling_count: 0,
-        sibling_index: 0,
+        // The host builds this context only for a batch that uses a tree-counting function, so this
+        // one is built exactly there too.
+        has_tree_counting_context: resolved.uses_tree_counting_function,
+        sibling_count: tree_counting_inputs >> 32,
+        sibling_index: tree_counting_inputs & 0xffff_ffff,
         random_base_values: std::ptr::null(),
         random_base_value_count: 0,
         document_base_url: std::ptr::null(),
@@ -3554,6 +3573,7 @@ unsafe fn try_stage_animation_tail(
         font_metrics_depend_on_viewport_metrics: computed_keyframes.font_metrics_depend_on_viewport_metrics,
         keyframes_inherited_non_inherited_style_groups,
         container_unit_effects,
+        uses_tree_counting_function: resolved.uses_tree_counting_function,
     })
 }
 
@@ -6804,6 +6824,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
             animation_height_size_query_container: 0,
             animation_width_size_query_container_has_no_box: false,
             animation_height_size_query_container_has_no_box: false,
+            animation_uses_tree_counting_function: false,
         };
     }
     let mut invalidated_longhands = 0;
@@ -7116,6 +7137,9 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         animation_width_size_query_container_has_no_box: stage_container_unit_effects.width_query_container_has_no_box,
         animation_height_size_query_container_has_no_box: stage_container_unit_effects
             .height_query_container_has_no_box,
+        animation_uses_tree_counting_function: stage_animation_tail
+            .as_ref()
+            .is_some_and(|tail| tail.uses_tree_counting_function),
     }
 }
 

@@ -34,6 +34,14 @@ impl StyleEngine {
     ) -> Option<crate::layout::style_snapshot::LayoutStyleSnapshotRow> {
         self.retained.layout_style_snapshots.row(node)
     }
+
+    /// The packed sibling count and index the tree-counting functions resolve against, for a caller
+    /// outside the longhand drive's frozen inputs. Zero for an identity the retained tree does not
+    /// hold.
+    #[must_use]
+    pub(crate) fn element_tree_counting_inputs(&self, node: StyleNodeID) -> u64 {
+        self.retained.element_tree_counting_inputs(node)
+    }
 }
 
 impl RetainedState {
