@@ -6,6 +6,8 @@
     @keyframes moves-late { to { --c: 99px; } }
     @keyframes moves-and-fades { from { --c: 10px; opacity: 0.25; } to { --c: 40px; opacity: 0.75; } }
     @keyframes moves-far { from { --c: 100px; } to { --c: 400px; } }
+    @keyframes moves-registered { from { --reg: 10px; } to { --reg: 40px; } }
+    @property --reg { syntax: "<length>"; inherits: true; initial-value: 0px; }
     #sheet::before { content: ""; animation: moves 1000s linear -500s infinite paused; }
     .reads { width: var(--c, 1px); }
 </style>
@@ -19,6 +21,8 @@
 <div id="synthesized" style="--c: 3px"></div>
 <div id="sheet"></div>
 <div id="cancels"></div>
+<div id="beside-a-registration"></div>
+<div id="registered"></div>
 <script>
     // An unregistered custom property a `@keyframes` rule declares: the value the animation settles
     // on is installed on the element as an environment of its own, so the element's own `var()`
@@ -124,6 +128,18 @@
         const mixed = animate("own", "moves-and-fades");
         seek(mixed, 600000);
         check("mixed", mixed, ["--c", "opacity", "width"]);
+
+        // A document that registers a name it never animates is no obstacle to animating the ones
+        // it does; a registered name itself keeps its computed initial value and its typed
+        // interpolation, and is sampled the way it always was.
+        const beside = animate("beside-a-registration", "moves");
+        seek(beside, 600000);
+        check("beside a registration", beside, ["--c"]);
+        const registered = animate("registered", "moves-registered");
+        seek(registered, 300000);
+        check("registered at 30%", registered, ["--reg"]);
+        seek(registered, 600000);
+        check("registered at 60%", registered, ["--reg"]);
 
         // Ending the animation mid-flight takes the installed environment away again.
         const cancels = animate("cancels", "moves");

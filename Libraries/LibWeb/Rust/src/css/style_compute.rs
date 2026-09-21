@@ -3528,25 +3528,20 @@ unsafe fn try_stage_animation_tail(
     );
     // A custom property a keyframe declares is sampled against the element's own environment and
     // handed back for the host to install. Only unregistered names: a registration gives a name a
-    // computed initial value and a typed interpolation, neither of which this channel carries, so
-    // one `@property` rule anywhere in the document leaves the whole element to the host.
+    // computed initial value and a typed interpolation, neither of which this channel carries. The
+    // collector asks the registry as it mints each name, so a document that registers a name it
+    // never animates is no obstacle to animating the names it does.
     let stack_declares_custom_properties = selected
         .iter()
         .any(|effect| effect.description.declares_custom_properties());
-    let mut custom = match stack_declares_custom_properties {
-        false => None,
-        true => match style_engine.document_has_custom_property_registrations() {
-            Some(false) => Some(anim::AnimatedCustomProperties::new(
-                custom_property_environments.base_store,
-                custom_property_environments.inheritance_store,
-                custom_property_environments.element_declares_own,
-            )),
-            _ => {
-                give_up_on_overlay();
-                return None;
-            }
-        },
-    };
+    let mut custom = stack_declares_custom_properties.then(|| {
+        anim::AnimatedCustomProperties::new(
+            custom_property_environments.base_store,
+            custom_property_environments.inheritance_store,
+            custom_property_environments.element_declares_own,
+            style_engine.custom_property_registry(),
+        )
+    });
     let Some(resolved) = anim::resolve_selected_animation_declarations(
         &selected_effects,
         table,
@@ -3563,6 +3558,13 @@ unsafe fn try_stage_animation_tail(
         unsafe { anim::release_resolved_animation_declarations(resolved.storage) };
         give_up_on_overlay();
     };
+    if custom
+        .as_ref()
+        .is_some_and(anim::AnimatedCustomProperties::animates_a_registered_name)
+    {
+        give_up(&resolved);
+        return None;
+    }
     // Effects whose keyframes declare nothing this element animates compose nothing at all: the
     // host returns before it evaluates them, leaving the overlay exactly as it found it and
     // caching no preparation, and so does this.
