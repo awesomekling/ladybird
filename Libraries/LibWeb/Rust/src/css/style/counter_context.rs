@@ -68,6 +68,10 @@ impl StyleEngine {
             .lookup(request)
             .expect("the font resolver must install its answer")
     }
+
+    pub(crate) fn document_style_computation_inputs(&self) -> Option<bridge::FfiDocumentStyleComputationInputs> {
+        self.state.retained.document_style_computation_inputs
+    }
 }
 
 impl StyleEngine {
