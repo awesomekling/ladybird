@@ -18,61 +18,53 @@
 //! totals go to standard error, or to the file `LIBWEB_SEAL_TREE_BUILD_STAGE_LOG` names, since a
 //! test runner does not keep the render process's standard error.
 //!
-//! **The stage is sealed**: the whole suite passes with the gate in `abort`. The walk is not handed
-//! the main-thread capability, and the tree builder's host callbacks each take it, so the compiler
-//! holds the walk to that as well. What the build owes the host - the shells whose construction
-//! tells the host something, a box's style resources, a generated image's provider, and what the
-//! build found out - it queues, and its entry pays once the walk has returned.
+//! **The stage is sealed, and the compiler holds it to that**: the whole suite passes with the
+//! gate in `abort`, and nothing the walk can reach is able to call the host. The walk is not handed
+//! the main-thread capability, and every host call the arena and the tree builder can make takes
+//! it: the tree builder's callbacks, the shell factory, and paying what the arena owes the host.
+//! What the build owes the host - the shells whose construction tells the host something, a box's
+//! style resources, a generated image's provider, what the build found out, and what it let go of -
+//! it queues, and its entry pays once the walk has returned.
 //!
-//! What the whole suite takes, as of the commit that took the capability away from the walk. Every
-//! route below but the allow-list's is taken only after the walk:
+//! What the build lets go of is the arena's handbacks: the boxes nodes gained or lost, the shells,
+//! owned image providers and image observer sets of the rows it freed, the resets of rows whose
+//! paint state went with them, and a kept box's new style. The operations the walk shares with the
+//! DOM mutation entries only queue these; a main-thread entry pays the queue as its change returns,
+//! and the build returns its queue as part of its output.
+//!
+//! What the whole suite takes, as of the commit that emptied the allow-list. None of it is taken
+//! while a build runs; the handbacks are counted where they are paid, which for a build is after
+//! the walk:
 //!
 //! | route | calls | during build |
 //! |---|---|---|
-//! | `layout_node_shell_factory` | 2825050 | 0 |
-//! | `shell_style_changed` | 68261 | 0 |
-//! | `attach_style_resources` | 13164 | 0 |
-//! | `deliver_commit_messages` | 4012 | 0 |
+//! | `notify_box_presence` | 7918548 | 0 |
+//! | `paintable_row_reset` | 3828173 | 0 |
+//! | `layout_node_shell_factory` | 2807113 | 0 |
+//! | `layout_node_shell_destroy` | 2803597 | 0 |
+//! | `viewport_propagation_facts` | 180865 | 0 |
+//! | `shell_style_changed` | 68029 | 0 |
+//! | `build_replaced_content_facts` | 36973 | 0 |
+//! | `attach_style_resources` | 13029 | 0 |
+//! | `deliver_commit_messages` | 4028 | 0 |
+//! | `image_observers_destroy` | 3030 | 0 |
+//! | `owned_image_provider_destroy` | 96 | 0 |
+//! | `owned_image_provider_notify_detach` | 96 | 0 |
 //! | `attach_generated_image` | 20 | 0 |
 //!
-//! What the allow-list costs during a build, so that the debt is a number rather than a word:
-//! `notify_box_presence` 11339320, `layout_node_shell_destroy` 1294010, `paintable_row_reset`
-//! 557466, `image_observers_destroy` 2044, `owned_image_provider_notify_detach` 2,
-//! `owned_image_provider_destroy` 2. `layout_node_shell_factory` and `notify_box_presence` swing
-//! by about a tenth between runs of the same binary, because a handful of tests do a variable
-//! amount of build work, so read those two as an order of magnitude.
-//!
 //! A build owes a shell only to a row whose shell's construction tells the host something about
-//! it; every other row gets one when something first asks for its box. Of the 4.6 million rows a suite run stamps, 2.8 million ever get a shell, most of them
-//! asked for by the layout tree dumps the tests print; of the rows `treebuild.html` stamps, fewer
-//! than three in ten do.
+//! it; every other row gets one when something first asks for its box. Of the 4.6 million rows a
+//! suite run stamps, 2.8 million ever get a shell, most of them asked for by the layout tree dumps
+//! the tests print; of the rows `treebuild.html` stamps, fewer than three in ten do.
 //!
-//! `build_replaced_content_facts` and `viewport_propagation_facts` are counted too and have never
-//! been taken during a build: they belong to the layout entry that follows it.
+//! # No allow-list
 //!
-//! # The allow-list
+//! Every call out of a running build is a route to retire, and there are none left. The shared
+//! resource services, the Unicode segmenters and category lookups the build uses for text, are the
+//! purity exception a render thread keeps: thread-safe services, not reads of the document. They
+//! are not recorded at all, the same as in [`super::seal`].
 //!
-//! Three kinds of call are permitted and are marked `allowed` in the census.
-//!
-//! **Outputs.** The render side telling the document what it decided is not a read of the
-//! document:
-//!
-//! - `notify_box_presence` - a row telling the document that it gained or lost a box.
-//! - `paintable_row_reset` - the paint state that rides with a box going away.
-//!
-//! **Render-side objects the host owns the memory of.** The arena holds the shells, owned image
-//! providers and image observer sets as opaque pointers, and the host frees them; a detaching
-//! row's provider is told its row has gone the same way. These hand memory back or clear a
-//! pointer into the arena, rather than asking the document anything, and they are the same upcalls
-//! the sealed layout stage already permits outside a pass. An owned image provider is always the
-//! one a box's generated content is built around, whose detach notification clears two pointers.
-//!
-//! **The shared resource services.** Fonts, text shaping and the Unicode services are the purity
-//! exception a render thread keeps: thread-safe services, not reads of the document. They are not
-//! recorded at all, the same as in [`super::seal`].
-//!
-//! Anything else the build asks the document is a route that has to be retired. Add a
-//! `note_host_call` beside any new call out of the build rather than leaving it uncounted.
+//! Add a `note_host_call` beside any new call out of the build rather than leaving it uncounted.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -98,20 +90,6 @@ fn mode() -> Mode {
         Ok("abort") => Mode::Abort,
         Ok(_) => Mode::Report,
     })
-}
-
-/// The routes a sealed tree build would still be allowed to take. Kept beside the census rather
-/// than at the call sites, so that one list answers "what does the seal permit".
-fn route_is_allowed(callback: &'static str) -> bool {
-    matches!(
-        callback,
-        "notify_box_presence"
-            | "paintable_row_reset"
-            | "layout_node_shell_destroy"
-            | "owned_image_provider_destroy"
-            | "owned_image_provider_notify_detach"
-            | "image_observers_destroy"
-    )
 }
 
 thread_local! {
@@ -162,7 +140,7 @@ pub(crate) fn note_host_call(callback: &'static str) {
         counts.calls = counts.calls.wrapping_add(1);
         counts.during_build = counts.during_build.wrapping_add(u64::from(during_build));
     });
-    if !during_build || route_is_allowed(callback) {
+    if !during_build {
         return;
     }
     assert!(
@@ -189,10 +167,8 @@ pub(crate) fn flush_census() {
     counts.sort_unstable_by_key(|(callback, _)| *callback);
     for (callback, counts) in counts {
         write_report(&format!(
-            "TREE BUILD SEAL COUNT: callback={callback} calls={} during_build={} allowed={}\n",
-            counts.calls,
-            counts.during_build,
-            route_is_allowed(callback),
+            "TREE BUILD SEAL COUNT: callback={callback} calls={} during_build={}\n",
+            counts.calls, counts.during_build,
         ));
     }
 }

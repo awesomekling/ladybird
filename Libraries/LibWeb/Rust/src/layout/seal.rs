@@ -36,8 +36,9 @@
 //!   them. `FfiLayoutHostCallbacks::deliver_commit_messages`, sent from
 //!   `commit::CommitNotifications::notify_host`.
 //! - box presence - a row telling the document that it gained or lost a box, and the paintable
-//!   row resets that ride with it. `LayoutNodeArena::notify_box_presence` and
-//!   `PaintableRowReset::invoke_callback`.
+//!   row resets that ride with it. Commit queues them, and `commit_entry_pass` pays them with the
+//!   main thread capability through `LayoutNodeArena::finish_paying_host_handbacks` once commit
+//!   has returned.
 //!
 //! **Inputs synced before a pass, never during one.** These are host calls, and they are the
 //! two `note_host_call` sites that remain; each passes `layout_pass_is_running()`, so a call
