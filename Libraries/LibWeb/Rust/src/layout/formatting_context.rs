@@ -2425,18 +2425,19 @@ pub(crate) unsafe fn run_root_layout(
     // SAFETY: The host keeps the arena and its published inputs alive and unchanged for the
     // synchronous stage run.
     let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
-    let LayoutStageOutput(pass_fragments) = run_root_layout_stage(
-        LayoutStageInput {
-            arena,
-            root,
-            viewport: root,
-            viewport_inline_size_raw,
-            viewport_block_size_raw,
-            document_in_quirks_mode,
-            should_collect_devtools_layout_data,
-        },
-        layout_scratch_for_stage(arena_handle, arena),
-    );
+    let input = LayoutStageInput {
+        arena,
+        root,
+        viewport: root,
+        viewport_inline_size_raw,
+        viewport_block_size_raw,
+        document_in_quirks_mode,
+        should_collect_devtools_layout_data,
+    };
+    let scratch = layout_scratch_for_stage(arena_handle, arena);
+    // SAFETY: The arena and its scratch belong to this thread, which waits for the stage.
+    let LayoutStageOutput(pass_fragments) =
+        unsafe { crate::stage_thread::run_stage(|| run_root_layout_stage(input, scratch)) };
     // SAFETY: Computation has finished and its input borrows are no longer used.
     let arena = unsafe { commit_entry_pass(main_thread, arena_handle, &host, root, &pass_fragments) };
     arena.did_commit_full_layout(root);
@@ -2595,18 +2596,19 @@ pub(crate) unsafe fn compute_subtree_layout(
     // SAFETY: The host keeps the arena and its published inputs alive and unchanged for the
     // synchronous stage run.
     let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
-    let LayoutStageOutput(pass_fragments) = compute_subtree_layout_stage(
-        LayoutStageInput {
-            arena,
-            root,
-            viewport,
-            viewport_inline_size_raw,
-            viewport_block_size_raw,
-            document_in_quirks_mode,
-            should_collect_devtools_layout_data: false,
-        },
-        layout_scratch_for_stage(arena_handle, arena),
-    );
+    let input = LayoutStageInput {
+        arena,
+        root,
+        viewport,
+        viewport_inline_size_raw,
+        viewport_block_size_raw,
+        document_in_quirks_mode,
+        should_collect_devtools_layout_data: false,
+    };
+    let scratch = layout_scratch_for_stage(arena_handle, arena);
+    // SAFETY: The arena and its scratch belong to this thread, which waits for the stage.
+    let LayoutStageOutput(pass_fragments) =
+        unsafe { crate::stage_thread::run_stage(|| compute_subtree_layout_stage(input, scratch)) };
     // SAFETY: Computation has finished and its input borrows are no longer used.
     let arena = unsafe { commit_entry_pass(main_thread, arena_handle, &host, root, &pass_fragments) };
     // Commit reset the subtree's rows, and its new size may affect ancestor scrollable overflow.

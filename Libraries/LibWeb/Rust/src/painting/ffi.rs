@@ -1297,14 +1297,16 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
     let RecordingStageOutput {
         recording,
         recording_from_scratch,
-    } = record_display_list_stage(
-        RecordingStageInput {
+    } = {
+        let input = RecordingStageInput {
             arena,
             viewport,
             inputs: recording_inputs,
-        },
-        &mut arena.recording_scratch().take_for_run(),
-    );
+        };
+        let mut scratch = arena.recording_scratch().take_for_run();
+        // SAFETY: The arena and its scratch belong to this thread, which waits for the stage.
+        unsafe { crate::stage_thread::run_stage(|| record_display_list_stage(input, &mut scratch)) }
+    };
     let mut paint_state = arena.paint_state().borrow_mut();
     if paint_state.trace_recordings && recording.output.capture_log_for_verification.is_some() {
         paint_state.pending_recording_trace = Some(crate::painting::paint_state::PendingRecordingTrace {
