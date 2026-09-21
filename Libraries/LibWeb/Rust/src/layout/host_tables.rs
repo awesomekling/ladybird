@@ -12,10 +12,13 @@
 use super::LayoutNodeArena;
 use super::formatting_context::FfiLayoutHostCallbacks;
 use super::layout_node_arena::{BoxPresenceHost, ShellFactory, ShellStyleChangedHost};
+use super::node_data::NodeSlotId;
 use super::update_layout::LayoutUpdateHost;
+use crate::css::style::fast_hash::FastMap as HashMap;
 use crate::painting::host::GeometryHostCallbacks;
 use crate::painting::paintable_rows::ChromeStateCallback;
 use std::cell::Cell;
+use std::cell::RefCell;
 use std::ffi::c_void;
 
 #[derive(Default)]
@@ -27,6 +30,13 @@ pub(crate) struct HostTables {
     pub(super) shell_style_changed_host: Cell<Option<ShellStyleChangedHost>>,
     pub(crate) geometry_host: Cell<Option<GeometryHostCallbacks>>,
     pub(crate) chrome_state_callback: Cell<Option<ChromeStateCallback>>,
+    /// The image provider each row that owns one owns. The arena knows which rows those are.
+    pub(super) owned_image_providers: RefCell<HashMap<NodeSlotId, *mut c_void>>,
+    /// The image observer set each row that holds one holds. The arena knows which rows those are.
+    pub(super) image_observer_sets: RefCell<HashMap<NodeSlotId, *mut c_void>>,
+    /// Observer sets the arena has handed back that a newer set displaced before the handback was
+    /// paid, in the order they were displaced.
+    pub(super) image_observer_sets_owed: RefCell<Vec<(NodeSlotId, *mut c_void)>>,
 }
 
 impl HostTables {
