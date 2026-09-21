@@ -3940,10 +3940,6 @@ pub struct FfiCodePointCategoryFacts {
     pub is_dash_punctuation: bool,
 }
 
-unsafe extern "C" {
-    fn ladybird_layout_code_point_category_facts(code_point: u32) -> FfiCodePointCategoryFacts;
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum FfiAnonymousTableBoxKind {
@@ -5035,10 +5031,7 @@ fn find_first_letter_in_layout_text(host: &TreeBuilderHost, node: LayoutNode) ->
         &text,
         preserves_segment_breaks,
         |index| segmenter.next_boundary(index, false).unwrap_or(text.len()),
-        |code_point| {
-            // SAFETY: This service classifies a scalar value without accessing layout.
-            unsafe { ladybird_layout_code_point_category_facts(code_point) }
-        },
+        crate::layout::text_chunker::code_point_category_facts,
     );
     if target.found {
         target.text_layout_node = node;
