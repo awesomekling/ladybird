@@ -5697,6 +5697,33 @@ pub unsafe extern "C" fn layout_arena_bound_row(arena: *mut c_void, style_node: 
     unsafe { &*arena.cast::<LayoutNodeArena>() }.bound_row(style_node)
 }
 
+/// Pins, for the host, the style record of the box the element or text node with `style_node` is
+/// bound to, or of the box of its pseudo-element of kind `generated_for`, so that the box keeps
+/// its style readable once the node has left the document. A text box has no record of its own.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_pin_bound_box_style_record_for_detachment(
+    arena: *mut c_void,
+    style_node: u32,
+    generated_for: u8,
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(style_node) = StyleNodeID::from_raw(style_node) else {
+        return;
+    };
+    // SAFETY: The C++ wrapper keeps the arena alive for this call and
+    // serializes all access on the document thread.
+    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    let row = if generated_for == 0 {
+        arena.bound_row(style_node)
+    } else {
+        arena.bound_pseudo_element_row(style_node, generated_for)
+    };
+    if row.is_invalid() || !super::tree_builder::node_kind_is_node_with_style(arena.data(row).kind.get()) {
+        return;
+    }
+    arena.pin_node_style_record_for_host(row, arena.node_style_record(row));
+}
+
 /// The shell of the row the element or text node with `style_node` is bound to, materialised if
 /// nothing has asked for it yet, or null if the node has no row.
 #[unsafe(no_mangle)]
