@@ -294,35 +294,38 @@ void Animatable::cancel_css_animations_and_transitions()
     publish_animation_timing_rows();
 }
 
-bool Animatable::add_transitioned_properties(Optional<CSS::PseudoElement> pseudo_element, Vector<CSS::TransitionProperties> const& transitions)
+bool Animatable::set_registered_transitions(Optional<CSS::PseudoElement> pseudo_element, Vector<CSS::TransitionProperties> const& transitions)
 {
     // An entry naming no property is indexed by nothing, so registering it would grow the element's
-    // attribute list without any property ever reaching it. An element whose whole declaration
-    // names no property therefore registers nothing at all, and is not given a transition record.
-    bool any_entry_names_a_property = false;
+    // attribute list without any property ever reaching it.
+    HashMap<CSS::PropertyID, size_t> attribute_indices;
+    Vector<TransitionAttributes> attributes;
     for (auto const& entry : transitions) {
-        if (!entry.properties.is_empty()) {
-            any_entry_names_a_property = true;
-            break;
-        }
+        if (entry.properties.is_empty())
+            continue;
+        auto index_of_this_transition = attributes.size();
+        attributes.empend(entry.delay, entry.duration, entry.timing_function, entry.transition_behavior);
+        for (auto const& property : entry.properties)
+            attribute_indices.set(property, index_of_this_transition);
     }
-    if (!any_entry_names_a_property)
+
+    // An element's declaration is recomputed far more often than it changes, and what it registers
+    // is a pure function of that declaration. Leaving the same registration in place keeps this
+    // from writing to the element - and keeps an element that registers nothing from being given a
+    // transition record, and with it an animation list to publish, at all.
+    auto* existing = const_cast<Transition*>(transition_if_exists(pseudo_element));
+    if (!existing) {
+        if (attributes.is_empty())
+            return false;
+    } else if (existing->transition_attributes == attributes && existing->transition_attribute_indices == attribute_indices) {
         return false;
+    }
 
     auto* maybe_transition = ensure_transition(pseudo_element);
     if (!maybe_transition)
         return false;
-
-    auto& transition = *maybe_transition;
-    for (size_t i = 0; i < transitions.size(); i++) {
-        if (transitions[i].properties.is_empty())
-            continue;
-        size_t index_of_this_transition = transition.transition_attributes.size();
-        transition.transition_attributes.empend(transitions[i].delay, transitions[i].duration, transitions[i].timing_function, transitions[i].transition_behavior);
-
-        for (auto const& property : transitions[i].properties)
-            transition.transition_attribute_indices.set(property, index_of_this_transition);
-    }
+    maybe_transition->transition_attributes = move(attributes);
+    maybe_transition->transition_attribute_indices = move(attribute_indices);
     return true;
 }
 

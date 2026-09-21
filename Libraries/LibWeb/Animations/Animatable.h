@@ -31,6 +31,8 @@ public:
         double duration;
         CSS::EasingFunction timing_function;
         CSS::TransitionBehavior transition_behavior;
+
+        bool operator==(TransitionAttributes const&) const = default;
     };
 
     virtual ~Animatable() = default;
@@ -77,8 +79,9 @@ public:
     Vector<GC::Ref<CSS::CSSAnimation>> const* css_defined_animations(Optional<CSS::PseudoElement>);
     void set_css_defined_animations(Optional<CSS::PseudoElement>, Vector<GC::Ref<CSS::CSSAnimation>>&&);
 
-    // Registers the entries that name a property, and says whether any were registered.
-    bool add_transitioned_properties(Optional<CSS::PseudoElement>, Vector<CSS::TransitionProperties> const& transitions);
+    // Makes the entries that name a property the element's registered transitions, and says whether
+    // that moved them. An element whose declaration registers what it already had is left alone.
+    bool set_registered_transitions(Optional<CSS::PseudoElement>, Vector<CSS::TransitionProperties> const& transitions);
     Vector<CSS::PropertyID> property_ids_with_matching_transition_property_entry(Optional<CSS::PseudoElement>) const;
     Optional<TransitionAttributes const&> property_transition_attributes(Optional<CSS::PseudoElement>, CSS::PropertyID) const;
     void set_transition(Optional<CSS::PseudoElement>, CSS::PropertyID, GC::Ref<CSS::CSSTransition>);
