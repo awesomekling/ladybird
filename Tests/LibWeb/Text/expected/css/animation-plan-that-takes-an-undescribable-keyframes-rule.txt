@@ -1,0 +1,38 @@
+start before: 5px -
+start before after recompute: 5px -
+start-beside-plain before: 10px -
+start-beside-plain before after recompute: 10px -
+retime-name before: 10px -
+retime-name before after recompute: 10px -
+retime-name-beside-plain before: 10px -
+retime-name-beside-plain before after recompute: 10px -
+retime-timing before: 30px 30px
+retime-timing before after recompute: 30px 30px
+retime-away before: 30px 30px
+retime-away before after recompute: 30px 30px
+start: 30px 30px
+start after recompute: 30px 30px
+start-beside-plain: 30px 30px
+start-beside-plain after recompute: 30px 30px
+retime-name: 30px 30px
+retime-name after recompute: 30px 30px
+retime-name-beside-plain: 30px 30px
+retime-name-beside-plain after recompute: 30px 30px
+retime-timing: 30px 30px
+retime-timing after recompute: 30px 30px
+retime-timing to another undescribable rule: 40px 40px
+retime-timing to another undescribable rule after recompute: 40px 40px
+retime-away: 20px -
+retime-away after recompute: 20px -
+flip at -100s: 70px 70px
+flip at -100s after recompute: 70px 70px
+flip at -900s: 30px 30px
+flip at -900s after recompute: 30px 30px
+flip at -200s: 70px 70px
+flip at -200s after recompute: 70px 70px
+flip at -800s: 30px 30px
+flip at -800s after recompute: 30px 30px
+flip at -300s: 30px 30px
+flip at -300s after recompute: 30px 30px
+flip at -700s: 30px 30px
+flip at -700s after recompute: 30px 30px
