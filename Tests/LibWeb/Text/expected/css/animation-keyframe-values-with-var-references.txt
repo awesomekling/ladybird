@@ -26,7 +26,7 @@ changing after the name moves: 0.8
 changing after the name moves after recompute: 0.8
 changing after the name is dropped: 0.25
 changing after the name is dropped after recompute: 0.25
-inherited after the root moves: 0.5
+inherited after the root moves: 0.15
 inherited after the root moves after recompute: 0.15
 two: 0.25
 two after recompute: 0.25

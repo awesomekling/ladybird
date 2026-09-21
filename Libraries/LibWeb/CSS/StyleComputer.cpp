@@ -1007,8 +1007,10 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
     auto resolved_properties = StyleValueFFI::rust_resolve_animation_declarations_from_published(&published_sample);
     // A keyframe the description carried as a token stream was substituted against this element,
     // which is a var() read of its environment just as `resolve_unresolved_style_value` is below.
-    if (published_description_substituted_var)
+    if (published_description_substituted_var) {
         abstract_element.element().set_style_uses_var_css_function();
+        abstract_element.element().set_animation_uses_var_css_function();
+    }
     // Only where the description did not cover every effect does the stage still walk the host's
     // keyframe sets for itself.
     for (size_t active_effect_index = 0; !published_description_covers_effects && active_effect_index < active_effects.size(); ++active_effect_index) {
@@ -1088,6 +1090,10 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
                     // and those re-parse the value every frame anyway.
                     auto unresolved = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(style_value.data()));
                     if (!property.is_custom_property() || unresolved->as_unresolved().contains_arbitrary_substitution_function()) {
+                        // `resolve_unresolved_style_value` leaves the element's ordinary var() mark
+                        // behind; this one is the keyframe's, which no cascade declaration names.
+                        if (unresolved->as_unresolved().includes_var_function())
+                            abstract_element.element().set_animation_uses_var_css_function();
                         auto resolved = abstract_element.document().style_computer().resolve_unresolved_style_value(abstract_element, property, unresolved->as_unresolved());
                         style_value = RustStyleValueHandle::retained(resolved->rust_style_value_data());
                     }
@@ -6283,8 +6289,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             const_cast<DOM::Element&>(abstract_element.element()).set_style_uses_tree_counting_function();
         // A keyframe of what the stage sampled substituted a `var()` reference of this element, so
         // the mark `resolve_unresolved_style_value` leaves behind for one is left here instead.
-        if (finalization_result.animation_substituted_var)
+        if (finalization_result.animation_substituted_var) {
             const_cast<DOM::Element&>(abstract_element.element()).set_style_uses_var_css_function();
+            const_cast<DOM::Element&>(abstract_element.element()).set_animation_uses_var_css_function();
+        }
         if (finalization_result.animation_subject_depends_on_size_container_query) {
             // The stage resolved the batch's container units against the published container-query
             // inputs, so what `Length::container_relative_length_to_px_without_rounding` records

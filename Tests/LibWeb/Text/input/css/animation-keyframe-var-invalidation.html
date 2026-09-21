@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    :root { --o: 0.5; --other: 0.5; }
+    div { width: 10px; height: 10px; }
+    @keyframes reads { from { opacity: var(--o); } to { opacity: var(--o); } }
+    @keyframes reads-calc { from { margin-left: calc(var(--o) * 100px); } to { margin-left: calc(var(--o) * 100px); } }
+    @keyframes reads-other { from { opacity: var(--other); } to { opacity: var(--other); } }
+    #pseudo::before { content: ""; animation: reads 1000s linear -500s infinite paused; }
+</style>
+<div id="only"></div>
+<div id="also" style="flex-grow: var(--o)"></div>
+<div id="deep"><div><div id="deepest"></div></div></div>
+<div id="calced"></div>
+<div id="pseudo"></div>
+<div id="declares" style="--mine: 0.25"></div>
+<div id="stops"></div>
+<script>
+    // A custom property an element reads only through its `@keyframes` values must invalidate that
+    // element when the declaration it resolves against moves: the keyframe's var() is substituted
+    // against the element's computed custom properties, so the sampled value follows them.
+    test(() => {
+        let nudge = 0;
+        // A style recomputation that has nothing to do with the animation, on a property no
+        // keyframe below writes. Every value is read on the mutating update AND after this, so a
+        // value that is only right once the element is recomputed for another reason is visible.
+        function recompute(element) {
+            element.style.wordSpacing = `${++nudge}px`;
+            getComputedStyle(element).wordSpacing;
+        }
+        function report(label, element, properties, pseudo) {
+            const style = getComputedStyle(element, pseudo ?? null);
+            println(`${label}: ${properties.map(property => style[property]).join(" ")}`);
+        }
+        function check(label, element, properties, pseudo) {
+            report(label, element, properties, pseudo);
+            recompute(element);
+            report(`${label} after recompute`, element, properties, pseudo);
+        }
+        // A paused animation with a negative delay samples at a fixed point of its own timeline, so
+        // every value below is decided by the keyframes alone.
+        function animate(id, name) {
+            const element = document.getElementById(id);
+            element.style.animation = `${name} 1000s linear -500s infinite paused`;
+            return element;
+        }
+        const root = document.documentElement;
+
+        // The element's own cascade reads nothing at all; only its keyframes read `--o`.
+        const only = animate("only", "reads");
+        // The element's cascade reads `--o` as well, so its recomputation was never in doubt.
+        const also = animate("also", "reads");
+        // The reader is two levels below the element whose declaration moves.
+        const deepest = animate("deepest", "reads");
+        // A reference inside a `calc()` in the keyframe.
+        const calced = animate("calced", "reads-calc");
+        // The keyframes of a pseudo-element, whose animation is declared in the sheet.
+        const pseudo = document.getElementById("pseudo");
+        // An element that declares a custom property of its own, so it holds an environment layered
+        // over the one that moves rather than the inherited one itself.
+        const declares = animate("declares", "reads");
+
+        check("only", only, ["opacity"]);
+        check("also", also, ["opacity", "flexGrow"]);
+        check("deepest", deepest, ["opacity"]);
+        check("calced", calced, ["marginLeft"]);
+        check("pseudo", pseudo, ["opacity"], "::before");
+        check("declares", declares, ["opacity"]);
+
+        root.style.setProperty("--o", "0.125");
+        check("only after the root moves", only, ["opacity"]);
+        check("also after the root moves", also, ["opacity", "flexGrow"]);
+        check("deepest after the root moves", deepest, ["opacity"]);
+        check("calced after the root moves", calced, ["marginLeft"]);
+        check("pseudo after the root moves", pseudo, ["opacity"], "::before");
+        check("declares after the root moves", declares, ["opacity"]);
+
+        // The declaration is dropped: the reference falls back to nothing and the keyframe with it.
+        root.style.removeProperty("--o");
+        check("only after the root drops the name", only, ["opacity"]);
+
+        // A name the keyframes do not read moves: nothing about the sample changes.
+        root.style.setProperty("--other", "0.75");
+        check("only after an unread name moves", only, ["opacity"]);
+
+        // An element whose animation is removed stops following the name.
+        const stops = animate("stops", "reads");
+        root.style.setProperty("--o", "0.25");
+        check("stops", stops, ["opacity"]);
+        stops.style.animation = "";
+        root.style.setProperty("--o", "0.9");
+        check("stops after the animation is removed", stops, ["opacity"]);
+    });
+</script>

@@ -1,0 +1,32 @@
+only: 0.5
+only after recompute: 0.5
+also: 0.5 0.5
+also after recompute: 0.5 0.5
+deepest: 0.5
+deepest after recompute: 0.5
+calced: 50px
+calced after recompute: 50px
+pseudo: 0.5
+pseudo after recompute: 0.5
+declares: 0.5
+declares after recompute: 0.5
+only after the root moves: 0.125
+only after the root moves after recompute: 0.125
+also after the root moves: 0.125 0.125
+also after the root moves after recompute: 0.125 0.125
+deepest after the root moves: 0.125
+deepest after the root moves after recompute: 0.125
+calced after the root moves: 12.5px
+calced after the root moves after recompute: 12.5px
+pseudo after the root moves: 0.125
+pseudo after the root moves after recompute: 0.125
+declares after the root moves: 0.125
+declares after the root moves after recompute: 0.125
+only after the root drops the name: 0.5
+only after the root drops the name after recompute: 0.5
+only after an unread name moves: 0.5
+only after an unread name moves after recompute: 0.5
+stops: 0.25
+stops after recompute: 0.25
+stops after the animation is removed: 1
+stops after the animation is removed after recompute: 1
