@@ -76,6 +76,7 @@ thread_local! {
     static LONGHAND_INPUT_FREEZE_REASONS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
     static BETWEEN_PASS_BATCHES: RefCell<HashMap<&'static str, (u64, u64)>> = RefCell::new(HashMap::new());
     static HOST_DRIVEN_ROWS: Cell<u64> = const { Cell::new(0) };
+    static HOST_RETRY_ENTRIES: Cell<u64> = const { Cell::new(0) };
     static HOST_SAMPLED_ANIMATION_ROWS: Cell<u64> = const { Cell::new(0) };
     static HOST_DRIVEN_ROW_KINDS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
 }
@@ -122,9 +123,17 @@ pub(crate) fn flush_engine_decline_census<'a>(counters: impl Iterator<Item = (&'
         })
         .collect::<Vec<_>>();
     rows.sort_unstable_by_key(|(name, _)| *name);
-    for (name, value) in rows {
+    for (name, value) in &rows {
         write_report(&format!("STYLE SEAL COUNT: engine_record {name}: {value}\n"));
     }
+    // The host's retry is a second way into the engine for one element, so `flush_census` adds it
+    // to the rows the host drove. It is reported here and totalled there because only this half
+    // sees the engine's counters.
+    let retries = rows
+        .iter()
+        .find(|(name, _)| *name == "retryAfterAncestorCalls")
+        .map_or(0, |(_, value)| *value);
+    HOST_RETRY_ENTRIES.with(|entries| entries.set(retries));
 }
 
 /// Record that one row's animations were sampled by the host after the stage returned.
@@ -300,6 +309,18 @@ pub(crate) fn flush_census() {
         write_report(&format!("STYLE SEAL COUNT: host_driven_rows: {host_driven_rows}\n"));
     }
     let sampled = HOST_SAMPLED_ANIMATION_ROWS.with(|rows| rows.replace(0));
+    // Every way one element is entered from the host during an update, in one number. A row the
+    // host computed and a retry the host asked for after applying an ancestor cost the same
+    // thing: control on the host side between two elements. Relaxing a gate usually moves rows
+    // from the first to the second, so only the total says whether the stage got closer to being
+    // one function.
+    let host_retries = HOST_RETRY_ENTRIES.with(|entries| entries.replace(0));
+    let host_entries = host_driven_rows + host_retries + sampled;
+    if host_entries != 0 {
+        write_report(&format!(
+            "STYLE SEAL COUNT: host_entries: {host_entries} (rows {host_driven_rows} + retries {host_retries} + sampled {sampled})\n"
+        ));
+    }
     if sampled != 0 {
         write_report(&format!("STYLE SEAL COUNT: host_sampled_animation_rows: {sampled}\n"));
     }
