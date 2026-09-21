@@ -199,6 +199,7 @@ pub(crate) fn commit_replacing(
     pass_fragments: &fragment_tree::CompletedPassFragments,
 ) -> CommitNotifications {
     let links_by_slot = pass_fragments.links_by_slot();
+    arena.release_published_paintable_rows();
     crate::painting::published_immutable::before_publication(arena);
     arena.note_layout_commit();
     arena.begin_layout_style_snapshot_commit();
@@ -225,6 +226,7 @@ pub(crate) fn commit_replacing(
         }
     }
     crate::painting::published_immutable::published(paintables.arena());
+    paintables.publish_rows();
     paintables.arena().finish_layout_style_snapshot_commit();
     CommitNotifications {
         row_resets: paintables.take_row_reset_notifications(),

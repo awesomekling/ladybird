@@ -18,6 +18,7 @@ mod encoding_detection;
 mod font_seal;
 pub use libcompositing_rust::fast_hash;
 
+pub(crate) mod cow_column;
 pub mod css;
 pub mod layout;
 pub mod painting;
