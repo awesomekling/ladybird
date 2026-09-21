@@ -198,52 +198,6 @@ Box& LayoutTreeBuildBridge::create_list_item_marker(Box& list_box, CSS::LayoutSt
     return list_item_marker;
 }
 
-// https://drafts.csswg.org/css-lists-3/#text-markers
-// NB: The build generates the marker string out of the published records of the marker box and of
-//     the list item box. What is recorded here is only the resolved counter style a later style
-//     change compares against to decide whether the marker box has to be rebuilt.
-static Vector<ValueComparingRefPtr<CSS::CounterStyle const>> normal_marker_counter_style_dependencies(BlockContainer const& list_box, BlockContainer const& marker)
-{
-    Vector<ValueComparingRefPtr<CSS::CounterStyle const>> counter_style_dependencies;
-    if (marker.list_style_image())
-        return counter_style_dependencies;
-    auto use_counter_style = [&](RefPtr<CSS::CounterStyle const> const& counter_style) {
-        if (counter_style)
-            counter_style_dependencies.append(counter_style);
-    };
-    list_box.list_style_type().visit(
-        [](Empty const&) { VERIFY_NOT_REACHED(); },
-        [&](RefPtr<CSS::CounterStyle const> const& counter_style) {
-            use_counter_style(counter_style);
-        },
-        [](Utf16String const&) {},
-        [&](CSS::UnresolvedCounterStyleName const&) {
-            use_counter_style(nullptr);
-        },
-        [&](CSS::ListStyleSymbols const& symbols) {
-            use_counter_style(symbols.counter_style);
-        });
-    return counter_style_dependencies;
-}
-
-// NB: The counter styles a pseudo-element's `content` names are resolved by the build itself, out of
-//     the published record and the tree scope's registered counter styles. What is recorded here is
-//     only what a later style change compares against to decide whether the box has to be rebuilt.
-static void publish_generated_content(DOM::AbstractElement const& element_reference, NodeWithStyle& layout_node, BlockContainer const* originating_list_box)
-{
-    auto const* payloads = element_reference.style_record_payloads();
-    VERIFY(payloads);
-    auto const& content_values = *CSS::style_group_from_payloads<CSS::ComputedValues::ContentValues>(payloads);
-    if (layout_node.is_list_item_marker_box() && content_values.content_is_normal()) {
-        VERIFY(originating_list_box);
-        layout_node.set_content_counter_style_dependencies(normal_marker_counter_style_dependencies(*originating_list_box, static_cast<BlockContainer const&>(layout_node)));
-        return;
-    }
-
-    layout_node.set_content_counter_style_dependencies(
-        CSS::content_counter_style_dependencies(*content_values.computed_content_value(), element_reference.style_scope()));
-}
-
 // The node an identity the walk carries names. The document is the build's root and is not in the
 // style computer's node index, because a document holding a reference back to itself there would
 // keep itself alive; every other identity resolves through the index.
@@ -329,8 +283,6 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
                 layout_node = DOM::Element::create_layout_node_for_display_type(document, display, style, nullptr);
                 break;
             }
-            if (layout_node)
-                publish_generated_content({ element, pseudo_element }, *layout_node, originating_list_box);
             return Node::slot_id(layout_node); },
         .create_nested_list_marker = [](void* builder_pointer, u32 style_node, RustFFI::FfiPseudoElement originating_pseudo, Compositing::RustFFI::NodeSlotId pseudo_element_box_slot) -> Compositing::RustFFI::NodeSlotId {
             VERIFY(builder_pointer);
@@ -343,7 +295,6 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
             // NB: The marker of a list-item ::before or ::after belongs to that pseudo-element, not to the element's own
             //     ::marker, so it is generated for the originating pseudo-element and never becomes the ::marker's box.
             list_item_marker.set_generated_for(css_pseudo_element(originating_pseudo), element);
-            list_item_marker.set_content_counter_style_dependencies(normal_marker_counter_style_dependencies(list_item_box, list_item_marker));
             return Node::slot_id(&list_item_marker); },
         .create_content_item = [](void* builder_pointer, u32 style_node, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiGeneratedContentItem item, Compositing::RustFFI::NodeSlotId pseudo_element_box_slot) -> Compositing::RustFFI::NodeSlotId {
             VERIFY(builder_pointer);

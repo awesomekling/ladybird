@@ -4972,6 +4972,38 @@ fn counter_owner(style_node: u32, generated_for: u8) -> Option<super::counters::
     StyleNodeID::from_raw(style_node).map(|element| super::counters::CounterOwner { element, generated_for })
 }
 
+/// Whether the counter styles the record of the pseudo-element `generated_for` of the element
+/// `style_node` names now differ from the ones the box built for it renders from. Answers
+/// `CONTENT_COUNTER_STYLES_NOT_RECORDED` while no box of that pseudo-element has recorded any,
+/// which is every element that generates no content.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_content_counter_styles_changed(
+    arena: *mut c_void,
+    style_node: u32,
+    generated_for: u8,
+) -> u8 {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(owner) = counter_owner(style_node, generated_for) else {
+        return CONTENT_COUNTER_STYLES_NOT_RECORDED;
+    };
+    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the
+    // document thread.
+    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    match super::generated_content::content_counter_styles_changed(arena, owner) {
+        None => CONTENT_COUNTER_STYLES_NOT_RECORDED,
+        Some(false) => CONTENT_COUNTER_STYLES_UNCHANGED,
+        Some(true) => CONTENT_COUNTER_STYLES_CHANGED,
+    }
+}
+
+pub const CONTENT_COUNTER_STYLES_NOT_RECORDED: u8 = 0;
+pub const CONTENT_COUNTER_STYLES_UNCHANGED: u8 = 1;
+pub const CONTENT_COUNTER_STYLES_CHANGED: u8 = 2;
+
 /// The text the content of the pseudo-element `generated_for` of the element `style_node` names last
 /// resolved to, the way accessibility reads it: the alt text when there is one, otherwise every
 /// string in order. The result is an `AK::Utf16String` raw representation the caller adopts.

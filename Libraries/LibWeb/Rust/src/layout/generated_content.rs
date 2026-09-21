@@ -40,6 +40,11 @@ pub(crate) struct MarkerContentStyles {
 #[derive(Default)]
 pub(crate) struct GeneratedContent {
     accessible_texts: HashMap<CounterOwner, Vec<u16>>,
+    /// The counter styles the box built for a pseudo-element was rendered from, one per
+    /// `counter()` or `counters()` the content names and one for the counter style a normal
+    /// marker shows. A later style change compares what the pseudo-element's record names now
+    /// against this to decide whether the box has to be rebuilt.
+    content_counter_styles_in_use: HashMap<CounterOwner, Vec<Option<Arc<CounterStyle>>>>,
 }
 
 impl GeneratedContent {
@@ -53,6 +58,8 @@ impl GeneratedContent {
     pub(crate) fn forget(&mut self, element: StyleNodeID) {
         let belongs_to_element = |owner: &CounterOwner| owner.element != element;
         self.accessible_texts.retain(|owner, _| belongs_to_element(owner));
+        self.content_counter_styles_in_use
+            .retain(|owner, _| belongs_to_element(owner));
     }
 }
 
@@ -184,6 +191,15 @@ fn resolve_normal_marker_content(
     ContentItem::Text(text)
 }
 
+/// The counter style a normal marker renders from, as the list its box records for a later style
+/// change to compare against. A marker showing an image or a string renders from none.
+fn marker_counter_styles_in_use(styles: &MarkerContentStyles) -> Vec<Option<Arc<CounterStyle>>> {
+    match &styles.content {
+        MarkerContent::CounterStyle(Some(counter_style)) => vec![Some(counter_style.clone())],
+        _ => Vec::new(),
+    }
+}
+
 fn marker_renders_list_item_counter_value(styles: &MarkerContentStyles) -> bool {
     // NB: A marker showing its list-style-image shows no text at all.
     !matches!(styles.content, MarkerContent::Image) && styles.text_depends_on_list_item_counter
@@ -198,6 +214,7 @@ pub(crate) fn resolve_nested_marker_content(
 ) -> ResolvedContent {
     let tree_scope = arena.with_style_store(|engine| engine.tree().tree_scope(element.element).0);
     let styles = resolve_marker_content_styles(arena, marker, list_box, tree_scope);
+    note_content_counter_styles_in_use(arena, element, marker_counter_styles_in_use(&styles));
     let renders_list_item_counter_value = marker_renders_list_item_counter_value(&styles);
     ResolvedContent {
         items: vec![resolve_normal_marker_content(arena, element, styles)],
@@ -252,6 +269,7 @@ struct CounterItemResolver<'a> {
     arena: &'a LayoutNodeArena,
     element: CounterOwner,
     tree_scope: u32,
+    styles: Vec<Option<Arc<CounterStyle>>>,
     next_counter_style: usize,
     renders_list_item_counter_value: bool,
 }
@@ -259,23 +277,11 @@ struct CounterItemResolver<'a> {
 impl CounterItemResolver<'_> {
     // counter( <counter-name>, <counter-style>? )
     // counters( <counter-name>, <string>, <counter-style>? )
-    fn resolve(
-        &mut self,
-        function: u8,
-        counter_name: &CssString,
-        counter_style_value: Option<&StyleValueData>,
-        join_string: &CssString,
-    ) -> Vec<u16> {
+    fn resolve(&mut self, function: u8, counter_name: &CssString, join_string: &CssString) -> Vec<u16> {
         if counter_name.units() == LIST_ITEM_COUNTER_NAME {
             self.renders_list_item_counter_value = true;
         }
-        let counter_style = self.arena.with_counter_style_registry(|registry| {
-            crate::css::counter_representation::resolve_counter_style_value(
-                registry,
-                self.tree_scope,
-                counter_style_value,
-            )
-        });
+        let counter_style = self.styles[self.next_counter_style].clone();
         self.next_counter_style += 1;
 
         // "If no counter named <counter-name> exists on an element where counter() or counters() is used,
@@ -313,6 +319,76 @@ impl CounterItemResolver<'_> {
     }
 }
 
+/// The counter styles a `content` value names, in the order they appear in the content list and
+/// then in its alt text; `None` for a name no scope in the chain registers, which reads as
+/// `decimal`.
+///
+/// Port of `CSS::content_counter_style_dependencies`.
+fn content_counter_styles(
+    arena: &LayoutNodeArena,
+    content: Option<&StyleValueData>,
+    tree_scope: u32,
+) -> Vec<Option<Arc<CounterStyle>>> {
+    let Some(StyleValueData::Content {
+        content: content_list,
+        alt_text,
+    }) = content
+    else {
+        return Vec::new();
+    };
+    let mut styles = Vec::new();
+    let mut append_styles_of = |list: Option<&StyleValueData>| {
+        for item in value_list(list) {
+            let Some(StyleValueData::Counter { counter_style, .. }) = item.optional_data() else {
+                continue;
+            };
+            styles.push(arena.with_counter_style_registry(|registry| {
+                crate::css::counter_representation::resolve_counter_style_value(
+                    registry,
+                    tree_scope,
+                    counter_style.optional_data(),
+                )
+            }));
+        }
+    };
+    append_styles_of(content_list.optional_data());
+    append_styles_of(alt_text.optional_data());
+    styles
+}
+
+/// Records the counter styles the box just built for `owner` renders from.
+fn note_content_counter_styles_in_use(
+    arena: &LayoutNodeArena,
+    owner: CounterOwner,
+    styles: Vec<Option<Arc<CounterStyle>>>,
+) {
+    arena
+        .generated_content()
+        .borrow_mut()
+        .content_counter_styles_in_use
+        .insert(owner, styles);
+}
+
+/// Whether the counter styles the pseudo-element's record names now differ from the ones its box
+/// was built with. `None` while no box of the pseudo-element has recorded any.
+pub(crate) fn content_counter_styles_changed(arena: &LayoutNodeArena, owner: CounterOwner) -> Option<bool> {
+    let in_use = arena
+        .generated_content()
+        .borrow()
+        .content_counter_styles_in_use
+        .get(&owner)?
+        .clone();
+    let styles = arena.with_style_store(|engine| {
+        let tree_scope = engine.tree().tree_scope(owner.element).0;
+        content_counter_styles(
+            arena,
+            style_of(arena, engine, owner).and_then(ComputedValuesView::content_value),
+            tree_scope,
+        )
+    });
+    Some(in_use != styles)
+}
+
 fn value_list(value: Option<&StyleValueData>) -> &[crate::css::style_value::RetainedStyleValueData] {
     match value {
         Some(StyleValueData::ValueList { values, .. }) => values.as_slice(),
@@ -337,6 +413,7 @@ pub(crate) fn resolve_content(
             && matches!(content, Some(StyleValueData::Keyword { keyword }) if *keyword == keyword::NORMAL)
         {
             let styles = resolve_marker_content_styles(arena, marker, list_box, tree_scope);
+            note_content_counter_styles_in_use(arena, element, marker_counter_styles_in_use(&styles));
             let renders_list_item_counter_value = marker_renders_list_item_counter_value(&styles);
             return ResolvedContent {
                 items: vec![resolve_normal_marker_content(arena, element, styles)],
@@ -345,6 +422,9 @@ pub(crate) fn resolve_content(
                 renders_list_item_counter_value,
             };
         }
+
+        let styles = content_counter_styles(arena, content, tree_scope);
+        note_content_counter_styles_in_use(arena, element, styles.clone());
 
         let Some(StyleValueData::Content {
             content: content_list,
@@ -364,6 +444,7 @@ pub(crate) fn resolve_content(
             arena,
             element,
             tree_scope,
+            styles,
             next_counter_style: 0,
             renders_list_item_counter_value: false,
         };
@@ -411,14 +492,13 @@ pub(crate) fn resolve_content(
                 Some(StyleValueData::Counter {
                     function,
                     counter_name,
-                    counter_style,
                     join_string,
+                    ..
                 }) => {
                     flush_pending_text(&mut items, &mut pending_text);
                     items.push(ContentItem::Text(counters.resolve(
                         *function,
                         counter_name,
-                        counter_style.optional_data(),
                         join_string,
                     )));
                 }
@@ -443,14 +523,9 @@ pub(crate) fn resolve_content(
                     Some(StyleValueData::Counter {
                         function,
                         counter_name,
-                        counter_style,
                         join_string,
-                    }) => accessible_text.extend(counters.resolve(
-                        *function,
-                        counter_name,
-                        counter_style.optional_data(),
-                        join_string,
-                    )),
+                        ..
+                    }) => accessible_text.extend(counters.resolve(*function, counter_name, join_string)),
                     _ => {}
                 }
             }
