@@ -1462,8 +1462,69 @@ pub(crate) fn principal_node_entry_decision(
 }
 
 struct DomTreeBuilderHost<'a> {
-    callbacks: &'a FfiDomTreeBuilderCallbacks,
+    callbacks: host_callbacks::TreeBuilderHostCallbacks<'a>,
     arena: *mut LayoutNodeArena,
+}
+
+/// The host callbacks a tree build owes calls to once its walk is over. The table is held behind
+/// fields nothing outside this module can read, and every call takes the main-thread capability,
+/// which the walk is never handed: a walk that tried to call into the host would not compile.
+mod host_callbacks {
+    use super::{FfiDomTreeBuilderCallbacks, FfiGeneratedContentItem, FfiPseudoElement, NodeSlotId};
+    use crate::stage::MainThread;
+
+    pub(super) struct TreeBuilderHostCallbacks<'a> {
+        table: &'a FfiDomTreeBuilderCallbacks,
+    }
+
+    impl<'a> TreeBuilderHostCallbacks<'a> {
+        pub(super) fn new(table: &'a FfiDomTreeBuilderCallbacks) -> Self {
+            Self { table }
+        }
+
+        /// # Safety
+        ///
+        /// `row` must be a live NodeWithStyle.
+        pub(super) unsafe fn attach_style_resources(
+            &self,
+            _: &MainThread,
+            row: NodeSlotId,
+            owns_content_replacement_image: bool,
+        ) {
+            super::super::tree_build_seal::note_host_call("attach_style_resources");
+            // SAFETY: The builder remains live for the entry's call, and the caller vouches for
+            // the row.
+            unsafe { (self.table.attach_style_resources)(self.table.builder, row, owns_content_replacement_image) };
+        }
+
+        /// # Safety
+        ///
+        /// `row` must be a live image box and `pseudo_element_box` the live box of the
+        /// pseudo-element whose generated content it is.
+        pub(super) unsafe fn attach_generated_image(
+            &self,
+            _: &MainThread,
+            row: NodeSlotId,
+            generator: u32,
+            pseudo_element: FfiPseudoElement,
+            item: FfiGeneratedContentItem,
+            pseudo_element_box: NodeSlotId,
+        ) {
+            super::super::tree_build_seal::note_host_call("attach_generated_image");
+            // SAFETY: The builder remains live for the entry's call, and the caller vouches for
+            // the rows.
+            unsafe {
+                (self.table.attach_generated_image)(
+                    self.table.builder,
+                    row,
+                    generator,
+                    pseudo_element,
+                    item,
+                    pseudo_element_box,
+                );
+            };
+        }
+    }
 }
 
 /// The raw form the walk carries an identity in: 0 for no node at all.
@@ -1636,7 +1697,7 @@ unsafe fn dom_tree_builder_host<'a>(
     assert!(!arena.is_null());
     // SAFETY: Each exported entry point requires the callback table to remain live for the duration of its call.
     DomTreeBuilderHost {
-        callbacks: unsafe { &*callbacks },
+        callbacks: host_callbacks::TreeBuilderHostCallbacks::new(unsafe { &*callbacks }),
         arena: arena.cast(),
     }
 }
@@ -2930,9 +2991,16 @@ pub struct FfiLayoutTreeBuildOutcome {
 
 /// Builds or incrementally updates a document's layout tree and applies table fixup.
 ///
+pub(crate) struct MainThreadFfiEntry {
+    _private: (),
+}
+
+const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
+
 /// # Safety
 ///
-/// The callback table, arena, and document must remain valid for the duration of the call.
+/// The callback table, arena, and document must remain valid for the duration of the call, which
+/// must be made on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_build_layout_tree(
     callbacks: *const FfiDomTreeBuilderCallbacks,
@@ -2941,8 +3009,76 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     document_style_node: u32,
 ) -> FfiLayoutTreeBuildOutcome {
     assert!(!document.is_null());
+    // SAFETY: The entry point's contract puts this call on the document thread.
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: Guaranteed by the entry point's contract.
     let host = unsafe { dom_tree_builder_host(callbacks, arena) };
+    let TreeBuildStageOutput { outcome, reports } = run_tree_build_stage(&host, document_style_node);
+
+    let layout_host = host.layout();
+    let arena = layout_host.arena();
+    // What the build found out goes to the document now that the walk is complete and nothing can
+    // clear a DOM update flag again, in the order the build found it out.
+    if !reports.is_empty() {
+        super::tree_build_seal::note_host_call("deliver_commit_messages");
+        // SAFETY: The document outlives the build, and no arena borrow is held here.
+        unsafe {
+            arena
+                .guarded_layout_host()
+                .deliver_commit_messages(&main_thread, &reports);
+        };
+    }
+    for (row, owed) in arena.take_rows_owed_to_host() {
+        match owed {
+            OwedToHost::Shell => {
+                arena.node_shell(row);
+            }
+            OwedToHost::StyleResources {
+                owns_content_replacement_image,
+            } => {
+                // SAFETY: The row is live, and every row a build owes style resources for is a
+                // NodeWithStyle.
+                unsafe {
+                    host.callbacks
+                        .attach_style_resources(&main_thread, row, owns_content_replacement_image);
+                };
+            }
+            OwedToHost::GeneratedImage {
+                generator,
+                pseudo_element,
+                item,
+                pseudo_element_box,
+            } => {
+                // SAFETY: The row is a live image box, and the pseudo-element box it was built in
+                // outlives it.
+                unsafe {
+                    host.callbacks.attach_generated_image(
+                        &main_thread,
+                        row,
+                        generator.raw(),
+                        pseudo_element,
+                        item,
+                        pseudo_element_box,
+                    );
+                };
+            }
+        }
+    }
+    outcome
+}
+
+/// What the tree build stage hands its entry: the outcome the entry answers with, and what the
+/// build found out for the document, in the order it found it out.
+struct TreeBuildStageOutput {
+    outcome: FfiLayoutTreeBuildOutcome,
+    reports: Vec<crate::layout::commit::FfiCommitMessage>,
+}
+
+/// The layout tree build stage: the walk that turns the style mirror's flat tree into layout
+/// rows. It reads the mirror and the arena, and it is not handed the main-thread capability, so
+/// nothing it calls can reach the host; what it owes the host it queues on the arena for its
+/// entry to pay once it returns.
+fn run_tree_build_stage(host: &DomTreeBuilderHost<'_>, document_style_node: u32) -> TreeBuildStageOutput {
     super::tree_build_seal::begin_build();
     let mut state = TreeBuilderState::default();
     let mut context = TreeBuilderContext {
@@ -2954,7 +3090,7 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     let document_had_layout_node = !host.layout().arena().layout_root().is_invalid();
 
     update_layout_tree_from(
-        &host,
+        host,
         &mut state,
         document_style_node,
         &mut context,
@@ -3021,17 +3157,6 @@ pub unsafe extern "C" fn rust_build_layout_tree(
         });
     }
 
-    // What the build found out goes to the document now that the walk is complete and nothing can
-    // clear a DOM update flag again, in the order the build found it out.
-    if !state.reports.is_empty() {
-        let layout_host = host.layout().arena().layout_host();
-        super::tree_build_seal::note_host_call("deliver_commit_messages");
-        // SAFETY: The document outlives the build, and no arena borrow is held here.
-        unsafe {
-            (layout_host.deliver_commit_messages)(layout_host.context, state.reports.as_ptr(), state.reports.len());
-        }
-    }
-
     if rebuilt_subtrees_were_updated_individually {
         let layout_host = host.layout();
         let attached_roots = layout_host
@@ -3072,51 +3197,14 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     arena.release_published_document_style();
 
     super::tree_build_seal::end_build();
-    for (row, owed) in arena.take_rows_owed_to_host() {
-        match owed {
-            OwedToHost::Shell => {
-                arena.node_shell(row);
-            }
-            OwedToHost::StyleResources {
-                owns_content_replacement_image,
-            } => {
-                super::tree_build_seal::note_host_call("attach_style_resources");
-                // SAFETY: The builder remains live, and the row is a live NodeWithStyle.
-                unsafe {
-                    (host.callbacks.attach_style_resources)(
-                        host.callbacks.builder,
-                        row,
-                        owns_content_replacement_image,
-                    );
-                };
-            }
-            OwedToHost::GeneratedImage {
-                generator,
-                pseudo_element,
-                item,
-                pseudo_element_box,
-            } => {
-                super::tree_build_seal::note_host_call("attach_generated_image");
-                // SAFETY: The builder remains live, and the row is a live image box whose
-                // pseudo-element box is live too.
-                unsafe {
-                    (host.callbacks.attach_generated_image)(
-                        host.callbacks.builder,
-                        row,
-                        generator.raw(),
-                        pseudo_element,
-                        item,
-                        pseudo_element_box,
-                    );
-                };
-            }
-        }
-    }
-    FfiLayoutTreeBuildOutcome {
-        viewport,
-        rebuilt_subtree_root_count,
-        layout_tree_update_escaped_rebuild_roots: state.layout_tree_update_escaped_rebuild_roots,
-        needs_another_build_pass: !state.layout_tree_rebuild_requests.is_empty(),
+    TreeBuildStageOutput {
+        outcome: FfiLayoutTreeBuildOutcome {
+            viewport,
+            rebuilt_subtree_root_count,
+            layout_tree_update_escaped_rebuild_roots: state.layout_tree_update_escaped_rebuild_roots,
+            needs_another_build_pass: !state.layout_tree_rebuild_requests.is_empty(),
+        },
+        reports: state.reports,
     }
 }
 
