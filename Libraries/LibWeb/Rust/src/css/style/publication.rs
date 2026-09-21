@@ -2094,6 +2094,37 @@ impl RetainedState {
         root_inputs.apply_to(inputs);
     }
 
+    pub(crate) fn prepare_root_font_metrics_from_legacy(
+        &mut self,
+        node: StyleNodeID,
+        table: &ComputedLonghandTable,
+        font: &crate::css::table_group_builder::FfiFontGroupBuildInputs,
+    ) {
+        // Descendants in the same preorder batch resolve root-relative lengths before the host
+        // installs this row. Publish the finalized row's exact font inputs at finalization time.
+        if self.computed_group_sets.adjustment_facts(node) & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT == 0 {
+            return;
+        }
+        let Some(inputs) = self.document_style_computation_inputs.as_mut() else {
+            return;
+        };
+        RootFontInputs {
+            metrics: [
+                crate::css::css_pixels::CssPixels::from_raw(font.font_size_raw)
+                    .to_double()
+                    .to_bits(),
+                f64::from(font.font_x_height).to_bits(),
+                f64::from(font.font_ascent).to_bits(),
+                f64::from(font.font_zero_advance).to_bits(),
+                crate::css::css_pixels::CssPixels::from_raw(font.line_height_used_raw)
+                    .to_double()
+                    .to_bits(),
+            ],
+            depends_on_viewport: table.publication_dependency_flags() & (1 << 1) != 0,
+        }
+        .apply_to(inputs);
+    }
+
     fn element_drive_subject(&mut self, node: StyleNodeID, counters: &mut Counters) -> Option<DriveSubject> {
         let facts = self.computed_group_sets.adjustment_facts(node);
         let parent = self.tree.flat_tree_parent(node);
@@ -3098,6 +3129,10 @@ impl RetainedState {
             metadata_input,
             owned,
         );
+        // A finalized legacy row has already published the root inputs its table produced. Host
+        // publication installs the same table later and must not become a second producer.
+        let root_font_inputs_were_prepared_from_retained_row =
+            target.is_some_and(|target| is_base_record && self.legacy_finalized_longhand_rows.contains_key(&target));
         if is_base_record
             && let Some(target) = target
             && let Some((table_matches, was_host_published)) =
@@ -3126,6 +3161,7 @@ impl RetainedState {
         }
         if let Some(target) = target
             && !target.is_pseudo()
+            && !root_font_inputs_were_prepared_from_retained_row
             && self.computed_group_sets.adjustment_facts(target.node())
                 & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT
                 != 0
