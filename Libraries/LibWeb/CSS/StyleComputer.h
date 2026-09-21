@@ -360,7 +360,9 @@ private:
     [[nodiscard]] NonnullRefPtr<CascadedProperties> compute_cascaded_values(DOM::AbstractElement, CascadeInput const&, IncludeInlineStyle, StyleSharingCandidate* sharing = nullptr, Vector<StyleProperty> const* precomputed_presentational_hints = nullptr, u8* substitution_usage = nullptr) const;
     void collect_animation_effects_into(DOM::AbstractElement, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>, ComputedStyleWorkingSet&, ComputedValuesFFI::FfiAnimationLengthContexts const*) const;
     NonnullRefPtr<StyleValue const> compute_animated_custom_property_value(Utf16FlyString const& name, NonnullRefPtr<StyleValue const> specified_value, ComputedStyleWorkingSet&, DOM::AbstractElement) const;
-    void publish_animated_custom_properties(ComputedStyleWorkingSet&, DOM::AbstractElement) const;
+    // Says whether publishing moved the element's custom-property environment. An element whose
+    // animations settle on the values it already holds is left alone.
+    bool publish_animated_custom_properties(ComputedStyleWorkingSet&, DOM::AbstractElement) const;
     void invalidate_animated_custom_property_readers(DOM::AbstractElement, OrderedHashMap<Utf16FlyString, NonnullRefPtr<StyleValue const>> const& animated_values) const;
     // `did_write_main_side_state`, when given, is set where this reaches past the element's own
     // working set: a recorded stabilization baseline, a provisional state, a started transition.
