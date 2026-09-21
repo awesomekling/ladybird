@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use crate::cow_column::{ColumnSnapshot, CowColumn};
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeSlotId};
 use crate::layout::{fragment_tree, used_values};
@@ -31,6 +32,29 @@ mod tests {
     #[cfg(target_pointer_width = "64")]
     fn committed_geometry_validity_fits_in_the_link_slots_existing_padding() {
         assert_eq!(std::mem::size_of::<CommittedFragmentLinkSlot>(), 16);
+    }
+
+    #[test]
+    fn committed_rows_keep_what_was_published_until_the_main_side_reads_them() {
+        use crate::css::css_pixels::CssPixels;
+
+        let mut arena = LayoutNodeArena::new();
+        let node = arena.allocate_for_test().slot;
+        arena.populate_paintable_row(node);
+        arena.paintable_rows_mut().paintable_data_mut(node).offset.x = CssPixels::from_integer(10);
+        arena.publish_paintable_rows();
+        arena.paintable_rows_mut().paintable_data_mut(node).offset.x = CssPixels::from_integer(20);
+
+        let published = arena.paintable_rows.published_rows.clone().unwrap();
+        let published_offset = |rows: &ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>| {
+            rows.get(node.slot_index() as usize).unwrap().offset.x
+        };
+        assert_eq!(published_offset(&published), CssPixels::from_integer(10).into());
+        assert_eq!(
+            arena.committed_paintable_rows().paintable_data(node).offset.x,
+            CssPixels::from_integer(20).into()
+        );
+        assert_eq!(published_offset(&published), CssPixels::from_integer(10).into());
     }
 
     #[test]
@@ -151,24 +175,6 @@ mod tests {
     }
 }
 
-#[repr(align(64))]
-struct PaintableRowChunk {
-    slots: [PaintableData; PAINTABLE_SLOTS_PER_CHUNK],
-}
-
-fn new_chunk() -> Box<PaintableRowChunk> {
-    // SAFETY: Every slot is written with PaintableData::default() before the chunk is exposed;
-    // the chunk is built in place on the heap because it is too large for the stack.
-    unsafe {
-        let mut chunk = Box::<PaintableRowChunk>::new_uninit();
-        let slots = &raw mut (*chunk.as_mut_ptr()).slots;
-        for offset in 0..PAINTABLE_SLOTS_PER_CHUNK {
-            (&raw mut (*slots)[offset]).write(PaintableData::default());
-        }
-        chunk.assume_init()
-    }
-}
-
 pub(crate) type ChromeStateCallback = (
     *mut c_void,
     unsafe extern "C" fn(*mut c_void, NodeSlotId, PaintableRowResetKind),
@@ -253,7 +259,13 @@ struct CommittedFragmentLinkSlot {
 
 #[derive(Default)]
 pub(crate) struct PaintableRowStore {
-    chunks: Vec<Box<PaintableRowChunk>>,
+    rows: CowColumn<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>,
+    /// The rows as last published, for the main side to read, sharing unchanged chunks with
+    /// `rows`. The layout commit and the visual context update release it when they start, since
+    /// nothing reads it while they run and releasing it lets them write chunks in place, and
+    /// publish again when they are done. A row a main-side writer changes is published when the
+    /// main side next reads the rows.
+    published_rows: Option<ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>>,
     side_data: RefCell<Vec<PaintableSideData>>,
     row_reset_versions: Vec<u64>,
     pub(crate) row_paint_states: RefCell<Vec<RowPaintState>>,
@@ -325,14 +337,12 @@ where
 {
     pub(crate) fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
         assert!(!id.is_invalid(), "invalid paintable arena slot ID");
-        let index = id.slot_index() as usize;
-        let chunk = self
+        let data = self
             .arena
             .paintable_rows
-            .chunks
-            .get(index / PAINTABLE_SLOTS_PER_CHUNK)
+            .rows
+            .get(id.slot_index() as usize)
             .expect("invalid paintable arena slot ID");
-        let data = &chunk.slots[index % PAINTABLE_SLOTS_PER_CHUNK];
         assert_eq!(
             data.slot_generation,
             id.generation(),
@@ -349,12 +359,10 @@ where
         if id.is_invalid() {
             return false;
         }
-        let index = id.slot_index() as usize;
-        let Some(chunk) = self.arena.paintable_rows.chunks.get(index / PAINTABLE_SLOTS_PER_CHUNK) else {
+        let Some(data) = self.arena.paintable_rows.rows.get(id.slot_index() as usize) else {
             return false;
         };
-        let generation = chunk.slots[index % PAINTABLE_SLOTS_PER_CHUNK].slot_generation;
-        generation != 0 && generation == id.generation()
+        data.slot_generation != 0 && data.slot_generation == id.generation()
     }
 
     /// Identifies the version of the physical row slot. Unlike `NodeSlotId::generation()`, this
@@ -453,14 +461,12 @@ where
 {
     pub(crate) fn paintable_data_mut(&mut self, id: NodeSlotId) -> &mut PaintableData {
         assert!(!id.is_invalid(), "invalid paintable arena slot ID");
-        let index = id.slot_index() as usize;
-        let chunk = self
+        let data = self
             .arena
             .paintable_rows
-            .chunks
-            .get_mut(index / PAINTABLE_SLOTS_PER_CHUNK)
+            .rows
+            .get_mut(id.slot_index() as usize)
             .expect("invalid paintable arena slot ID");
-        let data = &mut chunk.slots[index % PAINTABLE_SLOTS_PER_CHUNK];
         assert_eq!(
             data.slot_generation,
             id.generation(),
@@ -484,6 +490,56 @@ where
             .set(false);
         // The row's damage is deliberately kept; the commit diff pushes what actually changed.
         self.arena.paintable_side_data_mut(id).clear_committed_records();
+    }
+}
+
+/// The paintable rows as last published, for the main side. What is not a row is read from the
+/// arena.
+pub(crate) struct CommittedPaintableRows<'a> {
+    arena: &'a LayoutNodeArena,
+}
+
+impl Deref for CommittedPaintableRows<'_> {
+    type Target = LayoutNodeArena;
+
+    fn deref(&self) -> &Self::Target {
+        self.arena
+    }
+}
+
+impl CommittedPaintableRows<'_> {
+    fn published_rows(&self) -> &ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK> {
+        self.arena
+            .paintable_rows
+            .published_rows
+            .as_ref()
+            .expect("committed rows are published before they are read")
+    }
+}
+
+impl PaintableRowsRead for CommittedPaintableRows<'_> {
+    fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
+        assert!(!id.is_invalid(), "invalid paintable arena slot ID");
+        let data = self
+            .published_rows()
+            .get(id.slot_index() as usize)
+            .expect("invalid paintable arena slot ID");
+        assert_eq!(
+            data.slot_generation,
+            id.generation(),
+            "paintable arena read a stale or unused slot"
+        );
+        data
+    }
+
+    fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool {
+        if id.is_invalid() {
+            return false;
+        }
+        let Some(data) = self.published_rows().get(id.slot_index() as usize) else {
+            return false;
+        };
+        data.slot_generation != 0 && data.slot_generation == id.generation()
     }
 }
 
@@ -829,16 +885,12 @@ impl LayoutNodeArena {
         {
             let store = &mut self.paintable_rows;
             let index = layout_node.slot_index() as usize;
-            let chunks = &mut store.chunks;
             let mut side_data = store.side_data.borrow_mut();
             let mut row_paint_states = store.row_paint_states.borrow_mut();
             let mut absolute_rect_memo = store.absolute_rect_memo.borrow_mut();
             let mut visual_context_records = store.visual_context_records.borrow_mut();
             let mut stacking_context_entries = store.stacking_context_entries.borrow_mut();
             while side_data.len() <= index {
-                if side_data.len().is_multiple_of(PAINTABLE_SLOTS_PER_CHUNK) {
-                    chunks.push(new_chunk());
-                }
                 side_data.push(PaintableSideData::default());
                 store.row_reset_versions.push(0);
                 row_paint_states.push(RowPaintState::default());
@@ -847,7 +899,8 @@ impl LayoutNodeArena {
                 stacking_context_entries.push(None);
             }
 
-            chunks[index / PAINTABLE_SLOTS_PER_CHUNK].slots[index % PAINTABLE_SLOTS_PER_CHUNK] = PaintableData {
+            store.rows.grow_to(side_data.len());
+            *store.rows.get_mut(index).expect("the row was just grown") = PaintableData {
                 slot_generation: layout_node.generation(),
                 ..PaintableData::default()
             };
@@ -900,8 +953,7 @@ impl LayoutNodeArena {
         self.clear_absolute_rect_memo();
         let store = &mut self.paintable_rows;
         let index = id.slot_index() as usize;
-        store.chunks[index / PAINTABLE_SLOTS_PER_CHUNK].slots[index % PAINTABLE_SLOTS_PER_CHUNK] =
-            PaintableData::default();
+        *store.rows.get_mut(index).expect("invalid paintable arena slot ID") = PaintableData::default();
         store.side_data.borrow_mut()[index] = PaintableSideData::default();
         store.row_paint_states.borrow()[index].clear();
         store.visual_context_records.borrow_mut()[index] = None;
@@ -1088,13 +1140,32 @@ impl LayoutNodeArena {
         self.paintable_rows().paintable_row_is_populated(id)
     }
 
+    /// Lets a writer that runs while nothing reads the published rows write their chunks in place.
+    pub(crate) fn release_published_paintable_rows(&mut self) {
+        self.paintable_rows.published_rows = None;
+    }
+
+    /// Hands the main side the rows as they are now, if a writer changed them since they were last
+    /// handed over.
+    pub(crate) fn publish_paintable_rows(&mut self) {
+        let store = &mut self.paintable_rows;
+        if store.published_rows.is_none() || store.rows.written_since_publish() {
+            store.published_rows = Some(store.rows.publish());
+        }
+    }
+
+    /// The paintable rows as last published. Rows a main-side writer changed since are published
+    /// first: that writer has finished, since the main side reads between writes.
+    pub(crate) fn committed_paintable_rows(&mut self) -> CommittedPaintableRows<'_> {
+        self.publish_paintable_rows();
+        CommittedPaintableRows { arena: self }
+    }
+
     fn paintable_data_by_index(&self, index: u32) -> &PaintableData {
-        let chunk = self
-            .paintable_rows
-            .chunks
-            .get(index as usize / PAINTABLE_SLOTS_PER_CHUNK)
-            .expect("invalid paintable arena slot index");
-        &chunk.slots[index as usize % PAINTABLE_SLOTS_PER_CHUNK]
+        self.paintable_rows
+            .rows
+            .get(index as usize)
+            .expect("invalid paintable arena slot index")
     }
 
     pub(crate) fn transfer_fragments_to_replacement_node(

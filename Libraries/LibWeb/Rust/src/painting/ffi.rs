@@ -532,8 +532,8 @@ pub struct FfiBoxModelMetrics {
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_paintable_content_size(arena: *mut c_void, slot: NodeSlotId) -> FfiCssPixelSize {
-    let arena = unsafe { arena_from_handle(arena) };
-    let paintable_rows = arena.paintable_rows();
+    let arena = unsafe { arena_from_handle_mut(arena) };
+    let paintable_rows = arena.committed_paintable_rows();
     if !paintable_rows.paintable_row_is_populated(slot) {
         return FfiCssPixelSize::default();
     }
@@ -608,8 +608,8 @@ pub unsafe extern "C" fn layout_arena_paintable_transform_reference_box(
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_paintable_box_model(arena: *mut c_void, slot: NodeSlotId) -> FfiBoxModelMetrics {
-    let arena = unsafe { arena_from_handle(arena) };
-    if !arena.paintable_row_is_populated(slot) {
+    let arena = unsafe { arena_from_handle_mut(arena) };
+    if !arena.committed_paintable_rows().paintable_row_is_populated(slot) {
         return FfiBoxModelMetrics::default();
     }
     FfiBoxModelMetrics {
@@ -637,8 +637,8 @@ pub unsafe extern "C" fn layout_arena_paintable_is_positioned(arena: *mut c_void
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_paintable_absolute_rect(arena: *mut c_void, slot: NodeSlotId) -> FfiCssPixelRect {
-    let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::paintable_geometry::absolute_rect_or_default(&arena.paintable_rows(), slot).into()
+    let arena = unsafe { arena_from_handle_mut(arena) };
+    crate::painting::paintable_geometry::absolute_rect_or_default(&arena.committed_paintable_rows(), slot).into()
 }
 
 /// # Safety
@@ -649,8 +649,8 @@ pub unsafe extern "C" fn layout_arena_paintable_absolute_padding_box_rect(
     arena: *mut c_void,
     slot: NodeSlotId,
 ) -> FfiCssPixelRect {
-    let arena = unsafe { arena_from_handle(arena) };
-    let paintable_rows = arena.paintable_rows();
+    let arena = unsafe { arena_from_handle_mut(arena) };
+    let paintable_rows = arena.committed_paintable_rows();
     if !paintable_rows.paintable_row_is_populated(slot) {
         return FfiCssPixelRect::default();
     }
@@ -665,8 +665,8 @@ pub unsafe extern "C" fn layout_arena_paintable_absolute_border_box_rect(
     arena: *mut c_void,
     slot: NodeSlotId,
 ) -> FfiCssPixelRect {
-    let arena = unsafe { arena_from_handle(arena) };
-    let paintable_rows = arena.paintable_rows();
+    let arena = unsafe { arena_from_handle_mut(arena) };
+    let paintable_rows = arena.committed_paintable_rows();
     if !paintable_rows.paintable_row_is_populated(slot) {
         return FfiCssPixelRect::default();
     }
@@ -932,6 +932,8 @@ pub unsafe extern "C" fn layout_arena_update_accumulated_visual_contexts(
     if !arena_ref.paintable_row_is_populated(viewport) {
         return crate::painting::host::FfiVisualContextUpdateOutcome::default();
     }
+    unsafe { arena_from_handle_mut(arena) }.release_published_paintable_rows();
+    let arena_ref = unsafe { arena_from_handle(arena) };
     let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
     let inputs = arena_ref.visual_context_tree_inputs();
     let mut state = std::mem::take(&mut arena_ref.paint_state().borrow_mut().visual_context);
@@ -985,6 +987,7 @@ pub unsafe extern "C" fn layout_arena_update_accumulated_visual_contexts(
                 state.last_tree_inputs = Some(inputs);
                 let structural_epoch = state.structural_epoch();
                 arena_mut.paint_state().borrow_mut().visual_context = state;
+                arena_mut.publish_paintable_rows();
                 return crate::painting::host::FfiVisualContextUpdateOutcome {
                     performed_full_build,
                     structural_epoch_changed,
@@ -1007,6 +1010,7 @@ pub unsafe extern "C" fn layout_arena_update_accumulated_visual_contexts(
     state.last_tree_inputs = Some(inputs);
     let arena_ref = unsafe { arena_from_handle_inside_render_pass(arena) };
     arena_ref.paint_state().borrow_mut().visual_context = state;
+    unsafe { arena_from_handle_mut(arena) }.publish_paintable_rows();
     outcome
 }
 
