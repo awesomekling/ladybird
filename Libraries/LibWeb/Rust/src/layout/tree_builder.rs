@@ -3071,6 +3071,7 @@ pub unsafe extern "C" fn rust_build_layout_tree(
     }
 
     super::tree_build_seal::end_build();
+    arena.materialize_deferred_shells();
     FfiLayoutTreeBuildOutcome {
         viewport,
         rebuilt_subtree_root_count,
@@ -3519,7 +3520,7 @@ fn stamp_nested_list_marker_row(
     layout_host
         .arena()
         .set_node_flag(slot, NodeFlag::ListMarkerIsInside, marker_position_is_inside);
-    assert!(!layout_host.arena().node_shell(slot).is_null());
+    layout_host.arena().defer_shell(slot);
     slot
 }
 
@@ -3545,9 +3546,7 @@ fn stamp_pseudo_element_box_row(
     layout_host
         .arena()
         .stamp_pseudo_element_row(slot, kind, generator, pseudo_kind);
-    // The box the host allocated existed before its display was adjusted and before it was told
-    // where its marker sits, so the row's shell does too.
-    assert!(!layout_host.arena().node_shell(slot).is_null());
+    layout_host.arena().defer_shell(slot);
     if decision == FfiPseudoElementDecision::Contents {
         layout_host.arena().update_layout_style(slot, |style| {
             style.set_display(FfiDisplay::outside_and_inside(
@@ -4103,7 +4102,7 @@ impl TreeBuilderHost {
         self.arena().stamp_anonymous_box(slot, node_kind, derived);
         self.arena().refresh_insets_use_anchor_functions_flag(slot);
         if node_kind == NodeKind::InlineNode {
-            assert!(!self.arena().node_shell(slot).is_null());
+            self.arena().defer_shell(slot);
         }
         UnplacedLayoutNode::new(slot)
     }
@@ -4132,6 +4131,8 @@ impl TreeBuilderHost {
             self.arena().set_constructed_row_dom_paint_facts(slot, dom_paint_facts);
         }
         self.arena().take_over_rows_of_bound_node(slot);
+        // The viewport's shell is what asks the style computer for the document's style, which
+        // the build reads before it is over.
         assert!(!self.arena().node_shell(slot).is_null());
         slot
     }
@@ -4184,14 +4185,14 @@ impl TreeBuilderHost {
             // SAFETY: No arena borrow survives the writes above.
             unsafe { &mut *self.arena }.set_raw_table_column_span(slot, spans.raw_column_span);
         }
-        assert!(!self.arena().node_shell(slot).is_null());
+        self.arena().defer_shell(slot);
         slot
     }
 
     fn create_dom_box(&self, kind: NodeKind, style_node: Option<StyleNodeID>) -> NodeSlotId {
         let slot = self.stamp_dom_box(kind, style_node);
         self.arena().take_over_rows_of_bound_node(slot);
-        assert!(!self.arena().node_shell(slot).is_null());
+        self.arena().defer_shell(slot);
         slot
     }
 
@@ -4908,10 +4909,10 @@ fn create_first_letter_boxes(host: &DomTreeBuilderHost<'_>, style_node: u32, tar
         let first_letter_slice_slot = layout_host.stamp_generated_text_box();
         (first_letter_slice_slot, remainder_slice_slot)
     };
-    // A text row renders what its shell enrolled for content sync, so every slice materialises
-    // one, as the rows the retired host path allocated did.
-    assert!(!layout_host.arena().node_shell(first_letter_slice_slot).is_null());
-    assert!(!layout_host.arena().node_shell(remainder_slice_slot).is_null());
+    // A text row renders what its shell enrolled for content sync, so every slice is owed one, as
+    // the rows the retired host path allocated were.
+    layout_host.arena().defer_shell(first_letter_slice_slot);
+    layout_host.arena().defer_shell(remainder_slice_slot);
     let first_letter_slice = layout_host.created(first_letter_slice_slot);
     let remainder_slice = layout_host.created(remainder_slice_slot);
 

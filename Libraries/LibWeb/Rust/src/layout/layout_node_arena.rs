@@ -730,6 +730,9 @@ pub(crate) struct LayoutNodeArena {
     pub(crate) boxes_needing_scrollable_overflow_recalculation: RefCell<Vec<NodeSlotId>>,
     pub(crate) needs_full_scrollable_overflow_recalculation: Cell<bool>,
     text_nodes_enrolled_for_content_sync: RefCell<HashSet<NodeSlotId>>,
+    /// The rows a running tree build stamped whose shells the host is owed once the build is over,
+    /// in the order the build stamped them.
+    rows_awaiting_shells: RefCell<Vec<NodeSlotId>>,
     nodes_enrolled_for_replaced_content_facts_sync: RefCell<Vec<NodeSlotId>>,
     /// What the running pass has to tell the document, waiting for the commit that delivers it.
     messages_reported_during_pass: RefCell<Vec<super::commit::FfiCommitMessage>>,
@@ -830,6 +833,7 @@ impl LayoutNodeArena {
             boxes_needing_scrollable_overflow_recalculation: RefCell::new(Vec::new()),
             needs_full_scrollable_overflow_recalculation: Cell::new(false),
             text_nodes_enrolled_for_content_sync: RefCell::new(HashSet::default()),
+            rows_awaiting_shells: RefCell::new(Vec::new()),
             nodes_enrolled_for_replaced_content_facts_sync: RefCell::new(Vec::new()),
             messages_reported_during_pass: RefCell::new(Vec::new()),
             layout_style_snapshots: Default::default(),
@@ -4819,6 +4823,23 @@ impl LayoutNodeArena {
 
     pub(crate) fn node_generated_for(&self, id: NodeSlotId) -> u8 {
         self.data(id).generated_for.get()
+    }
+
+    /// Owes the host `id`'s shell once the running build is over, so that the build itself only
+    /// stamps rows. A reader that asks for the shell before then materialises it on demand.
+    pub(crate) fn defer_shell(&self, id: NodeSlotId) {
+        self.rows_awaiting_shells.borrow_mut().push(id);
+    }
+
+    /// Materialises the shells the finished build deferred, in the order it stamped their rows.
+    /// A row the build freed again, such as whitespace table fixup removed, is owed nothing.
+    pub(crate) fn materialize_deferred_shells(&self) {
+        let rows = std::mem::take(&mut *self.rows_awaiting_shells.borrow_mut());
+        for row in rows {
+            if self.slot_is_live(row) {
+                self.node_shell(row);
+            }
+        }
     }
 
     pub(crate) fn node_shell(&self, id: NodeSlotId) -> *mut c_void {
