@@ -25,6 +25,12 @@ unsafe extern "C" {
     fn ladybird_layout_code_point_has_keep_all_line_break_class(code_point: u32) -> bool;
     fn ladybird_layout_code_point_has_combining_mark_line_break_class(code_point: u32) -> bool;
     fn ladybird_layout_code_point_has_emoji_property(code_point: u32) -> bool;
+    fn ladybird_layout_code_point_category_facts(code_point: u32) -> super::tree_builder::FfiCodePointCategoryFacts;
+}
+
+pub(crate) fn code_point_category_facts(code_point: u32) -> super::tree_builder::FfiCodePointCategoryFacts {
+    // SAFETY: This service classifies a scalar value without accessing layout.
+    unsafe { ladybird_layout_code_point_category_facts(code_point) }
 }
 
 #[derive(Clone, Debug, PartialEq)]
