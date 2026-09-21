@@ -6,7 +6,7 @@
 
 use super::LayoutNodeArena;
 use super::formatting_context::{FormattingContextType, LayoutMode, LayoutPurpose};
-use super::node_data::{NodeKind, NodeSlotId};
+use super::node_data::{NodeFlag, NodeKind, NodeSlotId};
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::fmt::Write;
@@ -108,6 +108,18 @@ fn owner_name(arena: &LayoutNodeArena, root: NodeSlotId, describe: DescribeNode)
     unsafe extern "C" fn append(sink: *mut c_void, bytes: *const u8, length: usize) {
         // SAFETY: describe receives this live vector and supplies bytes valid for this call.
         unsafe { &mut *sink.cast::<Vec<u8>>() }.extend_from_slice(unsafe { std::slice::from_raw_parts(bytes, length) });
+    }
+    // A row nothing has materialised a shell for is named from the row, the way its shell would
+    // describe itself, since materialising one would ask the document something mid-pass.
+    let data = arena.data(root);
+    if data.shell.get().is_null() {
+        let kind = data.kind.get();
+        if data.flags.get() & NodeFlag::Anonymous as u32 != 0 {
+            return format!("{kind:?}(anonymous)");
+        }
+        if kind == NodeKind::TextNode {
+            return format!("{kind:?}<#text>");
+        }
     }
     let mut bytes = Vec::<u8>::new();
     // SAFETY: the traced run holds the arena and its shells alive; describe copies
