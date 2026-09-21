@@ -45,6 +45,83 @@ impl<'arena> LayoutPass<'arena> {
         self.scratch
     }
 
+    pub(crate) fn intrinsic_block_size_cache_get(
+        &self,
+        data: &NodeData,
+        kind: IntrinsicSizeCacheKind,
+        key: IntrinsicSizeCacheKey,
+    ) -> Option<IntrinsicBlockSizeMeasurement> {
+        self.scratch
+            .intrinsic_size_caches
+            .intrinsic_block_size_cache_get(self.arena, data, kind, key)
+    }
+
+    pub(crate) fn intrinsic_block_size_cache_put(
+        &self,
+        data: &NodeData,
+        kind: IntrinsicSizeCacheKind,
+        key: IntrinsicSizeCacheKey,
+        value: IntrinsicBlockSizeMeasurement,
+    ) {
+        self.scratch
+            .intrinsic_size_caches
+            .intrinsic_block_size_cache_put(self.arena, data, kind, key, value);
+    }
+
+    pub(crate) fn intrinsic_inline_size_measurement_cache_get(
+        &self,
+        data: &NodeData,
+        kind: IntrinsicSizeCacheKind,
+        key: IntrinsicSizeCacheKey,
+    ) -> Option<IntrinsicInlineSizeMeasurement> {
+        self.scratch
+            .intrinsic_size_caches
+            .intrinsic_inline_size_measurement_cache_get(self.arena, data, kind, key)
+    }
+
+    pub(crate) fn intrinsic_inline_size_measurement_cache_put(
+        &self,
+        data: &NodeData,
+        kind: IntrinsicSizeCacheKind,
+        key: IntrinsicSizeCacheKey,
+        value: IntrinsicInlineSizeMeasurement,
+    ) {
+        self.scratch
+            .intrinsic_size_caches
+            .intrinsic_inline_size_measurement_cache_put(self.arena, data, kind, key, value);
+    }
+
+    pub(crate) fn intrinsic_inline_size_depends_on_block_size(
+        &self,
+        data: &NodeData,
+        compute: impl FnOnce() -> bool,
+    ) -> bool {
+        self.scratch
+            .intrinsic_size_caches
+            .intrinsic_inline_size_depends_on_block_size(self.arena, data, compute)
+    }
+
+    pub(crate) fn table_cell_measurement_cache_get(
+        &self,
+        data: &NodeData,
+        key: TableCellMeasurementKey,
+    ) -> Option<TableCellMeasurement> {
+        self.scratch
+            .intrinsic_size_caches
+            .table_cell_measurement_cache_get(self.arena, data, key)
+    }
+
+    pub(crate) fn table_cell_measurement_cache_put(
+        &self,
+        data: &NodeData,
+        key: TableCellMeasurementKey,
+        value: TableCellMeasurement,
+    ) {
+        self.scratch
+            .intrinsic_size_caches
+            .table_cell_measurement_cache_put(self.arena, data, key, value);
+    }
+
     pub(crate) fn node_data(&self, node: Node) -> &'arena NodeData {
         self.arena.assert_layout_read_is_in_scope(node);
         self.arena().data(node)
