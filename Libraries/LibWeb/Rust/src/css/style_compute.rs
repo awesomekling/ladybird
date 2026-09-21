@@ -746,6 +746,14 @@ pub struct FfiFontSizeRecascadeBatch {
     pub skipped_calculated_value: bool,
 }
 
+#[derive(Clone, Copy)]
+struct FontSizeRecascadeDocumentInputs {
+    root_font_size: f64,
+    root_font_metrics_depend_on_viewport_metrics: bool,
+    viewport_width: f64,
+    viewport_height: f64,
+}
+
 /// Drives the time-traveling font-size inheritance applied when the cascade
 /// ends up with `font-family: monospace` through as many ancestors as Rust can
 /// resolve without another DOM-dependent length context.
@@ -755,6 +763,7 @@ pub struct FfiFontSizeRecascadeBatch {
 /// Building it involves font work, so the caller does so lazily after a batch
 /// reports `NeedsLengthResolution` and resumes at the reported index.
 ///
+#[allow(clippy::too_many_arguments)]
 fn recascade_font_size_batch(
     value_count: usize,
     mut value_at: impl FnMut(usize) -> *const c_void,
@@ -762,6 +771,7 @@ fn recascade_font_size_batch(
     current_size_raw: i32,
     current_depends_on_viewport_metrics: bool,
     default_size_raw: i32,
+    document_inputs: FontSizeRecascadeDocumentInputs,
     length_resolution_context: *const FfiLengthResolutionContext,
 ) -> FfiFontSizeRecascadeBatch {
     assert!(start_index <= value_count);
@@ -816,6 +826,36 @@ fn recascade_font_size_batch(
                 continue;
             }
             StyleValueData::Length { value, unit } => {
+                let directly_resolved = match length_unit_kinds().get(*unit as usize) {
+                    Some(LengthUnitKind::Px) => Some((*value, false)),
+                    Some(LengthUnitKind::Absolute { px_per_unit }) => Some((*value * px_per_unit, false)),
+                    Some(LengthUnitKind::FontRelative {
+                        metric: FontMetricSelector::FontSize,
+                        root,
+                    }) => Some(if *root {
+                        (
+                            *value * document_inputs.root_font_size,
+                            document_inputs.root_font_metrics_depend_on_viewport_metrics,
+                        )
+                    } else {
+                        (*value * current_size.to_double(), depends_on_viewport_metrics)
+                    }),
+                    Some(LengthUnitKind::ViewportRelative { axis }) => {
+                        let basis = match axis {
+                            ViewportAxis::Width => document_inputs.viewport_width,
+                            ViewportAxis::Height => document_inputs.viewport_height,
+                            ViewportAxis::Min => document_inputs.viewport_width.min(document_inputs.viewport_height),
+                            ViewportAxis::Max => document_inputs.viewport_width.max(document_inputs.viewport_height),
+                        };
+                        Some((basis * *value / 100.0, true))
+                    }
+                    _ => None,
+                };
+                if let Some((px, resolved_viewport_relative_length)) = directly_resolved {
+                    current_size = CssPixels::nearest_value_for(px);
+                    depends_on_viewport_metrics = resolved_viewport_relative_length;
+                    continue;
+                }
                 let Some(length_resolution_context) = (index == start_index)
                     .then_some(supplied_length_resolution_context)
                     .flatten()
@@ -887,6 +927,7 @@ pub unsafe extern "C" fn rust_recascade_font_size_batch(
 ) -> FfiFontSizeRecascadeBatch {
     crate::css::ffi_stats::bump(crate::css::ffi_stats::FfiOp::NestedPropertyComputeEntry);
     let style_engine = unsafe { &*style_engine.cast::<crate::css::style::StyleEngine>() };
+    let document_inputs = style_engine.document_style_computation_inputs().unwrap_or_default();
     let style_records = crate::css::style::tree::StyleNodeID::from_raw(style_node)
         .map(|node| style_engine.retained_inheritance_ancestor_style_records(node, pseudo_kind))
         .unwrap_or_default();
@@ -906,6 +947,12 @@ pub unsafe extern "C" fn rust_recascade_font_size_batch(
         current_size_raw,
         current_depends_on_viewport_metrics,
         default_size_raw,
+        FontSizeRecascadeDocumentInputs {
+            root_font_size: document_inputs.root_font_size,
+            root_font_metrics_depend_on_viewport_metrics: document_inputs.root_font_metrics_depend_on_viewport_metrics,
+            viewport_width: document_inputs.viewport_width,
+            viewport_height: document_inputs.viewport_height,
+        },
         length_resolution_context,
     )
 }
@@ -8274,7 +8321,7 @@ mod tests {
     }
 
     #[test]
-    fn font_size_recascade_batches_until_length_context_is_needed() {
+    fn font_size_recascade_resolves_em_without_a_host_context() {
         let percentage = StyleValueData::Percentage { value: 200.0 };
         let em = StyleValueData::Length {
             value: 2.0,
@@ -8296,26 +8343,51 @@ mod tests {
             default_size.raw_value(),
             false,
             default_size.raw_value(),
+            FontSizeRecascadeDocumentInputs {
+                root_font_size: 16.0,
+                root_font_metrics_depend_on_viewport_metrics: false,
+                viewport_width: 800.0,
+                viewport_height: 600.0,
+            },
             std::ptr::null(),
         );
-        assert!(first_batch.status == FontSizeRecascadeStatus::NeedsLengthResolution);
-        assert_eq!(first_batch.next_index, 2);
+        assert!(first_batch.status == FontSizeRecascadeStatus::Complete);
+        assert_eq!(first_batch.next_index, values.len());
         assert_eq!(first_batch.current_size_raw, CssPixels::from_integer(26).raw_value());
+    }
 
-        let mut context = test_context();
-        context.font_metrics.font_size = 26.0;
-        let resumed_batch = recascade_font_size_batch(
+    #[test]
+    fn font_size_recascade_resolves_published_document_lengths() {
+        let rem = StyleValueData::Length {
+            value: 2.0,
+            unit: unit_code("rem") as u8,
+        };
+        let vw = StyleValueData::Length {
+            value: 10.0,
+            unit: unit_code("vw") as u8,
+        };
+        let values: [*const std::ffi::c_void; 2] = [
+            (&rem as *const StyleValueData).cast(),
+            (&vw as *const StyleValueData).cast(),
+        ];
+        let result = recascade_font_size_batch(
             values.len(),
             |index| values[index],
-            first_batch.next_index,
-            first_batch.current_size_raw,
-            first_batch.depends_on_viewport_metrics,
-            default_size.raw_value(),
-            &context,
+            0,
+            CssPixels::from_integer(13).raw_value(),
+            false,
+            CssPixels::from_integer(13).raw_value(),
+            FontSizeRecascadeDocumentInputs {
+                root_font_size: 20.0,
+                root_font_metrics_depend_on_viewport_metrics: false,
+                viewport_width: 800.0,
+                viewport_height: 600.0,
+            },
+            std::ptr::null(),
         );
-        assert!(resumed_batch.status == FontSizeRecascadeStatus::Complete);
-        assert_eq!(resumed_batch.next_index, values.len());
-        assert_eq!(resumed_batch.current_size_raw, CssPixels::from_integer(26).raw_value());
+        assert!(result.status == FontSizeRecascadeStatus::Complete);
+        assert_eq!(result.current_size_raw, CssPixels::from_integer(80).raw_value());
+        assert!(result.depends_on_viewport_metrics);
     }
 
     #[test]
