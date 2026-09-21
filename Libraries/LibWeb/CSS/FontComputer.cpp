@@ -73,9 +73,13 @@ void FontComputer::bump_environment_generation()
 {
     ++m_environment_generation;
     publish_font_faces();
+    // A style update holds the table it was given for its whole length, so a change made while one
+    // is running has to reach it here or the rest of that update resolves against a table the
+    // document has already left behind.
+    document().style_computer().style_engine().publish_font_faces();
 }
 
-void FontComputer::publish_font_faces()
+void const* FontComputer::build_font_face_snapshot() const
 {
     Vector<FontFaceSnapshotKey> keys;
     Vector<FontFaceSnapshotRecord> records;
@@ -109,8 +113,6 @@ void FontComputer::publish_font_faces()
                 flags |= FaceIsUnusable;
             if (face->has_non_default_unicode_range())
                 flags |= FaceHasNonDefaultUnicodeRange;
-            if (face->status() == FontFaceLoadStatus::Unloaded)
-                flags |= FaceIsUnloaded;
             records.append({
                 .face_id = face->id(),
                 // The snapshot takes its own reference; the typeface outlives any face that
@@ -136,7 +138,12 @@ void FontComputer::publish_font_faces()
         .range_count = ranges.size(),
         .generation = m_environment_generation,
     };
-    auto* published = rust_font_face_snapshot_build(&view);
+    return rust_font_face_snapshot_build(&view);
+}
+
+void FontComputer::publish_font_faces()
+{
+    auto* published = build_font_face_snapshot();
     rust_font_face_snapshot_release(m_published_font_faces);
     m_published_font_faces = published;
 }
@@ -642,12 +649,7 @@ void FontComputer::register_font_face(NonnullRefPtr<FontFaceState> face)
 {
     VERIFY(face->should_be_registered_with_font_computer());
 
-    FontFaceKey key {
-        .family_name = face->family_name(),
-        .weight = face->declared_weight_range(),
-        .slope = face->declared_slope(),
-        .width = face->declared_width(),
-    };
+    auto key = face->matching_key();
     auto& faces = m_font_faces.ensure(key);
     if (!faces.contains_slow(face))
         faces.append(face);
@@ -658,12 +660,7 @@ void FontComputer::unregister_font_face(NonnullRefPtr<FontFaceState> face)
 {
     VERIFY(face->should_be_registered_with_font_computer());
 
-    FontFaceKey key {
-        .family_name = face->family_name(),
-        .weight = face->declared_weight_range(),
-        .slope = face->declared_slope(),
-        .width = face->declared_width(),
-    };
+    auto key = face->matching_key();
     if (auto it = m_font_faces.find(key); it != m_font_faces.end()) {
         it->value.remove_all_matching([&](auto const& entry) { return entry == face; });
         if (it->value.is_empty())

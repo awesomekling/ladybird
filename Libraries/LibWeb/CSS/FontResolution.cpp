@@ -182,8 +182,10 @@ struct MatchingFontCandidate {
             // corresponding FontFace’s load() method described here.
             // NB: An unloaded face with no subsetting unicode-range starts loading once a style actually selects
             //     it, but the load itself mutates the face and the document. A resolution only leaves the face's
-            //     number behind; request_wanted_web_faces() performs the load afterwards.
-            if ((record.flags & FaceHasUrls) && !(record.flags & FaceHasNonDefaultUnicodeRange) && (record.flags & FaceIsUnloaded))
+            //     number behind; request_wanted_web_faces() performs the load afterwards, and skips a face that
+            //     is past "unloaded" already. The published table therefore says nothing about load status, which
+            //     is one fewer thing that has to bump the font-environment generation.
+            if ((record.flags & FaceHasUrls) && !(record.flags & FaceHasNonDefaultUnicodeRange))
                 note_wanted_web_face(record.face_id, WantedWebFace::Load);
             if (auto face_fonts = font_for_face(snapshot, record, point_size, variations, shape_features)) {
                 font_list->extend(*face_fonts);
@@ -343,16 +345,30 @@ static RefPtr<Gfx::FontCascadeList const> font_matching_algorithm(FontFaceSnapsh
 NonnullRefPtr<Gfx::FontCascadeList const> FontCascadeMemo::resolve(FontFaceSnapshotView const& snapshot, ComputedFontCacheKey const& key, FontFeatureValuesProvider const* font_feature_values_provider)
 {
     MutexLocker locker { m_mutex };
-    return m_cascades.ensure(key, [&] {
-        return resolve_font_cascade(snapshot, key.font_families.span(), key.font_size, key.font_slope, key.font_weight, key.font_width, key.font_optical_sizing, key.font_variation_settings, key.font_feature_data, font_feature_values_provider);
-    });
+    auto it = m_cascades.find(key);
+    if (it != m_cascades.end() && it->value.generation == snapshot.generation)
+        return it->value.font_list;
+
+    auto font_list = resolve_font_cascade(snapshot, key.font_families.span(), key.font_size, key.font_slope, key.font_weight, key.font_width, key.font_optical_sizing, key.font_variation_settings, key.font_feature_data, font_feature_values_provider);
+    if (it != m_cascades.end()) {
+        // OPTIMIZATION: An answer that a newer table did not change keeps its identity, so that
+        //               every element holding it keeps holding the same cascade.
+        if (font_list->equals(*it->value.font_list)) {
+            it->value.generation = snapshot.generation;
+            return it->value.font_list;
+        }
+        it->value = Entry { snapshot.generation, font_list };
+        return font_list;
+    }
+    m_cascades.set(key, Entry { snapshot.generation, font_list });
+    return font_list;
 }
 
 void FontCascadeMemo::take_matching(Function<bool(ComputedFontCacheKey const&, Gfx::FontCascadeList const&)> const& is_stale)
 {
     MutexLocker locker { m_mutex };
-    m_cascades.remove_all_matching([&](auto const& key, auto const& font_list) {
-        return is_stale(key, *font_list);
+    m_cascades.remove_all_matching([&](auto const& key, auto const& entry) {
+        return is_stale(key, *entry.font_list);
     });
 }
 

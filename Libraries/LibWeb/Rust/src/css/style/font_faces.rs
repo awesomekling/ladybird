@@ -57,8 +57,8 @@ pub struct FfiFontFaceRecord {
     pub pending_state: u8,
     /// Bit 0: the face has `src` urls, so a style selecting it can want it loaded. Bit 1: its
     /// `font-display` period failed or its load errored, so it contributes nothing. Bit 2: its
-    /// `unicode-range` is narrower than everything, so it is fetched on demand. Bit 3: its status
-    /// is still `unloaded`. NB: only the C++ resolver reads these; see `FontFaceSnapshotFlags`.
+    /// `unicode-range` is narrower than everything, so it is fetched on demand.
+    /// NB: only the C++ resolver reads these; see `FontFaceSnapshotFlags`.
     pub flags: u8,
     pub padding: [u8; 6],
 }

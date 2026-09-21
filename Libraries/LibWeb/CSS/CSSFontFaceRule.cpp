@@ -197,8 +197,18 @@ void CSSFontFaceRule::handle_descriptor_change(Utf16FlyString const& property)
     // any change made to a @font-face descriptor is immediately reflected in the corresponding FontFace attribute
     font_face->reparse_connected_css_font_face_rule_descriptors();
 
-    if (font_computer)
+    if (font_computer) {
         font_computer->register_font_face(*font_face);
+        return;
+    }
+
+    // A descriptor that leaves the face's matching key alone still changes what selecting it
+    // answers with - its unicode-range, or its font-display timeline - so the published
+    // @font-face table has to be rebuilt for it too.
+    if (!font_face->should_be_registered_with_font_computer())
+        return;
+    if (auto document = parent_style_sheet() ? parent_style_sheet()->owning_document() : nullptr)
+        document->font_computer().did_load_font(font_face->matching_key());
 }
 
 // https://drafts.csswg.org/css-font-loading/#font-face-css-connection

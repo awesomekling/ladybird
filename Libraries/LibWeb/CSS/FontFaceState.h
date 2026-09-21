@@ -108,6 +108,17 @@ public:
     [[nodiscard]] u64 id() const { return m_id; }
     [[nodiscard]] static RefPtr<FontFaceState> with_id(u64);
 
+    // The key the font computer files this face under, and matching selects it by.
+    [[nodiscard]] FontFaceKey matching_key() const
+    {
+        return {
+            .family_name = m_family,
+            .weight = m_cached_weight_range,
+            .slope = m_cached_slope,
+            .width = m_cached_width,
+        };
+    }
+
     FontWeightRange declared_weight_range() const { return m_cached_weight_range; }
     int declared_slope() const { return m_cached_slope; }
     int declared_width() const { return m_cached_width; }

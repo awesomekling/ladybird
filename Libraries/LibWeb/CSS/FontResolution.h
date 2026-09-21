@@ -45,7 +45,6 @@ enum FontFaceSnapshotFlags : u8 {
     FaceHasUrls = 1 << 0,
     FaceIsUnusable = 1 << 1,
     FaceHasNonDefaultUnicodeRange = 1 << 2,
-    FaceIsUnloaded = 1 << 3,
 };
 
 struct FontFaceSnapshotRange {
@@ -101,8 +100,16 @@ public:
 private:
     FontCascadeMemo() = default;
 
+    struct Entry {
+        // The font-environment generation of the table this answer came from. The published table
+        // an update resolves against can be older than the document's current one, so an answer
+        // has to name the table that produced it rather than stand for every later one.
+        u64 generation { 0 };
+        NonnullRefPtr<Gfx::FontCascadeList const> font_list;
+    };
+
     Mutex m_mutex;
-    HashMap<ComputedFontCacheKey, NonnullRefPtr<Gfx::FontCascadeList const>> m_cascades;
+    HashMap<ComputedFontCacheKey, Entry> m_cascades;
 };
 
 // Resolve a font cascade from the published table and the process-wide font services alone. This
