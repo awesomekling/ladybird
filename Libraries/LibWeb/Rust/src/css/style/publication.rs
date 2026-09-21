@@ -84,6 +84,11 @@ impl RetainedState {
         node: StyleNodeID,
         pseudo_kind: u8,
     ) -> Option<computed::FinalStyleRecordID> {
+        let parent = self.retained_inheritance_parent_node(node, pseudo_kind)?;
+        self.computed_group_sets.assigned_style_record(parent)
+    }
+
+    fn retained_inheritance_parent_node(&self, node: StyleNodeID, pseudo_kind: u8) -> Option<StyleNodeID> {
         let parent = if pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT {
             self.tree.inheritance_parent(node)?
         } else if (bridge::FIRST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND
@@ -91,7 +96,7 @@ impl RetainedState {
             .contains(&pseudo_kind)
         {
             let Some(shadow_root) = self.tree.shadow_root_of(node) else {
-                return self.computed_group_sets.assigned_style_record(node);
+                return Some(node);
             };
             let mut pending = self.tree.dom_children(shadow_root).collect::<Vec<_>>();
             let represented_element = loop {
@@ -110,7 +115,24 @@ impl RetainedState {
         } else {
             node
         };
-        self.computed_group_sets.assigned_style_record(parent)
+        Some(parent)
+    }
+
+    /// The retained style records, root first, whose raw cascaded font sizes participate in the
+    /// monospace font-size recascade for one element or pseudo-element.
+    pub(crate) fn retained_inheritance_ancestor_style_records(&self, node: StyleNodeID, pseudo_kind: u8) -> Vec<u64> {
+        let mut records = Vec::new();
+        let mut ancestor = self.retained_inheritance_parent_node(node, pseudo_kind);
+        while let Some(node) = ancestor {
+            records.push(
+                self.computed_group_sets
+                    .assigned_style_record(node)
+                    .map_or(0, computed::FinalStyleRecordID::raw),
+            );
+            ancestor = self.tree.inheritance_parent(node);
+        }
+        records.reverse();
+        records
     }
 
     fn shared_style_record_key(
@@ -4553,12 +4575,23 @@ mod tests {
             Some(parent_record)
         );
         assert_eq!(
+            engine.retained_inheritance_ancestor_style_records(child, u8::MAX),
+            [parent_record.raw()]
+        );
+        assert_eq!(
             engine.retained_inheritance_parent_style_record(child, 0),
             Some(child_record)
         );
         assert_eq!(
             engine.retained_inheritance_parent_style_record(host, bridge::FIRST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND,),
             Some(wrapper_record)
+        );
+        assert_eq!(
+            engine.retained_inheritance_ancestor_style_records(
+                host,
+                bridge::FIRST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND,
+            ),
+            [wrapper_record.raw()]
         );
         assert_eq!(engine.tree.flat_tree_parent(light_child), None);
         assert_eq!(
@@ -4572,6 +4605,10 @@ mod tests {
         assert_eq!(
             engine.retained_inheritance_parent_style_record(light_child, u8::MAX),
             Some(slot_record)
+        );
+        assert_eq!(
+            engine.retained_inheritance_ancestor_style_records(light_child, u8::MAX),
+            [slot_record.raw()]
         );
     }
 

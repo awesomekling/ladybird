@@ -877,8 +877,8 @@ fn recascade_font_size_batch(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_recascade_font_size_batch(
     style_engine: *const c_void,
-    style_records: *const u64,
-    style_record_count: usize,
+    style_node: u32,
+    pseudo_kind: u8,
     start_index: usize,
     current_size_raw: i32,
     current_depends_on_viewport_metrics: bool,
@@ -887,11 +887,9 @@ pub unsafe extern "C" fn rust_recascade_font_size_batch(
 ) -> FfiFontSizeRecascadeBatch {
     crate::css::ffi_stats::bump(crate::css::ffi_stats::FfiOp::NestedPropertyComputeEntry);
     let style_engine = unsafe { &*style_engine.cast::<crate::css::style::StyleEngine>() };
-    let style_records = if style_record_count == 0 {
-        &[]
-    } else {
-        unsafe { std::slice::from_raw_parts(style_records, style_record_count) }
-    };
+    let style_records = crate::css::style::tree::StyleNodeID::from_raw(style_node)
+        .map(|node| style_engine.retained_inheritance_ancestor_style_records(node, pseudo_kind))
+        .unwrap_or_default();
     recascade_font_size_batch(
         style_records.len(),
         |index| {
