@@ -855,6 +855,11 @@ pub struct RetainedState {
     /// parent results are deliberately absent: the preorder driver supplies those from retained
     /// result rows as it advances.
     frozen_longhand_inputs: HashMap<StyleNodeID, inputs::FrozenLonghandInputRow>,
+    /// The custom-property environment each element holds, kept so a row that inherits custom
+    /// properties is not the reason a walk to the element it inherits from happens. `None` records
+    /// an element holding none; a missing entry records an element the engine was never told
+    /// about, which the host still answers for itself.
+    element_custom_property_data: HashMap<StyleNodeID, Option<inputs::RetainedCustomPropertyData>>,
     /// Finalized legacy longhand rows produced earlier in the current direct-application batch.
     /// Descendants inherit from these stage results before the host projects them onto elements.
     legacy_finalized_longhand_rows: HashMap<computed::ComputedStyleTarget, LegacyFinalizedLonghandRow>,

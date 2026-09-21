@@ -5521,10 +5521,22 @@ void Element::replace_custom_property_data(Optional<CSS::PseudoElement> pseudo_e
     install_custom_property_data(pseudo_element, move(data));
 }
 
+// The style engine keeps what an element's custom-property environment is, so that a row inheriting
+// custom properties reads it from there instead of walking the flat tree to this element. This is
+// the only place the element's environment moves, so it is the only place that has to say so.
+void Element::publish_custom_property_data_to_style_engine() const
+{
+    auto style_node = style_node_id();
+    if (style_node == 0)
+        return;
+    const_cast<CSS::StyleEngine&>(document().style_computer().style_engine()).set_element_custom_property_data(style_node, m_custom_property_data.ptr());
+}
+
 void Element::install_custom_property_data(Optional<CSS::PseudoElement> pseudo_element, RefPtr<CSS::CustomPropertyData const> data)
 {
     if (!pseudo_element.has_value()) {
         m_custom_property_data = move(data);
+        publish_custom_property_data_to_style_engine();
         return;
     }
 
@@ -5581,12 +5593,14 @@ bool Element::refresh_inherited_custom_property_data()
         for (auto const& [name, property] : m_custom_property_data->own_values())
             animated_values.set(name, property);
         m_custom_property_data = CSS::CustomPropertyData::create_animation_overlay(move(animated_values), move(parent_data));
+        publish_custom_property_data_to_style_engine();
         return true;
     }
 
     if (m_custom_property_data == parent_data)
         return false;
     m_custom_property_data = move(parent_data);
+    publish_custom_property_data_to_style_engine();
     return true;
 }
 

@@ -6,6 +6,7 @@
 
 #include <AK/StdLibExtras.h>
 #include <AK/Time.h>
+#include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/RustDeclarationBlock.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineBridge.h>
@@ -278,6 +279,17 @@ void StyleEngine::freeze_longhand_inputs(ReadonlySpan<StyleNodeID> nodes)
 StyleEngineFFI::FfiFrozenLonghandInputRow StyleEngine::frozen_longhand_input(StyleNodeID node) const
 {
     return StyleEngineFFI::style_engine_frozen_longhand_input(m_impl, node.value());
+}
+
+void StyleEngine::set_element_custom_property_data(StyleNodeID node, CustomPropertyData const* data)
+{
+    StyleEngineFFI::style_engine_set_element_custom_property_data(
+        m_impl, node.value(), data, data ? data->rust_store() : nullptr);
+}
+
+StyleEngineFFI::FfiRetainedCustomPropertyData StyleEngine::retained_inheritance_custom_property_data(StyleNodeID node, u8 pseudo_kind) const
+{
+    return StyleEngineFFI::style_engine_retained_inheritance_custom_property_data(m_impl, node.value(), pseudo_kind);
 }
 
 void StyleEngine::decide_transitions(StyleRecordID before_style_record, void const* after_longhand_table, void const* after_animated_overlay, StyleValueFFI::FfiTransitionInput& input, StyleValueFFI::FfiTransitionAction* actions) const

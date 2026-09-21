@@ -146,3 +146,8 @@ private:
 };
 
 }
+
+// The style engine retains an element's custom-property environment so that a row inheriting from
+// that element does not have to walk to it.
+extern "C" WEB_API void web_css_custom_property_data_reference(void const*);
+extern "C" WEB_API void web_css_custom_property_data_unreference(void const*);

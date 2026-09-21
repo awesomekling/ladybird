@@ -507,6 +507,9 @@ public:
     void set_shadow_root(GC::Ptr<ShadowRoot>);
 
     void set_custom_property_data(Optional<CSS::PseudoElement>, RefPtr<CSS::CustomPropertyData const>);
+    // Tell the style engine what custom-property environment this element holds, so a row that
+    // inherits custom properties from it needs no walk to reach it.
+    void publish_custom_property_data_to_style_engine() const;
     void replace_custom_property_data(Optional<CSS::PseudoElement>, RefPtr<CSS::CustomPropertyData const>);
     [[nodiscard]] RefPtr<CSS::CustomPropertyData const> custom_property_data(Optional<CSS::PseudoElement>) const;
 

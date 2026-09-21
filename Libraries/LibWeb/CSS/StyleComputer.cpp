@@ -5947,16 +5947,30 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
 
         auto data = context.custom_property_data;
         if (data && data->declared_count() > 0) {
-            // OPTIMIZATION: Only a row that declares custom properties of its own reads the
-            //               element it inherits them from, so the tree walk that names it waits
-            //               until one does.
-            auto inheritance_parent = abstract_element.element_to_inherit_style_from();
-            state.used_host_custom_property_inheritance_walk = true;
-            bool shares_parent_data = inheritance_parent.has_value() && inheritable_custom_property_data(*inheritance_parent).ptr() == data.ptr();
+            // The environment the row inherits custom properties from is the one the element it
+            // inherits from holds, and the engine keeps that beside the node. Only a row the engine
+            // has no answer for walks the flat tree to the element and reads it off there.
+            RefPtr<CustomPropertyData const> inheritance_data;
+            auto retained_inheritance = abstract_element.has_inheritance_override()
+                ? StyleEngineFFI::FfiRetainedCustomPropertyData {}
+                : style_computer.style_engine().retained_inheritance_custom_property_data(
+                      abstract_element.element().style_node_id(), pseudo_element_to_ffi(abstract_element.pseudo_element()));
+            if (retained_inheritance.is_present) {
+                inheritance_data = static_cast<CustomPropertyData const*>(retained_inheritance.data);
+            } else {
+                auto inheritance_parent = abstract_element.element_to_inherit_style_from();
+                inheritance_data = inheritance_parent.has_value() ? inheritance_parent->custom_property_data() : nullptr;
+                state.used_host_custom_property_inheritance_walk = true;
+            }
+            void const* inheritance_custom_property_store = retained_inheritance.is_present
+                ? retained_inheritance.store
+                : inheritance_data ? inheritance_data->rust_store()
+                                   : nullptr;
+            auto parent_inheritable_data = inheritance_data ? inheritance_data->inheritable(style_computer.document()) : nullptr;
+            bool shares_parent_data = parent_inheritable_data.ptr() == data.ptr();
             if (!shares_parent_data) {
-                auto parent_data = inheritance_parent.has_value() ? inheritable_custom_property_data(*inheritance_parent) : nullptr;
+                auto parent_data = move(parent_inheritable_data);
                 state.custom_property_resolution = make<CustomPropertyResolutionState>(data.release_nonnull(), move(parent_data), bit_cast<FlatPtr>(&style_computer.document()), style_computer.document().custom_property_registration_generation());
-                auto inheritance_data = inheritance_parent.has_value() ? inheritance_parent->custom_property_data() : nullptr;
                 auto& resolution = *state.custom_property_resolution;
                 if (!custom_property_resolution_is_callback_free)
                     resolution.host_adapter = make<CustomPropertyResolutionState::HostAdapter>(abstract_element);
@@ -5968,7 +5982,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                     .animated_custom_property_store = nullptr,
                     .animated_custom_property_base_store = nullptr,
                     .inheritance_custom_property_store = resolution.host_adapter
-                        ? inheritance_data ? inheritance_data->rust_store() : nullptr
+                        ? inheritance_custom_property_store
                         : resolution.parent_data    ? resolution.parent_data->rust_store()
                         : resolution.data->parent() ? resolution.data->parent()->rust_store()
                                                     : nullptr,
