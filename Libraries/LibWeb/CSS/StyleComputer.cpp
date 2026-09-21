@@ -6220,6 +6220,16 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         }
         publish_animated_custom_properties(computed_style, abstract_element);
     }
+    if (finalization_result.applies_animation_plan_after_return) {
+        // The stage sampled the one animation this computation starts without the host creating it
+        // first, so creating it - the GC object, its association with the element, its place in the
+        // global animation list, the events that follow - is a main-side effect of the computation
+        // rather than something a callback did while the stage ran. It is applied here, as soon as
+        // the computation returns, so that everything downstream still runs in the order it did.
+        // FIXME: This belongs in the ordered table of per-row results the stage is growing, applied
+        //        with the rest of a whole update's effects rather than one row at a time.
+        apply_animation_definitions(abstract_element, native_context.state->animation_definitions.span(), native_context.state->animation_definition_matches.span(), native_context.state->animation_definition_keyframe_sets.span(), false);
+    }
     finish_properties(&native_context, finalization_result.parent_style_in_display_none_subtree);
     return native_context.state->working_set;
 }

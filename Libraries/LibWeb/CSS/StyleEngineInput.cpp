@@ -1235,6 +1235,13 @@ static constexpr u32 published_effect_flag_not_covered = 1u << 1;
 static constexpr u32 published_effect_flag_has_resource_context = 1u << 2;
 static constexpr u32 published_effect_flag_resource_context_is_origin_clean = 1u << 3;
 
+// The two holes a `@keyframes` description published before any animation runs it keeps: a keyframe
+// with no easing of its own runs the animation's `animation-timing-function`, and one that says
+// `composite: auto` composites the way its effect does. Both are per-animation, so the stage fills
+// them in from the definition it computed. Mirrored in `Rust/src/css/style/animations.rs`.
+static constexpr u8 published_keyframe_easing_kind_from_animation = 3;
+static constexpr u8 published_keyframe_composite_from_animation = 0xff;
+
 // One effect's easing, spelled out for publication. A published `linear()` keeps its control points
 // in the shared buffer the keyframe names by range.
 static void describe_easing(EasingFunction const& easing, StyleEngineFFI::FfiPublishedAnimationKeyframe& keyframe, Vector<StyleEngineFFI::FfiPublishedLinearEasingPoint>& points)
@@ -1261,6 +1268,148 @@ static void describe_easing(EasingFunction const& easing, StyleEngineFFI::FfiPub
     keyframe.linear_point_count = static_cast<u32>(points.size()) - keyframe.first_linear_point;
 }
 
+// The buffers one keyframe set's description is appended to, and what came of appending it.
+struct KeyframeSetDescription {
+    Vector<StyleEngineFFI::FfiPublishedAnimationKeyframe>& keyframes;
+    Vector<StyleEngineFFI::FfiPublishedAnimationDeclaration>& declarations;
+    Vector<StyleEngineFFI::FfiPublishedLinearEasingPoint>& points;
+    Vector<u8>& base_url_bytes;
+};
+
+// Describe one resolved keyframe set into the flat buffers the style stage reads it from, and say
+// what the description could not cover.
+//
+// `default_easing` and `effect_composite` are what the animation running the set contributes: a
+// keyframe that declares no easing of its own runs the animation's, and one that says
+// `composite: auto` composites the way its effect does. Where they are empty - the per-scope table,
+// which describes a `@keyframes` rule before any animation runs it - the keyframe keeps the hole and
+// the stage fills it in from the definition it computed.
+static u32 describe_keyframe_set(Animations::KeyframeEffect::KeyFrameSet const& key_frame_set, Optional<EasingFunction> const& default_easing, Optional<Bindings::CompositeOperation> effect_composite, KeyframeSetDescription description, StyleEngineFFI::FfiPublishedAnimationEffect& row)
+{
+    u32 flags = 0;
+    row.base_url_offset = static_cast<u32>(description.base_url_bytes.size());
+    row.base_url_length = 0;
+    row.first_keyframe = static_cast<u32>(description.keyframes.size());
+    if (key_frame_set.style_sheet_resource_context.has_value()) {
+        flags |= published_effect_flag_has_resource_context;
+        if (key_frame_set.style_sheet_resource_context->origin_clean)
+            flags |= published_effect_flag_resource_context_is_origin_clean;
+        auto bytes = key_frame_set.style_sheet_resource_context->base_url.bytes();
+        description.base_url_bytes.append(bytes.data(), bytes.size());
+        row.base_url_length = static_cast<u32>(bytes.size());
+    }
+    for (auto it = key_frame_set.keyframes_by_key.begin(); it != key_frame_set.keyframes_by_key.end(); ++it) {
+        StyleEngineFFI::FfiPublishedAnimationKeyframe ffi_keyframe {};
+        ffi_keyframe.key = static_cast<i64>(it.key());
+        auto easing = it->easing.visit(
+            [&](Empty) -> Optional<EasingFunction> { return {}; },
+            [](EasingFunction const& easing) -> Optional<EasingFunction> { return easing; },
+            [&](RustStyleValueHandle const&) -> Optional<EasingFunction> {
+                // Resolving one of these can need substitution against the element.
+                flags |= published_effect_flag_not_covered;
+                return {};
+            });
+        if (!easing.has_value())
+            easing = default_easing;
+        if (easing.has_value())
+            describe_easing(*easing, ffi_keyframe, description.points);
+        else
+            ffi_keyframe.easing_kind = published_keyframe_easing_kind_from_animation;
+        ffi_keyframe.composite = [&]() -> u8 {
+            switch (it->composite) {
+            case Bindings::CompositeOperationOrAuto::Accumulate:
+                return to_underlying(Bindings::CompositeOperation::Accumulate);
+            case Bindings::CompositeOperationOrAuto::Add:
+                return to_underlying(Bindings::CompositeOperation::Add);
+            case Bindings::CompositeOperationOrAuto::Replace:
+                return to_underlying(Bindings::CompositeOperation::Replace);
+            case Bindings::CompositeOperationOrAuto::Auto:
+                return effect_composite.has_value() ? to_underlying(*effect_composite) : published_keyframe_composite_from_animation;
+            }
+            VERIFY_NOT_REACHED();
+        }();
+        ffi_keyframe.first_declaration = static_cast<u32>(description.declarations.size());
+        for (auto const& [property, value] : it->properties) {
+            if (property.is_custom_property()) {
+                flags |= published_effect_flag_not_covered;
+                continue;
+            }
+            bool use_initial = false;
+            auto const* data = value.visit(
+                [&](Animations::KeyframeEffect::KeyFrameSet::UseInitial) -> StyleValueFFI::StyleValueData const* {
+                    if (property_is_shorthand(property.id()))
+                        return nullptr;
+                    use_initial = true;
+                    return nullptr;
+                },
+                [](RustStyleValueHandle const& handle) -> StyleValueFFI::StyleValueData const* { return handle.data(); });
+            if (!use_initial) {
+                if (!data || data->tag == StyleValueFFI::StyleValueData::Tag::PendingSubstitution)
+                    continue;
+                if (data->tag == StyleValueFFI::StyleValueData::Tag::Unresolved) {
+                    // Substitution runs against the element being sampled.
+                    flags |= published_effect_flag_not_covered;
+                    continue;
+                }
+                // https://drafts.csswg.org/css-values-5/#invalid-at-computed-value-time
+                if (data->tag == StyleValueFFI::StyleValueData::Tag::GuaranteedInvalid)
+                    continue;
+            }
+            description.declarations.append({
+                .property_id = to_underlying(property.id()),
+                .use_initial = use_initial,
+                .value = data,
+            });
+        }
+        ffi_keyframe.declaration_count = static_cast<u32>(description.declarations.size()) - ffi_keyframe.first_declaration;
+        description.keyframes.append(ffi_keyframe);
+    }
+    row.keyframe_count = static_cast<u32>(description.keyframes.size()) - row.first_keyframe;
+    return flags;
+}
+
+// The `@keyframes` one style scope defines, described for the style stage.
+//
+// The per-element descriptions below cover the animations an element already holds. This one covers
+// the ones it does not: a computation that would start a brand-new animation knows the definition it
+// computed, and with the rule's keyframes published it can sample what that animation would apply
+// without the host creating it first.
+void record_tree_scope_animation_keyframes(DOM::Document& document, TreeScopeID tree_scope, FlatPtr shadow_root_identity, ReadonlySpan<u32> name_lengths, ReadonlySpan<u16> name_units, ReadonlySpan<FlatPtr> keyframe_sets)
+{
+    auto* style_engine = style_engine_for(document);
+    if (!style_engine)
+        return;
+
+    Vector<StyleEngineFFI::FfiPublishedAnimationEffect> ffi_sets;
+    Vector<StyleEngineFFI::FfiPublishedAnimationKeyframe> ffi_keyframes;
+    Vector<StyleEngineFFI::FfiPublishedAnimationDeclaration> ffi_declarations;
+    Vector<StyleEngineFFI::FfiPublishedLinearEasingPoint> ffi_points;
+    Vector<u8> base_url_bytes;
+    ffi_sets.ensure_capacity(keyframe_sets.size());
+
+    for (auto pointer : keyframe_sets) {
+        auto const* key_frame_set = bit_cast<Animations::KeyframeEffect::KeyFrameSet const*>(pointer);
+        StyleEngineFFI::FfiPublishedAnimationEffect row {};
+        // A set is named by the pointer the scope's name table already names it by, and a name's
+        // description never goes stale on its own: the whole row is replaced when the scope's rule
+        // cache is rebuilt.
+        row.identity = static_cast<u64>(pointer);
+        row.generation = 0;
+        row.flags = describe_keyframe_set(*key_frame_set, {}, {},
+            { ffi_keyframes, ffi_declarations, ffi_points, base_url_bytes }, row);
+        ffi_sets.unchecked_append(row);
+    }
+
+    StyleEngineFFI::style_engine_set_tree_scope_animation_keyframes(
+        style_engine->rust_handle(), tree_scope.value(), shadow_root_identity,
+        name_lengths.data(), name_units.data(), name_units.size(), name_lengths.size(),
+        ffi_sets.data(), ffi_sets.size(),
+        ffi_keyframes.data(), ffi_keyframes.size(),
+        ffi_declarations.data(), ffi_declarations.size(),
+        ffi_points.data(), ffi_points.size(),
+        base_url_bytes.data(), base_url_bytes.size());
+}
+
 // Describe the effects one of an element's animation lists holds, in composite order.
 //
 // An input: the style stage builds the animation batch it interpolates from this rather than from
@@ -1282,98 +1431,24 @@ void record_element_animation_effect_descriptions(DOM::Element& element, u8 slot
 
     for (auto const& effect : effects) {
         auto animation = effect->associated_animation();
-        u32 flags = 0;
+        StyleEngineFFI::FfiPublishedAnimationEffect row {};
+        row.identity = effect->animation_preparation_identity();
+        row.generation = effect->animation_preparation_generation();
+        row.base_url_offset = static_cast<u32>(base_url_bytes.size());
+        row.first_keyframe = static_cast<u32>(ffi_keyframes.size());
         if (animation && animation->is_css_transition())
-            flags |= published_effect_flag_is_transition;
+            row.flags |= published_effect_flag_is_transition;
         if (!animation || !effect->key_frame_set())
-            flags |= published_effect_flag_not_covered;
+            row.flags |= published_effect_flag_not_covered;
 
-        auto base_url_offset = static_cast<u32>(base_url_bytes.size());
-        u32 base_url_length = 0;
-        auto first_keyframe = static_cast<u32>(ffi_keyframes.size());
         if (auto const* key_frame_set = effect->key_frame_set()) {
-            if (key_frame_set->style_sheet_resource_context.has_value()) {
-                flags |= published_effect_flag_has_resource_context;
-                if (key_frame_set->style_sheet_resource_context->origin_clean)
-                    flags |= published_effect_flag_resource_context_is_origin_clean;
-                auto bytes = key_frame_set->style_sheet_resource_context->base_url.bytes();
-                base_url_bytes.append(bytes.data(), bytes.size());
-                base_url_length = static_cast<u32>(bytes.size());
-            }
             auto default_easing = animation && animation->is_css_animation()
                 ? static_cast<CSSAnimation const&>(*animation).default_easing()
                 : EasingFunction::linear();
-            for (auto it = key_frame_set->keyframes_by_key.begin(); it != key_frame_set->keyframes_by_key.end(); ++it) {
-                StyleEngineFFI::FfiPublishedAnimationKeyframe ffi_keyframe {};
-                ffi_keyframe.key = static_cast<i64>(it.key());
-                auto easing = it->easing.visit(
-                    [&](Empty) -> Optional<EasingFunction> { return {}; },
-                    [](EasingFunction const& easing) -> Optional<EasingFunction> { return easing; },
-                    [&](RustStyleValueHandle const&) -> Optional<EasingFunction> {
-                        // Resolving one of these can need substitution against the element.
-                        flags |= published_effect_flag_not_covered;
-                        return {};
-                    });
-                describe_easing(easing.value_or(default_easing), ffi_keyframe, ffi_points);
-                ffi_keyframe.composite = static_cast<u8>(to_underlying([&] {
-                    switch (it->composite) {
-                    case Bindings::CompositeOperationOrAuto::Accumulate:
-                        return Bindings::CompositeOperation::Accumulate;
-                    case Bindings::CompositeOperationOrAuto::Add:
-                        return Bindings::CompositeOperation::Add;
-                    case Bindings::CompositeOperationOrAuto::Replace:
-                        return Bindings::CompositeOperation::Replace;
-                    case Bindings::CompositeOperationOrAuto::Auto:
-                        return effect->composite();
-                    }
-                    VERIFY_NOT_REACHED();
-                }()));
-                ffi_keyframe.first_declaration = static_cast<u32>(ffi_declarations.size());
-                for (auto const& [property, value] : it->properties) {
-                    if (property.is_custom_property()) {
-                        flags |= published_effect_flag_not_covered;
-                        continue;
-                    }
-                    bool use_initial = false;
-                    auto const* data = value.visit(
-                        [&](Animations::KeyframeEffect::KeyFrameSet::UseInitial) -> StyleValueFFI::StyleValueData const* {
-                            if (property_is_shorthand(property.id()))
-                                return nullptr;
-                            use_initial = true;
-                            return nullptr;
-                        },
-                        [](RustStyleValueHandle const& handle) -> StyleValueFFI::StyleValueData const* { return handle.data(); });
-                    if (!use_initial) {
-                        if (!data || data->tag == StyleValueFFI::StyleValueData::Tag::PendingSubstitution)
-                            continue;
-                        if (data->tag == StyleValueFFI::StyleValueData::Tag::Unresolved) {
-                            // Substitution runs against the element being sampled.
-                            flags |= published_effect_flag_not_covered;
-                            continue;
-                        }
-                        // https://drafts.csswg.org/css-values-5/#invalid-at-computed-value-time
-                        if (data->tag == StyleValueFFI::StyleValueData::Tag::GuaranteedInvalid)
-                            continue;
-                    }
-                    ffi_declarations.append({
-                        .property_id = to_underlying(property.id()),
-                        .use_initial = use_initial,
-                        .value = data,
-                    });
-                }
-                ffi_keyframe.declaration_count = static_cast<u32>(ffi_declarations.size()) - ffi_keyframe.first_declaration;
-                ffi_keyframes.append(ffi_keyframe);
-            }
+            row.flags |= describe_keyframe_set(*key_frame_set, default_easing, effect->composite(),
+                { ffi_keyframes, ffi_declarations, ffi_points, base_url_bytes }, row);
         }
-        ffi_effects.append({
-            .identity = effect->animation_preparation_identity(),
-            .generation = effect->animation_preparation_generation(),
-            .flags = flags,
-            .first_keyframe = first_keyframe,
-            .keyframe_count = static_cast<u32>(ffi_keyframes.size()) - first_keyframe,
-            .base_url_offset = base_url_offset,
-            .base_url_length = base_url_length,
-        });
+        ffi_effects.append(row);
     }
 
     StyleEngineFFI::style_engine_set_element_animation_effect_descriptions(

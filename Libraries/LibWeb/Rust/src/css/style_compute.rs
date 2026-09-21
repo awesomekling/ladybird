@@ -2722,6 +2722,12 @@ pub struct FfiLonghandFinalizationResult {
     pub depends_on_viewport_metrics: bool,
     pub font_metrics_depend_on_viewport_metrics: bool,
     pub keyframes_inherited_non_inherited_style_groups: u32,
+    /// NB: Additive, and the last thing on this result: the stage sampled the one animation this
+    ///     computation starts without the host creating it first, so the creation - the GC object,
+    ///     its association with the element, its place in the global animation list - is a
+    ///     main-side effect of the computation, which the host applies as soon as it returns. Set
+    ///     only together with `animated_overlay`.
+    pub applies_animation_plan_after_return: bool,
 }
 
 /// The three length-resolution contexts a keyframe value is computed in.
@@ -2868,6 +2874,83 @@ fn animation_length_resolution_context(
     }
 }
 
+/// The one CSS animation a computation is about to start, described from the definition it just
+/// computed and the `@keyframes` rule the host published for the scope, so that what the animation
+/// would apply can be sampled before the animation exists.
+struct StartingAnimation<'a> {
+    description: &'a crate::css::style::animations::PublishedEffect,
+    /// The animation's own `animation-timing-function`, which every keyframe that declares no
+    /// easing of its own runs.
+    easing: crate::css::style::animations::PublishedEasing,
+    /// The animation's `animation-composition`, which every keyframe that says `composite: auto`
+    /// composites with.
+    composite: u8,
+    current_key: f64,
+}
+
+/// What a computation that would start exactly one brand-new CSS animation, on an element that
+/// holds none, can sample for itself.
+///
+/// The whole shape has to hold: no animation rows for the slot at all, so there is no composite
+/// order to merge into and no overlay to compose onto; exactly one definition, which starts rather
+/// than claims an animation; a `@keyframes` rule the host described; and timing this can settle
+/// from the definition alone. `None` wherever any of that fails, and then the host applies the plan
+/// and samples as before.
+fn starting_animation<'a>(
+    style_engine: &'a crate::css::style::StyleEngine,
+    input: &FfiComputePropertiesInput,
+    node: crate::css::style::tree::StyleNodeID,
+    slot: u8,
+    definition: &FfiComputedAnimation,
+    in_display_none_subtree: i8,
+) -> Option<StartingAnimation<'a>> {
+    use crate::css::style::animations;
+
+    // An element in a `display: none` subtree starts nothing at all, and one the host could not
+    // decide that for is one this cannot decide it for either.
+    if in_display_none_subtree != 0 {
+        return None;
+    }
+    // Nothing published for the slot means nothing to merge into: no composite order to take a
+    // place in, and no effect of the element's own already contributing to the overlay.
+    if !style_engine.element_animation_timing_rows(node, slot).is_empty() {
+        return None;
+    }
+    let row = animations::AnimationTimingRow::for_new_css_animation(definition, node, slot)?;
+    // A key of `None` is an animation whose progress does not resolve, which the host samples
+    // nothing from; that is a cleared overlay rather than a replaced one, so it stays with the host.
+    if !animations::row_is_relevant(&row, None)? {
+        return None;
+    }
+    let current_key = animations::row_current_key(&row, None)??;
+
+    // The `@keyframes` the host resolved this name to, looked for in the same scope chain the
+    // definition's keyframe-set pointer was resolved in.
+    let name = unsafe { &*definition.name.cast::<crate::css::css_string::CssString>() };
+    let declaration_shadow_root_identity = unsafe { &*input.store }
+        .winning_source_shadow_root_identity(crate::css::property_metadata::property_id::ANIMATION_NAME);
+    let element_tree_scope = style_engine.tree().tree_scope(node);
+    let set = style_engine
+        .animation_keyframes()
+        .resolve(declaration_shadow_root_identity, element_tree_scope, name)?;
+    // The lookup is redone here rather than carried from the drive, so it has to be the same one.
+    if set.pointer != definition.keyframe_set as usize {
+        return None;
+    }
+    let easing = animations::PublishedEasing::from_computed_timing_function(unsafe {
+        &*definition
+            .timing_function
+            .cast::<crate::css::style_value::StyleValueData>()
+    })?;
+    Some(StartingAnimation {
+        description: &set.description,
+        easing,
+        // `animation-composition` is in the same order as `Bindings::CompositeOperation`.
+        composite: definition.composition,
+        current_key,
+    })
+}
+
 /// Samples the element's animations onto an overlay of the stage's own, for the elements whose
 /// whole animation state the published facts describe: no plan to apply, every effect described,
 /// and a batch whose values depend on nothing outside what the drive already resolved. `None`
@@ -2882,6 +2965,7 @@ unsafe fn try_stage_animation_tail(
     drive_input: &FfiLonghandTransactionInput,
     length_contexts: &FfiAnimationLengthContexts,
     existing_overlay: *const AnimatedOverlay,
+    starting: Option<&StartingAnimation<'_>>,
 ) -> Option<StageAnimationTail> {
     use crate::css::animation as anim;
 
@@ -2892,7 +2976,18 @@ unsafe fn try_stage_animation_tail(
     }
     let node = crate::css::style::tree::StyleNodeID::from_raw(input.style_node)?;
     let slot = animation_slot(input.pseudo_kind);
-    let (preparation_effects, current_keys) = published_active_effects(style_engine, node, slot)?;
+    let (preparation_effects, current_keys) = match starting {
+        // The effect this animation would get has no identity until the host creates it, so the
+        // preparation it stands for is one no overlay can already hold and none is cached under.
+        Some(starting) => (
+            vec![anim::FfiAnimationPreparationEffect {
+                identity: 0,
+                generation: 0,
+            }],
+            vec![starting.current_key],
+        ),
+        None => published_active_effects(style_engine, node, slot)?,
+    };
     // An element with nothing to sample has its overlay cleared rather than replaced, which is a
     // different message to the host; it stays with the host for now.
     if preparation_effects.is_empty() {
@@ -2929,7 +3024,9 @@ unsafe fn try_stage_animation_tail(
 
     // A preparation the overlay already holds for exactly these effects needs no declarations and
     // no keyframe longhands at all.
-    if unsafe { anim::rust_animation_preparation_matches(overlay.cast(), &raw const preparation_key) } {
+    if starting.is_none()
+        && unsafe { anim::rust_animation_preparation_matches(overlay.cast(), &raw const preparation_key) }
+    {
         let batch = anim::FfiComputedAnimationBatch {
             context,
             preparation_key: &raw const preparation_key,
@@ -2965,26 +3062,52 @@ unsafe fn try_stage_animation_tail(
         .iter()
         .map(|effect| effect.generation)
         .collect::<Vec<_>>();
+    let give_up_on_overlay = || unsafe { crate::css::animated_overlay::rust_animated_overlay_free(overlay) };
     let mut covered = false;
-    let sample = anim::FfiPublishedAnimationSample {
-        style_engine: std::ptr::from_ref(style_engine).cast(),
-        style_node: input.style_node,
-        slot,
-        identities: identities.as_ptr(),
-        generations: generations.as_ptr(),
-        current_keys: current_keys.as_ptr(),
-        effect_count: identities.len(),
-        underlying_longhand_table: (drive_input.longhand_table as *const ComputedLonghandTable).cast(),
-        writing_mode,
-        direction,
-        important_property_bitmap: importance.as_ptr(),
-        important_property_bitmap_length: importance.len(),
-        covered: &raw mut covered,
+    let resolved = match starting {
+        Some(starting) => match anim::resolve_new_animation_declarations(
+            anim::SelectedEffect {
+                effect: starting.description,
+                current_key: starting.current_key,
+                easing_from_animation: Some(&starting.easing),
+                composite_from_animation: starting.composite,
+            },
+            table,
+            writing_mode,
+            direction,
+            importance,
+        ) {
+            Some(resolved) => {
+                covered = true;
+                resolved
+            }
+            None => {
+                give_up_on_overlay();
+                return None;
+            }
+        },
+        None => {
+            let sample = anim::FfiPublishedAnimationSample {
+                style_engine: std::ptr::from_ref(style_engine).cast(),
+                style_node: input.style_node,
+                slot,
+                identities: identities.as_ptr(),
+                generations: generations.as_ptr(),
+                current_keys: current_keys.as_ptr(),
+                effect_count: identities.len(),
+                underlying_longhand_table: (drive_input.longhand_table as *const ComputedLonghandTable).cast(),
+                writing_mode,
+                direction,
+                important_property_bitmap: importance.as_ptr(),
+                important_property_bitmap_length: importance.len(),
+                covered: &raw mut covered,
+            };
+            unsafe { anim::rust_resolve_animation_declarations_from_published(&raw const sample) }
+        }
     };
-    let resolved = unsafe { anim::rust_resolve_animation_declarations_from_published(&raw const sample) };
     let give_up = |resolved: &anim::FfiResolvedAnimationProperties| {
         unsafe { anim::release_resolved_animation_declarations(resolved.storage) };
-        unsafe { crate::css::animated_overlay::rust_animated_overlay_free(overlay) };
+        give_up_on_overlay();
     };
     if !covered || resolved.count == 0 {
         give_up(&resolved);
@@ -3062,7 +3185,9 @@ unsafe fn try_stage_animation_tail(
         preparation_key: &raw const preparation_key,
         current_keys: current_keys.as_ptr(),
         current_key_count: current_keys.len(),
-        cache_preparation: true,
+        // A preparation is cached under the identities of the effects it was built from, and a
+        // starting animation has none yet.
+        cache_preparation: starting.is_none(),
         resolved_animation_storage: resolved.storage,
         computed_keyframe_storage: computed_keyframes.storage,
         underlying_longhand_table: (drive_input.longhand_table as *const ComputedLonghandTable).cast(),
@@ -3094,6 +3219,8 @@ struct LonghandTransactionContinuation {
     // The length-resolution contexts the animation tail needs, kept where the drive built them.
     animation_length_contexts: FfiAnimationLengthContexts,
     inherited_animated_overlay: Option<Box<AnimatedOverlay>>,
+    /// See `starting_definition` in `rust_compute_properties`.
+    starting_definition: Option<FfiComputedAnimation>,
 }
 
 #[repr(C)]
@@ -3121,7 +3248,7 @@ pub struct FfiComputedTransitionList {
     pub storage: *mut c_void,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum FfiAnimationTimelineKind {
     Document,
@@ -3129,6 +3256,7 @@ pub enum FfiAnimationTimelineKind {
     Scroll,
 }
 
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiComputedAnimation {
     pub duration_is_auto: bool,
@@ -5706,7 +5834,9 @@ fn build_computed_animation_list(
         let delay = time_value_to_milliseconds(delay_values[index % delay_values.len()].data());
         let fill_mode = keyword_to_animation_fill_mode(keyword_value(fill_mode_values)).unwrap();
         let composition = keyword_to_animation_composition(keyword_value(composition_values)).unwrap();
-        let keyframe_set = keyframes.resolve(declaration_shadow_root_identity, element_tree_scope, name_string);
+        let keyframe_set = keyframes
+            .resolve(declaration_shadow_root_identity, element_tree_scope, name_string)
+            .map_or(0, |set| set.pointer);
         animations.push(FfiComputedAnimation {
             duration_is_auto,
             duration,
@@ -6031,6 +6161,16 @@ pub unsafe extern "C" fn rust_compute_properties(
                         && computed_animation_definitions[index].would_change_nothing(&applied[index])
                 })
         });
+    // The one definition of a plan that would do nothing but start a single brand-new animation,
+    // kept for the tail to sample from: the drive result the definitions live in is destroyed
+    // before the tail runs, while the values this names - the animation's name, its timing
+    // function, the keyframe set - are the longhand table's and the engine's, which outlive it.
+    let starting_definition = match definitions {
+        [definition] if definition.matched_existing_index == crate::css::style::animations::NO_MATCHED_ANIMATION => {
+            Some(*definition)
+        }
+        _ => None,
+    };
     let animation_values_applied = unsafe { animated_overlay.as_ref() }.is_some_and(|overlay| !overlay.is_empty());
     unsafe { crate::css::cascaded_properties::destroy_style_computation_requirements(prepared.requirements.storage) };
     let continuation = Box::new(LonghandTransactionContinuation {
@@ -6044,6 +6184,7 @@ pub unsafe extern "C" fn rust_compute_properties(
         parent_text_align_input_is_animated,
         animation_length_contexts,
         inherited_animated_overlay,
+        starting_definition,
     });
     let drive_result = &raw const continuation.drive_result;
     let storage = Box::into_raw(continuation);
@@ -6078,6 +6219,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         parent_text_align_input_is_animated,
         mut animation_length_contexts,
         inherited_animated_overlay: _inherited_animated_overlay,
+        starting_definition,
     } = *continuation;
     // NB: The root element's own computation refreshes the host's root font metrics in the callback
     //     that applies the drive result, which runs between the drive and this tail - so the
@@ -6102,6 +6244,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
             depends_on_viewport_metrics: false,
             font_metrics_depend_on_viewport_metrics: false,
             keyframes_inherited_non_inherited_style_groups: 0,
+            applies_animation_plan_after_return: false,
         };
     }
     let mut invalidated_longhands = 0;
@@ -6188,10 +6331,30 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         invalidated_longhands |= invalidated;
     }
     let mut stage_animation_tail = None;
+    let mut starts_one_animation = false;
     if element_has_animation_state {
+        // A plan that would do nothing but start one animation on an element that holds none is one
+        // the stage can sample for itself too: what that animation would apply is a function of the
+        // definition it just computed and of the `@keyframes` rule the host published, and creating
+        // it composes nothing else into this computation. The creation itself is left for the host
+        // to make after the stage has run.
+        let starting = match plan_has_work && !element_has_css_defined_animations {
+            true => starting_definition.as_ref().and_then(|definition| {
+                let node = crate::css::style::tree::StyleNodeID::from_raw(input.style_node)?;
+                starting_animation(
+                    style_engine,
+                    input,
+                    node,
+                    animation_slot(input.pseudo_kind),
+                    definition,
+                    in_display_none_subtree,
+                )
+            }),
+            false => None,
+        };
         // An element with no plan to apply and whose whole animation state the host described is
         // one the stage samples for itself, and then the host is never asked.
-        stage_animation_tail = match plan_has_work {
+        stage_animation_tail = match plan_has_work && starting.is_none() {
             true => None,
             false => unsafe {
                 try_stage_animation_tail(
@@ -6200,9 +6363,11 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
                     drive_input,
                     &animation_length_contexts,
                     animated_overlay,
+                    starting.as_ref(),
                 )
             },
         };
+        starts_one_animation = starting.is_some() && stage_animation_tail.is_some();
         if let Some(tail) = &stage_animation_tail {
             animated_overlay = tail.overlay;
             // The host measures the finalization's input line height after sampling; the tail only
@@ -6282,6 +6447,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         keyframes_inherited_non_inherited_style_groups: stage_animation_tail
             .as_ref()
             .map_or(0, |tail| tail.keyframes_inherited_non_inherited_style_groups),
+        applies_animation_plan_after_return: starts_one_animation,
     }
 }
 

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    @keyframes slide {
+        from {
+            margin-left: 0px;
+        }
+        50% {
+            margin-left: 100px;
+            animation-timing-function: linear;
+        }
+        to {
+            margin-left: 200px;
+        }
+    }
+
+    /* The very first style update that sees each of these starts a brand-new animation, and the
+       value it computes has to be the one that animation applies at time zero. */
+    #plain {
+        animation: slide 10s linear paused;
+    }
+    #negative-delay {
+        animation: slide 10s linear -2.5s paused;
+    }
+    #steps {
+        animation: slide 10s steps(4, end) -5s paused;
+    }
+    #reverse {
+        animation: slide 10s linear reverse paused;
+    }
+    #alternate-reverse {
+        animation: slide 10s linear -15s 2 alternate-reverse paused;
+    }
+    #backwards-fill {
+        animation: slide 10s linear 5s backwards paused;
+    }
+    #no-fill {
+        animation: slide 10s linear 5s paused;
+        margin-left: 40px;
+    }
+    #zero-iterations {
+        animation: slide 10s linear 0 both paused;
+        margin-left: 40px;
+    }
+    #fractional-iterations {
+        animation: slide 10s linear -7.5s 0.75 both paused;
+    }
+    #ease {
+        animation: slide 10s -2.5s paused;
+    }
+    #add-composition {
+        animation: slide 10s linear paused;
+        animation-composition: add;
+        margin-left: 30px;
+    }
+</style>
+<div id="plain"></div>
+<div id="negative-delay"></div>
+<div id="steps"></div>
+<div id="reverse"></div>
+<div id="alternate-reverse"></div>
+<div id="backwards-fill"></div>
+<div id="no-fill"></div>
+<div id="zero-iterations"></div>
+<div id="fractional-iterations"></div>
+<div id="ease"></div>
+<div id="add-composition"></div>
+<script>
+    test(() => {
+        for (const id of [
+            "plain",
+            "negative-delay",
+            "steps",
+            "reverse",
+            "alternate-reverse",
+            "backwards-fill",
+            "no-fill",
+            "zero-iterations",
+            "fractional-iterations",
+            "ease",
+            "add-composition",
+        ]) {
+            const element = document.getElementById(id);
+            // The first read computes the element's style for the first time, which is where the
+            // animation is started. Every animation here is paused at time zero, so recomputing
+            // the element's style afterwards - with the animation now a real one the element holds
+            // - has to arrive at exactly the same value.
+            const first = getComputedStyle(element).marginLeft;
+            element.style.paddingLeft = "1px";
+            const second = getComputedStyle(element).marginLeft;
+            println(`${id}: ${first}${first === second ? "" : ` (recomputed to ${second})`}`);
+        }
+        // The animations really were created, each exactly once.
+        println(`animations: ${document.getAnimations().length}`);
+    });
+</script>

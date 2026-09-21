@@ -1131,21 +1131,27 @@ impl RetainedState {
     /// Record the `@keyframes` one style scope defines, as the host's rule cache for that scope
     /// resolved them. Published at the style update's begin boundary, before any element's
     /// animation definitions are matched against them.
-    pub fn set_tree_scope_animation_keyframes(
+    ///
+    /// # Safety
+    /// Every declaration's `value` must be a live style value the host holds a reference to for the
+    /// duration of the call.
+    pub unsafe fn set_tree_scope_animation_keyframes(
         &mut self,
         tree_scope: TreeScopeID,
         shadow_root_identity: usize,
         name_lengths: &[u32],
         name_units: &[u16],
-        keyframe_sets: &[usize],
+        published_buffers: animations::PublishedEffectBuffers<'_>,
     ) {
-        self.animation_keyframes.set(
-            tree_scope,
-            shadow_root_identity,
-            name_lengths,
-            name_units,
-            keyframe_sets,
-        );
+        unsafe {
+            self.animation_keyframes.set(
+                tree_scope,
+                shadow_root_identity,
+                name_lengths,
+                name_units,
+                published_buffers,
+            );
+        }
     }
 
     /// The `@keyframes` the document's style scopes define.

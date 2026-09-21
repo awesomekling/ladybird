@@ -1298,8 +1298,17 @@ pub unsafe extern "C" fn style_engine_set_tree_scope_animation_keyframes(
     name_lengths: *const u32,
     name_units: *const u16,
     name_unit_count: usize,
-    keyframe_sets: *const usize,
     count: usize,
+    descriptions: *const FfiPublishedAnimationEffect,
+    description_count: usize,
+    keyframes: *const FfiPublishedAnimationKeyframe,
+    keyframe_count: usize,
+    declarations: *const FfiPublishedAnimationDeclaration,
+    declaration_count: usize,
+    linear_points: *const FfiPublishedLinearEasingPoint,
+    linear_point_count: usize,
+    base_url_bytes: *const u8,
+    base_url_byte_count: usize,
 ) {
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     let name_lengths = match count {
@@ -1310,17 +1319,29 @@ pub unsafe extern "C" fn style_engine_set_tree_scope_animation_keyframes(
         0 => &[][..],
         _ => unsafe { std::slice::from_raw_parts(name_units, name_unit_count) },
     };
-    let keyframe_sets = match count {
-        0 => &[][..],
-        _ => unsafe { std::slice::from_raw_parts(keyframe_sets, count) },
+    let buffers = unsafe {
+        published_effect_buffers(
+            descriptions,
+            description_count,
+            keyframes,
+            keyframe_count,
+            declarations,
+            declaration_count,
+            linear_points,
+            linear_point_count,
+            base_url_bytes,
+            base_url_byte_count,
+        )
     };
-    engine.set_tree_scope_animation_keyframes(
-        TreeScopeID(tree_scope),
-        shadow_root_identity,
-        name_lengths,
-        name_units,
-        keyframe_sets,
-    );
+    unsafe {
+        engine.set_tree_scope_animation_keyframes(
+            TreeScopeID(tree_scope),
+            shadow_root_identity,
+            name_lengths,
+            name_units,
+            buffers,
+        );
+    }
 }
 
 /// How one effect's description travels across the boundary: a header naming the ranges of the flat
@@ -1398,27 +1419,56 @@ pub unsafe extern "C" fn style_engine_set_element_animation_effect_descriptions(
     let Some(node) = StyleNodeID::from_raw(node) else {
         return;
     };
-    // SAFETY: each pointer is either null with a zero count or names that many elements.
-    unsafe {
-        macro_rules! slice {
-            ($pointer:expr, $count:expr) => {
-                match $count {
-                    0 => &[][..],
-                    count => std::slice::from_raw_parts($pointer, count),
-                }
-            };
-        }
-        engine.set_element_animation_effect_descriptions(
-            node,
-            slot,
-            crate::css::style::animations::PublishedEffectBuffers {
-                effects: slice!(effects, effect_count),
-                keyframes: slice!(keyframes, keyframe_count),
-                declarations: slice!(declarations, declaration_count),
-                linear_points: slice!(linear_points, linear_point_count),
-                base_url_bytes: slice!(base_url_bytes, base_url_byte_count),
-            },
-        );
+    let buffers = unsafe {
+        published_effect_buffers(
+            effects,
+            effect_count,
+            keyframes,
+            keyframe_count,
+            declarations,
+            declaration_count,
+            linear_points,
+            linear_point_count,
+            base_url_bytes,
+            base_url_byte_count,
+        )
+    };
+    unsafe { engine.set_element_animation_effect_descriptions(node, slot, buffers) };
+}
+
+/// Gather the flat buffers a list of effect descriptions travels in. An element's effects and the
+/// `@keyframes` a style scope defines are described alike and travel the same way.
+///
+/// # Safety
+/// Each pointer must be null with a zero count, or name that many elements, and every declaration's
+/// value must be a live style value for the duration of the call.
+#[expect(clippy::too_many_arguments)]
+unsafe fn published_effect_buffers<'a>(
+    effects: *const FfiPublishedAnimationEffect,
+    effect_count: usize,
+    keyframes: *const FfiPublishedAnimationKeyframe,
+    keyframe_count: usize,
+    declarations: *const FfiPublishedAnimationDeclaration,
+    declaration_count: usize,
+    linear_points: *const FfiPublishedLinearEasingPoint,
+    linear_point_count: usize,
+    base_url_bytes: *const u8,
+    base_url_byte_count: usize,
+) -> crate::css::style::animations::PublishedEffectBuffers<'a> {
+    macro_rules! slice {
+        ($pointer:expr, $count:expr) => {
+            match $count {
+                0 => &[][..],
+                count => unsafe { std::slice::from_raw_parts($pointer, count) },
+            }
+        };
+    }
+    crate::css::style::animations::PublishedEffectBuffers {
+        effects: slice!(effects, effect_count),
+        keyframes: slice!(keyframes, keyframe_count),
+        declarations: slice!(declarations, declaration_count),
+        linear_points: slice!(linear_points, linear_point_count),
+        base_url_bytes: slice!(base_url_bytes, base_url_byte_count),
     }
 }
 
