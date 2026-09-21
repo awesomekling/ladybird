@@ -1437,7 +1437,11 @@ void record_element_animation_effect_descriptions(DOM::Element& element, u8 slot
         row.first_keyframe = static_cast<u32>(ffi_keyframes.size());
         if (animation && animation->is_css_transition())
             row.flags |= published_effect_flag_is_transition;
-        if (!animation || !effect->key_frame_set())
+        // An effect whose animation names no `@keyframes` rule has no keyframe set at all. That is
+        // not a description the stage is missing, it is the whole description: such an effect is
+        // published with no keyframes, which every consumer skips exactly the way the host's own
+        // `collect_animation_effects_into` skips it.
+        if (!animation)
             row.flags |= published_effect_flag_not_covered;
 
         if (auto const* key_frame_set = effect->key_frame_set()) {

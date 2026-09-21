@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    @keyframes fade { from { opacity: 0.25; } to { opacity: 0.25; } }
+    @keyframes tint { from { color: rgb(1, 2, 3); } to { color: rgb(1, 2, 3); } }
+    #alone { animation: nowhere 1000s linear infinite; }
+    #before { animation: nowhere 1000s linear infinite, fade 1000s linear infinite; }
+    #after { animation: fade 1000s linear infinite, nowhere 1000s linear infinite; }
+    #between { animation: fade 1000s linear infinite, nowhere 1000s linear infinite, tint 1000s linear infinite; }
+    #pseudo::before { content: ""; animation: nowhere 1000s linear infinite, fade 1000s linear infinite; }
+</style>
+<div id="alone"></div>
+<div id="before"></div>
+<div id="after"></div>
+<div id="between"></div>
+<div id="pseudo"></div>
+<div id="late"></div>
+<script>
+    test(() => {
+        let nudge = 0;
+        function report(label, element, pseudo) {
+            const style = getComputedStyle(element, pseudo ?? null);
+            const animations = element.getAnimations({ subtree: true }).map(a => a.playState).join("+");
+            println(`${label}: ${animations} ${style.opacity} ${style.color}`);
+        }
+        function recompute(element) {
+            element.style.paddingLeft = `${++nudge}px`;
+            getComputedStyle(element).paddingLeft;
+        }
+
+        for (const [id, pseudo] of [["alone"], ["before"], ["after"], ["between"], ["pseudo", "::before"]]) {
+            const element = document.getElementById(id);
+            report(`${id} initially`, element, pseudo);
+            recompute(element);
+            report(`${id} after recompute`, element, pseudo);
+        }
+
+        // A name that only becomes a real `@keyframes` rule later, and one that stops being one.
+        const late = document.getElementById("late");
+        late.style.animation = "later 1000s linear infinite";
+        report("late before the rule", late);
+        const sheet = document.styleSheets[0];
+        const index = sheet.insertRule("@keyframes later { from { opacity: 0.5; } to { opacity: 0.5; } }", sheet.cssRules.length);
+        report("late with the rule", late);
+        recompute(late);
+        report("late with the rule after recompute", late);
+        sheet.deleteRule(index);
+        report("late without the rule again", late);
+        recompute(late);
+        report("late without the rule after recompute", late);
+    });
+</script>
