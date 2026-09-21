@@ -2483,12 +2483,16 @@ unsafe fn commit_entry_pass<'a>(
     pass_fragments: &fragment_tree::CompletedPassFragments,
 ) -> &'a LayoutNodeArena {
     // SAFETY: Computation has finished and its input borrows are no longer used.
-    // Commit performs no host callbacks while it borrows the arena exclusively.
+    unsafe { LayoutNodeArena::from_handle(arena_handle) }.begin_paying_host_handbacks(main_thread);
+    // SAFETY: As above. Commit performs no host callbacks while it borrows the arena exclusively.
     let notifications = commit::commit_replacing(
         commit_root,
         unsafe { LayoutNodeArena::from_handle_mut(arena_handle) },
         pass_fragments,
     );
+    // The boxes the commit gave or took reach the host first, as they did while it ran.
+    // SAFETY: Commit's mutable borrow has ended.
+    unsafe { LayoutNodeArena::from_handle(arena_handle) }.finish_paying_host_handbacks(main_thread);
     // SAFETY: The host and shells remain live, and commit's mutable borrow has ended.
     unsafe { notifications.notify_host(main_thread, host) };
     // SAFETY: Host callbacks have returned; borrow the arena again for the epilogue, which

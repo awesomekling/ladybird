@@ -465,6 +465,22 @@ pub unsafe extern "C" fn layout_arena_paintable_row(arena: *mut c_void, slot: No
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_paintable_cleared_from_node(arena: *mut c_void, layout_node: NodeSlotId) {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
+    // SAFETY: Guaranteed by the entry point's contract.
+    unsafe {
+        crate::layout::paying_host_handbacks(&main_thread, arena, || {
+            clear_paintable_row_of_node(arena, layout_node);
+        });
+    }
+}
+
+/// Clears the paint state of `layout_node`'s row, whose box is going away, and hands back its
+/// reset.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+pub(crate) unsafe fn clear_paintable_row_of_node(arena: *mut c_void, layout_node: NodeSlotId) {
     let reset = {
         let arena = unsafe { arena_from_handle(arena) };
         crate::painting::published_immutable::note_row_mutation(
