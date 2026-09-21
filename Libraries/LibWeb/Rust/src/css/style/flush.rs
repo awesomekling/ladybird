@@ -2134,7 +2134,8 @@ impl StyleEngineState {
                         })
                         .flatten();
                     if engine_computed_record_scratch.font_drive.request.is_some() {
-                        if record_deltas.is_none() {
+                        let starts_batching = record_deltas.is_none();
+                        if starts_batching {
                             record_deltas = Some((0..published_nodes.len()).map(|_| None).collect());
                             batching_start = Some(published_index);
                         }
@@ -2144,6 +2145,12 @@ impl StyleEngineState {
                             parent_inputs: parent_inputs_moved,
                             continuation: std::mem::take(&mut engine_computed_record_scratch.continuation),
                         });
+                        // Establish the first canonical request before speculative siblings can
+                        // observe or populate mutable host font-cascade state. Later passes can
+                        // collect independent misses because this first request is then stable.
+                        if starts_batching {
+                            break;
+                        }
                         continue;
                     }
                     // A first record C++ declines for the custom-property environment it inherits
