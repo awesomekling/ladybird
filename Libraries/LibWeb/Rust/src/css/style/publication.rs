@@ -3912,9 +3912,8 @@ impl EngineComputabilityScratch {
 }
 
 #[derive(Default)]
-pub(super) struct EngineComputedRecordScratch {
+pub(super) struct EngineComputedRecordContinuation {
     pub(super) font_drive: drive::FontDriveScratch,
-    pub(super) prepared_root_font: Option<(StyleNodeID, ParentInputsMoved, drive::FontDriveScratch)>,
     // NB: Preserve the root's existing remaining-phase context after preparing consumer inputs.
     root_element_inputs: Option<(StyleNodeID, RootFontInputs)>,
     // NB: A failed preparation already performed the root's unsupported computation.
@@ -3933,6 +3932,27 @@ pub(super) struct EngineComputedRecordScratch {
     /// The nodes whose substituted-record fact the step decided, in the order it decided them.
     /// The boundary that installs the record applies them.
     substitution_effects: Vec<(StyleNodeID, bool)>,
+    /// The pseudo-element records settled beside the element derived last.
+    pub(super) pseudo_deltas: Vec<PseudoRecordDelta>,
+    /// The pseudo-element rules that flipped for the element being derived.
+    pub(super) flipped_pseudo_rules: u64,
+}
+
+impl EngineComputedRecordContinuation {
+    fn capacity_bytes(&self) -> u64 {
+        capacity::capacity_bytes! {
+            shallow [self.pseudo_deltas, self.substitution_effects];
+            cached [self.font_drive.capacity_bytes()];
+            nested [];
+            skip [];
+        }
+    }
+}
+
+#[derive(Default)]
+pub(super) struct EngineComputedRecordScratch {
+    pub(super) continuation: EngineComputedRecordContinuation,
+    pub(super) prepared_root_font: Option<(StyleNodeID, ParentInputsMoved, drive::FontDriveScratch)>,
     cohorts: HashMap<(u64, CascadeStateID, u32, RecordDeltaParent, u64, RootFontInputs), computed::FinalStyleRecordID>,
     computability: EngineComputabilityScratch,
     /// What each node the walk has reached tells its children: whether the chain above it is
@@ -3949,10 +3969,20 @@ pub(super) struct EngineComputedRecordScratch {
     /// Pseudo-element records derived this flush, by what they were derived from.
     pub(super) pseudo_cohorts: HashMap<PseudoCohortKey, computed::FinalStyleRecordID>,
     pub(super) pseudo_stores: HashMap<(u8, CascadeStateID, u64), std::sync::Arc<WinnerStore>>,
-    /// The pseudo-element records settled beside the element derived last.
-    pub(super) pseudo_deltas: Vec<PseudoRecordDelta>,
-    /// The pseudo-element rules that flipped for the element being derived.
-    pub(super) flipped_pseudo_rules: u64,
+}
+
+impl std::ops::Deref for EngineComputedRecordScratch {
+    type Target = EngineComputedRecordContinuation;
+
+    fn deref(&self) -> &Self::Target {
+        &self.continuation
+    }
+}
+
+impl std::ops::DerefMut for EngineComputedRecordScratch {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.continuation
+    }
 }
 
 /// What one node tells its flat-tree children, decided where the node settles and read by the
@@ -4057,9 +4087,8 @@ impl EngineComputedRecordScratch {
     pub(super) fn capacity_bytes(&self) -> u64 {
         capacity::capacity_bytes! {
             shallow [self.computability.states, self.cohorts, self.derived_child_inputs, self.cold_cohorts, self.stores,
-                self.substituted_states, self.pseudo_cohorts, self.pseudo_stores,
-                self.pseudo_deltas, self.substitution_effects];
-            cached [self.store_capacity_bytes, self.font_drive.capacity_bytes(),
+                self.substituted_states, self.pseudo_cohorts, self.pseudo_stores];
+            cached [self.store_capacity_bytes, self.continuation.capacity_bytes(),
                 self.prepared_root_font.as_ref().map_or(0, |(_, _, drive)| drive.capacity_bytes())];
             nested [];
             skip [];
