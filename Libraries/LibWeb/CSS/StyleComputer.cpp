@@ -629,6 +629,19 @@ void StyleComputer::begin_transition_stabilization_epoch()
     VERIFY(m_transition_stabilization_baselines.is_empty());
 }
 
+// Whether a later pass of the stabilization epoch can still give this element a transition whose
+// before-change style is the one it holds now: the element's scope has size container queries, so
+// a later pass can happen at all, or a later pass has already happened.
+bool StyleComputer::pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(DOM::AbstractElement abstract_element) const
+{
+    if (abstract_element.element().style_node_id() == 0)
+        return false;
+    if (!abstract_element.style_scope().rule_cache().has_size_container_queries
+        && !document().is_in_style_stabilization_feedback_epoch())
+        return false;
+    return record_transition_stabilization_baseline(abstract_element);
+}
+
 bool StyleComputer::record_transition_stabilization_baseline(DOM::AbstractElement abstract_element) const
 {
     auto style_node_id = abstract_element.element().style_node_id();
@@ -6340,8 +6353,9 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             || !element.property_ids_with_matching_transition_property_entry(pseudo_element).is_empty()
             || element.has_associated_animations()
             // A provisionally started transition is not associated with its element yet, so only
-            // the pending states say that publishing this element's timing has anything to say.
-            || !context.style_computer->m_provisional_transition_states.is_empty();
+            // this element's own pending states say that publishing its timing has anything to
+            // say. Asking whether any exist at all answers for the wrong element.
+            || context.style_computer->has_provisional_transition_states(context.abstract_element);
     };
     // Says whether finishing this row reached past its own working set to the main side.
     auto finish_properties = [&row_transition_or_animation_state_of](void* context_pointer, bool parent_style_in_display_none_subtree) -> bool {
@@ -6353,6 +6367,15 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             return false;
 
         bool did_write_main_side_state = false;
+
+        // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
+        // A later pass of this stabilization epoch can give this element a transition it does not
+        // declare yet, and that transition's before-change style is the one this row holds, so it
+        // is pinned here. The precondition is the pin's own - the scope can feed back at all, or a
+        // later pass has already happened - and not whether some other row in this update has
+        // already started a transition, which says nothing about this element.
+        if (style_computer.pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(context.abstract_element))
+            did_write_main_side_state = true;
 
         // Transition declarations [css-transitions-1]
         // Theoretically this should be part of the cascade, but it works with computed values.

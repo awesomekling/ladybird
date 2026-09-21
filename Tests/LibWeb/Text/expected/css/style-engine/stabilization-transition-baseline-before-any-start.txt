@@ -1,0 +1,2 @@
+the first-pass transition started: true
+late transition used the committed baseline: true
