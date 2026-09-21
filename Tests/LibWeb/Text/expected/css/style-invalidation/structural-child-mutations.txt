@@ -2,7 +2,7 @@ PASS: child mutation: document: :empty becomes false after element append
 PASS: child mutation: document: :empty becomes false after textContent | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: document: mixed-case SVG type selector with :empty becomes false after element append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: child mutation: document: mixed-case SVG type selector with :not(:empty) becomes true after element append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: child mutation: document: mixed-case SVG foreignObject type selector with :empty becomes false after element append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: child mutation: document: mixed-case SVG foreignObject type selector with :empty becomes false after element append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: document: :has(.hit) after direct child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: document: :has(.hit) after DocumentFragment append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: document: :has(.hit) after existing child move into parent | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
@@ -391,7 +391,7 @@ PASS: child mutation: slotted-default: :empty becomes false after element append
 PASS: child mutation: slotted-default: :empty becomes false after textContent | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-default: mixed-case SVG type selector with :empty becomes false after element append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-default: mixed-case SVG type selector with :not(:empty) becomes true after element append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: child mutation: slotted-default: mixed-case SVG foreignObject type selector with :empty becomes false after element append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: child mutation: slotted-default: mixed-case SVG foreignObject type selector with :empty becomes false after element append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-default: :has(.hit) after direct child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-default: :has(.hit) after DocumentFragment append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-default: :has(.hit) after existing child move into parent | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
@@ -490,7 +490,7 @@ PASS: child mutation: slotted-named: :empty becomes false after element append
 PASS: child mutation: slotted-named: :empty becomes false after textContent | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-named: mixed-case SVG type selector with :empty becomes false after element append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-named: mixed-case SVG type selector with :not(:empty) becomes true after element append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: child mutation: slotted-named: mixed-case SVG foreignObject type selector with :empty becomes false after element append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: child mutation: slotted-named: mixed-case SVG foreignObject type selector with :empty becomes false after element append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-named: :has(.hit) after direct child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-named: :has(.hit) after DocumentFragment append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-named: :has(.hit) after existing child move into parent | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
