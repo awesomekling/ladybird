@@ -246,7 +246,7 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
 {
     return {
         .builder = this,
-        .create_layout_node = [](void* builder_pointer, u32 style_node, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiPseudoElementDecision decision, RustFFI::NodeSlotId originating_list_box_slot) -> RustFFI::NodeSlotId {
+        .create_content_replacement_box = [](void* builder_pointer, u32 style_node, RustFFI::FfiPseudoElement ffi_pseudo) -> RustFFI::NodeSlotId {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
             auto& element = as<DOM::Element>(dom_node_for_style_node(*builder.m_document, style_node));
@@ -256,34 +256,11 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
             builder.pin_style_record_for_build(style_record_identity);
             auto const* pseudo_payloads = element.style_record_payloads(pseudo_element);
             VERIFY(pseudo_payloads);
-            auto const display = CSS::style_group_from_payloads<CSS::ComputedValues::BoxValues>(pseudo_payloads)->display_value();
             auto const replacement_image = content_replacement_image(CSS::style_group_from_payloads<CSS::ComputedValues::ContentValues>(pseudo_payloads)->computed_content_value());
+            VERIFY(replacement_image);
             CSS::LayoutStyle style { style_record_identity };
-            auto& document = element.document();
-            BlockContainer* originating_list_box = nullptr;
-            if (auto* originating_box = pseudo_element_build_node(document, originating_list_box_slot))
-                originating_list_box = &as<BlockContainer>(*originating_box);
-            NodeWithStyle* layout_node = nullptr;
-            switch (decision) {
-            case RustFFI::FfiPseudoElementDecision::None:
-                VERIFY_NOT_REACHED();
-            case RustFFI::FfiPseudoElementDecision::ContentReplacement:
-                VERIFY(replacement_image);
-                layout_node = &create_content_image_box(document, nullptr, style, const_cast<CSS::AbstractImageStyleValue&>(*replacement_image));
-                break;
-            case RustFFI::FfiPseudoElementDecision::Contents:
-                layout_node = &allocate_layout_node<NodeWithStyle>(document, nullptr, style, RustFFI::NodeKind::InlineNode);
-                layout_node->set_display(CSS::Display(CSS::DisplayOutside::Inline, CSS::DisplayInside::Flow));
-                break;
-            case RustFFI::FfiPseudoElementDecision::Box:
-                if (originating_list_box) {
-                    layout_node = &create_list_item_marker(*originating_list_box, style);
-                    break;
-                }
-                layout_node = DOM::Element::create_layout_node_for_display_type(document, display, style, nullptr);
-                break;
-            }
-            return Node::slot_id(layout_node); },
+            auto& image_box = create_content_image_box(element.document(), nullptr, style, const_cast<CSS::AbstractImageStyleValue&>(*replacement_image));
+            return Node::slot_id(&image_box); },
         .create_nested_list_marker = [](void* builder_pointer, u32 style_node, RustFFI::FfiPseudoElement originating_pseudo, Compositing::RustFFI::NodeSlotId pseudo_element_box_slot) -> Compositing::RustFFI::NodeSlotId {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);

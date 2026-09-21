@@ -2688,8 +2688,11 @@ impl LayoutNodeArena {
     ) {
         self.stamp_dom_row(slot, kind, None);
         // A pseudo-element's box names no DOM node of its own, which is what the walks that look
-        // for the row of the nearest element skip it for.
+        // for the row of the nearest element skip it for. What it is generated for is what tells
+        // an anonymous row apart from one stamped for a pseudo-element, and the row carries it
+        // before its shell exists; binding it to the pseudo-element comes later.
         self.set_node_flag(slot, NodeFlag::Anonymous, true);
+        self.data(slot).generated_for.set(pseudo_kind + 1);
         let (record, payloads) = self
             .with_style_engine(|engine| engine.pseudo_published_style_record(generator, pseudo_kind))
             .expect("a pseudo-element whose box is built has published its style");

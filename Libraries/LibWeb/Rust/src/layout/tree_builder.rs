@@ -3163,10 +3163,9 @@ pub struct FfiGeneratedContentItem {
 #[repr(C)]
 pub struct FfiPseudoTreeBuilderCallbacks {
     pub builder: *mut c_void,
-    /// The last argument is the list-item box a `::marker` belongs to, or an invalid slot when the
-    /// pseudo-element is not a marker.
-    pub create_layout_node:
-        unsafe extern "C" fn(*mut c_void, u32, FfiPseudoElement, FfiPseudoElementDecision, NodeSlotId) -> NodeSlotId,
+    /// The box of a pseudo-element whose `content` replaces its contents with a single image. The
+    /// box owns the image provider it renders, which is why the host still builds it.
+    pub create_content_replacement_box: unsafe extern "C" fn(*mut c_void, u32, FfiPseudoElement) -> NodeSlotId,
     /// The last argument of each of these is the pseudo-element's own box, which the build tracks
     /// by slot.
     pub create_nested_list_marker: unsafe extern "C" fn(*mut c_void, u32, FfiPseudoElement, NodeSlotId) -> NodeSlotId,
@@ -3466,6 +3465,78 @@ fn published_pseudo_element_facts(
     facts
 }
 
+/// The kind of box a pseudo-element's decision asks for, or `None` for a display that generates
+/// no box.
+fn pseudo_element_box_kind(
+    layout_host: &TreeBuilderHost,
+    generator: StyleNodeID,
+    pseudo_element: FfiPseudoElement,
+    decision: FfiPseudoElementDecision,
+    facts: PseudoElementFacts,
+) -> Option<NodeKind> {
+    match decision {
+        FfiPseudoElementDecision::None | FfiPseudoElementDecision::ContentReplacement => {
+            unreachable!("the host builds the box of a content replacement")
+        }
+        // https://drafts.csswg.org/css-content-3/#content-property
+        // A pseudo-element whose contents are a content list is an inline box holding them.
+        FfiPseudoElementDecision::Contents => Some(NodeKind::InlineNode),
+        FfiPseudoElementDecision::Box if !facts.originating_list_box.is_invalid() => Some(NodeKind::ListItemMarkerBox),
+        FfiPseudoElementDecision::Box => layout_host
+            .arena()
+            .with_style_store(|engine| {
+                engine
+                    .published_style_view(generator, Some(generated_for_of(pseudo_element) - 1))
+                    .map(|view| view.display())
+            })
+            .and_then(node_kind_for_display),
+    }
+}
+
+/// The row a pseudo-element's box is built in. Every decision but the content replacement, whose
+/// box owns the image it replaces the pseudo-element's contents with, is a row the build stamps
+/// out of the record the mirror published for the pseudo-element.
+fn stamp_pseudo_element_box_row(
+    layout_host: &TreeBuilderHost,
+    generator: StyleNodeID,
+    pseudo_element: FfiPseudoElement,
+    decision: FfiPseudoElementDecision,
+    facts: PseudoElementFacts,
+) -> NodeSlotId {
+    let pseudo_kind = generated_for_of(pseudo_element) - 1;
+    let is_list_item_marker = decision == FfiPseudoElementDecision::Box && !facts.originating_list_box.is_invalid();
+    // A pseudo-element whose display generates no box of its own gets none, as its generator does.
+    let Some(kind) = pseudo_element_box_kind(layout_host, generator, pseudo_element, decision, facts) else {
+        return NodeSlotId::INVALID;
+    };
+    // SAFETY: Entry points guarantee that the arena remains live, and callers hold no reference
+    // derived from it across the allocation.
+    let slot = unsafe { &mut *layout_host.arena }.allocate_unbound();
+    layout_host
+        .arena()
+        .stamp_pseudo_element_row(slot, kind, generator, pseudo_kind);
+    // The box the host allocated existed before its display was adjusted and before it was told
+    // where its marker sits, so the row's shell does too.
+    assert!(!layout_host.arena().node_shell(slot).is_null());
+    if decision == FfiPseudoElementDecision::Contents {
+        layout_host.arena().update_layout_style(slot, |style| {
+            style.set_display(FfiDisplay::outside_and_inside(
+                crate::css::css_enums::display_outside::INLINE,
+                crate::css::css_enums::display_inside::FLOW,
+                false,
+            ));
+        });
+    }
+    if is_list_item_marker {
+        // https://drafts.csswg.org/css-lists-3/#list-style-position-property
+        // The marker box of a list item takes its position from the list item's own style.
+        layout_host
+            .arena()
+            .set_node_flag(slot, NodeFlag::ListMarkerIsInside, facts.marker_position_is_inside);
+    }
+    slot
+}
+
 fn create_pseudo_element(
     host: &DomTreeBuilderHost<'_>,
     state: &mut TreeBuilderState,
@@ -3490,21 +3561,17 @@ fn create_pseudo_element(
         return None;
     }
 
-    super::tree_build_seal::note_host_call("pseudo.create_layout_node");
-    // SAFETY: The builder remains live, and the identity names a live element.
-    let layout_node = unsafe {
-        (callbacks.create_layout_node)(
-            callbacks.builder,
-            style_node,
-            pseudo_element,
-            decision,
-            facts.originating_list_box,
-        )
+    let layout_host = host.layout();
+    let layout_node = if decision == FfiPseudoElementDecision::ContentReplacement {
+        super::tree_build_seal::note_host_call("pseudo.create_content_replacement_box");
+        // SAFETY: The builder remains live, and the identity names a live element.
+        unsafe { (callbacks.create_content_replacement_box)(callbacks.builder, style_node, pseudo_element) }
+    } else {
+        stamp_pseudo_element_box_row(&layout_host, element_identity, pseudo_element, decision, facts)
     };
     if layout_node.is_invalid() {
         return None;
     }
-    let layout_host = host.layout();
     let mut unplaced_box = Some(layout_host.created(layout_node));
 
     // https://drafts.csswg.org/css-lists-3/#list-style-position-outside

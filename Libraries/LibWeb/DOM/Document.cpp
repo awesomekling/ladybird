@@ -696,6 +696,7 @@ Layout::NodeArena& Document::layout_node_arena()
             case Layout::RustFFI::NodeKind::FieldSetBox:
             case Layout::RustFFI::NodeKind::LegendBox:
             case Layout::RustFFI::NodeKind::ListItemBox:
+            case Layout::RustFFI::NodeKind::ListItemMarkerBox:
             case Layout::RustFFI::NodeKind::RangeInputBox:
             case Layout::RustFFI::NodeKind::SVGForeignObjectBox:
             case Layout::RustFFI::NodeKind::TableWrapper:
@@ -742,7 +743,7 @@ Layout::NodeArena& Document::layout_node_arena()
                 // published for it, as an element's row does, and tells the document the same
                 // things about it. An anonymous row's style is derived by the arena, which has
                 // already told the shell everything about it.
-                if (!node->is_anonymous())
+                if (!node->is_anonymous() || node->is_generated_for_pseudo_element())
                     node->initialize_stamped_style_record();
                 else if (kind == Layout::RustFFI::NodeKind::InlineNode)
                     node->attach_style_resources();
