@@ -672,7 +672,7 @@ void StyleScope::publish_animation_keyframes()
 
     Vector<u32> name_lengths;
     Vector<u16> name_units;
-    Vector<size_t> keyframe_sets;
+    Vector<FlatPtr> keyframe_sets;
     Vector<NonnullRefPtr<Animations::KeyframeEffect::KeyFrameSet const>> published;
     name_lengths.ensure_capacity(rule_cache.rules_by_animation_keyframes.size());
     keyframe_sets.ensure_capacity(rule_cache.rules_by_animation_keyframes.size());
@@ -683,16 +683,15 @@ void StyleScope::publish_animation_keyframes()
         name_units.ensure_capacity(name_units.size() + view.length_in_code_units());
         for (size_t index = 0; index < view.length_in_code_units(); ++index)
             name_units.unchecked_append(static_cast<u16>(view.code_unit_at(index)));
-        keyframe_sets.unchecked_append(bit_cast<size_t>(keyframe_set.ptr()));
+        keyframe_sets.unchecked_append(bit_cast<FlatPtr>(keyframe_set.ptr()));
         published.unchecked_append(*keyframe_set);
     }
 
-    StyleEngineFFI::style_engine_set_tree_scope_animation_keyframes(
-        document().style_computer().style_engine().rust_handle(),
-        style_engine_tree_scope().value(),
+    record_tree_scope_animation_keyframes(
+        document(),
+        style_engine_tree_scope(),
         bit_cast<FlatPtr>(as_if<DOM::ShadowRoot>(*m_node)),
-        name_lengths.data(), name_units.data(), name_units.size(),
-        keyframe_sets.data(), name_lengths.size());
+        name_lengths, name_units, keyframe_sets);
     m_published_keyframe_sets = move(published);
 }
 
@@ -706,11 +705,8 @@ void StyleScope::unpublish_animation_keyframes()
         return;
     if (!document().style_engine_tracks_tree())
         return;
-    StyleEngineFFI::style_engine_set_tree_scope_animation_keyframes(
-        document().style_computer().style_engine().rust_handle(),
-        shadow_root->style_engine_tree_scope().value(),
-        bit_cast<FlatPtr>(shadow_root),
-        nullptr, nullptr, 0, nullptr, 0);
+    record_tree_scope_animation_keyframes(
+        document(), shadow_root->style_engine_tree_scope(), bit_cast<FlatPtr>(shadow_root), {}, {}, {});
     m_published_keyframe_sets.clear();
 }
 

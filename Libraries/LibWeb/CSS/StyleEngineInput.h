@@ -228,6 +228,9 @@ WEB_API void record_element_animation_names(DOM::Element&, ReadonlySpan<Utf16Fly
 WEB_API void record_element_css_defined_animations(DOM::Element&, u8 slot, ReadonlySpan<Utf16FlyString> names, ReadonlySpan<u64> definition_words);
 WEB_API void record_element_animation_timing_rows(DOM::Element&, u8 slot, ReadonlySpan<u32> words, ReadonlySpan<u64> times);
 WEB_API void record_element_animation_effect_descriptions(DOM::Element&, u8 slot, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>);
+// The keyframe sets travel as the pointers the scope's name table names them by: naming their type
+// here would mean pulling `Animations::KeyframeEffect` into every translation unit that styles.
+WEB_API void record_tree_scope_animation_keyframes(DOM::Document&, TreeScopeID, FlatPtr shadow_root_identity, ReadonlySpan<u32> name_lengths, ReadonlySpan<u16> name_units, ReadonlySpan<FlatPtr> keyframe_sets);
 WEB_API void record_animation_timeline_samples(DOM::Document&, ReadonlySpan<u32> identities, ReadonlySpan<u32> words, ReadonlySpan<u64> times);
 WEB_API void record_element_custom_property_names(DOM::Element&, ReadonlySpan<Utf16FlyString>, bool uses_unnamed, bool uses_custom_functions);
 

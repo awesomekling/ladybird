@@ -7123,19 +7123,75 @@ pub unsafe extern "C" fn rust_resolve_animation_declarations_from_published(
         selected.push(found);
     }
 
+    let selected = selected
+        .into_iter()
+        .zip(current_keys.iter().copied())
+        .map(|(effect, current_key)| SelectedEffect {
+            effect,
+            current_key,
+            easing_from_animation: None,
+            composite_from_animation: 0,
+        })
+        .collect::<Vec<_>>();
+    let Some((ffi_effects, ffi_keyframes, ffi_declarations)) = describe_selected_effects(&selected, table) else {
+        return no_resolved_animation_properties();
+    };
+
+    let important_property_bitmap =
+        unsafe { std::slice::from_raw_parts(input.important_property_bitmap, input.important_property_bitmap_length) };
+    let resolved = resolve_animation_declarations(
+        &ffi_declarations,
+        &ffi_effects,
+        &ffi_keyframes,
+        input.writing_mode,
+        input.direction,
+        important_property_bitmap,
+    );
+    unsafe { *input.covered = true };
+    finish_resolved_animation_properties(resolved)
+}
+
+/// One effect the stage is about to sample: its description, how far along it is, and - for a
+/// description taken from a `@keyframes` rule rather than from an effect the host holds - what the
+/// animation running it contributes to the two holes such a description keeps.
+pub(crate) struct SelectedEffect<'a> {
+    pub(crate) effect: &'a crate::css::style::animations::PublishedEffect,
+    pub(crate) current_key: f64,
+    pub(crate) easing_from_animation: Option<&'a crate::css::style::animations::PublishedEasing>,
+    pub(crate) composite_from_animation: u8,
+}
+
+/// Turn the selected descriptions, in composite order, into the flat buffers the animation core
+/// resolves declarations from. `None` where a keyframe wants the element's own computed value for a
+/// longhand the drive did not compute.
+type DescribedEffects = (
+    Vec<FfiAnimationEffect>,
+    Vec<FfiAnimationKeyframe>,
+    Vec<FfiAnimationDeclaration>,
+);
+
+fn describe_selected_effects(
+    selected: &[SelectedEffect<'_>],
+    table: &crate::css::computed_longhand_table::ComputedLonghandTable,
+) -> Option<DescribedEffects> {
     let mut ffi_keyframes = Vec::new();
     let mut ffi_declarations = Vec::new();
-    let mut ffi_effects = Vec::with_capacity(count);
-    for (index, effect) in selected.iter().enumerate() {
+    let mut ffi_effects = Vec::with_capacity(selected.len());
+    for selection in selected {
+        let effect = selection.effect;
         let first_keyframe_index = ffi_keyframes.len();
         let style_sheet_resource_context = effect.resource_context();
         let is_transition = effect.flags & crate::css::style::animations::effect_flag::IS_TRANSITION != 0;
         for keyframe in &effect.keyframes {
             let keyframe_index = ffi_keyframes.len();
+            let easing = match selection.easing_from_animation {
+                Some(animation) => keyframe.easing_from(animation),
+                None => &keyframe.easing,
+            };
             ffi_keyframes.push(FfiAnimationKeyframe {
                 key: keyframe.key,
-                easing: keyframe.easing.descriptor(),
-                composite: match keyframe.composite {
+                easing: easing.descriptor(),
+                composite: match keyframe.composite_from(selection.composite_from_animation) {
                     1 => FfiCompositeOperation::Add,
                     2 => FfiCompositeOperation::Accumulate,
                     _ => FfiCompositeOperation::Replace,
@@ -7144,10 +7200,7 @@ pub unsafe extern "C" fn rust_resolve_animation_declarations_from_published(
             for declaration in effect.declarations_of(keyframe) {
                 let value = match declaration.use_initial {
                     // The element's own computed value, which is not known until it is sampled.
-                    true => match table.get(declaration.property_id) {
-                        Some(value) => value.pointer(),
-                        None => return no_resolved_animation_properties(),
-                    },
+                    true => table.get(declaration.property_id)?.pointer(),
                     false => declaration.value.pointer(),
                 };
                 ffi_declarations.push(FfiAnimationDeclaration {
@@ -7166,23 +7219,37 @@ pub unsafe extern "C" fn rust_resolve_animation_declarations_from_published(
         ffi_effects.push(FfiAnimationEffect {
             first_keyframe_index,
             keyframe_count: ffi_keyframes.len() - first_keyframe_index,
-            current_key: current_keys[index],
+            current_key: selection.current_key,
             result_of_transition: is_transition,
         });
     }
+    Some((ffi_effects, ffi_keyframes, ffi_declarations))
+}
 
-    let important_property_bitmap =
-        unsafe { std::slice::from_raw_parts(input.important_property_bitmap, input.important_property_bitmap_length) };
-    let resolved = resolve_animation_declarations(
+/// Resolve the animation declarations of the one CSS animation a computation is about to start,
+/// from the `@keyframes` rule the host published for the scope rather than from an effect it holds.
+///
+/// The rule's description keeps two holes only the animation can fill - a keyframe's own easing and
+/// `composite: auto` - and both come from the definition the computation just computed.
+pub(crate) fn resolve_new_animation_declarations(
+    starting: SelectedEffect<'_>,
+    table: &crate::css::computed_longhand_table::ComputedLonghandTable,
+    writing_mode: u8,
+    direction: u8,
+    important_property_bitmap: &[u8],
+) -> Option<FfiResolvedAnimationProperties> {
+    if !starting.effect.is_covered() || starting.effect.keyframes.len() < 2 {
+        return None;
+    }
+    let (ffi_effects, ffi_keyframes, ffi_declarations) = describe_selected_effects(&[starting], table)?;
+    Some(finish_resolved_animation_properties(resolve_animation_declarations(
         &ffi_declarations,
         &ffi_effects,
         &ffi_keyframes,
-        input.writing_mode,
-        input.direction,
+        writing_mode,
+        direction,
         important_property_bitmap,
-    );
-    unsafe { *input.covered = true };
-    finish_resolved_animation_properties(resolved)
+    )))
 }
 
 struct AnimationPreparationKey {

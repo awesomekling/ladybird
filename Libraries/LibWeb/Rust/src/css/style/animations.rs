@@ -459,6 +459,85 @@ impl AnimationTimingRow {
         }
     }
 
+    /// The row a CSS animation this definition is about to start would publish, built from the
+    /// definition alone.
+    ///
+    /// `CSSAnimation::apply_css_properties` settles the effect's timing from the definition and
+    /// then starts it, and a brand-new animation's current time is unresolved, so both "play an
+    /// animation" and "pause an animation" hold it at time zero and leave the rest to a task that
+    /// runs after this style update. The timeline's current time therefore never enters the
+    /// arithmetic, which is why the caller may sample the row without a published sample for it.
+    ///
+    /// `None` for a definition whose row this cannot settle: a scroll timeline, which is
+    /// materialized from the element's surroundings, and an `auto` duration, which the host takes
+    /// from the effect's intrinsic duration.
+    #[must_use]
+    pub(crate) fn for_new_css_animation(
+        definition: &crate::css::style_compute::FfiComputedAnimation,
+        owning_node: StyleNodeID,
+        owning_slot: AnimationSlot,
+    ) -> Option<Self> {
+        use crate::css::style_compute::FfiAnimationTimelineKind;
+        use timing_row_flag as flag;
+
+        if definition.timeline_kind != FfiAnimationTimelineKind::Document || definition.duration_is_auto {
+            return None;
+        }
+        // `Bindings::PlaybackDirection` and `Bindings::FillMode` are in IDL order, which is not the
+        // order the CSS keywords are in: a mirror of `css_animation_direction_to_playback_direction`
+        // and `css_fill_mode_to_bindings_fill_mode`.
+        let direction = match definition.direction {
+            0 => 2, // alternate
+            1 => 3, // alternate-reverse
+            2 => 0, // normal
+            3 => 1, // reverse
+            _ => return None,
+        };
+        let fill_mode = match definition.fill_mode {
+            0 => 2, // backwards
+            1 => 3, // both
+            2 => 1, // forwards
+            3 => 0, // none
+            _ => return None,
+        };
+        // A pending play or pause task settles nothing the phase or the active time is derived
+        // from, but the row the host publishes for this animation carries one, so this one does
+        // too. `animation_play_state::PAUSED` is 0.
+        let pending_task = match definition.play_state {
+            0 => flag::HAS_PENDING_PAUSE_TASK,
+            _ => flag::HAS_PENDING_PLAY_TASK,
+        };
+        let mut times = [0.0; TIMING_ROW_TIMES];
+        times[TIME_HOLD] = 0.0;
+        times[TIME_START_DELAY] = definition.delay;
+        times[TIME_ITERATION_DURATION] = definition.duration;
+        times[TIME_ITERATION_COUNT] = definition.iteration_count;
+        times[TIME_PLAYBACK_RATE] = 1.0;
+        Some(Self {
+            flags: flag::HAS_HOLD_TIME
+                | flag::HAS_TIMELINE
+                | flag::TIMELINE_IS_MONOTONICALLY_INCREASING
+                | flag::HAS_OWNING_ELEMENT
+                | pending_task
+                | (fill_mode << flag::FILL_MODE_SHIFT)
+                | (direction << flag::PLAYBACK_DIRECTION_SHIFT),
+            // The document timeline's identity is never asked for: the hold time settles the
+            // current time, so the row is sampled with no timeline time at all.
+            timeline: 0,
+            easing_interval_count: 0,
+            // The effect this animation would get has no identity until the host creates it.
+            effect_identity: 0,
+            composite_class: 0,
+            composite_owning_slot: owning_slot,
+            composite_transition_property: 0,
+            composite_owning_node: owning_node.raw(),
+            composite_class_key: 0,
+            // The order among an element's animations, which a lone row needs no place in.
+            global_list_order: 0,
+            times,
+        })
+    }
+
     #[must_use]
     pub(crate) fn effect_identity(&self) -> u64 {
         self.effect_identity
@@ -1051,6 +1130,95 @@ pub(crate) struct PublishedEasing {
 }
 
 impl PublishedEasing {
+    /// The easing a computed `animation-timing-function` describes, which fills in the hole a
+    /// keyframe with no easing of its own keeps. A mirror of `EasingFunction::from_style_value`.
+    ///
+    /// `None` for a `linear()` with stops of its own: the host canonicalizes those before reading
+    /// them, which resolves each stop's calculated values and interpolates the inputs it was not
+    /// given, and a definition that names one is left to the host.
+    #[must_use]
+    pub(crate) fn from_computed_timing_function(value: &crate::css::style_value::StyleValueData) -> Option<Self> {
+        use crate::css::style_value::StyleValueData;
+        use crate::layout::keyword;
+
+        let cubic_bezier = |x1, y1, x2, y2| Self {
+            kind: 1,
+            linear_points: Box::new([]),
+            x1,
+            y1,
+            x2,
+            y2,
+            interval_count: 0,
+            step_position: 0,
+        };
+        match value {
+            // https://drafts.csswg.org/css-easing-2/#typedef-easing-function
+            StyleValueData::Keyword { keyword } => match *keyword {
+                keyword::LINEAR => Some(Self {
+                    kind: 0,
+                    // `linear` is `linear(0, 1)`, the identity curve, spelled out the way the host
+                    // spells it out when it describes a keyframe that runs it.
+                    linear_points: Box::new([
+                        crate::css::animation::FfiLinearEasingPoint {
+                            input: 0.0,
+                            output: 0.0,
+                        },
+                        crate::css::animation::FfiLinearEasingPoint {
+                            input: 1.0,
+                            output: 1.0,
+                        },
+                    ]),
+                    x1: 0.0,
+                    y1: 0.0,
+                    x2: 0.0,
+                    y2: 0.0,
+                    interval_count: 0,
+                    step_position: 0,
+                }),
+                keyword::EASE => Some(cubic_bezier(0.25, 0.1, 0.25, 1.0)),
+                keyword::EASE_IN => Some(cubic_bezier(0.42, 0.0, 1.0, 1.0)),
+                keyword::EASE_OUT => Some(cubic_bezier(0.0, 0.0, 0.58, 1.0)),
+                keyword::EASE_IN_OUT => Some(cubic_bezier(0.42, 0.0, 0.58, 1.0)),
+                _ => None,
+            },
+            StyleValueData::Easing {
+                kind,
+                step_position,
+                x1,
+                y1,
+                x2,
+                y2,
+                number_of_intervals,
+                ..
+            } => {
+                // The host reads each of these with its own `numeric()`, which resolves a
+                // calculation on the spot; a definition that needs one is left to it.
+                let numeric = |value: &crate::css::style_value::RetainedStyleValueData| match value.data() {
+                    StyleValueData::Number { value } => Some(*value),
+                    StyleValueData::Integer { value } => Some(*value as f64),
+                    StyleValueData::Percentage { value } => Some(*value),
+                    _ => None,
+                };
+                match kind {
+                    1 => Some(cubic_bezier(numeric(x1)?, numeric(y1)?, numeric(x2)?, numeric(y2)?)),
+                    2 => Some(Self {
+                        kind: 2,
+                        linear_points: Box::new([]),
+                        x1: 0.0,
+                        y1: 0.0,
+                        x2: 0.0,
+                        y2: 0.0,
+                        #[expect(clippy::cast_possible_truncation)]
+                        interval_count: numeric(number_of_intervals)?.round_ties_even() as i32,
+                        step_position: *step_position,
+                    }),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
     #[must_use]
     pub(crate) fn descriptor(&self) -> crate::css::animation::FfiEasingDescriptor {
         use crate::css::animation::{FfiEasingDescriptor, FfiEasingKind};
@@ -1080,6 +1248,35 @@ pub(crate) struct PublishedKeyframe {
     pub(crate) easing: PublishedEasing,
     pub(crate) composite: u8,
     declaration_range: std::ops::Range<usize>,
+}
+
+/// The two holes a `@keyframes` rule's own description keeps, which only the animation running it
+/// can fill: a keyframe with no easing runs the animation's `animation-timing-function`, and one
+/// that says `composite: auto` composites the way its effect does. An element's effect descriptions
+/// never carry them - the host fills both in as it describes the effect. Mirrored in
+/// `CSS/StyleEngineInput.cpp`; keep the two in step.
+pub(crate) const KEYFRAME_EASING_FROM_ANIMATION: u8 = 3;
+pub(crate) const KEYFRAME_COMPOSITE_FROM_ANIMATION: u8 = 0xff;
+
+impl PublishedKeyframe {
+    /// This keyframe's easing, with the hole a `@keyframes` rule keeps filled in from the animation
+    /// running it.
+    #[must_use]
+    pub(crate) fn easing_from<'a>(&'a self, animation: &'a PublishedEasing) -> &'a PublishedEasing {
+        match self.easing.kind {
+            KEYFRAME_EASING_FROM_ANIMATION => animation,
+            _ => &self.easing,
+        }
+    }
+
+    /// This keyframe's composite operation, with the same hole filled in.
+    #[must_use]
+    pub(crate) fn composite_from(&self, animation: u8) -> u8 {
+        match self.composite {
+            KEYFRAME_COMPOSITE_FROM_ANIMATION => animation,
+            composite => composite,
+        }
+    }
 }
 
 /// One property a published keyframe declares. `use_initial` marks the keyframe the host synthesized
@@ -1161,6 +1358,48 @@ impl AnimationEffectDescriptions {
             self.rows.remove(&(node, slot));
             return;
         }
+        let published = unsafe {
+            build_published_effects(PublishedEffectBuffers {
+                effects,
+                keyframes,
+                declarations,
+                linear_points,
+                base_url_bytes,
+            })
+        };
+        self.rows.insert((node, slot), published.into_boxed_slice());
+    }
+
+    #[must_use]
+    pub(crate) fn effects(&self, node: StyleNodeID, slot: AnimationSlot) -> &[PublishedEffect] {
+        self.rows.get(&(node, slot)).map_or(&[][..], |effects| &effects[..])
+    }
+
+    /// Give up the rows of identities that have been retired, which can be minted again.
+    pub(crate) fn retire(&mut self, nodes: &[StyleNodeID]) {
+        if self.rows.is_empty() {
+            return;
+        }
+        self.rows.retain(|&(node, _), _| !nodes.contains(&node));
+    }
+}
+
+/// Unpack the flat buffers one list of descriptions travels in. Shared by an element's effects and
+/// by the `@keyframes` a style scope defines, which are described alike: the scope's descriptions
+/// are the same shape with the two per-animation holes (see `PublishedKeyframe`) left open.
+///
+/// # Safety
+/// Every declaration's `value` must be a live style value the host holds a reference to for the
+/// duration of the call.
+unsafe fn build_published_effects(published_buffers: PublishedEffectBuffers<'_>) -> Vec<PublishedEffect> {
+    let PublishedEffectBuffers {
+        effects,
+        keyframes,
+        declarations,
+        linear_points,
+        base_url_bytes,
+    } = published_buffers;
+    {
         let mut published = Vec::with_capacity(effects.len());
         for effect in effects {
             let keyframe_range =
@@ -1223,20 +1462,7 @@ impl AnimationEffectDescriptions {
                 declarations: published_declarations.into_boxed_slice(),
             });
         }
-        self.rows.insert((node, slot), published.into_boxed_slice());
-    }
-
-    #[must_use]
-    pub(crate) fn effects(&self, node: StyleNodeID, slot: AnimationSlot) -> &[PublishedEffect] {
-        self.rows.get(&(node, slot)).map_or(&[][..], |effects| &effects[..])
-    }
-
-    /// Give up the rows of identities that have been retired, which can be minted again.
-    pub(crate) fn retire(&mut self, nodes: &[StyleNodeID]) {
-        if self.rows.is_empty() {
-            return;
-        }
-        self.rows.retain(|&(node, _), _| !nodes.contains(&node));
+        published
     }
 }
 
@@ -1264,9 +1490,19 @@ impl std::hash::Hash for KeyframesName {
 /// each published scope's cache for as long as the table names it, and replaces a scope's whole row
 /// when that scope's rule cache is rebuilt. A replayed engine is never published to and resolves
 /// nothing, the way it reads no layout arena.
+/// One `@keyframes` rule of a scope: the host's keyframe set, and what the rule declares.
+///
+/// The description is the same shape as an element effect's, with the two holes a rule keeps until
+/// an animation runs it - a keyframe's own easing, and `composite: auto` - left open for the
+/// definition to fill in.
+pub(crate) struct PublishedKeyframesSet {
+    pub(crate) pointer: usize,
+    pub(crate) description: PublishedEffect,
+}
+
 #[derive(Default)]
 pub(crate) struct AnimationKeyframes {
-    scopes: HashMap<TreeScopeID, HashMap<KeyframesName, usize>>,
+    scopes: HashMap<TreeScopeID, HashMap<KeyframesName, PublishedKeyframesSet>>,
     /// Which scope a shadow root's host-side pointer identity names. The cascade attributes the
     /// winning `animation-name` declaration to a shadow root by that identity, and the scope it
     /// names is where the declaration's `@keyframes` are looked for first.
@@ -1275,17 +1511,22 @@ pub(crate) struct AnimationKeyframes {
 
 impl AnimationKeyframes {
     /// Replace one scope's row. The names arrive packed into one buffer of code units with a length
-    /// each, the way an element's animation names do.
-    pub(crate) fn set(
+    /// each, the way an element's animation names do, and each one's description in the same flat
+    /// buffers an element's effect descriptions travel in, in the order the names are given.
+    ///
+    /// # Safety
+    /// Every declaration's `value` must be a live style value the host holds a reference to for the
+    /// duration of the call.
+    pub(crate) unsafe fn set(
         &mut self,
         tree_scope: TreeScopeID,
         shadow_root_identity: usize,
         name_lengths: &[u32],
         name_units: &[u16],
-        keyframe_sets: &[usize],
+        published_buffers: PublishedEffectBuffers<'_>,
     ) {
         assert!(
-            name_lengths.len() == keyframe_sets.len(),
+            name_lengths.len() == published_buffers.effects.len(),
             "a published @keyframes name must come with its keyframe set"
         );
         if name_lengths.is_empty() {
@@ -1299,27 +1540,34 @@ impl AnimationKeyframes {
         if shadow_root_identity != 0 {
             self.scope_by_shadow_root.insert(shadow_root_identity, tree_scope);
         }
+        let descriptions = unsafe { build_published_effects(published_buffers) };
         let mut sets = HashMap::with_capacity(name_lengths.len());
         let mut offset = 0usize;
-        for (index, &length) in name_lengths.iter().enumerate() {
+        for (&length, description) in name_lengths.iter().zip(descriptions) {
             let end = offset + length as usize;
             assert!(end <= name_units.len(), "@keyframes name lengths overrun their buffer");
-            sets.insert(
-                KeyframesName(CssString::from_utf16(&name_units[offset..end])),
-                keyframe_sets[index],
-            );
+            let name = KeyframesName(CssString::from_utf16(&name_units[offset..end]));
             offset = end;
+            sets.insert(
+                name,
+                PublishedKeyframesSet {
+                    // The host names a set by its own pointer, which is what it publishes as the
+                    // description's identity.
+                    pointer: description.identity as usize,
+                    description,
+                },
+            );
         }
         self.scopes.insert(tree_scope, sets);
     }
 
     #[must_use]
-    fn in_scope(&self, tree_scope: TreeScopeID, name: &KeyframesName) -> Option<usize> {
-        self.scopes.get(&tree_scope)?.get(name).copied()
+    fn in_scope(&self, tree_scope: TreeScopeID, name: &KeyframesName) -> Option<&PublishedKeyframesSet> {
+        self.scopes.get(&tree_scope)?.get(name)
     }
 
-    /// The keyframe set an animation of this name runs, or zero where no scope in its chain defines
-    /// one and the host makes an effect with no keyframes.
+    /// The keyframe set an animation of this name runs, or `None` where no scope in its chain
+    /// defines one and the host makes an effect with no keyframes.
     ///
     /// The chain is the one the host walked: the tree scope of the winning `animation-name`
     /// declaration first, because that declaration can come from a shadow-root rule - `:host()` and
@@ -1332,9 +1580,9 @@ impl AnimationKeyframes {
         declaration_shadow_root_identity: usize,
         element_tree_scope: TreeScopeID,
         name: &CssString,
-    ) -> usize {
+    ) -> Option<&PublishedKeyframesSet> {
         if self.scopes.is_empty() {
-            return 0;
+            return None;
         }
         let name = KeyframesName(name.clone());
         if declaration_shadow_root_identity != 0
@@ -1344,14 +1592,14 @@ impl AnimationKeyframes {
                 .copied()
             && let Some(set) = self.in_scope(scope, &name)
         {
-            return set;
+            return Some(set);
         }
         if element_tree_scope != TreeScopeID::DOCUMENT
             && let Some(set) = self.in_scope(element_tree_scope, &name)
         {
-            return set;
+            return Some(set);
         }
-        self.in_scope(TreeScopeID::DOCUMENT, &name).unwrap_or(0)
+        self.in_scope(TreeScopeID::DOCUMENT, &name)
     }
 }
 
