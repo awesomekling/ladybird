@@ -614,10 +614,14 @@ impl RetainedState {
             // that flipped (custom properties are no winners), the parent's inherited style and
             // custom-property environment - the record stands, and the reaction may still move a
             // pseudo-element. The state has to hold the flips: a row this flush published holds
-            // the cascade of the node's current answer. Anything else recomputes in C++.
-            let flips_are_reflected = exact_flipped_rules.is_some_and(|flipped| {
-                !flipped.element || self.current_winner_groups().row_stamp(node) == Some(self.flush_stamp)
-            });
+            // the cascade of the node's current answer, whichever rules flipped for it. Anything
+            // else recomputes in C++, as does a record under a moved environment, which reaches
+            // values its winners do not name.
+            let row_is_current = self.current_winner_groups().row_stamp(node) == Some(self.flush_stamp);
+            let flips_are_reflected = match exact_flipped_rules {
+                Some(flipped) => !flipped.element || row_is_current,
+                None => row_is_current && !scratch.environment_changed,
+            };
             if !flips_are_reflected {
                 counters.bump(Counter::EngineComputedRecordBailUnchangedWinners);
                 return None;
@@ -4079,6 +4083,9 @@ impl EngineComputedRecordContinuation {
 
 #[derive(Default)]
 pub(super) struct EngineComputedRecordScratch {
+    /// Whether the transaction moved the document environment, which reaches computed values the
+    /// winners do not name.
+    pub(super) environment_changed: bool,
     pub(super) continuation: EngineComputedRecordContinuation,
     /// Whether this flush carries a document environment action. A record's winners can stand
     /// through one while the values they computed to do not, so such a record is driven again in

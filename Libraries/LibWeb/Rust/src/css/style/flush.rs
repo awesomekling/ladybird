@@ -1810,6 +1810,7 @@ impl StyleEngineState {
             let mut engine_computed_record_scratch = publication::EngineComputedRecordScratch::default();
             engine_computed_record_scratch.document_environment_moved =
                 environment_changed && !environment_action_needs_host_computation;
+            engine_computed_record_scratch.environment_changed = environment_changed;
             let computation_loop_timer = PassTimer::start();
             computation_scratch_memory.resize_required_to(
                 &mut self.retained.memory,
