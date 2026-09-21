@@ -536,10 +536,27 @@ void Animatable::publish_animation_timing_rows()
     Vector<u32> words;
     Vector<u64> times;
     Vector<GC::Ref<KeyframeEffect>> effects_in_order;
+    // A CSS animation keeps the place in its owning element's `animation-name` list it was given
+    // when a plan last applied a definition to it, and script can revive one the element has since
+    // stopped listing. Its place is then one another animation holds, so the key alone says nothing
+    // about which of the two the element's next plan works on. Say on the row whether the element
+    // really lists this animation there.
+    auto listed_by_owning_element = [](Animation& animation) -> u32 {
+        auto owning_element = animation.owning_element();
+        if (!owning_element.has_value())
+            return 0;
+        auto const* css_defined_animations = owning_element->element().css_defined_animations(owning_element->pseudo_element());
+        if (!css_defined_animations)
+            return 0;
+        auto index = animation.class_specific_composite_order_key();
+        if (index >= css_defined_animations->size() || &*css_defined_animations->at(index) != &animation)
+            return 0;
+        return Animation::StyleTimingRow::listed_by_owning_element;
+    };
     auto append_row = [&](KeyframeEffect& keyframe_effect, Animation& animation, u32 extra_flags) {
         auto row = animation.style_timing_row();
         row.effect_identity = keyframe_effect.animation_preparation_identity();
-        words.append(row.flags | extra_flags);
+        words.append(row.flags | extra_flags | listed_by_owning_element(animation));
         words.append(row.timeline_identity);
         words.append(bit_cast<u32>(row.easing_interval_count));
         words.append(static_cast<u32>(row.effect_identity));
