@@ -5774,6 +5774,9 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         bool used_host_element_adjustment_facts { false };
         bool used_host_tree_counting_inputs { false };
         bool used_host_custom_property_inheritance_walk { false };
+        // Whether this row's results actually moved the metrics a `rem` resolves against. Only the
+        // document element can, and almost none of its recomputations do.
+        bool did_write_root_element_font_metrics { false };
         Optional<DOM::AbstractElement::TreeCountingFunctionResolutionContext> tree_counting_context;
         ComputedValuesFFI::FfiStyleComputationEnvironment computation_environment {};
         OwnPtr<CustomPropertyResolutionState> custom_property_resolution;
@@ -6178,9 +6181,17 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 *context.explicitly_inherited_non_inherited_style_groups |= style_groups;
         }
         if (!context.stop_after_longhand_drive && context.abstract_element.element().is_document_element()) {
-            style_computer.set_root_element_font_metrics(
-                style_computer.calculate_root_element_font_metrics(computed_style),
-                computed_style.font_metrics_depend_on_viewport_metrics());
+            // OPTIMIZATION: The metrics a `rem` resolves against are the same across almost every
+            //               recomputation of the document element, and writing them again both
+            //               publishes a style-engine event and makes this row's result application
+            //               reach the host. Both wait until the metrics actually move.
+            auto root_element_font_metrics = style_computer.calculate_root_element_font_metrics(computed_style);
+            auto depends_on_viewport_metrics = computed_style.font_metrics_depend_on_viewport_metrics();
+            if (root_element_font_metrics != style_computer.m_root_element_font_metrics
+                || depends_on_viewport_metrics != style_computer.m_root_element_font_metrics_depend_on_viewport_metrics) {
+                style_computer.set_root_element_font_metrics(root_element_font_metrics, depends_on_viewport_metrics);
+                state.did_write_root_element_font_metrics = true;
+            }
         }
         // NB: Keyframe collection is the only thing that sets this, and nothing between here and
         //     where the animation stage consumes it runs in between. Clearing it here rather
@@ -6370,9 +6381,11 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         || drive_result.animations.count != 0
         || drive_result.driver_results.uses_tree_counting_function
         || drive_result.driver_results.explicitly_inherited_non_inherited_style_groups != 0
-        || abstract_element.element().is_document_element()
         || row_transition_or_animation_state_of(native_context, !drive_result.transitions.delay_and_duration_are_single_zero);
     consume_longhand_transaction_result(&native_context, transaction_result.drive_result);
+    // The document element's row only reaches the host when the metrics it publishes moved, which
+    // the application itself decides, so that term joins once the application has run.
+    application_reaches_the_host |= native_context.state->did_write_root_element_font_metrics;
     if (transaction_result.drive_result->custom_properties.environment_identity != 0) {
         auto resolved = abstract_element.custom_property_data();
         ComputedValuesFFI::rust_set_longhand_custom_property_environment(transaction_result.storage, resolved ? resolved->identity() : 0);
