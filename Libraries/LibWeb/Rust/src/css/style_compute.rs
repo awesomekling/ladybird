@@ -2652,6 +2652,7 @@ pub struct FfiLonghandTransactionInput {
 #[repr(C)]
 pub struct FfiLonghandDriveResult {
     pub driver_results: FfiLonghandDriverResults,
+    pub inherited_animated_overlay: *mut AnimatedOverlay,
     pub custom_properties: FfiResolvedCustomProperties,
     pub transitions: FfiComputedTransitionList,
     pub animations: FfiComputedAnimationList,
@@ -3045,6 +3046,7 @@ struct LonghandTransactionContinuation {
     parent_text_align_input_is_animated: bool,
     // The length-resolution contexts the animation tail needs, kept where the drive built them.
     animation_length_contexts: FfiAnimationLengthContexts,
+    inherited_animated_overlay: Option<Box<AnimatedOverlay>>,
 }
 
 #[repr(C)]
@@ -5109,6 +5111,7 @@ pub(crate) fn is_required_driver_input(property_id: u16) -> bool {
 
 unsafe fn compute_longhands(
     input: &FfiLonghandTransactionInput,
+    animated_overlay: *mut AnimatedOverlay,
     environment: &FfiStyleComputationEnvironment,
     parent_snapshot: Option<&ParentSnapshot<'_>>,
     highlight: Option<&HighlightInheritance<'_>>,
@@ -5124,7 +5127,7 @@ unsafe fn compute_longhands(
         |phase, length_resolution_context, input_line_height_metrics, line_height_before_adjustments| unsafe {
             drive_property_computation(
                 input.longhand_table,
-                input.animated_overlay,
+                animated_overlay,
                 &*input.store,
                 parent_snapshot,
                 highlight,
@@ -5150,7 +5153,7 @@ unsafe fn compute_longhands(
     let value_of = |property| -> Option<&StyleValueData> {
         unsafe {
             (&*input.longhand_table)
-                .effective_value(input.animated_overlay.as_ref(), property, true)
+                .effective_value(animated_overlay.as_ref(), property, true)
                 .value
                 .cast::<StyleValueData>()
                 .as_ref()
@@ -5183,11 +5186,7 @@ unsafe fn compute_longhands(
         _ => 0,
     };
     let font_family = unsafe { &*input.longhand_table }
-        .effective_value(
-            unsafe { input.animated_overlay.as_ref() },
-            property_id::FONT_FAMILY,
-            true,
-        )
+        .effective_value(unsafe { animated_overlay.as_ref() }, property_id::FONT_FAMILY, true)
         .value;
     let resolved_font =
         style_engine.resolve_font_for_legacy_drive(crate::css::style::bridge::FfiFontResolutionRequest {
@@ -5250,11 +5249,7 @@ unsafe fn compute_longhands(
         }
     };
     let line_height_before_adjustments = unsafe { &*input.longhand_table }
-        .effective_value(
-            unsafe { input.animated_overlay.as_ref() },
-            property_id::LINE_HEIGHT,
-            true,
-        )
+        .effective_value(unsafe { animated_overlay.as_ref() }, property_id::LINE_HEIGHT, true)
         .value;
     drive_phase(
         LONGHAND_DRIVE_PHASE_REMAINING,
@@ -5293,6 +5288,7 @@ unsafe fn compute_longhands(
     (
         FfiLonghandDriveResult {
             driver_results,
+            inherited_animated_overlay: std::ptr::null_mut(),
             custom_properties,
             transitions: FfiComputedTransitionList {
                 transitions: std::ptr::null(),
@@ -5911,8 +5907,26 @@ pub unsafe extern "C" fn rust_compute_properties(
         snapshot.has_animated_property(property_id::TEXT_ALIGN)
             || snapshot.has_animated_property(property_id::DIRECTION)
     });
-    let (mut result, finalization_line_height_metrics, animation_length_contexts) =
-        unsafe { compute_longhands(drive_input, &environment, parent_snapshot.as_ref(), highlight.as_ref()) };
+    let mut inherited_animated_overlay = (drive_input.animated_overlay.is_null()
+        && prepared.parent_has_animated_values)
+        .then(Box::<AnimatedOverlay>::default);
+    let animated_overlay = inherited_animated_overlay
+        .as_deref_mut()
+        .map_or(drive_input.animated_overlay, std::ptr::from_mut);
+    let (mut result, finalization_line_height_metrics, animation_length_contexts) = unsafe {
+        compute_longhands(
+            drive_input,
+            animated_overlay,
+            &environment,
+            parent_snapshot.as_ref(),
+            highlight.as_ref(),
+        )
+    };
+    result.inherited_animated_overlay = inherited_animated_overlay
+        .as_deref()
+        .map_or(std::ptr::null_mut(), |overlay| unsafe {
+            crate::css::animated_overlay::rust_animated_overlay_clone(std::ptr::from_ref(overlay))
+        });
 
     let mut computed_animation_definitions = Vec::new();
     if !input.stop_after_longhand_drive {
@@ -5970,7 +5984,6 @@ pub unsafe extern "C" fn rust_compute_properties(
                         && computed_animation_definitions[index].would_change_nothing(&applied[index])
                 })
         });
-    let animated_overlay = drive_input.animated_overlay;
     let animation_values_applied = unsafe { animated_overlay.as_ref() }.is_some_and(|overlay| !overlay.is_empty());
     unsafe { crate::css::cascaded_properties::destroy_style_computation_requirements(prepared.requirements.storage) };
     let continuation = Box::new(LonghandTransactionContinuation {
@@ -5983,6 +5996,7 @@ pub unsafe extern "C" fn rust_compute_properties(
         animation_values_applied,
         parent_text_align_input_is_animated,
         animation_length_contexts,
+        inherited_animated_overlay,
     });
     let drive_result = &raw const continuation.drive_result;
     let storage = Box::into_raw(continuation);
@@ -6016,6 +6030,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         mut animation_values_applied,
         parent_text_align_input_is_animated,
         mut animation_length_contexts,
+        inherited_animated_overlay: _inherited_animated_overlay,
     } = *continuation;
     // NB: The root element's own computation refreshes the host's root font metrics in the callback
     //     that applies the drive result, which runs between the drive and this tail - so the
