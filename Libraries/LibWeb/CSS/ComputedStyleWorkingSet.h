@@ -262,6 +262,8 @@ public:
 
     void set_property(PropertyID, NonnullRefPtr<StyleValue const>, AnimatedPropertyResultOfTransition, ComputedStyleWorkingSet::Inherited);
     void clear_wrapper_cache() { m_wrapper_cache.clear(); }
+    // Drops every value the element's own effects sampled, keeping the ones it inherited.
+    void keep_only_inherited_properties();
     // Takes ownership of an overlay the style stage allocated and filled, dropping this one.
     void adopt_overlay(ComputedValuesFFI::AnimatedOverlay*);
 

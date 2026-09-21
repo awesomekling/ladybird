@@ -420,6 +420,11 @@ ComputedValuesFFI::AnimatedOverlay* ComputedStyleWorkingSet::prepare_animated_ov
     return const_cast<ComputedValuesFFI::AnimatedOverlay*>(animated_properties.overlay());
 }
 
+void AnimatedProperties::keep_only_inherited_properties()
+{
+    adopt_overlay(ComputedValuesFFI::rust_animated_overlay_clone_inherited(m_overlay));
+}
+
 void AnimatedProperties::adopt_overlay(ComputedValuesFFI::AnimatedOverlay* overlay)
 {
     VERIFY(overlay);
@@ -486,7 +491,14 @@ void ComputedStyleWorkingSet::clear_animated_properties(Badge<StyleComputer>)
     if (!m_animated_properties)
         return;
 
-    m_animated_properties = nullptr;
+    // The overlay carries two different things: the animated values this element inherited from its
+    // parent, seeded while its longhands were computed, and the values its own effects sampled.
+    // Clearing an element's animated properties takes away only what it contributed itself - it
+    // still inherits its parent's computed values, animations and all.
+    auto& animated_properties = mutable_animated_properties();
+    animated_properties.keep_only_inherited_properties();
+    if (animated_properties.is_empty())
+        m_animated_properties = nullptr;
     clear_computed_font_list_cache();
 }
 

@@ -3042,15 +3042,18 @@ unsafe fn try_stage_animation_tail(
     // effect of its own at all - the published rows name none, or name only the provisional
     // transitions no animation list holds - keeps the overlay it computed. An element that holds
     // effects, every one of which turned out to be inactive, has its animated properties cleared
-    // instead, and an empty overlay is what that clearing leaves behind.
+    // instead, and clearing leaves behind exactly what the element inherited.
     if preparation_effects.is_empty() {
         let holds_an_effect = starting.is_some()
             || rows
                 .iter()
                 .any(|row| !crate::css::style::animations::row_is_not_associated(row));
-        let overlay = match holds_an_effect || existing_overlay.is_null() {
-            true => crate::css::animated_overlay::rust_animated_overlay_create(),
-            false => unsafe { crate::css::animated_overlay::rust_animated_overlay_clone(existing_overlay) },
+        let overlay = match (existing_overlay.is_null(), holds_an_effect) {
+            (true, _) => crate::css::animated_overlay::rust_animated_overlay_create(),
+            (false, true) => unsafe {
+                crate::css::animated_overlay::rust_animated_overlay_clone_inherited(existing_overlay)
+            },
+            (false, false) => unsafe { crate::css::animated_overlay::rust_animated_overlay_clone(existing_overlay) },
         };
         return Some(StageAnimationTail {
             overlay,
