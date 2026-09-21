@@ -3166,9 +3166,7 @@ pub struct FfiPseudoTreeBuilderCallbacks {
     /// The box of a pseudo-element whose `content` replaces its contents with a single image. The
     /// box owns the image provider it renders, which is why the host still builds it.
     pub create_content_replacement_box: unsafe extern "C" fn(*mut c_void, u32, FfiPseudoElement) -> NodeSlotId,
-    /// The last argument of each of these is the pseudo-element's own box, which the build tracks
-    /// by slot.
-    pub create_nested_list_marker: unsafe extern "C" fn(*mut c_void, u32, FfiPseudoElement, NodeSlotId) -> NodeSlotId,
+    /// The last argument is the pseudo-element's own box, which the build tracks by slot.
     pub create_content_item:
         unsafe extern "C" fn(*mut c_void, u32, FfiPseudoElement, FfiGeneratedContentItem, NodeSlotId) -> NodeSlotId,
 }
@@ -3493,6 +3491,38 @@ fn pseudo_element_box_kind(
     }
 }
 
+/// The row the list marker a list-item pseudo-element nests is built in. The marker takes the
+/// generator's own `::marker` record, which the style stage settles for exactly this case, and
+/// belongs to the pseudo-element that nests it rather than to that `::marker`.
+fn stamp_nested_list_marker_row(
+    layout_host: &TreeBuilderHost,
+    generator: StyleNodeID,
+    pseudo_element: FfiPseudoElement,
+    list_item_box: NodeSlotId,
+) -> NodeSlotId {
+    const MARKER_PSEUDO_KIND: u8 = GENERATED_FOR_MARKER - 1;
+    // SAFETY: Entry points guarantee that the arena remains live, and callers hold no reference
+    // derived from it across the allocation.
+    let slot = unsafe { &mut *layout_host.arena }.allocate_unbound();
+    layout_host
+        .arena()
+        .stamp_pseudo_element_row(slot, NodeKind::ListItemMarkerBox, generator, MARKER_PSEUDO_KIND);
+    // NB: The marker of a list-item ::before or ::after belongs to that pseudo-element, not to the
+    //     element's own ::marker, so it is generated for the originating pseudo-element and never
+    //     becomes the ::marker's box.
+    layout_host
+        .arena()
+        .set_node_generated_for(slot, generated_for_of(pseudo_element), Some(generator));
+    let marker_position_is_inside = layout_host
+        .style(list_item_box)
+        .is_some_and(ComputedValuesView::list_style_position_is_inside);
+    layout_host
+        .arena()
+        .set_node_flag(slot, NodeFlag::ListMarkerIsInside, marker_position_is_inside);
+    assert!(!layout_host.arena().node_shell(slot).is_null());
+    slot
+}
+
 /// The row a pseudo-element's box is built in. Every decision but the content replacement, whose
 /// box owns the image it replaces the pseudo-element's contents with, is a row the build stamps
 /// out of the record the mirror published for the pseudo-element.
@@ -3629,12 +3659,11 @@ fn create_pseudo_element(
 
     // FIXME: This code actually computes style for element::marker, and shouldn't for element::pseudo::marker.
     if layout_node_kind == NodeKind::ListItemBox {
-        super::tree_build_seal::note_host_call("pseudo.create_nested_list_marker");
-        // SAFETY: The builder remains live, and the box the host just built is a live BlockContainer.
-        let marker = layout_host.created(unsafe {
-            (callbacks.create_nested_list_marker)(callbacks.builder, style_node, pseudo_element, layout_node)
-        });
-        let marker_slot = marker.slot();
+        let marker_slot = stamp_nested_list_marker_row(&layout_host, element_identity, pseudo_element, layout_node);
+        super::tree_build_seal::note_host_call("attach_style_resources");
+        // SAFETY: The builder remains live, and the row the build stamped is a live NodeWithStyle.
+        unsafe { (host.callbacks.attach_style_resources)(host.callbacks.builder, marker_slot, false) };
+        let marker = layout_host.created(marker_slot);
         let first_child = layout_host.first_child(layout_node);
         layout_host.attach_child(layout_node, marker, first_child);
         let marker_content = crate::layout::generated_content::resolve_nested_marker_content(
