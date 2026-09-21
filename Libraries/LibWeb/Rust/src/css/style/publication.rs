@@ -5,6 +5,7 @@
  */
 
 mod drive;
+pub(super) mod pending;
 mod pseudo;
 mod winner_store;
 

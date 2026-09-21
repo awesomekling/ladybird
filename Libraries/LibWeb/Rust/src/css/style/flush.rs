@@ -1793,6 +1793,8 @@ impl StyleEngineState {
             let mut style_deltas = Vec::with_capacity(published_nodes.len());
             let style_delta_bytes = (style_deltas.capacity() * size_of::<PublishedStyleDeltaRecord>()) as u64;
             style_delta_memory.resize_required_to(&mut self.retained.memory, style_delta_bytes);
+            let mut record_deltas: Vec<Option<Vec<PublishedStyleDeltaRecord>>> =
+                (0..published_nodes.len()).map(|_| None).collect();
             let mut engine_computed_record_scratch = publication::EngineComputedRecordScratch::default();
             let computation_loop_timer = PassTimer::start();
             computation_scratch_memory.resize_required_to(
@@ -1932,10 +1934,29 @@ impl StyleEngineState {
                 }
                 chain
             };
-            let mut next_published_index = 0;
-            let mut pending_parent_inputs = None;
-            while next_published_index < published_nodes.len() {
-                for (published_index, node) in published_nodes.iter().copied().enumerate().skip(next_published_index) {
+            let mut completed_record_count = 0;
+            let mut ready_record = None::<publication::pending::ParkedEngineComputedRecord>;
+            let mut waiting_records = Vec::<publication::pending::ParkedEngineComputedRecord>::new();
+            while completed_record_count < published_nodes.len() {
+                let mut next_parked_records = std::mem::take(&mut waiting_records);
+                for (published_index, node) in published_nodes.iter().copied().enumerate() {
+                    if record_deltas[published_index].is_some()
+                        || next_parked_records
+                            .iter()
+                            .any(|parked| self.tree.is_in_subtree_of(node, parked.subtree_root))
+                    {
+                        continue;
+                    }
+                    let parked_parent_inputs = if ready_record
+                        .as_ref()
+                        .is_some_and(|parked| parked.published_index == published_index)
+                    {
+                        let parked = ready_record.take().unwrap();
+                        engine_computed_record_scratch.continuation = parked.continuation;
+                        Some(parked.parent_inputs)
+                    } else {
+                        None
+                    };
                     let pseudo_inputs_may_have_changed = pseudo_inputs_may_have_changed
                         || !selector_truth_changes.refreshes_for(node).is_empty()
                         || selector_truth_changes
@@ -2022,12 +2043,13 @@ impl StyleEngineState {
                     let reaction_is_settleable =
                         reaction & !(transaction::STYLE_REACTION_PUBLISHED_STYLE | DERIVABLE_REACTIONS) == 0
                             && !(reaction & DERIVABLE_REACTIONS != 0 && style_input_nodes_for_cpp.contains(&node));
-                    let mut parent_inputs_moved = pending_parent_inputs.take().or(prepared_parent_inputs).unwrap_or(
-                        publication::ParentInputsMoved {
-                            inherited_style: reaction & transaction::STYLE_REACTION_INHERITED_STYLE != 0,
-                            display: parent_inputs_moved_nodes.contains(&node),
-                        },
-                    );
+                    let mut parent_inputs_moved =
+                        parked_parent_inputs
+                            .or(prepared_parent_inputs)
+                            .unwrap_or(publication::ParentInputsMoved {
+                                inherited_style: reaction & transaction::STYLE_REACTION_INHERITED_STYLE != 0,
+                                display: parent_inputs_moved_nodes.contains(&node),
+                            });
                     let mut retry_after_ancestor = false;
                     // NB: Entry gates were already established for a suspended computation.
                     //     Its completed originating record must not change that decision.
@@ -2134,13 +2156,14 @@ impl StyleEngineState {
                         })
                         .flatten();
                     if engine_computed_record_scratch.font_drive.request.is_some() {
-                        // NB: Retain this canonical suffix across refill. Descendants have not read
-                        //     their pending parent's old record, and the journal may be empty.
-                        next_published_index = published_index;
-                        pending_parent_inputs = Some(parent_inputs_moved);
-                        break;
+                        next_parked_records.push(publication::pending::ParkedEngineComputedRecord {
+                            published_index,
+                            subtree_root: node,
+                            parent_inputs: parent_inputs_moved,
+                            continuation: std::mem::take(&mut engine_computed_record_scratch.continuation),
+                        });
+                        continue;
                     }
-                    next_published_index = published_index + 1;
                     // A first record C++ declines for the custom-property environment it inherits
                     // takes its descendants' first records down with it: a descendant's environment is
                     // the parent's own, which fails the same check whenever the parent's did.
@@ -2216,26 +2239,12 @@ impl StyleEngineState {
                         uses_substitution: gap == FfiStyleDeltaGap::Computed
                             && engine_computed_record_scratch.element_uses_substitution,
                     };
-                    if style_deltas.len() == style_deltas.capacity() {
-                        style_deltas.reserve(1);
-                        style_delta_memory.resize_required_to(
-                            &mut self.retained.memory,
-                            capacity::ShallowCapacityBytes::shallow_capacity_bytes(&style_deltas),
-                        );
-                    }
-                    style_deltas.push(style_delta);
+                    let mut node_deltas = vec![style_delta];
                     // The pseudo-element records the engine settled beside an engine-computed record
                     // follow it, for C++ to install with it.
                     if gap == FfiStyleDeltaGap::Computed {
                         for pseudo in engine_computed_record_scratch.pseudo_deltas.drain(..) {
-                            if style_deltas.len() == style_deltas.capacity() {
-                                style_deltas.reserve(1);
-                                style_delta_memory.resize_required_to(
-                                    &mut self.retained.memory,
-                                    capacity::ShallowCapacityBytes::shallow_capacity_bytes(&style_deltas),
-                                );
-                            }
-                            style_deltas.push(PublishedStyleDeltaRecord {
+                            node_deltas.push(PublishedStyleDeltaRecord {
                                 style_node: node.raw(),
                                 match_answer: style_delta.match_answer,
                                 old_style_record: pseudo.old_style_record.raw(),
@@ -2249,6 +2258,8 @@ impl StyleEngineState {
                             });
                         }
                     }
+                    record_deltas[published_index] = Some(node_deltas);
+                    completed_record_count += 1;
                     // NB: Sample scratch coexistence without scanning its containers per element.
                     if (published_index + 1).is_multiple_of(256) {
                         computation_scratch_memory.resize_required_to(
@@ -2257,14 +2268,33 @@ impl StyleEngineState {
                         );
                     }
                 }
-                if let Some(request) = engine_computed_record_scratch.font_drive.request.take() {
-                    computation_scratch_memory.resize_required_to(
-                        &mut self.retained.memory,
-                        engine_computed_record_scratch.capacity_bytes(),
-                    );
-                    let node = published_nodes[next_published_index];
-                    self.refill_font_request(node, request, counters);
+                debug_assert!(ready_record.is_none());
+                next_parked_records.sort_unstable_by_key(|parked| parked.published_index);
+                if !next_parked_records.is_empty() {
+                    let mut parked = next_parked_records.remove(0);
+                    let request = parked.continuation.font_drive.request.take().unwrap();
+                    if !self
+                        .retained
+                        .font_resolution
+                        .as_ref()
+                        .is_some_and(|cache| request.is_resolved_by(cache))
+                    {
+                        let node = published_nodes[parked.published_index];
+                        self.refill_font_request(node, request, counters);
+                    }
+                    ready_record = Some(parked);
                 }
+                waiting_records = next_parked_records;
+            }
+            for deltas in record_deltas.into_iter().flatten() {
+                if style_deltas.len() + deltas.len() > style_deltas.capacity() {
+                    style_deltas.reserve(deltas.len());
+                    style_delta_memory.resize_required_to(
+                        &mut self.retained.memory,
+                        capacity::ShallowCapacityBytes::shallow_capacity_bytes(&style_deltas),
+                    );
+                }
+                style_deltas.extend(deltas);
             }
             computation_loop_timer.stop(Counter::ComputationLoopMicroseconds, counters);
             computation_scratch_memory.resize_required_to(

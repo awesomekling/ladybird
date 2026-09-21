@@ -48,6 +48,10 @@ impl FontRequest {
         };
         Self { ffi, family }
     }
+
+    pub(super) fn is_resolved_by(&self, cache: &FontResolutionCache) -> bool {
+        cache.lookup(self.ffi).is_some()
+    }
 }
 
 /// One reference to a host `Gfx::FontCascadeList`, held so the list the engine names stays alive
