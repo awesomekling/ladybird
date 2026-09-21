@@ -7191,29 +7191,42 @@ pub(crate) struct SelectedEffect<'a> {
 /// element declares the name `!important`, which suppresses animating it.
 ///
 /// Unregistered names only. A registered name's initial value is the registration's computed one
-/// and its interpolation is typed, neither of which this channel carries, so the tail refuses the
-/// whole element the moment the document holds any `@property` registration.
-pub(crate) struct AnimatedCustomProperties {
+/// and its interpolation is typed, neither of which this channel carries, so a stack that animates
+/// one is refused - but only that stack: a document that registers a name it never animates is no
+/// obstacle to animating the names it does.
+pub(crate) struct AnimatedCustomProperties<'a> {
     base_store: *const std::ffi::c_void,
     inheritance_store: *const std::ffi::c_void,
     element_declares_own: bool,
+    registry: Option<&'a crate::css::custom_properties::CustomPropertyRegistry>,
+    /// Set where a minted name turned out to be registered, or where the registry could not be
+    /// consulted at all. The whole element then goes back to the host.
+    animates_a_registered_name: bool,
     names: Vec<crate::css::retained_fly_string::RetainedUtf16FlyString>,
     important: Vec<bool>,
 }
 
-impl AnimatedCustomProperties {
+impl<'a> AnimatedCustomProperties<'a> {
     pub(crate) fn new(
         base_store: *const std::ffi::c_void,
         inheritance_store: *const std::ffi::c_void,
         element_declares_own: bool,
+        registry: Option<&'a crate::css::custom_properties::CustomPropertyRegistry>,
     ) -> Self {
         Self {
             base_store,
             inheritance_store,
             element_declares_own,
+            registry,
+            animates_a_registered_name: registry.is_none(),
             names: Vec::new(),
             important: Vec::new(),
         }
+    }
+
+    /// Whether this stack animates a name the channel cannot carry.
+    pub(crate) fn animates_a_registered_name(&self) -> bool {
+        self.animates_a_registered_name
     }
 
     fn store(store: *const std::ffi::c_void) -> Option<&'static crate::css::custom_properties::CustomPropertyStore> {
@@ -7231,6 +7244,12 @@ impl AnimatedCustomProperties {
         if let Some(index) = self.names.iter().position(|minted| minted.raw() == name.raw()) {
             return index as u32 + 1;
         }
+        // SAFETY: the name owns one reference to a live fly string for as long as it is held.
+        let units = match unsafe { ak::utf16_string_units(name.raw_word()) } {
+            ak::Utf16StringUnits::Ascii(bytes) => bytes.iter().map(|&unit| u16::from(unit)).collect::<Vec<_>>(),
+            ak::Utf16StringUnits::Utf16(units) => units.to_vec(),
+        };
+        self.animates_a_registered_name |= self.registry.is_none_or(|registry| registry.is_registered(&units));
         self.names.push(name.clone());
         self.important.push(
             self.element_declares_own
@@ -7375,7 +7394,7 @@ fn describe_selected_effects(
     selected: &[SelectedEffect<'_>],
     table: &crate::css::computed_longhand_table::ComputedLonghandTable,
     substitution: &mut KeyframeSubstitutionContext,
-    mut custom: Option<&mut AnimatedCustomProperties>,
+    mut custom: Option<&mut AnimatedCustomProperties<'_>>,
 ) -> Option<DescribedEffects> {
     let mut ffi_keyframes = Vec::new();
     let mut ffi_declarations = Vec::new();
@@ -7507,7 +7526,7 @@ pub(crate) fn resolve_selected_animation_declarations(
     direction: u8,
     important_property_bitmap: &[u8],
     substitution: &mut KeyframeSubstitutionContext,
-    custom: Option<&mut AnimatedCustomProperties>,
+    custom: Option<&mut AnimatedCustomProperties<'_>>,
 ) -> Option<FfiResolvedAnimationProperties> {
     if selected
         .iter()

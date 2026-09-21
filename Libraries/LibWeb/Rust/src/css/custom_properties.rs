@@ -211,6 +211,12 @@ impl CustomPropertyRegistry {
         !self.registrations.is_empty()
     }
 
+    /// Whether this name is registered with `@property`. A registered name has a computed initial
+    /// value and a typed interpolation; an unregistered one has neither.
+    pub(crate) fn is_registered(&self, name: &[u16]) -> bool {
+        self.registrations.contains_key(name)
+    }
+
     pub(crate) fn parse_context(&self, random_function_index: &mut usize) -> ParseContext {
         ParseContext {
             in_quirks_mode: false,

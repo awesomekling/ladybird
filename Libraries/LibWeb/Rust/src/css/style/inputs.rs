@@ -1267,12 +1267,12 @@ impl RetainedState {
         self.animation_effect_descriptions.effects(node, slot)
     }
 
-    /// Whether the document registers any custom property with `@property`, as the registry frozen
-    /// at this transaction's boundary holds it. `None` where the engine holds no registry at all
-    /// and so cannot answer.
+    /// The document's custom-property registry as this transaction froze it, for a caller that
+    /// needs to ask about one name rather than about the document. `None` where the engine holds
+    /// no registry and so can answer nothing.
     #[must_use]
-    pub(crate) fn document_has_custom_property_registrations(&self) -> Option<bool> {
-        Some(self.custom_property_registry.as_deref()?.has_registrations())
+    pub(crate) fn custom_property_registry(&self) -> Option<&crate::css::custom_properties::CustomPropertyRegistry> {
+        self.custom_property_registry.as_deref()
     }
 
     /// The timing of the animations the host holds for one of an element's animation lists.

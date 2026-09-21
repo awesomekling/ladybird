@@ -26,6 +26,12 @@ sheet pseudo: 40px
 sheet pseudo after recompute: 40px
 mixed: 40px 0.55 40px
 mixed after recompute: 40px 0.55 40px
+beside a registration: 40px
+beside a registration after recompute: 40px
+registered at 30%: 19px
+registered at 30% after recompute: 19px
+registered at 60%: 28.000001px
+registered at 60% after recompute: 28.000001px
 cancels while running: 40px
 cancels while running after recompute: 40px
 cancels after the animation is removed: (none)
