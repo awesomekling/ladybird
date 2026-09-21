@@ -6253,6 +6253,11 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             m_keyframes_inherited_non_inherited_style_groups |= style_groups;
         }
         publish_animated_custom_properties(computed_style, abstract_element);
+        // The stage answered the batch's tree-counting functions from the retained tree, so what
+        // `compute_animation_values` records after resolving them is recorded here instead: the
+        // element's style now depends on where it sits among its siblings.
+        if (finalization_result.animation_uses_tree_counting_function)
+            const_cast<DOM::Element&>(abstract_element.element()).set_style_uses_tree_counting_function();
         if (finalization_result.animation_subject_depends_on_size_container_query) {
             // The stage resolved the batch's container units against the published container-query
             // inputs, so what `Length::container_relative_length_to_px_without_rounding` records

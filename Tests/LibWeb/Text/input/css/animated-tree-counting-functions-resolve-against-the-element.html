@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    @keyframes count {
+        from {
+            margin-left: calc(sibling-index() * 10px);
+            margin-right: calc(sibling-count() * 10px);
+        }
+        to {
+            margin-left: calc(sibling-index() * 100px);
+            margin-right: calc(sibling-count() * 100px);
+        }
+    }
+
+    /* Every animation here is paused at time zero, so each one applies its `from` keyframe, and
+       `sibling-index()` / `sibling-count()` in it resolve against the element being sampled - not
+       against whatever element the `@keyframes` rule was seen on. */
+    .counted > div {
+        animation: count 10s linear paused;
+    }
+    #midway > div {
+        animation: count 10s linear -5s paused;
+    }
+    #in-a-shadow-host > div {
+        animation: count 10s linear paused;
+    }
+</style>
+<div class="counted" id="three">
+    <div></div>
+    <div></div>
+    <div></div>
+</div>
+<div class="counted" id="five">
+    <div></div>
+    <div></div>
+    <div></div>
+    <div></div>
+    <div></div>
+</div>
+<div class="counted" id="midway">
+    <div></div>
+    <div></div>
+</div>
+<div class="counted" id="with-text">
+    text before
+    <div></div>
+    <!-- a comment -->
+    <div></div>
+    text after
+</div>
+<div id="root-child-holder"></div>
+<script>
+    test(() => {
+        const read = element => {
+            const style = getComputedStyle(element);
+            return `${style.marginLeft}/${style.marginRight}`;
+        };
+        for (const id of ["three", "five", "midway", "with-text"]) {
+            const parent = document.getElementById(id);
+            const values = [];
+            for (const child of parent.children) {
+                // The first read is the style update that starts the animation; recomputing
+                // afterwards - with the animation now a real one the element holds - has to arrive
+                // at the same value.
+                const first = read(child);
+                child.style.paddingTop = "1px";
+                const second = read(child);
+                values.push(first === second ? first : `${first} (recomputed to ${second})`);
+            }
+            println(`${id}: ${values.join(" ")}`);
+        }
+
+        // A child of a shadow root has no parent element, so both functions resolve to 1.
+        const host = document.getElementById("root-child-holder");
+        const shadow = host.attachShadow({ mode: "open" });
+        shadow.innerHTML = `<style>
+            @keyframes shadow-count {
+                from { margin-left: calc(sibling-index() * 10px); margin-right: calc(sibling-count() * 10px); }
+                to { margin-left: calc(sibling-index() * 100px); margin-right: calc(sibling-count() * 100px); }
+            }
+            div { animation: shadow-count 10s linear paused; }
+        </style><div></div><div></div>`;
+        const inShadow = [];
+        for (const child of shadow.querySelectorAll("div")) {
+            const first = read(child);
+            child.style.paddingTop = "1px";
+            const second = read(child);
+            inShadow.push(first === second ? first : `${first} (recomputed to ${second})`);
+        }
+        println(`shadow: ${inShadow.join(" ")}`);
+    });
+</script>
