@@ -2,7 +2,7 @@ PASS: detached child mutation: slotted-default: :empty becomes false after eleme
 PASS: detached child mutation: slotted-default: :empty becomes false after textContent | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-default: mixed-case SVG type selector with :empty becomes false after element append | elementStyleRecomputations=5, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-default: mixed-case SVG type selector with :not(:empty) becomes true after element append | elementStyleRecomputations=5, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-default: mixed-case SVG foreignObject type selector with :empty becomes false after element append | elementStyleRecomputations=5, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-default: mixed-case SVG foreignObject type selector with :empty becomes false after element append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-default: :has(.hit) after direct child append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-default: :has(.hit) after DocumentFragment append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-default: :has(.hit) after existing child move into parent | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
@@ -101,7 +101,7 @@ PASS: detached child mutation: slotted-named: :empty becomes false after element
 PASS: detached child mutation: slotted-named: :empty becomes false after textContent | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-named: mixed-case SVG type selector with :empty becomes false after element append | elementStyleRecomputations=5, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-named: mixed-case SVG type selector with :not(:empty) becomes true after element append | elementStyleRecomputations=5, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-named: mixed-case SVG foreignObject type selector with :empty becomes false after element append | elementStyleRecomputations=5, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-named: mixed-case SVG foreignObject type selector with :empty becomes false after element append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-named: :has(.hit) after direct child append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-named: :has(.hit) after DocumentFragment append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-named: :has(.hit) after existing child move into parent | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
