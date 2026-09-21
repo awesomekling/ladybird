@@ -13,7 +13,13 @@
 #include <LibGfx/Font/TypefaceSkia.h>
 #include <LibWeb/CSS/FontFaceState.h>
 #include <LibWeb/CSS/FontResolution.h>
+#include <LibWeb/CSS/StyleValues/StyleValueList.h>
 #include <LibWeb/Platform/FontPlugin.h>
+
+extern "C" {
+void ladybird_libweb_font_cascade_memo_ref(void const*);
+void ladybird_libweb_font_cascade_memo_unref(void const*);
+}
 
 namespace Web::CSS {
 
@@ -334,6 +340,42 @@ static RefPtr<Gfx::FontCascadeList const> font_matching_algorithm(FontFaceSnapsh
     return {};
 }
 
+NonnullRefPtr<Gfx::FontCascadeList const> FontCascadeMemo::resolve(FontFaceSnapshotView const& snapshot, ComputedFontCacheKey const& key, FontFeatureValuesProvider const* font_feature_values_provider)
+{
+    MutexLocker locker { m_mutex };
+    return m_cascades.ensure(key, [&] {
+        return resolve_font_cascade(snapshot, key.font_families.span(), key.font_size, key.font_slope, key.font_weight, key.font_width, key.font_optical_sizing, key.font_variation_settings, key.font_feature_data, font_feature_values_provider);
+    });
+}
+
+void FontCascadeMemo::take_matching(Function<bool(ComputedFontCacheKey const&, Gfx::FontCascadeList const&)> const& is_stale)
+{
+    MutexLocker locker { m_mutex };
+    m_cascades.remove_all_matching([&](auto const& key, auto const& font_list) {
+        return is_stale(key, *font_list);
+    });
+}
+
+Vector<ComputedFontFamily> computed_font_families_from_style_value(StyleValue const& font_family)
+{
+    Vector<ComputedFontFamily> font_families;
+    auto const& values = font_family.as_value_list().values();
+    font_families.ensure_capacity(values.size());
+    for (auto const& value : values) {
+        if (value->is_keyword()) {
+            auto generic_family = keyword_to_generic_font_family(value->to_keyword());
+            VERIFY(generic_family.has_value());
+            font_families.unchecked_append(generic_family.release_value());
+        } else {
+            font_families.unchecked_append(ComputedFontFamilyName {
+                .name = string_from_style_value(value),
+                .syntax = value->is_string() ? ComputedFontFamilySyntax::String : ComputedFontFamilySyntax::CustomIdent,
+            });
+        }
+    }
+    return font_families;
+}
+
 NonnullRefPtr<Gfx::FontCascadeList const> resolve_font_cascade(FontFaceSnapshotView const& snapshot, ReadonlySpan<ComputedFontFamily const> font_families, CSSPixels const& font_size, int slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<Utf16FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data, FontFeatureValuesProvider const* font_feature_values_provider)
 {
     // FIXME: We round to int here as that is what is expected by our font infrastructure below
@@ -526,4 +568,17 @@ NonnullRefPtr<Gfx::FontCascadeList const> resolve_font_cascade(FontFaceSnapshotV
     return font_list;
 }
 
+}
+
+// The style engine holds the memo by address, so that the handle it keeps is plain data.
+extern "C" void ladybird_libweb_font_cascade_memo_ref(void const* memo)
+{
+    VERIFY(memo);
+    static_cast<Web::CSS::FontCascadeMemo const*>(memo)->ref();
+}
+
+extern "C" void ladybird_libweb_font_cascade_memo_unref(void const* memo)
+{
+    VERIFY(memo);
+    static_cast<Web::CSS::FontCascadeMemo const*>(memo)->unref();
 }

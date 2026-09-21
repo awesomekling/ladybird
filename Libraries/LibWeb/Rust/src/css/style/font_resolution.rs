@@ -5,14 +5,17 @@
  */
 
 use super::bridge::{FfiFontResolutionRequest, FfiResolvedFont};
+use super::font_faces::FontFaceSnapshot;
 use super::{HashMap, HashSet};
 use crate::css::style_value::{RetainedStyleValueData, retain_style_value, style_value_content_hash};
 use libgfx_rust::font::FontCascadeListHandle;
 use std::ffi::c_void;
 use std::hash::{Hash, Hasher};
 
+/// Resolves a batch of requests against a published `@font-face` table. The table is the only
+/// state it is given: there is no context pointer, because there is no document to point at.
 pub type ResolveFontsCallback =
-    unsafe extern "C" fn(*mut c_void, *const FfiFontResolutionRequest, *mut FfiResolvedFont, usize);
+    unsafe extern "C" fn(usize, *const c_void, *const FfiFontResolutionRequest, *mut FfiResolvedFont, usize);
 
 #[derive(Clone, Copy)]
 pub(super) enum FontService {
@@ -176,22 +179,25 @@ impl FontResolutionCache {
     }
 }
 
-/// The host's synchronous font resolver. This is host state: it holds a C++ context pointer and
-/// the callback into it, and only a round between evaluation passes may call it.
+/// The font resolver, as the stage holds it: one function of a published `@font-face` table and
+/// a request. It is C++ because everything it calls is - `Gfx::Typeface::font`,
+/// `Gfx::FontCascadeList`, `Gfx::FontDatabase`, `Platform::FontPlugin` - but it reads no document
+/// and holds no pointer to one, so the thread the stage runs on may call it.
 pub(super) struct FontResolverHost {
-    context: *mut c_void,
     resolve: ResolveFontsCallback,
 }
 
 impl FontResolverHost {
-    pub fn new(context: *mut c_void, resolve: ResolveFontsCallback) -> Self {
-        Self { context, resolve }
+    pub fn new(resolve: ResolveFontsCallback) -> Self {
+        Self { resolve }
     }
 
-    /// Service synchronous requests in one round between evaluation passes. Pending web faces
-    /// remain in the returned cascades and retain the host's rendering-triggered loading behavior.
+    /// Resolve the requests one pass collected, in one round between evaluation passes. Pending
+    /// web faces remain in the returned cascades, and wanting one is a message the host drains.
     pub fn refill(
         &self,
+        memo: usize,
+        snapshot: Option<&std::sync::Arc<FontFaceSnapshot>>,
         cache: &mut FontResolutionCache,
         mut requests: Vec<FontRequest>,
         service: FontService,
@@ -215,9 +221,11 @@ impl FontResolverHost {
         }
         let ffi_requests = requests.iter().map(|request| request.ffi).collect::<Vec<_>>();
         let mut resolved = vec![FfiResolvedFont::default(); requests.len()];
-        super::seal::between_pass_font_service(service.name(), requests.len() as u64, || unsafe {
+        let table = snapshot.map_or(std::ptr::null(), super::font_faces::as_pointer);
+        super::seal::between_pass_font_batch(service.name(), requests.len() as u64, || unsafe {
             (self.resolve)(
-                self.context,
+                memo,
+                table,
                 ffi_requests.as_ptr(),
                 resolved.as_mut_ptr(),
                 requests.len(),
@@ -241,7 +249,8 @@ mod tests {
     static RESOLVES: AtomicUsize = AtomicUsize::new(0);
 
     unsafe extern "C" fn resolve_fonts(
-        _context: *mut c_void,
+        _memo: usize,
+        _snapshot: *const c_void,
         _requests: *const FfiFontResolutionRequest,
         resolved: *mut FfiResolvedFont,
         count: usize,
@@ -263,7 +272,7 @@ mod tests {
         RESOLVES.store(0, Ordering::Relaxed);
         let unrefs_before = font_cascade_list_unref_count();
         let family = RetainedStyleValueData::from_owned(StyleValueData::Number { value: 1.5 });
-        let host = FontResolverHost::new(std::ptr::null_mut(), resolve_fonts);
+        let host = FontResolverHost::new(resolve_fonts);
         let mut resolver = FontResolutionCache::default();
         let mut request = FfiFontResolutionRequest {
             font_family: crate::css::style::bridge::FfiHostHandle::from_pointer(family.pointer().cast()),
@@ -278,7 +287,13 @@ mod tests {
         resolver.prepare(1);
         assert!(resolver.lookup(request).is_none());
         assert_eq!(RESOLVES.load(Ordering::Relaxed), 0);
-        host.refill(&mut resolver, vec![FontRequest::new(request)], FontService::ParkedBatch);
+        host.refill(
+            0,
+            None,
+            &mut resolver,
+            vec![FontRequest::new(request)],
+            FontService::ParkedBatch,
+        );
         let first = resolver.lookup(request).unwrap();
         assert_eq!(
             resolver.lookup(request).unwrap().font_cascade_list,
@@ -303,7 +318,13 @@ mod tests {
         assert!(resolver.lookup(request).is_none());
         resolver.prepare(2);
         assert_eq!(font_cascade_list_unref_count(), unrefs_before + 1);
-        host.refill(&mut resolver, vec![FontRequest::new(request)], FontService::ParkedBatch);
+        host.refill(
+            0,
+            None,
+            &mut resolver,
+            vec![FontRequest::new(request)],
+            FontService::ParkedBatch,
+        );
         resolver.lookup(request).unwrap();
         assert_eq!(RESOLVES.load(Ordering::Relaxed), 2);
         assert_eq!(font_cascade_list_unref_count(), unrefs_before + 1);
@@ -315,7 +336,8 @@ mod tests {
     #[test]
     fn unavailable_resolution_is_a_completed_answer_until_the_environment_changes() {
         unsafe extern "C" fn unavailable(
-            _: *mut c_void,
+            _: usize,
+            _: *const c_void,
             _: *const FfiFontResolutionRequest,
             resolved: *mut FfiResolvedFont,
             count: usize,
@@ -334,13 +356,13 @@ mod tests {
             font_optical_sizing: 0,
             font_environment_generation: 1,
         };
-        let host = FontResolverHost::new(std::ptr::null_mut(), unavailable);
+        let host = FontResolverHost::new(unavailable);
         let mut resolver = FontResolutionCache::default();
         resolver.prepare(1);
         let owned = FontRequest::new(request);
         drop(family);
         assert!(resolver.lookup(request).is_none());
-        host.refill(&mut resolver, vec![owned], FontService::ParkedBatch);
+        host.refill(0, None, &mut resolver, vec![owned], FontService::ParkedBatch);
         assert!(resolver.lookup(request).unwrap().font_cascade_list.is_none());
         assert!(resolver.lookup(request).unwrap().font_cascade_list.is_none());
         // A failed synchronous result must not cause an endless refill loop.

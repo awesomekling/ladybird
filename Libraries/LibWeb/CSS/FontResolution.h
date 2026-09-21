@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <AK/AtomicRefCounted.h>
+#include <AK/Mutex.h>
 #include <LibWeb/CSS/FontComputer.h>
 
 namespace Web::CSS {
@@ -75,6 +77,33 @@ struct FontFaceSnapshotView {
 // feature data at all. Callers that do - canvas, getComputedStyle - pass a provider; the resolver
 // verifies it is never asked for one it was not given.
 using FontFeatureValuesProvider = Function<HashMap<FontFeatureValueKey, Vector<u32>> const&(Utf16FlyString const&)>;
+
+// The `font-family` list, as the matcher wants it: generic families kept apart from names, and a
+// name's syntax kept so that a custom ident and a string do not compare equal.
+[[nodiscard]] Vector<ComputedFontFamily> computed_font_families_from_style_value(StyleValue const& font_family);
+
+// The cascades already resolved from a document's `@font-face` tables. This is retained render
+// state, not document state: a memo of a pure function of the published table and the request.
+// It is shared rather than owned by the font computer, because the style stage's between-pass
+// batch fills it too, and that batch is meant to run off the document thread; its lock is what
+// makes that safe. The document reads it back to find the cascades a change to the table makes
+// stale, which is the one thing that needs the whole history rather than one generation of it.
+class WEB_API FontCascadeMemo : public AtomicRefCounted<FontCascadeMemo> {
+public:
+    static NonnullRefPtr<FontCascadeMemo> create() { return adopt_ref(*new FontCascadeMemo); }
+
+    [[nodiscard]] NonnullRefPtr<Gfx::FontCascadeList const> resolve(FontFaceSnapshotView const&, ComputedFontCacheKey const&, FontFeatureValuesProvider const* = nullptr);
+
+    // Answers every remembered resolution, so the caller can decide which a change to the table
+    // has made stale, and forgets the ones it says so about.
+    void take_matching(Function<bool(ComputedFontCacheKey const&, Gfx::FontCascadeList const&)> const&);
+
+private:
+    FontCascadeMemo() = default;
+
+    Mutex m_mutex;
+    HashMap<ComputedFontCacheKey, NonnullRefPtr<Gfx::FontCascadeList const>> m_cascades;
+};
 
 // Resolve a font cascade from the published table and the process-wide font services alone. This
 // is the whole of what the style stage's between-pass font batch does.

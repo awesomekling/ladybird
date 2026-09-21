@@ -1825,6 +1825,8 @@ impl StyleEngineState {
                 element_custom_property_data: HashMap::default(),
                 legacy_finalized_longhand_rows: HashMap::default(),
                 font_resolution: None,
+                font_face_snapshot: None,
+                font_cascade_memo: None,
                 root_font_request: None,
                 layout_style_snapshots: Default::default(),
                 container_query_inputs: Default::default(),

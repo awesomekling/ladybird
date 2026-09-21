@@ -1256,13 +1256,45 @@ pub extern "C" fn style_engine_create(device_class: FfiDeviceClass) -> *mut c_vo
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_install_font_resolver(
     engine: *mut c_void,
-    context: *mut c_void,
-    resolve: unsafe extern "C" fn(*mut c_void, *const FfiFontResolutionRequest, *mut FfiResolvedFont, usize),
+    resolve: unsafe extern "C" fn(usize, *const c_void, *const FfiFontResolutionRequest, *mut FfiResolvedFont, usize),
 ) {
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     assert!(engine.host.font_resolver.is_none(), "font resolver is installed once");
-    engine.host.font_resolver = Some(super::font_resolution::FontResolverHost::new(context, resolve));
+    engine.host.font_resolver = Some(super::font_resolution::FontResolverHost::new(resolve));
     engine.retained.font_resolution = Some(super::font_resolution::FontResolutionCache::default());
+}
+
+/// Publishes the document's `@font-face` table for the generation this update computes against.
+/// The engine holds its own reference, so resolving a font needs nothing the document owns.
+///
+/// # Safety
+/// `engine` must point to a live style engine, and `snapshot` must be null or a live pointer from
+/// `rust_font_face_snapshot_build`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_publish_font_face_snapshot(
+    engine: *mut c_void,
+    snapshot: *const c_void,
+    memo: usize,
+) {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    if engine
+        .retained
+        .font_cascade_memo
+        .as_ref()
+        .is_none_or(|held| held.address() != memo)
+    {
+        // SAFETY: The caller guarantees the memo is live.
+        engine.retained.font_cascade_memo = unsafe { super::font_faces::RetainedFontCascadeMemo::retain(memo) };
+    }
+    let held = &mut engine.retained.font_face_snapshot;
+    if held
+        .as_ref()
+        .is_some_and(|current| super::font_faces::as_pointer(current) == snapshot)
+    {
+        return;
+    }
+    // SAFETY: The caller guarantees the pointer is live.
+    *held = unsafe { super::font_faces::retained(snapshot) };
 }
 
 /// Publishes the previous document-element font answer before style evaluation begins.
@@ -1286,12 +1318,20 @@ pub unsafe extern "C" fn style_engine_prepare_root_font_resolution(engine: *mut 
         .font_resolver
         .as_ref()
         .expect("a root request has a font resolver");
+    let snapshot = state.retained.font_face_snapshot.clone();
+    let memo = state
+        .retained
+        .font_cascade_memo
+        .as_ref()
+        .map_or(0, |memo| memo.address());
     let cache = state
         .retained
         .font_resolution
         .as_mut()
         .expect("a root request has a font resolution cache");
     resolver.refill(
+        memo,
+        snapshot.as_ref(),
         cache,
         vec![request],
         super::font_resolution::FontService::RootPreparation,

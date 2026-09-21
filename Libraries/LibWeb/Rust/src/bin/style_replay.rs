@@ -2770,6 +2770,14 @@ extern "C" fn ladybird_gfx_font_cascade_list_frozen(_list: *const c_void) -> *co
 }
 #[unsafe(no_mangle)]
 extern "C" fn ladybird_gfx_font_unref(_font: *const c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_typeface_ref(_typeface: *const c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_typeface_unref(_typeface: *const c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_libweb_font_cascade_memo_ref(_memo: *const c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_libweb_font_cascade_memo_unref(_memo: *const c_void) {}
 
 // Replay publishes no element custom-property environments, so the engine holds no reference to a
 // C++ `CustomPropertyData` and there is none to take or give up here.
