@@ -58,6 +58,7 @@ impl HostTables {
 pub(crate) struct ArenaHandle {
     arena: LayoutNodeArena,
     host_tables: HostTables,
+    layout_scratch: super::LayoutScratch,
 }
 
 // A handle is also a pointer to its arena.
@@ -68,7 +69,19 @@ impl ArenaHandle {
         Self {
             arena: LayoutNodeArena::new(),
             host_tables: HostTables::default(),
+            layout_scratch: super::LayoutScratch::default(),
         }
+    }
+
+    /// The layout scratch of the arena `handle` names.
+    ///
+    /// # Safety
+    ///
+    /// As for [`HostTables::from_handle`].
+    pub(crate) unsafe fn layout_scratch_of<'a>(handle: *mut c_void) -> &'a super::LayoutScratch {
+        assert!(!handle.is_null(), "layout node arena handle is null");
+        // SAFETY: Guaranteed by the caller. The projection does not borrow the arena beside it.
+        unsafe { &*std::ptr::addr_of!((*handle.cast::<ArenaHandle>()).layout_scratch) }
     }
 
     pub(crate) fn arena(&self) -> &LayoutNodeArena {

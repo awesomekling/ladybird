@@ -1695,7 +1695,7 @@ fn execute_formatting_context_run(
 ) -> RunOutputs {
     assert!(!box_.is_invalid());
     let root_used = root_cells.materialize_record();
-    RunRecords::with_root(callbacks.arena(), box_, root_containing_block, &root_used, |records| {
+    RunRecords::with_root(callbacks.layout_scratch(), callbacks.arena(), box_, root_containing_block, &root_used, |records| {
         let run = FormattingContextRun {
             purpose,
             records,
@@ -2278,7 +2278,7 @@ const _: () = {
 
 /// The host-free full layout stage. Host callbacks require a `MainThread` capability, which this
 /// function neither receives nor stores in its input.
-fn run_root_layout_stage(stage: LayoutStageInput<'_>) -> LayoutStageOutput {
+fn run_root_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScratch) -> LayoutStageOutput {
     let _pass = seal::enter_pass();
     let LayoutStageInput {
         arena,
@@ -2302,6 +2302,7 @@ fn run_root_layout_stage(stage: LayoutStageInput<'_>) -> LayoutStageOutput {
     }
     let callbacks = LayoutPass::new(
         arena,
+        scratch,
         CssPixels::from_raw(viewport_inline_size_raw),
         CssPixels::from_raw(viewport_block_size_raw),
         document_in_quirks_mode,
@@ -2314,7 +2315,7 @@ fn run_root_layout_stage(stage: LayoutStageInput<'_>) -> LayoutStageOutput {
         percentage_basis_block_size: Some(viewport_block_size),
         ..ContainingBlockConstraints::default()
     };
-    let pass_fragments = RunRecords::with_unrooted(arena, root, NodeSlotId::INVALID, |entry_records| {
+    let pass_fragments = RunRecords::with_unrooted(scratch, arena, root, NodeSlotId::INVALID, |entry_records| {
         let _trace = arena.layout_trace.pass(None);
         let viewport_used = entry_records.create_used_values(&callbacks, root, root_constraints);
         let entry_fragments = std::rc::Rc::new(fragment_tree::RunFragmentBuilder::new_entry_accumulator(root));
@@ -2418,15 +2419,19 @@ pub(crate) unsafe fn run_root_layout(
     // SAFETY: The host keeps the arena and its published inputs alive and unchanged for the
     // synchronous stage run.
     let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
-    let LayoutStageOutput(pass_fragments) = run_root_layout_stage(LayoutStageInput {
-        arena,
-        root,
-        viewport: root,
-        viewport_inline_size_raw,
-        viewport_block_size_raw,
-        document_in_quirks_mode,
-        should_collect_devtools_layout_data,
-    });
+    let LayoutStageOutput(pass_fragments) = run_root_layout_stage(
+        LayoutStageInput {
+            arena,
+            root,
+            viewport: root,
+            viewport_inline_size_raw,
+            viewport_block_size_raw,
+            document_in_quirks_mode,
+            should_collect_devtools_layout_data,
+        },
+        // SAFETY: The scratch lives beside the arena for as long as the handle does.
+        unsafe { LayoutScratch::from_handle(arena_handle) },
+    );
     // SAFETY: Computation has finished and its input borrows are no longer used.
     let arena = unsafe { commit_entry_pass(main_thread, arena_handle, &host, root, &pass_fragments) };
     arena.did_commit_full_layout(root);
@@ -2486,12 +2491,14 @@ unsafe fn commit_entry_pass<'a>(
     // performs no host callbacks.
     let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
     arena.end_layout_pass();
+    // SAFETY: The scratch lives beside the arena for as long as the handle does.
+    unsafe { LayoutScratch::from_handle(arena_handle) }.end_layout_pass();
     arena.reset_layout_update_flags_in_subtree(commit_root);
     arena
 }
 
 /// The host-free partial layout stage. Its input carries no host table or main-thread capability.
-fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>) -> LayoutStageOutput {
+fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScratch) -> LayoutStageOutput {
     let _pass = seal::enter_pass();
     let LayoutStageInput {
         arena,
@@ -2505,6 +2512,7 @@ fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>) -> LayoutStageOutpu
     arena.begin_active_layout_pass();
     let callbacks = LayoutPass::new(
         arena,
+        scratch,
         CssPixels::from_raw(viewport_inline_size_raw),
         CssPixels::from_raw(viewport_block_size_raw),
         document_in_quirks_mode,
@@ -2531,7 +2539,7 @@ fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>) -> LayoutStageOutpu
             .map_or(NodeSlotId::INVALID, |link| link.containing_block);
         (root, containing_block)
     };
-    let pass_fragments = RunRecords::with_unrooted(arena, entry_root, entry_root_containing_block, |entry_records| {
+    let pass_fragments = RunRecords::with_unrooted(scratch, arena, entry_root, entry_root_containing_block, |entry_records| {
         let _trace = arena.layout_trace.pass(Some(root));
         let entry_fragments = std::rc::Rc::new(fragment_tree::RunFragmentBuilder::new_entry_accumulator(entry_root));
         let entry_run = FormattingContextRun {
@@ -2580,15 +2588,19 @@ pub(crate) unsafe fn compute_subtree_layout(
     // SAFETY: The host keeps the arena and its published inputs alive and unchanged for the
     // synchronous stage run.
     let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
-    let LayoutStageOutput(pass_fragments) = compute_subtree_layout_stage(LayoutStageInput {
-        arena,
-        root,
-        viewport,
-        viewport_inline_size_raw,
-        viewport_block_size_raw,
-        document_in_quirks_mode,
-        should_collect_devtools_layout_data: false,
-    });
+    let LayoutStageOutput(pass_fragments) = compute_subtree_layout_stage(
+        LayoutStageInput {
+            arena,
+            root,
+            viewport,
+            viewport_inline_size_raw,
+            viewport_block_size_raw,
+            document_in_quirks_mode,
+            should_collect_devtools_layout_data: false,
+        },
+        // SAFETY: The scratch lives beside the arena for as long as the handle does.
+        unsafe { LayoutScratch::from_handle(arena_handle) },
+    );
     // SAFETY: Computation has finished and its input borrows are no longer used.
     let arena = unsafe { commit_entry_pass(main_thread, arena_handle, &host, root, &pass_fragments) };
     // Commit reset the subtree's rows, and its new size may affect ancestor scrollable overflow.
