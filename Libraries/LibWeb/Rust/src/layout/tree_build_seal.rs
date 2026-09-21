@@ -23,32 +23,40 @@
 //! matters as much as the name, because a route a full suite takes twice is a different problem
 //! from one it takes a hundred thousand times.
 //!
-//! What the whole suite takes, by `during_build` count, as of the commit that stamped a
-//! pseudo-element's generated text in the build. Two of these are not tree builder callback slots
-//! at all, which is what the gate was for:
+//! What the whole suite takes, by `during_build` count, as of the commit that stamped the marker a
+//! list-item pseudo-element nests. Two of these are not tree builder callback slots at all, which
+//! is what the gate was for:
 //!
 //! | route | during build | note |
 //! |---|---|---|
-//! | `layout_node_shell_factory` | 4000608 | **not a slot**: the arena materialising a shell |
-//! | `shell_style_changed` | 81690 | **not a slot**: a row's style reaching its shell |
-//! | `pseudo.create_layout_node` | 43994 | slot |
-//! | `attach_style_resources` | 11797 | slot: every box's style resources, wherever it was built |
-//! | `pseudo.create_nested_list_marker` | 1531 | slot |
-//! | `pseudo.create_content_item` | 18 | slot: what is left is the generated image cases |
+//! | `layout_node_shell_factory` | 4045613 | **not a slot**: the arena materialising a shell |
+//! | `shell_style_changed` | 81661 | **not a slot**: a row's style reaching its shell |
+//! | `attach_style_resources` | 11890 | slot: every box's style resources, wherever it was built |
+//! | `pseudo.create_content_replacement_box` | 61 | slot: a box that owns the image it replaces its contents with |
+//! | `pseudo.create_content_item` | 20 | slot: what is left is the generated image cases |
 //!
-//! `create_first_letter_nodes` is gone: the build stamps the slices and the wrapper itself, and
-//! what it still asks the host for is the wrapper's style resources, which is why
-//! `attach_style_resources` counts a few hundred more than it did.
+//! `pseudo.create_layout_node` is gone: the build stamps every pseudo-element box but the content
+//! replacement, which is what the slot is named for now. `pseudo.create_nested_list_marker` is gone
+//! too, and with it the last style record the build asked to have computed while it ran.
 //!
 //! What the allow-list costs, by the same count, so that the debt is a number rather than a word:
-//! `notify_box_presence` 11358617, `layout_node_shell_destroy` 2564548, `paintable_row_reset`
-//! 567718, `image_observers_destroy` 2044, `deliver_commit_messages` 1025,
+//! `notify_box_presence` 11382371, `layout_node_shell_destroy` 2575221, `paintable_row_reset`
+//! 567016, `image_observers_destroy` 2047, `deliver_commit_messages` 1028,
 //! `owned_image_provider_notify_detach` 2, `owned_image_provider_destroy` 2.
 //!
 //! Two of these counts are not stable: `layout_node_shell_factory` and `notify_box_presence` swing
 //! by about a tenth between runs of the same binary, because a handful of tests do a variable
 //! amount of build work. The rest hold to under a percent, so read those two as an order of
 //! magnitude rather than a number to compare against.
+//!
+//! # Where the shells come from
+//!
+//! A census keyed by the entry point each materialisation was reached through, over the same
+//! suite: 3986003 of the 3986151 a build makes are reached from the render side itself - the
+//! build's own `node_shell` assertions - and 148 from the host's `node_shell_if_live`. Every
+//! materialisation the host reaches through `node_link_shell` (207877) and
+//! `containing_block_shell_if_live` (147) happens outside a build. So the build materialises
+//! almost four million shells for itself, and the main side asks for a fifth of a million.
 //!
 //! `build_replaced_content_facts` and `viewport_propagation_facts` are counted too and have never
 //! been taken during a build: they belong to the layout entry that follows it.
