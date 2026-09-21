@@ -10,6 +10,8 @@
 
 use super::counters::{CounterName, CounterOwner, LIST_ITEM_COUNTER_NAME, style_of};
 use super::layout_node_arena::LayoutNodeArena;
+use super::node_data::NodeSlotId;
+use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::counter_representation::{CounterStyle, generate_a_counter_representation};
 use crate::css::css_string::CssString;
 use crate::css::style::fast_hash::FastMap as HashMap;
@@ -18,8 +20,8 @@ use crate::css::style_compute::keyword;
 use crate::css::style_value::StyleValueData;
 use std::sync::Arc;
 
-/// What a list marker whose `content` is `normal` shows, as the host resolved its `list-style-type` and
-/// `list-style-image` when it built the marker box.
+/// What a list marker whose `content` is `normal` shows, resolved from the published records of the
+/// marker box and of the list item box it belongs to.
 pub(crate) enum MarkerContent {
     Image,
     String(Vec<u16>),
@@ -37,15 +39,10 @@ pub(crate) struct MarkerContentStyles {
 /// the tree build resolves that content, and the text each one's content resolved to.
 #[derive(Default)]
 pub(crate) struct GeneratedContent {
-    marker_content_styles: HashMap<CounterOwner, MarkerContentStyles>,
     accessible_texts: HashMap<CounterOwner, Vec<u16>>,
 }
 
 impl GeneratedContent {
-    pub(crate) fn set_marker_content_styles(&mut self, owner: CounterOwner, styles: MarkerContentStyles) {
-        self.marker_content_styles.insert(owner, styles);
-    }
-
     /// The text the content of `owner` last resolved to, the way accessibility reads it: the alt text
     /// when there is one, otherwise every string in order.
     pub(crate) fn accessible_text(&self, owner: CounterOwner) -> &[u16] {
@@ -55,7 +52,6 @@ impl GeneratedContent {
     /// Drops everything kept for an element's pseudo-elements, once its identity is retired.
     pub(crate) fn forget(&mut self, element: StyleNodeID) {
         let belongs_to_element = |owner: &CounterOwner| owner.element != element;
-        self.marker_content_styles.retain(|owner, _| belongs_to_element(owner));
         self.accessible_texts.retain(|owner, _| belongs_to_element(owner));
     }
 }
@@ -92,6 +88,58 @@ fn representation(
 
 // https://drafts.csswg.org/css-lists-3/#text-markers
 // "<counter-style>: Specifies the element's marker string as the value of the list-item counter
+// https://drafts.csswg.org/css-lists-3/#text-markers
+/// What a list marker whose `content` is `normal` shows, resolved from the marker box's own
+/// `list-style-image` and the list item box's `list-style-type`.
+///
+/// Port of `publish_normal_marker_content`.
+fn resolve_marker_content_styles(
+    arena: &LayoutNodeArena,
+    marker: NodeSlotId,
+    list_box: NodeSlotId,
+    tree_scope: u32,
+) -> MarkerContentStyles {
+    let style_of_row = |row: NodeSlotId| {
+        arena
+            .style_payloads(row)
+            .map(|payloads| ComputedValuesView::new(&payloads.groups))
+            .expect("a list marker and its list item box both carry a style")
+    };
+    if style_of_row(marker).list_style_image_is_set() {
+        return MarkerContentStyles {
+            tree_scope,
+            content: MarkerContent::Image,
+            text_depends_on_list_item_counter: false,
+        };
+    }
+    let list_style_type = style_of_row(list_box).inherited_list().list_style_type.data();
+    // A marker whose list-style-type is `none` generates no box, so the build never asks.
+    assert!(
+        !matches!(list_style_type, Some(StyleValueData::Keyword { keyword }) if *keyword == keyword::NONE),
+        "a list marker box was built for list-style-type: none"
+    );
+    if let Some(StyleValueData::String { string, .. }) = list_style_type {
+        // A string literal marker is the same for every item, regardless of the counter value.
+        return MarkerContentStyles {
+            tree_scope,
+            content: MarkerContent::String(string.units().to_vec()),
+            text_depends_on_list_item_counter: false,
+        };
+    }
+    let counter_style = arena.with_counter_style_registry(|registry| {
+        crate::css::counter_representation::resolve_counter_style_value(registry, tree_scope, list_style_type)
+    });
+    // The name of a counter style that could not be resolved renders the counter value as `decimal`.
+    let text_depends_on_list_item_counter = counter_style
+        .as_ref()
+        .is_none_or(|counter_style| !counter_style.representation_is_constant());
+    MarkerContentStyles {
+        tree_scope,
+        content: MarkerContent::CounterStyle(counter_style),
+        text_depends_on_list_item_counter,
+    }
+}
+
 // represented using the specified <counter-style>. Specifically, the marker string is the result of
 // generating a counter representation of the list-item counter value using the specified
 // <counter-style>, prefixed by the prefix of the <counter-style>, and followed by the suffix of the
@@ -141,15 +189,15 @@ fn marker_renders_list_item_counter_value(styles: &MarkerContentStyles) -> bool 
     !matches!(styles.content, MarkerContent::Image) && styles.text_depends_on_list_item_counter
 }
 
-/// The marker string of a list marker a list-item pseudo-element nests, from what the host resolved
-/// when it built the marker box.
-pub(crate) fn resolve_nested_marker_content(arena: &LayoutNodeArena, element: CounterOwner) -> ResolvedContent {
-    let styles = arena
-        .generated_content()
-        .borrow_mut()
-        .marker_content_styles
-        .remove(&element)
-        .expect("a nested list marker has its content styles");
+/// The marker string of a list marker a list-item pseudo-element nests.
+pub(crate) fn resolve_nested_marker_content(
+    arena: &LayoutNodeArena,
+    element: CounterOwner,
+    marker: NodeSlotId,
+    list_box: NodeSlotId,
+) -> ResolvedContent {
+    let tree_scope = arena.with_style_store(|engine| engine.tree().tree_scope(element.element).0);
+    let styles = resolve_marker_content_styles(arena, marker, list_box, tree_scope);
     let renders_list_item_counter_value = marker_renders_list_item_counter_value(&styles);
     ResolvedContent {
         items: vec![resolve_normal_marker_content(arena, element, styles)],
@@ -277,22 +325,18 @@ fn value_list(value: Option<&StyleValueData>) -> &[crate::css::style_value::Reta
 pub(crate) fn resolve_content(
     arena: &LayoutNodeArena,
     element: CounterOwner,
-    box_is_list_item_marker: bool,
+    marker_and_list_box: Option<(NodeSlotId, NodeSlotId)>,
     initial_quote_nesting_level: u32,
 ) -> ResolvedContent {
     arena.with_style_store(|engine| {
         let style = style_of(arena, engine, element).expect("a pseudo-element with a box has a style");
         let content = style.content_value();
+        let tree_scope = engine.tree().tree_scope(element.element).0;
 
-        if box_is_list_item_marker
+        if let Some((marker, list_box)) = marker_and_list_box
             && matches!(content, Some(StyleValueData::Keyword { keyword }) if *keyword == keyword::NORMAL)
         {
-            let styles = arena
-                .generated_content()
-                .borrow_mut()
-                .marker_content_styles
-                .remove(&element)
-                .expect("a list marker has its content styles");
+            let styles = resolve_marker_content_styles(arena, marker, list_box, tree_scope);
             let renders_list_item_counter_value = marker_renders_list_item_counter_value(&styles);
             return ResolvedContent {
                 items: vec![resolve_normal_marker_content(arena, element, styles)],
@@ -319,7 +363,7 @@ pub(crate) fn resolve_content(
         let mut counters = CounterItemResolver {
             arena,
             element,
-            tree_scope: engine.tree().tree_scope(element.element).0,
+            tree_scope,
             next_counter_style: 0,
             renders_list_item_counter_value: false,
         };

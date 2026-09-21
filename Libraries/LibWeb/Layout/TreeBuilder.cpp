@@ -198,56 +198,31 @@ Box& LayoutTreeBuildBridge::create_list_item_marker(Box& list_box, CSS::LayoutSt
     return list_item_marker;
 }
 
-static void* layout_node_arena_handle(DOM::AbstractElement const& element_reference)
-{
-    return element_reference.document().layout_node_arena().handle();
-}
-
-static u8 generated_for(DOM::AbstractElement const& element_reference)
-{
-    return Node::encode_generated_for(*element_reference.pseudo_element());
-}
-
 // https://drafts.csswg.org/css-lists-3/#text-markers
-// NB: The tree build generates the marker string. What it is generated from is resolved here, when the marker box is
-//     built, since resolving a counter style name settles the style scope's counter styles.
-static Vector<ValueComparingRefPtr<CSS::CounterStyle const>> publish_normal_marker_content(DOM::AbstractElement const& element_reference, BlockContainer const& list_box, BlockContainer const& marker)
+// NB: The build generates the marker string out of the published records of the marker box and of
+//     the list item box. What is recorded here is only the resolved counter style a later style
+//     change compares against to decide whether the marker box has to be rebuilt.
+static Vector<ValueComparingRefPtr<CSS::CounterStyle const>> normal_marker_counter_style_dependencies(BlockContainer const& list_box, BlockContainer const& marker)
 {
-    RustFFI::FfiMarkerContent content {
-        .kind = RustFFI::FfiMarkerContentKind::Image,
-        .string = 0,
-        .counter_style = nullptr,
-        .text_depends_on_list_item_counter = false,
-    };
     Vector<ValueComparingRefPtr<CSS::CounterStyle const>> counter_style_dependencies;
-    if (!marker.list_style_image()) {
-        auto const& list_style_type = list_box.list_style_type();
-        content.text_depends_on_list_item_counter = CSS::marker_text_depends_on_list_item_counter_value(list_style_type);
-        auto use_counter_style = [&](RefPtr<CSS::CounterStyle const> const& counter_style) {
-            content.kind = RustFFI::FfiMarkerContentKind::CounterStyle;
-            if (counter_style) {
-                content.counter_style = counter_style->rust_counter_style();
-                counter_style_dependencies.append(counter_style);
-            }
-        };
-        list_style_type.visit(
-            [](Empty const&) { VERIFY_NOT_REACHED(); },
-            [&](RefPtr<CSS::CounterStyle const> const& counter_style) {
-                use_counter_style(counter_style);
-            },
-            [&](Utf16String const& string) {
-                content.kind = RustFFI::FfiMarkerContentKind::String;
-                content.string = string.to_raw_leaked();
-            },
-            [&](CSS::UnresolvedCounterStyleName const&) {
-                use_counter_style(nullptr);
-            },
-            [&](CSS::ListStyleSymbols const& symbols) {
-                use_counter_style(symbols.counter_style);
-            });
-    }
-    RustFFI::layout_arena_set_marker_content(layout_node_arena_handle(element_reference), element_reference.element().style_node_id().value(),
-        generated_for(element_reference), element_reference.style_scope().style_engine_tree_scope().value(), content);
+    if (marker.list_style_image())
+        return counter_style_dependencies;
+    auto use_counter_style = [&](RefPtr<CSS::CounterStyle const> const& counter_style) {
+        if (counter_style)
+            counter_style_dependencies.append(counter_style);
+    };
+    list_box.list_style_type().visit(
+        [](Empty const&) { VERIFY_NOT_REACHED(); },
+        [&](RefPtr<CSS::CounterStyle const> const& counter_style) {
+            use_counter_style(counter_style);
+        },
+        [](Utf16String const&) {},
+        [&](CSS::UnresolvedCounterStyleName const&) {
+            use_counter_style(nullptr);
+        },
+        [&](CSS::ListStyleSymbols const& symbols) {
+            use_counter_style(symbols.counter_style);
+        });
     return counter_style_dependencies;
 }
 
@@ -261,7 +236,7 @@ static void publish_generated_content(DOM::AbstractElement const& element_refere
     auto const& content_values = *CSS::style_group_from_payloads<CSS::ComputedValues::ContentValues>(payloads);
     if (layout_node.is_list_item_marker_box() && content_values.content_is_normal()) {
         VERIFY(originating_list_box);
-        layout_node.set_content_counter_style_dependencies(publish_normal_marker_content(element_reference, *originating_list_box, static_cast<BlockContainer const&>(layout_node)));
+        layout_node.set_content_counter_style_dependencies(normal_marker_counter_style_dependencies(*originating_list_box, static_cast<BlockContainer const&>(layout_node)));
         return;
     }
 
@@ -374,7 +349,7 @@ RustFFI::FfiPseudoTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_pseudo_tr
             // NB: The marker of a list-item ::before or ::after belongs to that pseudo-element, not to the element's own
             //     ::marker, so it is generated for the originating pseudo-element and never becomes the ::marker's box.
             list_item_marker.set_generated_for(css_pseudo_element(originating_pseudo), element);
-            list_item_marker.set_content_counter_style_dependencies(publish_normal_marker_content({ element, css_pseudo_element(originating_pseudo) }, list_item_box, list_item_marker));
+            list_item_marker.set_content_counter_style_dependencies(normal_marker_counter_style_dependencies(list_item_box, list_item_marker));
             return Node::slot_id(&list_item_marker); },
         .create_content_item = [](void* builder_pointer, u32 style_node, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiGeneratedContentItem item, Compositing::RustFFI::NodeSlotId pseudo_element_box_slot) -> Compositing::RustFFI::NodeSlotId {
             VERIFY(builder_pointer);
