@@ -2878,6 +2878,12 @@ fn animation_length_resolution_context(
 /// computed and the `@keyframes` rule the host published for the scope, so that what the animation
 /// would apply can be sampled before the animation exists.
 struct StartingAnimation<'a> {
+    /// `None` when the animation names a `@keyframes` rule that does not exist: the host creates
+    /// it with no keyframes at all, and it composes nothing.
+    keyframes: Option<StartingAnimationKeyframes<'a>>,
+}
+
+struct StartingAnimationKeyframes<'a> {
     description: &'a crate::css::style::animations::PublishedEffect,
     /// The animation's own `animation-timing-function`, which every keyframe that declares no
     /// easing of its own runs.
@@ -2916,6 +2922,12 @@ fn starting_animation<'a>(
     if !style_engine.element_animation_timing_rows(node, slot).is_empty() {
         return None;
     }
+    // An `animation-name` that names no `@keyframes` rule at all still starts an animation - it is
+    // created, it is relevant, it is one the element reports - but the effect it is created with
+    // has no keyframes, so it never composes anything and its timing decides nothing here.
+    if definition.keyframe_set.is_null() {
+        return Some(StartingAnimation { keyframes: None });
+    }
     let row = animations::AnimationTimingRow::for_new_css_animation(definition, node, slot)?;
     // A key of `None` is an animation whose progress does not resolve, which the host samples
     // nothing from; that is a cleared overlay rather than a replaced one, so it stays with the host.
@@ -2943,11 +2955,13 @@ fn starting_animation<'a>(
             .cast::<crate::css::style_value::StyleValueData>()
     })?;
     Some(StartingAnimation {
-        description: &set.description,
-        easing,
-        // `animation-composition` is in the same order as `Bindings::CompositeOperation`.
-        composite: definition.composition,
-        current_key,
+        keyframes: Some(StartingAnimationKeyframes {
+            description: &set.description,
+            easing,
+            // `animation-composition` is in the same order as `Bindings::CompositeOperation`.
+            composite: definition.composition,
+            current_key,
+        }),
     })
 }
 
@@ -2976,16 +2990,20 @@ unsafe fn try_stage_animation_tail(
     }
     let node = crate::css::style::tree::StyleNodeID::from_raw(input.style_node)?;
     let slot = animation_slot(input.pseudo_kind);
+    let starting_keyframes = starting.and_then(|starting| starting.keyframes.as_ref());
     let (preparation_effects, current_keys) = match starting {
         // The effect this animation would get has no identity until the host creates it, so the
         // preparation it stands for is one no overlay can already hold and none is cached under.
-        Some(starting) => (
-            vec![anim::FfiAnimationPreparationEffect {
-                identity: 0,
-                generation: 0,
-            }],
-            vec![starting.current_key],
-        ),
+        Some(_) => match starting_keyframes {
+            Some(keyframes) => (
+                vec![anim::FfiAnimationPreparationEffect {
+                    identity: 0,
+                    generation: 0,
+                }],
+                vec![keyframes.current_key],
+            ),
+            None => (Vec::new(), Vec::new()),
+        },
         None => published_active_effects(style_engine, node, slot)?,
     };
     // An element with nothing to sample says one of two different things. An element that holds no
@@ -2994,10 +3012,11 @@ unsafe fn try_stage_animation_tail(
     // effects, every one of which turned out to be inactive, has its animated properties cleared
     // instead, and an empty overlay is what that clearing leaves behind.
     if preparation_effects.is_empty() {
-        let holds_an_effect = style_engine
-            .element_animation_timing_rows(node, slot)
-            .iter()
-            .any(|row| !crate::css::style::animations::row_is_not_associated(row));
+        let holds_an_effect = starting.is_some()
+            || style_engine
+                .element_animation_timing_rows(node, slot)
+                .iter()
+                .any(|row| !crate::css::style::animations::row_is_not_associated(row));
         let overlay = match holds_an_effect || existing_overlay.is_null() {
             true => crate::css::animated_overlay::rust_animated_overlay_create(),
             false => unsafe { crate::css::animated_overlay::rust_animated_overlay_clone(existing_overlay) },
@@ -3080,13 +3099,13 @@ unsafe fn try_stage_animation_tail(
         .collect::<Vec<_>>();
     let give_up_on_overlay = || unsafe { crate::css::animated_overlay::rust_animated_overlay_free(overlay) };
     let mut covered = false;
-    let resolved = match starting {
-        Some(starting) => match anim::resolve_new_animation_declarations(
+    let resolved = match starting_keyframes {
+        Some(keyframes) => match anim::resolve_new_animation_declarations(
             anim::SelectedEffect {
-                effect: starting.description,
-                current_key: starting.current_key,
-                easing_from_animation: Some(&starting.easing),
-                composite_from_animation: starting.composite,
+                effect: keyframes.description,
+                current_key: keyframes.current_key,
+                easing_from_animation: Some(&keyframes.easing),
+                composite_from_animation: keyframes.composite,
             },
             table,
             writing_mode,
