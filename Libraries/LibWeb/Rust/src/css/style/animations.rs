@@ -546,6 +546,24 @@ impl AnimationTimingRow {
         self.effect_identity
     }
 
+    /// The place in the element's `animation-name` list of the CSS animation this row describes,
+    /// for a row that is one of the animations `(node, slot)`'s own plan works on. `None` for every
+    /// other row: a transition, an animation script started, a CSS animation another element owns.
+    ///
+    /// The host's class-specific composite order key for a CSS animation *is* that place, so the
+    /// row already carries it.
+    #[must_use]
+    pub(crate) fn owned_css_animation_index(&self, node: StyleNodeID, slot: AnimationSlot) -> Option<u32> {
+        if self.composite_class != animation_class::CSS_ANIMATION_WITH_OWNING_ELEMENT
+            || !self.has(timing_row_flag::HAS_OWNING_ELEMENT)
+            || self.composite_owning_node != node.raw()
+            || self.composite_owning_slot != slot
+        {
+            return None;
+        }
+        Some(self.composite_class_key)
+    }
+
     #[must_use]
     fn has(&self, flag: u32) -> bool {
         self.flags & flag != 0
@@ -1001,6 +1019,54 @@ pub(crate) fn composite_order(a: &AnimationTimingRow, b: &AnimationTimingRow) ->
         Ordering::Equal => a.global_list_order.cmp(&b.global_list_order),
         order => order,
     }
+}
+
+/// The rows an element would publish once a plan that does nothing to its CSS animations but
+/// cancel and renumber them has been applied: a cancelled animation drops out of the effect stack,
+/// one the plan moved takes its new place in it, and the composite order is redone over what is
+/// left.
+///
+/// `new_indices[j]` is the place `animation-name` order gives the element's `j`th CSS animation,
+/// or `NO_MATCHED_ANIMATION` for one no definition claimed and that the plan therefore cancels.
+/// Everything else the element holds - its transitions, the animations script started - the plan
+/// does not touch, so those rows travel unchanged.
+///
+/// `None` where the published rows are not the list the plan is about: an animation the plan works
+/// on that published no row at all, or two rows claiming one place in the list.
+#[must_use]
+pub(crate) fn rows_after_cancel_and_renumber(
+    rows: &[AnimationTimingRow],
+    node: StyleNodeID,
+    slot: AnimationSlot,
+    new_indices: &[i32],
+) -> Option<Vec<AnimationTimingRow>> {
+    let mut planned = Vec::with_capacity(rows.len());
+    let mut was_found = vec![false; new_indices.len()];
+    for row in rows {
+        let Some(existing) = row.owned_css_animation_index(node, slot) else {
+            planned.push(*row);
+            continue;
+        };
+        let existing = existing as usize;
+        if *was_found.get(existing)? {
+            return None;
+        }
+        was_found[existing] = true;
+        let new_index = new_indices[existing];
+        if new_index == NO_MATCHED_ANIMATION {
+            continue;
+        }
+        let mut planned_row = *row;
+        planned_row.composite_class_key = new_index as u32;
+        planned.push(planned_row);
+    }
+    if was_found.iter().any(|found| !found) {
+        return None;
+    }
+    // The published list is already in composite order, so a stable sort keeps the relative order
+    // of the rows the order declines to tell apart.
+    planned.sort_by(composite_order);
+    Some(planned)
 }
 
 /// The current time each of the document's animation timelines was sampled at when the style

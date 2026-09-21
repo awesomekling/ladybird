@@ -2814,6 +2814,7 @@ fn published_active_effects(
     style_engine: &crate::css::style::StyleEngine,
     node: crate::css::style::tree::StyleNodeID,
     slot: u8,
+    rows: &[crate::css::style::animations::AnimationTimingRow],
 ) -> Option<(Vec<crate::css::animation::FfiAnimationPreparationEffect>, Vec<f64>)> {
     use crate::css::style::animations;
 
@@ -2821,7 +2822,7 @@ fn published_active_effects(
     let descriptions = style_engine.element_animation_effect_descriptions(node, slot);
     let mut effects = Vec::new();
     let mut current_keys = Vec::new();
-    for row in style_engine.element_animation_timing_rows(node, slot) {
+    for row in rows {
         if animations::row_is_not_associated(row) {
             continue;
         }
@@ -2980,6 +2981,7 @@ unsafe fn try_stage_animation_tail(
     length_contexts: &FfiAnimationLengthContexts,
     existing_overlay: *const AnimatedOverlay,
     starting: Option<&StartingAnimation<'_>>,
+    planned_rows: Option<&[crate::css::style::animations::AnimationTimingRow]>,
 ) -> Option<StageAnimationTail> {
     use crate::css::animation as anim;
 
@@ -2990,6 +2992,9 @@ unsafe fn try_stage_animation_tail(
     }
     let node = crate::css::style::tree::StyleNodeID::from_raw(input.style_node)?;
     let slot = animation_slot(input.pseudo_kind);
+    // The effect stack the element holds once the plan this computation carries has been applied,
+    // which for an element with no plan is the one the host published.
+    let rows = planned_rows.unwrap_or_else(|| style_engine.element_animation_timing_rows(node, slot));
     let starting_keyframes = starting.and_then(|starting| starting.keyframes.as_ref());
     let (preparation_effects, current_keys) = match starting {
         // The effect this animation would get has no identity until the host creates it, so the
@@ -3004,7 +3009,7 @@ unsafe fn try_stage_animation_tail(
             ),
             None => (Vec::new(), Vec::new()),
         },
-        None => published_active_effects(style_engine, node, slot)?,
+        None => published_active_effects(style_engine, node, slot, rows)?,
     };
     // An element with nothing to sample says one of two different things. An element that holds no
     // effect of its own at all - the published rows name none, or name only the provisional
@@ -3013,8 +3018,7 @@ unsafe fn try_stage_animation_tail(
     // instead, and an empty overlay is what that clearing leaves behind.
     if preparation_effects.is_empty() {
         let holds_an_effect = starting.is_some()
-            || style_engine
-                .element_animation_timing_rows(node, slot)
+            || rows
                 .iter()
                 .any(|row| !crate::css::style::animations::row_is_not_associated(row));
         let overlay = match holds_an_effect || existing_overlay.is_null() {
@@ -3270,6 +3274,8 @@ struct LonghandTransactionContinuation {
     inherited_animated_overlay: Option<Box<AnimatedOverlay>>,
     /// See `starting_definition` in `rust_compute_properties`.
     starting_definition: Option<FfiComputedAnimation>,
+    /// See `animation_plan_new_indices` in `rust_compute_properties`.
+    animation_plan_new_indices: Option<Vec<i32>>,
 }
 
 #[repr(C)]
@@ -6194,21 +6200,41 @@ pub unsafe extern "C" fn rust_compute_properties(
     let a_definition_starts_an_animation = definitions
         .iter()
         .any(|animation| animation.matched_existing_index == crate::css::style::animations::NO_MATCHED_ANIMATION);
-    // A plan every one of whose definitions claims the animation already sitting in its own place,
-    // and computes for it exactly what that animation last had applied, leaves the element's list
-    // and every animation in it untouched: no animation is created, none is cancelled, none is
-    // reordered, and each one's timing, keyframes and name index are set to what they already are.
-    // The stage may then sample the element for itself, the way it does when there is no plan.
-    let plan_would_change_nothing = has_animation_definitions
-        && !a_definition_starts_an_animation
-        && crate::css::style::tree::StyleNodeID::from_raw(input.style_node).is_some_and(|node| {
+    // A plan none of whose definitions starts an animation, and each of which computes for the
+    // animation it claims exactly what that animation last had applied, does nothing to the
+    // element's animations but cancel the ones no definition claimed and move the rest to their new
+    // places in the `animation-name` list. Its whole effect is then this table: the place
+    // definition order gives each animation the element holds, or `NO_MATCHED_ANIMATION` for one
+    // the plan cancels. `None` for a plan that does anything else, which only the host can apply.
+    let animation_plan_new_indices = match a_definition_starts_an_animation {
+        true => None,
+        false => crate::css::style::tree::StyleNodeID::from_raw(input.style_node).and_then(|node| {
             let applied = style_engine.element_applied_animation_definitions(node, animation_slot(input.pseudo_kind));
-            // An existing animation no definition claims is one the plan would cancel.
-            applied.len() == definitions.len()
-                && definitions.iter().enumerate().all(|(index, animation)| {
-                    animation.matched_existing_index == index as i32
-                        && computed_animation_definitions[index].would_change_nothing(&applied[index])
-                })
+            let mut new_indices = vec![crate::css::style::animations::NO_MATCHED_ANIMATION; applied.len()];
+            for (index, animation) in definitions.iter().enumerate() {
+                let matched = usize::try_from(animation.matched_existing_index).ok()?;
+                if !computed_animation_definitions
+                    .get(index)?
+                    .would_change_nothing(applied.get(matched)?)
+                {
+                    return None;
+                }
+                new_indices[matched] = i32::try_from(index).ok()?;
+            }
+            Some(new_indices)
+        }),
+    };
+    // A plan every one of whose definitions claims the animation already sitting in its own place
+    // leaves the element's list and every animation in it untouched: no animation is created, none
+    // is cancelled, none is reordered, and each one's timing, keyframes and name index are set to
+    // what they already are. The stage may then sample the element for itself, the way it does when
+    // there is no plan, and the plan never has to reach the host at all.
+    let plan_would_change_nothing = has_animation_definitions
+        && animation_plan_new_indices.as_ref().is_some_and(|new_indices| {
+            new_indices
+                .iter()
+                .enumerate()
+                .all(|(existing, &new_index)| new_index == existing as i32)
         });
     // The one definition of a plan that would do nothing but start a single brand-new animation,
     // kept for the tail to sample from: the drive result the definitions live in is destroyed
@@ -6234,6 +6260,7 @@ pub unsafe extern "C" fn rust_compute_properties(
         animation_length_contexts,
         inherited_animated_overlay,
         starting_definition,
+        animation_plan_new_indices,
     });
     let drive_result = &raw const continuation.drive_result;
     let storage = Box::into_raw(continuation);
@@ -6269,6 +6296,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         mut animation_length_contexts,
         inherited_animated_overlay: _inherited_animated_overlay,
         starting_definition,
+        animation_plan_new_indices,
     } = *continuation;
     // NB: The root element's own computation refreshes the host's root font metrics in the callback
     //     that applies the drive result, which runs between the drive and this tail - so the
@@ -6357,6 +6385,24 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
     let plan_is_inert = plan_would_change_nothing
         || (has_animation_definitions && !element_has_css_defined_animations && in_display_none_subtree == 1);
     let plan_has_work = plan_has_entries && !plan_is_inert;
+    // A plan whose whole effect on the element's animations is the cancelling and renumbering the
+    // drive's table describes is one the stage can sample around: the rows it samples are the
+    // published ones adjusted for it, and the plan itself rides back to the host to be applied as
+    // soon as this call returns, before anything downstream can see the element's animations.
+    let planned_animation_rows = match plan_has_work {
+        true => crate::css::style::tree::StyleNodeID::from_raw(input.style_node)
+            .zip(animation_plan_new_indices.as_ref())
+            .and_then(|(node, new_indices)| {
+                let slot = animation_slot(input.pseudo_kind);
+                crate::css::style::animations::rows_after_cancel_and_renumber(
+                    style_engine.element_animation_timing_rows(node, slot),
+                    node,
+                    slot,
+                    new_indices,
+                )
+            }),
+        false => None,
+    };
     // What is left is whether the element has anything to sample, which is a question about the
     // WAAPI timing model: an animation is relevant when its effect is current or in effect. Both
     // are pure functions of the animation's timing and of the current time its timeline was sampled
@@ -6380,7 +6426,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         invalidated_longhands |= invalidated;
     }
     let mut stage_animation_tail = None;
-    let mut starts_one_animation = false;
+    let mut applies_animation_plan_after_return = false;
     if element_has_animation_state {
         // A plan that would do nothing but start one animation on an element that holds none is one
         // the stage can sample for itself too: what that animation would apply is a function of the
@@ -6403,7 +6449,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         };
         // An element with no plan to apply and whose whole animation state the host described is
         // one the stage samples for itself, and then the host is never asked.
-        stage_animation_tail = match plan_has_work && starting.is_none() {
+        stage_animation_tail = match plan_has_work && starting.is_none() && planned_animation_rows.is_none() {
             true => None,
             false => unsafe {
                 try_stage_animation_tail(
@@ -6413,10 +6459,11 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
                     &animation_length_contexts,
                     animated_overlay,
                     starting.as_ref(),
+                    planned_animation_rows.as_deref(),
                 )
             },
         };
-        starts_one_animation = starting.is_some() && stage_animation_tail.is_some();
+        applies_animation_plan_after_return = plan_has_work && stage_animation_tail.is_some();
         if let Some(tail) = &stage_animation_tail {
             animated_overlay = tail.overlay;
             // The host measures the finalization's input line height after sampling; the tail only
@@ -6496,7 +6543,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         keyframes_inherited_non_inherited_style_groups: stage_animation_tail
             .as_ref()
             .map_or(0, |tail| tail.keyframes_inherited_non_inherited_style_groups),
-        applies_animation_plan_after_return: starts_one_animation,
+        applies_animation_plan_after_return,
     }
 }
 
