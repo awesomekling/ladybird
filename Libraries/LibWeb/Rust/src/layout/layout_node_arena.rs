@@ -5248,7 +5248,8 @@ pub unsafe extern "C" fn layout_arena_note_rows_share_dom_node(
     unsafe { &*arena.cast::<LayoutNodeArena>() }.note_rows_share_dom_node(bound_row, added_row);
 }
 
-/// The shell of the row the element or text node with `style_node` is bound to, or null.
+/// The shell of the row the element or text node with `style_node` is bound to, materialised if
+/// nothing has asked for it yet, or null if the node has no row.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_bound_shell(arena: *mut c_void, style_node: u32) -> *mut c_void {
     assert!(!arena.is_null(), "layout node arena handle is null");
@@ -5262,11 +5263,11 @@ pub unsafe extern "C" fn layout_arena_bound_shell(arena: *mut c_void, style_node
     if row.is_invalid() {
         return std::ptr::null_mut();
     }
-    arena.data(row).shell.get()
+    arena.node_shell(row)
 }
 
 /// The shell of the row the pseudo-element of kind `generated_for` on the element with
-/// `style_node` is bound to, or null.
+/// `style_node` is bound to, materialised if nothing has asked for it yet, or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_bound_pseudo_element_shell(
     arena: *mut c_void,
@@ -5284,10 +5285,11 @@ pub unsafe extern "C" fn layout_arena_bound_pseudo_element_shell(
     if row.is_invalid() {
         return std::ptr::null_mut();
     }
-    arena.data(row).shell.get()
+    arena.node_shell(row)
 }
 
-/// The shell of the viewport row the document is bound to, or null.
+/// The shell of the viewport row the document is bound to, materialised if nothing has asked for
+/// it yet, or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_bound_viewport_shell(arena: *mut c_void) -> *mut c_void {
     assert!(!arena.is_null(), "layout node arena handle is null");
@@ -5297,7 +5299,7 @@ pub unsafe extern "C" fn layout_arena_bound_viewport_shell(arena: *mut c_void) -
     if row.is_invalid() {
         return std::ptr::null_mut();
     }
-    arena.data(row).shell.get()
+    arena.node_shell(row)
 }
 
 #[unsafe(no_mangle)]
