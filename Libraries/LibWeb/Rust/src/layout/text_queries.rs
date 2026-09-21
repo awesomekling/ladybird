@@ -15,6 +15,12 @@ use std::ops::Range;
 
 use RenderedTextBoundary::{End, Start};
 
+pub(crate) struct MainThreadFfiEntry {
+    _private: (),
+}
+
+const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TextPosition {
     node: NodeSlotId,
@@ -102,13 +108,18 @@ impl MappedText {
         })
     }
 
-    fn dom_range(&self, arena: &LayoutNodeArena, range: Range<usize>) -> Option<FfiDomTextRange> {
+    fn dom_range(
+        &self,
+        main_thread: &crate::stage::MainThread,
+        arena: &LayoutNodeArena,
+        range: Range<usize>,
+    ) -> Option<FfiDomTextRange> {
         let start = self.dom_position(arena, range.start, Start)?;
         let end = self.dom_position(arena, range.end, End)?;
         Some(FfiDomTextRange {
-            start_layout_node: arena.node_shell(start.node),
+            start_layout_node: arena.node_shell(main_thread, start.node),
             start_offset: start.offset,
-            end_layout_node: arena.node_shell(end.node),
+            end_layout_node: arena.node_shell(main_thread, end.node),
             end_offset: end.offset,
         })
     }
@@ -289,16 +300,16 @@ enum SearchNode {
 }
 
 impl SearchNode {
-    fn text(arena: &LayoutNodeArena, node: NodeSlotId) -> Self {
+    fn text(main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena, node: NodeSlotId) -> Self {
         // Generated text renders no DOM text, so only a DOM-backed row can be searched.
         match arena.node_is_dom_backed(node) {
-            true => SearchNode::Text(arena.node_shell(node)),
+            true => SearchNode::Text(arena.node_shell(main_thread, node)),
             false => SearchNode::Skip,
         }
     }
 }
 
-fn search_node(arena: &LayoutNodeArena, node: NodeSlotId) -> SearchNode {
+fn search_node(main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena, node: NodeSlotId) -> SearchNode {
     let data = arena.data(node);
     if node_style_view(data).is_some_and(|style| style.display().is_none()) {
         return SearchNode::Skip;
@@ -310,13 +321,14 @@ fn search_node(arena: &LayoutNodeArena, node: NodeSlotId) -> SearchNode {
     if kind_is_text(data.kind.get()) {
         let style = node_style_view(arena.data(data.parent.get())).expect("text parent has style");
         if style.visibility() == visibility::VISIBLE && style.effects().opacity != 0.0 {
-            return SearchNode::text(arena, node);
+            return SearchNode::text(main_thread, arena, node);
         }
     }
     SearchNode::Skip
 }
 
 unsafe fn ensure_searchable_text(
+    main_thread: &crate::stage::MainThread,
     arena: *mut LayoutNodeArena,
     viewport: NodeSlotId,
     is_searchable: unsafe extern "C" fn(*mut c_void) -> bool,
@@ -334,7 +346,7 @@ unsafe fn ensure_searchable_text(
     let mut builder = SearchTextBuilder::default();
     for node in nodes {
         // SAFETY: The tree is live and no borrowed data escapes classification.
-        match search_node(unsafe { &*arena }, node) {
+        match search_node(main_thread, unsafe { &*arena }, node) {
             SearchNode::Skip => {}
             SearchNode::Break => builder.flush(),
             SearchNode::Text(layout_node) => {
@@ -409,13 +421,14 @@ pub unsafe extern "C" fn layout_arena_find_matching_text(
     context: *mut c_void,
     append: unsafe extern "C" fn(*mut c_void, FfiDomTextRange),
 ) {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     // SAFETY: The host lends the query for this synchronous operation.
     let query = unsafe { query.to_utf16() }.expect("query carries no storage");
     if query.is_empty() {
         return;
     }
     // SAFETY: Source and DOM callbacks finish before native cache publication.
-    unsafe { ensure_searchable_text(arena.cast(), viewport, is_searchable) };
+    unsafe { ensure_searchable_text(&main_thread, arena.cast(), viewport, is_searchable) };
     let matches = {
         // SAFETY: Cache preparation is complete; matching performs no callbacks.
         let arena = unsafe { LayoutNodeArena::from_handle(arena) };
@@ -423,7 +436,7 @@ pub unsafe extern "C" fn layout_arena_find_matching_text(
         for block in arena.searchable_text.as_ref().expect("search cache was prepared") {
             let mut offset = 0;
             while let Some(index) = find_text(&block.text, &query, offset, case_sensitive) {
-                if let Some(range) = block.dom_range(arena, index..index + query.len()) {
+                if let Some(range) = block.dom_range(&main_thread, arena, index..index + query.len()) {
                     matches.push(range);
                 }
                 offset = index + query.len() + 1;
@@ -451,6 +464,11 @@ pub unsafe extern "C" fn layout_arena_invalidate_searchable_text(arena: *mut c_v
 
 #[cfg(test)]
 mod tests {
+    fn main_thread_for_test() -> crate::stage::MainThread {
+        // SAFETY: Tests run on the thread that owns their arena.
+        unsafe { crate::stage::from_ffi_entry(&super::MAIN_THREAD_FFI_ENTRY) }
+    }
+
     use super::*;
     use crate::layout::node_data::NodeKind;
     use crate::layout::rendered_text::{RenderedTextEdit, TextContent};
@@ -506,16 +524,25 @@ mod tests {
         let mut builder = SearchTextBuilder::default();
         builder.append(expanded, &arena.text_content(expanded).unwrap().text, false);
         for rendered in [1..2, 2..3, 1..3] {
-            let range = builder.current.dom_range(&arena, rendered).unwrap();
+            let range = builder
+                .current
+                .dom_range(&main_thread_for_test(), &arena, rendered)
+                .unwrap();
             assert_eq!((range.start_offset, range.end_offset), (1, 2));
         }
-        let range = builder.current.dom_range(&arena, 4..6).unwrap();
+        let range = builder
+            .current
+            .dom_range(&main_thread_for_test(), &arena, 4..6)
+            .unwrap();
         assert_eq!((range.start_offset, range.end_offset), (3, 5));
 
         let contracted = node(&mut arena, "ix", 0, 3, vec![edit(0, 2, 0, 1)]);
         let mut builder = SearchTextBuilder::default();
         builder.append(contracted, &arena.text_content(contracted).unwrap().text, false);
-        let range = builder.current.dom_range(&arena, 0..1).unwrap();
+        let range = builder
+            .current
+            .dom_range(&main_thread_for_test(), &arena, 0..1)
+            .unwrap();
         assert_eq!((range.start_offset, range.end_offset), (0, 2));
     }
 

@@ -61,7 +61,7 @@ pub struct FfiLayoutTreeDumpCallbacks {
 
 struct LayoutTreeDumpHost<'a> {
     callbacks: FfiLayoutTreeDumpCallbacks,
-    _main_thread: &'a crate::stage::MainThread,
+    main_thread: &'a crate::stage::MainThread,
 }
 
 impl LayoutTreeDumpHost<'_> {
@@ -139,7 +139,7 @@ pub unsafe extern "C" fn layout_arena_dump_layout_tree(
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY) };
     let callbacks = LayoutTreeDumpHost {
         callbacks,
-        _main_thread: &main_thread,
+        main_thread: &main_thread,
     };
     let context = LayoutTreeDumpContext {
         arena_handle: arena,
@@ -402,9 +402,11 @@ fn push_layout_node_line(
     if node_facts::has_flag(data, NodeFlag::Anonymous) {
         output.extend_from_slice(b"(anonymous)");
     } else {
-        context
-            .callbacks
-            .describe_dom_node(arena.node_shell(slot), output, &mut identifier);
+        context.callbacks.describe_dom_node(
+            arena.node_shell(context.callbacks.main_thread, slot),
+            output,
+            &mut identifier,
+        );
     }
     output.extend_from_slice(if is_box { palette.off } else { "" }.as_bytes());
     output.extend_from_slice(identifier_color.as_bytes());
@@ -448,7 +450,9 @@ unsafe fn dump_layout_node(output: &mut Vec<u8>, context: &LayoutTreeDumpContext
         push_layout_node_line(output, arena, data, slot, context);
         let kind = data.kind.get();
         // The host reads the row's DOM node, which the row names by identity, through the shell.
-        let layout_node = arena.node_is_dom_backed(slot).then(|| arena.node_shell(slot));
+        let layout_node = arena
+            .node_is_dom_backed(slot)
+            .then(|| arena.node_shell(context.callbacks.main_thread, slot));
         let nested_navigable_document = (kind == NodeKind::NavigableContainerViewport)
             .then(|| {
                 layout_node.and_then(|layout_node| context.callbacks.navigable_container_content_document(layout_node))

@@ -2444,7 +2444,7 @@ pub(crate) unsafe fn run_root_layout(
     // SAFETY: Computation has finished and its input borrows are no longer used.
     let arena = unsafe { commit_entry_pass(main_thread, arena_handle, &host, root, &pass_fragments) };
     arena.did_commit_full_layout(root);
-    arena.end_active_layout_pass();
+    arena.end_active_layout_pass(main_thread);
 }
 
 fn finish_entry_pass(
@@ -2627,7 +2627,7 @@ pub(crate) unsafe fn compute_subtree_layout(
     // would require a new layout instead of an overflow update.
     debug_assert!(!node_facts::kind_is_svg_box(arena.data(root).kind.get()));
     arena.schedule_scrollable_overflow_recalculation(root);
-    arena.end_active_layout_pass();
+    arena.end_active_layout_pass(main_thread);
 }
 
 fn layout_subtree_with_frozen_root_geometry(run: &FormattingContextRun<'_>) {
