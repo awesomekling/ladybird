@@ -333,7 +333,15 @@ RustFFI::FfiLayoutTreeBuildOutcome LayoutTreeBuildBridge::build(DOM::Node& dom_n
     m_document = &dom_node.document();
     auto callbacks = make_ffi_dom_tree_builder_callbacks();
     auto& document = dom_node.document();
-    return RustFFI::rust_build_layout_tree(&callbacks, document.layout_node_arena().handle(), &dom_node, document.style_node_id().value());
+    auto* arena = document.layout_node_arena().handle();
+    // The viewport's style is the document's, which the style computer makes on demand rather than
+    // publishing, so a build that may build the viewport is handed it before it starts.
+    if (RustFFI::layout_arena_tree_build_may_create_viewport(arena, document.style_node_id().value())) {
+        auto& style_computer = document.style_computer();
+        auto document_style = style_computer.intern_anonymous_layout_style(*style_computer.create_document_style());
+        RustFFI::layout_arena_publish_document_style_record(arena, document_style.value());
+    }
+    return RustFFI::rust_build_layout_tree(&callbacks, arena, &dom_node, document.style_node_id().value());
 }
 
 RustFFI::FfiLayoutTreeBuildOutcome build_layout_tree(DOM::Node& dom_node)
