@@ -2510,6 +2510,29 @@ impl LayoutNodeArena {
     /// under the node's identity instead; the shell answers for the paint facts once it is
     /// materialised, since those are not published. The document names no identity of its own,
     /// and its row is recognised by its kind.
+    /// The row generated text is rendered from: an anonymous row that names no DOM node and
+    /// carries no style, as the shell the retired host path allocated for one did.
+    pub(crate) fn stamp_anonymous_text_row(&self, slot: NodeSlotId) {
+        self.assert_owner_thread();
+        let data = self.data(slot);
+        assert_eq!(
+            data.kind.get(),
+            NodeKind::Unset,
+            "stamped a prepared row onto a bound slot"
+        );
+        data.kind.set(NodeKind::GeneratedTextNode);
+        data.flags.set(super::node_facts::construction_flags(
+            &FfiNodeConstructionFacts {
+                kind: NodeKind::GeneratedTextNode,
+                shell: std::ptr::null_mut(),
+                is_anonymous: true,
+                dom_paint_facts: 0,
+                style_node: 0,
+            },
+            0,
+        ));
+    }
+
     pub(crate) fn stamp_dom_row(&self, slot: NodeSlotId, kind: NodeKind, style_node: Option<StyleNodeID>) {
         self.assert_owner_thread();
         let data = self.data(slot);
@@ -2650,6 +2673,33 @@ impl LayoutNodeArena {
             self.refresh_style_flags(slot);
         }
         self.enroll_node_for_svg_paint_resources_sync(slot);
+    }
+
+    /// The row a pseudo-element's box is built in. The row names no DOM node of its own: the kind
+    /// its published display asks for and the record the mirror published for the pseudo-element
+    /// are all it is stamped out of, and `stamp_pseudo_element_box` is what makes it the box the
+    /// pseudo-element holds.
+    pub(crate) fn stamp_pseudo_element_row(
+        &self,
+        slot: NodeSlotId,
+        kind: NodeKind,
+        generator: StyleNodeID,
+        pseudo_kind: u8,
+    ) {
+        self.stamp_dom_row(slot, kind, None);
+        // A pseudo-element's box names no DOM node of its own, which is what the walks that look
+        // for the row of the nearest element skip it for.
+        self.set_node_flag(slot, NodeFlag::Anonymous, true);
+        let (record, payloads) = self
+            .with_style_engine(|engine| engine.pseudo_published_style_record(generator, pseudo_kind))
+            .expect("a pseudo-element whose box is built has published its style");
+        if self.set_node_style(slot, record, payloads) {
+            self.refresh_style_flags(slot);
+        }
+        self.enroll_node_for_svg_paint_resources_sync(slot);
+        // A pseudo-element's box can outlive replacement of the record it was stamped from, until
+        // the layout tree is rebuilt, so the record is rooted across that gap.
+        self.pin_node_style_record_for_host(slot, record);
     }
 
     /// The paint facts a row is built with, answered by the shell a prepared row was materialised

@@ -724,6 +724,9 @@ Layout::NodeArena& Document::layout_node_arena()
             case Layout::RustFFI::NodeKind::TextNode:
                 Layout::allocate_layout_node<Layout::TextNode>(document, Layout::BindToPreparedArenaSlot::Yes, slot, kind);
                 return;
+            case Layout::RustFFI::NodeKind::GeneratedTextNode:
+                Layout::allocate_layout_node<Layout::GeneratedTextNode>(document, Layout::BindToPreparedArenaSlot::Yes, slot, kind);
+                return;
             case Layout::RustFFI::NodeKind::Viewport:
                 Layout::allocate_layout_node<Layout::Viewport>(document, Layout::BindToPreparedArenaSlot::Yes, slot, kind);
                 return;
@@ -735,7 +738,13 @@ Layout::NodeArena& Document::layout_node_arena()
             // published, and adopting it is what the element's box tells the document about.
             auto* element = as_if<Element>(node->dom_node());
             if (!element) {
-                if (kind == Layout::RustFFI::NodeKind::InlineNode)
+                // A row the build stamped for a pseudo-element carries the record the mirror
+                // published for it, as an element's row does, and tells the document the same
+                // things about it. An anonymous row's style is derived by the arena, which has
+                // already told the shell everything about it.
+                if (!node->is_anonymous())
+                    node->initialize_stamped_style_record();
+                else if (kind == Layout::RustFFI::NodeKind::InlineNode)
                     node->attach_style_resources();
                 return;
             }

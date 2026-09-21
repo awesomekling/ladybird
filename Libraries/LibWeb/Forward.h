@@ -966,7 +966,6 @@ class Node;
 class NodeArena;
 class NodeWithStyle;
 class TextNode;
-class LayoutTreeBuilderAccess;
 class Viewport;
 
 }

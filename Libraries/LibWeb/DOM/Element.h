@@ -607,8 +607,6 @@ public:
     bool should_indicate_focus() const;
     virtual bool is_focusable() const override;
 
-    void set_synthetic_pseudo_element_node(Badge<Layout::LayoutTreeBuilderAccess>, CSS::PseudoElement, Layout::NodeWithStyle*);
-
     Layout::NodeWithStyle* pseudo_element_layout_node(CSS::PseudoElement) const;
     Layout::NodeWithStyle* pseudo_element_unsafe_layout_node(CSS::PseudoElement) const;
 
