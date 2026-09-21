@@ -5767,18 +5767,28 @@ pub(crate) fn is_required_driver_input(property_id: u16) -> bool {
     )
 }
 
+/// A drive produces one font request and reads the answer, so a second service means the drive
+/// asked for something the first answer did not settle. Bound it rather than spin.
+const MAX_LONGHAND_DRIVE_FONT_SERVICES: u32 = 4;
+
+/// What one longhand drive of an element produces, or the font request it needs answered first.
+type LonghandDriveOutcome = Result<
+    (
+        FfiLonghandDriveResult,
+        FfiInputLineHeightMetrics,
+        FfiAnimationLengthContexts,
+        LegacyFontBuildState,
+    ),
+    crate::css::style::bridge::FfiFontResolutionRequest,
+>;
+
 unsafe fn compute_longhands(
     input: &FfiLonghandTransactionInput,
     animated_overlay: *mut AnimatedOverlay,
     environment: &FfiStyleComputationEnvironment,
     parent_snapshot: Option<&ParentSnapshot<'_>>,
     highlight: Option<&HighlightInheritance<'_>>,
-) -> (
-    FfiLonghandDriveResult,
-    FfiInputLineHeightMetrics,
-    FfiAnimationLengthContexts,
-    LegacyFontBuildState,
-) {
+) -> LonghandDriveOutcome {
     let mut driver_results = empty_longhand_driver_results();
     let driver_results_pointer = &raw mut driver_results;
     let mut effective_color_scheme = -1;
@@ -5808,7 +5818,7 @@ unsafe fn compute_longhands(
         std::ptr::null(),
         std::ptr::null(),
     );
-    let style_engine = unsafe { &mut *input.style_engine.cast_mut().cast::<crate::css::style::StyleEngine>() };
+    let style_engine = unsafe { &*input.style_engine.cast::<crate::css::style::StyleEngine>() };
     let value_of = |property| -> Option<&StyleValueData> {
         unsafe {
             (&*input.longhand_table)
@@ -5847,16 +5857,21 @@ unsafe fn compute_longhands(
     let font_family = unsafe { &*input.longhand_table }
         .effective_value(unsafe { animated_overlay.as_ref() }, property_id::FONT_FAMILY, true)
         .value;
-    let resolved_font =
-        style_engine.resolve_font_for_legacy_drive(crate::css::style::bridge::FfiFontResolutionRequest {
-            font_family: crate::css::style::bridge::FfiHostHandle::from_pointer(font_family.cast()),
-            font_size_raw: crate::css::css_pixels::CssPixels::nearest_value_for(font_size).raw_value(),
-            font_slope,
-            font_weight,
-            font_width,
-            font_optical_sizing,
-            font_environment_generation: input.font_environment_generation,
-        });
+    let font_request = crate::css::style::bridge::FfiFontResolutionRequest {
+        font_family: crate::css::style::bridge::FfiHostHandle::from_pointer(font_family.cast()),
+        font_size_raw: crate::css::css_pixels::CssPixels::nearest_value_for(font_size).raw_value(),
+        font_slope,
+        font_weight,
+        font_width,
+        font_optical_sizing,
+        font_environment_generation: input.font_environment_generation,
+    };
+    // The drive reads the element's font from retained engine state. Where the answer is not
+    // there yet, the drive produces the request and stops: its caller services the request
+    // between passes and drives the element again, which then reads the installed answer.
+    let Some(resolved_font) = style_engine.resolved_font_for_longhand_drive(font_request) else {
+        return Err(font_request);
+    };
     let inherited_line_height = input.font_length_resolution_context.font_metrics.line_height;
     let own_metrics = |line_height| FfiFontMetrics {
         font_size,
@@ -5965,7 +5980,7 @@ unsafe fn compute_longhands(
     } else {
         unsafe { crate::css::cascaded_properties::drive_custom_property_resolution(&custom_property_input) }
     };
-    (
+    Ok((
         FfiLonghandDriveResult {
             driver_results,
             inherited_animated_overlay: std::ptr::null_mut(),
@@ -5999,7 +6014,7 @@ unsafe fn compute_longhands(
             font_width,
             normal_line_height,
         },
-    )
+    ))
 }
 
 struct ComputedTransitionListStorage {
@@ -6626,14 +6641,35 @@ pub unsafe extern "C" fn rust_compute_properties(
     let animated_overlay = inherited_animated_overlay
         .as_deref_mut()
         .map_or(drive_input.animated_overlay, std::ptr::from_mut);
-    let (mut result, finalization_line_height_metrics, animation_length_contexts, legacy_font) = unsafe {
-        compute_longhands(
-            &drive_input,
-            animated_overlay,
-            &environment,
-            parent_snapshot.as_ref(),
-            highlight.as_ref(),
-        )
+    // A drive that needs a font the engine has not resolved yet returns its request instead of
+    // producing a record. Servicing it here keeps the host round between two complete drives of
+    // the element rather than inside one, and shares the engine's between-pass font service.
+    let (mut result, finalization_line_height_metrics, animation_length_contexts, legacy_font) = {
+        let mut services = 0;
+        loop {
+            let outcome = unsafe {
+                compute_longhands(
+                    &drive_input,
+                    animated_overlay,
+                    &environment,
+                    parent_snapshot.as_ref(),
+                    highlight.as_ref(),
+                )
+            };
+            match outcome {
+                Ok(outcome) => break outcome,
+                Err(request) => {
+                    services += 1;
+                    assert!(
+                        services <= MAX_LONGHAND_DRIVE_FONT_SERVICES,
+                        "the font service must answer a longhand drive's request"
+                    );
+                    let style_engine =
+                        unsafe { &mut *input.style_engine.cast_mut().cast::<crate::css::style::StyleEngine>() };
+                    style_engine.service_longhand_drive_font_request(input.style_node, request);
+                }
+            }
+        }
     };
     if prepared.custom_property_resolution_is_callback_free
         && result.custom_properties.did_resolve

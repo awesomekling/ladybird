@@ -4861,7 +4861,7 @@ impl StyleEngineState {
 impl StyleEngineState {
     pub(super) fn refill_font_requests(
         &mut self,
-        requests: Vec<(StyleNodeID, font_resolution::FontRequest)>,
+        requests: Vec<(Option<StyleNodeID>, font_resolution::FontRequest)>,
         counters: &mut Counters,
     ) {
         self.refill_font_requests_for_service(requests, font_resolution::FontService::ParkedBatch, counters);
@@ -4869,7 +4869,7 @@ impl StyleEngineState {
 
     fn refill_font_requests_for_service(
         &mut self,
-        requests: Vec<(StyleNodeID, font_resolution::FontRequest)>,
+        requests: Vec<(Option<StyleNodeID>, font_resolution::FontRequest)>,
         service: font_resolution::FontService,
         counters: &mut Counters,
     ) {
@@ -4883,7 +4883,7 @@ impl StyleEngineState {
             requests
                 .iter()
                 .fold(counters.get(Counter::FontRefillBlockedDepth), |depth, (node, _)| {
-                    depth.max(u64::from(self.tree.depth(*node)) + 1)
+                    node.map_or(depth, |node| depth.max(u64::from(self.tree.depth(node)) + 1))
                 }),
         );
         let resolver = self.host.font_resolver.as_ref().expect("a request has a font resolver");
@@ -4941,7 +4941,7 @@ impl StyleEngineState {
             self.root_font_request = Some(request.for_generation(inputs.font_environment_generation));
             // This update computed a new root request after the begin boundary. Complete that
             // exceptional miss through the shared between-pass service before consumers run.
-            self.refill_font_requests(vec![(node, request)], counters);
+            self.refill_font_requests(vec![(Some(node), request)], counters);
             self.engine_computed_element_record_delta(
                 node,
                 cascade_winners_are_complete,
@@ -5029,7 +5029,7 @@ impl StyleEngineState {
             // C++ installs the earlier ancestor before making this retry, so requests from
             // different retries cannot be known together. Use the shared batch service even
             // though this dependency boundary limits the batch to one request.
-            self.refill_font_requests(vec![(node, request)], counters);
+            self.refill_font_requests(vec![(Some(node), request)], counters);
         }
     }
 }

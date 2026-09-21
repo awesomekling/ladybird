@@ -54,35 +54,28 @@ impl StyleEngine {
         self.state.box_type_parent_display_for_target(node, is_pseudo_element)
     }
 
-    pub(crate) fn resolve_font_for_legacy_drive(
-        &mut self,
+    /// The element's font answer, as far as retained engine state has one.
+    pub(crate) fn resolved_font_for_longhand_drive(
+        &self,
         request: bridge::FfiFontResolutionRequest,
-    ) -> bridge::FfiResolvedFont {
-        if let Some(resolved) = self.state.retained.resolved_font(request) {
-            return resolved;
-        }
-        self.counters.bump(Counter::FontRefillRounds);
-        self.counters.bump(Counter::FontResolutionRequests);
-        let resolver = self
-            .state
-            .host
-            .font_resolver
-            .as_ref()
-            .expect("a legacy longhand request has a font resolver");
-        let cache = self
-            .state
-            .retained
-            .font_resolution
-            .as_mut()
-            .expect("a legacy longhand request has a font resolution cache");
-        resolver.refill(
-            cache,
-            vec![font_resolution::FontRequest::new(request)],
-            font_resolution::FontService::LegacyLonghand,
+    ) -> Option<bridge::FfiResolvedFont> {
+        self.state.retained.resolved_font(request)
+    }
+
+    /// Answer one longhand drive's font request between two drives of its element, through the
+    /// same between-pass service the engine's own computation uses.
+    pub(crate) fn service_longhand_drive_font_request(
+        &mut self,
+        style_node: u32,
+        request: bridge::FfiFontResolutionRequest,
+    ) {
+        self.state.refill_font_requests(
+            vec![(
+                StyleNodeID::from_raw(style_node),
+                font_resolution::FontRequest::new(request),
+            )],
+            &mut self.counters,
         );
-        cache
-            .lookup(request)
-            .expect("the font resolver must install its answer")
     }
 
     pub(crate) fn document_style_computation_inputs(&self) -> Option<bridge::FfiDocumentStyleComputationInputs> {
