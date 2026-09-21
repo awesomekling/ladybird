@@ -1426,7 +1426,7 @@ NonnullRefPtr<StyleValue const> StyleComputer::compute_animated_custom_property_
     return finalize_custom_property_value(&computed_properties, AbstractOrHypotheticalElement { abstract_element }, name, move(specified_value));
 }
 
-void StyleComputer::publish_animated_custom_properties(ComputedStyleWorkingSet& computed_properties, DOM::AbstractElement abstract_element) const
+bool StyleComputer::publish_animated_custom_properties(ComputedStyleWorkingSet& computed_properties, DOM::AbstractElement abstract_element) const
 {
     auto data = abstract_element.custom_property_data();
     RefPtr<CustomPropertyData const> base = data;
@@ -1435,11 +1435,11 @@ void StyleComputer::publish_animated_custom_properties(ComputedStyleWorkingSet& 
 
     auto const& animated_values = computed_properties.animated_custom_properties();
     if (animated_values.is_empty()) {
-        if (base.ptr() != data.ptr()) {
-            abstract_element.replace_custom_property_data(Badge<StyleComputer> {}, base);
-            invalidate_animated_custom_property_readers(abstract_element, animated_values);
-        }
-        return;
+        if (base.ptr() == data.ptr())
+            return false;
+        abstract_element.replace_custom_property_data(Badge<StyleComputer> {}, base);
+        invalidate_animated_custom_property_readers(abstract_element, animated_values);
+        return true;
     }
 
     if (data && data->is_animation_overlay() && data->own_values().size() == animated_values.size()) {
@@ -1452,7 +1452,7 @@ void StyleComputer::publish_animated_custom_properties(ComputedStyleWorkingSet& 
             }
         }
         if (values_unchanged)
-            return;
+            return false;
     }
 
     OrderedHashMap<Utf16FlyString, StyleProperty> overlay_values;
@@ -1466,6 +1466,7 @@ void StyleComputer::publish_animated_custom_properties(ComputedStyleWorkingSet& 
     }
     abstract_element.replace_custom_property_data(Badge<StyleComputer> {}, CustomPropertyData::create_animation_overlay(move(overlay_values), move(base)));
     invalidate_animated_custom_property_readers(abstract_element, animated_values);
+    return true;
 }
 
 void StyleComputer::invalidate_animated_custom_property_readers(DOM::AbstractElement abstract_element, OrderedHashMap<Utf16FlyString, NonnullRefPtr<StyleValue const>> const& animated_values) const
@@ -6464,8 +6465,12 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             &input, finalization_result.animation_sampling_storage, overlay, line_height_metrics, did_sample);
         application_reaches_the_host = true;
     }
-    application_reaches_the_host |= finalization_result.animated_overlay != nullptr
-        || finalization_result.applies_animation_plan_after_return;
+    // Installing the overlay the stage sampled, and the values it settled, is all working-set
+    // work; what reaches the host is the environment the animated custom properties are published
+    // into and the marks the sampling leaves on elements. So the term joins after the application
+    // has run, saying what it wrote, rather than being predicted from the overlay's existence.
+    bool animation_application_wrote_main_side_state = false;
+    application_reaches_the_host |= finalization_result.applies_animation_plan_after_return;
     native_context.state->working_set->did_apply_style_finalization_from_rust(finalization_result.invalidated_longhands);
     if (finalization_result.animated_overlay) {
         // The stage sampled this element's animations for itself, so what it produced is installed
@@ -6494,19 +6499,25 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(static_cast<StyleValueFFI::StyleValueData const*>(animated.value))));
         }
         ComputedValuesFFI::rust_release_animated_custom_property_results(finalization_result.animated_custom_properties_storage);
-        publish_animated_custom_properties(computed_style, abstract_element);
+        if (publish_animated_custom_properties(computed_style, abstract_element))
+            animation_application_wrote_main_side_state = true;
         // The stage answered the batch's tree-counting functions from the retained tree, so what
         // `compute_animation_values` records after resolving them is recorded here instead: the
         // element's style now depends on where it sits among its siblings.
-        if (finalization_result.animation_uses_tree_counting_function)
+        if (finalization_result.animation_uses_tree_counting_function && !abstract_element.element().style_uses_tree_counting_function()) {
             const_cast<DOM::Element&>(abstract_element.element()).set_style_uses_tree_counting_function();
+            animation_application_wrote_main_side_state = true;
+        }
         // A keyframe of what the stage sampled substituted a `var()` reference of this element, so
         // the mark `resolve_unresolved_style_value` leaves behind for one is left here instead.
-        if (finalization_result.animation_substituted_var) {
+        if (finalization_result.animation_substituted_var
+            && (!abstract_element.element().style_uses_var_css_function() || !abstract_element.element().animation_uses_var_css_function())) {
             const_cast<DOM::Element&>(abstract_element.element()).set_style_uses_var_css_function();
             const_cast<DOM::Element&>(abstract_element.element()).set_animation_uses_var_css_function();
+            animation_application_wrote_main_side_state = true;
         }
         if (finalization_result.animation_subject_depends_on_size_container_query) {
+            animation_application_wrote_main_side_state = true;
             // The stage resolved the batch's container units against the published container-query
             // inputs, so what `Length::container_relative_length_to_px_without_rounding` records
             // while it resolves is recorded here instead: a container unit asks about a container's
@@ -6546,6 +6557,8 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     // actually does - it clears nothing, registers nothing and starts nothing for an element whose
     // declarations name no property and which holds no transition - so the last term of this row's
     // interleave is the step's own answer rather than a test made before it.
+    if (animation_application_wrote_main_side_state)
+        application_reaches_the_host = true;
     if (finish_properties(&native_context, finalization_result.parent_style_in_display_none_subtree))
         application_reaches_the_host = true;
     if (application_reaches_the_host)

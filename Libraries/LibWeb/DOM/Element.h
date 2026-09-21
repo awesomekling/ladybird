@@ -552,6 +552,7 @@ public:
     // against its custom-property environment. Such a read belongs to no cascade declaration, so
     // the style input record cannot name it: the record reports its reads as incomplete instead,
     // and a moved environment above the element recomputes it whichever names moved.
+    [[nodiscard]] bool animation_uses_var_css_function() const { return m_animation_uses_var_css_function; }
     void set_animation_uses_var_css_function() { m_animation_uses_var_css_function = true; }
     // A tree-counting function is answered from the element's position among its siblings, so what
     // has to be remembered is on the parent: a child list mutation there moves the answer.
