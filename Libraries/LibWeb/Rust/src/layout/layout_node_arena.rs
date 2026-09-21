@@ -858,16 +858,16 @@ pub(crate) struct LayoutNodeArena {
     /// kind. A pseudo-element has no identity of its own and its box is replaced whenever its
     /// subtree is rebuilt, so the offset is held against the pair that outlives both, and a newly
     /// bound box reads it here instead of asking the DOM cell that used to store it.
-    pseudo_element_scroll_offsets: RefCell<HashMap<(StyleNodeID, u8), FfiCssPixelPoint>>,
+    pseudo_element_scroll_offsets: HashMap<(StyleNodeID, u8), FfiCssPixelPoint>,
     /// The scroll offset each element holds, keyed by its identity. The element's own box is
     /// replaced whenever its subtree is rebuilt, so a newly stamped row reads the offset here
     /// rather than off the element. Zero is the absence of an entry, which is nearly every
     /// element; a text identity never publishes one, and so reads zero.
-    element_scroll_offsets: RefCell<HashMap<StyleNodeID, FfiCssPixelPoint>>,
+    element_scroll_offsets: HashMap<StyleNodeID, FfiCssPixelPoint>,
     /// The identities sitting in the user agent shadow tree of the focused text control, which is
     /// what a caret and a selection are painted inside. At most one control is focused, so this
     /// holds one control's shadow tree and is empty the rest of the time.
-    identities_in_focused_text_control: RefCell<HashSet<StyleNodeID>>,
+    identities_in_focused_text_control: HashSet<StyleNodeID>,
     /// The rows that own an image provider, for a row whose image comes from its style rather than
     /// from a DOM element. The provider is made for the row and is of no use without it, so the
     /// arena hands it back when the row is freed, rather than leaving it on a shell that the arena
@@ -1026,9 +1026,9 @@ impl LayoutNodeArena {
             first_rows_by_style_node: RefCell::new(RowsByStyleNode::default()),
             bound_rows_by_style_node: RefCell::new(RowsByStyleNode::default()),
             bound_pseudo_element_rows: RefCell::new(HashMap::default()),
-            pseudo_element_scroll_offsets: RefCell::new(HashMap::default()),
-            element_scroll_offsets: RefCell::new(HashMap::default()),
-            identities_in_focused_text_control: RefCell::new(HashSet::default()),
+            pseudo_element_scroll_offsets: HashMap::default(),
+            element_scroll_offsets: HashMap::default(),
+            identities_in_focused_text_control: HashSet::default(),
             rows_with_owned_image_provider: RefCell::new(HashSet::default()),
             rows_with_image_observers: RefCell::new(HashSet::default()),
             shadow_including_parent_elements: RefCell::new(Vec::new()),
@@ -1820,7 +1820,7 @@ impl LayoutNodeArena {
 
     /// Clears a retired identity from every row still carrying it, including rows of a removed
     /// subtree that outlive the element's disconnection.
-    pub(crate) fn forget_style_node(&self, style_node: StyleNodeID) {
+    pub(crate) fn forget_style_node(&mut self, style_node: StyleNodeID) {
         self.assert_owner_thread();
         self.set_shadow_including_parent_element(style_node, ShadowIncludingParent::default());
         // A retired shadow host takes its tree scope with it, and the host withdraws no names from
@@ -1831,10 +1831,9 @@ impl LayoutNodeArena {
         self.counters_sets.borrow_mut().forget(style_node);
         self.generated_content.borrow_mut().forget(style_node);
         self.pseudo_element_scroll_offsets
-            .borrow_mut()
             .retain(|&(generator, _), _| generator != style_node);
-        self.element_scroll_offsets.borrow_mut().remove(&style_node);
-        self.identities_in_focused_text_control.borrow_mut().remove(&style_node);
+        self.element_scroll_offsets.remove(&style_node);
+        self.identities_in_focused_text_control.remove(&style_node);
         loop {
             let row = self.first_rows_by_style_node.borrow().head(style_node);
             if row.is_invalid() {
@@ -2850,7 +2849,6 @@ impl LayoutNodeArena {
     /// nothing has scrolled it.
     pub(crate) fn pseudo_element_scroll_offset(&self, generator: StyleNodeID, pseudo_kind: u8) -> FfiCssPixelPoint {
         self.pseudo_element_scroll_offsets
-            .borrow()
             .get(&(generator, pseudo_kind))
             .copied()
             .unwrap_or_default()
@@ -2858,12 +2856,12 @@ impl LayoutNodeArena {
 
     /// Whether the node sits in the user agent shadow tree of the focused text control.
     pub(crate) fn is_identity_in_focused_text_control(&self, node: StyleNodeID) -> bool {
-        self.identities_in_focused_text_control.borrow().contains(&node)
+        self.identities_in_focused_text_control.contains(&node)
     }
 
     /// Record whether the node sits in the user agent shadow tree of the focused text control.
-    pub(crate) fn set_identity_in_focused_text_control(&self, node: StyleNodeID, value: bool) {
-        let mut identities = self.identities_in_focused_text_control.borrow_mut();
+    pub(crate) fn set_identity_in_focused_text_control(&mut self, node: StyleNodeID, value: bool) {
+        let identities = &mut self.identities_in_focused_text_control;
         if value {
             identities.insert(node);
         } else {
@@ -2873,17 +2871,13 @@ impl LayoutNodeArena {
 
     /// What the element has scrolled to. Zero while nothing has scrolled it.
     pub(crate) fn element_scroll_offset(&self, element: StyleNodeID) -> FfiCssPixelPoint {
-        self.element_scroll_offsets
-            .borrow()
-            .get(&element)
-            .copied()
-            .unwrap_or_default()
+        self.element_scroll_offsets.get(&element).copied().unwrap_or_default()
     }
 
     /// Record what the element has scrolled to. A zero offset is the absence of one, as for a
     /// pseudo-element.
-    pub(crate) fn set_element_scroll_offset(&self, element: StyleNodeID, offset: FfiCssPixelPoint) {
-        let mut offsets = self.element_scroll_offsets.borrow_mut();
+    pub(crate) fn set_element_scroll_offset(&mut self, element: StyleNodeID, offset: FfiCssPixelPoint) {
+        let offsets = &mut self.element_scroll_offsets;
         if offset == FfiCssPixelPoint::default() {
             offsets.remove(&element);
         } else {
@@ -2894,12 +2888,12 @@ impl LayoutNodeArena {
     /// Record what the pseudo-element has scrolled to. A zero offset is the absence of one, which
     /// is what an identity that has never scrolled reads as.
     pub(crate) fn set_pseudo_element_scroll_offset(
-        &self,
+        &mut self,
         generator: StyleNodeID,
         pseudo_kind: u8,
         offset: FfiCssPixelPoint,
     ) {
-        let mut offsets = self.pseudo_element_scroll_offsets.borrow_mut();
+        let offsets = &mut self.pseudo_element_scroll_offsets;
         if offset == FfiCssPixelPoint::default() {
             offsets.remove(&(generator, pseudo_kind));
         } else {
@@ -2909,8 +2903,12 @@ impl LayoutNodeArena {
 
     /// An element keeps what its pseudo-elements have scrolled to across an identity change, as it
     /// keeps their bindings.
-    pub(crate) fn move_pseudo_element_scroll_offsets(&self, old_generator: StyleNodeID, new_generator: StyleNodeID) {
-        let mut offsets = self.pseudo_element_scroll_offsets.borrow_mut();
+    pub(crate) fn move_pseudo_element_scroll_offsets(
+        &mut self,
+        old_generator: StyleNodeID,
+        new_generator: StyleNodeID,
+    ) {
+        let offsets = &mut self.pseudo_element_scroll_offsets;
         let moved = offsets
             .iter()
             .filter(|((generator, _), _)| *generator == old_generator)
@@ -5672,7 +5670,7 @@ pub unsafe extern "C" fn layout_arena_set_pseudo_element_scroll_offset(
         return;
     };
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset);
+    unsafe { LayoutNodeArena::from_handle_mut(arena) }.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset);
 }
 
 /// # Safety
@@ -5685,7 +5683,7 @@ pub unsafe extern "C" fn layout_arena_set_identity_in_focused_text_control(arena
         return;
     };
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_identity_in_focused_text_control(node, value);
+    unsafe { LayoutNodeArena::from_handle_mut(arena) }.set_identity_in_focused_text_control(node, value);
 }
 
 /// # Safety
@@ -5702,7 +5700,7 @@ pub unsafe extern "C" fn layout_arena_set_element_scroll_offset(
         return;
     };
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_element_scroll_offset(element, offset);
+    unsafe { LayoutNodeArena::from_handle_mut(arena) }.set_element_scroll_offset(element, offset);
 }
 
 #[unsafe(no_mangle)]
@@ -5840,7 +5838,7 @@ pub unsafe extern "C" fn layout_arena_move_pseudo_element_scroll_offsets(
         return;
     };
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.move_pseudo_element_scroll_offsets(old_generator, new_generator);
+    unsafe { LayoutNodeArena::from_handle_mut(arena) }.move_pseudo_element_scroll_offsets(old_generator, new_generator);
 }
 
 #[unsafe(no_mangle)]

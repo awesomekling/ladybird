@@ -295,7 +295,7 @@ unsafe extern "C" fn layout_arena_forget_style_node(arena: *mut c_void, style_no
     // SAFETY: As above.
     unsafe {
         paying_host_handbacks(&main_thread, arena, || {
-            (LayoutNodeArena::from_handle(arena)).forget_style_node(style_node);
+            LayoutNodeArena::from_handle_mut(arena).forget_style_node(style_node);
         });
     }
 }
