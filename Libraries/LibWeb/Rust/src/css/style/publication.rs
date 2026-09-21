@@ -4967,14 +4967,24 @@ impl StyleEngineState {
         &mut self,
         node: StyleNodeID,
         request: font_resolution::FontRequest,
+        service: font_resolution::FontService,
         counters: &mut Counters,
     ) {
-        self.refill_font_requests(vec![(node, request)], counters);
+        self.refill_font_requests_for_service(vec![(node, request)], service, counters);
     }
 
     pub(super) fn refill_font_requests(
         &mut self,
         requests: Vec<(StyleNodeID, font_resolution::FontRequest)>,
+        counters: &mut Counters,
+    ) {
+        self.refill_font_requests_for_service(requests, font_resolution::FontService::ParkedBatch, counters);
+    }
+
+    fn refill_font_requests_for_service(
+        &mut self,
+        requests: Vec<(StyleNodeID, font_resolution::FontRequest)>,
+        service: font_resolution::FontService,
         counters: &mut Counters,
     ) {
         if requests.is_empty() {
@@ -4996,7 +5006,11 @@ impl StyleEngineState {
             .font_resolution
             .as_mut()
             .expect("a request has a font resolution cache");
-        let request_count = resolver.refill(resolutions, requests.into_iter().map(|(_, request)| request).collect());
+        let request_count = resolver.refill(
+            resolutions,
+            requests.into_iter().map(|(_, request)| request).collect(),
+            service,
+        );
         if request_count != 0 {
             counters.bump(Counter::FontRefillRounds);
             counters.add(Counter::FontResolutionRequests, request_count as u64);
@@ -5042,7 +5056,7 @@ impl StyleEngineState {
         if let Some(request) = scratch.font_drive.request.take() {
             // NB: A root font miss completes at this preparation boundary. Consumers need
             //     current metrics even when their first records install in this same pass.
-            self.refill_font_request(node, request, counters);
+            self.refill_font_request(node, request, font_resolution::FontService::RootPreparation, counters);
             self.engine_computed_element_record_delta(
                 node,
                 cascade_winners_are_complete,
@@ -5127,7 +5141,7 @@ impl StyleEngineState {
                 return record;
             };
             suspended_memory.resize_required_to(&mut self.memory, scratch.font_drive.capacity_bytes());
-            self.refill_font_request(node, request, counters);
+            self.refill_font_request(node, request, font_resolution::FontService::AncestorRetry, counters);
         }
     }
 }
