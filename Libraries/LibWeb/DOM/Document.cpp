@@ -2418,6 +2418,9 @@ void Document::invalidate_style_for_viewport_change()
     invalidate_registered_initial_values(m_cached_registered_properties_from_css_property_rules);
 
     if (registered_initial_value_depends_on_viewport_metrics) {
+        // The engine holds the value that was just dropped, so the next style update has to carry
+        // the recomputed one over before it reads it.
+        m_rust_custom_property_registry_synced = false;
         // A registered initial value is shared by every element that does not specify the custom
         // property, so its consumers cannot be identified from their computed styles.
         record_style_environment_change();
@@ -10886,15 +10889,22 @@ void Document::sync_custom_property_registrations_to_rust()
 
     Vector<Utf16String> names;
     Vector<Optional<Utf16String>> initial_values;
+    Vector<NonnullRefPtr<CSS::StyleValue const>> computed_initial_values;
     Vector<CSS::ComputedValuesFFI::FfiCustomPropertyRegistration> registrations;
     names.ensure_capacity(effective_registrations.size());
     initial_values.ensure_capacity(effective_registrations.size());
+    computed_initial_values.ensure_capacity(effective_registrations.size());
     registrations.ensure_capacity(effective_registrations.size());
     for (auto const& [name, registration] : effective_registrations) {
         names.unchecked_append(name.to_utf16_string());
         initial_values.unchecked_append(registration->initial_value
                 ? Optional<Utf16String> { registration->initial_value->to_utf16_string(CSS::SerializationMode::ResolvedValueForReparse) }
                 : Optional<Utf16String> {});
+        // The initial value a registration computes to is a fact about the registration, resolved
+        // against the document rather than against any element, and the host memoizes it on the
+        // registration for every reader. Publishing it here rather than leaving the engine to
+        // derive it is what lets the style stage answer for a registered name at all.
+        computed_initial_values.unchecked_append(CSS::compute_registered_custom_property_initial_value(*this, *registration));
         auto const& name_string = names.last();
         auto const& initial_value = initial_values.last();
         registrations.unchecked_append({
@@ -10903,6 +10913,7 @@ void Document::sync_custom_property_registrations_to_rust()
             .inherits = registration->inherit,
             .has_initial_value = initial_value.has_value(),
             .initial_value = initial_value.has_value() ? ffi_utf16_view(*initial_value) : CSS::ComputedValuesFFI::FfiUtf16View {},
+            .computed_initial_value = computed_initial_values.last()->rust_style_value_data(),
         });
     }
     auto const& document_url = serialized_url();
