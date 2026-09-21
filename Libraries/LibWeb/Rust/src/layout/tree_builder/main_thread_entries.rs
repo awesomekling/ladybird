@@ -79,7 +79,16 @@ unsafe extern "C" fn rust_build_layout_tree(
         outcome,
         reports,
         handbacks,
-    } = run_tree_build_stage(&host, document_style_node);
+    } = {
+        // DEBT: The walk's handbacks carry the host's shell objects, which it only queues. They
+        // leave its output once owed shells and handbacks become a commit message.
+        struct WalkOutput(TreeBuildStageOutput);
+        // SAFETY: The shell pointers are opaque to the walk and are paid on this thread.
+        unsafe impl Send for WalkOutput {}
+        // SAFETY: The builder host, the arena and the style mirror belong to this thread, which
+        // waits for the walk.
+        unsafe { crate::stage_thread::run_stage(|| WalkOutput(run_tree_build_stage(&host, document_style_node))) }.0
+    };
 
     let layout_host = host.layout();
     let arena = layout_host.arena();
