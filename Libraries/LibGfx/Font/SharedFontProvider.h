@@ -38,6 +38,11 @@ struct BrokeredFont {
     Variant<Empty, BrokeredFontFile, SystemFontReference> source;
 };
 
+// Build a typeface out of what the font service brokered. Neither touches provider state, so a
+// caller on a thread of its own can use them too.
+RefPtr<Typeface> load_typeface_from_font_file(u32 ttc_index, FontFileFormat, IPC::File);
+RefPtr<Typeface> load_typeface_from_system_font_reference(SystemFontReference const&);
+
 struct SharedFontProviderCallbacks {
     Function<BrokeredFont(u64 generation, u64 face_id)> open_font;
     Function<BrokeredFont(String const& name)> match_local_font;
