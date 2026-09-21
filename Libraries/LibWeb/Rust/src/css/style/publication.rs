@@ -530,6 +530,12 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
             return None;
         }
+        // A record derived from the old one inherits what the parent's animations sampled when the
+        // old one was computed.
+        if self.parent_composes_animations(node) {
+            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
+            return None;
+        }
         // A record C++ computed holds no cascade state; when the reaction moved none of the
         // node's own rules its winners are the ones the record was computed from, and a full
         // drive against the moved parent inputs binds the state.
@@ -1928,14 +1934,22 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailRecordParent);
             return None;
         }
-        // A child inherits the parent's animated values, which C++ composes over the record.
-        if let Some(parent) = parent
-            && self.computed_group_sets.node_has_animation_overlay(parent)
-        {
+        if self.parent_composes_animations(node) {
             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
             return None;
         }
         Some(DriveSubject { parent, facts })
+    }
+
+    /// Whether a node inherits values its parent's animations sample, which C++ composes over the
+    /// parent's record. An animation that settles a custom property installs an environment of its
+    /// own on the parent, and sampling moves it without a publication the engine sees.
+    fn parent_composes_animations(&self, node: StyleNodeID) -> bool {
+        self.tree.flat_tree_parent(node).is_some_and(|parent| {
+            self.computed_group_sets.node_has_animation_overlay(parent)
+                || self.computed_group_sets.adjustment_facts(parent) & bridge::element_adjustment_fact::HAS_ANIMATIONS
+                    != 0
+        })
     }
 
     /// A later element alike in what a first record is computed from takes this record, the way a
