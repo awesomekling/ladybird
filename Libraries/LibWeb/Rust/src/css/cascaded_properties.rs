@@ -1456,8 +1456,7 @@ pub(crate) fn custom_property_value_is_callback_free(value: &StyleValueData) -> 
         } | StyleValueData::Unresolved {
             presence_dashed_function: true,
             ..
-        } | StyleValueData::Unresolved { presence_env: true, .. }
-            | StyleValueData::Unresolved { presence_if: true, .. }
+        } | StyleValueData::Unresolved { presence_if: true, .. }
             | StyleValueData::Unresolved {
                 presence_inherit: true,
                 ..
