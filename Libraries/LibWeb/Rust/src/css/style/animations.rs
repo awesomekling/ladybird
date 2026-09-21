@@ -55,6 +55,10 @@ const APPLIED_DEFINITION_TIMELINE_KIND_SHIFT: u32 = 40;
 /// `animation-fill-mode` and `animation-composition`, each a byte. Everything else in that word -
 /// `duration_is_auto`, the play state and the timeline - is a change the retime cannot describe.
 const APPLIED_DEFINITION_RETIMABLE_FLAGS_MASK: u64 = (0xff << 8) | (0xff << 24) | (0xff << 32);
+/// The `animation-play-state` byte of the flags word. `apply_css_properties` compares it against
+/// the play state the last definition applied, and runs `play_from_css()` or `pause_from_css()`
+/// when the two differ.
+const APPLIED_DEFINITION_PLAY_STATE_MASK: u64 = 0xff << 16;
 const APPLIED_DEFINITION_KEYFRAME_SET_WORD: usize = 4;
 const APPLIED_DEFINITION_TIMING_FUNCTION_WORD: usize = 5;
 /// `AnimationTimelineSource::Kind::Scroll`.
@@ -178,6 +182,27 @@ impl AppliedAnimationDefinition {
         }
         self.words[APPLIED_DEFINITION_FLAGS_WORD] & !APPLIED_DEFINITION_RETIMABLE_FLAGS_MASK
             == published.words[APPLIED_DEFINITION_FLAGS_WORD] & !APPLIED_DEFINITION_RETIMABLE_FLAGS_MASK
+    }
+
+    /// Whether the only thing applying `self` to an animation that last had `published` applied
+    /// would do is run `play_from_css()` or `pause_from_css()` on it.
+    ///
+    /// Every other field of the definition is unchanged, so `apply_css_properties` hands the effect
+    /// the values it already has and the play-state branch at its end is the whole of the change.
+    /// Whether that branch moves anything the stage samples is a question about the animation's
+    /// published row, which `row_absorbs_a_play_state_change` answers.
+    #[must_use]
+    pub(crate) fn change_is_only_play_state(&self, published: &Self) -> bool {
+        if self.words[APPLIED_DEFINITION_FLAGS_WORD] & APPLIED_DEFINITION_PLAY_STATE_MASK
+            == published.words[APPLIED_DEFINITION_FLAGS_WORD] & APPLIED_DEFINITION_PLAY_STATE_MASK
+        {
+            return false;
+        }
+        let mut without_the_play_state = *self;
+        without_the_play_state.words[APPLIED_DEFINITION_FLAGS_WORD] = (self.words[APPLIED_DEFINITION_FLAGS_WORD]
+            & !APPLIED_DEFINITION_PLAY_STATE_MASK)
+            | (published.words[APPLIED_DEFINITION_FLAGS_WORD] & APPLIED_DEFINITION_PLAY_STATE_MASK);
+        without_the_play_state.would_change_nothing(published)
     }
 }
 
@@ -765,6 +790,60 @@ pub(crate) fn row_is_relevant(row: &AnimationTimingRow, timeline_time: Option<Ti
 
     // https://www.w3.org/TR/web-animations-1/#in-effect, via the active time.
     Some(timing.active_time.is_some())
+}
+
+/// Whether running `play_from_css()` or `pause_from_css()` on the animation this row describes
+/// would leave everything the stage samples exactly as published.
+///
+/// A mirror of `Animation::play_an_animation` with the auto-rewind flag and of `Animation::pause`,
+/// restricted to the envelope in which neither of them moves a time:
+///
+/// - a monotonically increasing timeline, so neither procedure has a finite timeline, neither ever
+///   auto-aligns a start time, and `row_is_relevant` never consults the play state at all;
+/// - a resolved current time that is at least zero and below the associated effect end, with a
+///   playback rate above zero and no pending playback rate - so the rate is already the effective
+///   one, `play_an_animation` takes none of its three rewind branches at step 6, and `pause` needs
+///   no seek at step 5;
+/// - not already marked finished, so `update_finished_state` cannot clear that flag underneath
+///   `is_in_play`.
+///
+/// What is then left of either procedure is bookkeeping in the two pending-task bits: each cancels
+/// whichever task was scheduled and schedules its own. A row that already carries one of them is
+/// fine - `play_an_animation` runs only for an animation that is not already running, and `pause`
+/// only for one that is not already paused, so the two never fight. Those bits then turn
+/// `update_finished_state`'s step 2 off, so no hold time is touched either. A play whose animation
+/// holds no hold time and aborts no pause aborts at step 10 and does nothing at all; one that does
+/// hold a hold time keeps it and only loses its start time, and a current time read from a hold
+/// time does not consult the start time. `row_current_key` never consults the play state or the
+/// pending tasks, and `row_is_relevant` consults them only through `play_state`, which it asks for
+/// only about a timeline that is not monotonically increasing.
+#[must_use]
+pub(crate) fn row_absorbs_a_play_state_change(row: &AnimationTimingRow, timeline_time: Option<TimeValue>) -> bool {
+    use timing_row_flag as flag;
+
+    if row.has(flag::UNDECIDABLE)
+        || !row.has(flag::HAS_TIMELINE)
+        || !row.has(flag::TIMELINE_IS_MONOTONICALLY_INCREASING)
+        || row.has(flag::HAS_PENDING_PLAYBACK_RATE)
+        || row.has(flag::IS_FINISHED)
+    {
+        return false;
+    }
+    // A rate that is not a number is one no comparison the host makes is true of.
+    if row.times[TIME_PLAYBACK_RATE].partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+        return false;
+    }
+    let Some(timing) = resolve_timing(row, timeline_time) else {
+        return false;
+    };
+    let Some(current_time) = timing.current_time else {
+        return false;
+    };
+    // The host compares the lower bound against the raw value and the upper one as a time.
+    current_time.value >= 0.0
+        && current_time
+            .compare(timing.end_time)
+            .is_some_and(std::cmp::Ordering::is_lt)
 }
 
 /// A mirror of `AnimationEffect::ResolvedTiming`, with what `Animation` contributes to it.
