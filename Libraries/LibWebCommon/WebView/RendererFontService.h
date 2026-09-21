@@ -14,6 +14,8 @@
 #include <AK/NonnullOwnPtr.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/Optional.h>
+#include <AK/Variant.h>
+#include <LibGfx/Font/SharedFontProvider.h>
 #include <LibGfx/Font/SystemFallbackFonts.h>
 #include <LibIPC/TransportHandle.h>
 #include <LibThreading/Forward.h>
@@ -32,7 +34,9 @@ namespace WebView {
 // Core::EventLoop, so this service owns a thread that does nothing else. Callers need neither a
 // connection nor an event loop; they hand over a code point and a style and block until the answer
 // comes back.
-class WEBCOMMON_API RendererFontService final : public Gfx::SystemFallbackFontService {
+class WEBCOMMON_API RendererFontService final
+    : public Gfx::SystemFallbackFontService
+    , public Gfx::RenderSideFontBroker {
     AK_MAKE_NONCOPYABLE(RendererFontService);
     AK_MAKE_NONMOVABLE(RendererFontService);
 
@@ -45,9 +49,35 @@ public:
     virtual RefPtr<Gfx::Font const> match_font_for_code_point(Gfx::SystemFallbackFontKey const&) override;
     virtual void did_change_font_set() override;
 
+    // The questions a font match asks, for a caller that must not use the document thread's
+    // connection. Family matching needs these: a catalog face carries no font data, so the first
+    // use of any system family has to ask the font service to open it.
+    virtual Gfx::BrokeredFont open_font(u64 generation, u64 face_id) override;
+    virtual Gfx::BrokeredFont match_font(String const& family, u16 weight, u16 width, u8 slope) override;
+    virtual Optional<FlyString> resolve_generic_family(String const& family, u16 weight, u8 slope) override;
+
 private:
+    struct OpenFontRequest {
+        u64 generation { 0 };
+        u64 face_id { 0 };
+    };
+    struct MatchFontRequest {
+        String family;
+        u16 weight { 0 };
+        u16 width { 0 };
+        u8 slope { 0 };
+    };
+    struct ResolveGenericFamilyRequest {
+        String family;
+        u16 weight { 0 };
+        u8 slope { 0 };
+    };
+    using Request = Variant<Gfx::SystemFallbackFontKey, OpenFontRequest, MatchFontRequest, ResolveGenericFamilyRequest>;
+    using Answer = Variant<Empty, RefPtr<Gfx::Font const>, Gfx::BrokeredFont, Optional<FlyString>>;
+
     explicit RendererFontService(IPC::TransportHandle);
     intptr_t thread_main();
+    Answer ask(Request);
 
     // Serializes callers, so that one question is in flight at a time. Misses are rare enough that
     // a queue would only be machinery nobody exercises.
@@ -62,8 +92,8 @@ private:
     bool m_connected { false };
     bool m_should_quit { false };
     bool m_has_request { false };
-    Gfx::SystemFallbackFontKey m_request;
-    RefPtr<Gfx::Font const> m_answer;
+    Request m_request { Gfx::SystemFallbackFontKey {} };
+    Answer m_answer;
 
     Atomic<bool> m_font_set_changed { false };
 

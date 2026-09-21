@@ -242,6 +242,15 @@ pub(crate) fn between_pass_font_batch<T>(name: &'static str, requests: u64, batc
     batch()
 }
 
+/// Record that the style stage's font batch had to ask a font question on the document thread's
+/// own IPC connection, because no render-side broker was installed to ask it on. The batch is
+/// otherwise stage-local; this is the one crossing left in it, and the seal treats it like any
+/// other host call - reported once, fatal in `abort`.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_style_seal_note_font_match_reached_document_thread() {
+    note_host_call("font_match_document_connection");
+}
+
 /// Record one Rust-to-C++ call. Calls outside sealed computation are input preparation, output
 /// commit, resource publication, or CSSOM mutation, but remain in the census.
 pub(crate) fn note_host_call(callback: &'static str) {
