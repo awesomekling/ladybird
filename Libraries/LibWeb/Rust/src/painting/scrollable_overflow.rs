@@ -30,7 +30,7 @@ pub(crate) fn refill_contained_boxes_index(
     for contained_boxes in non_child_boxes_by_containing_block.values_mut() {
         contained_boxes.clear();
     }
-    if !layout_arena.shell_if_live(root).is_null() {
+    if layout_arena.slot_is_live(root) {
         let mut stack = vec![root];
         while let Some(node) = stack.pop() {
             if node != root
