@@ -114,7 +114,9 @@ pub(crate) fn flush_engine_decline_census<'a>(counters: impl Iterator<Item = (&'
         return;
     }
     let mut rows = counters
-        .filter(|(name, value)| *value != 0 && name.starts_with("engineComputedRecord"))
+        .filter(|(name, value)| {
+            *value != 0 && (name.starts_with("engineComputedRecord") || name.starts_with("retryAfterAncestor"))
+        })
         .collect::<Vec<_>>();
     rows.sort_unstable_by_key(|(name, _)| *name);
     for (name, value) in rows {
