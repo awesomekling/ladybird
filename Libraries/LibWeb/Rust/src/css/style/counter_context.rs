@@ -34,6 +34,22 @@ impl std::ops::DerefMut for StyleEngine {
 }
 
 impl StyleEngine {
+    pub(crate) fn note_host_built_style_record(&mut self, style_record: u64) {
+        self.state.last_host_built_style_record = style_record;
+    }
+
+    pub(crate) fn assemble_legacy_record_for_verification(
+        &mut self,
+        node: StyleNodeID,
+        table: &crate::css::computed_longhand_table::ComputedLonghandTable,
+        length: &crate::css::style_compute::FfiLengthResolutionContext,
+        font: &crate::css::table_group_builder::FfiFontGroupBuildInputs,
+    ) -> Option<u64> {
+        self.state
+            .assemble_legacy_record_for_verification(node, table, length, font, &mut self.counters)
+            .map(super::computed::FinalStyleRecordID::raw)
+    }
+
     pub(crate) fn box_type_parent_display(
         &self,
         node: StyleNodeID,

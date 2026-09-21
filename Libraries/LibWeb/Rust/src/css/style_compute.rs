@@ -3425,6 +3425,7 @@ struct LonghandTransactionContinuation {
     parent_text_align_input_is_animated: bool,
     // The length-resolution contexts the animation tail needs, kept where the drive built them.
     animation_length_contexts: FfiAnimationLengthContexts,
+    legacy_font: LegacyFontBuildState,
     inherited_animated_overlay: Option<Box<AnimatedOverlay>>,
     /// See `starting_definitions` in `rust_compute_properties`.
     starting_definitions: Vec<StartingDefinition>,
@@ -3432,6 +3433,59 @@ struct LonghandTransactionContinuation {
     animation_plan_new_indices: Option<Vec<i32>>,
     /// See `keyframe_retimed_definitions` in `rust_compute_properties`.
     keyframe_retimed_definitions: Vec<KeyframeRetimedDefinition>,
+}
+
+#[derive(Clone, Copy)]
+struct LegacyFontBuildState {
+    resolved: crate::css::style::bridge::FfiResolvedFont,
+    font_size_raw: i32,
+    font_weight: f64,
+    font_width: f64,
+    normal_line_height: f64,
+}
+
+impl LegacyFontBuildState {
+    fn group_inputs(
+        self,
+        table: &ComputedLonghandTable,
+        fallback_line_height: f64,
+    ) -> crate::css::table_group_builder::FfiFontGroupBuildInputs {
+        let value_of = |property| table.get(property).map(RetainedStyleValueData::data);
+        let font_size = crate::css::css_pixels::CssPixels::from_raw(self.font_size_raw).to_double();
+        let line_height = match value_of(property_id::LINE_HEIGHT) {
+            Some(StyleValueData::Keyword { keyword: value }) if *value == keyword::NORMAL => self.normal_line_height,
+            Some(StyleValueData::Length { value, unit }) if *unit == px_length_unit() => *value,
+            Some(StyleValueData::Number { value }) => value * font_size,
+            _ => fallback_line_height,
+        };
+        let keyword_code = |property, map: fn(u16) -> Option<u8>| match value_of(property) {
+            Some(StyleValueData::Keyword { keyword }) => map(*keyword).unwrap_or(0),
+            _ => 0,
+        };
+        let math_depth = match value_of(property_id::MATH_DEPTH) {
+            Some(StyleValueData::Integer { value }) => *value,
+            _ => 0,
+        };
+        crate::css::table_group_builder::FfiFontGroupBuildInputs {
+            font_size_raw: self.font_size_raw,
+            line_height_used_raw: crate::css::css_pixels::CssPixels::nearest_value_for(line_height).raw_value(),
+            font_variant_emoji: keyword_code(
+                property_id::FONT_VARIANT_EMOJI,
+                crate::css::css_enums::keyword_to_font_variant_emoji,
+            ),
+            font_ascent: self.resolved.ascent,
+            font_descent: self.resolved.descent,
+            font_x_height: self.resolved.x_height,
+            font_zero_advance: self.resolved.zero_advance,
+            first_available_font: self.resolved.first_available_font.as_pointer(),
+            font_cascade_list: self.resolved.font_cascade_list.as_pointer(),
+            font_weight: self.font_weight,
+            font_width: self.font_width,
+            math_shift: keyword_code(property_id::MATH_SHIFT, crate::css::css_enums::keyword_to_math_shift),
+            math_style: keyword_code(property_id::MATH_STYLE, crate::css::css_enums::keyword_to_math_style),
+            math_depth,
+        }
+    }
 }
 
 #[repr(C)]
@@ -3575,7 +3629,7 @@ fn retained_inheritance_parent_snapshot<'a>(
     input: &FfiComputePropertiesInput,
 ) -> Option<ParentSnapshot<'a>> {
     let style_node = crate::css::style::tree::StyleNodeID::from_raw(input.style_node);
-    if let Some((table, previous_style_record)) =
+    if let Some((table, previous_style_record, assembled_style_record, projected_style_record)) =
         style_node.and_then(|node| style_engine.retained_legacy_inheritance_parent_table(node, input.pseudo_kind))
     {
         if std::env::var_os("LIBWEB_CORRUPT_RETAINED_LEGACY_PARENT").is_some() && previous_style_record != 0 {
@@ -3585,10 +3639,44 @@ fn retained_inheritance_parent_snapshot<'a>(
                 None,
             ));
         }
-        let projected_record = retained_inheritance_parent_style_record(style_engine, input);
-        let projected_table_matches = projected_record != 0
+        if assembled_style_record != 0 {
+            let difference = match (
+                style_engine.style_record_view(assembled_style_record),
+                style_engine.style_record_view(projected_style_record),
+            ) {
+                (Some(assembled), Some(projected)) => {
+                    let mut difference = 0;
+                    if assembled.payloads != projected.payloads {
+                        difference = 64
+                            + assembled
+                                .payloads
+                                .iter()
+                                .zip(projected.payloads)
+                                .position(|(assembled, projected)| assembled != projected)
+                                .unwrap_or(31) as u8;
+                    }
+                    difference |= u8::from(
+                        style_engine.retained_style_record_custom_property_environment(assembled_style_record)
+                            != style_engine.retained_style_record_custom_property_environment(projected_style_record),
+                    ) << 1;
+                    difference |= u8::from(assembled.pseudo_element_styles != projected.pseudo_element_styles) << 2;
+                    difference |= u8::from(
+                        assembled.counter_style_environment_identity != projected.counter_style_environment_identity,
+                    ) << 3;
+                    difference |= u8::from(assembled.dependency_flags != projected.dependency_flags) << 4;
+                    difference |= u8::from(
+                        !unsafe { assembled.longhand_table.deref() }
+                            .publication_equals(unsafe { projected.longhand_table.deref() }),
+                    ) << 5;
+                    difference
+                }
+                _ => u8::MAX,
+            };
+            crate::css::style::seal::note_assembled_legacy_record(difference);
+        }
+        let projected_table_matches = projected_style_record != 0
             && style_engine
-                .style_record_view(projected_record)
+                .style_record_view(projected_style_record)
                 .is_some_and(|view| unsafe { view.longhand_table.deref() }.publication_equals(table));
         crate::css::style::seal::note_retained_legacy_parent(projected_table_matches);
         let dependency_flags = table.publication_dependency_flags();
@@ -5541,6 +5629,7 @@ unsafe fn compute_longhands(
     FfiLonghandDriveResult,
     FfiInputLineHeightMetrics,
     FfiAnimationLengthContexts,
+    LegacyFontBuildState,
 ) {
     let mut driver_results = empty_longhand_driver_results();
     let driver_results_pointer = &raw mut driver_results;
@@ -5753,6 +5842,13 @@ unsafe fn compute_longhands(
             font: input.font_length_resolution_context,
             line_height: line_height_context,
             remaining: remaining_length_context,
+        },
+        LegacyFontBuildState {
+            resolved: resolved_font,
+            font_size_raw: crate::css::css_pixels::CssPixels::nearest_value_for(font_size).raw_value(),
+            font_weight,
+            font_width,
+            normal_line_height,
         },
     )
 }
@@ -6352,7 +6448,7 @@ pub unsafe extern "C" fn rust_compute_properties(
     let animated_overlay = inherited_animated_overlay
         .as_deref_mut()
         .map_or(drive_input.animated_overlay, std::ptr::from_mut);
-    let (mut result, finalization_line_height_metrics, animation_length_contexts) = unsafe {
+    let (mut result, finalization_line_height_metrics, animation_length_contexts, legacy_font) = unsafe {
         compute_longhands(
             drive_input,
             animated_overlay,
@@ -6483,6 +6579,7 @@ pub unsafe extern "C" fn rust_compute_properties(
         animation_values_applied,
         parent_text_align_input_is_animated,
         animation_length_contexts,
+        legacy_font,
         inherited_animated_overlay,
         starting_definitions,
         animation_plan_new_indices,
@@ -6520,6 +6617,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         mut animation_values_applied,
         parent_text_align_input_is_animated,
         mut animation_length_contexts,
+        legacy_font,
         inherited_animated_overlay: _inherited_animated_overlay,
         starting_definitions,
         animation_plan_new_indices,
@@ -6795,12 +6893,22 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         && input.pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT
         && let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(input.style_node)
     {
+        let table = unsafe { &*drive_input.longhand_table };
+        let assembled_style_record = if drive_input.has_custom_property_resolution {
+            0
+        } else {
+            let font = legacy_font.group_inputs(table, animation_length_contexts.remaining.font_metrics.line_height);
+            style_engine
+                .assemble_legacy_record_for_verification(node, table, &animation_length_contexts.remaining, &font)
+                .unwrap_or(0)
+        };
         unsafe {
             style_engine.retain_legacy_finalized_longhand_row(
                 node,
                 input.pseudo_kind,
                 drive_input.longhand_table,
                 input.previous_style_record,
+                assembled_style_record,
             );
         };
     }

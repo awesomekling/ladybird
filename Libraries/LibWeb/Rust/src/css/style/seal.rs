@@ -56,6 +56,8 @@ thread_local! {
     static LONGHAND_INPUT_FREEZE_REASONS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
     static BETWEEN_PASS_SERVICES: RefCell<HashMap<&'static str, (u64, u64)>> = RefCell::new(HashMap::new());
     static RETAINED_LEGACY_PARENT_CHECKS: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
+    static ASSEMBLED_LEGACY_RECORD_CHECKS: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
+    static ASSEMBLED_LEGACY_RECORD_DIFFERENCES: RefCell<HashMap<u8, u64>> = RefCell::new(HashMap::new());
 }
 
 pub(crate) fn note_retained_legacy_parent(matches_projected_record: bool) {
@@ -69,6 +71,25 @@ pub(crate) fn note_retained_legacy_parent(matches_projected_record: bool) {
             mismatches.wrapping_add(u64::from(!matches_projected_record)),
         ));
     });
+}
+
+pub(crate) fn note_assembled_legacy_record(difference: u8) {
+    if std::env::var_os("LIBWEB_VERIFY_RETAINED_LEGACY_PARENT").is_none() {
+        return;
+    }
+    ASSEMBLED_LEGACY_RECORD_CHECKS.with(|counts| {
+        let (comparisons, mismatches) = counts.get();
+        counts.set((
+            comparisons.wrapping_add(1),
+            mismatches.wrapping_add(u64::from(difference != 0)),
+        ));
+    });
+    if difference != 0 {
+        ASSEMBLED_LEGACY_RECORD_DIFFERENCES.with(|differences| {
+            let mut differences = differences.borrow_mut();
+            *differences.entry(difference).or_default() += 1;
+        });
+    }
 }
 
 pub(crate) fn note_longhand_input_freeze(reasons: u8) {
@@ -268,6 +289,23 @@ pub(crate) fn flush_census() {
     if comparisons != 0 {
         write_report(&format!(
             "STYLE SEAL CHECK: retained_legacy_parent comparisons={comparisons} mismatches={mismatches}\n"
+        ));
+    }
+    let (comparisons, mismatches) = ASSEMBLED_LEGACY_RECORD_CHECKS.with(|counts| counts.replace((0, 0)));
+    if comparisons != 0 {
+        write_report(&format!(
+            "STYLE SEAL CHECK: assembled_legacy_record comparisons={comparisons} mismatches={mismatches}\n"
+        ));
+    }
+    let mut differences = ASSEMBLED_LEGACY_RECORD_DIFFERENCES.with(|counts| {
+        std::mem::take(&mut *counts.borrow_mut())
+            .into_iter()
+            .collect::<Vec<_>>()
+    });
+    differences.sort_unstable();
+    for (difference, count) in differences {
+        write_report(&format!(
+            "STYLE SEAL CHECK: assembled_legacy_record difference={difference:#04x} count={count}\n"
         ));
     }
 }
