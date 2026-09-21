@@ -1211,16 +1211,23 @@ impl RetainedState {
     ///
     /// The times travel as raw `f64` bits beside a word of presence and kind flags, eight times and
     /// two words per animation, because a row is a handful of scalars and a struct per animation
-    /// would cost more than the scalars do.
+    /// would cost more than the scalars do. A `linear()` easing's stops travel the same way, in a
+    /// buffer shared by the list, which each row names its own part of by range.
     pub fn set_element_animation_timing_rows(
         &mut self,
         node: StyleNodeID,
         slot: animations::AnimationSlot,
         words: &[u32],
         times: &[u64],
+        linear_points: &[u64],
     ) {
         let times = times.iter().map(|&bits| f64::from_bits(bits)).collect::<Vec<_>>();
-        self.animation_timing_rows.set(node, slot, words, &times);
+        let linear_points = linear_points
+            .iter()
+            .map(|&bits| f64::from_bits(bits))
+            .collect::<Vec<_>>();
+        self.animation_timing_rows
+            .set(node, slot, words, &times, &linear_points);
     }
 
     /// Describe the effects the host holds for one of an element's animation lists, in composite
@@ -1258,6 +1265,16 @@ impl RetainedState {
         slot: animations::AnimationSlot,
     ) -> &[animations::AnimationTimingRow] {
         self.animation_timing_rows.rows(node, slot)
+    }
+
+    /// The `linear()` stops the rows of one of an element's animation lists name by range.
+    #[must_use]
+    pub(crate) fn element_animation_timing_row_linear_points(
+        &self,
+        node: StyleNodeID,
+        slot: animations::AnimationSlot,
+    ) -> &[crate::css::animation::FfiLinearEasingPoint] {
+        self.animation_timing_rows.linear_points(node, slot)
     }
 
     /// The timing of one effect, named by the identity the stage looks its description up by.

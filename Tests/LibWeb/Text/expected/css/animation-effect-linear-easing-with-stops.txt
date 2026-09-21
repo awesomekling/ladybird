@@ -1,0 +1,181 @@
+stops at 0: 0
+stops at 0 after recompute: 0
+stops at 1: 0.0005
+stops at 1 after recompute: 0.0005
+stops at 250: 0.125
+stops at 250 after recompute: 0.125
+stops at 400: 0.2
+stops at 400 after recompute: 0.2
+stops at 500: 0.25
+stops at 500 after recompute: 0.25
+stops at 750: 0.625
+stops at 750 after recompute: 0.625
+stops at 900: 0.85
+stops at 900 after recompute: 0.85
+stops at 999: 0.9985
+stops at 999 after recompute: 0.9985
+stops at 1000: 1
+stops at 1000 after recompute: 1
+single at 0: 0.4
+single at 0 after recompute: 0.4
+single at 1: 0.4
+single at 1 after recompute: 0.4
+single at 250: 0.4
+single at 250 after recompute: 0.4
+single at 400: 0.4
+single at 400 after recompute: 0.4
+single at 500: 0.4
+single at 500 after recompute: 0.4
+single at 750: 0.4
+single at 750 after recompute: 0.4
+single at 900: 0.4
+single at 900 after recompute: 0.4
+single at 999: 0.4
+single at 999 after recompute: 0.4
+single at 1000: 0.4
+single at 1000 after recompute: 0.4
+percent at 0: 0
+percent at 0 after recompute: 0
+percent at 1: 0.00025
+percent at 1 after recompute: 0.00025
+percent at 250: 0.0625
+percent at 250 after recompute: 0.0625
+percent at 400: 0.1
+percent at 400 after recompute: 0.1
+percent at 500: 0.125
+percent at 500 after recompute: 0.125
+percent at 750: 0.1875
+percent at 750 after recompute: 0.1875
+percent at 900: 0.7
+percent at 900 after recompute: 0.7
+percent at 999: 0.997
+percent at 999 after recompute: 0.997
+percent at 1000: 1
+percent at 1000 after recompute: 1
+reverse at 0: 1
+reverse at 0 after recompute: 1
+reverse at 1: 0.9985
+reverse at 1 after recompute: 0.9985
+reverse at 250: 0.625
+reverse at 250 after recompute: 0.625
+reverse at 400: 0.4
+reverse at 400 after recompute: 0.4
+reverse at 500: 0.25
+reverse at 500 after recompute: 0.25
+reverse at 750: 0.125
+reverse at 750 after recompute: 0.125
+reverse at 900: 0.05
+reverse at 900 after recompute: 0.05
+reverse at 999: 0.0005
+reverse at 999 after recompute: 0.0005
+reverse at 1000: 0
+reverse at 1000 after recompute: 0
+alternate at 0: 0
+alternate at 0 after recompute: 0
+alternate at 1: 0.001
+alternate at 1 after recompute: 0.001
+alternate at 250: 0.25
+alternate at 250 after recompute: 0.25
+alternate at 400: 0.7
+alternate at 400 after recompute: 0.7
+alternate at 500: 1
+alternate at 500 after recompute: 1
+alternate at 750: 0.25
+alternate at 750 after recompute: 0.25
+alternate at 900: 0.1
+alternate at 900 after recompute: 0.1
+alternate at 999: 0.001
+alternate at 999 after recompute: 0.001
+alternate at 1000: 0
+alternate at 1000 after recompute: 0
+backwards at 0: 0
+backwards at 0 after recompute: 0
+backwards at 1: 0
+backwards at 1 after recompute: 0
+backwards at 250: 0.15
+backwards at 250 after recompute: 0.15
+backwards at 400: 0.3
+backwards at 400 after recompute: 0.3
+backwards at 500: 0.4
+backwards at 500 after recompute: 0.4
+backwards at 750: 0.65
+backwards at 750 after recompute: 0.65
+backwards at 900: 0.8
+backwards at 900 after recompute: 0.8
+backwards at 999: 0.899
+backwards at 999 after recompute: 0.899
+backwards at 1000: 0.9
+backwards at 1000 after recompute: 0.9
+identity at 0: 0
+identity at 0 after recompute: 0
+identity at 1: 0.001
+identity at 1 after recompute: 0.001
+identity at 250: 0.25
+identity at 250 after recompute: 0.25
+identity at 400: 0.4
+identity at 400 after recompute: 0.4
+identity at 500: 0.5
+identity at 500 after recompute: 0.5
+identity at 750: 0.75
+identity at 750 after recompute: 0.75
+identity at 900: 0.9
+identity at 900 after recompute: 0.9
+identity at 999: 0.999
+identity at 999 after recompute: 0.999
+identity at 1000: 1
+identity at 1000 after recompute: 1
+two at 0: 0 0px
+two at 0 after recompute: 0 0px
+two at 1: 0.0005 0.453125px
+two at 1 after recompute: 0.0005 0.453125px
+two at 250: 0.125 90.421875px
+two at 250 after recompute: 0.125 90.421875px
+two at 400: 0.2 91.671875px
+two at 400 after recompute: 0.2 91.671875px
+two at 500: 0.25 92.5px
+two at 500 after recompute: 0.25 92.5px
+two at 750: 0.625 94.578125px
+two at 750 after recompute: 0.625 94.578125px
+two at 900: 0.85 97.5px
+two at 900 after recompute: 0.85 97.5px
+two at 999: 0.9985 99.96875px
+two at 999 after recompute: 0.9985 99.96875px
+two at 1000: 1 100px
+two at 1000 after recompute: 1 100px
+pseudo at 0: 0
+pseudo at 0 after recompute: 0
+pseudo at 1: 0.0005
+pseudo at 1 after recompute: 0.0005
+pseudo at 250: 0.125
+pseudo at 250 after recompute: 0.125
+pseudo at 400: 0.2
+pseudo at 400 after recompute: 0.2
+pseudo at 500: 0.25
+pseudo at 500 after recompute: 0.25
+pseudo at 750: 0.625
+pseudo at 750 after recompute: 0.625
+pseudo at 900: 0.85
+pseudo at 900 after recompute: 0.85
+pseudo at 999: 0.9985
+pseudo at 999 after recompute: 0.9985
+pseudo at 1000: 1
+pseudo at 1000 after recompute: 1
+transition started: 1
+transition at 0: 1
+transition at 0 after recompute: 1
+transition at 1: 0.999997
+transition at 1 after recompute: 0.999997
+transition at 250: 0.9992
+transition at 250 after recompute: 0.9992
+transition at 400: 0.99872
+transition at 400 after recompute: 0.99872
+transition at 500: 0.9984
+transition at 500 after recompute: 0.9984
+transition at 750: 0.9976
+transition at 750 after recompute: 0.9976
+transition at 900: 0.99712
+transition at 900 after recompute: 0.99712
+transition at 999: 0.996803
+transition at 999 after recompute: 0.996803
+transition at 1000: 0.9968
+transition at 1000 after recompute: 0.9968

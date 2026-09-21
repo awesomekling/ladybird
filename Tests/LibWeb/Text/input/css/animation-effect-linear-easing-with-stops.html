@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+    div { width: 10px; height: 10px; }
+    /* A transition takes its `transition-timing-function` as the *effect's* own easing, which is
+       the same place a script-created animation's `easing` option lands. */
+    #transition { transition: opacity 1000s linear(0, 0.8 25%, 0.9 75%, 1); }
+</style>
+<div id="stops"></div>
+<div id="single"></div>
+<div id="percent"></div>
+<div id="reverse"></div>
+<div id="alternate"></div>
+<div id="backwards"></div>
+<div id="identity"></div>
+<div id="two"></div>
+<div id="transition"></div>
+<div id="pseudo"></div>
+<script>
+    test(() => {
+        let nudge = 0;
+        // Force a style recomputation that has nothing to do with the animations.
+        function recompute(element) {
+            element.style.paddingLeft = `${++nudge}px`;
+            getComputedStyle(element).paddingLeft;
+        }
+        function report(label, element, pseudo) {
+            println(`${label}: ${getComputedStyle(element, pseudo ?? null).opacity}`);
+        }
+
+        function sample(label, element, animation, pseudo) {
+            for (const time of [0, 1, 250, 400, 500, 750, 900, 999, 1000]) {
+                animation.currentTime = time;
+                report(`${label} at ${time}`, element, pseudo);
+                recompute(element);
+                report(`${label} at ${time} after recompute`, element, pseudo);
+            }
+        }
+
+        function animateOn(id, easing, extra) {
+            const element = document.getElementById(id);
+            const animation = element.animate([{ opacity: 0 }, { opacity: 1 }],
+                Object.assign({ duration: 1000, easing, fill: "both" }, extra ?? {}));
+            animation.pause();
+            return [element, animation];
+        }
+
+        // Several stops, the case the stage used to refuse outright.
+        sample("stops", ...animateOn("stops", "linear(0, 0.25 50%, 1)"));
+        // A single stop is a constant output, whatever the input progress is.
+        sample("single", ...animateOn("single", "linear(0.4)"));
+        // Stops whose inputs are given out of order are clamped to the largest so far, and a run of
+        // stops with no input at all is spread evenly between the ones that have.
+        sample("percent", ...animateOn("percent", "linear(0, 0.2 80%, 0.3 20%, 0.7, 1)"));
+        // The directed progress runs backwards, so the same stops are read from the other end.
+        sample("reverse", ...animateOn("reverse", "linear(0, 0.25 50%, 1)", { direction: "reverse" }));
+        // Two iterations alternating, so one sample of each direction lands in each iteration.
+        sample("alternate", ...animateOn("alternate", "linear(0, 0.25 50%, 1)", { direction: "alternate", iterations: 2, duration: 500 }));
+        // `fill: backwards` with a delay samples in the before phase, where the before flag picks
+        // the other side of a stop that repeats an input.
+        sample("backwards", ...animateOn("backwards", "linear(0, 0.5 50%, 0.5 50%, 1)", { delay: 100, fill: "backwards" }));
+        // `linear` itself is `linear(0, 1)`, which the stage already knew without being told stops.
+        sample("identity", ...animateOn("identity", "linear"));
+
+        // Two animations on one element, each with stops of its own. The element publishes one stop
+        // buffer for the pair, so the second animation's row is the one whose range does not start
+        // at zero.
+        const two = document.getElementById("two");
+        const first = two.animate([{ opacity: 0 }, { opacity: 1 }],
+            { duration: 1000, easing: "linear(0, 0.25 50%, 1)", fill: "both" });
+        const second = two.animate([{ marginLeft: "0px" }, { marginLeft: "100px" }],
+            { duration: 1000, easing: "linear(0, 0.9 20%, 0.95 80%, 1)", fill: "both" });
+        first.pause();
+        second.pause();
+        for (const time of [0, 1, 250, 400, 500, 750, 900, 999, 1000]) {
+            first.currentTime = time;
+            second.currentTime = time;
+            const style = getComputedStyle(two);
+            println(`two at ${time}: ${style.opacity} ${style.marginLeft}`);
+            recompute(two);
+            const after = getComputedStyle(two);
+            println(`two at ${time} after recompute: ${after.opacity} ${after.marginLeft}`);
+        }
+
+        // A pseudo-element's animation reaches the same code through the other animation slot.
+        const pseudoHost = document.getElementById("pseudo");
+        pseudoHost.style.opacity = "0.5";
+        const pseudoAnimation = new Animation(new KeyframeEffect(pseudoHost, [{ opacity: 0 }, { opacity: 1 }],
+            { duration: 1000, easing: "linear(0, 0.25 50%, 1)", fill: "both", pseudoElement: "::before" }), document.timeline);
+        const style = document.createElement("style");
+        style.textContent = "#pseudo::before { content: \"\"; display: block; width: 5px; height: 5px; }";
+        document.head.appendChild(style);
+        pseudoAnimation.play();
+        pseudoAnimation.pause();
+        sample("pseudo", pseudoHost, pseudoAnimation, "::before");
+
+        // A CSS transition, whose `transition-timing-function` is the effect's own easing.
+        const transition = document.getElementById("transition");
+        transition.style.opacity = "0";
+        report("transition started", transition);
+        const transitionAnimation = transition.getAnimations()[0];
+        if (!transitionAnimation) {
+            println("transition: no animation");
+        } else {
+            transitionAnimation.pause();
+            sample("transition", transition, transitionAnimation);
+        }
+    });
+</script>

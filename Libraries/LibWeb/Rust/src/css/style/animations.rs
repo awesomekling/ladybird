@@ -442,7 +442,6 @@ pub(crate) mod timing_row_flag {
     pub(crate) const EASING_STEP_POSITION_MASK: u32 = 0b111;
     /// A `linear()` easing that has control points of its own, which the row has no room to spell
     /// out. The mirror declines the key rather than answering with the identity curve.
-    pub(crate) const EASING_HAS_CONTROL_POINTS: u32 = 1 << 26;
     /// A provisionally started transition's row. The pass that started the transition samples its
     /// effect, so the row is published for it to be sampled from, but the transition is not
     /// associated with its target yet and the row answers nothing about what the element holds.
@@ -480,7 +479,7 @@ mod fill_mode {
 }
 
 /// How many words of each buffer one row occupies.
-pub(crate) const TIMING_ROW_WORDS: usize = 9;
+pub(crate) const TIMING_ROW_WORDS: usize = 11;
 pub(crate) const TIMING_ROW_TIMES: usize = 13;
 
 const WORD_FLAGS: usize = 0;
@@ -494,6 +493,10 @@ const WORD_COMPOSITE: usize = 5;
 const WORD_COMPOSITE_OWNING_NODE: usize = 6;
 const WORD_COMPOSITE_CLASS_KEY: usize = 7;
 const WORD_GLOBAL_LIST_ORDER: usize = 8;
+/// Where in the list's shared stop buffer this row's `linear()` control points start, and how many
+/// of them there are. A count of zero is the identity `linear(0, 1)`.
+const WORD_FIRST_LINEAR_POINT: usize = 9;
+const WORD_LINEAR_POINT_COUNT: usize = 10;
 
 const TIME_START: usize = 0;
 const TIME_HOLD: usize = 1;
@@ -522,6 +525,8 @@ pub(crate) struct AnimationTimingRow {
     composite_owning_node: u32,
     composite_class_key: u32,
     global_list_order: u32,
+    first_linear_point: u32,
+    linear_point_count: u32,
     times: [f64; TIMING_ROW_TIMES],
     /// For a row this stage synthesized for an animation the host has not created yet, which of the
     /// computation's starting animations it stands for. `None` for a row the host published.
@@ -545,6 +550,8 @@ impl AnimationTimingRow {
             composite_owning_node: words[WORD_COMPOSITE_OWNING_NODE],
             composite_class_key: words[WORD_COMPOSITE_CLASS_KEY],
             global_list_order: words[WORD_GLOBAL_LIST_ORDER],
+            first_linear_point: words[WORD_FIRST_LINEAR_POINT],
+            linear_point_count: words[WORD_LINEAR_POINT_COUNT],
             times: [0.0; TIMING_ROW_TIMES],
             synthesized_index: None,
         }
@@ -636,6 +643,10 @@ impl AnimationTimingRow {
             // Only two CSS transitions with no owning element are ordered by the global list, and a
             // CSS animation this element owns is neither.
             global_list_order: 0,
+            // A CSS animation's `animation-timing-function` is applied per keyframe, so the effect's
+            // own easing is always the identity `linear`.
+            first_linear_point: 0,
+            linear_point_count: 0,
             times,
             synthesized_index: Some(synthesized_index),
         })
@@ -956,10 +967,14 @@ fn resolve_timing(row: &AnimationTimingRow, timeline_time: Option<TimeValue>) ->
 /// `simple_iteration_progress()`, `current_iteration()`, `current_direction()`,
 /// `directed_progress()` and `EasingFunction::evaluate_at()`.
 #[must_use]
-pub(crate) fn row_current_key(row: &AnimationTimingRow, timeline_time: Option<TimeValue>) -> Option<Option<f64>> {
+pub(crate) fn row_current_key(
+    row: &AnimationTimingRow,
+    linear_points: &[crate::css::animation::FfiLinearEasingPoint],
+    timeline_time: Option<TimeValue>,
+) -> Option<Option<f64>> {
     use timing_row_flag as flag;
 
-    if row.has(flag::UNDECIDABLE) || row.has(flag::EASING_HAS_CONTROL_POINTS) {
+    if row.has(flag::UNDECIDABLE) {
         return None;
     }
     let timing = resolve_timing(row, timeline_time)?;
@@ -1028,18 +1043,24 @@ pub(crate) fn row_current_key(row: &AnimationTimingRow, timeline_time: Option<Ti
         (timing.phase == Phase::Before && going_forwards) || (timing.phase == Phase::After && !going_forwards);
     let easing_kind = (row.flags >> flag::EASING_KIND_SHIFT) & flag::EASING_KIND_MASK;
     let output_progress = match easing_kind {
-        // `linear`, which the host holds as `linear(0, 1)`.
+        // `linear()`, whose stops the row names by range in the list's shared buffer. An empty
+        // range is `linear` itself, which the host holds as `linear(0, 1)`.
         0 => crate::css::animation::evaluate_linear_easing(
-            &[
-                crate::css::animation::FfiLinearEasingPoint {
-                    input: 0.0,
-                    output: 0.0,
-                },
-                crate::css::animation::FfiLinearEasingPoint {
-                    input: 1.0,
-                    output: 1.0,
-                },
-            ],
+            match row.linear_point_count {
+                0 => &[
+                    crate::css::animation::FfiLinearEasingPoint {
+                        input: 0.0,
+                        output: 0.0,
+                    },
+                    crate::css::animation::FfiLinearEasingPoint {
+                        input: 1.0,
+                        output: 1.0,
+                    },
+                ],
+                count => linear_points
+                    .get(row.first_linear_point as usize..)?
+                    .get(..count as usize)?,
+            },
             directed_progress,
             before_flag,
         ),
@@ -1099,14 +1120,28 @@ fn play_state(
 
 /// Per element and pseudo-element, the timing of every animation the host holds a keyframe effect
 /// for, published whole whenever any of it can have changed.
+/// One element's published list: the rows, and the `linear()` stops the rows name by range.
+#[derive(PartialEq)]
+struct PublishedTimingRows {
+    rows: Box<[AnimationTimingRow]>,
+    linear_points: Box<[crate::css::animation::FfiLinearEasingPoint]>,
+}
+
 #[derive(Default)]
 pub(crate) struct AnimationTimingRows {
-    rows: HashMap<(StyleNodeID, AnimationSlot), Box<[AnimationTimingRow]>>,
+    rows: HashMap<(StyleNodeID, AnimationSlot), PublishedTimingRows>,
 }
 
 impl AnimationTimingRows {
-    /// Replace one list, from the two buffers the host packs it into. An empty list drops the row.
-    pub(crate) fn set(&mut self, node: StyleNodeID, slot: AnimationSlot, words: &[u32], times: &[f64]) {
+    /// Replace one list, from the three buffers the host packs it into. An empty list drops the row.
+    pub(crate) fn set(
+        &mut self,
+        node: StyleNodeID,
+        slot: AnimationSlot,
+        words: &[u32],
+        times: &[f64],
+        linear_points: &[f64],
+    ) {
         if words.is_empty() {
             self.rows.remove(&(node, slot));
             return;
@@ -1114,7 +1149,11 @@ impl AnimationTimingRows {
         let count = words.len() / TIMING_ROW_WORDS;
         assert!(
             times.len() == count * TIMING_ROW_TIMES,
-            "an animation timing row has eight times"
+            "an animation timing row has thirteen times"
+        );
+        assert!(
+            linear_points.len().is_multiple_of(2),
+            "a linear easing stop is an input and an output"
         );
         let mut rows = Vec::with_capacity(count);
         for index in 0..count {
@@ -1123,19 +1162,42 @@ impl AnimationTimingRows {
                 .copy_from_slice(&times[index * TIMING_ROW_TIMES..][..TIMING_ROW_TIMES]);
             rows.push(row);
         }
+        let published = PublishedTimingRows {
+            rows: rows.into_boxed_slice(),
+            linear_points: linear_points
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|&[input, output]| crate::css::animation::FfiLinearEasingPoint { input, output })
+                .collect(),
+        };
         // Republishing an unchanged list is the common case - the host cannot cheaply tell that
         // nothing moved - so compare before giving up the allocation the engine already holds.
         match self.rows.get(&(node, slot)) {
-            Some(existing) if **existing == rows[..] => {}
+            Some(existing) if *existing == published => {}
             _ => {
-                self.rows.insert((node, slot), rows.into_boxed_slice());
+                self.rows.insert((node, slot), published);
             }
         }
     }
 
     #[must_use]
     pub(crate) fn rows(&self, node: StyleNodeID, slot: AnimationSlot) -> &[AnimationTimingRow] {
-        self.rows.get(&(node, slot)).map_or(&[][..], |rows| &rows[..])
+        self.rows
+            .get(&(node, slot))
+            .map_or(&[][..], |published| &published.rows[..])
+    }
+
+    /// The `linear()` stops this list's rows name by range.
+    #[must_use]
+    pub(crate) fn linear_points(
+        &self,
+        node: StyleNodeID,
+        slot: AnimationSlot,
+    ) -> &[crate::css::animation::FfiLinearEasingPoint] {
+        self.rows
+            .get(&(node, slot))
+            .map_or(&[][..], |published| &published.linear_points[..])
     }
 
     /// The row of one effect, which the stage names by the identity it already uses to look its

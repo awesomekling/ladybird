@@ -1220,13 +1220,13 @@ void record_element_css_defined_animations(DOM::Element& element, u8 slot, Reado
 //
 // An input: the animation stage decides which of them are relevant, which is a pure function of this
 // and of the current time its timeline was sampled at.
-void record_element_animation_timing_rows(DOM::Element& element, u8 slot, ReadonlySpan<u32> words, ReadonlySpan<u64> times)
+void record_element_animation_timing_rows(DOM::Element& element, u8 slot, ReadonlySpan<u32> words, ReadonlySpan<u64> times, ReadonlySpan<u64> linear_points)
 {
     auto* style_engine = style_engine_for(element);
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
-    style_engine->set_element_animation_timing_rows(element.style_node_id(), slot, words, times);
+    style_engine->set_element_animation_timing_rows(element.style_node_id(), slot, words, times, linear_points);
 }
 
 // Mirrored by `effect_flag` in `Rust/src/css/style/animations.rs`; keep the two in step.

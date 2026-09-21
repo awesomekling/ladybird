@@ -2982,6 +2982,9 @@ fn tail_effects<'a>(
 
     let starting = planned.starting;
     let samples = style_engine.animation_timeline_samples();
+    // The planned rows are the published ones with entries cancelled and renumbered, so both name
+    // their `linear()` stops in the list's published buffer.
+    let linear_points = style_engine.element_animation_timing_row_linear_points(node, slot);
     let descriptions = style_engine.element_animation_effect_descriptions(node, slot);
     let mut effects = Vec::new();
     for row in rows {
@@ -3027,7 +3030,7 @@ fn tail_effects<'a>(
         }
         // The outer `None` is a row that declines to be decided; the inner one is a progress that
         // did not resolve, which the host skips over.
-        let Some(current_key) = animations::row_current_key(row, timeline_time)? else {
+        let Some(current_key) = animations::row_current_key(row, linear_points, timeline_time)? else {
             continue;
         };
         if let Some(retime) = retime {
@@ -3237,7 +3240,9 @@ fn starting_animation<'a>(
     // delay with nothing to fill backwards from, say. The host creates it and the element reports
     // it, but `collect_animation_effects_into` skips over it, so it composes nothing and takes no
     // place in what is sampled: the same shape as an animation that names no `@keyframes` rule.
-    let Some(current_key) = animations::row_current_key(&row, None)? else {
+    // A row this stage synthesized stands for a CSS animation, whose effect-level easing is always
+    // the identity `linear`, so it names no stops.
+    let Some(current_key) = animations::row_current_key(&row, &[], None)? else {
         return Some(StartingAnimationRow {
             keyframes: None,
             row: None,
