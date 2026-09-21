@@ -162,6 +162,8 @@ define_counters! {
     RetryAfterAncestorPseudoAbandons => "retryAfterAncestorPseudoAbandons",
     RetryAfterAncestorColdHits => "retryAfterAncestorColdHits",
     RetryAfterAncestorMicroseconds => "retryAfterAncestorMicroseconds",
+    EngineComputedRecordHostPseudoSettles => "engineComputedRecordHostPseudoSettles",
+    EngineComputedRecordHostPseudoDeclines => "engineComputedRecordHostPseudoDeclines",
     EngineComputedRecordBailPseudoStale => "engineComputedRecordBailPseudoStale",
     EngineComputedRecordBailPseudoBackdrop => "engineComputedRecordBailPseudoBackdrop",
     EngineComputedRecordBailPseudoMask => "engineComputedRecordBailPseudoMask",
