@@ -449,6 +449,14 @@ pub(crate) enum OwedToHost {
     Shell,
     /// The row's style resources: the images its style names, and the paint facts that follow.
     StyleResources { owns_content_replacement_image: bool },
+    /// The provider for an image a pseudo-element's generated content names, and the image box's
+    /// style resources.
+    GeneratedImage {
+        generator: StyleNodeID,
+        pseudo_element: super::tree_builder::FfiPseudoElement,
+        item: super::tree_builder::FfiGeneratedContentItem,
+        pseudo_element_box: NodeSlotId,
+    },
 }
 
 #[must_use]
@@ -4898,6 +4906,41 @@ impl LayoutNodeArena {
         if let Some(derived) = self.published_document_style.take() {
             self.with_style_engine(|engine| engine.unpin_layout_style_record(derived.record));
         }
+    }
+
+    /// Owes the host the provider for the image a pseudo-element's generated content names, and
+    /// the image box's style resources, once the running build is over.
+    pub(crate) fn defer_generated_image(
+        &self,
+        id: NodeSlotId,
+        generator: StyleNodeID,
+        pseudo_element: super::tree_builder::FfiPseudoElement,
+        item: super::tree_builder::FfiGeneratedContentItem,
+        pseudo_element_box: NodeSlotId,
+    ) {
+        self.rows_owed_to_host.borrow_mut().push((
+            id,
+            OwedToHost::GeneratedImage {
+                generator,
+                pseudo_element,
+                item,
+                pseudo_element_box,
+            },
+        ));
+    }
+
+    /// The record `record` derives with its display replaced, as the style of a box that takes
+    /// another's style but lays out as `display` would.
+    pub(crate) fn derive_style_record_with_display(
+        &self,
+        record: u64,
+        display: crate::css::display::FfiDisplay,
+    ) -> DerivedStyleRecord {
+        self.with_style_engine(|engine| {
+            let mut style = LayoutStyle::from_record(engine, record);
+            style.set_display(display);
+            style.intern(engine)
+        })
     }
 
     /// What the finished build owes the host, in the order it came to owe it. A row the build

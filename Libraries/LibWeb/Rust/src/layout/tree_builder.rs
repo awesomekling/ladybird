@@ -120,7 +120,12 @@ pub struct FfiDomTreeBuilderCallbacks {
     /// both go through this; nothing about it depends on which the box is. The flag says the box
     /// replaces its element's contents with a single image, which it owns the provider for.
     pub attach_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId, bool),
-    pub pseudo: FfiPseudoTreeBuilderCallbacks,
+    /// Gives an image a pseudo-element's generated content names the provider it renders, and
+    /// attaches its box's style resources. The arguments are the image's row, the element the
+    /// pseudo-element is generated for, the pseudo-element, the content item, and the
+    /// pseudo-element's own box.
+    pub attach_generated_image:
+        unsafe extern "C" fn(*mut c_void, NodeSlotId, u32, FfiPseudoElement, FfiGeneratedContentItem, NodeSlotId),
 }
 
 /// What the build knows about a node when it enters it: what its marks ask for, and what layout
@@ -3085,6 +3090,26 @@ pub unsafe extern "C" fn rust_build_layout_tree(
                     );
                 };
             }
+            OwedToHost::GeneratedImage {
+                generator,
+                pseudo_element,
+                item,
+                pseudo_element_box,
+            } => {
+                super::tree_build_seal::note_host_call("attach_generated_image");
+                // SAFETY: The builder remains live, and the row is a live image box whose
+                // pseudo-element box is live too.
+                unsafe {
+                    (host.callbacks.attach_generated_image)(
+                        host.callbacks.builder,
+                        row,
+                        generator.raw(),
+                        pseudo_element,
+                        item,
+                        pseudo_element_box,
+                    );
+                };
+            }
         }
     }
     FfiLayoutTreeBuildOutcome {
@@ -3163,7 +3188,8 @@ pub enum FfiGeneratedContentItemKind {
     ListStyleImage,
 }
 
-/// One node the host allocates for the generated content of a pseudo-element.
+/// One image the generated content of a pseudo-element names, whose provider the host attaches.
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiGeneratedContentItem {
     pub kind: FfiGeneratedContentItemKind,
@@ -3174,17 +3200,6 @@ pub struct FfiGeneratedContentItem {
     /// The list marker a list-item pseudo-element nests, when the item is that marker's content;
     /// invalid for the pseudo-element's own content.
     pub nested_marker: NodeSlotId,
-}
-
-#[repr(C)]
-pub struct FfiPseudoTreeBuilderCallbacks {
-    pub builder: *mut c_void,
-    /// The box of a pseudo-element whose `content` replaces its contents with a single image. The
-    /// box owns the image provider it renders, which is why the host still builds it.
-    pub create_content_replacement_box: unsafe extern "C" fn(*mut c_void, u32, FfiPseudoElement) -> NodeSlotId,
-    /// The last argument is the pseudo-element's own box, which the build tracks by slot.
-    pub create_content_item:
-        unsafe extern "C" fn(*mut c_void, u32, FfiPseudoElement, FfiGeneratedContentItem, NodeSlotId) -> NodeSlotId,
 }
 
 pub(crate) fn pseudo_element_decision(facts: PseudoElementFacts) -> FfiPseudoElementDecision {
@@ -3541,9 +3556,65 @@ fn stamp_nested_list_marker_row(
     slot
 }
 
+/// The box of a pseudo-element whose `content` replaces its contents with a single image: an image
+/// box stamped out of the record the mirror published for the pseudo-element. It owns the provider
+/// for its image, which the host attaches once the build is over, with its style resources.
+fn stamp_content_replacement_box_row(
+    layout_host: &TreeBuilderHost,
+    generator: StyleNodeID,
+    pseudo_element: FfiPseudoElement,
+) -> NodeSlotId {
+    // SAFETY: Entry points guarantee that the arena remains live, and callers hold no reference
+    // derived from it across the allocation.
+    let slot = unsafe { &mut *layout_host.arena }.allocate_unbound();
+    layout_host.arena().stamp_pseudo_element_row(
+        slot,
+        NodeKind::ImageBox,
+        generator,
+        generated_for_of(pseudo_element) - 1,
+    );
+    layout_host.arena().defer_style_resources(slot, true);
+    slot
+}
+
+/// The box of an image in a pseudo-element's generated content.
+/// https://drafts.csswg.org/css-content-3/#content-property
+/// "For <image>, this is an inline anonymous replaced element."
+/// It takes its style from the box whose content it is, the pseudo-element's own or the marker it
+/// nests, and owns the provider for its image, which the host attaches once the build is over.
+fn stamp_generated_image_row(
+    layout_host: &TreeBuilderHost,
+    generator: StyleNodeID,
+    pseudo_element: FfiPseudoElement,
+    item: FfiGeneratedContentItem,
+    pseudo_element_box: NodeSlotId,
+) -> NodeSlotId {
+    let style_box = if item.nested_marker.is_invalid() {
+        pseudo_element_box
+    } else {
+        item.nested_marker
+    };
+    let derived = layout_host
+        .arena()
+        .derive_style_record_with_display(layout_host.arena().node_style_record(style_box), FfiDisplay::inline());
+    // SAFETY: Entry points guarantee that the arena remains live, and callers hold no reference
+    // derived from it across the allocation.
+    let slot = unsafe { &mut *layout_host.arena }.allocate_unbound();
+    layout_host
+        .arena()
+        .stamp_anonymous_box(slot, NodeKind::ImageBox, derived);
+    layout_host
+        .arena()
+        .set_node_generated_for(slot, generated_for_of(pseudo_element), Some(generator));
+    layout_host
+        .arena()
+        .defer_generated_image(slot, generator, pseudo_element, item, pseudo_element_box);
+    slot
+}
+
 /// The row a pseudo-element's box is built in. Every decision but the content replacement, whose
-/// box owns the image it replaces the pseudo-element's contents with, is a row the build stamps
-/// out of the record the mirror published for the pseudo-element.
+/// box is an image box of its own, is a row the build stamps out of the record the mirror
+/// published for the pseudo-element.
 fn stamp_pseudo_element_box_row(
     layout_host: &TreeBuilderHost,
     generator: StyleNodeID,
@@ -3594,7 +3665,6 @@ fn create_pseudo_element(
     if !pseudo_element_may_need_a_box(host, style_node, published_pseudo_records, pseudo_element) {
         return None;
     }
-    let callbacks = &host.callbacks.pseudo;
     let element_identity = StyleNodeID::from_raw(style_node).expect("a pseudo-element names its generator");
     // The pseudo-element gives up the box it holds from an earlier build before the walk decides
     // whether it gets a new one.
@@ -3609,9 +3679,7 @@ fn create_pseudo_element(
 
     let layout_host = host.layout();
     let layout_node = if decision == FfiPseudoElementDecision::ContentReplacement {
-        super::tree_build_seal::note_host_call("pseudo.create_content_replacement_box");
-        // SAFETY: The builder remains live, and the identity names a live element.
-        unsafe { (callbacks.create_content_replacement_box)(callbacks.builder, style_node, pseudo_element) }
+        stamp_content_replacement_box_row(&layout_host, element_identity, pseudo_element)
     } else {
         stamp_pseudo_element_box_row(&layout_host, element_identity, pseudo_element, decision, facts)
     };
@@ -3632,9 +3700,12 @@ fn create_pseudo_element(
         layout_host.attach_child(list_item_box, unplaced_box.take().expect("the marker box"), first_child);
     }
 
-    if layout_host
-        .arena()
-        .style_resources_attach_can_change_anything(layout_node)
+    // A content replacement box is owed its style resources along with the image it replaces its
+    // contents with.
+    if decision != FfiPseudoElementDecision::ContentReplacement
+        && layout_host
+            .arena()
+            .style_resources_attach_can_change_anything(layout_node)
     {
         layout_host.arena().defer_style_resources(layout_node, false);
     }
@@ -3695,11 +3766,7 @@ fn create_pseudo_element(
                 )
             } else {
                 let (item, _) = generated_content_item(item, marker_slot);
-                super::tree_build_seal::note_host_call("pseudo.create_content_item");
-                // SAFETY: The builder remains live throughout content creation.
-                unsafe {
-                    (callbacks.create_content_item)(callbacks.builder, style_node, pseudo_element, item, layout_node)
-                }
+                stamp_generated_image_row(&layout_host, element_identity, pseudo_element, item, layout_node)
             };
             if !content.is_invalid() {
                 layout_host.attach_child(marker_slot, layout_host.created(content), NodeSlotId::INVALID);
@@ -3740,11 +3807,7 @@ fn create_pseudo_element(
                 )
             } else {
                 let (item, _) = generated_content_item(item, NodeSlotId::INVALID);
-                super::tree_build_seal::note_host_call("pseudo.create_content_item");
-                // SAFETY: The builder remains live throughout content creation.
-                unsafe {
-                    (callbacks.create_content_item)(callbacks.builder, style_node, pseudo_element, item, layout_node)
-                }
+                stamp_generated_image_row(&layout_host, element_identity, pseudo_element, item, layout_node)
             };
             if content_item.is_invalid() {
                 continue;
