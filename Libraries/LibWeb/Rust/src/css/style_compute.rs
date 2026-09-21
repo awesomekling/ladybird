@@ -2760,6 +2760,49 @@ pub struct FfiLonghandFinalizationResult {
     ///     `resolve_unresolved_style_value` leaves when it substitutes one. Set only together with
     ///     `animated_overlay`.
     pub animation_substituted_var: bool,
+    /// NB: Additive, and the last thing on this result: the custom properties the stage's own
+    ///     animation tail sampled, which the host writes into the working set as soon as the
+    ///     computation returns - where its own `apply_animations` would have written them - and
+    ///     then installs with the same `publish_animated_custom_properties` as before. Each row
+    ///     lends one reference to the name and one to the value; the host takes its own of each
+    ///     and gives the storage back with
+    ///     `rust_release_animated_custom_property_results`. Set only together with
+    ///     `animated_overlay`, and empty wherever nothing animated a name.
+    pub animated_custom_properties: *const FfiAnimatedCustomPropertyResult,
+    pub animated_custom_property_count: usize,
+    pub animated_custom_properties_storage: *mut c_void,
+}
+
+/// One custom property the stage's animation tail animated: the host's `Utf16FlyString` in its raw
+/// one-word representation, and the computed value the animation settled on.
+#[repr(C)]
+pub struct FfiAnimatedCustomPropertyResult {
+    pub name_raw: usize,
+    pub value: *const c_void,
+}
+
+/// The storage one finalization's animated custom properties travel in. It owns a reference to
+/// every name and every value in it, which is what the rows lend the host.
+struct AnimatedCustomPropertyResults {
+    rows: Vec<FfiAnimatedCustomPropertyResult>,
+    _retained: Vec<(
+        crate::css::retained_fly_string::RetainedUtf16FlyString,
+        RetainedStyleValueData,
+    )>,
+}
+
+/// Give back the storage a finalization's animated custom properties travelled in, once the host
+/// has taken its own reference to each name and value.
+///
+/// # Safety
+/// `storage` must be the `animated_custom_properties_storage` of a finalization result that has
+/// not been released yet, and must not be used again.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_release_animated_custom_property_results(storage: *mut c_void) {
+    if storage.is_null() {
+        return;
+    }
+    drop(unsafe { Box::from_raw(storage.cast::<AnimatedCustomPropertyResults>()) });
 }
 
 /// The three length-resolution contexts a keyframe value is computed in.
@@ -2955,6 +2998,14 @@ pub(crate) struct StageAnimationTail {
     /// Whether a keyframe of this batch substituted a `var()` reference of the element, which the
     /// post-stage step records the same way the host's `resolve_unresolved_style_value` does.
     pub(crate) substituted_var: bool,
+    /// The custom properties this batch animated, name and computed value, in the order the
+    /// animation core settled them. The post-stage step writes them into the working set where
+    /// the host's own sampling writes them, and `publish_animated_custom_properties` installs the
+    /// environment node from there exactly as before. Empty wherever nothing animated a name.
+    pub(crate) animated_custom_properties: Vec<(
+        crate::css::retained_fly_string::RetainedUtf16FlyString,
+        RetainedStyleValueData,
+    )>,
 }
 
 /// The effects of one of an element's animation lists that the stage would sample, taken from the
@@ -3338,6 +3389,7 @@ unsafe fn try_stage_animation_tail(
     length_contexts: &FfiAnimationLengthContexts,
     existing_overlay: *const AnimatedOverlay,
     planned: &PlannedAnimations<'_>,
+    custom_property_environments: AnimationCustomPropertyEnvironments,
 ) -> Option<StageAnimationTail> {
     use crate::css::animation as anim;
 
@@ -3390,6 +3442,7 @@ unsafe fn try_stage_animation_tail(
             container_unit_effects: StageContainerUnitEffects::default(),
             uses_tree_counting_function: false,
             substituted_var: false,
+            animated_custom_properties: Vec::new(),
         });
     }
 
@@ -3451,6 +3504,7 @@ unsafe fn try_stage_animation_tail(
             container_unit_effects: StageContainerUnitEffects::default(),
             uses_tree_counting_function: false,
             substituted_var: false,
+            animated_custom_properties: Vec::new(),
         });
     }
 
@@ -3472,6 +3526,27 @@ unsafe fn try_stage_animation_tail(
         drive_input.current_custom_property_store,
         style_engine.document_style_computation_inputs(),
     );
+    // A custom property a keyframe declares is sampled against the element's own environment and
+    // handed back for the host to install. Only unregistered names: a registration gives a name a
+    // computed initial value and a typed interpolation, neither of which this channel carries, so
+    // one `@property` rule anywhere in the document leaves the whole element to the host.
+    let stack_declares_custom_properties = selected
+        .iter()
+        .any(|effect| effect.description.declares_custom_properties());
+    let mut custom = match stack_declares_custom_properties {
+        false => None,
+        true => match style_engine.document_has_custom_property_registrations() {
+            Some(false) => Some(anim::AnimatedCustomProperties::new(
+                custom_property_environments.base_store,
+                custom_property_environments.inheritance_store,
+                custom_property_environments.element_declares_own,
+            )),
+            _ => {
+                give_up_on_overlay();
+                return None;
+            }
+        },
+    };
     let Some(resolved) = anim::resolve_selected_animation_declarations(
         &selected_effects,
         table,
@@ -3479,6 +3554,7 @@ unsafe fn try_stage_animation_tail(
         direction,
         importance,
         &mut substitution,
+        custom.as_mut(),
     ) else {
         give_up_on_overlay();
         return None;
@@ -3500,6 +3576,7 @@ unsafe fn try_stage_animation_tail(
             container_unit_effects: StageContainerUnitEffects::default(),
             uses_tree_counting_function: false,
             substituted_var: false,
+            animated_custom_properties: Vec::new(),
         });
     }
     let properties = unsafe { std::slice::from_raw_parts(resolved.properties, resolved.count) };
@@ -3523,7 +3600,9 @@ unsafe fn try_stage_animation_tail(
     // The same terms the host's `cache_preparation` uses: everything outside them needs an input
     // the stage does not hold - a custom property to compute, a container size no length context
     // carries, the document's base URL, a random base value.
-    let batch_is_fully_described = properties.iter().all(|property| property.custom_name_id == 0)
+    let batch_is_fully_described = properties
+        .iter()
+        .all(|property| property.custom_name_id == 0 || custom.is_some())
         && (!resolved.uses_tree_counting_function || tree_counting_inputs != 0)
         && length_contexts.covers_container_relative_units(resolved.container_relative_length_unit_mask)
         && !resolved.needs_document_base_url
@@ -3538,6 +3617,11 @@ unsafe fn try_stage_animation_tail(
     let mut keyframes_inherited_non_inherited_style_groups = 0u32;
     for property in properties {
         if property.value_source != anim::FfiAnimationSpecifiedValueSource::Inherited {
+            continue;
+        }
+        // A custom property has no style group and no non-inherited longhand to mark; the host's
+        // `compute_animation_values` skips one here for the same reason.
+        if property.custom_name_id != 0 {
             continue;
         }
         if crate::css::property_metadata::property_is_inherited(property.source_longhand_id) {
@@ -3575,6 +3659,29 @@ unsafe fn try_stage_animation_tail(
         initial_font_size_raw: drive_environment.initial_font_size_raw,
         default_font_size_raw: drive_environment.default_font_size_raw,
     };
+    // The keyframe drive reads one computed value per resolved custom-property declaration, and
+    // the evaluation one underlying and one initial value per minted name. All of them are the
+    // element's own environment's answers, which is where the host reads them too; for an
+    // unregistered name computing a specified value is the identity, so the two are the same.
+    let mut custom_value_storage = Vec::new();
+    let mut custom_keyframe_values = Vec::new();
+    let (mut custom_underlying_pointers, mut custom_initial_pointers) = (Vec::new(), Vec::new());
+    if let Some(custom) = &custom {
+        custom_keyframe_values.resize(properties.len(), std::ptr::null::<c_void>());
+        for (index, property) in properties.iter().enumerate() {
+            if property.custom_name_id == 0 {
+                continue;
+            }
+            let value = custom.specified_value(property);
+            custom_keyframe_values[index] = value.pointer().cast();
+            custom_value_storage.push(value);
+        }
+        let (underlying, initial) = custom.underlying_and_initial_values();
+        custom_underlying_pointers = underlying.iter().map(RetainedStyleValueData::pointer).collect();
+        custom_initial_pointers = initial.iter().map(RetainedStyleValueData::pointer).collect();
+        custom_value_storage.extend(underlying);
+        custom_value_storage.extend(initial);
+    }
     let keyframe_input = FfiAnimationKeyframeLonghandInput {
         underlying_longhand_table: drive_input.longhand_table,
         style_engine: std::ptr::from_ref(style_engine).cast(),
@@ -3585,28 +3692,53 @@ unsafe fn try_stage_animation_tail(
         font_length_resolution_context: &raw const length_contexts.font,
         line_height_length_resolution_context: &raw const length_contexts.line_height,
         remaining_length_resolution_context: &raw const length_contexts.remaining,
-        custom_property_values: std::ptr::null(),
+        custom_property_values: custom_keyframe_values.as_ptr(),
     };
     let computed_keyframes = unsafe { rust_compute_animation_keyframe_longhands(&raw const keyframe_input) };
+    let mut custom_results = Vec::new();
+    let mut custom_result_count = 0usize;
+    if let Some(custom) = &custom {
+        custom_results.resize_with(custom.len(), || anim::FfiAnimatedCustomProperty {
+            custom_name_id: 0,
+            value: std::ptr::null(),
+        });
+    }
     let batch = anim::FfiComputedAnimationBatch {
         context,
         preparation_key: &raw const preparation_key,
         current_keys: current_keys.as_ptr(),
         current_key_count: current_keys.len(),
         // A preparation is cached under the identities of the effects it was built from, and a
-        // starting animation has none yet.
-        cache_preparation: stack_is_published,
+        // starting animation has none yet. A batch that animates a custom property caches none at
+        // all: what it composes over is the element's own environment rather than the longhand
+        // table, and the host's `cache_preparation` refuses one for the same reason.
+        cache_preparation: stack_is_published && custom.is_none(),
         resolved_animation_storage: resolved.storage,
         computed_keyframe_storage: computed_keyframes.storage,
         underlying_longhand_table: (drive_input.longhand_table as *const ComputedLonghandTable).cast(),
         overlay: overlay.cast(),
-        custom_underlying_values: std::ptr::null(),
-        custom_initial_values: std::ptr::null(),
-        custom_value_count: 0,
-        custom_results: std::ptr::null_mut(),
-        custom_result_count: std::ptr::null_mut(),
+        custom_underlying_values: custom_underlying_pointers.as_ptr(),
+        custom_initial_values: custom_initial_pointers.as_ptr(),
+        custom_value_count: custom_underlying_pointers.len(),
+        custom_results: custom_results.as_mut_ptr(),
+        custom_result_count: &raw mut custom_result_count,
     };
     unsafe { anim::rust_evaluate_animations(&raw const batch) };
+    // What the animation core settled for each name, one retained value per result, paired with
+    // the name the host installs it under.
+    let animated_custom_properties = match &custom {
+        None => Vec::new(),
+        Some(custom) => custom_results[..custom_result_count]
+            .iter()
+            .map(|result| {
+                (
+                    custom.name(result.custom_name_id),
+                    // SAFETY: the evaluation transfers one reference per written result.
+                    unsafe { RetainedStyleValueData::from_retained_pointer(result.value) },
+                )
+            })
+            .collect(),
+    };
     Some(StageAnimationTail {
         overlay,
         depends_on_viewport_metrics: computed_keyframes.depends_on_viewport_metrics,
@@ -3615,6 +3747,7 @@ unsafe fn try_stage_animation_tail(
         container_unit_effects,
         uses_tree_counting_function: resolved.uses_tree_counting_function,
         substituted_var: substitution.substituted_var,
+        animated_custom_properties,
     })
 }
 
@@ -3637,6 +3770,20 @@ struct LonghandTransactionContinuation {
     animation_plan_new_indices: Option<Vec<i32>>,
     /// See `keyframe_retimed_definitions` in `rust_compute_properties`.
     keyframe_retimed_definitions: Vec<KeyframeRetimedDefinition>,
+    /// What the element's animated custom properties are sampled against, handed over after the
+    /// host consumed the drive result and installed this computation's environment - which is
+    /// exactly where `collect_animation_effects_into` would have read them. See
+    /// `rust_set_longhand_animation_custom_property_environments`.
+    animation_custom_property_environments: AnimationCustomPropertyEnvironments,
+}
+
+/// The two custom-property environments the stage's animation tail reads, and whether the element
+/// declares any custom property of its own.
+#[derive(Clone, Copy, Default)]
+struct AnimationCustomPropertyEnvironments {
+    base_store: *const c_void,
+    inheritance_store: *const c_void,
+    element_declares_own: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -6846,6 +6993,7 @@ pub unsafe extern "C" fn rust_compute_properties(
         starting_definitions,
         animation_plan_new_indices,
         keyframe_retimed_definitions,
+        animation_custom_property_environments: AnimationCustomPropertyEnvironments::default(),
     });
     let drive_result = &raw const continuation.drive_result;
     let storage = Box::into_raw(continuation);
@@ -6864,6 +7012,34 @@ pub unsafe extern "C" fn rust_compute_properties(
 pub unsafe extern "C" fn rust_set_longhand_custom_property_environment(storage: *mut c_void, environment: u64) {
     let continuation = unsafe { &mut *storage.cast::<LonghandTransactionContinuation>() };
     continuation.drive_result.custom_properties.environment_identity = environment;
+}
+
+/// Name the two custom-property environments the stage's own animation tail samples an animated
+/// custom property against: the element's own environment with this frame's animation overlay
+/// peeled off, which is what an animation composes over, and the one it inherits from, which is
+/// what a keyframe saying `inherit` takes.
+///
+/// They are handed over here rather than with the transaction's other inputs because the host
+/// installs this computation's environment while it consumes the drive result, and the host's own
+/// `collect_animation_effects_into` reads both *after* that - so reading them any earlier would
+/// sample a frame behind.
+///
+/// # Safety
+/// `storage` must name a live `LonghandTransactionContinuation` which has not been finalized, and
+/// both stores must be null or live custom-property stores that outlive the finalization.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_set_longhand_animation_custom_property_environments(
+    storage: *mut c_void,
+    base_store: *const c_void,
+    inheritance_store: *const c_void,
+    element_declares_own: bool,
+) {
+    let continuation = unsafe { &mut *storage.cast::<LonghandTransactionContinuation>() };
+    continuation.animation_custom_property_environments = AnimationCustomPropertyEnvironments {
+        base_store,
+        inheritance_store,
+        element_declares_own,
+    };
 }
 
 /// Resumes the animation and finalization tail after native code has consumed
@@ -6895,6 +7071,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         starting_definitions,
         animation_plan_new_indices,
         keyframe_retimed_definitions,
+        animation_custom_property_environments,
     } = *continuation;
     // NB: The root element's own computation refreshes the host's root font metrics in the callback
     //     that applies the drive result, which runs between the drive and this tail - so the
@@ -6927,6 +7104,9 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
             animation_height_size_query_container_has_no_box: false,
             animation_uses_tree_counting_function: false,
             animation_substituted_var: false,
+            animated_custom_properties: std::ptr::null(),
+            animated_custom_property_count: 0,
+            animated_custom_properties_storage: std::ptr::null_mut(),
         };
     }
     let mut invalidated_longhands = 0;
@@ -7100,6 +7280,7 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
                         starting: starting.as_ref(),
                         keyframe_retimes: keyframe_retimes.as_deref().unwrap_or_default(),
                     },
+                    animation_custom_property_environments,
                 )
             },
         };
@@ -7190,6 +7371,33 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
     let stage_container_unit_effects = stage_animation_tail
         .as_ref()
         .map_or_else(StageContainerUnitEffects::default, |tail| tail.container_unit_effects);
+    // The names and values the animation tail settled, boxed so the host can read them after this
+    // returns and hand the storage back once it has taken its own reference to each.
+    let (animated_custom_properties, animated_custom_property_count, animated_custom_properties_storage) =
+        match stage_animation_tail
+            .as_mut()
+            .map(|tail| std::mem::take(&mut tail.animated_custom_properties))
+            .filter(|animated| !animated.is_empty())
+        {
+            None => (std::ptr::null(), 0, std::ptr::null_mut()),
+            Some(animated) => {
+                let rows = animated
+                    .iter()
+                    .map(|(name, value)| FfiAnimatedCustomPropertyResult {
+                        name_raw: name.raw(),
+                        value: value.pointer().cast(),
+                    })
+                    .collect::<Vec<_>>();
+                let count = rows.len();
+                let storage = Box::into_raw(Box::new(AnimatedCustomPropertyResults {
+                    rows,
+                    _retained: animated,
+                }));
+                // SAFETY: the box is live until the host releases it, and `rows` is never moved.
+                let pointer = unsafe { (*storage).rows.as_ptr() };
+                (pointer, count, storage.cast::<c_void>())
+            }
+        };
     FfiLonghandFinalizationResult {
         parent_style_in_display_none_subtree,
         invalidated_longhands,
@@ -7217,6 +7425,9 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
             .as_ref()
             .is_some_and(|tail| tail.uses_tree_counting_function),
         animation_substituted_var: stage_animation_tail.as_ref().is_some_and(|tail| tail.substituted_var),
+        animated_custom_properties,
+        animated_custom_property_count,
+        animated_custom_properties_storage,
     }
 }
 

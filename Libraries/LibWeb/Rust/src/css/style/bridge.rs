@@ -1333,6 +1333,8 @@ pub unsafe extern "C" fn style_engine_set_tree_scope_animation_keyframes(
     keyframe_count: usize,
     declarations: *const FfiPublishedAnimationDeclaration,
     declaration_count: usize,
+    custom_declarations: *const FfiPublishedAnimationCustomDeclaration,
+    custom_declaration_count: usize,
     linear_points: *const FfiPublishedLinearEasingPoint,
     linear_point_count: usize,
     base_url_bytes: *const u8,
@@ -1355,6 +1357,8 @@ pub unsafe extern "C" fn style_engine_set_tree_scope_animation_keyframes(
             keyframe_count,
             declarations,
             declaration_count,
+            custom_declarations,
+            custom_declaration_count,
             linear_points,
             linear_point_count,
             base_url_bytes,
@@ -1401,6 +1405,26 @@ pub struct FfiPublishedAnimationKeyframe {
     pub linear_point_count: u32,
     pub first_declaration: u32,
     pub declaration_count: u32,
+    /// NB: Additive, and the last thing on this keyframe: the custom properties it declares travel
+    ///     in a buffer of their own, ranged exactly the way the longhand declarations above are.
+    ///     A custom property is named rather than numbered, and its value composes against the
+    ///     element's own environment rather than against a longhand table, so the two never mix.
+    pub first_custom_declaration: u32,
+    pub custom_declaration_count: u32,
+}
+
+/// One published custom-property declaration of a keyframe.
+///
+/// The name is the raw one-word representation of the host's `Utf16FlyString`, borrowed for the
+/// call and retained by the engine the way every published style payload is. `use_initial` marks
+/// the keyframe the host synthesized to hold the element's own value, whose value - the element's
+/// underlying value for the name - is not known until the element is sampled, and then the value
+/// is null.
+#[repr(C)]
+pub struct FfiPublishedAnimationCustomDeclaration {
+    pub name_raw: usize,
+    pub use_initial: bool,
+    pub value: *const std::ffi::c_void,
 }
 
 /// One control point of a published `linear()` easing.
@@ -1438,6 +1462,8 @@ pub unsafe extern "C" fn style_engine_set_element_animation_effect_descriptions(
     keyframe_count: usize,
     declarations: *const FfiPublishedAnimationDeclaration,
     declaration_count: usize,
+    custom_declarations: *const FfiPublishedAnimationCustomDeclaration,
+    custom_declaration_count: usize,
     linear_points: *const FfiPublishedLinearEasingPoint,
     linear_point_count: usize,
     base_url_bytes: *const u8,
@@ -1455,6 +1481,8 @@ pub unsafe extern "C" fn style_engine_set_element_animation_effect_descriptions(
             keyframe_count,
             declarations,
             declaration_count,
+            custom_declarations,
+            custom_declaration_count,
             linear_points,
             linear_point_count,
             base_url_bytes,
@@ -1478,6 +1506,8 @@ unsafe fn published_effect_buffers<'a>(
     keyframe_count: usize,
     declarations: *const FfiPublishedAnimationDeclaration,
     declaration_count: usize,
+    custom_declarations: *const FfiPublishedAnimationCustomDeclaration,
+    custom_declaration_count: usize,
     linear_points: *const FfiPublishedLinearEasingPoint,
     linear_point_count: usize,
     base_url_bytes: *const u8,
@@ -1495,6 +1525,7 @@ unsafe fn published_effect_buffers<'a>(
         effects: slice!(effects, effect_count),
         keyframes: slice!(keyframes, keyframe_count),
         declarations: slice!(declarations, declaration_count),
+        custom_declarations: slice!(custom_declarations, custom_declaration_count),
         linear_points: slice!(linear_points, linear_point_count),
         base_url_bytes: slice!(base_url_bytes, base_url_byte_count),
     }

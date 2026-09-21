@@ -1274,6 +1274,7 @@ static void describe_easing(EasingFunction const& easing, StyleEngineFFI::FfiPub
 struct KeyframeSetDescription {
     Vector<StyleEngineFFI::FfiPublishedAnimationKeyframe>& keyframes;
     Vector<StyleEngineFFI::FfiPublishedAnimationDeclaration>& declarations;
+    Vector<StyleEngineFFI::FfiPublishedAnimationCustomDeclaration>& custom_declarations;
     Vector<StyleEngineFFI::FfiPublishedLinearEasingPoint>& points;
     Vector<u8>& base_url_bytes;
 };
@@ -1331,9 +1332,46 @@ static u32 describe_keyframe_set(Animations::KeyframeEffect::KeyFrameSet const& 
             VERIFY_NOT_REACHED();
         }();
         ffi_keyframe.first_declaration = static_cast<u32>(description.declarations.size());
+        ffi_keyframe.first_custom_declaration = static_cast<u32>(description.custom_declarations.size());
         for (auto const& [property, value] : it->properties) {
             if (property.is_custom_property()) {
-                flags |= published_effect_flag_not_covered;
+                // A custom property a keyframe declares travels in a range of its own, named rather
+                // than numbered: the stage samples it against the element's own environment and
+                // hands the result back for the host to install once the computation returns. What
+                // the stage cannot sample stays refused, exactly as the whole class was before -
+                // a value that still needs a callback to substitute, and a shorthand's pending
+                // substitution, which neither path animates.
+                bool use_initial = false;
+                auto const* data = value.visit(
+                    [&](Animations::KeyframeEffect::KeyFrameSet::UseInitial) -> StyleValueFFI::StyleValueData const* {
+                        // The element's underlying value for the name, which is not known until the
+                        // element is sampled.
+                        use_initial = true;
+                        return nullptr;
+                    },
+                    [](RustStyleValueHandle const& handle) -> StyleValueFFI::StyleValueData const* { return handle.data(); });
+                if (!use_initial) {
+                    if (!data || data->tag == StyleValueFFI::StyleValueData::Tag::PendingSubstitution)
+                        continue;
+                    // Unlike a longhand, a custom property's written value is substituted only when
+                    // it actually carries a substitution function: `StyleComputer.cpp`'s walk asks
+                    // `contains_arbitrary_substitution_function()` before resolving one, and where
+                    // it does not the token stream travels as it stands. One that does is still
+                    // refused - a custom property substitutes as a name rather than as a longhand,
+                    // which is not what `substitute_written_value_against_store` resolves.
+                    if (data->tag == StyleValueFFI::StyleValueData::Tag::Unresolved
+                        && (data->unresolved.presence_attr || data->unresolved.presence_dashed_function
+                            || data->unresolved.presence_env || data->unresolved.presence_if
+                            || data->unresolved.presence_inherit || data->unresolved.presence_var)) {
+                        flags |= published_effect_flag_not_covered;
+                        continue;
+                    }
+                }
+                description.custom_declarations.append({
+                    .name_raw = property.name().raw_identity(),
+                    .use_initial = use_initial,
+                    .value = data,
+                });
                 continue;
             }
             bool use_initial = false;
@@ -1375,6 +1413,7 @@ static u32 describe_keyframe_set(Animations::KeyframeEffect::KeyFrameSet const& 
             });
         }
         ffi_keyframe.declaration_count = static_cast<u32>(description.declarations.size()) - ffi_keyframe.first_declaration;
+        ffi_keyframe.custom_declaration_count = static_cast<u32>(description.custom_declarations.size()) - ffi_keyframe.first_custom_declaration;
         description.keyframes.append(ffi_keyframe);
     }
     row.keyframe_count = static_cast<u32>(description.keyframes.size()) - row.first_keyframe;
@@ -1396,6 +1435,7 @@ void record_tree_scope_animation_keyframes(DOM::Document& document, TreeScopeID 
     Vector<StyleEngineFFI::FfiPublishedAnimationEffect> ffi_sets;
     Vector<StyleEngineFFI::FfiPublishedAnimationKeyframe> ffi_keyframes;
     Vector<StyleEngineFFI::FfiPublishedAnimationDeclaration> ffi_declarations;
+    Vector<StyleEngineFFI::FfiPublishedAnimationCustomDeclaration> ffi_custom_declarations;
     Vector<StyleEngineFFI::FfiPublishedLinearEasingPoint> ffi_points;
     Vector<u8> base_url_bytes;
     ffi_sets.ensure_capacity(keyframe_sets.size());
@@ -1409,7 +1449,7 @@ void record_tree_scope_animation_keyframes(DOM::Document& document, TreeScopeID 
         row.identity = static_cast<u64>(pointer);
         row.generation = 0;
         row.flags = describe_keyframe_set(*key_frame_set, {}, {},
-            { ffi_keyframes, ffi_declarations, ffi_points, base_url_bytes }, row);
+            { ffi_keyframes, ffi_declarations, ffi_custom_declarations, ffi_points, base_url_bytes }, row);
         ffi_sets.unchecked_append(row);
     }
 
@@ -1419,6 +1459,7 @@ void record_tree_scope_animation_keyframes(DOM::Document& document, TreeScopeID 
         ffi_sets.data(), ffi_sets.size(),
         ffi_keyframes.data(), ffi_keyframes.size(),
         ffi_declarations.data(), ffi_declarations.size(),
+        ffi_custom_declarations.data(), ffi_custom_declarations.size(),
         ffi_points.data(), ffi_points.size(),
         base_url_bytes.data(), base_url_bytes.size());
 }
@@ -1439,6 +1480,7 @@ void record_element_animation_effect_descriptions(DOM::Element& element, u8 slot
     Vector<StyleEngineFFI::FfiPublishedAnimationEffect> ffi_effects;
     Vector<StyleEngineFFI::FfiPublishedAnimationKeyframe> ffi_keyframes;
     Vector<StyleEngineFFI::FfiPublishedAnimationDeclaration> ffi_declarations;
+    Vector<StyleEngineFFI::FfiPublishedAnimationCustomDeclaration> ffi_custom_declarations;
     Vector<StyleEngineFFI::FfiPublishedLinearEasingPoint> ffi_points;
     Vector<u8> base_url_bytes;
 
@@ -1463,7 +1505,7 @@ void record_element_animation_effect_descriptions(DOM::Element& element, u8 slot
                 ? static_cast<CSSAnimation const&>(*animation).default_easing()
                 : EasingFunction::linear();
             row.flags |= describe_keyframe_set(*key_frame_set, default_easing, effect->composite(),
-                { ffi_keyframes, ffi_declarations, ffi_points, base_url_bytes }, row);
+                { ffi_keyframes, ffi_declarations, ffi_custom_declarations, ffi_points, base_url_bytes }, row);
         }
         ffi_effects.append(row);
     }
@@ -1473,6 +1515,7 @@ void record_element_animation_effect_descriptions(DOM::Element& element, u8 slot
         ffi_effects.data(), ffi_effects.size(),
         ffi_keyframes.data(), ffi_keyframes.size(),
         ffi_declarations.data(), ffi_declarations.size(),
+        ffi_custom_declarations.data(), ffi_custom_declarations.size(),
         ffi_points.data(), ffi_points.size(),
         base_url_bytes.data(), base_url_bytes.size());
 }

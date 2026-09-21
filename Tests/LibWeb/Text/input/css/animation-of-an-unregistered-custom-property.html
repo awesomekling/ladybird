@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    div { width: 10px; height: 10px; }
+    @keyframes moves { from { --c: 10px; } to { --c: 40px; } }
+    @keyframes moves-late { to { --c: 99px; } }
+    @keyframes moves-and-fades { from { --c: 10px; opacity: 0.25; } to { --c: 40px; opacity: 0.75; } }
+    @keyframes moves-far { from { --c: 100px; } to { --c: 400px; } }
+    #sheet::before { content: ""; animation: moves 1000s linear -500s infinite paused; }
+    .reads { width: var(--c, 1px); }
+</style>
+<div id="own"></div>
+<div id="parent"><div class="reads" id="child"></div></div>
+<div id="over" style="--c: 5px"><div class="reads" id="under" style="--c: 6px"></div></div>
+<div id="two"></div>
+<div id="fills"></div>
+<div id="drops"></div>
+<div id="important" style="--c: 7px !important"></div>
+<div id="synthesized" style="--c: 3px"></div>
+<div id="sheet"></div>
+<div id="cancels"></div>
+<script>
+    // An unregistered custom property a `@keyframes` rule declares: the value the animation settles
+    // on is installed on the element as an environment of its own, so the element's own `var()`
+    // reads it, its descendants inherit it, and dropping the animation takes it away again.
+    // Unregistered names interpolate discretely, flipping at the halfway point of the interval.
+    test(() => {
+        let nudge = 0;
+        // A style recomputation that has nothing to do with the animation, on a property no
+        // keyframe below writes. Every value is read on the mutating update AND after this, so a
+        // value that is only right once the element is recomputed for another reason is visible.
+        function recompute(element) {
+            element.style.wordSpacing = `${++nudge}px`;
+            getComputedStyle(element).wordSpacing;
+        }
+        function read(element, properties, pseudo) {
+            const style = getComputedStyle(element, pseudo ?? null);
+            return properties
+                .map(property => (property.startsWith("--") ? style.getPropertyValue(property).trim() || "(none)" : style[property]))
+                .join(" ");
+        }
+        function check(label, element, properties, pseudo) {
+            println(`${label}: ${read(element, properties, pseudo)}`);
+            recompute(element);
+            println(`${label} after recompute: ${read(element, properties, pseudo)}`);
+        }
+        // A paused animation with an explicit current time samples at a fixed point of its own
+        // timeline, so every value below is decided by the keyframes alone.
+        function animate(id, name, options) {
+            const element = document.getElementById(id);
+            element.style.animation = `${name} 1000s linear ${options ?? ""}paused`;
+            return element;
+        }
+        function seek(element, time) {
+            for (const animation of element.getAnimations())
+                animation.currentTime = time;
+        }
+
+        // The element's own `var()` reads the value its own animation settles on.
+        const own = animate("own", "moves");
+        own.style.width = "var(--c, 1px)";
+        seek(own, 100000);
+        check("own before the flip", own, ["--c", "width"]);
+        seek(own, 600000);
+        check("own after the flip", own, ["--c", "width"]);
+
+        // A descendant inherits it, because an unregistered custom property always inherits.
+        // NB: `child after the flip` reads the new value for `--c` and the old one for the `width`
+        //     that resolves against it. The environment the parent's animation installs marks its
+        //     descendants for recomputation, and that mark is only acted on by the *next* style
+        //     update - the child was not dirty when this one began. The line moves on the
+        //     recompute below, and both paths through the sampling behave alike.
+        const parent = document.getElementById("parent");
+        const child = document.getElementById("child");
+        animate("parent", "moves");
+        seek(parent, 100000);
+        println(`child before the flip: ${read(child, ["--c", "width"])}`);
+        recompute(child);
+        println(`child before the flip after recompute: ${read(child, ["--c", "width"])}`);
+        seek(parent, 600000);
+        println(`child after the flip: ${read(child, ["--c", "width"])}`);
+        recompute(child);
+        println(`child after the flip after recompute: ${read(child, ["--c", "width"])}`);
+
+        // A child that declares the name itself overrides what the parent's animation settles on.
+        const over = document.getElementById("over");
+        const under = document.getElementById("under");
+        animate("over", "moves");
+        seek(over, 600000);
+        check("over", over, ["--c"]);
+        check("under", under, ["--c", "width"]);
+
+        // Two animations on the same property compose in animation-name order: the second wins.
+        const two = document.getElementById("two");
+        two.style.animation = "moves 1000s linear paused, moves-far 1000s linear paused";
+        seek(two, 600000);
+        check("two", two, ["--c"]);
+
+        // `animation-fill-mode` after the end: `both` holds the last value, the default holds none.
+        const fills = animate("fills", "moves", "both ");
+        seek(fills, 1200000);
+        check("fills both after the end", fills, ["--c"]);
+        const drops = animate("drops", "moves");
+        seek(drops, 1200000);
+        check("drops none after the end", drops, ["--c"]);
+
+        // An `!important` declaration of the element's own suppresses animating the name.
+        const important = animate("important", "moves");
+        seek(important, 600000);
+        check("important", important, ["--c"]);
+
+        // A keyframe the host synthesizes to hold the element's own value: the rule declares only
+        // `to`, so `from` composes over what the element itself declares.
+        const synthesized = animate("synthesized", "moves-late");
+        seek(synthesized, 100000);
+        check("synthesized before the flip", synthesized, ["--c"]);
+        seek(synthesized, 600000);
+        check("synthesized after the flip", synthesized, ["--c"]);
+
+        // A pseudo-element's keyframes, declared in the sheet, and a longhand riding along with the
+        // custom property in the same rule.
+        const sheet = document.getElementById("sheet");
+        check("sheet pseudo", sheet, ["--c"], "::before");
+        const mixed = animate("own", "moves-and-fades");
+        seek(mixed, 600000);
+        check("mixed", mixed, ["--c", "opacity", "width"]);
+
+        // Ending the animation mid-flight takes the installed environment away again.
+        const cancels = animate("cancels", "moves");
+        seek(cancels, 600000);
+        check("cancels while running", cancels, ["--c"]);
+        cancels.style.animation = "";
+        check("cancels after the animation is removed", cancels, ["--c"]);
+        // And cancelling one through the API, which leaves `animation-name` naming it.
+        const again = animate("cancels", "moves");
+        seek(again, 600000);
+        for (const animation of again.getAnimations())
+            animation.cancel();
+        check("cancels after cancelling", again, ["--c"]);
+    });
+</script>

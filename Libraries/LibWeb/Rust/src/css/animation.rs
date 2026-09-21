@@ -7124,7 +7124,14 @@ pub unsafe extern "C" fn rust_resolve_animation_declarations_from_published(
         let Some(found) = published.iter().find(|effect| effect.identity == identities[index]) else {
             return no_resolved_animation_properties();
         };
-        if found.generation != generations[index] || !found.is_covered() || found.keyframes.len() < 2 {
+        // This is the host's own fast path through the description, and it resolves longhands
+        // alone: an effect that declares a custom property is one the host still walks its own
+        // keyframe sets for, exactly as it did before the description carried them at all.
+        if found.generation != generations[index]
+            || !found.is_covered()
+            || found.declares_custom_properties()
+            || found.keyframes.len() < 2
+        {
             return no_resolved_animation_properties();
         }
         selected.push(found);
@@ -7143,7 +7150,7 @@ pub unsafe extern "C" fn rust_resolve_animation_declarations_from_published(
     let mut substitution =
         KeyframeSubstitutionContext::new(input.custom_property_store, engine.document_style_computation_inputs());
     let Some((ffi_effects, ffi_keyframes, ffi_declarations, _substituted_values)) =
-        describe_selected_effects(&selected, table, &mut substitution)
+        describe_selected_effects(&selected, table, &mut substitution, None)
     else {
         return no_resolved_animation_properties();
     };
@@ -7171,6 +7178,139 @@ pub(crate) struct SelectedEffect<'a> {
     pub(crate) current_key: f64,
     pub(crate) easing_from_animation: Option<&'a crate::css::style::animations::PublishedEasing>,
     pub(crate) composite_from_animation: u8,
+}
+
+/// The custom properties the effect stack the stage is sampling declares, and what the element's
+/// own environment answers about each of them.
+///
+/// A name is minted into a number the way `StyleComputer.cpp`'s `custom_name_id_for` mints one -
+/// the animation core keys a value plan by that number, and `rust_evaluate_animations` indexes the
+/// underlying and initial buffers by it - and the two things the host reads off the element for a
+/// name come from the same two environments the host reads them from: its underlying value from
+/// the element's own environment with this frame's animation overlay peeled off, and whether the
+/// element declares the name `!important`, which suppresses animating it.
+///
+/// Unregistered names only. A registered name's initial value is the registration's computed one
+/// and its interpolation is typed, neither of which this channel carries, so the tail refuses the
+/// whole element the moment the document holds any `@property` registration.
+pub(crate) struct AnimatedCustomProperties {
+    base_store: *const std::ffi::c_void,
+    inheritance_store: *const std::ffi::c_void,
+    element_declares_own: bool,
+    names: Vec<crate::css::retained_fly_string::RetainedUtf16FlyString>,
+    important: Vec<bool>,
+}
+
+impl AnimatedCustomProperties {
+    pub(crate) fn new(
+        base_store: *const std::ffi::c_void,
+        inheritance_store: *const std::ffi::c_void,
+        element_declares_own: bool,
+    ) -> Self {
+        Self {
+            base_store,
+            inheritance_store,
+            element_declares_own,
+            names: Vec::new(),
+            important: Vec::new(),
+        }
+    }
+
+    fn store(store: *const std::ffi::c_void) -> Option<&'static crate::css::custom_properties::CustomPropertyStore> {
+        // SAFETY: both stores are the host's, handed over for the computation and kept alive by
+        // the `CustomPropertyData` nodes the element and its inheritance parent hold.
+        unsafe {
+            store
+                .cast::<crate::css::custom_properties::CustomPropertyStore>()
+                .as_ref()
+        }
+    }
+
+    /// The number this name animates under, minting one where it is new.
+    fn name_id(&mut self, name: &crate::css::retained_fly_string::RetainedUtf16FlyString) -> u32 {
+        if let Some(index) = self.names.iter().position(|minted| minted.raw() == name.raw()) {
+            return index as u32 + 1;
+        }
+        self.names.push(name.clone());
+        self.important.push(
+            self.element_declares_own
+                && Self::store(self.base_store).is_some_and(|store| store.declares_important(name.raw())),
+        );
+        self.names.len() as u32
+    }
+
+    fn is_important(&self, name_id: u32) -> bool {
+        self.important[name_id as usize - 1]
+    }
+
+    fn name_raw(&self, name_id: u32) -> usize {
+        self.names[name_id as usize - 1].raw()
+    }
+
+    /// An unregistered custom property's initial value is the guaranteed-invalid value.
+    fn initial_value() -> crate::css::style_value::RetainedStyleValueData {
+        crate::css::style_value::RetainedStyleValueData::from_owned(
+            crate::css::style_value::StyleValueData::GuaranteedInvalid,
+        )
+    }
+
+    /// The value an animation of this name composes over: what the element's environment says
+    /// without this frame's overlay, and otherwise the initial value.
+    fn underlying_value(&self, name_id: u32) -> crate::css::style_value::RetainedStyleValueData {
+        Self::store(self.base_store)
+            .and_then(|store| store.retained_value(self.name_raw(name_id)))
+            .unwrap_or_else(Self::initial_value)
+    }
+
+    /// What a keyframe that says `inherit` takes: the value the environment the element inherits
+    /// from answers, and otherwise the initial value.
+    fn inherited_value(&self, name_id: u32) -> crate::css::style_value::RetainedStyleValueData {
+        Self::store(self.inheritance_store)
+            .and_then(|store| store.retained_value(self.name_raw(name_id)))
+            .unwrap_or_else(Self::initial_value)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.names.len()
+    }
+
+    pub(crate) fn name(&self, name_id: u32) -> crate::css::retained_fly_string::RetainedUtf16FlyString {
+        self.names[name_id as usize - 1].clone()
+    }
+
+    /// The buffers `rust_evaluate_animations` indexes by name id: what an animation of each name
+    /// composes over, and what a keyframe that says `initial` takes.
+    pub(crate) fn underlying_and_initial_values(
+        &self,
+    ) -> (
+        Vec<crate::css::style_value::RetainedStyleValueData>,
+        Vec<crate::css::style_value::RetainedStyleValueData>,
+    ) {
+        (1..=self.names.len() as u32)
+            .map(|name_id| (self.underlying_value(name_id), Self::initial_value()))
+            .unzip()
+    }
+
+    /// The specified value of one resolved custom-property declaration, which is also its computed
+    /// value: `compute_animated_custom_property_value` computes nothing for an unregistered name.
+    /// A mirror of the `value_source` switch in `StyleComputer.cpp`'s `compute_animation_values`.
+    pub(crate) fn specified_value(
+        &self,
+        property: &FfiResolvedAnimationProperty,
+    ) -> crate::css::style_value::RetainedStyleValueData {
+        match property.value_source {
+            FfiAnimationSpecifiedValueSource::Inherited => self.inherited_value(property.custom_name_id),
+            FfiAnimationSpecifiedValueSource::Initial => Self::initial_value(),
+            FfiAnimationSpecifiedValueSource::Underlying => self.underlying_value(property.custom_name_id),
+            // SAFETY: a resolved declaration's value is retained by the resolution's storage,
+            //         which outlives the keyframe drive this value feeds.
+            FfiAnimationSpecifiedValueSource::Value => unsafe {
+                crate::css::style_value::RetainedStyleValueData::from_retained_pointer(
+                    crate::css::style_value::retain_style_value(property.value),
+                )
+            },
+        }
+    }
 }
 
 /// What a keyframe declaration written as a token stream substitutes against on the element being
@@ -7235,6 +7375,7 @@ fn describe_selected_effects(
     selected: &[SelectedEffect<'_>],
     table: &crate::css::computed_longhand_table::ComputedLonghandTable,
     substitution: &mut KeyframeSubstitutionContext,
+    mut custom: Option<&mut AnimatedCustomProperties>,
 ) -> Option<DescribedEffects> {
     let mut ffi_keyframes = Vec::new();
     let mut ffi_declarations = Vec::new();
@@ -7308,6 +7449,39 @@ fn describe_selected_effects(
                     is_transition,
                 });
             }
+            // The custom properties the same keyframe declares, in the range of their own. A
+            // caller that resolves longhands alone - the host's fast path through this very
+            // description - passes no collector and refuses such an effect outright, above.
+            let Some(custom) = custom.as_deref_mut() else {
+                continue;
+            };
+            for declaration in effect.custom_declarations_of(keyframe) {
+                let custom_name_id = custom.name_id(&declaration.name);
+                // The element's own underlying value for the name, which is not known until the
+                // element is sampled - the same hole `use_initial` leaves for a longhand.
+                let synthesized = declaration.use_initial.then(|| custom.underlying_value(custom_name_id));
+                let value = match &synthesized {
+                    Some(underlying) => underlying.pointer(),
+                    None => declaration.value.pointer(),
+                };
+                substituted_values.extend(synthesized);
+                ffi_declarations.push(FfiAnimationDeclaration {
+                    keyframe_index,
+                    // A custom property has no longhand of its own; the number it was minted
+                    // into is its whole identity here, and the animation core composes and
+                    // interpolates it under `PropertyID::Custom` as the host's walk does.
+                    property_id: crate::css::property_metadata::property_id::CUSTOM,
+                    custom_name_id,
+                    // Only unregistered names reach this channel, and an unregistered custom
+                    // property always inherits.
+                    custom_is_inherited: true,
+                    custom_is_important: custom.is_important(custom_name_id),
+                    value,
+                    style_sheet_resource_context,
+                    use_initial: declaration.use_initial,
+                    is_transition,
+                });
+            }
         }
         ffi_effects.push(FfiAnimationEffect {
             first_keyframe_index,
@@ -7333,6 +7507,7 @@ pub(crate) fn resolve_selected_animation_declarations(
     direction: u8,
     important_property_bitmap: &[u8],
     substitution: &mut KeyframeSubstitutionContext,
+    custom: Option<&mut AnimatedCustomProperties>,
 ) -> Option<FfiResolvedAnimationProperties> {
     if selected
         .iter()
@@ -7341,7 +7516,7 @@ pub(crate) fn resolve_selected_animation_declarations(
         return None;
     }
     let (ffi_effects, ffi_keyframes, ffi_declarations, _substituted_values) =
-        describe_selected_effects(selected, table, substitution)?;
+        describe_selected_effects(selected, table, substitution, custom)?;
     Some(finish_resolved_animation_properties(resolve_animation_declarations(
         &ffi_declarations,
         &ffi_effects,

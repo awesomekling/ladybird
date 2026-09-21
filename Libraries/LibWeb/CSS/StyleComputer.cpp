@@ -6255,6 +6255,28 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         auto resolved = abstract_element.custom_property_data();
         ComputedValuesFFI::rust_set_longhand_custom_property_environment(transaction_result.storage, resolved ? resolved->identity() : 0);
     }
+    {
+        // What an animated custom property is sampled against, read exactly where
+        // `collect_animation_effects_into` reads it: after this computation's environment is
+        // installed, and with the animation overlay of the frame before peeled off, which is what
+        // an animation composes over. The stage's own animation tail runs below, so the two stores
+        // are handed over here rather than with the transaction's other inputs, which were taken
+        // before the cascade resolved anything.
+        auto base_custom_property_data = abstract_element.custom_property_data();
+        if (base_custom_property_data && base_custom_property_data->is_animation_overlay())
+            base_custom_property_data = base_custom_property_data->parent();
+        auto inherit_from = abstract_element.element_to_inherit_style_from();
+        RefPtr<CustomPropertyData const> inheritance_custom_property_data;
+        if (inherit_from.has_value())
+            inheritance_custom_property_data = inherit_from->custom_property_data();
+        auto element_declares_own_custom_properties = base_custom_property_data
+            && !(inherit_from.has_value() && inheritable_custom_property_data(*inherit_from).ptr() == base_custom_property_data.ptr());
+        ComputedValuesFFI::rust_set_longhand_animation_custom_property_environments(
+            transaction_result.storage,
+            base_custom_property_data ? base_custom_property_data->rust_store() : nullptr,
+            inheritance_custom_property_data ? inheritance_custom_property_data->rust_store() : nullptr,
+            element_declares_own_custom_properties);
+    }
     auto finalization_result = ComputedValuesFFI::rust_finalize_longhand_transaction(&input, transaction_result);
     native_context.state->working_set->did_apply_style_finalization_from_rust(finalization_result.invalidated_longhands);
     if (finalization_result.animated_overlay) {
@@ -6272,6 +6294,18 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
                 style_groups = ComputedValues::all_style_groups;
             m_keyframes_inherited_non_inherited_style_groups |= style_groups;
         }
+        // The stage sampled this element's animated custom properties for itself, so the pairs it
+        // settled are written into the working set here, where the host's own sampling writes
+        // them, and installed by the same `publish_animated_custom_properties` below: the overlay
+        // node, the unchanged-values early-out, the teardown of an empty one and the invalidation
+        // of everything that reads a name all stay exactly where they were.
+        for (size_t index = 0; index < finalization_result.animated_custom_property_count; ++index) {
+            auto const& animated = finalization_result.animated_custom_properties[index];
+            computed_style.set_animated_custom_property(Badge<StyleComputer> {},
+                Utf16FlyString::from_raw(animated.name_raw),
+                StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(static_cast<StyleValueFFI::StyleValueData const*>(animated.value))));
+        }
+        ComputedValuesFFI::rust_release_animated_custom_property_results(finalization_result.animated_custom_properties_storage);
         publish_animated_custom_properties(computed_style, abstract_element);
         // The stage answered the batch's tree-counting functions from the retained tree, so what
         // `compute_animation_values` records after resolving them is recorded here instead: the
