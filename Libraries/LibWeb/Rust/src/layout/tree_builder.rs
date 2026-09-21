@@ -114,7 +114,6 @@ pub(crate) enum StaleSubtreeClearScope {
 #[repr(C)]
 pub struct FfiDomTreeBuilderCallbacks {
     pub builder: *mut c_void,
-    pub create_first_letter_nodes: unsafe extern "C" fn(*mut c_void, u32, FfiFirstLetterTarget) -> FfiFirstLetterNodes,
     /// Attaches the image resources a box's style asks for. Principal and pseudo-element boxes
     /// both go through this; nothing about it depends on which the box is. The flag says the box
     /// replaces its element's contents with a single image, which it owns the provider for.
@@ -3248,6 +3247,9 @@ pub(crate) fn pseudo_element_decision(facts: PseudoElementFacts) -> FfiPseudoEle
 /// The pseudo-element kind the style store numbers this one by, for the kinds it settles a record
 /// for. `::backdrop` is deliberately not one of them, so nothing here can answer for it.
 /// How the arena names the pseudo-element a box is generated for.
+/// The mirror numbers the pseudo-element kinds one below the generated-for encoding.
+const FIRST_LETTER_PSEUDO_KIND: u8 = GENERATED_FOR_FIRST_LETTER - 1;
+
 fn generated_for_of(pseudo_element: FfiPseudoElement) -> u8 {
     match pseudo_element {
         FfiPseudoElement::None => 0,
@@ -3663,7 +3665,6 @@ pub(crate) fn adjusted_table_display_for_replaced_element(
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiFirstLetterTarget {
-    pub text_node: *mut c_void,
     pub text_layout_node: NodeSlotId,
     pub letter_start: usize,
     pub letter_end: usize,
@@ -3674,7 +3675,6 @@ pub struct FfiFirstLetterTarget {
 impl FfiFirstLetterTarget {
     fn not_found() -> Self {
         Self {
-            text_node: std::ptr::null_mut(),
             text_layout_node: NodeSlotId::INVALID,
             letter_start: 0,
             letter_end: 0,
@@ -3682,14 +3682,6 @@ impl FfiFirstLetterTarget {
             found: false,
         }
     }
-}
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiFirstLetterNodes {
-    pub wrapper: NodeSlotId,
-    pub first_letter_slice: NodeSlotId,
-    pub remainder_slice: NodeSlotId,
 }
 
 #[derive(Clone, Copy)]
@@ -3923,12 +3915,6 @@ impl TreeBuilderHost {
         })
     }
 
-    fn shell(&self, node: LayoutNode) -> *mut c_void {
-        let shell = self.arena().node_shell(node);
-        assert!(!shell.is_null());
-        shell
-    }
-
     fn set_children_are_inline(&self, node: LayoutNode, children_are_inline: bool) {
         self.arena()
             .set_node_flag(node, NodeFlag::ChildrenAreInline, children_are_inline);
@@ -4031,6 +4017,16 @@ impl TreeBuilderHost {
         let slot = self.stamp_dom_box(kind, style_node);
         self.arena().take_over_rows_of_bound_node(slot);
         assert!(!self.arena().node_shell(slot).is_null());
+        slot
+    }
+
+    /// The row a piece of generated text is rendered from. It names no DOM node and carries no
+    /// style of its own, so it is stamped out of its kind alone.
+    fn stamp_generated_text_box(&self) -> NodeSlotId {
+        // SAFETY: Entry points guarantee that the arena remains live, and callers hold no reference
+        // derived from it across the allocation.
+        let slot = unsafe { &mut *self.arena }.allocate_unbound();
+        self.arena().stamp_anonymous_text_row(slot);
         slot
     }
 
@@ -4639,7 +4635,6 @@ pub(crate) fn find_first_letter_in_text(
         // node, accept it as the first-letter.
         if cursor >= code_units {
             return FfiFirstLetterTarget {
-                text_node: std::ptr::null_mut(),
                 text_layout_node: NodeSlotId::INVALID,
                 letter_start: match_start,
                 letter_end: cursor,
@@ -4677,7 +4672,6 @@ pub(crate) fn find_first_letter_in_text(
         }
 
         return FfiFirstLetterTarget {
-            text_node: std::ptr::null_mut(),
             text_layout_node: NodeSlotId::INVALID,
             letter_start: match_start,
             letter_end,
@@ -4711,7 +4705,6 @@ fn find_first_letter_in_layout_text(host: &TreeBuilderHost, node: LayoutNode) ->
         },
     );
     if target.found {
-        target.text_node = host.shell(node);
         target.text_layout_node = node;
     }
     target
@@ -4719,23 +4712,53 @@ fn find_first_letter_in_layout_text(host: &TreeBuilderHost, node: LayoutNode) ->
 
 fn create_first_letter_boxes(host: &DomTreeBuilderHost<'_>, style_node: u32, target: FfiFirstLetterTarget) {
     let layout_host = host.layout();
-    super::tree_build_seal::note_host_call("create_first_letter_nodes");
-    // SAFETY: The builder remains live, the identity names a live element, and `target` identifies
-    // a live descendant text node.
-    let nodes = unsafe { (host.callbacks.create_first_letter_nodes)(host.callbacks.builder, style_node, target) };
-    let first_letter_slice = layout_host.created(nodes.first_letter_slice);
-    let remainder_slice = layout_host.created(nodes.remainder_slice);
-    if nodes.wrapper.is_invalid() {
+    let generator = StyleNodeID::from_raw(style_node).expect("a first letter names the element it styles");
+    let text_layout_node = target.text_layout_node;
+    let slices_a_dom_text_node = layout_host.data(text_layout_node).kind.get() == NodeKind::TextNode;
+    let sliced_text_identity = layout_host.arena().node_style_node(text_layout_node);
+
+    // The first-letter and remainder boxes render slices of the same DOM text node; generated
+    // text has no DOM node and gets plain generated slices of its characters instead.
+    let (first_letter_slice_slot, remainder_slice_slot) = if slices_a_dom_text_node {
+        // The remainder takes the text node's rows over, and the first letter slice renders the
+        // same node without becoming the row the node is bound to.
+        let remainder_slice_slot = layout_host.create_dom_box(NodeKind::TextNode, sliced_text_identity);
+        let first_letter_slice_slot = layout_host.stamp_dom_box(NodeKind::TextNode, sliced_text_identity);
+        layout_host
+            .arena()
+            .note_rows_share_dom_node(remainder_slice_slot, first_letter_slice_slot);
+        (first_letter_slice_slot, remainder_slice_slot)
+    } else {
+        let remainder_slice_slot = layout_host.stamp_generated_text_box();
+        let first_letter_slice_slot = layout_host.stamp_generated_text_box();
+        (first_letter_slice_slot, remainder_slice_slot)
+    };
+    // A text row renders what its shell enrolled for content sync, so every slice materialises
+    // one, as the rows the retired host path allocated did.
+    assert!(!layout_host.arena().node_shell(first_letter_slice_slot).is_null());
+    assert!(!layout_host.arena().node_shell(remainder_slice_slot).is_null());
+    let first_letter_slice = layout_host.created(first_letter_slice_slot);
+    let remainder_slice = layout_host.created(remainder_slice_slot);
+
+    let wrapper_display = layout_host.arena().with_style_store(|engine| {
+        engine
+            .published_style_view(generator, Some(FIRST_LETTER_PSEUDO_KIND))
+            .map(|view| view.display())
+    });
+    let wrapper_kind = wrapper_display.and_then(node_kind_for_display);
+    let Some(wrapper_kind) = wrapper_kind else {
+        // A `::first-letter` whose display generates no box leaves the text it matched alone.
         layout_host.free_unplaced(first_letter_slice);
         layout_host.free_unplaced(remainder_slice);
         return;
-    }
-    if layout_host.data(nodes.remainder_slice).kind.get() == NodeKind::TextNode {
-        // SAFETY: The host callback has returned and no arena borrow survives it.
+    };
+
+    if slices_a_dom_text_node {
+        // SAFETY: No arena borrow survives into the allocation.
         // Initialize the source ranges before attaching or rendering either slice.
         unsafe { &mut *layout_host.arena }.set_first_letter_slices(
-            nodes.first_letter_slice,
-            nodes.remainder_slice,
+            first_letter_slice_slot,
+            remainder_slice_slot,
             target.letter_end,
             target.source_length,
         );
@@ -4743,33 +4766,43 @@ fn create_first_letter_boxes(host: &DomTreeBuilderHost<'_>, style_node: u32, tar
         // A `::first-letter` over generated content slices the characters the build resolved
         // rather than a DOM text node's data, so each slice renders the whole of its own share
         // and neither carries a source range.
-        let published = layout_host
-            .arena()
-            .published_text_source(target.text_layout_node, false);
+        let published = layout_host.arena().published_text_source(text_layout_node, false);
         let source = published.data.to_utf16();
         let letter_end = target.letter_end.min(source.len());
         stamp_generated_text(
             &layout_host,
-            nodes.first_letter_slice,
+            first_letter_slice_slot,
             Some(ak::Utf16String::from_utf16(&source[..letter_end])),
         );
         stamp_generated_text(
             &layout_host,
-            nodes.remainder_slice,
+            remainder_slice_slot,
             Some(ak::Utf16String::from_utf16(&source[letter_end..])),
         );
     }
-    let wrapper = layout_host.created(nodes.wrapper);
-    let wrapper_slot = wrapper.slot();
-    let text_node = target.text_layout_node;
-    let parent = layout_host.parent(text_node);
+
+    // SAFETY: Entry points guarantee that the arena remains live, and callers hold no reference
+    // derived from it across the allocation.
+    let wrapper_slot = unsafe { &mut *layout_host.arena }.allocate_unbound();
+    layout_host
+        .arena()
+        .stamp_pseudo_element_row(wrapper_slot, wrapper_kind, generator, FIRST_LETTER_PSEUDO_KIND);
+    super::tree_build_seal::note_host_call("attach_style_resources");
+    // SAFETY: The builder remains live, and the row the build stamped is a live NodeWithStyle.
+    unsafe { (host.callbacks.attach_style_resources)(host.callbacks.builder, wrapper_slot, false) };
+    layout_host
+        .arena()
+        .stamp_pseudo_element_box(wrapper_slot, generator, GENERATED_FOR_FIRST_LETTER);
+    let wrapper = layout_host.created(wrapper_slot);
+
+    let parent = layout_host.parent(text_layout_node);
     assert!(!parent.is_invalid());
     layout_host.set_children_are_inline(wrapper_slot, true);
     layout_host.attach_child(wrapper_slot, first_letter_slice, NodeSlotId::INVALID);
-    layout_host.attach_child(parent, wrapper, text_node);
-    layout_host.attach_child(parent, remainder_slice, text_node);
-    layout_host.arena().detach_child(parent, text_node);
-    layout_host.free_subtree(text_node);
+    layout_host.attach_child(parent, wrapper, text_layout_node);
+    layout_host.attach_child(parent, remainder_slice, text_layout_node);
+    layout_host.arena().detach_child(parent, text_layout_node);
+    layout_host.free_subtree(text_layout_node);
 }
 
 fn is_marker_content(data: &NodeData) -> bool {

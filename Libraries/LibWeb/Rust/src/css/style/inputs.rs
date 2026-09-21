@@ -778,6 +778,19 @@ impl RetainedState {
         Some((record, payloads.as_ptr().cast()))
     }
 
+    /// The published style record of one of the element's pseudo-elements, as
+    /// [`Self::element_published_style_record`] answers for the element itself. `None` while the
+    /// element styles no such pseudo-element.
+    pub fn pseudo_published_style_record(
+        &self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+    ) -> Option<(u64, *const std::ffi::c_void)> {
+        let record = self.computed_group_sets.pseudo_style_record(node, pseudo_kind)?.raw();
+        let payloads = self.computed_group_sets.style_record_payloads(record)?;
+        Some((record, payloads.as_ptr().cast()))
+    }
+
     /// The box facts the element's published record for one pseudo-element kind holds. `None`
     /// while the element styles no such pseudo-element.
     #[must_use]

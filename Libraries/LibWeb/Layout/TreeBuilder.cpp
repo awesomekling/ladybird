@@ -62,7 +62,6 @@ private:
     RustFFI::FfiPseudoTreeBuilderCallbacks make_ffi_pseudo_tree_builder_callbacks();
 
     static Box& create_list_item_marker(Box& list_box, CSS::LayoutStyle marker_style);
-    static RustFFI::FfiFirstLetterNodes create_first_letter_nodes(DOM::Element&, RustFFI::FfiFirstLetterTarget);
 
     void pin_style_record_for_build(CSS::StyleRecordID);
 
@@ -72,11 +71,6 @@ private:
     // in one place is what lets a visit carry no C++ frame of its own.
     Vector<CSS::StyleRecordID> m_pinned_style_records;
 };
-
-void LayoutTreeBuilderAccess::set_synthetic_pseudo_element_node(DOM::Element& element, CSS::PseudoElement pseudo_element, Layout::NodeWithStyle* layout_node)
-{
-    element.set_synthetic_pseudo_element_node({}, pseudo_element, layout_node);
-}
 
 class GeneratedContentImageProvider final
     : public ImageProvider {
@@ -195,55 +189,6 @@ static void attach_content_replacement_image(Box& image_box)
     auto replacement_image = content_replacement_image(image_box.style_group<CSS::ComputedValues::ContentValues>().computed_content_value());
     VERIFY(replacement_image);
     attach_owned_image_provider(image_box, const_cast<CSS::AbstractImageStyleValue&>(*replacement_image));
-}
-
-struct FirstLetterTextSlices {
-    TextNode* first_letter_slice;
-    TextNode* remainder_slice;
-};
-
-static FirstLetterTextSlices create_first_letter_text_slices(DOM::Document& document, TextNode& text_node, size_t letter_end)
-{
-    auto const full_length = text_node.text().length_in_code_units();
-
-    // The first-letter and remainder boxes render slices of the same DOM text node; generated text
-    // (from a content property) has no DOM node and gets plain generated slices of its text instead.
-    if (auto* dom_text = text_node.dom_text()) {
-        auto& mutable_dom_text = const_cast<DOM::Text&>(*dom_text);
-        auto& remainder_slice = allocate_layout_node<TextNode>(document, mutable_dom_text, Node::AttachToDOMNode::Yes);
-        auto& first_letter_slice = allocate_layout_node<TextNode>(document, mutable_dom_text, Node::AttachToDOMNode::No);
-        return { &first_letter_slice, &remainder_slice };
-    }
-
-    auto text = text_node.text();
-    return {
-        &allocate_layout_node<GeneratedTextNode>(document, Utf16String::from_utf16(text.utf16_view().substring_view(0, letter_end))),
-        &allocate_layout_node<GeneratedTextNode>(document, Utf16String::from_utf16(text.utf16_view().substring_view(letter_end, full_length - letter_end))),
-    };
-}
-
-RustFFI::FfiFirstLetterNodes LayoutTreeBuildBridge::create_first_letter_nodes(DOM::Element& element, RustFFI::FfiFirstLetterTarget target)
-{
-    VERIFY(target.found);
-    auto& text_node = as<TextNode>(*static_cast<Node*>(target.text_node));
-    auto& document = element.document();
-
-    auto [first_letter_slice, remainder_slice] = create_first_letter_text_slices(document, text_node, target.letter_end);
-
-    auto const* first_letter_box_values = element.style_group<CSS::ComputedValues::BoxValues>(CSS::PseudoElement::FirstLetter);
-    VERIFY(first_letter_box_values);
-    auto display = first_letter_box_values->display_value();
-    auto first_letter_wrapper = DOM::Element::create_layout_node_for_display_type(document, display, CSS::LayoutStyle { element.style_record_identity(CSS::PseudoElement::FirstLetter) }, nullptr);
-    if (first_letter_wrapper) {
-        first_letter_wrapper->attach_style_resources();
-        first_letter_wrapper->set_generated_for(CSS::PseudoElement::FirstLetter, element);
-        LayoutTreeBuilderAccess::set_synthetic_pseudo_element_node(element, CSS::PseudoElement::FirstLetter, first_letter_wrapper);
-    }
-    return {
-        .wrapper = Node::slot_id(first_letter_wrapper),
-        .first_letter_slice = Node::slot_id(first_letter_slice),
-        .remainder_slice = Node::slot_id(remainder_slice),
-    };
 }
 
 Box& LayoutTreeBuildBridge::create_list_item_marker(Box& list_box, CSS::LayoutStyle marker_style)
@@ -493,10 +438,6 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
 {
     return {
         .builder = this,
-        .create_first_letter_nodes = [](void* builder_pointer, u32 style_node, RustFFI::FfiFirstLetterTarget target) -> RustFFI::FfiFirstLetterNodes {
-            VERIFY(builder_pointer);
-            auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
-            return create_first_letter_nodes(as<DOM::Element>(dom_node_for_style_node(*builder.m_document, style_node)), target); },
         .attach_style_resources = [](void* builder_pointer, Compositing::RustFFI::NodeSlotId slot, bool owns_content_replacement_image) {
             VERIFY(builder_pointer);
             auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);

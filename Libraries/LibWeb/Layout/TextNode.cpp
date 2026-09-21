@@ -71,6 +71,11 @@ GeneratedTextNode::GeneratedTextNode(DOM::Document& document, Utf16String text)
 {
 }
 
+GeneratedTextNode::GeneratedTextNode(DOM::Document& document, BindToPreparedArenaSlot bind, RustFFI::NodeSlotId slot, RustFFI::NodeKind kind)
+    : TextNode(document, bind, slot, kind)
+{
+}
+
 GeneratedTextNode::~GeneratedTextNode() = default;
 
 Utf16String TextNode::rendered_text_for_dom(bool collapse_whitespace) const

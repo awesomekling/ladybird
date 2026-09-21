@@ -51,6 +51,9 @@ private:
 class GeneratedTextNode final : public TextNode {
 public:
     GeneratedTextNode(DOM::Document&, Utf16String);
+    // A row the build stamped for generated text renders the characters the arena holds for it,
+    // so the shell materialised into it carries none of its own.
+    GeneratedTextNode(DOM::Document&, BindToPreparedArenaSlot, RustFFI::NodeSlotId, RustFFI::NodeKind);
     virtual ~GeneratedTextNode() override;
 
     virtual DOM::Text const* dom_text() const override { return nullptr; }
