@@ -80,18 +80,50 @@ void RendererFontService::did_change_font_set()
     m_font_set_changed.store(true, AK::MemoryOrder::memory_order_release);
 }
 
-RefPtr<Gfx::Font const> RendererFontService::match_font_for_code_point(Gfx::SystemFallbackFontKey const& key)
+RendererFontService::Answer RendererFontService::ask(Request request)
 {
     MutexLocker call_locker(m_call_mutex);
     MutexLocker locker(m_mutex);
     if (!m_connected || m_should_quit)
-        return {};
+        return Empty {};
 
-    m_request = key;
+    m_request = move(request);
     m_has_request = true;
     m_request_condition.signal();
     m_answer_condition.wait_while([&] { return m_has_request; });
     return move(m_answer);
+}
+
+RefPtr<Gfx::Font const> RendererFontService::match_font_for_code_point(Gfx::SystemFallbackFontKey const& key)
+{
+    auto answer = ask(key);
+    if (auto* font = answer.get_pointer<RefPtr<Gfx::Font const>>())
+        return move(*font);
+    return {};
+}
+
+Gfx::BrokeredFont RendererFontService::open_font(u64 generation, u64 face_id)
+{
+    auto answer = ask(OpenFontRequest { generation, face_id });
+    if (auto* font = answer.get_pointer<Gfx::BrokeredFont>())
+        return move(*font);
+    return {};
+}
+
+Gfx::BrokeredFont RendererFontService::match_font(String const& family, u16 weight, u16 width, u8 slope)
+{
+    auto answer = ask(MatchFontRequest { family, weight, width, slope });
+    if (auto* font = answer.get_pointer<Gfx::BrokeredFont>())
+        return move(*font);
+    return {};
+}
+
+Optional<FlyString> RendererFontService::resolve_generic_family(String const& family, u16 weight, u8 slope)
+{
+    auto answer = ask(ResolveGenericFamilyRequest { family, weight, slope });
+    if (auto* resolved = answer.get_pointer<Optional<FlyString>>())
+        return move(*resolved);
+    return {};
 }
 
 intptr_t RendererFontService::thread_main()
@@ -120,41 +152,66 @@ intptr_t RendererFontService::thread_main()
 #endif
 
     for (;;) {
-        Gfx::SystemFallbackFontKey key;
+        Request request { Gfx::SystemFallbackFontKey {} };
         {
             MutexLocker locker(m_mutex);
             m_request_condition.wait_while([&] { return !m_has_request && !m_should_quit; });
             if (m_should_quit)
                 break;
-            key = m_request;
+            request = move(m_request);
         }
 
         if (m_font_set_changed.exchange(false, AK::MemoryOrder::memory_order_acquire))
             m_typefaces.clear();
 
-        RefPtr<Gfx::Font const> font;
-        if (auto response = client->send_sync_but_allow_failure<Messages::RendererFontServer::MatchSystemFontForCodePoint>(key.code_point, key.weight, key.width, key.slope, key.prefer_color_emoji)) {
-            auto generation = response->generation();
-            auto brokered_font = response->take_font();
-            if (auto typeface = m_typefaces.get(brokered_font.face_id); typeface.has_value()) {
-                font = (*typeface)->font(key.point_size, {});
-            } else if (brokered_font.face_id != 0) {
-                RefPtr<Gfx::Typeface> loaded;
-                brokered_font.source.visit(
-                    [](Empty) {},
-                    [&](Gfx::BrokeredFontFile& font_file) {
-                        loaded = Gfx::load_typeface_from_font_file(font_file.ttc_index, font_file.format, move(font_file.file));
-                    },
-                    [&](Gfx::SystemFontReference const& reference) {
-                        loaded = Gfx::load_typeface_from_system_font_reference(reference);
-                    });
-                if (loaded) {
-                    loaded->set_system_font_identifier({ generation, brokered_font.face_id });
-                    m_typefaces.set(brokered_font.face_id, *loaded);
-                    font = loaded->font(key.point_size, {});
+        auto answer = request.visit(
+            [&](Gfx::SystemFallbackFontKey const& key) -> Answer {
+                RefPtr<Gfx::Font const> font;
+                if (auto response = client->send_sync_but_allow_failure<Messages::RendererFontServer::MatchSystemFontForCodePoint>(key.code_point, key.weight, key.width, key.slope, key.prefer_color_emoji)) {
+                    auto generation = response->generation();
+                    auto brokered_font = response->take_font();
+                    if (auto typeface = m_typefaces.get(brokered_font.face_id); typeface.has_value()) {
+                        font = (*typeface)->font(key.point_size, {});
+                    } else if (brokered_font.face_id != 0) {
+                        RefPtr<Gfx::Typeface> loaded;
+                        brokered_font.source.visit(
+                            [](Empty) {},
+                            [&](Gfx::BrokeredFontFile& font_file) {
+                                loaded = Gfx::load_typeface_from_font_file(font_file.ttc_index, font_file.format, move(font_file.file));
+                            },
+                            [&](Gfx::SystemFontReference const& reference) {
+                                loaded = Gfx::load_typeface_from_system_font_reference(reference);
+                            });
+                        if (loaded) {
+                            loaded->set_system_font_identifier({ generation, brokered_font.face_id });
+                            m_typefaces.set(brokered_font.face_id, *loaded);
+                            font = loaded->font(key.point_size, {});
+                        }
+                    }
                 }
-            }
-        }
+                return font;
+            },
+            // NB: A brokered face is handed straight back. The caller is the process's own font
+            //     provider, which has the typeface cache for it; a second one here would open the
+            //     same file twice.
+            [&](OpenFontRequest const& open) -> Answer {
+                if (auto response = client->send_sync_but_allow_failure<Messages::RendererFontServer::OpenSystemFont>(open.generation, open.face_id))
+                    return response->take_font();
+                return Gfx::BrokeredFont {};
+            },
+            [&](MatchFontRequest const& match) -> Answer {
+                if (auto response = client->send_sync_but_allow_failure<Messages::RendererFontServer::MatchSystemFont>(match.family, match.weight, match.width, match.slope))
+                    return response->take_font();
+                return Gfx::BrokeredFont {};
+            },
+            [&](ResolveGenericFamilyRequest const& resolve) -> Answer {
+                if (auto response = client->send_sync_but_allow_failure<Messages::RendererFontServer::ResolveGenericFont>(resolve.family, resolve.weight, resolve.slope)) {
+                    auto resolved_family = response->take_resolved_family();
+                    if (resolved_family.has_value())
+                        return Optional<FlyString> { FlyString { resolved_family.release_value() } };
+                }
+                return Optional<FlyString> {};
+            });
 
         // The drain that delivered the reply deferred a call to this thread's loop. Nothing else
         // ever runs it, so run it here rather than let one accumulate per answer.
@@ -162,7 +219,7 @@ intptr_t RendererFontService::thread_main()
 
         {
             MutexLocker locker(m_mutex);
-            m_answer = move(font);
+            m_answer = move(answer);
             m_has_request = false;
             m_answer_condition.broadcast();
         }

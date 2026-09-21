@@ -46,6 +46,24 @@ private:
         return { move(font), m_font_service.catalog_generation() };
     }
 
+    virtual Messages::RendererFontServer::OpenSystemFontResponse open_system_font(u64 generation, u64 face_id) override
+    {
+        return m_font_service.open_font(generation, face_id);
+    }
+
+    virtual Messages::RendererFontServer::MatchSystemFontResponse match_system_font(String family, u16 weight, u16 width, u8 slope) override
+    {
+        return m_font_service.match_font(family, weight, width, slope);
+    }
+
+    virtual Messages::RendererFontServer::ResolveGenericFontResponse resolve_generic_font(String family, u16 weight, u8 slope) override
+    {
+        auto resolved_family = m_font_service.resolve_generic_family(family, weight, slope);
+        if (!resolved_family.has_value())
+            return Optional<String> {};
+        return Optional<String> { resolved_family->to_string() };
+    }
+
     FontService& m_font_service;
 };
 

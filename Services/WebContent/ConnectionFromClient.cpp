@@ -202,7 +202,12 @@ void ConnectionFromClient::set_renderer_font_service_transport(IPC::TransportHan
         dbgln("WebContent: Unable to connect the render side's font service: {}", service.error());
         return;
     }
-    Gfx::install_render_side_system_fallback_font_service(service.release_value());
+    auto renderer_font_service = service.release_value();
+    // The same connection answers both: a code point no family covers, and the questions family
+    // matching asks. Installing the broker first keeps the reference valid - the service object
+    // does not move when the fallback slot takes ownership of it.
+    Gfx::install_render_side_font_broker(*renderer_font_service);
+    Gfx::install_render_side_system_fallback_font_service(move(renderer_font_service));
 }
 
 void ConnectionFromClient::initialize(Compositing::PageId initial_page_id, Vector<Web::HTML::RemoteNavigableDescriptor> remote_navigables, Web::HTML::CrossProcessId root_navigable_id, Web::HTML::CrossProcessIdAllocator cross_process_id_allocator, Web::HTML::SessionHistoryEntryDescriptor initial_history_entry, Web::HTML::VisibilityState system_visibility_state)

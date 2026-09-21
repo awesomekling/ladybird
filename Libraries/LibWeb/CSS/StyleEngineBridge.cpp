@@ -6,6 +6,7 @@
 
 #include <AK/StdLibExtras.h>
 #include <AK/Time.h>
+#include <LibGfx/Font/SharedFontProvider.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/FontResolution.h>
 #include <LibWeb/CSS/RustDeclarationBlock.h>
@@ -19,6 +20,7 @@
 namespace Web::CSS {
 
 extern "C" void style_engine_prepare_root_font_resolution(void*, u64);
+extern "C" void rust_style_seal_note_font_match_reached_document_thread();
 extern "C" void style_engine_publish_font_face_snapshot(void*, void const*, uintptr_t);
 extern "C" void rust_font_face_snapshot_view(void const*, FontFaceSnapshotView*);
 
@@ -63,8 +65,14 @@ static void resolve_fonts(uintptr_t font_cascade_memo, void const* font_face_sna
     FontFaceSnapshotView font_faces;
     rust_font_face_snapshot_view(font_face_snapshot, &font_faces);
     auto& memo = *reinterpret_cast<FontCascadeMemo*>(font_cascade_memo);
+    // Family matching leaves the process for the first use of any system family, and the
+    // connection the font provider's callbacks use belongs to the document thread. Inside this
+    // scope those questions go out on the render side's own connection instead.
+    Gfx::RenderSideFontScope render_side_font_scope;
     for (size_t index = 0; index < count; ++index)
         resolved_fonts[index] = resolve_font(memo, font_faces, requests[index]);
+    for (u64 question = 0; question < render_side_font_scope.questions_that_reached_the_document_thread(); ++question)
+        rust_style_seal_note_font_match_reached_document_thread();
 }
 
 static_assert(StyleEngineFFI::LAST_SYNTHETIC_PSEUDO_ELEMENT_KIND == to_underlying(last_synthetic_pseudo_element));

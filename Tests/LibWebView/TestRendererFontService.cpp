@@ -7,6 +7,7 @@
 #include <AK/Atomic.h>
 #include <LibCore/EventLoop.h>
 #include <LibGfx/Font/Font.h>
+#include <LibGfx/Font/SharedFontProvider.h>
 #include <LibGfx/Font/SystemFallbackFonts.h>
 #include <LibTest/TestCase.h>
 #include <LibThreading/Thread.h>
@@ -41,6 +42,7 @@ RenderSideFontService& render_side_font_service()
         auto font_service = WebView::FontService::create({});
         auto connection = MUST(WebView::RendererFontServiceConnection::create(*font_service));
         auto client = MUST(WebView::RendererFontService::create(connection->take_transport_handle()));
+        Gfx::install_render_side_font_broker(*client);
         Gfx::install_render_side_system_fallback_font_service(move(client));
         return new RenderSideFontService { move(font_service), move(connection) };
     }();
@@ -122,4 +124,67 @@ TEST_CASE(render_side_hits_and_misses_run_on_several_threads_at_once)
     for (auto const* answer : warm_answers)
         EXPECT_EQ(answer, warm_font);
     EXPECT_EQ(Gfx::system_fallback_font_cache_size(), 1u + first_code_points.size() + second_code_points.size());
+}
+
+// A catalog face carries a face id and no font data, so the first use of any system family has to
+// ask the font service to open the file. That question used to go out on the document thread's own
+// connection, which is the one a render pass must not touch.
+TEST_CASE(a_cold_family_lookup_from_another_thread_is_answered_while_the_main_thread_is_blocked)
+{
+    auto& installed = render_side_font_service();
+    EXPECT(Gfx::has_render_side_font_broker());
+
+    auto family = installed.font_service->resolve_generic_family("sans-serif"_string, 400, 0);
+    EXPECT(family.has_value());
+
+    // The provider's own callbacks stand for the document thread's connection: a question that
+    // takes them from inside a render-side scope is the regression this test is about.
+    IGNORE_USE_IN_ESCAPING_LAMBDA Atomic<u32> questions_on_the_document_connection { 0 };
+    auto make_provider = [&] {
+        auto catalog = MUST(installed.font_service->clone_catalog());
+        Gfx::SharedFontProviderCallbacks callbacks;
+        callbacks.open_font = [&](u64 generation, u64 face_id) {
+            questions_on_the_document_connection.fetch_add(1);
+            return installed.font_service->open_font(generation, face_id);
+        };
+        callbacks.match_font = [&](String const& family, u16 weight, u16 width, u8 slope) {
+            questions_on_the_document_connection.fetch_add(1);
+            return installed.font_service->match_font(family, weight, width, slope);
+        };
+        return MUST(Gfx::SharedFontProvider::create_from_catalog_file_or_empty(move(catalog.file), catalog.size, catalog.generation, move(callbacks)));
+    };
+
+    // The document thread's loop exists and is not running, exactly as it will be during a join.
+    Core::EventLoop event_loop;
+
+    IGNORE_USE_IN_ESCAPING_LAMBDA auto render_side_provider = make_provider();
+    IGNORE_USE_IN_ESCAPING_LAMBDA Atomic<u32> typefaces_seen { 0 };
+    IGNORE_USE_IN_ESCAPING_LAMBDA Atomic<u64> questions_the_scope_counted { 0 };
+
+    auto worker = Threading::Thread::construct("RenderSideFamilyMatch"sv, [&] {
+        Gfx::RenderSideFontScope scope;
+        render_side_provider->for_each_typeface_with_family_name(*family, [&](Gfx::Typeface const&) {
+            typefaces_seen.fetch_add(1);
+        });
+        questions_the_scope_counted.store(scope.questions_that_reached_the_document_thread());
+        return 0;
+    });
+    worker->start();
+    (void)worker->join();
+
+    // A machine with no sans-serif family at all cannot run this suite, so the lookup found faces,
+    // and every file it needed was opened without the main thread pumping anything.
+    EXPECT(typefaces_seen.load() > 0u);
+    EXPECT_EQ(questions_on_the_document_connection.load(), 0u);
+    EXPECT_EQ(questions_the_scope_counted.load(), 0u);
+
+    // The control: the same cold lookup outside a render-side scope still takes the callbacks, so
+    // the count above is zero because the broker answered, not because nothing was asked.
+    auto document_side_provider = make_provider();
+    u32 typefaces_seen_on_the_document_side = 0;
+    document_side_provider->for_each_typeface_with_family_name(*family, [&](Gfx::Typeface const&) {
+        ++typefaces_seen_on_the_document_side;
+    });
+    EXPECT_EQ(typefaces_seen_on_the_document_side, typefaces_seen.load());
+    EXPECT(questions_on_the_document_connection.load() > 0u);
 }
