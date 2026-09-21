@@ -6194,8 +6194,13 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         .stop_after_longhand_drive = stop_after_longhand_drive,
         .transaction_input = nullptr,
         .callback_context = &native_context,
-        .apply_animations = [](void* context_pointer, i8 in_display_none_subtree, bool should_measure_line_height, ComputedValuesFFI::FfiInputLineHeightMetrics* line_height_metrics, ComputedValuesFFI::FfiAnimationLengthContexts const* stage_length_contexts, bool* did_sample) -> ComputedValuesFFI::AnimatedOverlay* {
-            auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
+    };
+    // Reconciles the element's CSS animations against the plan the computation decided, collects
+    // the effects that remain and samples them into an animated overlay - for the elements whose
+    // animation state the style stage could not sample for itself. It runs once the stage has
+    // returned and handed the rest of the finalization back, rather than from inside it.
+    auto sample_animations_after_the_stage = [&native_context](i8 in_display_none_subtree, bool should_measure_line_height, ComputedValuesFFI::FfiInputLineHeightMetrics* line_height_metrics, ComputedValuesFFI::FfiAnimationLengthContexts const* stage_length_contexts, bool* did_sample) -> ComputedValuesFFI::AnimatedOverlay* {
+            auto& context = native_context;
             *did_sample = false;
             // Applying the plan the style computation decided has to happen before the effects are
             // collected, since an animation it starts composes into this very computation.
@@ -6255,8 +6260,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             context.style_computer->collect_animations_into(context.abstract_element, context.state->animation_effects.span(), computed_style, AnimationRefresh::No, stage_length_contexts);
             *line_height_metrics = input_line_height_metrics(computed_style, context.abstract_element, should_measure_line_height);
             return computed_style.prepare_animated_overlay_for_rust_finalization(
-                Badge<StyleComputer> {}, ComputedStyleWorkingSet::CreateAnimatedOverlay::No); },
-    };
+                Badge<StyleComputer> {}, ComputedStyleWorkingSet::CreateAnimatedOverlay::No); };
     // Whether the element has any transition or animation state for the row's results to act on.
     auto row_transition_or_animation_state_of = [](NativeComputePropertiesContext const& context, bool row_registers_transitions) {
         auto& element = context.abstract_element.element();
@@ -6378,6 +6382,19 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             element_declares_own_custom_properties);
     }
     auto finalization_result = ComputedValuesFFI::rust_finalize_longhand_transaction(&input, transaction_result);
+    if (finalization_result.needs_host_animation_sampling) {
+        bool did_sample = false;
+        ComputedValuesFFI::FfiInputLineHeightMetrics line_height_metrics {};
+        auto* overlay = sample_animations_after_the_stage(
+            finalization_result.animation_sampling_in_display_none_subtree,
+            finalization_result.animation_sampling_should_measure_line_height,
+            &line_height_metrics,
+            finalization_result.animation_sampling_length_contexts,
+            &did_sample);
+        finalization_result = ComputedValuesFFI::rust_finalize_longhand_transaction_after_animations(
+            &input, finalization_result.animation_sampling_storage, overlay, line_height_metrics, did_sample);
+        application_reaches_the_host = true;
+    }
     application_reaches_the_host |= finalization_result.animated_overlay != nullptr
         || finalization_result.applies_animation_plan_after_return;
     native_context.state->working_set->did_apply_style_finalization_from_rust(finalization_result.invalidated_longhands);

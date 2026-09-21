@@ -2726,7 +2726,8 @@ pub struct FfiLonghandFinalizationResult {
     pub invalidated_longhands: u16,
     // NB: Additive, and the only thing below this line: what the stage's own animation tail
     //     produced, for the post-stage `finish_properties` to install. `animated_overlay` is null
-    //     wherever the host's `apply_animations` ran instead, and then the other three say nothing.
+    //     wherever the host sampled the element after the stage returned instead, and then the
+    //     other three say nothing.
     pub animated_overlay: *mut AnimatedOverlay,
     pub depends_on_viewport_metrics: bool,
     pub font_metrics_depend_on_viewport_metrics: bool,
@@ -2762,7 +2763,7 @@ pub struct FfiLonghandFinalizationResult {
     pub animation_substituted_var: bool,
     /// NB: Additive, and the last thing on this result: the custom properties the stage's own
     ///     animation tail sampled, which the host writes into the working set as soon as the
-    ///     computation returns - where its own `apply_animations` would have written them - and
+    ///     computation returns - where the host's own sampling would have written them - and
     ///     then installs with the same `publish_animated_custom_properties` as before. Each row
     ///     lends one reference to the name and one to the value; the host takes its own of each
     ///     and gives the storage back with
@@ -2771,6 +2772,20 @@ pub struct FfiLonghandFinalizationResult {
     pub animated_custom_properties: *const FfiAnimatedCustomPropertyResult,
     pub animated_custom_property_count: usize,
     pub animated_custom_properties_storage: *mut c_void,
+    /// NB: Additive, and the last thing on this result: the stage could not sample this element's
+    ///     animations for itself, so the host samples them once this call has returned and then
+    ///     resumes the finalization with `rust_finalize_longhand_transaction_after_animations`.
+    ///     Nothing else on this result says anything while it is set, and the finalization is not
+    ///     finished until the resume returns.
+    pub needs_host_animation_sampling: bool,
+    pub animation_sampling_storage: *mut c_void,
+    /// Whether the element is in a `display: none` subtree, which decides whether an animation may
+    /// start at all: `0` or `1` for an answer the mirror could give, and a negative value where it
+    /// could not and the host has to walk the ancestors itself.
+    pub animation_sampling_in_display_none_subtree: i8,
+    pub animation_sampling_should_measure_line_height: bool,
+    /// Borrowed from `animation_sampling_storage`, and live until the resume takes it back.
+    pub animation_sampling_length_contexts: *const FfiAnimationLengthContexts,
 }
 
 /// One custom property the stage's animation tail animated: the host's `Utf16FlyString` in its raw
@@ -3011,7 +3026,7 @@ pub(crate) struct StageAnimationTail {
 /// The effects of one of an element's animation lists that the stage would sample, taken from the
 /// published timing rows and effect descriptions alone.
 ///
-/// A mirror of what `apply_animations` builds out of `get_animations_internal()` and what
+/// A mirror of what the host's sampling builds out of `get_animations_internal()` and what
 /// `collect_animation_effects_into()` then filters to its `active_effects`: the rows are published
 /// in composite order, so the walk takes them in order, skips the provisional duplicates the
 /// element's animation list does not hold, keeps the relevant ones, and drops the ones whose
@@ -3377,7 +3392,7 @@ fn starting_animations<'a>(
 /// Samples the element's animations onto an overlay of the stage's own, for the elements whose
 /// whole animation state the published facts describe: no plan to apply, every effect described,
 /// and a batch whose values depend on nothing outside what the drive already resolved. `None`
-/// wherever any of that fails, and then the host's `apply_animations` runs as before.
+/// wherever any of that fails, and then the host samples the element once the stage has returned.
 ///
 /// # Safety
 /// Every pointer in `input` and `drive_input` must be live for the call, and `existing_overlay`
@@ -3971,22 +3986,6 @@ pub struct FfiComputePropertiesInput {
     pub stop_after_longhand_drive: bool,
     pub transaction_input: *const FfiLonghandTransactionInput,
     pub callback_context: *mut c_void,
-    /// Reconciles the element's CSS animations against the plan the computation decided, collects
-    /// the effects that remain and samples them into an animated overlay.
-    ///
-    /// The second argument answers whether the element is in a `display: none` subtree, which
-    /// decides whether an animation may start at all: `0` or `1` for an answer the mirror could
-    /// give, and a negative value where it could not and the host has to walk the ancestors
-    /// itself. The last argument reports whether anything was sampled; where nothing was, the
-    /// overlay and the line height metrics the computation already holds stand.
-    pub apply_animations: unsafe extern "C" fn(
-        *mut c_void,
-        i8,
-        bool,
-        *mut FfiInputLineHeightMetrics,
-        *const FfiAnimationLengthContexts,
-        *mut bool,
-    ) -> *mut AnimatedOverlay,
 }
 
 /// Document-level inputs to used color-scheme resolution. Scheme values use
@@ -7088,279 +7087,46 @@ pub unsafe extern "C" fn rust_set_longhand_animation_custom_property_environment
     };
 }
 
-/// Resumes the animation and finalization tail after native code has consumed
-/// the base longhand result.
+/// What a computation still has to do once its animations have been sampled, kept where the host
+/// can wait on it. Plain data: nothing in it borrows the stage's state.
+struct PendingAnimationSampling {
+    invalidated_longhands: u16,
+    animated_overlay: *mut AnimatedOverlay,
+    parent_text_align_input_is_animated: bool,
+    finalization_line_height_metrics: FfiInputLineHeightMetrics,
+    animation_length_contexts: FfiAnimationLengthContexts,
+    legacy_font: LegacyFontBuildState,
+    /// What the host's own sampling has to be told, answered while the stage still had the facts.
+    in_display_none_subtree: i8,
+    should_measure_line_height: bool,
+}
+
+/// Everything a longhand finalization does once the element's animations have been sampled -
+/// whether the stage sampled them itself or the host did after the stage returned.
 ///
 /// # Safety
-/// `input` and `transaction.storage` must describe the same live transaction.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_finalize_longhand_transaction(
-    input: *const FfiComputePropertiesInput,
-    transaction: FfiLonghandTransactionResult,
+/// Every pointer in `input` and in `input.transaction_input` must be live for the call.
+unsafe fn finish_longhand_finalization(
+    input: &FfiComputePropertiesInput,
+    state: PendingAnimationSampling,
+    animation_values_applied: bool,
+    used_animation_host_call: bool,
+    mut stage_animation_tail: Option<StageAnimationTail>,
+    applies_animation_plan_after_return: bool,
 ) -> FfiLonghandFinalizationResult {
-    let input = unsafe { &*input };
     let drive_input = unsafe { &*input.transaction_input };
     let style_engine = unsafe { &mut *input.style_engine.cast_mut().cast::<crate::css::style::StyleEngine>() };
-    let continuation = unsafe { Box::from_raw(transaction.storage.cast::<LonghandTransactionContinuation>()) };
-    let LonghandTransactionContinuation {
-        drive_result,
-        mut finalization_line_height_metrics,
-        has_animation_definitions,
-        a_definition_starts_an_animation,
-        plan_would_change_nothing,
-        mut animated_overlay,
-        mut animation_values_applied,
+    let PendingAnimationSampling {
+        mut invalidated_longhands,
+        animated_overlay,
         parent_text_align_input_is_animated,
-        mut animation_length_contexts,
+        finalization_line_height_metrics,
+        animation_length_contexts,
         legacy_font,
-        inherited_animated_overlay: _inherited_animated_overlay,
-        starting_definitions,
-        animation_plan_new_indices,
-        keyframe_retimed_definitions,
-        animation_custom_property_environments,
-    } = *continuation;
-    // NB: The root element's own computation refreshes the host's root font metrics in the callback
-    //     that applies the drive result, which runs between the drive and this tail - so the
-    //     contexts take the published row here, where the host would read its member, and not where
-    //     the drive built them.
-    animation_length_contexts.settle(
-        style_engine.root_element_font_metrics(),
-        crate::css::style::tree::StyleNodeID::from_raw(input.style_node).is_some_and(|node| {
-            style_engine.element_adjustment_facts(node)
-                & crate::css::style::bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT
-                != 0
-        }),
-        drive_result.driver_results.font_metrics_depend_on_viewport_metrics,
-    );
-    unsafe { destroy_style_computation_result(&drive_result) };
-    if input.stop_after_longhand_drive {
-        unsafe { &mut *drive_input.longhand_table }.freeze();
-        return FfiLonghandFinalizationResult {
-            parent_style_in_display_none_subtree: false,
-            invalidated_longhands: 0,
-            animated_overlay: std::ptr::null_mut(),
-            depends_on_viewport_metrics: false,
-            font_metrics_depend_on_viewport_metrics: false,
-            keyframes_inherited_non_inherited_style_groups: 0,
-            applies_animation_plan_after_return: false,
-            animation_subject_depends_on_size_container_query: false,
-            animation_width_size_query_container: 0,
-            animation_height_size_query_container: 0,
-            animation_width_size_query_container_has_no_box: false,
-            animation_height_size_query_container_has_no_box: false,
-            animation_uses_tree_counting_function: false,
-            animation_substituted_var: false,
-            animated_custom_properties: std::ptr::null(),
-            animated_custom_property_count: 0,
-            animated_custom_properties_storage: std::ptr::null_mut(),
-        };
-    }
-    let mut invalidated_longhands = 0;
+        in_display_none_subtree: _,
+        should_measure_line_height: _,
+    } = state;
     let parent_snapshot = retained_inheritance_parent_snapshot(style_engine, input);
-
-    // OPTIMIZATION: An element with no plan to apply and nothing relevant to sample has nothing for
-    //               the animation stage to do. The published per-element fact answers the weaker
-    //               question of whether the element has any animation at all, and stands in
-    //               wherever the timing rows decline to answer the exact one.
-    let element_has_associated_animations = match crate::css::style::tree::StyleNodeID::from_raw(input.style_node) {
-        Some(node) => {
-            style_engine.element_adjustment_facts(node)
-                & crate::css::style::bridge::element_adjustment_fact::HAS_ANIMATIONS
-                != 0
-        }
-        // An element the mirror does not name is one nothing is published about, so it asks the host.
-        None => true,
-    };
-    // The plan has to reach the host's objects whenever it has any work: a definition to retime or
-    // to start, or an animation no definition claimed and that must therefore be cancelled.
-    // NB: The host's own flag is sticky and shared by every pseudo-element slot - it says the
-    //     element has held a CSS-defined animation at some point, not that it holds one now - so an
-    //     element whose animations have all ended would claim a plan forever. The names published
-    //     for the slot are the list the plan actually works on, and an empty one leaves it nothing
-    //     to retime and nothing to cancel.
-    let element_has_css_defined_animations = match crate::css::style::tree::StyleNodeID::from_raw(input.style_node) {
-        Some(node) => !style_engine
-            .element_css_defined_animations(node, animation_slot(input.pseudo_kind))
-            .is_empty(),
-        None => input.has_css_defined_animations,
-    };
-    let plan_has_entries = has_animation_definitions || element_has_css_defined_animations;
-    // Whether a definition may start an animation is asked before the post-compute adjustments are
-    // undone, since the element's own display is one of the values such an adjustment can change.
-    let in_display_none_subtree = match plan_has_entries {
-        true => in_display_none_subtree_for_animations(
-            input,
-            drive_input,
-            animated_overlay,
-            a_definition_starts_an_animation,
-            style_engine,
-        ),
-        false => -1,
-    };
-    // A plan whose every definition would start an animation that the element is too unrendered to
-    // start, and that holds no existing animation to retime or to cancel, leaves nothing behind: it
-    // creates nothing, sets the element's animation list to the empty list it already was, and
-    // republishes the timing rows that are already published. Nothing about the element changes, so
-    // the stage may sample it for itself as if there were no plan at all.
-    // NB: An empty published list is also what an unknown pseudo-element slot has, and there the
-    //     host's plan returns before it does anything at all - inert either way.
-    let plan_is_inert = plan_would_change_nothing
-        || (has_animation_definitions && !element_has_css_defined_animations && in_display_none_subtree == 1);
-    let plan_has_work = plan_has_entries && !plan_is_inert;
-    // A plan whose whole effect on the element's animations is the cancelling and renumbering the
-    // drive's table describes is one the stage can sample around: the rows it samples are the
-    // published ones adjusted for it, and the plan itself rides back to the host to be applied as
-    // soon as this call returns, before anything downstream can see the element's animations.
-    let planned_animation_rows = match plan_has_work {
-        true => crate::css::style::tree::StyleNodeID::from_raw(input.style_node)
-            .zip(animation_plan_new_indices.as_ref())
-            .and_then(|(node, new_indices)| {
-                let slot = animation_slot(input.pseudo_kind);
-                crate::css::style::animations::rows_after_cancel_and_renumber(
-                    style_engine.element_animation_timing_rows(node, slot),
-                    node,
-                    slot,
-                    new_indices,
-                )
-            }),
-        false => None,
-    };
-    // What is left is whether the element has anything to sample, which is a question about the
-    // WAAPI timing model: an animation is relevant when its effect is current or in effect. Both
-    // are pure functions of the animation's timing and of the current time its timeline was sampled
-    // at when this style update began, and both are published, so the mirror answers it. `None`
-    // where a row declines to be decided, and then the published fact decides as before.
-    let element_has_relevant_effects = match plan_has_work {
-        true => None,
-        false => crate::css::style::tree::StyleNodeID::from_raw(input.style_node).and_then(|node| {
-            crate::css::style::animations::any_row_is_relevant(
-                style_engine.element_animation_timing_rows(node, animation_slot(input.pseudo_kind)),
-                style_engine.animation_timeline_samples(),
-            )
-        }),
-    };
-    let element_has_animation_state =
-        plan_has_work || element_has_relevant_effects.unwrap_or(element_has_associated_animations);
-    // The values an animation composes over are the ones the drive computed before its post-compute
-    // adjustments, so the adjustments are undone here and redone by the finalization below.
-    if animation_values_applied || element_has_animation_state {
-        let invalidated = unsafe { restore_post_compute_values(&mut *drive_input.longhand_table, false) };
-        invalidated_longhands |= invalidated;
-    }
-    let mut stage_animation_tail = None;
-    let mut applies_animation_plan_after_return = false;
-    let mut used_animation_host_call = false;
-    if element_has_animation_state {
-        // A plan that starts animations is one the stage can sample around too: what each new
-        // animation would apply is a function of the definition just computed and of the
-        // `@keyframes` rule the host published, and creating it composes nothing else into this
-        // computation. The rows the new animations would publish join the ones the plan leaves
-        // behind, in composite order; the creation itself is left for the host to make after the
-        // stage has run.
-        let starting = match plan_has_work && !starting_definitions.is_empty() {
-            true => crate::css::style::tree::StyleNodeID::from_raw(input.style_node).and_then(|node| {
-                starting_animations(
-                    style_engine,
-                    input,
-                    node,
-                    animation_slot(input.pseudo_kind),
-                    &starting_definitions,
-                    in_display_none_subtree,
-                )
-            }),
-            false => None,
-        };
-        // The rows the element would hold once the whole plan has been applied: the published ones
-        // cancelled and renumbered, with the starting animations' own rows merged in.
-        let merged_animation_rows = match (&planned_animation_rows, &starting) {
-            (Some(planned), Some(starting)) => Some(crate::css::style::animations::rows_with_synthesized(
-                planned,
-                &starting.rows,
-            )),
-            (None, _) => None,
-            (Some(_), None) => None,
-        };
-        let planned_rows = match &merged_animation_rows {
-            Some(rows) => Some(rows.as_slice()),
-            None => planned_animation_rows.as_deref(),
-        };
-        // A plan that only gives an animation another `@keyframes` rule is one the stage can sample
-        // around as well: the animation keeps its row, its identity and its place, and only the
-        // rule the stage resolves its declarations from changes. The swap itself rides back to the
-        // host with the rest of the plan.
-        let keyframe_retimes = match plan_has_work && !keyframe_retimed_definitions.is_empty() {
-            true => crate::css::style::tree::StyleNodeID::from_raw(input.style_node).and_then(|node| {
-                keyframe_retimed_definitions
-                    .iter()
-                    .map(|retimed| {
-                        Some(KeyframeRetime {
-                            animation_index: retimed.animation_index,
-                            retiming_definition: retimed.row_is_retimed.then_some(retimed.definition),
-                            keyframes: match retimed.definition.keyframe_set.is_null() {
-                                true => None,
-                                false => Some(definition_keyframes(style_engine, input, node, &retimed.definition)?),
-                            },
-                        })
-                    })
-                    .collect::<Option<Vec<_>>>()
-            }),
-            false => Some(Vec::new()),
-        };
-        // A plan the stage could not describe in full - a start it cannot settle, an animation it
-        // cannot renumber, a keyframe set it cannot find - is one the host applies and samples as
-        // before.
-        let plan_is_described = planned_rows.is_some()
-            && (starting_definitions.is_empty() || starting.is_some())
-            && keyframe_retimes.is_some();
-        stage_animation_tail = match plan_has_work && !plan_is_described {
-            true => None,
-            false => unsafe {
-                try_stage_animation_tail(
-                    style_engine,
-                    input,
-                    drive_input,
-                    &animation_length_contexts,
-                    animated_overlay,
-                    &PlannedAnimations {
-                        rows: planned_rows,
-                        starting: starting.as_ref(),
-                        keyframe_retimes: keyframe_retimes.as_deref().unwrap_or_default(),
-                    },
-                    animation_custom_property_environments,
-                )
-            },
-        };
-        applies_animation_plan_after_return = plan_has_work && stage_animation_tail.is_some();
-        if let Some(tail) = &stage_animation_tail {
-            animated_overlay = tail.overlay;
-            // The host measures the finalization's input line height after sampling; the tail only
-            // runs for an element that needs no measurement, where the host writes zeroes.
-            finalization_line_height_metrics = FfiInputLineHeightMetrics {
-                current_line_height: 0.0,
-                minimum_line_height: 0.0,
-            };
-        } else {
-            used_animation_host_call = true;
-            let mut animation_stage_sampled = false;
-            let overlay = unsafe {
-                crate::css::style::seal::note_host_call("computed_properties.apply_animations");
-                (input.apply_animations)(
-                    input.callback_context,
-                    in_display_none_subtree,
-                    (&*drive_input.environment).box_type_input.check_input_line_height,
-                    &raw mut finalization_line_height_metrics,
-                    &raw const animation_length_contexts,
-                    &raw mut animation_stage_sampled,
-                )
-            };
-            if animation_stage_sampled {
-                animated_overlay = overlay;
-            }
-        }
-        // The adjustments have been undone, so the finalization has to redo them whether or not the
-        // stage found anything to sample.
-        animation_values_applied = true;
-    }
 
     if parent_text_align_input_is_animated && !animation_values_applied {
         let invalidated = unsafe { restore_post_compute_values(&mut *drive_input.longhand_table, true) };
@@ -7474,6 +7240,374 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
         animated_custom_properties,
         animated_custom_property_count,
         animated_custom_properties_storage,
+        needs_host_animation_sampling: false,
+        animation_sampling_storage: std::ptr::null_mut(),
+        animation_sampling_in_display_none_subtree: -1,
+        animation_sampling_should_measure_line_height: false,
+        animation_sampling_length_contexts: std::ptr::null(),
+    }
+}
+
+/// Resumes the finalization of a computation whose animations the host sampled after the stage
+/// returned. `sampled_overlay` and `line_height_metrics` are what the sampling produced, and say
+/// nothing unless `did_sample`.
+///
+/// # Safety
+/// `input` must describe the same live computation as the call that asked for the sampling, and
+/// `storage` must be that call's `animation_sampling_storage`, which this consumes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_finalize_longhand_transaction_after_animations(
+    input: *const FfiComputePropertiesInput,
+    storage: *mut c_void,
+    sampled_overlay: *mut AnimatedOverlay,
+    line_height_metrics: FfiInputLineHeightMetrics,
+    did_sample: bool,
+) -> FfiLonghandFinalizationResult {
+    let input = unsafe { &*input };
+    let mut state = unsafe { *Box::from_raw(storage.cast::<PendingAnimationSampling>()) };
+    // Where nothing was sampled, the overlay and the line height metrics the computation already
+    // held stand, exactly as they did when the host answered from inside the stage.
+    if did_sample {
+        state.animated_overlay = sampled_overlay;
+        state.finalization_line_height_metrics = line_height_metrics;
+    }
+    unsafe { finish_longhand_finalization(input, state, true, true, None, false) }
+}
+
+/// Resumes the animation and finalization tail after native code has consumed
+/// the base longhand result.
+///
+/// # Safety
+/// `input` and `transaction.storage` must describe the same live transaction.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_finalize_longhand_transaction(
+    input: *const FfiComputePropertiesInput,
+    transaction: FfiLonghandTransactionResult,
+) -> FfiLonghandFinalizationResult {
+    let input = unsafe { &*input };
+    let drive_input = unsafe { &*input.transaction_input };
+    let style_engine = unsafe { &mut *input.style_engine.cast_mut().cast::<crate::css::style::StyleEngine>() };
+    let continuation = unsafe { Box::from_raw(transaction.storage.cast::<LonghandTransactionContinuation>()) };
+    let LonghandTransactionContinuation {
+        drive_result,
+        mut finalization_line_height_metrics,
+        has_animation_definitions,
+        a_definition_starts_an_animation,
+        plan_would_change_nothing,
+        mut animated_overlay,
+        mut animation_values_applied,
+        parent_text_align_input_is_animated,
+        mut animation_length_contexts,
+        legacy_font,
+        inherited_animated_overlay: _inherited_animated_overlay,
+        starting_definitions,
+        animation_plan_new_indices,
+        keyframe_retimed_definitions,
+        animation_custom_property_environments,
+    } = *continuation;
+    // NB: The root element's own computation refreshes the host's root font metrics in the callback
+    //     that applies the drive result, which runs between the drive and this tail - so the
+    //     contexts take the published row here, where the host would read its member, and not where
+    //     the drive built them.
+    animation_length_contexts.settle(
+        style_engine.root_element_font_metrics(),
+        crate::css::style::tree::StyleNodeID::from_raw(input.style_node).is_some_and(|node| {
+            style_engine.element_adjustment_facts(node)
+                & crate::css::style::bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT
+                != 0
+        }),
+        drive_result.driver_results.font_metrics_depend_on_viewport_metrics,
+    );
+    unsafe { destroy_style_computation_result(&drive_result) };
+    if input.stop_after_longhand_drive {
+        unsafe { &mut *drive_input.longhand_table }.freeze();
+        return FfiLonghandFinalizationResult {
+            parent_style_in_display_none_subtree: false,
+            invalidated_longhands: 0,
+            animated_overlay: std::ptr::null_mut(),
+            depends_on_viewport_metrics: false,
+            font_metrics_depend_on_viewport_metrics: false,
+            keyframes_inherited_non_inherited_style_groups: 0,
+            applies_animation_plan_after_return: false,
+            animation_subject_depends_on_size_container_query: false,
+            animation_width_size_query_container: 0,
+            animation_height_size_query_container: 0,
+            animation_width_size_query_container_has_no_box: false,
+            animation_height_size_query_container_has_no_box: false,
+            animation_uses_tree_counting_function: false,
+            animation_substituted_var: false,
+            animated_custom_properties: std::ptr::null(),
+            animated_custom_property_count: 0,
+            animated_custom_properties_storage: std::ptr::null_mut(),
+            needs_host_animation_sampling: false,
+            animation_sampling_storage: std::ptr::null_mut(),
+            animation_sampling_in_display_none_subtree: -1,
+            animation_sampling_should_measure_line_height: false,
+            animation_sampling_length_contexts: std::ptr::null(),
+        };
+    }
+    let mut invalidated_longhands = 0;
+
+    // OPTIMIZATION: An element with no plan to apply and nothing relevant to sample has nothing for
+    //               the animation stage to do. The published per-element fact answers the weaker
+    //               question of whether the element has any animation at all, and stands in
+    //               wherever the timing rows decline to answer the exact one.
+    let element_has_associated_animations = match crate::css::style::tree::StyleNodeID::from_raw(input.style_node) {
+        Some(node) => {
+            style_engine.element_adjustment_facts(node)
+                & crate::css::style::bridge::element_adjustment_fact::HAS_ANIMATIONS
+                != 0
+        }
+        // An element the mirror does not name is one nothing is published about, so it asks the host.
+        None => true,
+    };
+    // The plan has to reach the host's objects whenever it has any work: a definition to retime or
+    // to start, or an animation no definition claimed and that must therefore be cancelled.
+    // NB: The host's own flag is sticky and shared by every pseudo-element slot - it says the
+    //     element has held a CSS-defined animation at some point, not that it holds one now - so an
+    //     element whose animations have all ended would claim a plan forever. The names published
+    //     for the slot are the list the plan actually works on, and an empty one leaves it nothing
+    //     to retime and nothing to cancel.
+    let element_has_css_defined_animations = match crate::css::style::tree::StyleNodeID::from_raw(input.style_node) {
+        Some(node) => !style_engine
+            .element_css_defined_animations(node, animation_slot(input.pseudo_kind))
+            .is_empty(),
+        None => input.has_css_defined_animations,
+    };
+    let plan_has_entries = has_animation_definitions || element_has_css_defined_animations;
+    // Whether a definition may start an animation is asked before the post-compute adjustments are
+    // undone, since the element's own display is one of the values such an adjustment can change.
+    let in_display_none_subtree = match plan_has_entries {
+        true => in_display_none_subtree_for_animations(
+            input,
+            drive_input,
+            animated_overlay,
+            a_definition_starts_an_animation,
+            style_engine,
+        ),
+        false => -1,
+    };
+    // A plan whose every definition would start an animation that the element is too unrendered to
+    // start, and that holds no existing animation to retime or to cancel, leaves nothing behind: it
+    // creates nothing, sets the element's animation list to the empty list it already was, and
+    // republishes the timing rows that are already published. Nothing about the element changes, so
+    // the stage may sample it for itself as if there were no plan at all.
+    // NB: An empty published list is also what an unknown pseudo-element slot has, and there the
+    //     host's plan returns before it does anything at all - inert either way.
+    let plan_is_inert = plan_would_change_nothing
+        || (has_animation_definitions && !element_has_css_defined_animations && in_display_none_subtree == 1);
+    let plan_has_work = plan_has_entries && !plan_is_inert;
+    // A plan whose whole effect on the element's animations is the cancelling and renumbering the
+    // drive's table describes is one the stage can sample around: the rows it samples are the
+    // published ones adjusted for it, and the plan itself rides back to the host to be applied as
+    // soon as this call returns, before anything downstream can see the element's animations.
+    let planned_animation_rows = match plan_has_work {
+        true => crate::css::style::tree::StyleNodeID::from_raw(input.style_node)
+            .zip(animation_plan_new_indices.as_ref())
+            .and_then(|(node, new_indices)| {
+                let slot = animation_slot(input.pseudo_kind);
+                crate::css::style::animations::rows_after_cancel_and_renumber(
+                    style_engine.element_animation_timing_rows(node, slot),
+                    node,
+                    slot,
+                    new_indices,
+                )
+            }),
+        false => None,
+    };
+    // What is left is whether the element has anything to sample, which is a question about the
+    // WAAPI timing model: an animation is relevant when its effect is current or in effect. Both
+    // are pure functions of the animation's timing and of the current time its timeline was sampled
+    // at when this style update began, and both are published, so the mirror answers it. `None`
+    // where a row declines to be decided, and then the published fact decides as before.
+    let element_has_relevant_effects = match plan_has_work {
+        true => None,
+        false => crate::css::style::tree::StyleNodeID::from_raw(input.style_node).and_then(|node| {
+            crate::css::style::animations::any_row_is_relevant(
+                style_engine.element_animation_timing_rows(node, animation_slot(input.pseudo_kind)),
+                style_engine.animation_timeline_samples(),
+            )
+        }),
+    };
+    let element_has_animation_state =
+        plan_has_work || element_has_relevant_effects.unwrap_or(element_has_associated_animations);
+    // The values an animation composes over are the ones the drive computed before its post-compute
+    // adjustments, so the adjustments are undone here and redone by the finalization below.
+    if animation_values_applied || element_has_animation_state {
+        let invalidated = unsafe { restore_post_compute_values(&mut *drive_input.longhand_table, false) };
+        invalidated_longhands |= invalidated;
+    }
+    let mut stage_animation_tail = None;
+    let mut applies_animation_plan_after_return = false;
+    if element_has_animation_state {
+        // A plan that starts animations is one the stage can sample around too: what each new
+        // animation would apply is a function of the definition just computed and of the
+        // `@keyframes` rule the host published, and creating it composes nothing else into this
+        // computation. The rows the new animations would publish join the ones the plan leaves
+        // behind, in composite order; the creation itself is left for the host to make after the
+        // stage has run.
+        let starting = match plan_has_work && !starting_definitions.is_empty() {
+            true => crate::css::style::tree::StyleNodeID::from_raw(input.style_node).and_then(|node| {
+                starting_animations(
+                    style_engine,
+                    input,
+                    node,
+                    animation_slot(input.pseudo_kind),
+                    &starting_definitions,
+                    in_display_none_subtree,
+                )
+            }),
+            false => None,
+        };
+        // The rows the element would hold once the whole plan has been applied: the published ones
+        // cancelled and renumbered, with the starting animations' own rows merged in.
+        let merged_animation_rows = match (&planned_animation_rows, &starting) {
+            (Some(planned), Some(starting)) => Some(crate::css::style::animations::rows_with_synthesized(
+                planned,
+                &starting.rows,
+            )),
+            (None, _) => None,
+            (Some(_), None) => None,
+        };
+        let planned_rows = match &merged_animation_rows {
+            Some(rows) => Some(rows.as_slice()),
+            None => planned_animation_rows.as_deref(),
+        };
+        // A plan that only gives an animation another `@keyframes` rule is one the stage can sample
+        // around as well: the animation keeps its row, its identity and its place, and only the
+        // rule the stage resolves its declarations from changes. The swap itself rides back to the
+        // host with the rest of the plan.
+        let keyframe_retimes = match plan_has_work && !keyframe_retimed_definitions.is_empty() {
+            true => crate::css::style::tree::StyleNodeID::from_raw(input.style_node).and_then(|node| {
+                keyframe_retimed_definitions
+                    .iter()
+                    .map(|retimed| {
+                        Some(KeyframeRetime {
+                            animation_index: retimed.animation_index,
+                            retiming_definition: retimed.row_is_retimed.then_some(retimed.definition),
+                            keyframes: match retimed.definition.keyframe_set.is_null() {
+                                true => None,
+                                false => Some(definition_keyframes(style_engine, input, node, &retimed.definition)?),
+                            },
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()
+            }),
+            false => Some(Vec::new()),
+        };
+        // A plan the stage could not describe in full - a start it cannot settle, an animation it
+        // cannot renumber, a keyframe set it cannot find - is one the host applies and samples as
+        // before.
+        let plan_is_described = planned_rows.is_some()
+            && (starting_definitions.is_empty() || starting.is_some())
+            && keyframe_retimes.is_some();
+        stage_animation_tail = match plan_has_work && !plan_is_described {
+            true => None,
+            false => unsafe {
+                try_stage_animation_tail(
+                    style_engine,
+                    input,
+                    drive_input,
+                    &animation_length_contexts,
+                    animated_overlay,
+                    &PlannedAnimations {
+                        rows: planned_rows,
+                        starting: starting.as_ref(),
+                        keyframe_retimes: keyframe_retimes.as_deref().unwrap_or_default(),
+                    },
+                    animation_custom_property_environments,
+                )
+            },
+        };
+        applies_animation_plan_after_return = plan_has_work && stage_animation_tail.is_some();
+        if let Some(tail) = &stage_animation_tail {
+            animated_overlay = tail.overlay;
+            // The host measures the finalization's input line height after sampling; the tail only
+            // runs for an element that needs no measurement, where the host writes zeroes.
+            finalization_line_height_metrics = FfiInputLineHeightMetrics {
+                current_line_height: 0.0,
+                minimum_line_height: 0.0,
+            };
+        } else {
+            // The stage could not sample this element for itself. Rather than reaching for the host
+            // from inside the computation, everything the finalization still has to do is handed
+            // back; the host samples the element's animations and resumes with
+            // `rust_finalize_longhand_transaction_after_animations`, which is the same shape the
+            // animation plan and the sampled custom properties already travel in.
+            //
+            // The sampling is still main-side work inside the style update, so it stays in the
+            // census as a row of its own: what leaves is the callback out of sealed computation,
+            // not the work.
+            crate::css::style::seal::note_host_sampled_animation_row();
+            let pending = Box::into_raw(Box::new(PendingAnimationSampling {
+                invalidated_longhands,
+                animated_overlay,
+                parent_text_align_input_is_animated,
+                finalization_line_height_metrics,
+                animation_length_contexts,
+                legacy_font,
+                in_display_none_subtree,
+                should_measure_line_height: unsafe { &*drive_input.environment }
+                    .box_type_input
+                    .check_input_line_height,
+            }));
+            // SAFETY: the box is live until the resume takes it back, and is never moved.
+            let (in_display_none_subtree, should_measure_line_height, length_contexts) = unsafe {
+                (
+                    (*pending).in_display_none_subtree,
+                    (*pending).should_measure_line_height,
+                    &raw const (*pending).animation_length_contexts,
+                )
+            };
+            return FfiLonghandFinalizationResult {
+                parent_style_in_display_none_subtree: false,
+                invalidated_longhands: 0,
+                animated_overlay: std::ptr::null_mut(),
+                depends_on_viewport_metrics: false,
+                font_metrics_depend_on_viewport_metrics: false,
+                keyframes_inherited_non_inherited_style_groups: 0,
+                applies_animation_plan_after_return: false,
+                animation_subject_depends_on_size_container_query: false,
+                animation_width_size_query_container: 0,
+                animation_height_size_query_container: 0,
+                animation_width_size_query_container_has_no_box: false,
+                animation_height_size_query_container_has_no_box: false,
+                animation_uses_tree_counting_function: false,
+                animation_substituted_var: false,
+                animated_custom_properties: std::ptr::null(),
+                animated_custom_property_count: 0,
+                animated_custom_properties_storage: std::ptr::null_mut(),
+                needs_host_animation_sampling: true,
+                animation_sampling_storage: pending.cast(),
+                animation_sampling_in_display_none_subtree: in_display_none_subtree,
+                animation_sampling_should_measure_line_height: should_measure_line_height,
+                animation_sampling_length_contexts: length_contexts,
+            };
+        }
+        // The adjustments have been undone, so the finalization has to redo them whether or not the
+        // stage found anything to sample.
+        animation_values_applied = true;
+    }
+    unsafe {
+        finish_longhand_finalization(
+            input,
+            PendingAnimationSampling {
+                invalidated_longhands,
+                animated_overlay,
+                parent_text_align_input_is_animated,
+                finalization_line_height_metrics,
+                animation_length_contexts,
+                legacy_font,
+                in_display_none_subtree,
+                should_measure_line_height: false,
+            },
+            animation_values_applied,
+            // The host only ever samples this element after the stage has returned, so a
+            // computation that reaches here sampled for itself or had nothing to sample.
+            false,
+            stage_animation_tail,
+            applies_animation_plan_after_return,
+        )
     }
 }
 
