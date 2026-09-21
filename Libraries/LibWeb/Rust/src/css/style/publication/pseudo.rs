@@ -198,8 +198,11 @@ impl RetainedState {
             None => false,
         };
         let facts = self.computed_group_sets.adjustment_facts(node) & PSEUDO_ELEMENT_ADJUSTMENT_FACTS;
+        // A pseudo-element resolves a font cascade of its own, so its originating inputs moved
+        // when the element's font environment did, exactly as when the root's font inputs did.
         let originating_inputs_unchanged = inherited_inputs_unchanged
             && !scratch.root_font_inputs_changed
+            && !scratch.font_environment_moved
             && old_element_record.is_some_and(|old| {
                 let Some(old_view) = self.computed_group_sets.style_record_view(old.raw()) else {
                     return false;

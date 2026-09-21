@@ -2063,9 +2063,14 @@ impl StyleEngineState {
                     const DERIVABLE_REACTIONS: u8 = transaction::STYLE_REACTION_RECOMPUTE_STYLE
                         | transaction::STYLE_REACTION_INHERITED_STYLE
                         | transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES;
-                    let reaction_is_settleable =
-                        reaction & !(transaction::STYLE_REACTION_PUBLISHED_STYLE | DERIVABLE_REACTIONS) == 0
-                            && !(reaction & DERIVABLE_REACTIONS != 0 && style_input_nodes_for_cpp.contains(&node));
+                    // A font-environment reaction is the engine's too: the `@font-face` table it
+                    // resolves against is a published input now, and a record from an older
+                    // font-environment generation is already one the engine refuses to reuse.
+                    const SETTLEABLE_REACTIONS: u8 = transaction::STYLE_REACTION_PUBLISHED_STYLE
+                        | transaction::STYLE_REACTION_FONT_INPUTS_CHANGED
+                        | DERIVABLE_REACTIONS;
+                    let reaction_is_settleable = reaction & !SETTLEABLE_REACTIONS == 0
+                        && !(reaction & DERIVABLE_REACTIONS != 0 && style_input_nodes_for_cpp.contains(&node));
                     let mut parent_inputs_moved =
                         parked_parent_inputs
                             .or(prepared_parent_inputs)
@@ -2166,6 +2171,11 @@ impl StyleEngineState {
                                         && flipped_rules.iter().all(|delta| {
                                             self.retained.program.declarations_are_complete_for(delta.rule)
                                         })));
+                            // The element's font environment moved: its record resolves a font
+                            // cascade out of the published `@font-face` table, and that table is
+                            // not the one the record holds.
+                            engine_computed_record_scratch.font_environment_moved =
+                                reaction & transaction::STYLE_REACTION_FONT_INPUTS_CHANGED != 0;
                             self.engine_computed_record_delta(
                                 node,
                                 answer_winners_are_complete,

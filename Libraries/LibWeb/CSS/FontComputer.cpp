@@ -491,7 +491,10 @@ static void record_font_input_change(DOM::Element& element)
     if (auto* record = element.style_input_record())
         record->font_environment_changed = true;
     constexpr u8 font_group = 1u << ComputedValues::FontValues::style_group_index;
-    element.document().style_computer().style_engine().record_element_style_input_change(
+    // Derived, not recorded: this is not C++ asking for a computation only it can do. The change
+    // is to the published `@font-face` table, which the engine holds and versions, so the engine
+    // settles the element's record itself wherever the rest of its reaction lets it.
+    element.document().style_computer().style_engine().record_derived_element_style_input_change(
         element.style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle | StyleEngine::FontInputsChanged, font_group);
 }
 

@@ -27,14 +27,20 @@
         internals.updateStyle();
 
         internals.resetStyleInvalidationCounters();
+        const engineRecordsBefore = internals.styleEngineCounters().engineComputedRecordDeltas;
         const regularFace = new FontFace("WeightSpecific", 'url("../../../Assets/HashSansNoSpace.woff")', { weight: "400" });
         document.fonts.add(regularFace);
         await regularFace.load();
         internals.updateStyle();
 
+        // A font-environment reaction is settled by the style engine where it can be and by C++
+        // otherwise, so count both: what this test is about is how many elements were recomputed,
+        // not which side recomputed them.
         const counters = internals.getStyleInvalidationCounters();
-        println(`affected weight recomputed: ${counters.elementStyleRecomputations > 0}`);
-        println(`unaffected weights skipped: ${counters.elementStyleRecomputations < 10}`);
+        const engineRecords = internals.styleEngineCounters().engineComputedRecordDeltas - engineRecordsBefore;
+        const recomputed = counters.elementStyleRecomputations + engineRecords;
+        println(`affected weight recomputed: ${recomputed > 0}`);
+        println(`unaffected weights skipped: ${recomputed < 10}`);
         println(`regular face loaded: ${regularFace.status}`);
     });
 </script>

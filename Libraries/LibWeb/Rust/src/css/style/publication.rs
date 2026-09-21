@@ -504,8 +504,13 @@ impl RetainedState {
         // pseudo-element, and a hint mapped from another element's attributes moves without
         // anything recorded on the element.
         let facts = self.computed_group_sets.adjustment_facts(node);
-        let root_inputs_moved =
-            scratch.root_font_inputs_changed && facts & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT == 0;
+        // Either the root's font inputs moved under this element, or the element's own font
+        // environment did: a face its cascade names became available or failed. The winners are
+        // the same either way, so nothing else below would notice, and the record has to be
+        // driven again in full rather than stand.
+        let font_inputs_moved = (scratch.root_font_inputs_changed
+            && facts & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT == 0)
+            || scratch.font_environment_moved;
         if facts
             & (bridge::element_adjustment_fact::HAS_ANIMATIONS
                 | bridge::element_adjustment_fact::IS_SHADOW_HOST_PSEUDO_ELEMENT
@@ -549,7 +554,7 @@ impl RetainedState {
                 self.winner_groups.semantic_delta(Some(previous_state), state)
             }
             None if winners_unchanged
-                && (parent_inputs_moved.any() || root_inputs_moved || scratch.document_environment_moved) =>
+                && (parent_inputs_moved.any() || font_inputs_moved || scratch.document_environment_moved) =>
             {
                 self.winner_groups.semantic_delta(Some(state), state)
             }
@@ -631,7 +636,7 @@ impl RetainedState {
             // does not say which parent display it was transformed under, and a winner's own
             // value may read the parent (a relative length, an inherit keyword).
             if !parent_inputs_moved.any()
-                && !root_inputs_moved
+                && !font_inputs_moved
                 && !environment_moved_under_substitutions
                 && !scratch.document_environment_moved
             {
@@ -687,7 +692,7 @@ impl RetainedState {
         // takes the same route, as does a record whose parent inputs moved: the transformation
         // and the inheritance are part of the full drive.
         let full_drive = parent_inputs_moved.any()
-            || root_inputs_moved
+            || font_inputs_moved
             || environment_moved_under_substitutions
             || scratch.document_environment_moved
             || delta.properties().iter().any(|&property| {
@@ -4091,6 +4096,11 @@ pub(super) struct EngineComputedRecordScratch {
     /// through one while the values they computed to do not, so such a record is driven again in
     /// full rather than kept - and rather than handed back to C++.
     pub(super) document_environment_moved: bool,
+    /// An input to the record the step derives, set beside the node the flush is about to derive:
+    /// whether that element's font environment moved. It rides here rather than in the argument
+    /// list because the record loop is shared with four other lines of work. The flush assigns it
+    /// for every node it derives, and it is false for the whole of a flush that derives none.
+    pub(super) font_environment_moved: bool,
     pub(super) prepared_root_font: Option<(StyleNodeID, ParentInputsMoved, drive::FontDriveScratch)>,
     cohorts: HashMap<(u64, CascadeStateID, u32, RecordDeltaParent, u64, RootFontInputs), computed::FinalStyleRecordID>,
     computability: EngineComputabilityScratch,

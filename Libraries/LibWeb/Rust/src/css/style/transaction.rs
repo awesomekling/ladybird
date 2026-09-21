@@ -231,6 +231,11 @@ pub const STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES: u8 = 1 << 3;
 pub const STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES: u8 = 1 << 4;
 pub const STYLE_REACTION_ANCESTOR_BECAME_VISIBLE: u8 = 1 << 5;
 pub const STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED: u8 = 1 << 6;
+/// The element's font environment moved: a face it names became available, failed, or changed.
+/// What that changes about the element's style is the font cascade its record resolves, and the
+/// `@font-face` table that decides it is an engine input, versioned by the font-environment
+/// generation the engine already refuses to reuse a record across.
+pub const STYLE_REACTION_FONT_INPUTS_CHANGED: u8 = 1 << 7;
 
 impl InputKey {
     #[must_use]
