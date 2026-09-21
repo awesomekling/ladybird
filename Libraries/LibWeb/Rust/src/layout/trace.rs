@@ -16,8 +16,18 @@ type DescribeNode = unsafe extern "C" fn(*mut c_void, *mut c_void, AppendText);
 
 struct Trace {
     describe_node: DescribeNode,
-    text: String,
+    lines: Vec<Line>,
     depth: usize,
+}
+
+/// One traced event: what it says, and the node it names, if any. The node is named once the
+/// pass is over, since naming it can materialise its shell, which asks the document something.
+struct Line {
+    depth: usize,
+    prefix: &'static str,
+    owner: Option<NodeSlotId>,
+    owner_name: Option<String>,
+    text: String,
 }
 
 /// Observation belongs to the document, not to a single pass: geometry reads and
@@ -38,47 +48,97 @@ impl LayoutTrace {
         assert!(self.0.borrow().as_ref().is_none_or(|trace| trace.depth == 0));
         *self.0.borrow_mut() = Some(Trace {
             describe_node,
-            text: String::new(),
+            lines: Vec::new(),
             depth: 0,
         });
     }
 
-    fn take(&self) -> String {
+    fn take(&self, arena: &LayoutNodeArena) -> String {
+        self.name_owners(arena);
         let Some(trace) = self.0.borrow_mut().take() else {
             return String::new();
         };
         assert_eq!(trace.depth, 0, "incomplete layout trace");
-        trace.text
+        let mut text = String::new();
+        for line in trace.lines {
+            writeln!(
+                text,
+                "{}{}{}{}",
+                "  ".repeat(line.depth),
+                line.prefix,
+                line.owner_name.unwrap_or_default(),
+                line.text
+            )
+            .unwrap();
+        }
+        text
     }
 
-    fn scope(&self, label: impl FnOnce(DescribeNode) -> String) -> Option<Scope<'_>> {
+    /// Names the nodes the traced events name. This runs once a pass is over, while the nodes the
+    /// pass ran for are still live: a subsequent mutation may remove them or reuse their arena
+    /// slots before JavaScript takes the trace.
+    pub(super) fn name_owners(&self, arena: &LayoutNodeArena) {
+        let (describe, unnamed) = {
+            let state = self.0.borrow();
+            let Some(trace) = state.as_ref() else {
+                return;
+            };
+            let unnamed: Vec<(usize, NodeSlotId)> = trace
+                .lines
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| line.owner_name.is_none())
+                .filter_map(|(index, line)| line.owner.map(|owner| (index, owner)))
+                .collect();
+            (trace.describe_node, unnamed)
+        };
+        let names: Vec<(usize, String)> = unnamed
+            .into_iter()
+            .map(|(index, owner)| (index, owner_name(arena, owner, describe)))
+            .collect();
+        if let Some(trace) = self.0.borrow_mut().as_mut() {
+            for (index, name) in names {
+                trace.lines[index].owner_name = Some(name);
+            }
+        }
+    }
+
+    fn scope(
+        &self,
+        prefix: &'static str,
+        owner: Option<NodeSlotId>,
+        text: impl FnOnce() -> String,
+    ) -> Option<Scope<'_>> {
         let mut state = self.0.borrow_mut();
         let trace = state.as_mut()?;
-        // Resolve names while the run's nodes are live. A subsequent mutation may
-        // remove them or reuse their arena slots before JavaScript takes the trace.
-        writeln!(trace.text, "{}{}", "  ".repeat(trace.depth), label(trace.describe_node)).unwrap();
+        let depth = trace.depth;
+        trace.lines.push(Line {
+            depth,
+            prefix,
+            owner,
+            owner_name: None,
+            text: text(),
+        });
         trace.depth += 1;
         Some(Scope(self))
     }
 
-    pub(super) fn pass(&self, arena: &LayoutNodeArena, partial_root: Option<NodeSlotId>) -> Option<Scope<'_>> {
-        self.scope(|describe| match partial_root {
-            Some(root) => format!("layout PARTIAL {}", owner_name(arena, root, describe)),
-            None => "layout FULL".into(),
-        })
+    pub(super) fn pass(&self, partial_root: Option<NodeSlotId>) -> Option<Scope<'_>> {
+        match partial_root {
+            Some(root) => self.scope("layout PARTIAL ", Some(root), String::new),
+            None => self.scope("layout FULL", None, String::new),
+        }
     }
 
     pub(super) fn run(
         &self,
-        arena: &LayoutNodeArena,
         root: NodeSlotId,
         fc_type: FormattingContextType,
         purpose: LayoutPurpose,
         mode: LayoutMode,
         action: impl FnOnce() -> &'static str,
     ) -> Option<Scope<'_>> {
-        self.scope(|describe| {
-            let owner = owner_name(arena, root, describe);
+        self.scope("", Some(root), || {
             let context = match fc_type {
                 FormattingContextType::Block => "block",
                 FormattingContextType::Inline => "inline",
@@ -96,7 +156,7 @@ impl LayoutTrace {
                 (true, LayoutMode::Normal) => " (measurement)",
                 (true, LayoutMode::IntrinsicSizing) => " (measurement, intrinsic)",
             };
-            format!("{owner}/{context}{measurement} {}", action())
+            format!("/{context}{measurement} {}", action())
         })
     }
 }
@@ -146,7 +206,8 @@ pub unsafe extern "C" fn layout_arena_take_layout_trace(
     context: *mut c_void,
     append_text: AppendText,
 ) {
-    let text = unsafe { LayoutNodeArena::from_handle(arena) }.layout_trace.take();
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
+    let text = arena.layout_trace.take(arena);
     unsafe { append_text(context, text.as_ptr(), text.len()) };
 }
 
@@ -160,40 +221,43 @@ mod tests {
 
     #[test]
     fn disabled_trace_does_not_construct_labels() {
+        let arena = LayoutNodeArena::new();
         let trace = LayoutTrace::default();
-        assert!(trace.scope(|_| panic!("disabled observation")).is_none());
-        assert_eq!(trace.take(), "");
+        assert!(trace.scope("", None, || panic!("disabled observation")).is_none());
+        assert_eq!(trace.take(&arena), "");
     }
 
     #[test]
     fn preserves_nesting_repeated_runs_and_multiple_passes() {
+        let arena = LayoutNodeArena::new();
         let trace = LayoutTrace::default();
         trace.begin(unused_description);
         {
-            let _pass = trace.scope(|_| "layout FULL".into());
-            let _run = trace.scope(|_| "@viewport/block RUN (cache=bypass)".into());
+            let _pass = trace.scope("layout FULL", None, String::new);
+            let _run = trace.scope("", None, || "@viewport/block RUN (cache=bypass)".into());
             {
-                let _child = trace.scope(|_| "#child/block REUSE SUBTREE".into());
+                let _child = trace.scope("", None, || "#child/block REUSE SUBTREE".into());
             }
-            let _child = trace.scope(|_| "#child/block RUN (cache=miss)".into());
+            let _child = trace.scope("", None, || "#child/block RUN (cache=miss)".into());
         }
         {
-            let _pass = trace.scope(|_| "layout PARTIAL #boundary".into());
+            let _pass = trace.scope("layout PARTIAL ", None, || "#boundary".into());
         }
         assert_eq!(
-            trace.take(),
+            trace.take(&arena),
             "layout FULL\n  @viewport/block RUN (cache=bypass)\n    #child/block REUSE SUBTREE\n    #child/block RUN (cache=miss)\nlayout PARTIAL #boundary\n"
         );
-        assert!(trace.scope(|_| panic!("take must disable tracing")).is_none());
-        assert_eq!(trace.take(), "");
+        assert!(trace.scope("", None, || panic!("take must disable tracing")).is_none());
+        assert_eq!(trace.take(&arena), "");
     }
 
     #[test]
     fn begin_discards_previous_events() {
+        let arena = LayoutNodeArena::new();
         let trace = LayoutTrace::default();
         trace.begin(unused_description);
-        drop(trace.scope(|_| "old pass".into()));
+        drop(trace.scope("", None, || "old pass".into()));
         trace.begin(unused_description);
-        assert_eq!(trace.take(), "");
+        assert_eq!(trace.take(&arena), "");
     }
 }
