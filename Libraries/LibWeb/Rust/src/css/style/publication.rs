@@ -4963,16 +4963,6 @@ impl StyleEngineState {
 }
 
 impl StyleEngineState {
-    pub(super) fn refill_font_request(
-        &mut self,
-        node: StyleNodeID,
-        request: font_resolution::FontRequest,
-        service: font_resolution::FontService,
-        counters: &mut Counters,
-    ) {
-        self.refill_font_requests_for_service(vec![(node, request)], service, counters);
-    }
-
     pub(super) fn refill_font_requests(
         &mut self,
         requests: Vec<(StyleNodeID, font_resolution::FontRequest)>,
@@ -5140,7 +5130,10 @@ impl StyleEngineState {
                 return record;
             };
             suspended_memory.resize_required_to(&mut self.memory, scratch.font_drive.capacity_bytes());
-            self.refill_font_request(node, request, font_resolution::FontService::AncestorRetry, counters);
+            // C++ installs the earlier ancestor before making this retry, so requests from
+            // different retries cannot be known together. Use the shared batch service even
+            // though this dependency boundary limits the batch to one request.
+            self.refill_font_requests(vec![(node, request)], counters);
         }
     }
 }
