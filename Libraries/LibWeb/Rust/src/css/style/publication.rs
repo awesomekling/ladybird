@@ -555,7 +555,10 @@ impl RetainedState {
                 self.winner_groups.semantic_delta(Some(previous_state), state)
             }
             None if winners_unchanged
-                && (parent_inputs_moved.any() || font_inputs_moved || scratch.document_environment_moved) =>
+                && (parent_inputs_moved.any()
+                    || font_inputs_moved
+                    || scratch.document_environment_moved
+                    || scratch.recompute_in_full) =>
             {
                 self.winner_groups.semantic_delta(Some(state), state)
             }
@@ -646,6 +649,7 @@ impl RetainedState {
                 && !font_inputs_moved
                 && !environment_moved_under_substitutions
                 && !scratch.document_environment_moved
+                && !scratch.recompute_in_full
             {
                 // A declaration in an inherited payload group does not prove that the other
                 // properties in that group still inherit from the current parent. Re-drive the
@@ -702,6 +706,7 @@ impl RetainedState {
             || font_inputs_moved
             || environment_moved_under_substitutions
             || scratch.document_environment_moved
+            || scratch.recompute_in_full
             || delta.properties().iter().any(|&property| {
                 !property_computes_in_remaining_phase(property) || property_feeds_box_type_transformation(property)
             });
@@ -4313,6 +4318,9 @@ pub(super) struct EngineComputedRecordScratch {
     /// list because the record loop is shared with four other lines of work. The flush assigns it
     /// for every node it derives, and it is false for the whole of a flush that derives none.
     pub(super) font_environment_moved: bool,
+    /// Set the same way: whether the reaction drives the element's record again in full whatever
+    /// its winners did, for inputs the winners do not show.
+    pub(super) recompute_in_full: bool,
     pub(super) prepared_root_font: Option<(StyleNodeID, ParentInputsMoved, drive::FontDriveScratch)>,
     cohorts: HashMap<RecordCohortKey, RecordCohortValue>,
     computability: EngineComputabilityScratch,

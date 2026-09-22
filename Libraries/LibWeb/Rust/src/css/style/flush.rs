@@ -2088,10 +2088,13 @@ impl StyleEngineState {
                         | transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES;
                     // A font-environment reaction is the engine's too: the `@font-face` table it
                     // resolves against is a published input now, and a record from an older
-                    // font-environment generation is already one the engine refuses to reuse.
+                    // font-environment generation is already one the engine refuses to reuse. So is
+                    // a descendant recompute: C++ answers it with a full recompute, and so does the
+                    // engine (see `recompute_in_full`).
                     const SETTLEABLE_REACTIONS: u8 = transaction::STYLE_REACTION_PUBLISHED_STYLE
                         | transaction::STYLE_REACTION_FONT_INPUTS_CHANGED
-                        | DERIVABLE_REACTIONS;
+                        | DERIVABLE_REACTIONS
+                        | transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES;
                     let reaction_is_settleable = reaction & !SETTLEABLE_REACTIONS == 0
                         && !(reaction & DERIVABLE_REACTIONS != 0 && style_input_nodes_for_cpp.contains(&node));
                     let mut parent_inputs_moved =
@@ -2210,14 +2213,20 @@ impl StyleEngineState {
                             // not the one the record holds.
                             engine_computed_record_scratch.font_environment_moved =
                                 reaction & transaction::STYLE_REACTION_FONT_INPUTS_CHANGED != 0;
-                            self.engine_computed_record_delta(
+                            // A descendant recompute stands for inputs no winner shows: the root's
+                            // font metrics, an ancestor's direction, writing mode or container type.
+                            engine_computed_record_scratch.recompute_in_full =
+                                reaction & transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES != 0;
+                            let delta = self.engine_computed_record_delta(
                                 node,
                                 answer_winners_are_complete,
                                 winners_are_exact.then_some(flipped),
                                 parent_inputs_moved,
                                 &mut engine_computed_record_scratch,
                                 counters,
-                            )
+                            );
+                            engine_computed_record_scratch.recompute_in_full = false;
+                            delta
                         })
                         .flatten();
                     if engine_computed_record_scratch.font_drive.request.is_some() {
