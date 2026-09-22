@@ -262,7 +262,7 @@ static void report_engine_computed_record_difference(StyleEngine& style_engine, 
     auto engine_view = style_engine.style_record_view(engine_record);
     auto installed_view = style_engine.style_record_view(installed);
     StringBuilder builder;
-    builder.appendff("Engine record {} differs from the computation's {} for {}", engine_record.value(), installed.value(), element.debug_description());
+    builder.appendff("Engine record {} differs from the computation's {} for {} (style node {})", engine_record.value(), installed.value(), element.debug_description(), element.style_node_id().value());
     if (pseudo_kind != NumericLimits<u8>::max())
         builder.appendff(" pseudo-element kind {}", pseudo_kind);
     if (!engine_view.present || !installed_view.present || engine_view.payload_count != installed_view.payload_count) {
