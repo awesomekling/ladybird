@@ -94,6 +94,7 @@ mod publication;
 pub(crate) use publication::drive_font_metric;
 #[cfg(feature = "style-recording")]
 pub mod record_replay;
+mod resource_contexts;
 mod routing;
 pub(crate) mod seal;
 mod sorted_merge;
@@ -850,6 +851,8 @@ pub struct RetainedState {
     next_style_transaction_version: StyleTransactionVersion,
     /// Latest document-wide scalar computation facts, copied at the transaction boundary.
     document_style_computation_inputs: Option<bridge::FfiDocumentStyleComputationInputs>,
+    /// The base URLs a `url()` resolves against, copied at the transaction boundary with the inputs.
+    document_resource_contexts: resource_contexts::DocumentResourceContexts,
     /// Immutable registry generation used by custom-property style queries during a transaction.
     custom_property_registry: Option<std::sync::Arc<crate::css::custom_properties::CustomPropertyRegistry>>,
     /// Independent per-element longhand inputs frozen once for the reaction batch. Same-update

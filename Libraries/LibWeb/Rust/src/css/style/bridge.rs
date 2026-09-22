@@ -264,6 +264,24 @@ pub struct FfiDocumentStyleComputationInputs {
     /// what an engine-computed environment resolves registered names against.
     pub custom_property_registry: FfiHostHandle,
     pub custom_property_registration_generation: u64,
+    /// What a `url()` resolves against, lent for the boundary call only: the document's base URL,
+    /// and an `FfiStyleSheetResourceContextEntry` for each style sheet a rule may come from. The
+    /// engine copies them and clears these fields before it keeps the inputs.
+    pub document_base_url: FfiHostHandle,
+    pub document_base_url_length: usize,
+    pub style_sheet_resource_contexts: FfiHostHandle,
+    pub style_sheet_resource_context_count: usize,
+}
+
+/// One style sheet's resource context, keyed by the identity of its native sheet: the base URL a
+/// `url()` in its rules resolves against, and whether the sheet is origin-clean.
+#[repr(C)]
+pub struct FfiStyleSheetResourceContextEntry {
+    pub source_identity: u64,
+    pub base_url: *const u8,
+    pub base_url_length: usize,
+    pub has_base_url: bool,
+    pub origin_clean: bool,
 }
 
 impl Default for FfiDocumentStyleComputationInputs {
@@ -292,6 +310,10 @@ impl Default for FfiDocumentStyleComputationInputs {
             document_supported_scheme_codes: [0; 4],
             custom_property_registry: FfiHostHandle { address: 0 },
             custom_property_registration_generation: 0,
+            document_base_url: FfiHostHandle { address: 0 },
+            document_base_url_length: 0,
+            style_sheet_resource_contexts: FfiHostHandle { address: 0 },
+            style_sheet_resource_context_count: 0,
         }
     }
 }
@@ -4399,12 +4421,16 @@ fn record_interned_atom(engine: &mut StyleEngine, raw: usize, atom: StyleAtomID)
 pub unsafe extern "C" fn style_engine_take_style_transaction(
     engine: *mut c_void,
     root: u32,
-    computation_inputs: FfiDocumentStyleComputationInputs,
+    mut computation_inputs: FfiDocumentStyleComputationInputs,
 ) -> FfiStyleTransactionView {
     let Some(root) = StyleNodeID::from_raw(root) else {
         return FfiStyleTransactionView::default();
     };
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    let resource_contexts =
+        unsafe { super::resource_contexts::DocumentResourceContexts::take_from(&mut computation_inputs) };
+    let resource_contexts_moved = engine.document_resource_contexts.moved_for_records(&resource_contexts);
+    engine.document_resource_contexts = resource_contexts;
     engine.custom_property_registrations_changed = engine.document_style_computation_inputs.is_some_and(|previous| {
         previous.custom_property_registration_generation != computation_inputs.custom_property_registration_generation
     });
@@ -4423,7 +4449,7 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
             .cloned()
             .map(std::sync::Arc::new)
     };
-    if engine.document_style_computation_inputs != Some(computation_inputs) {
+    if engine.document_style_computation_inputs != Some(computation_inputs) || resource_contexts_moved {
         // Persistent records are derived from every document computation input, not only the
         // font generation carried in their keys.
         engine.engine_cold_record_cache.clear();
