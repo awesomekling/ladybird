@@ -1423,7 +1423,11 @@ static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_updat
 {
     auto& style_computer = element.document().style_computer();
 
-    if (element.parent()) {
+    // FIXME: A targeted record demand does not refresh a container's own pseudo-element
+    //        styles when its scroll-state verdict changes after layout.
+    auto const* box_values = element.style_group<ComputedValues::BoxValues>();
+    bool const has_scroll_state_pseudo_dependency = box_values && box_values->is_scroll_state_container && element.style_depends_on_size_container_query();
+    if (element.parent() && !has_scroll_state_pseudo_dependency) {
         StringView decline_cause;
         if (auto invalidation = style_computer.answer_record_demand(element, did_change_custom_properties, decline_cause, {}, false, true); invalidation.has_value())
             return *invalidation;
