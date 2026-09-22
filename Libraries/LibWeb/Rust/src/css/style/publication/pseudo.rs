@@ -7,6 +7,17 @@
 use super::*;
 
 impl RetainedState {
+    pub(crate) fn drop_demand_pseudo_records(&mut self, node: StyleNodeID) {
+        let records: Vec<_> = self
+            .demand_pseudo_records
+            .extract_if(|(owner, _), _| *owner == node)
+            .map(|(_, record)| record)
+            .collect();
+        for record in records {
+            self.computed_group_sets.unpin_style_record(record.raw());
+        }
+    }
+
     /// Check pseudo winner availability before deriving an originating record that would have
     /// to be discarded. Marker generation additionally depends on the newly computed display
     /// and is checked when settling the pseudo records.
@@ -103,6 +114,7 @@ impl RetainedState {
         scratch: &mut EngineComputedRecordScratch,
         counters: &mut Counters,
     ) -> Option<()> {
+        self.drop_demand_pseudo_records(node);
         self.settle_engine_pseudo_records(
             node,
             old_element_record,
@@ -111,13 +123,14 @@ impl RetainedState {
             generation,
             scratch,
             counters,
+            None,
         )
     }
 
     /// `old_is_list_item` says whether the element was a list item when the old record it no
     /// longer holds is unknown: C++ computed the new one over it.
     #[allow(clippy::too_many_arguments)]
-    fn settle_engine_pseudo_records(
+    pub(super) fn settle_engine_pseudo_records(
         &mut self,
         node: StyleNodeID,
         old_element_record: Option<computed::FinalStyleRecordID>,
@@ -126,6 +139,7 @@ impl RetainedState {
         generation: u64,
         scratch: &mut EngineComputedRecordScratch,
         counters: &mut Counters,
+        selected_kind: Option<u8>,
     ) -> Option<()> {
         use pseudo_kind::{AFTER, BACKDROP, BEFORE, FIRST_LETTER, MARKER, SELECTION};
 
@@ -152,10 +166,13 @@ impl RetainedState {
             if usize::from(kind) >= pseudo_kind::SYNTHETIC_COUNT {
                 continue;
             }
+            if selected_kind.is_some_and(|selected| selected != kind) {
+                continue;
+            }
             // A ::backdrop is materialized for a top-layer element only, which C++ decides; the
             // rules for it match every element. A stale row is no answer. A highlight
             // pseudo-element inherits from its parent element's, which C++ settles as well.
-            if kind == BACKDROP || pseudo_kind::is_highlight(usize::from(kind)) {
+            if selected_kind.is_none() && (kind == BACKDROP || pseudo_kind::is_highlight(usize::from(kind))) {
                 continue;
             }
             if version != program_version || !priority_current {
@@ -175,10 +192,11 @@ impl RetainedState {
             states[usize::from(kind)] = Some(state);
         }
         // An element holding a backdrop style is in the top layer: its backdrop is C++'s.
-        if self
-            .computed_group_sets
-            .assigned_pseudo_kinds(node)
-            .any(|kind| kind == BACKDROP)
+        if selected_kind.is_none()
+            && self
+                .computed_group_sets
+                .assigned_pseudo_kinds(node)
+                .any(|kind| kind == BACKDROP)
         {
             counters.bump(Counter::EngineComputedRecordBailPseudoBackdrop);
             return None;
@@ -272,14 +290,20 @@ impl RetainedState {
         // A marker's named counter style can move without changing any inherited group or
         // winner. Both retained and shared pseudo records must name the current registry.
         let mut pseudo_uses_substitution = scratch.pseudo_uses_substitution;
-        for (pseudo_index, kind) in [BEFORE, AFTER, FIRST_LETTER, SELECTION, MARKER]
+        for (pseudo_index, kind) in [BEFORE, AFTER, FIRST_LETTER, SELECTION, MARKER, BACKDROP]
             .into_iter()
             .enumerate()
             .skip(scratch.next_pseudo)
         {
             scratch.next_pseudo = pseudo_index + 1;
+            if selected_kind.is_some_and(|selected| selected != kind) {
+                continue;
+            }
+            if kind == BACKDROP && selected_kind.is_none() {
+                continue;
+            }
             if self.deferred_pseudo_element == Some(tree::PseudoElementKind(u16::from(kind)))
-                || pseudo_kind::is_highlight(usize::from(kind))
+                || (selected_kind.is_none() && pseudo_kind::is_highlight(usize::from(kind)))
             {
                 continue;
             }
@@ -555,6 +579,12 @@ impl RetainedState {
         Some(())
     }
 
+    fn drop_demand_pseudo_record(&mut self, node: StyleNodeID, kind: u8) {
+        if let Some(record) = self.demand_pseudo_records.remove(&(node, kind)) {
+            self.computed_group_sets.unpin_style_record(record.raw());
+        }
+    }
+
     /// Account for a pseudo-element record the engine settled (a removal when `new_style_record`
     /// is none) and leave its commitment to C++'s acknowledgement of the element.
     #[allow(clippy::too_many_arguments)]
@@ -667,6 +697,7 @@ impl RetainedState {
         scratch: &mut EngineComputedRecordScratch,
         counters: &mut Counters,
     ) -> Option<computed::FinalStyleRecordID> {
+        self.drop_demand_pseudo_records(node);
         let record = self.computed_group_sets.assigned_style_record(node)?;
         if !scratch.font_drive.is_pending() {
             // A record the engine derived for the element itself carries its pseudo-elements,
@@ -699,6 +730,7 @@ impl RetainedState {
                 generation,
                 scratch,
                 counters,
+                None,
             )
             .is_none()
         {
@@ -964,7 +996,7 @@ impl RetainedState {
     /// Whether every rule the node's answer matches for a pseudo-element declares only what the
     /// winner columns hold, and custom properties, which the engine resolves into the
     /// pseudo-element's own environment, including a container verdict held with its origin.
-    fn pseudo_winners_are_complete(&self, node: StyleNodeID) -> bool {
+    pub(super) fn pseudo_winners_are_complete(&self, node: StyleNodeID) -> bool {
         let rule_is_complete = |rule: RuleID| {
             self.container_gate_is_held(Some(node), rule, true)
                 && self.program.declarations_are_complete_but_for_custom_properties(rule)
@@ -1011,6 +1043,99 @@ fn pseudo_content_generates_nothing(store: &impl crate::css::cascaded_properties
 }
 
 impl StyleEngineState {
+    pub(super) fn demand_pseudo_record(
+        &mut self,
+        node: StyleNodeID,
+        kind: u8,
+        counters: &mut Counters,
+    ) -> Result<Option<computed::FinalStyleRecordID>, &'static str> {
+        if ![
+            pseudo_kind::BEFORE,
+            pseudo_kind::AFTER,
+            pseudo_kind::FIRST_LETTER,
+            pseudo_kind::MARKER,
+            pseudo_kind::BACKDROP,
+        ]
+        .contains(&kind)
+        {
+            return Err("NotOfferedPseudoElement");
+        }
+        let Some(mask) = self.pseudo_style_mask(node) else {
+            return Err("EngineComputedRecordBailPseudoMask");
+        };
+        let element = self
+            .computed_group_sets
+            .assigned_style_record(node)
+            .ok_or("EngineComputedRecordBailRecord")?;
+        let is_list_item = self
+            .computed_group_sets
+            .style_record_view(element.raw())
+            .and_then(|view| unsafe { view.longhand_table.as_ref() })
+            .is_some_and(|table| table.display_is_list_item());
+        if mask & (1 << kind) == 0 && !(kind == pseudo_kind::MARKER && is_list_item) {
+            self.drop_demand_pseudo_record(node, kind);
+            return Ok(None);
+        }
+        if !self.pseudo_winners_are_complete(node) {
+            return Err("EngineComputedRecordBailIncompleteWinners");
+        }
+        let before = counters.record_bail_marks();
+        let mut scratch = EngineComputedRecordScratch::default();
+        let generation = self.winner_groups.generation();
+        loop {
+            if self
+                .settle_engine_pseudo_records(
+                    node,
+                    Some(element),
+                    None,
+                    element,
+                    generation,
+                    &mut scratch,
+                    counters,
+                    Some(kind),
+                )
+                .is_some()
+            {
+                break;
+            }
+            if !self.random_base_requests.is_empty() {
+                self.refill_random_base_requests();
+                continue;
+            }
+            if let Some(request) = scratch.font_drive.request.take() {
+                self.refill_font_requests(vec![(Some(node), request)], counters);
+                continue;
+            }
+            return Err(counters
+                .first_changed_record_bail(&before)
+                .unwrap_or("ComputationBailUnnamed"));
+        }
+        let record = match scratch.pseudo_deltas.iter().rev().find(|delta| delta.kind == kind) {
+            Some(delta) if delta.new_style_record == computed::FinalStyleRecordID::NONE => None,
+            Some(delta) => Some(delta.new_style_record),
+            None => self.computed_group_sets.pseudo_style_record(node, kind),
+        };
+        if let Some(record) = record {
+            self.computed_group_sets.pin_style_record(record.raw());
+        }
+        for pending in self.engine_computed_records_pending.remove(&node).into_iter().flatten() {
+            if pending.pseudo_kind == kind {
+                self.revert_engine_computed_pseudo_record(&pending, counters);
+            } else {
+                self.engine_computed_records_pending
+                    .entry(node)
+                    .or_default()
+                    .push(pending);
+            }
+        }
+        self.drop_demand_pseudo_record(node, kind);
+        if let Some(record) = record {
+            self.demand_pseudo_records.insert((node, kind), record);
+        }
+        self.settle_computed_memory();
+        Ok(record)
+    }
+
     /// Settle the synthetic pseudo-elements of an element whose record C++ has just computed and
     /// installed, so C++ installs the engine's records for them instead of computing each one:
     /// their inputs are the element's record and the published winner states, all current once

@@ -1879,6 +1879,7 @@ impl StyleEngineState {
                 pending_element_style_computation_selections: HashMap::default(),
                 pending_pseudo_style_computation_selections: HashMap::default(),
                 engine_computed_records_pending: HashMap::default(),
+                demand_pseudo_records: HashMap::default(),
                 flush_stamp: 0,
                 style_input_nodes_for_cpp: HashSet::default(),
                 parent_inputs_moved_nodes: HashSet::default(),
@@ -2643,6 +2644,7 @@ impl StyleEngineState {
             }
             self.retained.winner_groups.remove(node);
             self.retained.computed_group_sets.remove(node);
+            self.retained.drop_demand_pseudo_records(node);
             self.retained.pending_element_style_computation_selections.remove(&node);
             self.retained.pending_pseudo_style_computation_selections.remove(&node);
             self.retained.nodes_with_substituted_records.remove(&node);

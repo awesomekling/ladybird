@@ -164,6 +164,7 @@ pub struct FfiEngineComputedRecord {
 #[repr(C)]
 pub struct FfiRecordDemandAnswer {
     pub record: FfiEngineComputedRecord,
+    pub is_absent: bool,
     pub decline_cause: *const u8,
     pub decline_cause_length: usize,
 }
@@ -172,6 +173,7 @@ impl FfiRecordDemandAnswer {
     fn declined(cause: &'static str) -> Self {
         Self {
             record: FfiEngineComputedRecord::default(),
+            is_absent: false,
             decline_cause: cause.as_ptr(),
             decline_cause_length: cause.len(),
         }
@@ -3825,13 +3827,20 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
             exclude_inline_style,
             targeted,
         ) {
-            Ok(answer) => FfiRecordDemandAnswer {
+            Ok(Some(answer)) => FfiRecordDemandAnswer {
                 record: FfiEngineComputedRecord {
                     style_record: answer.style_record,
                     uses_substitution: engine.nodes_with_substituted_records.contains(&node),
                     pseudo_records_present: answer.pseudo_records_present,
                     pseudo_records: answer.pseudo_records,
                 },
+                is_absent: false,
+                decline_cause: std::ptr::null(),
+                decline_cause_length: 0,
+            },
+            Ok(None) => FfiRecordDemandAnswer {
+                record: FfiEngineComputedRecord::default(),
+                is_absent: true,
                 decline_cause: std::ptr::null(),
                 decline_cause_length: 0,
             },
@@ -3843,6 +3852,7 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
             payload.write_bool(exclude_inline_style);
             payload.write_bool(targeted);
             payload.write_u64(result.record.style_record);
+            payload.write_bool(result.is_absent);
             payload.write_bool(result.record.uses_substitution);
             payload.write_u8(result.record.pseudo_records_present);
             for record in result.record.pseudo_records {
