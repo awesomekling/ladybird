@@ -62,7 +62,7 @@ PASS: target topology warm: inherited language changes through ancestor | elemen
 PASS: target topology cold: inherited language changes through ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: target topology detached: inherited language changes through ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: target topology detached-cold: inherited language changes through ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: target topology warm: custom property changes through ancestor | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: target topology warm: custom property changes through ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: target topology cold: custom property changes through ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: target topology detached: custom property changes through ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: target topology detached-cold: custom property changes through ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
