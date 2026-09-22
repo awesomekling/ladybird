@@ -247,30 +247,30 @@ PASS: stress warm pseudo-element child mutation: document: :has(:not(:checked)) 
 PASS: stress cold pseudo-element child mutation: document: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: document: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: document: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: document: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: document: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: document: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: document: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: document: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: document: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: document: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: document: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: document: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: document: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: document: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: document: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm pseudo-element child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached pseudo-element child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: document: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: document: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm pseudo-element child mutation: document: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: document: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: document: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached pseudo-element child mutation: document: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: document: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: document: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm pseudo-element child mutation: document: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: document: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: document: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached pseudo-element child mutation: document: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm pseudo-element child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached pseudo-element child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: document: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: document: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: document: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
@@ -337,12 +337,12 @@ PASS: stress warm pseudo-element child mutation: document: :has(:first-of-type) 
 PASS: stress cold pseudo-element child mutation: document: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: document: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: document: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm pseudo-element child mutation: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached pseudo-element child mutation: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: document: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: document: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: document: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -832,30 +832,30 @@ PASS: stress warm pseudo-element child mutation: shadow-internal: :has(:not(:che
 PASS: stress cold pseudo-element child mutation: shadow-internal: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: shadow-internal: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: shadow-internal: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm pseudo-element child mutation: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached pseudo-element child mutation: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm pseudo-element child mutation: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached pseudo-element child mutation: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm pseudo-element child mutation: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached pseudo-element child mutation: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm pseudo-element child mutation: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached pseudo-element child mutation: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: shadow-internal: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: stress cold child mutation: shadow-internal: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: shadow-internal: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -922,12 +922,12 @@ PASS: stress warm pseudo-element child mutation: shadow-internal: :has(:first-of
 PASS: stress cold pseudo-element child mutation: shadow-internal: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: shadow-internal: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: shadow-internal: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm pseudo-element child mutation: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached pseudo-element child mutation: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: shadow-internal: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: shadow-internal: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: shadow-internal: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
