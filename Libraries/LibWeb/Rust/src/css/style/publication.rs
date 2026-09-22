@@ -3311,78 +3311,6 @@ impl RetainedState {
     /// The cascade a winner state describes, as the drive consumes it: every winner's written
     /// value, seeded in cascade order so a logical property pair resolves the way it cascaded.
     /// `None` when a winner is not a plain rule declaration the engine can compute from.
-    /// What the host answered for this node, when it covers the units the row needs.
-    pub(super) fn container_query_basis_answers(
-        &self,
-        node: StyleNodeID,
-        unit_mask: u8,
-    ) -> Option<crate::css::style::ContainerQueryBasis> {
-        self.container_query_bases
-            .get(&node)
-            .copied()
-            .filter(|basis| basis.answered_unit_mask & unit_mask == unit_mask)
-    }
-
-    /// Ask again for every basis already answered. What was measured is a measurement of the
-    /// last layout, so it is re-taken each update the way the viewport and the root font metrics
-    /// are, and a row that has an answer is never parked twice for want of a fresh one.
-    pub(crate) fn refresh_container_query_basis_requests(&mut self) {
-        let asked: Vec<(StyleNodeID, u8)> = self
-            .container_query_bases
-            .iter()
-            .map(|(node, basis)| (*node, basis.answered_unit_mask))
-            .collect();
-        for (node, unit_mask) in asked {
-            self.park_container_query_basis_request(node, unit_mask);
-        }
-    }
-
-    fn park_container_query_basis_request(&mut self, node: StyleNodeID, unit_mask: u8) {
-        let already_asked = self.pending_host_requests.iter().any(|request| {
-            request.kind == bridge::host_request_kind::CONTAINER_QUERY_BASIS && request.style_node == node.raw()
-        });
-        if already_asked {
-            return;
-        }
-        self.pending_host_requests.push(bridge::FfiHostRequest {
-            kind: bridge::host_request_kind::CONTAINER_QUERY_BASIS,
-            style_node: node.raw(),
-            subject: 0,
-            detail: u64::from(unit_mask),
-        });
-    }
-
-    /// `flags` is what the measurement carries beside the two numbers: bit 0 a width basis, bit 1
-    /// a height basis, bits 2 and 3 whether each was read off the viewport.
-    pub(crate) fn answer_container_query_basis(
-        &mut self,
-        node: StyleNodeID,
-        answered_unit_mask: u8,
-        flags: u8,
-        width: f64,
-        height: f64,
-    ) {
-        let answer = crate::css::style::ContainerQueryBasis {
-            answered_unit_mask,
-            has_width: flags & 1 != 0,
-            has_height: flags & 2 != 0,
-            width,
-            height,
-            width_depends_on_viewport: flags & 4 != 0,
-            height_depends_on_viewport: flags & 8 != 0,
-        };
-        // Writing an unchanged answer would read as an input that moved, and re-drive every row
-        // that holds it for nothing.
-        if self
-            .container_query_bases
-            .get(&node)
-            .is_some_and(|held| held.is_the_same_measurement_as(&answer))
-        {
-            return;
-        }
-        self.container_query_bases.insert(node, answer);
-    }
-
     fn cascaded_store_for_state(
         &mut self,
         node: StyleNodeID,
@@ -3397,7 +3325,6 @@ impl RetainedState {
         // Seeded in cascade order, and within one rule in declaration order, since a logical
         // property and its physical associate resolve by order of appearance.
         let mut declarations = Vec::with_capacity(self.winner_groups.winner_count_in_state(state));
-        let mut park_request: Option<u8> = None;
         for winner in self.winner_groups.winners_in_state(state) {
             // A revert whose continuation resumes at nothing leaves the property undeclared.
             let Some(winner) = self.winner_groups.resolved_winner(winner) else {
@@ -3543,25 +3470,7 @@ impl RetainedState {
                 .longhand_context_free
                 .unwrap_or_else(|| value_computes_without_document_context(data))
                 || (resources_are_known && value_computes_without_document_context_but_for_resources(data).is_some());
-            // A container-relative length is the one obstacle here that the host can lift
-            // without computing the style: it measures the query container between passes and
-            // the row is driven with the basis in place. Park the question and decline this pass.
-            let container_units = (!context_free)
-                .then(|| crate::css::style_compute::external_value_dependencies(data))
-                .filter(|dependencies| {
-                    dependencies.container_relative_length_unit_mask != 0
-                        && !dependencies.uses_tree_counting_function
-                        && !dependencies.has_unfixed_random_sharing
-                        && !dependencies.uses_random_function
-                })
-                .map(|dependencies| dependencies.container_relative_length_unit_mask);
-            if let Some(unit_mask) = container_units {
-                if self.container_query_basis_answers(node, unit_mask).is_none() {
-                    // The host has not measured this container yet: ask, and decline the pass.
-                    park_request = Some(unit_mask);
-                    break;
-                }
-            } else if !context_free
+            if !context_free
                 || (pseudo_kind.is_some()
                     && winner.property == prop::CONTENT
                     && !content_value_is_engine_computable(data))
@@ -3577,11 +3486,6 @@ impl RetainedState {
                 index,
                 WinnerDeclaration::new(winner.property, winner.important, value),
             ));
-        }
-        if let Some(unit_mask) = park_request {
-            self.park_container_query_basis_request(node, unit_mask);
-            counters.bump(Counter::EngineComputedRecordBailValue);
-            return None;
         }
         declarations.sort_by_key(|(priority, index, ..)| (*priority, *index));
         Some(WinnerStore::new(
