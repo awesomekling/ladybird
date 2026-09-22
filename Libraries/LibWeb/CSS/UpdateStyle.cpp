@@ -320,7 +320,15 @@ static void verify_engine_computed_record_environment(DOM::Element& element, Sty
     auto check = [&](Utf16FlyString const& name) {
         auto const* expected_property = expected->get(name);
         auto const* actual_property = actual ? actual->get(name) : nullptr;
-        VERIFY(value_text(expected_property) == value_text(actual_property));
+        // Name what differs before failing, as the record comparison beside this one does: the
+        // environment is a map, and "not equal" leaves every name in it to search.
+        if (value_text(expected_property) != value_text(actual_property)) {
+            dbgln("Engine record environment differs on {} for {}: record says {}, the element holds {}",
+                name, element.debug_description(),
+                value_text(expected_property).value_or(Utf16String::from_utf8("(absent)"sv)),
+                value_text(actual_property).value_or(Utf16String::from_utf8("(absent)"sv)));
+            VERIFY_NOT_REACHED();
+        }
         VERIFY(!expected_property || !actual_property || expected_property->important == actual_property->important);
     };
     expected->for_each_property([&](Utf16FlyString const& name, StyleProperty const&) { check(name); });
