@@ -230,22 +230,9 @@ impl CustomPropertyRegistry {
         !self.registrations.is_empty()
     }
 
-    /// Whether any registration says its name does not inherit. Such a name is in an element's own
-    /// environment and in none of its descendants', which a store built over the parent's cannot
-    /// say: a reader that resolves an environment by layering declarations over the parent's has to
-    /// leave every element in the document alone while one exists.
+    /// Whether descendants need a filtered projection of their parent's environment.
     pub(crate) fn has_non_inheriting_registrations(&self) -> bool {
         self.registrations.values().any(|registration| !registration.inherits)
-    }
-
-    /// The names registered as not inheriting, for a reader that has to ask whether one of them is
-    /// in an environment it is about to hand to a descendant. A document registers a handful.
-    pub(crate) fn non_inheriting_names(&self) -> Vec<&[u16]> {
-        self.registrations
-            .iter()
-            .filter(|(_, registration)| !registration.inherits)
-            .map(|(name, _)| name.as_slice())
-            .collect()
     }
 
     /// What a registration says about a name, for a caller that has to answer for it without the
@@ -566,6 +553,68 @@ pub(crate) fn finalize_custom_property_value(
 }
 
 impl CustomPropertyStore {
+    /// Filter one store layer over an already filtered parent. The returned pointer owns
+    /// one reference, including when the result is the source or the parent itself.
+    unsafe fn inheritable_layer(source: *const Self, parent: *const c_void, excluded: &[usize]) -> *const c_void {
+        let store = unsafe { &*source };
+        if store.own_values.is_empty() {
+            return unsafe { Self::retained_parent(parent) }.map_or(std::ptr::null(), |p| Arc::into_raw(p).cast());
+        }
+        if excluded.is_empty()
+            && parent
+                == store
+                    .parent
+                    .as_ref()
+                    .map_or(std::ptr::null(), |p| Arc::as_ptr(p).cast())
+        {
+            unsafe { Arc::increment_strong_count(source) };
+            return source.cast();
+        }
+        let mut names = store.declared_names.clone();
+        let mut absorbed: Vec<_> = store
+            .own_values
+            .keys()
+            .filter(|name| !names.contains(name))
+            .copied()
+            .collect();
+        absorbed.sort_unstable();
+        names.extend(absorbed);
+        let entries: Vec<_> = names
+            .into_iter()
+            .filter(|name| !excluded.contains(name))
+            .map(|name| (name, store.own_values[&name].clone()))
+            .collect();
+        if entries.is_empty() {
+            return unsafe { Self::retained_parent(parent) }.map_or(std::ptr::null(), |p| Arc::into_raw(p).cast());
+        }
+        Self::child(unsafe { Self::retained_parent(parent) }, entries)
+    }
+
+    /// The environment inherited by a child, with non-inheriting registrations removed.
+    /// Registration generations are part of the caller's memo key.
+    pub(crate) unsafe fn inheritable(source: *const Self, registry: &CustomPropertyRegistry) -> *const c_void {
+        let store = unsafe { &*source };
+        let parent = store.parent.as_ref().map_or(std::ptr::null(), |parent| unsafe {
+            Self::inheritable(Arc::as_ptr(parent), registry)
+        });
+        let excluded: Vec<_> = store
+            .own_values
+            .iter()
+            .filter_map(|(&name, entry)| {
+                registry
+                    .registrations
+                    .get(entry.name.as_ref())
+                    .is_some_and(|registration| !registration.inherits)
+                    .then_some(name)
+            })
+            .collect();
+        let result = unsafe { Self::inheritable_layer(source, parent, &excluded) };
+        if !parent.is_null() {
+            unsafe { Arc::decrement_strong_count(parent.cast::<Self>()) };
+        }
+        result
+    }
+
     pub(crate) fn get(&self, name_raw: usize) -> Option<&CustomPropertyEntry> {
         self.own_values
             .get(&name_raw)
@@ -578,11 +627,6 @@ impl CustomPropertyStore {
             .and_then(|name_raw| self.own_values.get(name_raw))
             .map(|entry| (entry, self))
             .or_else(|| self.parent.as_ref()?.get_by_name_with_owner(name))
-    }
-
-    /// Whether this store, or one it inherits from, answers for any of these names.
-    pub(crate) fn holds_any_name(&self, names: &[&[u16]]) -> bool {
-        names.iter().any(|name| self.get_by_name_with_owner(name).is_some())
     }
 
     fn get_own_by_name(&self, name: &[u16]) -> Option<&CustomPropertyEntry> {
@@ -3974,6 +4018,57 @@ pub unsafe extern "C" fn rust_custom_property_store_destroy(store: *const c_void
 pub unsafe extern "C" fn rust_custom_property_store_retain(store: *const c_void) -> *const c_void {
     unsafe { Arc::increment_strong_count(store.cast::<CustomPropertyStore>()) };
     store
+}
+
+/// Filter the host's layer using its published registration decisions, sharing the engine's
+/// inheritance operation. The result transfers one store reference, or is null when empty.
+///
+/// # Safety
+/// `store` is live; `parent` is null or live; `excluded` holds `excluded_count` name atoms.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_custom_property_store_inheritable_layer(
+    store: *const c_void,
+    parent: *const c_void,
+    excluded: *const usize,
+    excluded_count: usize,
+) -> *const c_void {
+    let excluded = if excluded_count == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(excluded, excluded_count) }
+    };
+    unsafe { CustomPropertyStore::inheritable_layer(store.cast(), parent, excluded) }
+}
+
+/// Flatten a store for a host wrapper without promoting inherited names into its declared
+/// prefix or losing the original inheritance parent used by explicit inheritance.
+///
+/// # Safety
+/// `store` must be live. The result transfers one strong store reference.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_custom_property_store_flatten(store: *const c_void) -> *const c_void {
+    let source = unsafe { &*store.cast::<CustomPropertyStore>() };
+    let mut own_values = source.own_values.clone();
+    let mut own_names = source.own_names.clone();
+    let mut parent = source.parent.as_deref();
+    while let Some(current) = parent {
+        for (&name, entry) in &current.own_values {
+            if let std::collections::hash_map::Entry::Vacant(slot) = own_values.entry(name) {
+                own_names.insert(entry.name.clone(), name);
+                slot.insert(entry.clone());
+            }
+        }
+        parent = current.parent.as_deref();
+    }
+    Arc::into_raw(Arc::new(CustomPropertyStore {
+        own_values,
+        own_names,
+        declared_names: source.declared_names.clone(),
+        inheritance_parent: source.inheritance_parent.clone(),
+        parent: None,
+        ancestor_count: 0,
+    }))
+    .cast()
 }
 
 /// Hands every effective custom property to `callback`, with nearer entries shadowing ancestors.

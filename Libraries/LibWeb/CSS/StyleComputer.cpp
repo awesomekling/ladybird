@@ -3304,7 +3304,7 @@ NonnullRefPtr<CustomPropertyData const> StyleComputer::intern_custom_property_da
     return data;
 }
 
-RefPtr<CustomPropertyData const> StyleComputer::engine_custom_property_environment(u64 identity, RefPtr<CustomPropertyData const> const& inherited, bool* did_materialize) const
+RefPtr<CustomPropertyData const> StyleComputer::engine_custom_property_environment(u64 identity, bool* did_materialize) const
 {
     if (!StyleEngine::is_engine_custom_property_environment(identity))
         return {};
@@ -3316,22 +3316,7 @@ RefPtr<CustomPropertyData const> StyleComputer::engine_custom_property_environme
     auto const* store = m_style_engine.borrow_engine_custom_property_environment(identity, parent_identity);
     if (!store)
         return {};
-    if (parent_identity != (inherited ? inherited->identity() : 0)) {
-        ComputedValuesFFI::rust_custom_property_store_destroy(store);
-        return {};
-    }
-    OrderedHashMap<Utf16FlyString, StyleProperty> own_values;
-    ComputedValuesFFI::rust_custom_property_store_for_each_own_entry(store, &own_values, [](void* context, size_t name_raw, bool important, void const* data) {
-        auto& own_values = *static_cast<OrderedHashMap<Utf16FlyString, StyleProperty>*>(context);
-        own_values.set(
-            Utf16FlyString::from_raw(name_raw),
-            StyleProperty {
-                .important = important ? Important::Yes : Important::No,
-                .property_id = PropertyID::Custom,
-                .value = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(static_cast<StyleValueFFI::StyleValueData const*>(data))),
-            });
-    });
-    auto data = CustomPropertyData::create(move(own_values), inherited, store, identity);
+    auto data = CustomPropertyData::from_rust_store(store, nullptr, identity, true);
     m_engine_custom_property_environments.set(identity, data);
     return data;
 }
@@ -6343,7 +6328,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             auto inherited_data = resolution_state.parent_data ? resolution_state.parent_data : resolution_state.data->parent();
             if (StyleEngine::is_engine_custom_property_environment(resolution.environment_identity)) {
                 if (resolution.rust_store) {
-                    resolved = style_computer.engine_custom_property_environment(resolution.environment_identity, inherited_data, &state.custom_property_application_wrote_main_side_state);
+                    resolved = style_computer.engine_custom_property_environment(resolution.environment_identity, &state.custom_property_application_wrote_main_side_state);
                     VERIFY(resolved);
                     ComputedValuesFFI::rust_custom_property_store_destroy(resolution.rust_store);
                     resolved = style_computer.intern_custom_property_data(resolved.release_nonnull(), &state.custom_property_application_wrote_main_side_state);
