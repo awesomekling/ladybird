@@ -31,8 +31,11 @@
 #include <LibWeb/HTML/HTMLHeadingElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/HTMLPictureElement.h>
 #include <LibWeb/HTML/HTMLSelectElement.h>
 #include <LibWeb/HTML/HTMLSlotElement.h>
+#include <LibWeb/HTML/HTMLTableCellElement.h>
+#include <LibWeb/HTML/HTMLTableElement.h>
 #include <LibWeb/HTML/HTMLTextAreaElement.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
@@ -558,10 +561,18 @@ static void publish_element_selector_features(StyleEngine& style_engine, DOM::El
 // Hints mapped from another element's attributes, which move without the element's own moving.
 static bool element_may_have_derived_presentational_hints(DOM::Element const& element)
 {
-    // A table cell's hints also come from its table's attributes, and an image's from the
-    // <source> its <picture> selected.
-    if (element.namespace_uri() == Namespace::HTML && first_is_one_of(element.local_name(), HTML::TagNames::td, HTML::TagNames::th, HTML::TagNames::img))
-        return true;
+    if (element.namespace_uri() == Namespace::HTML) {
+        // A table cell's border hints come from its table's border attribute and computed border
+        // colors. Its cellpadding hints come from the table too, but a cellpadding change records
+        // the cells themselves.
+        if (first_is_one_of(element.local_name(), HTML::TagNames::td, HTML::TagNames::th)) {
+            auto const* table = element.first_ancestor_of_type<HTML::HTMLTableElement>();
+            return table && table->border() != 0;
+        }
+        // An image's hints come from the <source> its <picture> selected.
+        if (element.local_name() == HTML::TagNames::img)
+            return is<HTML::HTMLPictureElement>(element.parent());
+    }
     // A body's link, vlink and alink attributes are presentational hints on every link, by the
     // link's :link, :visited and :active state.
     if ((element.matches_link_pseudo_class() || element.matches_visited_pseudo_class())
@@ -572,6 +583,10 @@ static bool element_may_have_derived_presentational_hints(DOM::Element const& el
 
 static bool element_may_have_presentational_hints(DOM::Element const& element)
 {
+    // A table cell can take hints from its table's cellpadding, and an image from its <picture>'s
+    // <source>, without a presentational attribute of its own.
+    if (element.namespace_uri() == Namespace::HTML && first_is_one_of(element.local_name(), HTML::TagNames::td, HTML::TagNames::th, HTML::TagNames::img))
+        return true;
     if (element_may_have_derived_presentational_hints(element))
         return true;
     if (element.publishes_presentational_hints_on_arrival())
@@ -1012,6 +1027,11 @@ void record_element_moved(DOM::Element& element, DOM::Node* old_parent, DOM::Ele
                 style_engine->set_element_adjustment_facts(descendant->style_node_id(), element_style_adjustment_facts(*descendant));
                 style_engine->record_element_style_input_change(descendant->style_node_id(), StyleEngine::RecomputeStyle);
             }
+            // Whether a table cell's or an image's hints come from another element depends on the
+            // table or <picture> it is now under.
+            if (auto* descendant = as_if<DOM::Element>(node); descendant && descendant->namespace_uri() == Namespace::HTML && descendant->style_node_id() != no_style_node
+                && first_is_one_of(descendant->local_name(), HTML::TagNames::td, HTML::TagNames::th, HTML::TagNames::img))
+                style_engine->set_element_adjustment_facts(descendant->style_node_id(), element_style_adjustment_facts(*descendant));
             return TraversalDecision::Continue;
         });
 
@@ -2681,6 +2701,13 @@ void record_element_attribute_changed(DOM::Element& element, Utf16FlyString cons
     // box adjustments and whether it supports dimension attributes.
     if (old_value.has_value() != new_value.has_value() || name == HTML::AttributeNames::type)
         record_element_adjustment_facts(element);
+    // A table's border attribute decides whether its cells' hints come from the table.
+    if (name == HTML::AttributeNames::border && is<HTML::HTMLTableElement>(element)) {
+        element.for_each_in_subtree_of_type<HTML::HTMLTableCellElement>([](auto& cell) {
+            record_element_adjustment_facts(cell);
+            return TraversalDecision::Continue;
+        });
+    }
 
     // The box an element asks for also moves with the value of these, which say whether it is an
     // editing host and whether it renders its alternative text instead of its image.

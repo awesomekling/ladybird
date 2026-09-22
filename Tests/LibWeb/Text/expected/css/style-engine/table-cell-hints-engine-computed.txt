@@ -1,0 +1,4 @@
+engine computed the padded cell: true
+padded cell: color rgb(0, 128, 0), padding 7px
+after cellpadding change: padding 3px
+bordered cell: color rgb(0, 128, 0), border rgb(0, 0, 255)
