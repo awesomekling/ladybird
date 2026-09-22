@@ -7,9 +7,9 @@ PASS: detached pseudo-element child mutation: part-document: :empty becomes fals
 PASS: stress warm child mutation: part-document: :empty becomes false after textContent | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: part-document: :empty becomes false after textContent | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-document: :empty becomes false after textContent | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-document: :empty becomes false after textContent | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-document: :empty becomes false after textContent | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: part-document: :empty becomes false after textContent | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: part-document: :empty becomes false after textContent | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: detached pseudo-element child mutation: part-document: :empty becomes false after textContent | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: part-document: mixed-case SVG type selector with :empty becomes false after element append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: part-document: mixed-case SVG type selector with :empty becomes false after element append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: part-document: mixed-case SVG type selector with :empty becomes false after element append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -208,9 +208,9 @@ PASS: detached pseudo-element child mutation: part-document: :empty stays true a
 PASS: stress warm child mutation: part-document: :empty becomes false after whitespace text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: part-document: :empty becomes false after whitespace text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-document: :empty becomes false after whitespace text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-document: :empty becomes false after whitespace text append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-document: :empty becomes false after whitespace text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: part-document: :empty becomes false after whitespace text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: part-document: :empty becomes false after whitespace text append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: detached pseudo-element child mutation: part-document: :empty becomes false after whitespace text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: part-document: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: part-document: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-document: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -592,9 +592,9 @@ PASS: detached pseudo-element child mutation: part-shadow-host-document: :empty 
 PASS: stress warm child mutation: part-shadow-host-document: :empty becomes false after textContent | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: part-shadow-host-document: :empty becomes false after textContent | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-document: :empty becomes false after textContent | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :empty becomes false after textContent | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :empty becomes false after textContent | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: part-shadow-host-document: :empty becomes false after textContent | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: part-shadow-host-document: :empty becomes false after textContent | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: detached pseudo-element child mutation: part-shadow-host-document: :empty becomes false after textContent | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: part-shadow-host-document: :has(.hit) after direct child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: stress cold child mutation: part-shadow-host-document: :has(.hit) after direct child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-document: :has(.hit) after direct child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
@@ -784,9 +784,9 @@ PASS: detached pseudo-element child mutation: part-shadow-host-document: :empty 
 PASS: stress warm child mutation: part-shadow-host-document: :empty becomes false after whitespace text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: part-shadow-host-document: :empty becomes false after whitespace text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-document: :empty becomes false after whitespace text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :empty becomes false after whitespace text append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :empty becomes false after whitespace text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: part-shadow-host-document: :empty becomes false after whitespace text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: part-shadow-host-document: :empty becomes false after whitespace text append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: detached pseudo-element child mutation: part-shadow-host-document: :empty becomes false after whitespace text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: part-shadow-host-document: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: part-shadow-host-document: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-document: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
