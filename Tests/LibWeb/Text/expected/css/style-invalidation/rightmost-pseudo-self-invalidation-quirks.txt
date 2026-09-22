@@ -9,10 +9,10 @@ rightmost :not(:checked) self selector matches uppercase class in quirks mode af
 PASS: rightmost :not(:checked) self selector matches uppercase class in quirks mode | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 rightmost :disabled self selector matches uppercase class in quirks mode initial: selectorMatches=false, probe=base
 rightmost :disabled self selector matches uppercase class in quirks mode after mutation: selectorMatches=true, probe=match
-PASS: rightmost :disabled self selector matches uppercase class in quirks mode | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: rightmost :disabled self selector matches uppercase class in quirks mode | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 rightmost :required self selector matches uppercase class in quirks mode initial: selectorMatches=false, probe=base
 rightmost :required self selector matches uppercase class in quirks mode after mutation: selectorMatches=true, probe=match
-PASS: rightmost :required self selector matches uppercase class in quirks mode | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: rightmost :required self selector matches uppercase class in quirks mode | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 rightmost :checked self selector still rejects unrelated class in quirks mode initial: selectorMatches=false, probe=base
 rightmost :checked self selector still rejects unrelated class in quirks mode after mutation: selectorMatches=false, probe=base
 PASS: rightmost :checked self selector still rejects unrelated class in quirks mode | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -184,10 +184,10 @@ quirks sibling label after checked: selectorMatches=true, probe=match
 PASS: rightmost self selector can be skipped for missing uppercase class in quirks mode while sibling updates | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 quirks slotted className assignment initial: selectorMatches=false, probe=base
 quirks slotted className assignment after mutation: selectorMatches=true, probe=match
-PASS: quirks uppercase slotted class selector matches after lowercase className assignment | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: quirks uppercase slotted class selector matches after lowercase className assignment | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 quirks inverse slotted className assignment initial: selectorMatches=false, probe=base
 quirks inverse slotted className assignment after mutation: selectorMatches=true, probe=match
-PASS: quirks lowercase slotted class selector matches after uppercase className assignment | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: quirks lowercase slotted class selector matches after uppercase className assignment | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 quirks slotted uppercase class initial: selectorMatches=false, probe=base
 quirks slotted uppercase class after checked: selectorMatches=true, probe=match
-PASS: rightmost ::slotted() :checked selector matches uppercase class in quirks mode | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: rightmost ::slotted() :checked selector matches uppercase class in quirks mode | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
