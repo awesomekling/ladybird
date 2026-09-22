@@ -1232,6 +1232,9 @@ impl RetainedState {
         if assembly.group_set_unchanged {
             counters.bump(Counter::ComputedWinnerPropagationStops);
         }
+        if let Some(composition) = assembly.pinned_composition {
+            self.batch_pinned_compositions.push((node, composition));
+        }
         let delta = assembly.delta;
         self.note_engine_computed_record(
             node,
@@ -1402,7 +1405,22 @@ impl RetainedState {
 
     /// C++ installed the record the engine derived for `node`: the winner state it was computed
     /// from becomes the node's cascade state, and the answer counts as consumed.
+    /// Drop the batch's pins on the compositions a node's row derived beneath: the host has the
+    /// record now, and the composition it named is nobody's.
+    fn drop_pinned_compositions(&mut self, node: StyleNodeID) {
+        let mut index = 0;
+        while index < self.batch_pinned_compositions.len() {
+            if self.batch_pinned_compositions[index].0 != node {
+                index += 1;
+                continue;
+            }
+            let (_, composition) = self.batch_pinned_compositions.swap_remove(index);
+            self.computed_group_sets.unpin_style_record(composition);
+        }
+    }
+
     pub(crate) fn acknowledge_engine_computed_record(&mut self, node: StyleNodeID, counters: &mut Counters) {
+        self.drop_pinned_compositions(node);
         if let Some(pending_records) = self.engine_computed_records_pending.remove(&node) {
             for pending in pending_records {
                 let target = computed::ComputedStyleTarget::new(node, pending.pseudo_kind);
@@ -1450,6 +1468,9 @@ impl RetainedState {
     /// The transaction's outputs are gone: every derived record C++ did not install goes back to
     /// the record the node held, unless a publication has moved the node on since.
     pub(super) fn discard_engine_computed_records(&mut self, counters: &mut Counters) {
+        for (_, composition) in std::mem::take(&mut self.batch_pinned_compositions) {
+            self.computed_group_sets.unpin_style_record(composition);
+        }
         for pending in std::mem::take(&mut self.engine_computed_records_pending)
             .into_values()
             .flatten()

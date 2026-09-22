@@ -1846,6 +1846,7 @@ impl StyleEngineState {
                 nodes_with_substituted_records: HashSet::default(),
                 nodes_owing_a_transition_registration: HashMap::default(),
                 nodes_owing_explicit_inheritance: HashMap::default(),
+                batch_pinned_compositions: Vec::new(),
                 nodes_owing_an_animation_sample: HashSet::default(),
                 counter_style_environment_identities: HashMap::default(),
                 nodes_owing_animation_definitions: HashMap::default(),
