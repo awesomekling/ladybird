@@ -1504,9 +1504,6 @@ impl RetainedState {
     /// The transaction's outputs are gone: every derived record C++ did not install goes back to
     /// the record the node held, unless a publication has moved the node on since.
     pub(super) fn discard_engine_computed_records(&mut self, counters: &mut Counters) {
-        for (_, composition) in std::mem::take(&mut self.batch_pinned_compositions) {
-            self.computed_group_sets.unpin_style_record(composition);
-        }
         for pending in std::mem::take(&mut self.engine_computed_records_pending)
             .into_values()
             .flatten()
@@ -1520,6 +1517,9 @@ impl RetainedState {
                 pending.new_style_record,
                 pending.old_style_record,
             );
+        }
+        for (_, composition) in std::mem::take(&mut self.batch_pinned_compositions) {
+            self.computed_group_sets.unpin_style_record(composition);
         }
     }
 

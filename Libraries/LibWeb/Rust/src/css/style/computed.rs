@@ -297,6 +297,7 @@ struct AnimationOverlayRecord {
     // NB: No sampled value enters a permanent interning table. The current assignment owns one
     //     reference, while detached layout and stabilization baselines can pin an old generation.
     base_style_record: StyleRecordID,
+    effective_custom_property_environment: u64,
     source_identity: u64,
     final_style_record: FinalStyleRecordID,
     animated_overlay: Box<crate::css::animated_overlay::AnimatedOverlay>,
@@ -1697,16 +1698,51 @@ impl ComputedGroupSets {
             self.remove(node);
             return;
         }
-        let Some(previous_base) = previous_style_record.base_record() else {
-            return;
+        let previous_slot = self
+            .animation_overlay_slots_by_record
+            .get(&previous_style_record)
+            .copied();
+        let (previous_base, previous_environment) = if let Some(slot) = previous_slot {
+            let Some(overlay) = self.animation_overlay_slots[slot as usize].as_ref() else {
+                return;
+            };
+            if overlay.is_assigned {
+                return;
+            }
+            (
+                overlay.base_style_record,
+                Some(overlay.effective_custom_property_environment),
+            )
+        } else {
+            let Some(base) = previous_style_record.base_record() else {
+                return;
+            };
+            (base, None)
         };
         let Some(record) = self.style_records.get_index(previous_base.index()).copied() else {
             return;
         };
+        let custom_properties = previous_environment
+            .map(|environment| self.intern_custom_property_environment(environment).0)
+            .unwrap_or(record.custom_properties);
+        if let Some(slot) = previous_slot {
+            self.animation_overlay_slots[slot as usize]
+                .as_mut()
+                .expect("pinned animation overlay is live")
+                .is_assigned = true;
+            self.live_animation_overlay_assignments += 1;
+        }
         let inherited_identity = record.inherited_groups;
         self.columns.groups[index] = record.groups.0;
         self.columns.inherited_groups[index] = inherited_identity.0;
-        self.columns.custom_properties[index] = record.custom_properties.0;
+        self.columns.custom_properties[index] = custom_properties.0;
+        self.columns.fixed_metadata[index] = record.fixed_metadata.0;
+        self.columns.set_animation_overlay_slot(index, previous_slot);
+        let swap_eligible = record
+            .longhand_table
+            .and_then(|table| self.computed_longhand_tables.get_index(table.index()))
+            .is_some_and(|retained| table_inherited_group_swap_eligible(retained.table()));
+        self.columns.set_inherited_group_swap_eligible(index, swap_eligible);
         self.style_record_column[index] = Some(previous_base);
     }
 
@@ -1788,6 +1824,8 @@ impl ComputedGroupSets {
         }
         AnimationOverlayRecord {
             base_style_record,
+            effective_custom_property_environment: self.custom_property_environments
+                [self.style_records[base_style_record].custom_properties],
             source_identity,
             final_style_record: self.next_animation_overlay_record(),
             animated_overlay,
@@ -2276,6 +2314,12 @@ impl ComputedGroupSets {
             )
         };
         let final_style_record_identity = animation_overlay_publication.final_style_record;
+        if let Some(slot) = animation_overlay_publication.slot {
+            self.animation_overlay_slots[slot as usize]
+                .as_mut()
+                .expect("published animation overlay is live")
+                .effective_custom_property_environment = custom_property_environment;
+        }
         let style_record_node_handle_changed =
             target.is_some() && previous_style_record_identity != Some(final_style_record_identity);
         let publication = ComputedGroupPublication {
@@ -2786,6 +2830,12 @@ impl ComputedGroupSets {
         }
         let identity = self.intern_custom_property_environment(environment).0;
         self.columns.custom_properties[index] = identity.0;
+        if let Some(slot) = self.columns.animation_overlay_slot(index) {
+            self.animation_overlay_slots[slot as usize]
+                .as_mut()
+                .expect("assigned animation overlay is live")
+                .effective_custom_property_environment = environment;
+        }
     }
 
     /// The raw custom-property environment identity behind a node's record.
@@ -2864,6 +2914,12 @@ impl ComputedGroupSets {
         self.custom_property_environments
             .live_identities()
             .map(|identity| *self.custom_property_environments.get(identity))
+            .chain(
+                self.animation_overlay_slots
+                    .iter()
+                    .flatten()
+                    .map(|record| record.effective_custom_property_environment),
+            )
     }
 
     /// The base record behind a final record: itself, or the record an overlay was composed over.
@@ -4437,6 +4493,44 @@ mod tests {
                 .payloads
         );
         assert!(sets.base_style_record_view(FinalStyleRecordID::NONE).is_none());
+        assert!(
+            sets.base_style_record_view(FinalStyleRecordID(base.style_record_identity.raw() + (1 << 32)))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn discarded_candidate_restores_the_pinned_composition_and_environment() {
+        let mut sets = ComputedGroupSets::default();
+        let node = StyleNodeID::from_raw(1).unwrap();
+        let target = ComputedStyleTarget::new(node, u8::MAX);
+        let base = sets.publish_unowned(Some(target), &[], 0, 7, metadata(0, 0, 0));
+        let animated_overlay = crate::css::animated_overlay::AnimatedOverlay::default();
+        let mut animated_metadata = metadata(0, 0, 0);
+        animated_metadata.animation_overlay_identity = 1;
+        animated_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
+        let composition = sets.publish_unowned(Some(target), &[], 0, 7, animated_metadata);
+        sets.set_node_custom_property_environment(node, 9);
+        sets.pin_style_record(composition.style_record_identity.raw());
+
+        let candidate = sets.publish_unowned(Some(target), &[], 0, 11, metadata(0, 0, 0));
+        assert_eq!(
+            sets.assigned_final_style_record(target),
+            Some(candidate.style_record_identity)
+        );
+        sets.revert_engine_computed_record(node, candidate.style_record_identity, composition.style_record_identity);
+        sets.unpin_style_record(composition.style_record_identity.raw());
+
+        assert_eq!(
+            sets.assigned_final_style_record(target),
+            Some(composition.style_record_identity)
+        );
+        assert_eq!(
+            sets.assigned_base_style_record(target),
+            Some(base.style_record_identity)
+        );
+        assert_eq!(sets.custom_property_environment_identity(node), Some(9));
+        assert_eq!(sets.live_animation_overlay_records(), 1);
     }
 
     #[test]
