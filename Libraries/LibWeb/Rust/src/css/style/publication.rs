@@ -387,6 +387,7 @@ impl RetainedState {
         counters: &mut Counters,
     ) -> Option<(computed::FinalStyleRecordID, computed::FinalStyleRecordID)> {
         if scratch.root_computation_unsupported == Some(node) {
+            counters.bump(Counter::EngineComputedRecordBailRootFontInputs);
             return None;
         }
         // An element-backed pseudo-element is the element in the host's shadow tree that backs
