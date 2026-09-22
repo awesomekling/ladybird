@@ -238,6 +238,16 @@ impl CustomPropertyRegistry {
         self.registrations.values().any(|registration| !registration.inherits)
     }
 
+    /// The names registered as not inheriting, for a reader that has to ask whether one of them is
+    /// in an environment it is about to hand to a descendant. A document registers a handful.
+    pub(crate) fn non_inheriting_names(&self) -> Vec<&[u16]> {
+        self.registrations
+            .iter()
+            .filter(|(_, registration)| !registration.inherits)
+            .map(|(name, _)| name.as_slice())
+            .collect()
+    }
+
     /// Whether a name is registered at all, for a reader that only needs to keep its hands off it.
     pub(crate) fn name_is_registered(&self, name: &[u16]) -> bool {
         self.registrations.contains_key(name)
@@ -573,6 +583,11 @@ impl CustomPropertyStore {
             .and_then(|name_raw| self.own_values.get(name_raw))
             .map(|entry| (entry, self))
             .or_else(|| self.parent.as_ref()?.get_by_name_with_owner(name))
+    }
+
+    /// Whether this store, or one it inherits from, answers for any of these names.
+    pub(crate) fn holds_any_name(&self, names: &[&[u16]]) -> bool {
+        names.iter().any(|name| self.get_by_name_with_owner(name).is_some())
     }
 
     fn get_own_by_name(&self, name: &[u16]) -> Option<&CustomPropertyEntry> {
