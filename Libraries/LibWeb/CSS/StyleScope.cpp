@@ -1146,9 +1146,14 @@ void StyleScope::publish_counter_styles() const
             counter_styles.data(),
             names.size());
         // The style engine names the same registry on every record computed against it, so it
-        // learns the identity wherever the registry is published.
-        document().style_computer().style_engine().set_counter_style_environment_identity(
-            scope.style_engine_tree_scope().value(), scope.m_counter_style_environment_identity);
+        // learns the identity wherever the registry is published. A scope that has registered
+        // nothing has no identity to learn, and this runs inside a lazy cache build that a style
+        // computation can reach, so it stays out of the engine's way until there is something to
+        // say.
+        if (scope.m_counter_style_environment_identity != 0) {
+            document().style_computer().style_engine().set_counter_style_environment_identity(
+                scope.style_engine_tree_scope().value(), scope.m_counter_style_environment_identity);
+        }
     };
 
     publish(*this);
