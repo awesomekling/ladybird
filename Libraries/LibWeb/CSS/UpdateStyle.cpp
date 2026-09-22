@@ -696,13 +696,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     style_engine.consume_recorded_element_style_input_change(reaction.style_node);
                     bool verification_did_change_custom_properties = false;
                     invalidation = element->apply_style_engine_reaction(verification_did_change_custom_properties, DOM::Element::StyleRecomputeMode::Verification);
-                    bool verification_pseudo_record_changed = false;
-                    for (size_t kind = 0; kind < previous_pseudo_element_records.size(); ++kind) {
-                        if (element->style_record_identity(static_cast<PseudoElement>(kind)) != previous_pseudo_element_records[kind]) {
-                            verification_pseudo_record_changed = true;
-                            break;
-                        }
-                    }
                     auto packed = style_engine.compare_style_records(StyleRecordID { reaction.new_style_record }, element->style_record_identity(), true, false, false);
                     VERIFY(!(packed & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged))
                         || style_engine.style_records_match_for_verification(reaction.style_node, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, element->style_record_identity()));
@@ -739,13 +732,13 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     auto const computed_style_changes_before_application = counters.element_computed_style_changes;
                     if (engine_record_is_installable) {
                         invalidation = element->apply_engine_computed_style_record(StyleRecordID { reaction.new_style_record }, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties);
-                        // The reference pass already installed equal values, so applying the engine
-                        // record may be a no-op. Preserve the invalidation it proved the originating
-                        // record or pseudo-element transitions need.
-                        if (verification_pseudo_record_changed)
-                            invalidation |= verification_invalidation;
-                        else if (invalidation.is_none() && !!previous_style_record && production_computed_value_changed)
-                            invalidation = verification_invalidation;
+                        // The reference pass installed its own equal record first, so applying the
+                        // engine's record afterwards diffs against that record rather than against the
+                        // one the element held when the update started: it reports what is left, which
+                        // for an equal record is nothing. The reference pass diffed against the record
+                        // the element did hold, so its invalidation is the one this element's change
+                        // needs, and it is kept whole.
+                        invalidation |= verification_invalidation;
                         if (production_computed_value_changed
                             && counters.element_computed_style_changes == computed_style_changes_before_application)
                             ++counters.element_computed_style_changes;
