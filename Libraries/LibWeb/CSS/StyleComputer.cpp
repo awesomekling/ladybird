@@ -863,6 +863,8 @@ void StyleComputer::collect_animations_into(DOM::AbstractElement abstract_elemen
     m_keyframes_inherited_non_inherited_style_groups = 0;
     collect_animation_effects_into(abstract_element, effects, computed_properties, stage_length_contexts);
     publish_animated_custom_properties(computed_properties, abstract_element);
+    if (computed_properties.has_animated_property(PropertyID::Display))
+        computed_properties.set_display_before_box_type_transformation(computed_properties.display());
     // An animation-only overlay update resolves keyframe values just like a full style computation does, so a
     // keyframe-borne `inherit` on a non-inherited property discovered here must leave the same invalidation
     // mark behind, or a later change to the parent's value never reaches this element's animated style.
