@@ -2039,12 +2039,12 @@ impl RetainedState {
         let Some(winner) = self.winner_groups.winner_in_state(state, prop::CONTENT) else {
             return true;
         };
-        self.winner_groups
-            .resolved_winner(winner)
-            .is_some_and(|winner| match self.specified_values.value(winner.key.value) {
+        self.winner_groups.resolved_winner(winner).is_some_and(|winner| {
+            match self.specified_values.value(winner.key.value) {
                 Lookup::Known(value) => content_value_is_engine_computable(value),
                 _ => false,
-            })
+            }
+        })
     }
 
     /// Whether the record holds a value resolved against the viewport, its own or its font's.

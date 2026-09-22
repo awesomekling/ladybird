@@ -296,6 +296,7 @@ impl RetainedState {
             } else {
                 matches.sort_by_cached_key(|entry| {
                     self.cascade_priority_of(
+                        Some(entry.node),
                         entry.rule,
                         entry.tree_scope,
                         entry.specificity,
@@ -326,14 +327,20 @@ impl RetainedState {
         }
     }
 
-    pub(super) fn cascade_stratum_of(&self, rule: RuleID, tree_scope: TreeScopeID, important: bool) -> CascadeStratum {
+    pub(super) fn cascade_stratum_of(
+        &self,
+        node: Option<StyleNodeID>,
+        rule: RuleID,
+        tree_scope: TreeScopeID,
+        important: bool,
+    ) -> CascadeStratum {
         let sheet = self.program.rule_sheet(rule);
         let context_scope = self.cascade_context_scope(rule, tree_scope);
         let layer = self.program.rule_version(rule).layer;
         CascadeStratum::new(
             self.program.sheet_origin(sheet),
             important,
-            self.tree_scope_depth(context_scope),
+            self.context_depth_for(node, context_scope),
             layer,
             self.program.layer_rank(context_scope, layer),
             CascadeAttachment::StyleSheet,
@@ -399,13 +406,14 @@ impl RetainedState {
                     .get_or_insert_with(|| {
                         (
                             self.cascade_priority_of(
+                                Some(entry.node),
                                 entry.rule,
                                 entry.tree_scope,
                                 entry.specificity,
                                 entry.scope_proximity,
                                 declared.important,
                             ),
-                            self.cascade_stratum_of(entry.rule, entry.tree_scope, declared.important),
+                            self.cascade_stratum_of(Some(entry.node), entry.rule, entry.tree_scope, declared.important),
                         )
                     });
                 candidates.push(OrderedCascadeCandidate {
@@ -639,6 +647,7 @@ impl RetainedState {
                 }
                 let priority = *priorities[declared.important as usize].get_or_insert_with(|| {
                     self.cascade_priority_of(
+                        Some(entry.node),
                         entry.rule,
                         entry.tree_scope,
                         entry.specificity,
@@ -1323,6 +1332,7 @@ impl RetainedState {
                 };
                 let priority = *priorities[declared.important as usize].get_or_insert_with(|| {
                     self.cascade_priority_of(
+                        Some(node),
                         delta.rule,
                         matched.tree_scope,
                         entry.specificity,
@@ -1443,8 +1453,8 @@ impl RetainedState {
     /// tree scope: a document rule's do, and so does a rule's from the element's own tree scope,
     /// for the element and its pseudo-elements alike. A rule reaching across a shadow boundary
     /// (`:host`, `::slotted`, `::part`) decides from its own context, and the winners hold it when
-    /// that context is one the element's cascade weighs where a rule's priority places it, which
-    /// is at its encapsulation depth, the same for every element it matches.
+    /// that context is one the element's cascade weighs: its priority places it where the
+    /// element's context list does (`context_depth_for`).
     pub(super) fn match_scope_is_complete_for(
         &self,
         node: Option<StyleNodeID>,
@@ -1461,8 +1471,24 @@ impl RetainedState {
         if self.tree.tree_scope(node) == scope {
             return true;
         }
-        self.author_context_index(node, scope)
-            .is_some_and(|index| index == self.tree_scope_depth(scope))
+        self.author_context_index(node, scope).is_some()
+    }
+
+    /// Where a rule's encapsulation context stands in the order the element's cascade weighs its
+    /// contexts in: its position in the element's context list, which is its encapsulation depth
+    /// except where a slotted element is also a shadow host and its own tree comes after the
+    /// trees of the slots it is assigned to. Without an element, or for a context the element's
+    /// list does not hold, the depth.
+    pub(super) fn context_depth_for(&self, node: Option<StyleNodeID>, context_scope: TreeScopeID) -> u32 {
+        if context_scope == TreeScopeID::DOCUMENT {
+            return 0;
+        }
+        match node {
+            Some(node) if self.tree.tree_scope(node) != context_scope => self
+                .author_context_index(node, context_scope)
+                .unwrap_or_else(|| self.tree_scope_depth(context_scope)),
+            _ => self.tree_scope_depth(context_scope),
+        }
     }
 
     /// Where a tree scope stands among the encapsulation contexts that decide for an element,
@@ -1495,8 +1521,13 @@ impl RetainedState {
         for slotted_into in self.scopes_slotted_into(node) {
             append(slotted_into);
         }
-        if let Some(shadow_root) = self.tree.shadow_root_of(node) {
-            append(self.tree.tree_scope(shadow_root));
+        // The tree a shadow root roots, which is not the tree the root itself stands in.
+        if let Some(own_scope) = self
+            .tree
+            .shadow_root_of(node)
+            .and_then(|shadow_root| self.scope_by_root.get(shadow_root))
+        {
+            append(own_scope);
         }
         contexts
             .iter()
@@ -1704,6 +1735,7 @@ impl RetainedState {
     #[must_use]
     pub(super) fn cascade_priority_of(
         &self,
+        node: Option<StyleNodeID>,
         rule: RuleID,
         tree_scope: TreeScopeID,
         specificity: Specificity,
@@ -1720,7 +1752,7 @@ impl RetainedState {
         CascadePriority::new(PriorityInputs {
             origin: self.program.sheet_origin(sheet),
             important,
-            context_depth: self.tree_scope_depth(context_scope),
+            context_depth: self.context_depth_for(node, context_scope),
             element_attachment: ElementAttachment::Rule,
             layer_rank: self.program.layer_rank(context_scope, version.layer),
             specificity,
