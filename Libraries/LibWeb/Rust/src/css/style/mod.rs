@@ -851,6 +851,10 @@ pub struct RetainedState {
     next_style_transaction_version: StyleTransactionVersion,
     /// Latest document-wide scalar computation facts, copied at the transaction boundary.
     document_style_computation_inputs: Option<bridge::FfiDocumentStyleComputationInputs>,
+    /// The viewport the last flush drove records against. A record that reads the viewport cannot
+    /// stand when it moved, and the viewport is a published input: comparing it here is what tells
+    /// the engine so, without the host naming every reader.
+    driven_viewport: (f64, f64),
     /// The base URLs a `url()` resolves against, copied at the transaction boundary with the inputs.
     document_resource_contexts: resource_contexts::DocumentResourceContexts,
     /// Immutable registry generation used by custom-property style queries during a transaction.

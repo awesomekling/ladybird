@@ -803,6 +803,7 @@ impl RetainedState {
                 && !environment_moved_under_substitutions
                 && !scratch.document_environment_moved
                 && !scratch.recompute_in_full
+                && !(scratch.viewport_moved && self.record_reads_the_viewport(old_style_record))
             {
                 // A declaration in an inherited payload group does not prove that the other
                 // properties in that group still inherit from the current parent. Re-drive the
@@ -1995,6 +1996,18 @@ impl RetainedState {
             .is_some_and(|winner| match self.specified_values.value(winner.key.value) {
                 Lookup::Known(value) => content_value_is_engine_computable(value),
                 _ => false,
+            })
+    }
+
+    /// Whether the record holds a value resolved against the viewport, its own or its font's.
+    /// `merge_dependency_flags` puts both in the record's publication flags.
+    pub(super) fn record_reads_the_viewport(&self, record: computed::FinalStyleRecordID) -> bool {
+        const DEPENDS_ON_VIEWPORT_METRICS: u8 = 1;
+        const FONT_METRICS_DEPEND_ON_VIEWPORT_METRICS: u8 = 1 << 1;
+        self.computed_group_sets
+            .style_record_view(record.raw())
+            .is_some_and(|view| {
+                view.dependency_flags & (DEPENDS_ON_VIEWPORT_METRICS | FONT_METRICS_DEPEND_ON_VIEWPORT_METRICS) != 0
             })
     }
 
@@ -4840,6 +4853,9 @@ pub(super) struct EngineComputedRecordScratch {
     /// Set the same way: whether the reaction drives the element's record again in full whatever
     /// its winners did, for inputs the winners do not show.
     pub(super) recompute_in_full: bool,
+    /// Whether the viewport moved since the last flush. A record that reads it holds values its
+    /// winners do not name, so it cannot stand, and the row drives again against the new one.
+    pub(super) viewport_moved: bool,
     pub(super) prepared_root_font: Option<(StyleNodeID, ParentInputsMoved, drive::FontDriveScratch)>,
     cohorts: HashMap<RecordCohortKey, RecordCohortValue>,
     computability: EngineComputabilityScratch,
