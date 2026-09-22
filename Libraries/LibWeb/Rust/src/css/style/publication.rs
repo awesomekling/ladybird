@@ -4806,6 +4806,102 @@ impl RetainedState {
 }
 
 impl StyleEngineState {
+    /// Answer an observation of one node against current facts without draining the document's
+    /// transaction. The match is cold: no winner row from the preceding batch is read.
+    pub(crate) fn answer_record_demand(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        exclude_inline_style: bool,
+        targeted: bool,
+        counters: &mut Counters,
+    ) -> Result<RetriedEngineRecord, &'static str> {
+        if pseudo.is_some() {
+            return Err("NotOfferedPseudoElement");
+        }
+        if exclude_inline_style {
+            return Err("GateDeclarations");
+        }
+        if !self.tree.is_live(node)
+            || !self.host.tree_staging.is_empty()
+            || self.host.program_staging.is_dirty()
+            || self.host.sheet_rule_replacement.is_some()
+            || !self.host.journal.markers().is_empty()
+            || self.host.journal.inputs().any(|input| {
+                input.key.style_node().is_none()
+                    || matches!(input.key, InputKey::TreeRelations(_))
+                    || matches!(input.key, InputKey::LocalFeature(changed, _) | InputKey::State(changed, _) if changed == node)
+            })
+        {
+            return Err("GateReaction");
+        }
+
+        self.forget_node_match_answer_for_demand(node);
+        if !self.begin_cold_matching_batch(node, counters) {
+            self.begin_adaptive_cold_matching_batch(node, counters);
+        }
+        let answer = self.complete_published_match_answer(node, None, counters);
+        self.end_cold_matching_batch(counters);
+        let answer = answer.map_err(|_| "GateIncompleteAnswer")?;
+        let complete =
+            answer.cascade_winners_are_complete || self.cascade_winners_are_complete_but_for_custom_properties(node);
+        self.computed_group_sets.set_node_answer_incomplete(node, !complete);
+        self.retained
+            .published_match_answers
+            .push(answer, &mut self.retained.memory, counters);
+        self.retained.published_match_answers.sort();
+
+        let before = counters.record_bail_marks();
+        let mut scratch = EngineComputedRecordScratch {
+            recompute_in_full: targeted,
+            ..EngineComputedRecordScratch::default()
+        };
+        let mut suspended_memory = MemoryLease::new(MemoryCategory::BatchScratch);
+        let record = loop {
+            let delta = self.engine_computed_record_delta(
+                node,
+                complete,
+                None,
+                ParentInputsMoved {
+                    inherited_style: targeted,
+                    display: targeted,
+                },
+                &mut scratch,
+                counters,
+            );
+            if !self.random_base_requests.is_empty() {
+                self.refill_random_base_requests();
+                continue;
+            }
+            if let Some(request) = scratch.font_drive.request.take() {
+                suspended_memory.resize_required_to(&mut self.memory, scratch.font_drive.capacity_bytes());
+                self.refill_font_requests(vec![(Some(node), request)], counters);
+                continue;
+            }
+            break delta;
+        };
+        let Some((_, record)) = record else {
+            return Err(counters
+                .first_changed_record_bail(&before)
+                .unwrap_or("ComputationBailUnnamed"));
+        };
+        let mut result = RetriedEngineRecord {
+            style_record: record.raw(),
+            ..RetriedEngineRecord::default()
+        };
+        for delta in &scratch.pseudo_deltas {
+            let kind = usize::from(delta.kind);
+            if kind < bridge::RETRY_PSEUDO_RECORD_SLOTS {
+                result.pseudo_records_present |= 1 << kind;
+                result.pseudo_records[kind] = delta.new_style_record.raw();
+            }
+        }
+        self.host.journal.acknowledge_node(node, &mut self.retained.memory);
+        self.consume_element_style_input(node);
+        self.style_input_nodes_for_cpp.remove(&node);
+        Ok(result)
+    }
+
     pub(super) fn reclaim_computed_memory_if_needed(&mut self, counters: &mut Counters) {
         // Recording dictionaries are keyed by computed identities. Reusing an identity for new
         // semantics would make later events refer to the first definition replay saw for it.

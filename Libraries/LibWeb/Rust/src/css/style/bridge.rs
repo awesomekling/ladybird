@@ -158,6 +158,26 @@ pub struct FfiEngineComputedRecord {
     pub pseudo_records: [u64; RETRY_PSEUDO_RECORD_SLOTS],
 }
 
+/// One synchronous record demand. A nonempty cause names the census refusal that left the
+/// computation to the host; its bytes are static and never need releasing.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct FfiRecordDemandAnswer {
+    pub record: FfiEngineComputedRecord,
+    pub decline_cause: *const u8,
+    pub decline_cause_length: usize,
+}
+
+impl FfiRecordDemandAnswer {
+    fn declined(cause: &'static str) -> Self {
+        Self {
+            record: FfiEngineComputedRecord::default(),
+            decline_cause: cause.as_ptr(),
+            decline_cause_length: cause.len(),
+        }
+    }
+}
+
 /// One row of a retried batch: the node the engine settled, and what it settled for it.
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -3779,6 +3799,64 @@ fn record_target_is_under_verification(engine: &StyleEngine, node: u32, pseudo_k
         && (pseudo_kind == u8::MAX
             || pseudo_kind >= 64
             || engine.host.computed_record_verification_settled_pseudos & (1u64 << pseudo_kind) != 0)
+}
+
+/// Settle one node from current retained inputs, leaving other nodes' queued inputs intact.
+/// `pseudo_kind == u8::MAX` selects the originating element.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_answer_record_demand(
+    engine: *mut c_void,
+    node: u32,
+    pseudo_kind: u8,
+    exclude_inline_style: bool,
+    targeted: bool,
+) -> FfiRecordDemandAnswer {
+    abort_on_panic(|| {
+        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+        let Some(node) = StyleNodeID::from_raw(node) else {
+            return FfiRecordDemandAnswer::declined("GateReaction");
+        };
+        let result = match engine.answer_record_demand(
+            node,
+            (pseudo_kind != u8::MAX).then_some(pseudo_kind),
+            exclude_inline_style,
+            targeted,
+        ) {
+            Ok(answer) => FfiRecordDemandAnswer {
+                record: FfiEngineComputedRecord {
+                    style_record: answer.style_record,
+                    uses_substitution: engine.nodes_with_substituted_records.contains(&node),
+                    pseudo_records_present: answer.pseudo_records_present,
+                    pseudo_records: answer.pseudo_records,
+                },
+                decline_cause: std::ptr::null(),
+                decline_cause_length: 0,
+            },
+            Err(cause) => FfiRecordDemandAnswer::declined(cause),
+        };
+        engine.record_boundary_call(EventKind::AnswerRecordDemand, |payload| {
+            payload.write_u32(node.raw());
+            payload.write_u8(pseudo_kind);
+            payload.write_bool(exclude_inline_style);
+            payload.write_bool(targeted);
+            payload.write_u64(result.record.style_record);
+            payload.write_bool(result.record.uses_substitution);
+            payload.write_u8(result.record.pseudo_records_present);
+            for record in result.record.pseudo_records {
+                payload.write_u64(record);
+            }
+            let cause = if result.decline_cause_length == 0 {
+                &[][..]
+            } else {
+                unsafe { std::slice::from_raw_parts(result.decline_cause, result.decline_cause_length) }
+            };
+            payload.write_bytes(cause);
+        });
+        result
+    })
 }
 
 /// Retry after the ancestor's style was installed, returning installation metadata together
