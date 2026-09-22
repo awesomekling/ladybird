@@ -931,6 +931,8 @@ FontFeatureData font_feature_data_from_style_values(ReadonlySpan<StyleValue cons
     if (auto const* value = at(FontResolutionFeatureInput::FontVariantNumeric))
         data.font_variant_numeric = font_variant_numeric_from_style_value(*value);
     data.font_variant_position = keyword_to_font_variant_position(keyword_of(FontResolutionFeatureInput::FontVariantPosition, Keyword::Normal)).release_value();
+    if (auto const* value = at(FontResolutionFeatureInput::FontVariantAlternates))
+        data.font_variant_alternates = font_variant_alternates_from_style_value(*value);
     if (auto const* value = at(FontResolutionFeatureInput::FontFeatureSettings))
         data.font_feature_settings = font_feature_settings_from_style_value(*value);
     data.font_kerning = keyword_to_font_kerning(keyword_of(FontResolutionFeatureInput::FontKerning, Keyword::Auto)).release_value();

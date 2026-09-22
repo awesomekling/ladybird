@@ -135,6 +135,7 @@ public:
 
     void clear_computed_font_cache(Utf16FlyString const& family_name);
     void clear_font_feature_values_cache(Utf16FlyString const& family_name);
+    void invalidate_font_feature_values_snapshot();
     void did_load_font(Utf16FlyString const& family_name);
     void did_load_font(FontFaceKey const&);
 
@@ -163,6 +164,7 @@ public:
     // funnel that bumps the generation, and nowhere else.
     [[nodiscard]] void const* published_font_faces() const { return m_published_font_faces; }
     [[nodiscard]] FontCascadeMemo& font_cascade_memo() const { return *m_font_cascade_memo; }
+    [[nodiscard]] HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>> const& published_font_feature_values() const;
 
 private:
     virtual void visit_edges(Visitor&) override;
@@ -186,6 +188,8 @@ private:
     // Shared rather than owned: the style stage's between-pass batch fills this too.
     NonnullRefPtr<FontCascadeMemo> m_font_cascade_memo;
     mutable HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>> m_font_feature_values_cache;
+    mutable HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>> m_published_font_feature_values;
+    mutable bool m_font_feature_values_snapshot_dirty { true };
 
     bool m_has_completed_initial_paint { false };
     bool m_initial_paint_had_pending_fonts { false };

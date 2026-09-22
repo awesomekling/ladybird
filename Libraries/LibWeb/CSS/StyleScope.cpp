@@ -11,6 +11,7 @@
 #include <LibWeb/CSS/CounterStyle.h>
 #include <LibWeb/CSS/CounterStyleDefinition.h>
 #include <LibWeb/CSS/Enums.h>
+#include <LibWeb/CSS/FontComputer.h>
 #include <LibWeb/CSS/FontFaceSet.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
@@ -377,8 +378,10 @@ void StyleScope::invalidate_style_cache()
     m_published_layer_order_generation = 0;
     // The registered custom properties cache is built from the document's active stylesheets, so it only needs a
     // rebuild when the document scope's rule set changes.
-    if (m_node->is_document())
+    if (m_node->is_document()) {
         document().set_needs_registered_properties_cache_update();
+        document().font_computer().invalidate_font_feature_values_snapshot();
+    }
 }
 
 void StyleScope::invalidate_user_style_sheet()

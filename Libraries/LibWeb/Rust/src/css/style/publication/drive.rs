@@ -739,15 +739,6 @@ impl RetainedState {
             }
             _ => 0,
         };
-        // `font-variant-alternates` names features through the tree scope's `@font-feature-values`,
-        // which the stage's resolver has no provider for. Such an element keeps its record in C++.
-        if !matches!(
-            value_of(&table, prop::FONT_VARIANT_ALTERNATES),
-            Some(StyleValueData::Keyword { keyword }) if *keyword == keyword::NORMAL
-        ) {
-            counters.bump(Counter::EngineComputedRecordBailFontPhase);
-            return None;
-        }
         // The resolver reads these beside the family, so the request names each one whose value
         // is not the initial one and nothing for the rest. Read the computed values: a
         // non-default setting can also come from inheritance.
@@ -761,6 +752,7 @@ impl RetainedState {
                 (prop::FONT_VARIANT_LIGATURES, keyword::NORMAL),
                 (prop::FONT_VARIANT_NUMERIC, keyword::NORMAL),
                 (prop::FONT_VARIANT_POSITION, keyword::NORMAL),
+                (prop::FONT_VARIANT_ALTERNATES, keyword::NORMAL),
                 (prop::FONT_KERNING, keyword::AUTO),
                 (prop::TEXT_RENDERING, keyword::AUTO),
             ];
