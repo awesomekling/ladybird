@@ -734,6 +734,28 @@ impl RetainedState {
                 .iter()
                 .all(|&property| longhand_only_declares_a_css_transition(property))
         });
+        // A delta that moves a longhand declaring the element's CSS animations is a row whose only
+        // remaining obligation is the animation plan, and the host can apply that after the batch:
+        // the plan is a function of the longhands this drive computes, the `@keyframes` the host
+        // published before the stage began, and the animations the element already holds.
+        //
+        // It is taken only where the element holds none - which is where the batch let the row this
+        // far at all, since an element with an animation of its own is refused before its winners
+        // are compared - so the plan can do nothing but start what its definitions name: there is
+        // nothing to match, nothing to retime, nothing to cancel. A delta that also moves a
+        // transition declaration is left to C++, which decides both in one computation.
+        let owes_an_animation_plan = delta
+            .properties()
+            .iter()
+            .any(|&property| longhand_declares_a_css_animation(property))
+            && !delta
+                .properties()
+                .iter()
+                .any(|&property| longhand_only_declares_a_css_transition(property))
+            && self
+                .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
+                .is_empty()
+            && self.animation_keyframes().only_the_document_scope_defines_keyframes();
         // Partial drives can share across parents whose inherited inputs agree. Keep the full
         // parent record in the key when a non-inherited property explicitly inherits, including
         // through substitution, or when a full drive may read more of the parent's style.
@@ -756,6 +778,18 @@ impl RetainedState {
             RootFontInputs::from_document(&inputs),
         );
         if let Some(&(new_style_record, cohort_explicitly_inherited_groups)) = scratch.cohorts.get(&cohort) {
+            // The row takes another node's record whole, so its plan is decided from that record's
+            // own longhands rather than from a drive of this node's.
+            let animation_plan = match owes_an_animation_plan {
+                true => match self.settled_animation_plan_from_record(node, new_style_record) {
+                    Some(plan) => Some(plan),
+                    None => {
+                        counters.bump(Counter::EngineComputedRecordBailProperty);
+                        return None;
+                    }
+                },
+                false => None,
+            };
             self.note_node_substitution(node, scratch, state, current_environment);
             let delta =
                 self.computed_group_sets
@@ -774,6 +808,9 @@ impl RetainedState {
             if let Some(registration_only) = owes_a_transition_registration {
                 self.nodes_owing_a_transition_registration
                     .insert(node, registration_only);
+            }
+            if let Some(plan) = animation_plan {
+                self.nodes_owing_animation_definitions.insert(node, plan);
             }
             return Some(delta);
         }
@@ -800,12 +837,13 @@ impl RetainedState {
             (inherited_box.writing_mode, inherited_box.direction)
         };
         for &property in delta.properties() {
-            // Animations start from the C++ computation, and the counter-style environment behind
-            // `content` and `list-style-type` is resolved there. A delta that moves the element's
-            // transition declarations owes the host the transition step, which rides out of the
-            // batch as an effect of the row.
+            // The counter-style environment behind `content` and `list-style-type` is resolved in
+            // the C++ computation. A delta that moves the element's transition declarations owes
+            // the host the transition step, and one that moves its animation declarations owes the
+            // host the animation plan; both ride out of the batch as effects of the row.
             if property_starts_animation_or_counter_environment(property)
                 && !(owes_a_transition_step && longhand_only_declares_a_css_transition(property))
+                && !(owes_an_animation_plan && longhand_declares_a_css_animation(property))
                 && !self.counter_environment_winner_keeps_the_record(node, state, old_style_record, property)
             {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
@@ -960,6 +998,9 @@ impl RetainedState {
                 )?
             }
         };
+        // The plan is decided from the longhands this drive computed, before the table goes into
+        // the record.
+        let animation_plan = owes_an_animation_plan.then(|| self.settled_animation_plan(node, &table));
         let parent_in_display_none_subtree = self
             .tree
             .flat_tree_parent(node)
@@ -1012,7 +1053,49 @@ impl RetainedState {
             self.nodes_owing_a_transition_registration
                 .insert(node, registration_only && !driver_input_moved);
         }
+        if let Some(plan) = animation_plan {
+            self.nodes_owing_animation_definitions.insert(node, plan);
+        }
         Some(delta)
+    }
+
+    /// The animation plan a settled row leaves for the host, decided from one longhand table.
+    fn settled_animation_plan(
+        &self,
+        node: StyleNodeID,
+        table: &ComputedLonghandTable,
+    ) -> animations::SettledAnimationPlan {
+        crate::css::style_compute::build_settled_animation_plan(
+            table,
+            self.element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT),
+            self.animation_keyframes(),
+            self.tree.tree_scope(node),
+        )
+    }
+
+    /// The same, for a row that takes another node's record whole: the plan is decided from the
+    /// longhands that record carries.
+    fn settled_animation_plan_from_record(
+        &self,
+        node: StyleNodeID,
+        style_record: computed::FinalStyleRecordID,
+    ) -> Option<animations::SettledAnimationPlan> {
+        let view = self.computed_group_sets.style_record_view(style_record.raw())?;
+        // SAFETY: A record's table outlives the view the assignment below takes it from.
+        let table = unsafe { view.longhand_table.as_ref() }?;
+        Some(self.settled_animation_plan(node, table))
+    }
+
+    /// The animation definitions the engine-computed record the host is about to install for this
+    /// node leaves to be applied after the batch, taking the debt with the answer so that exactly
+    /// one application drains it. The plan stays alive until the next one is taken, which is long
+    /// enough for the host to read it.
+    pub(crate) fn take_settled_animation_definitions(
+        &mut self,
+        node: StyleNodeID,
+    ) -> Option<&animations::SettledAnimationPlan> {
+        self.animation_definitions_being_applied = self.nodes_owing_animation_definitions.remove(&node);
+        self.animation_definitions_being_applied.as_ref()
     }
 
     /// Account for a record the engine derived and leave its commitment to C++'s acknowledgement.
@@ -1020,20 +1103,29 @@ impl RetainedState {
     /// to, without recomputing anything: what an inherited-custom-properties reaction C++ settled
     /// by refreshing the data alone publishes. The new record's identity, or nothing when the node
     /// holds no base record to move.
-    /// What the engine-computed record the host is about to install for this node leaves to be
-    /// applied after the batch, taking the debt with the answer so that exactly one application
-    /// drains it: 0 nothing, 1 the registration alone, 2 the whole transition step.
     /// The style groups an engine-computed record read straight from the parent through an
     /// explicit `inherit`, taken with the answer so that exactly one application marks the parent.
     pub(crate) fn take_explicit_inheritance_debt(&mut self, node: StyleNodeID) -> u32 {
         self.nodes_owing_explicit_inheritance.remove(&node).unwrap_or(0)
     }
 
-    pub(crate) fn take_transition_registration_debt(&mut self, node: StyleNodeID) -> u8 {
-        match self.nodes_owing_a_transition_registration.remove(&node) {
+    /// What the engine-computed record the host is about to install for this node leaves to be
+    /// applied after the batch, taking the transition debt with the answer so that exactly one
+    /// application drains it: the low two bits are the transition step - 0 nothing, 1 the
+    /// registration alone, 2 the whole step - and `OWES_AN_ANIMATION_PLAN` says the row also left
+    /// an animation plan, which the host then takes for itself.
+    ///
+    /// Both effects are answered in one call because every installed row asks, and asking twice
+    /// costs more than the answer.
+    pub(crate) fn take_settled_row_effect_debt(&mut self, node: StyleNodeID) -> u8 {
+        let transition = match self.nodes_owing_a_transition_registration.remove(&node) {
             Some(true) => 1,
             Some(false) => 2,
             None => 0,
+        };
+        match self.nodes_owing_animation_definitions.contains_key(&node) {
+            true => transition | OWES_AN_ANIMATION_PLAN,
+            false => transition,
         }
     }
 
@@ -4740,6 +4832,29 @@ fn longhand_only_declares_a_css_transition(property: u16) -> bool {
                 | prop::TRANSITION_DURATION
                 | prop::TRANSITION_PROPERTY
                 | prop::TRANSITION_TIMING_FUNCTION
+        )
+}
+
+/// In a settled row's effect debt: the row left an animation plan for the host to take.
+pub(crate) const OWES_AN_ANIMATION_PLAN: u8 = 1 << 2;
+
+/// Whether a longhand does nothing but declare one of the element's CSS animations, so that a delta
+/// carrying it owes the host the animation plan and nothing else.
+fn longhand_declares_a_css_animation(property: u16) -> bool {
+    use crate::css::property_metadata::{FIRST_LONGHAND_PROPERTY_ID, LAST_LONGHAND_PROPERTY_ID, property_id as prop};
+    (FIRST_LONGHAND_PROPERTY_ID..=LAST_LONGHAND_PROPERTY_ID).contains(&property)
+        && matches!(
+            property,
+            prop::ANIMATION_COMPOSITION
+                | prop::ANIMATION_DELAY
+                | prop::ANIMATION_DIRECTION
+                | prop::ANIMATION_DURATION
+                | prop::ANIMATION_FILL_MODE
+                | prop::ANIMATION_ITERATION_COUNT
+                | prop::ANIMATION_NAME
+                | prop::ANIMATION_PLAY_STATE
+                | prop::ANIMATION_TIMELINE
+                | prop::ANIMATION_TIMING_FUNCTION
         )
 }
 

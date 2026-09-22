@@ -123,6 +123,14 @@ public:
     [[nodiscard]] bool animation_overlay_changed(StyleRecordID old_style_record, void const* animated_overlay) const;
     [[nodiscard]] Optional<u32> current_color_dependent_style_groups(StyleNodeID node, u8 pseudo_kind) const;
     [[nodiscard]] StyleEngineFFI::FfiAnimationInvalidation compare_animation_overlay(StyleRecordID old_style_record, void const* animated_overlay, ReadonlySpan<void const*> payloads, bool is_document_element) const;
+    // The animation definitions an engine-settled row left for the host, taken so that exactly one
+    // application drains them. Borrowed until the next row's are taken.
+    struct SettledAnimationDefinitions {
+        ReadonlySpan<ComputedValuesFFI::FfiComputedAnimation> definitions;
+        bool owed { false };
+        bool element_display_is_none { false };
+    };
+    [[nodiscard]] SettledAnimationDefinitions take_settled_animation_definitions(StyleNodeID node);
     [[nodiscard]] StyleRecordView style_record_view(StyleRecordID style_record) const;
     void decide_transitions(StyleRecordID before_style_record, void const* after_longhand_table, void const* after_animated_overlay, StyleValueFFI::FfiTransitionInput&, StyleValueFFI::FfiTransitionAction*) const;
     // Remove the retained input identities for one pseudo-element kind and return its removal.
@@ -198,6 +206,12 @@ public:
         AncestorBecameVisible = 1 << 5,
         PseudoInputsMayHaveChanged = 1 << 6,
         FontInputsChanged = 1 << 7,
+    };
+    // What a record the engine settled leaves for the host to apply once the batch is installed:
+    // the transition step it owes, and whether it also left an animation plan.
+    enum SettledRowEffectDebt : u8 {
+        SettledRowTransitionDebt = 3,
+        SettledRowOwesAnAnimationPlan = 1 << 2,
     };
     // What applying a style reaction found, reported so the engine derives the children's reactions.
     enum StyleReactionAppliedFact : u32 {

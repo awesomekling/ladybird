@@ -6645,6 +6645,64 @@ fn build_computed_animation_list(
     }
 }
 
+/// The animation plan for a record the engine settled, built from the table the drive just filled
+/// the way a C++ computation builds its own, and owning what its definitions name.
+///
+/// The scope chain `@keyframes` resolve in has only one link here: the engine settles such a row
+/// only where the document's own scope is the only one defining any `@keyframes`
+/// (`only_the_document_scope_defines_keyframes`), so the scope the winning `animation-name`
+/// declaration was written in - which the engine's winner store does not record - cannot change the
+/// answer.
+pub(crate) fn build_settled_animation_plan(
+    table: &ComputedLonghandTable,
+    existing_animation_names: &[crate::css::css_string::CssString],
+    keyframes: &crate::css::style::animations::AnimationKeyframes,
+    element_tree_scope: crate::css::style::tree::TreeScopeID,
+) -> crate::css::style::animations::SettledAnimationPlan {
+    let mut computed_definitions = Vec::new();
+    let list = build_computed_animation_list(
+        table,
+        existing_animation_names,
+        keyframes,
+        0,
+        element_tree_scope,
+        &mut computed_definitions,
+    );
+    // SAFETY: The list just built owns this many definitions, and its storage is released below.
+    let mut definitions = unsafe { std::slice::from_raw_parts(list.animations, list.count) }.to_vec();
+    let names = definitions
+        .iter()
+        // SAFETY: Every definition names a `CssString` the table it was built from still holds.
+        .map(|definition| unsafe { &*definition.name.cast::<crate::css::css_string::CssString>() }.clone())
+        .collect::<Vec<_>>()
+        .into_boxed_slice();
+    let timing_functions = definitions
+        .iter()
+        .map(|definition| {
+            // SAFETY: Every definition names a computed timing function the table still holds, so
+            //         retaining it here hands the plan its own reference.
+            unsafe {
+                crate::css::style_value::RetainedStyleValueData::from_retained_pointer(
+                    crate::css::style_value::retain_style_value(definition.timing_function.cast()),
+                )
+            }
+        })
+        .collect::<Vec<_>>()
+        .into_boxed_slice();
+    for (definition, (name, timing_function)) in definitions.iter_mut().zip(names.iter().zip(timing_functions.iter())) {
+        definition.name = name.as_ptr();
+        definition.timing_function = timing_function.pointer().cast();
+    }
+    // SAFETY: The list's storage is the box `build_computed_animation_list` leaked into it.
+    drop(unsafe { Box::from_raw(list.storage.cast::<Box<[FfiComputedAnimation]>>()) });
+    crate::css::style::animations::SettledAnimationPlan::new(
+        definitions.into_boxed_slice(),
+        names,
+        timing_functions,
+        effective_display(table, None).is_none(),
+    )
+}
+
 fn effective_longhand_data<'a>(
     table: &'a ComputedLonghandTable,
     overlay: Option<&'a AnimatedOverlay>,

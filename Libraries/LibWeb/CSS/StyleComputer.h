@@ -231,6 +231,16 @@ public:
     [[nodiscard]] NonnullRefPtr<ComputedStyleWorkingSet> compute_properties(DOM::AbstractElement, CascadedProperties&, u64 matching_pseudo_element_styles, u32* explicitly_inherited_non_inherited_style_groups = nullptr, StyleRecordID previous_style_record = {}, u32 initial_computed_group_mask = ComputedValues::all_style_groups, bool use_retained_style_computation_selection = false, bool stop_after_longhand_drive = false, u32* selected_computed_group_mask = nullptr, bool* computation_reads_unkeyed_context = nullptr, bool* computation_reads_resource_context = nullptr, Optional<StyleRecordID> highlight_parent_style_record = {}, u8* substitution_usage = nullptr, RefPtr<CustomPropertyData const> replaced_custom_property_data = nullptr) const;
 
     void apply_animation_definitions(DOM::AbstractElement& abstract_element, ReadonlySpan<AnimationProperties> animation_definitions, ReadonlySpan<i32> definition_matches, ReadonlySpan<RefPtr<Animations::KeyframeEffect::KeyFrameSet const>> definition_keyframe_sets, Optional<bool> computed_in_display_none_subtree) const;
+    // The animation plan a record the engine settled left for the host: what the C++ computation of
+    // that row would have applied beside the record it computed.
+    struct SettledAnimationPlan {
+        Vector<AnimationProperties> definitions;
+        Vector<i32> definition_matches;
+        Vector<RefPtr<Animations::KeyframeEffect::KeyFrameSet const>> definition_keyframe_sets;
+        bool element_display_is_none { false };
+    };
+    [[nodiscard]] Optional<SettledAnimationPlan> take_settled_animation_plan(StyleNodeID) const;
+    void apply_settled_animation_plan(DOM::AbstractElement, SettledAnimationPlan const&) const;
 
     enum class DeclaredValueSource : u8 {
         PublishedEnvironment,

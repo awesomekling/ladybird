@@ -558,6 +558,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
         u32 style_groups;
     };
     Vector<ExplicitInheritanceEffectRow> explicit_inheritance_effect_rows;
+    struct AnimationEffectRow {
+        StyleNodeID style_node;
+        StyleComputer::SettledAnimationPlan plan;
+    };
+    Vector<AnimationEffectRow> animation_effect_rows;
     for (auto const& reaction : reactions) {
         auto element = document.style_computer().element_for_style_node(reaction.style_node);
         if (!element || (!element->is_svg_element() && !element->has_relevant_animations()))
@@ -672,6 +677,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             bool const needs_inherited_style_recompute = reaction.reaction & StyleEngine::InheritedStyle;
             bool did_change_custom_properties = false;
             RequiredInvalidationAfterStyleChange invalidation;
+            // The animation plan the row leaves for the host, taken in the branch that installs an
+            // engine-computed record below.
+            Optional<StyleComputer::SettledAnimationPlan> animation_plan;
 
             // An element declaring custom properties of its own layers them over the environment it
             // inherits, which its cascade decides.
@@ -727,7 +735,13 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     bool const legacy_environment_is_complete = !needs_custom_property_recompute;
                     if (legacy_environment_is_complete)
                         verify_engine_computed_record_environment(*element, StyleRecordID { reaction.new_style_record });
-                    verify_engine_computed_record_font(*element, StyleRecordID { reaction.new_style_record });
+                    // A row that owes an animation plan is one the reference computation applied
+                    // itself, sampling what it started into the very style it resolved its font
+                    // from; an engine-settled record holds the font of the style beneath the
+                    // animation, which reaches the element as an overlay published on top of it.
+                    // The two fonts are then answers to different questions.
+                    if (!animation_plan.has_value())
+                        verify_engine_computed_record_font(*element, StyleRecordID { reaction.new_style_record });
                     for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
                         auto const& engine_record = pseudo_element_records[kind];
                         if (!engine_record.has_value())
@@ -812,6 +826,10 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 // transition step itself, so the debt is discharged either way.
                 auto const transition_debt = document.style_computer().style_engine().take_transition_registration_debt(StyleNodeID { reaction.style_node });
                 auto const explicit_inheritance_debt = document.style_computer().style_engine().take_explicit_inheritance_debt(StyleNodeID { reaction.style_node });
+                auto const row_effect_debt = document.style_computer().style_engine().take_settled_row_effect_debt(StyleNodeID { reaction.style_node });
+                auto const transition_debt = row_effect_debt & StyleEngine::SettledRowTransitionDebt;
+                if (row_effect_debt & StyleEngine::SettledRowOwesAnAnimationPlan)
+                    animation_plan = document.style_computer().take_settled_animation_plan(StyleNodeID { reaction.style_node });
                 if (!engine_computed_record_environment_is_installable(*element, StyleRecordID { reaction.new_style_record })) {
                     // The engine resolved the record's environment over the parent's own; when the
                     // parent's inheritable environment differs, C++ computes the style.
@@ -826,6 +844,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         transition_effect_rows.append({ StyleNodeID { reaction.style_node }, StyleRecordID { reaction.old_style_record }, transition_debt == 1 });
                     if (explicit_inheritance_debt != 0)
                         explicit_inheritance_effect_rows.append({ StyleNodeID { reaction.style_node }, explicit_inheritance_debt });
+                    if (animation_plan.has_value())
+                        animation_effect_rows.append({ StyleNodeID { reaction.style_node }, animation_plan.release_value() });
                 }
             } else if (needs_regular_style_recompute || needs_inherited_style_recompute || needs_full_custom_property_recompute) {
                 if (needs_regular_style_recompute)
@@ -931,6 +951,21 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             transaction_invalidation |= invalidation;
         }
     }
+    for (auto const& row : animation_effect_rows) {
+        auto element = document.style_computer().element_for_style_node(row.style_node);
+        if (!element || !element->is_connected() || &element->document() != &document)
+            continue;
+        DOM::AbstractElement abstract_element { *element };
+        if (!abstract_element.has_style())
+            continue;
+        document.style_computer().apply_settled_animation_plan(abstract_element, row.plan);
+    }
+    // The animations the plans started are this pass's to sample: an animation composes into the
+    // style its element publishes, and what that publication means for the element's descendants
+    // is the next transaction of this same style update, which the reaction loop around this
+    // batch takes.
+    if (!animation_effect_rows.is_empty())
+        document.sample_animation_effects_needing_style_update();
 
     return transaction_invalidation;
 }

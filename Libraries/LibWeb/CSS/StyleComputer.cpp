@@ -1520,6 +1520,86 @@ void StyleComputer::invalidate_animated_custom_property_readers(DOM::AbstractEle
     }
 }
 
+// The animation plan a style computation decided, in the shape the plan application takes it in.
+static void marshal_animation_definitions(ReadonlySpan<ComputedValuesFFI::FfiComputedAnimation> animations, Vector<AnimationProperties>& animation_definitions, Vector<i32>& definition_matches, Vector<RefPtr<Animations::KeyframeEffect::KeyFrameSet const>>& definition_keyframe_sets)
+{
+    animation_definitions.ensure_capacity(animations.size());
+    definition_matches.ensure_capacity(animations.size());
+    definition_keyframe_sets.ensure_capacity(animations.size());
+    for (auto const& animation : animations) {
+        definition_matches.unchecked_append(animation.matched_existing_index);
+        definition_keyframe_sets.unchecked_append(static_cast<Animations::KeyframeEffect::KeyFrameSet const*>(animation.keyframe_set));
+        Variant<double, Utf16String> duration { animation.duration };
+        if (animation.duration_is_auto)
+            duration = "auto"_utf16;
+        auto timing_function = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
+            static_cast<StyleValueFFI::StyleValueData const*>(animation.timing_function)));
+        static_assert(to_underlying(AnimationTimelineSource::Kind::Document) == to_underlying(ComputedValuesFFI::FfiAnimationTimelineKind::Document));
+        static_assert(to_underlying(AnimationTimelineSource::Kind::None) == to_underlying(ComputedValuesFFI::FfiAnimationTimelineKind::None));
+        static_assert(to_underlying(AnimationTimelineSource::Kind::Scroll) == to_underlying(ComputedValuesFFI::FfiAnimationTimelineKind::Scroll));
+        AnimationTimelineSource timeline {
+            .kind = static_cast<AnimationTimelineSource::Kind>(animation.timeline_kind),
+            .scroller = static_cast<Scroller>(animation.scroll_scroller),
+            .axis = static_cast<Axis>(animation.scroll_axis),
+        };
+        animation_definitions.unchecked_append({
+            .duration = move(duration),
+            .timing_function = EasingFunction::from_style_value(timing_function),
+            .iteration_count = animation.iteration_count,
+            .direction = static_cast<AnimationDirection>(animation.direction),
+            .play_state = static_cast<AnimationPlayState>(animation.play_state),
+            .delay = animation.delay,
+            .fill_mode = static_cast<AnimationFillMode>(animation.fill_mode),
+            .composition = static_cast<AnimationComposition>(animation.composition),
+            .name = css_string_from_rust(animation.name),
+            .timeline = timeline,
+            .timing_function_value = RustStyleValueHandle::retained(
+                static_cast<StyleValueFFI::StyleValueData const*>(animation.timing_function)),
+        });
+    }
+}
+
+// Takes the animation plan a record the engine settled left for the host, out of the engine's own
+// storage and into the batch, which applies it once every record is installed.
+Optional<StyleComputer::SettledAnimationPlan> StyleComputer::take_settled_animation_plan(StyleNodeID style_node) const
+{
+    auto taken = const_cast<StyleComputer&>(*this).style_engine().take_settled_animation_definitions(style_node);
+    if (!taken.owed)
+        return {};
+    SettledAnimationPlan plan;
+    plan.element_display_is_none = taken.element_display_is_none;
+    marshal_animation_definitions(taken.definitions, plan.definitions, plan.definition_matches, plan.definition_keyframe_sets);
+    return plan;
+}
+
+// The animation plan a record the engine settled left for the host, applied once the record is
+// installed.
+//
+// The engine settles such a record only where the element holds no CSS animation of its own, so
+// every definition asks for a new animation: there is nothing for the plan to match, to retime or
+// to cancel, and applying it is creating what its definitions name. The animations it creates are
+// sampled by the sampling pass that follows the batch, which is what publishes their first values.
+void StyleComputer::apply_settled_animation_plan(DOM::AbstractElement abstract_element, SettledAnimationPlan const& plan) const
+{
+    // Which animations the element references is an index a `@keyframes` rule finds its elements
+    // by, and the row exists because the declarations naming them moved.
+    if (!abstract_element.pseudo_element().has_value())
+        abstract_element.element().republish_animation_name_registry();
+    if (plan.definitions.is_empty())
+        return;
+    // The plan was decided for an element holding no CSS animation. Under verification the
+    // reference computation of this very row applied it already, which is the one thing that can
+    // have given the element one since.
+    if (auto const* existing = abstract_element.css_defined_animations(); !existing || !existing->is_empty())
+        return;
+    // An element that is not rendered starts no animation. The record says whether the element's
+    // own display is `none`; the walk for its ancestors is the host's, as it is for a C++ row.
+    Optional<bool> computed_in_display_none_subtree;
+    if (plan.element_display_is_none)
+        computed_in_display_none_subtree = true;
+    apply_animation_definitions(abstract_element, plan.definitions, plan.definition_matches, plan.definition_keyframe_sets, computed_in_display_none_subtree);
+}
+
 void StyleComputer::apply_animation_definitions(DOM::AbstractElement& abstract_element, ReadonlySpan<AnimationProperties> animation_definitions, ReadonlySpan<i32> definition_matches, ReadonlySpan<RefPtr<Animations::KeyframeEffect::KeyFrameSet const>> definition_keyframe_sets, Optional<bool> computed_in_display_none_subtree) const
 {
     auto& document = abstract_element.document();
@@ -6300,40 +6380,9 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             });
         }
         state.transition_delay_and_duration_are_single_zero = longhand_result->transitions.delay_and_duration_are_single_zero;
-        state.animation_definitions.ensure_capacity(longhand_result->animations.count);
-        state.animation_definition_matches.ensure_capacity(longhand_result->animations.count);
-        state.animation_definition_keyframe_sets.ensure_capacity(longhand_result->animations.count);
-        for (auto const& animation : ReadonlySpan<ComputedValuesFFI::FfiComputedAnimation> { longhand_result->animations.animations, longhand_result->animations.count }) {
-            state.animation_definition_matches.unchecked_append(animation.matched_existing_index);
-            state.animation_definition_keyframe_sets.unchecked_append(static_cast<Animations::KeyframeEffect::KeyFrameSet const*>(animation.keyframe_set));
-            Variant<double, Utf16String> duration { animation.duration };
-            if (animation.duration_is_auto)
-                duration = "auto"_utf16;
-            auto timing_function = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
-                static_cast<StyleValueFFI::StyleValueData const*>(animation.timing_function)));
-            static_assert(to_underlying(AnimationTimelineSource::Kind::Document) == to_underlying(ComputedValuesFFI::FfiAnimationTimelineKind::Document));
-            static_assert(to_underlying(AnimationTimelineSource::Kind::None) == to_underlying(ComputedValuesFFI::FfiAnimationTimelineKind::None));
-            static_assert(to_underlying(AnimationTimelineSource::Kind::Scroll) == to_underlying(ComputedValuesFFI::FfiAnimationTimelineKind::Scroll));
-            AnimationTimelineSource timeline {
-                .kind = static_cast<AnimationTimelineSource::Kind>(animation.timeline_kind),
-                .scroller = static_cast<Scroller>(animation.scroll_scroller),
-                .axis = static_cast<Axis>(animation.scroll_axis),
-            };
-            state.animation_definitions.unchecked_append({
-                .duration = move(duration),
-                .timing_function = EasingFunction::from_style_value(timing_function),
-                .iteration_count = animation.iteration_count,
-                .direction = static_cast<AnimationDirection>(animation.direction),
-                .play_state = static_cast<AnimationPlayState>(animation.play_state),
-                .delay = animation.delay,
-                .fill_mode = static_cast<AnimationFillMode>(animation.fill_mode),
-                .composition = static_cast<AnimationComposition>(animation.composition),
-                .name = css_string_from_rust(animation.name),
-                .timeline = timeline,
-                .timing_function_value = RustStyleValueHandle::retained(
-                    static_cast<StyleValueFFI::StyleValueData const*>(animation.timing_function)),
-            });
-        }
+        marshal_animation_definitions(
+            { longhand_result->animations.animations, longhand_result->animations.count },
+            state.animation_definitions, state.animation_definition_matches, state.animation_definition_keyframe_sets);
         auto const& driver_results = longhand_result->driver_results;
         style_computer.m_deferred_longhand_evaluations += driver_results.longhand_evaluations;
         if (driver_results.uses_tree_counting_function)
