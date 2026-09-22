@@ -1882,8 +1882,6 @@ impl StyleEngineState {
                         || (counter_styles_moved && self.node_reads_counter_styles(root))))
                     && (reaction_is_settleable
                         || (old_record.is_none() && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
-                    && !(self.retained.custom_property_registrations_changed
-                        && self.node_style_reads_custom_properties(root))
                     && !self.retained.computed_group_sets.node_answer_is_incomplete(root)
                     && !selector_truth_changes.deltas_for(root).iter().any(|delta| {
                         !self
@@ -2212,12 +2210,6 @@ impl StyleEngineState {
                     {
                         counters.bump(Counter::EngineComputedRecordGateReaction);
                         decline_cause = "GateReaction";
-                        false
-                    } else if self.retained.custom_property_registrations_changed
-                        && self.node_style_reads_custom_properties(node)
-                    {
-                        counters.bump(Counter::EngineComputedRecordBailSubstitution);
-                        decline_cause = "GateSubstitution";
                         false
                     } else if selector_truth_changes.deltas_for(node).iter().any(|delta| {
                         !self
