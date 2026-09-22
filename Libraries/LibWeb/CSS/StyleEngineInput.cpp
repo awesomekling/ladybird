@@ -585,14 +585,14 @@ static bool element_may_have_derived_presentational_hints(DOM::Element const& el
 
 // Whether an element's hints are mapped where they move, at its arrival and at the attribute
 // funnel, rather than by the cascade: every element but the ones whose hints come from another
-// element's state, which may not exist yet when the attribute moves.
+// element's state, which may not exist yet when the attribute moves. The engine leaves those to
+// C++ by their adjustment fact.
 bool element_publishes_presentational_hints_eagerly(DOM::Element const& element)
 {
     if (element.publishes_presentational_hints_on_arrival())
         return true;
     // A link's colour hints come from the body's link attributes, whichever state it is in.
-    return element.namespace_uri() == Namespace::HTML
-        && !element_may_have_derived_presentational_hints(element)
+    return !element_may_have_derived_presentational_hints(element)
         && !element.matches_link_pseudo_class() && !element.matches_visited_pseudo_class();
 }
 

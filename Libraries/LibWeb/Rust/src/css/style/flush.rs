@@ -929,20 +929,6 @@ impl StyleEngineState {
         } else {
             routing_setup_timer.stop(Counter::RoutingSetupMicroseconds, counters);
         }
-        // An element whose presentational hints moved in this transaction has C++ publish them
-        // while it computes the style, so its winner state is not yet what the hints say. A style
-        // attribute and an SVG element's presentation attributes are published as they change, so
-        // their winners are already current.
-        let mut nodes_with_declaration_changes: Vec<StyleNodeID> = transaction
-            .inputs
-            .iter()
-            .filter_map(|input| match input.key {
-                InputKey::ElementDeclaration(node, ElementDeclarationKind::PresentationalHint) => Some(node),
-                _ => None,
-            })
-            .collect();
-        nodes_with_declaration_changes.sort_unstable();
-        nodes_with_declaration_changes.dedup();
         let environment_changed = transaction
             .markers
             .iter()
@@ -1893,7 +1879,6 @@ impl StyleEngineState {
                         || (counter_styles_moved && self.node_reads_counter_styles(root))))
                     && (reaction_is_settleable
                         || (old_record.is_none() && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
-                    && nodes_with_declaration_changes.binary_search(&root).is_err()
                     && !(self.retained.custom_property_registrations_changed
                         && self.node_style_reads_custom_properties(root))
                     && !self.retained.computed_group_sets.node_answer_is_incomplete(root)
@@ -2205,10 +2190,6 @@ impl StyleEngineState {
                     {
                         counters.bump(Counter::EngineComputedRecordGateReaction);
                         decline_cause = "GateReaction";
-                        false
-                    } else if nodes_with_declaration_changes.binary_search(&node).is_ok() {
-                        counters.bump(Counter::EngineComputedRecordGateDeclarations);
-                        decline_cause = "GateDeclarations";
                         false
                     } else if self.retained.custom_property_registrations_changed
                         && self.node_style_reads_custom_properties(node)
