@@ -641,31 +641,48 @@ impl RetainedState {
             && facts & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT == 0)
             || scratch.font_environment_moved;
         if facts
-            & (bridge::element_adjustment_fact::HAS_ANIMATIONS
-                | bridge::element_adjustment_fact::IS_SHADOW_HOST_PSEUDO_ELEMENT
+            & (bridge::element_adjustment_fact::IS_SHADOW_HOST_PSEUDO_ELEMENT
                 | bridge::element_adjustment_fact::HAS_DERIVED_PRESENTATIONAL_HINTS)
             != 0
         {
             counters.bump(Counter::EngineComputedRecordBailWinnerElement);
             return None;
         }
-        // Both first records and updates need the inherited values composed by the parent's animations.
-        if self.parent_composes_animations(node) {
-            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-            return None;
-        }
+        // An element's animations compose into its style in the C++ computation, and the record it
+        // holds is the one they were composed into. Deriving another record from it, or moving it
+        // to another environment, would publish the composition as if it were the element's own
+        // style - so all of that stays in C++ while the element animates. Answering with the very
+        // record the element already holds does not: it is what the row asks for when nothing the
+        // record was computed from has moved, and the overlay on it is the host's either way.
+        let animations_bind_the_record = facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0;
         let Some(old_style_record) = self.computed_group_sets.assigned_style_record(node) else {
             // Presentational hints are mapped from the attributes by the C++ computation, which
             // publishes them as the element's declarations: a first record waits for that
             // computation, and an attribute change asks for it through a recorded input, so a
             // later record's winners carry the hints.
-            if facts & bridge::element_adjustment_fact::HAS_PRESENTATIONAL_HINTS != 0 {
+            // A first record for an element that already animates would be a record the engine
+            // computed for a style the host composes into, and the plan it may leave was decided
+            // against the animations the host published, which are not the only ones it holds.
+            if facts & bridge::element_adjustment_fact::HAS_PRESENTATIONAL_HINTS != 0 || animations_bind_the_record {
                 counters.bump(Counter::EngineComputedRecordBailWinnerElement);
                 return None;
             }
             return self.engine_cold_record(node, (generation, state), scratch, goal, counters);
         };
-        if self.record_requires_cpp_animation(old_style_record) {
+        // The same of a record that holds an animation overlay, or whose table declares a
+        // transition the moved values would start.
+        let animations_bind_the_record =
+            animations_bind_the_record || self.record_requires_cpp_animation(old_style_record);
+        // Even the record that stands is not an answer for an element running a CSS animation: a
+        // `@keyframes` rule that moves re-plans which keyframes that animation runs, and the plan
+        // is no part of the record, so the computation has to run for the element to hear about it.
+        // An element animating through the Web Animations API or a transition has no such rule
+        // behind it, and that is most of them.
+        let record_may_stand_while_animating =
+            !animations_bind_the_record || !self.css_defined_animations.node_runs_a_css_animation(node);
+        // A record derived from the old one inherits what the parent's animations sampled when the
+        // old one was computed.
+        if self.parent_composes_animations(node) {
             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
             return None;
         }
@@ -789,6 +806,11 @@ impl RetainedState {
                         return None;
                     }
                     // Only the environment moved: the record keeps its groups and takes the new one.
+                    // A record the element's animations compose into is not the engine's to move.
+                    if environment.is_some() && animations_bind_the_record {
+                        counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
+                        return None;
+                    }
                     if let Some(environment) = environment {
                         let Some(delta) = self
                             .computed_group_sets
@@ -800,6 +822,10 @@ impl RetainedState {
                         counters.bump(Counter::EngineComputedRecordUnchangedWinners);
                         self.note_engine_computed_record(node, delta, (generation, state), 0, 0, counters);
                         return Some(delta);
+                    }
+                    if !record_may_stand_while_animating {
+                        counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
+                        return None;
                     }
                     counters.bump(Counter::EngineComputedRecordUnchangedWinners);
                     counters.bump(Counter::CascadeWinnerDeltaStops);
@@ -824,6 +850,12 @@ impl RetainedState {
                 }
                 parent_inputs_moved.inherited_style = true;
             }
+        }
+        // Past the record that stands, every route derives another one from the record the element
+        // holds, and the values its animations composed are in that record.
+        if animations_bind_the_record {
+            counters.bump(Counter::EngineComputedRecordBailWinnerElement);
+            return None;
         }
         // A moved font-phase longhand reaches every value the font feeds, so the record is driven
         // through every phase and every group is rebuilt. A moved box-type transformation input
