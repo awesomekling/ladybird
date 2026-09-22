@@ -5991,6 +5991,7 @@ unsafe fn compute_longhands(
     environment: &FfiStyleComputationEnvironment,
     parent_snapshot: Option<&ParentSnapshot<'_>>,
     highlight: Option<&HighlightInheritance<'_>>,
+    is_document_element: bool,
 ) -> LonghandDriveOutcome {
     let mut driver_results = empty_longhand_driver_results();
     let driver_results_pointer = &raw mut driver_results;
@@ -6113,10 +6114,19 @@ unsafe fn compute_longhands(
         zero_advance: crate::css::style::drive_font_metric(resolved_font.zero_advance),
         line_height,
     };
+    // `rem` on the document element names the document element's own computed font-size, which
+    // this drive has just resolved. The context the font phase came in with carries the document's
+    // root metrics instead, and those still describe the font the root had before this
+    // computation: the host refreshes them only once the record is installed.
     let mut line_height_context = input.font_length_resolution_context;
     line_height_context.font_metrics = own_metrics(inherited_line_height);
     line_height_context.font_metrics_depend_on_viewport_metrics =
         driver_results.font_metrics_depend_on_viewport_metrics;
+    if is_document_element {
+        line_height_context.root_font_metrics = line_height_context.font_metrics;
+        line_height_context.root_font_metrics_depend_on_viewport_metrics =
+            driver_results.font_metrics_depend_on_viewport_metrics;
+    }
     drive_phase(
         LONGHAND_DRIVE_PHASE_LINE_HEIGHT,
         &raw const line_height_context,
@@ -6144,6 +6154,11 @@ unsafe fn compute_longhands(
     remaining_length_context.font_metrics = own_metrics(line_height_before_adjustments);
     remaining_length_context.font_metrics_depend_on_viewport_metrics =
         driver_results.font_metrics_depend_on_viewport_metrics;
+    if is_document_element {
+        remaining_length_context.root_font_metrics = remaining_length_context.font_metrics;
+        remaining_length_context.root_font_metrics_depend_on_viewport_metrics =
+            driver_results.font_metrics_depend_on_viewport_metrics;
+    }
     let input_line_height_metrics = if input.check_input_line_height {
         FfiInputLineHeightMetrics {
             current_line_height: line_height_before_adjustments,
@@ -6926,6 +6941,15 @@ pub unsafe extern "C" fn rust_compute_properties(
         snapshot.has_animated_property(property_id::TEXT_ALIGN)
             || snapshot.has_animated_property(property_id::DIRECTION)
     });
+    // `rem` on the document element names the document element's own computed font-size, which the
+    // drive resolves; the context it starts from carries the document's root metrics, and those
+    // still describe the font the root had before this computation.
+    let is_document_element = crate::css::style::tree::StyleNodeID::from_raw(input.style_node).is_some_and(|node| {
+        let style_engine = unsafe { &*input.style_engine.cast::<crate::css::style::StyleEngine>() };
+        style_engine.element_adjustment_facts(node)
+            & crate::css::style::bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT
+            != 0
+    });
     let mut inherited_animated_overlay = (drive_input.animated_overlay.is_null()
         && prepared.parent_has_animated_values)
         .then(Box::<AnimatedOverlay>::default);
@@ -6945,6 +6969,7 @@ pub unsafe extern "C" fn rust_compute_properties(
                     &environment,
                     parent_snapshot.as_ref(),
                     highlight.as_ref(),
+                    is_document_element,
                 )
             };
             match outcome {

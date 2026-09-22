@@ -3732,16 +3732,24 @@ ComputationContext StyleComputer::make_computation_context_for_property(Property
         };
     }
     default: {
+        auto font_metrics = Length::FontMetrics {
+            style.font_size(),
+            style.first_available_computed_font(document().font_computer())->pixel_metrics(),
+            style.line_height(document().font_computer())
+        };
+        // `rem` on the document element names the document element's own computed font-size, which
+        // is the font this computation just resolved. The retained root metrics still describe the
+        // font the root had before it, and are only refreshed once the record is installed.
+        bool const subject_is_the_document_element = abstract_element.has_value()
+            && !abstract_element->pseudo_element().has_value()
+            && abstract_element->element().is_document_element();
         return {
             .length_resolution_context = {
                 .viewport_rect = viewport_rect(),
-                .font_metrics = {
-                    style.font_size(),
-                    style.first_available_computed_font(document().font_computer())->pixel_metrics(),
-                    style.line_height(document().font_computer()) },
-                .root_font_metrics = m_root_element_font_metrics,
+                .font_metrics = font_metrics,
+                .root_font_metrics = subject_is_the_document_element ? font_metrics : m_root_element_font_metrics,
                 .font_metrics_depend_on_viewport_metrics = style.font_metrics_depend_on_viewport_metrics(),
-                .root_font_metrics_depend_on_viewport_metrics = abstract_element.has_value() && abstract_element->element().is_document_element() ? style.font_metrics_depend_on_viewport_metrics() : m_root_element_font_metrics_depend_on_viewport_metrics,
+                .root_font_metrics_depend_on_viewport_metrics = subject_is_the_document_element ? style.font_metrics_depend_on_viewport_metrics() : m_root_element_font_metrics_depend_on_viewport_metrics,
                 .subject_inline_axis_is_horizontal = subject_inline_axis_is_horizontal,
                 .subject_element = abstract_element.has_value() ? &abstract_element->element() : nullptr,
             },
