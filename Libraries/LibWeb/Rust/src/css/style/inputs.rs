@@ -1820,6 +1820,7 @@ impl StyleEngineState {
                 top_layer_elements: Vec::new(),
                 next_style_transaction_version: StyleTransactionVersion(1),
                 document_style_computation_inputs: None,
+                document_resource_contexts: Default::default(),
                 custom_property_registry: None,
                 frozen_longhand_inputs: HashMap::default(),
                 element_custom_property_data: HashMap::default(),
