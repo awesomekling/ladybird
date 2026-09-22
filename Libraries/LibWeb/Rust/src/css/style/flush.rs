@@ -2132,13 +2132,18 @@ impl StyleEngineState {
                     // resolves against is a published input now, and a record from an older
                     // font-environment generation is already one the engine refuses to reuse. So are
                     // a descendant recompute and an ancestor becoming visible: C++ answers both with a
-                    // full recompute, and so does the engine (see `recompute_in_full`).
-                    const SETTLEABLE_REACTIONS: u8 = transaction::STYLE_REACTION_PUBLISHED_STYLE
-                        | transaction::STYLE_REACTION_FONT_INPUTS_CHANGED
-                        | DERIVABLE_REACTIONS
-                        | transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES
-                        | transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE;
-                    let reaction_is_settleable = reaction & !SETTLEABLE_REACTIONS == 0
+                    // full recompute, and so does the engine (see `recompute_in_full`). A reaction
+                    // saying the element's pseudo-element inputs may have changed (a deferred
+                    // ::selection becoming observable) is too: the element's own record answers as
+                    // any other, and installing it recomputes the highlight pseudo-elements the
+                    // engine leaves to C++. That makes every reaction kind the engine's; what is
+                    // left to C++ is decided by what the reaction rides with.
+                    // A transaction of pseudo-element inputs alone leaves the element's own record
+                    // to C++, which refreshes only its pseudo-elements, as does one that also moved
+                    // the document environment.
+                    let reaction_is_settleable = reaction != transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED
+                        && !(environment_changed
+                            && reaction & transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED != 0)
                         && !(reaction & DERIVABLE_REACTIONS != 0 && style_input_nodes_for_cpp.contains(&node));
                     let mut parent_inputs_moved =
                         parked_parent_inputs
