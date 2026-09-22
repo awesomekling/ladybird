@@ -609,26 +609,6 @@ impl RetainedState {
                     .as_ref()
             }
         };
-        // The font resolver supplies default feature and variation settings. Check computed
-        // values here because non-default settings can also come from inheritance.
-        for (property, default_keyword) in [
-            (prop::FONT_FEATURE_SETTINGS, keyword::NORMAL),
-            (prop::FONT_VARIATION_SETTINGS, keyword::NORMAL),
-            (prop::FONT_VARIANT_ALTERNATES, keyword::NORMAL),
-            (prop::FONT_VARIANT_CAPS, keyword::NORMAL),
-            (prop::FONT_VARIANT_EAST_ASIAN, keyword::NORMAL),
-            (prop::FONT_VARIANT_EMOJI, keyword::NORMAL),
-            (prop::FONT_VARIANT_LIGATURES, keyword::NORMAL),
-            (prop::FONT_VARIANT_POSITION, keyword::NORMAL),
-            (prop::FONT_KERNING, keyword::AUTO),
-            (prop::TEXT_RENDERING, keyword::AUTO),
-        ] {
-            if !matches!(value_of(&table, property), Some(StyleValueData::Keyword { keyword }) if *keyword == default_keyword)
-            {
-                counters.bump(Counter::EngineComputedRecordBailFontPhase);
-                return None;
-            }
-        }
         // The font size the element's own lengths resolve against is the C++ working set's, a
         // CSSPixels value, not the computed value's double.
         let font_size = match value_of(&table, prop::FONT_SIZE) {
@@ -666,19 +646,43 @@ impl RetainedState {
             }
             _ => 0,
         };
-        // `normal` selects no features, so the request names nothing rather than a value the
-        // resolver would have to recognise as the default.
-        //
-        // A list item is left alone: its marker carries the default `tabular-nums`, and settling
-        // the marker's record in the engine is what decides whether the layout tree survives a
-        // change on the item. That belongs with the pseudo-element rows, not here.
-        let font_variant_numeric = match value_of(&table, prop::FONT_VARIANT_NUMERIC) {
-            Some(StyleValueData::Keyword { keyword }) if *keyword == keyword::NORMAL => std::ptr::null(),
-            _ => table.effective_value(None, prop::FONT_VARIANT_NUMERIC, true).value,
+        // `font-variant-alternates` names features through the tree scope's `@font-feature-values`,
+        // which the stage's resolver has no provider for. Such an element keeps its record in C++.
+        if !matches!(
+            value_of(&table, prop::FONT_VARIANT_ALTERNATES),
+            Some(StyleValueData::Keyword { keyword }) if *keyword == keyword::NORMAL
+        ) {
+            counters.bump(Counter::EngineComputedRecordBailFontPhase);
+            return None;
+        }
+        // The resolver reads these beside the family, so the request names each one whose value
+        // is not the initial one and nothing for the rest. Read the computed values: a
+        // non-default setting can also come from inheritance.
+        let font_feature_values: [bridge::FfiHostHandle; bridge::FONT_RESOLUTION_FEATURE_INPUT_COUNT] = {
+            let inputs = [
+                (prop::FONT_FEATURE_SETTINGS, keyword::NORMAL),
+                (prop::FONT_VARIATION_SETTINGS, keyword::NORMAL),
+                (prop::FONT_VARIANT_CAPS, keyword::NORMAL),
+                (prop::FONT_VARIANT_EAST_ASIAN, keyword::NORMAL),
+                (prop::FONT_VARIANT_EMOJI, keyword::NORMAL),
+                (prop::FONT_VARIANT_LIGATURES, keyword::NORMAL),
+                (prop::FONT_VARIANT_NUMERIC, keyword::NORMAL),
+                (prop::FONT_VARIANT_POSITION, keyword::NORMAL),
+                (prop::FONT_KERNING, keyword::AUTO),
+                (prop::TEXT_RENDERING, keyword::AUTO),
+            ];
+            std::array::from_fn(|index| {
+                let (property, default_keyword) = inputs[index];
+                let pointer = match value_of(&table, property) {
+                    Some(StyleValueData::Keyword { keyword }) if *keyword == default_keyword => std::ptr::null(),
+                    _ => table.effective_value(None, property, true).value,
+                };
+                bridge::FfiHostHandle::from_pointer(pointer.cast())
+            })
         };
         let request = bridge::FfiFontResolutionRequest {
             font_family: bridge::FfiHostHandle::from_pointer(font_family.cast()),
-            font_variant_numeric: bridge::FfiHostHandle::from_pointer(font_variant_numeric.cast()),
+            font_feature_values,
             font_size_raw,
             font_slope,
             font_weight,

@@ -37,14 +37,24 @@ static StyleEngineFFI::FfiResolvedFont resolve_font(FontCascadeMemo& memo, FontF
         reinterpret_cast<StyleValueFFI::StyleValueData const*>(request.font_family)));
     // A numeric variant selects shaping features, so it belongs to the resolution rather than to
     // the record. The engine names nothing when it is `normal`.
-    // Value-initialized is exactly the all-default feature set this resolver has always sent;
-    // only the variant the request names is filled in.
-    FontFeatureData font_feature_data {};
-    if (request.font_variant_numeric) {
-        auto font_variant_numeric = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
-            reinterpret_cast<StyleValueFFI::StyleValueData const*>(request.font_variant_numeric)));
-        font_feature_data.font_variant_numeric = font_variant_numeric_from_style_value(*font_variant_numeric);
+    // The engine names a value for each input it did not leave at its initial value; the rest are
+    // absent and the assembler reads them as the initial value they are.
+    Vector<RefPtr<StyleValue const>> retained_feature_values;
+    Vector<StyleValue const*> feature_values;
+    retained_feature_values.ensure_capacity(to_underlying(FontResolutionFeatureInput::Count));
+    feature_values.ensure_capacity(to_underlying(FontResolutionFeatureInput::Count));
+    for (size_t index = 0; index < to_underlying(FontResolutionFeatureInput::Count); ++index) {
+        auto handle = request.font_feature_values[index];
+        if (!handle) {
+            retained_feature_values.unchecked_append(nullptr);
+            feature_values.unchecked_append(nullptr);
+            continue;
+        }
+        retained_feature_values.unchecked_append(StyleValue::adopt_rust_style_value_data(
+            StyleValueFFI::rust_style_value_retain(reinterpret_cast<StyleValueFFI::StyleValueData const*>(handle))));
+        feature_values.unchecked_append(retained_feature_values.last().ptr());
     }
+    auto font_feature_data = font_feature_data_from_style_values(feature_values);
     ComputedFontCacheKey key {
         .font_families = computed_font_families_from_style_value(*font_family),
         .font_optical_sizing = static_cast<FontOpticalSizing>(request.font_optical_sizing),
@@ -52,7 +62,7 @@ static StyleEngineFFI::FfiResolvedFont resolve_font(FontCascadeMemo& memo, FontF
         .font_slope = request.font_slope,
         .font_weight = request.font_weight,
         .font_width = Percentage(request.font_width),
-        .font_variation_settings = {},
+        .font_variation_settings = font_variation_settings_from_style_values(feature_values),
         .font_feature_data = move(font_feature_data),
     };
     auto font_list = memo.resolve(font_faces, key);
