@@ -778,7 +778,7 @@ PASS: child mutation: slotted-shadow-host-named: :has(:not(:empty)) after text c
 PASS: child mutation: slotted-shadow-host-named: :has(:nth-child(even).hit) after even child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: child mutation: slotted-shadow-host-named: :has(:nth-child(odd).hit) after prepend shifts child index | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: pseudo-element child mutation: document: :empty becomes false after element append
-PASS: pseudo-element child mutation: document: :empty becomes false after textContent | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :empty becomes false after textContent | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(.hit) after direct child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(.hit) after direct child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(.hit) after DocumentFragment append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -818,7 +818,7 @@ PASS: pseudo-element child mutation: document: :has(.hit ~ .after) after indirec
 PASS: pseudo-element child mutation without warmup: document: :has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(> .wrapper > .hit) after nested structure append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(> .wrapper > .hit) after nested structure append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :not(:has(.hit)) becomes false after child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :not(:has(.hit)) becomes false after child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(.hit, .fallback) after first-list child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(.hit, .fallback) after first-list child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:empty) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -827,15 +827,15 @@ PASS: pseudo-element child mutation: document: :has(.hit) after replaceChild | e
 PASS: pseudo-element child mutation without warmup: document: :has(.hit) after replaceChild | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(.hit) after replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(.hit) after replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(.hit) becomes false after child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(.hit) becomes false after removeChild | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(.hit) becomes false after child moves out | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(.hit) becomes false after child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(.hit) becomes false after removeChild | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(.hit) becomes false after child moves out | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :empty becomes true after replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :empty becomes true after replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :empty becomes true after textContent clear | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :empty becomes true after textContent clear | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :empty stays true after comment append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :empty becomes false after whitespace text append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :empty becomes false after whitespace text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(*) after child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -844,7 +844,7 @@ PASS: pseudo-element child mutation: document: :has(> *) after child append | el
 PASS: pseudo-element child mutation without warmup: document: :has(> *) after child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:checked) after checked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(:checked) after checked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -855,7 +855,7 @@ PASS: pseudo-element child mutation: document: :has(:required) after required in
 PASS: pseudo-element child mutation without warmup: document: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:dir(rtl)) after dir=auto child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -868,7 +868,7 @@ PASS: pseudo-element child mutation: document: :has(:any-link) after linked anch
 PASS: pseudo-element child mutation without warmup: document: :has(:any-link) after linked anchor append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:only-child) after only child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(:only-child) after only child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(:only-child) becomes false after sibling append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(:only-child) becomes false after sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:nth-child(2)) after second child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(:nth-child(2)) after second child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -900,7 +900,7 @@ PASS: pseudo-element child mutation: document: :has(.hit ~ .after ~ .tail) after
 PASS: pseudo-element child mutation without warmup: document: :has(.hit ~ .after ~ .tail) after indirect chain append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(.hit:only-child) after only child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(.hit:only-child) after only child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(.hit:only-child) becomes false after sibling append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(.hit:only-child) becomes false after sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(.hit:nth-last-child(1)) after last child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(.hit:nth-last-child(1)) after last child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(.hit:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -909,7 +909,7 @@ PASS: pseudo-element child mutation: document: :has(.hit:nth-of-type(2)) after s
 PASS: pseudo-element child mutation without warmup: document: :has(.hit:nth-of-type(2)) after second typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(.hit:only-of-type) after only typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(.hit:only-of-type) after only typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(.hit:only-of-type) becomes false after same type sibling append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(.hit:only-of-type) becomes false after same type sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:is(.hit, .fallback)) after second-list child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(:is(.hit, .fallback)) after second-list child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:where(.hit, .fallback)) after second-list child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -924,18 +924,18 @@ PASS: pseudo-element child mutation: document: :not(:has(.miss)):has(.hit) after
 PASS: pseudo-element child mutation without warmup: document: :not(:has(.miss)):has(.hit) after direct child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(.hit:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(.hit:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(.hit:empty) becomes false after nested text append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(.hit:empty) becomes false after nested text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(.hit) after append with multiple arguments | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(.hit) after append with multiple arguments | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(.hit:first-child + .after) after prepend before existing child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(.hit:first-child + .after) after prepend before existing child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(.hit:last-child) becomes false after trailing sibling append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(.hit + .after) becomes false after middle child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(.hit ~ .after) becomes false after following child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(> .wrapper > .hit) becomes false after nested child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(.hit:last-child) becomes false after trailing sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(.hit + .after) becomes false after middle child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(.hit ~ .after) becomes false after following child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(> .wrapper > .hit) becomes false after nested child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(.hit) after replaceWith matching child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(.hit) after replaceWith matching child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(.hit) becomes false after replaceWith nonmatching child | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(.hit) becomes false after replaceWith nonmatching child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(.hit) after cloned child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(.hit) after cloned child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(.hit) after fragment replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0

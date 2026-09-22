@@ -1,25 +1,25 @@
 PASS: descendant direction stress pseudo-warm: document: :has(:dir(rtl)) after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant direction stress pseudo-cold: document: :has(:dir(rtl)) after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant direction stress pseudo-warm: document: :has(:dir(ltr)) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: descendant direction stress pseudo-cold: document: :has(:dir(ltr)) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant direction stress pseudo-warm: document: :has(:dir(ltr)) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant direction stress pseudo-cold: document: :has(:dir(ltr)) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant direction stress pseudo-warm: document: :has(:dir(rtl):first-child) after first descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant direction stress pseudo-cold: document: :has(:dir(rtl):first-child) after first descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant direction stress pseudo-warm: document: :not(:has(:dir(rtl))) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: descendant direction stress pseudo-cold: document: :not(:has(:dir(rtl))) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant direction stress pseudo-warm: document: :not(:has(:dir(rtl))) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant direction stress pseudo-cold: document: :not(:has(:dir(rtl))) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant language stress pseudo-warm: document: :has(:lang(he)) after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-cold: document: :has(:lang(he)) after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant language stress pseudo-warm: document: :has(:lang(en)) becomes false after descendant lang attribute change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: descendant language stress pseudo-cold: document: :has(:lang(en)) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant language stress pseudo-warm: document: :has(:lang(en)) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant language stress pseudo-cold: document: :has(:lang(en)) becomes false after descendant lang attribute change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant language stress pseudo-warm: document: :has(:lang(he):first-child) after first descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-cold: document: :has(:lang(he):first-child) after first descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant language stress pseudo-warm: document: :not(:has(:lang(he))) becomes false after descendant lang attribute change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: descendant language stress pseudo-cold: document: :not(:has(:lang(he))) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant language stress pseudo-warm: document: :not(:has(:lang(he))) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant language stress pseudo-cold: document: :not(:has(:lang(he))) becomes false after descendant lang attribute change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: inherited language stress pseudo-warm: document: :has(:lang(he)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-cold: document: :has(:lang(he)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: inherited language stress pseudo-warm: document: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: inherited language stress pseudo-cold: document: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: inherited language stress pseudo-warm: document: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: inherited language stress pseudo-cold: document: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: inherited language stress pseudo-warm: document: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: inherited language stress pseudo-cold: document: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: inherited language stress pseudo-warm: document: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: inherited language stress pseudo-cold: document: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: inherited language stress pseudo-warm: document: :has(:lang(he):first-child) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-cold: document: :has(:lang(he):first-child) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-warm: document: :has(:is(:lang(he), .fallback)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -29,25 +29,25 @@ PASS: inherited language stress pseudo-cold: document: :has(:where(:lang(he), .f
 PASS: descendant direction stress pseudo-warm: shadow-internal: :has(:dir(rtl)) after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant direction stress pseudo-cold: shadow-internal: :has(:dir(rtl)) after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant direction stress pseudo-warm: shadow-internal: :has(:dir(ltr)) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant direction stress pseudo-cold: shadow-internal: :has(:dir(ltr)) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant direction stress pseudo-cold: shadow-internal: :has(:dir(ltr)) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant direction stress pseudo-warm: shadow-internal: :has(:dir(rtl):first-child) after first descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant direction stress pseudo-cold: shadow-internal: :has(:dir(rtl):first-child) after first descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant direction stress pseudo-warm: shadow-internal: :not(:has(:dir(rtl))) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant direction stress pseudo-cold: shadow-internal: :not(:has(:dir(rtl))) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant direction stress pseudo-cold: shadow-internal: :not(:has(:dir(rtl))) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant language stress pseudo-warm: shadow-internal: :has(:lang(he)) after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-cold: shadow-internal: :has(:lang(he)) after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-warm: shadow-internal: :has(:lang(en)) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant language stress pseudo-cold: shadow-internal: :has(:lang(en)) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant language stress pseudo-cold: shadow-internal: :has(:lang(en)) becomes false after descendant lang attribute change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant language stress pseudo-warm: shadow-internal: :has(:lang(he):first-child) after first descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-cold: shadow-internal: :has(:lang(he):first-child) after first descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-warm: shadow-internal: :not(:has(:lang(he))) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant language stress pseudo-cold: shadow-internal: :not(:has(:lang(he))) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant language stress pseudo-cold: shadow-internal: :not(:has(:lang(he))) becomes false after descendant lang attribute change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: inherited language stress pseudo-warm: shadow-internal: :has(:lang(he)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-cold: shadow-internal: :has(:lang(he)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-warm: shadow-internal: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: inherited language stress pseudo-cold: shadow-internal: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: inherited language stress pseudo-cold: shadow-internal: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: inherited language stress pseudo-warm: shadow-internal: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: inherited language stress pseudo-cold: shadow-internal: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: inherited language stress pseudo-cold: shadow-internal: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: inherited language stress pseudo-warm: shadow-internal: :has(:lang(he):first-child) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-cold: shadow-internal: :has(:lang(he):first-child) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-warm: shadow-internal: :has(:is(:lang(he), .fallback)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -57,25 +57,25 @@ PASS: inherited language stress pseudo-cold: shadow-internal: :has(:where(:lang(
 PASS: descendant direction stress pseudo-warm: shadow-host: :has(:dir(rtl)) after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant direction stress pseudo-cold: shadow-host: :has(:dir(rtl)) after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant direction stress pseudo-warm: shadow-host: :has(:dir(ltr)) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: descendant direction stress pseudo-cold: shadow-host: :has(:dir(ltr)) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant direction stress pseudo-cold: shadow-host: :has(:dir(ltr)) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant direction stress pseudo-warm: shadow-host: :has(:dir(rtl):first-child) after first descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant direction stress pseudo-cold: shadow-host: :has(:dir(rtl):first-child) after first descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant direction stress pseudo-warm: shadow-host: :not(:has(:dir(rtl))) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: descendant direction stress pseudo-cold: shadow-host: :not(:has(:dir(rtl))) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant direction stress pseudo-cold: shadow-host: :not(:has(:dir(rtl))) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant language stress pseudo-warm: shadow-host: :has(:lang(he)) after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-cold: shadow-host: :has(:lang(he)) after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-warm: shadow-host: :has(:lang(en)) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant language stress pseudo-cold: shadow-host: :has(:lang(en)) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant language stress pseudo-cold: shadow-host: :has(:lang(en)) becomes false after descendant lang attribute change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant language stress pseudo-warm: shadow-host: :has(:lang(he):first-child) after first descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-cold: shadow-host: :has(:lang(he):first-child) after first descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-warm: shadow-host: :not(:has(:lang(he))) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant language stress pseudo-cold: shadow-host: :not(:has(:lang(he))) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant language stress pseudo-cold: shadow-host: :not(:has(:lang(he))) becomes false after descendant lang attribute change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: inherited language stress pseudo-warm: shadow-host: :has(:lang(he)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-cold: shadow-host: :has(:lang(he)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-warm: shadow-host: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: inherited language stress pseudo-cold: shadow-host: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: inherited language stress pseudo-cold: shadow-host: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: inherited language stress pseudo-warm: shadow-host: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: inherited language stress pseudo-cold: shadow-host: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: inherited language stress pseudo-cold: shadow-host: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: inherited language stress pseudo-warm: shadow-host: :has(:lang(he):first-child) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-cold: shadow-host: :has(:lang(he):first-child) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-warm: shadow-host: :has(:is(:lang(he), .fallback)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -141,25 +141,25 @@ PASS: inherited language stress pseudo-cold: part-shadow-host-document: :has(:wh
 PASS: descendant direction stress pseudo-warm: part-shadow-internal: :has(:dir(rtl)) after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant direction stress pseudo-cold: part-shadow-internal: :has(:dir(rtl)) after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant direction stress pseudo-warm: part-shadow-internal: :has(:dir(ltr)) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant direction stress pseudo-cold: part-shadow-internal: :has(:dir(ltr)) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant direction stress pseudo-cold: part-shadow-internal: :has(:dir(ltr)) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant direction stress pseudo-warm: part-shadow-internal: :has(:dir(rtl):first-child) after first descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant direction stress pseudo-cold: part-shadow-internal: :has(:dir(rtl):first-child) after first descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant direction stress pseudo-warm: part-shadow-internal: :not(:has(:dir(rtl))) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant direction stress pseudo-cold: part-shadow-internal: :not(:has(:dir(rtl))) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant direction stress pseudo-cold: part-shadow-internal: :not(:has(:dir(rtl))) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant language stress pseudo-warm: part-shadow-internal: :has(:lang(he)) after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-cold: part-shadow-internal: :has(:lang(he)) after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-warm: part-shadow-internal: :has(:lang(en)) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant language stress pseudo-cold: part-shadow-internal: :has(:lang(en)) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant language stress pseudo-cold: part-shadow-internal: :has(:lang(en)) becomes false after descendant lang attribute change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant language stress pseudo-warm: part-shadow-internal: :has(:lang(he):first-child) after first descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-cold: part-shadow-internal: :has(:lang(he):first-child) after first descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-warm: part-shadow-internal: :not(:has(:lang(he))) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant language stress pseudo-cold: part-shadow-internal: :not(:has(:lang(he))) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant language stress pseudo-cold: part-shadow-internal: :not(:has(:lang(he))) becomes false after descendant lang attribute change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: inherited language stress pseudo-warm: part-shadow-internal: :has(:lang(he)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-cold: part-shadow-internal: :has(:lang(he)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-warm: part-shadow-internal: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: inherited language stress pseudo-cold: part-shadow-internal: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: inherited language stress pseudo-cold: part-shadow-internal: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: inherited language stress pseudo-warm: part-shadow-internal: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: inherited language stress pseudo-cold: part-shadow-internal: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: inherited language stress pseudo-cold: part-shadow-internal: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: inherited language stress pseudo-warm: part-shadow-internal: :has(:lang(he):first-child) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-cold: part-shadow-internal: :has(:lang(he):first-child) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-warm: part-shadow-internal: :has(:is(:lang(he), .fallback)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -169,25 +169,25 @@ PASS: inherited language stress pseudo-cold: part-shadow-internal: :has(:where(:
 PASS: descendant direction stress pseudo-warm: part-shadow-host-internal: :has(:dir(rtl)) after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant direction stress pseudo-cold: part-shadow-host-internal: :has(:dir(rtl)) after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant direction stress pseudo-warm: part-shadow-host-internal: :has(:dir(ltr)) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: descendant direction stress pseudo-cold: part-shadow-host-internal: :has(:dir(ltr)) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant direction stress pseudo-cold: part-shadow-host-internal: :has(:dir(ltr)) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant direction stress pseudo-warm: part-shadow-host-internal: :has(:dir(rtl):first-child) after first descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant direction stress pseudo-cold: part-shadow-host-internal: :has(:dir(rtl):first-child) after first descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant direction stress pseudo-warm: part-shadow-host-internal: :not(:has(:dir(rtl))) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: descendant direction stress pseudo-cold: part-shadow-host-internal: :not(:has(:dir(rtl))) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant direction stress pseudo-cold: part-shadow-host-internal: :not(:has(:dir(rtl))) becomes false after descendant dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant language stress pseudo-warm: part-shadow-host-internal: :has(:lang(he)) after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-cold: part-shadow-host-internal: :has(:lang(he)) after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-warm: part-shadow-host-internal: :has(:lang(en)) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant language stress pseudo-cold: part-shadow-host-internal: :has(:lang(en)) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant language stress pseudo-cold: part-shadow-host-internal: :has(:lang(en)) becomes false after descendant lang attribute change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant language stress pseudo-warm: part-shadow-host-internal: :has(:lang(he):first-child) after first descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-cold: part-shadow-host-internal: :has(:lang(he):first-child) after first descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant language stress pseudo-warm: part-shadow-host-internal: :not(:has(:lang(he))) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant language stress pseudo-cold: part-shadow-host-internal: :not(:has(:lang(he))) becomes false after descendant lang attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: descendant language stress pseudo-cold: part-shadow-host-internal: :not(:has(:lang(he))) becomes false after descendant lang attribute change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: inherited language stress pseudo-warm: part-shadow-host-internal: :has(:lang(he)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-cold: part-shadow-host-internal: :has(:lang(he)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-warm: part-shadow-host-internal: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: inherited language stress pseudo-cold: part-shadow-host-internal: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: inherited language stress pseudo-cold: part-shadow-host-internal: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: inherited language stress pseudo-warm: part-shadow-host-internal: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: inherited language stress pseudo-cold: part-shadow-host-internal: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: inherited language stress pseudo-cold: part-shadow-host-internal: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: inherited language stress pseudo-warm: part-shadow-host-internal: :has(:lang(he):first-child) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-cold: part-shadow-host-internal: :has(:lang(he):first-child) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language stress pseudo-warm: part-shadow-host-internal: :has(:is(:lang(he), .fallback)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0

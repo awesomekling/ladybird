@@ -546,7 +546,7 @@ impl RetainedState {
         // A pseudo-element asks about its originating element too. The element's new record may
         // have changed that container's type, name or style after the first verdict check.
         if self.container_verdicts_moved(node) {
-            if self.republish_container_winners(node, counters).is_none() {
+            if self.republish_winners_from_retained_answer(node, counters).is_none() {
                 self.abandon_engine_computed_record(node, scratch, counters);
                 return None;
             }
@@ -619,9 +619,20 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailContainerVerdict);
             return None;
         }
-        if self.container_gates_unheld.contains(&node) || self.container_verdicts_moved(node) {
-            let Some(complete) = self.republish_container_winners(node, counters) else {
-                counters.bump(Counter::EngineComputedRecordBailContainerVerdict);
+        // A row omitted from winner publication can still carry a retained selector answer.
+        // Rebuild its winners before comparing them with the record's cascade state: otherwise
+        // an empty delta can describe yesterday's answer after this flush flipped a rule.
+        let stale_element_winners = scratch.answer_or_declarations_moved
+            && !self.published_container_verdicts.contains_key(&node)
+            && !self.container_gates_unheld.contains(&node)
+            && self.current_winner_groups().row_stamp(node) != Some(self.flush_stamp);
+        if self.container_gates_unheld.contains(&node) || self.container_verdicts_moved(node) || stale_element_winners {
+            let Some(complete) = self.republish_winners_from_retained_answer(node, counters) else {
+                counters.bump(if stale_element_winners {
+                    Counter::EngineComputedRecordBailWinner
+                } else {
+                    Counter::EngineComputedRecordBailContainerVerdict
+                });
                 return None;
             };
             cascade_winners_are_complete = complete;
@@ -789,10 +800,9 @@ impl RetainedState {
         // is driven again in full under the new one.
         let environment_moved_under_substitutions = environment.is_some() && self.state_has_substitutions(node, state);
         if delta.is_empty() {
-            // A current row holds the cascade after this flush's rule flips. An environment
-            // action the engine handles does not invalidate that answer: document_environment_moved
-            // drives its values again against the new inputs below. Other environment actions
-            // still require host computation.
+            // A current row, including one republished from its retained selector answer, holds
+            // this flush's rule flips. An unsupported environment action may still change values
+            // that the winners do not name.
             let row_is_current = self.current_winner_groups().row_stamp(node) == Some(self.flush_stamp);
             let flips_are_reflected = match exact_flipped_rules {
                 Some(flipped) => !flipped.element || row_is_current,
@@ -2433,7 +2443,7 @@ impl RetainedState {
         }
         let republished_complete = if self.container_gates_unheld.contains(&node) || self.container_verdicts_moved(node)
         {
-            let Some(complete) = self.republish_container_winners(node, counters) else {
+            let Some(complete) = self.republish_winners_from_retained_answer(node, counters) else {
                 return 0;
             };
             Some(complete)
@@ -5236,6 +5246,8 @@ pub(super) struct EngineComputedRecordScratch {
     /// Set the same way: whether the reaction drives the element's record again in full whatever
     /// its winners did, for inputs the winners do not show.
     pub(super) recompute_in_full: bool,
+    /// This row's selector answer or declaration values moved without publishing current winners.
+    pub(super) answer_or_declarations_moved: bool,
     /// Whether the viewport moved since the last flush. A record that reads it holds values its
     /// winners do not name, so it cannot stand, and the row drives again against the new one.
     pub(super) viewport_moved: bool,
