@@ -584,15 +584,15 @@ impl RetainedState {
             inputs.custom_property_registration_generation,
             &cascaded,
         );
-        // An environment C++ resolved for an element alike in its declarations is one C++ holds
-        // for that element: a pseudo-element's own is resolved by the engine, and C++'s stays
-        // remembered for the elements.
+        // An environment C++ resolved for an element alike in its declarations is C++'s own
+        // identity, and the host installs no record under one it does not recognise as the
+        // engine's: handing it back settles a row the host then computes again. The memo is worth
+        // only what it saves, so where it holds such an identity this resolves one of its own.
         let memoized = self.custom_property_environments.memoized(&key);
-        let keeps_cpp_environment = pseudo.is_some()
-            && memoized.is_some_and(|identity| {
-                identity != parent_environment
-                    && identity & custom_property_environments::ENGINE_ENVIRONMENT_IDENTITY_BIT == 0
-            });
+        let keeps_cpp_environment = memoized.is_some_and(|identity| {
+            identity != parent_environment
+                && identity & custom_property_environments::ENGINE_ENVIRONMENT_IDENTITY_BIT == 0
+        });
         if let Some(identity) = memoized.filter(|_| !keeps_cpp_environment) {
             counters.bump(Counter::EngineCustomPropertyEnvironmentMemoHits);
             return Some(identity);
