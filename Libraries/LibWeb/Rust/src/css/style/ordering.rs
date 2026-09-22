@@ -1498,7 +1498,10 @@ impl RetainedState {
         if let Some(shadow_root) = self.tree.shadow_root_of(node) {
             append(self.tree.tree_scope(shadow_root));
         }
-        contexts.iter().position(|&context| context == scope).map(|index| index as u32)
+        contexts
+            .iter()
+            .position(|&context| context == scope)
+            .map(|index| index as u32)
     }
 
     pub(super) fn cascade_winner_inventory_is_complete(

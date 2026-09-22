@@ -803,7 +803,9 @@ impl RetainedState {
         let complete = !matches.iter().any(|entry| {
             !self.match_scope_is_complete_for(Some(host), entry.rule, entry.tree_scope)
                 || self.program.rule_is_gated_by_container_query(entry.rule)
-                || !self.program.declarations_are_complete_but_for_custom_properties(entry.rule)
+                || !self
+                    .program
+                    .declarations_are_complete_but_for_custom_properties(entry.rule)
         }) && ElementDeclarationKind::ALL.iter().all(|&declaration_kind| {
             self.facts
                 .element_declarations_are_complete_but_for_custom_properties(node, declaration_kind)
