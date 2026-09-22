@@ -749,6 +749,201 @@ impl RetainedState {
             })
     }
 
+    /// Whether the node is an element standing for its shadow host's pseudo-element (the element
+    /// a `::placeholder` or a slider part is): its style is that pseudo-element's, cascaded from
+    /// the host's rules, and its own cascade decides nothing.
+    pub(crate) fn backs_host_pseudo_element(&self, node: StyleNodeID) -> bool {
+        self.computed_group_sets.adjustment_facts(node) & bridge::element_adjustment_fact::IS_SHADOW_HOST_PSEUDO_ELEMENT
+            != 0
+    }
+
+    /// The host's matches for the pseudo-element an element stands for, when the element's record
+    /// can be cascaded from them: every rule one the host's winners hold, ungated and declaring only what the
+    /// winner columns hold and custom properties, and the element's own declarations complete
+    /// and declaring no custom property.
+    fn backing_element_rule_matches(
+        &self,
+        node: StyleNodeID,
+        host: StyleNodeID,
+        target: tree::PseudoElementTarget,
+    ) -> Option<Vec<RuleMatch>> {
+        let matches: Vec<RuleMatch> = match Self::published_answer_lookup(
+            &self.published_match_answers,
+            self.batch_matching_traversal.as_deref(),
+            host,
+        )
+        .and_then(|(published, answer)| published.matches_for(answer))
+        {
+            Some(matches) => matches
+                .iter()
+                .filter(|entry| entry.pseudo_element == Some(target))
+                .copied()
+                .collect(),
+            None => match self.retained_match_answer(host) {
+                Lookup::Known(answer) => answer
+                    .iter()
+                    .filter(|entry| {
+                        self.programs.get(entry.program).entries()[entry.entry as usize].pseudo_element == Some(target)
+                    })
+                    .map(|entry| entry.materialize(host, &self.programs, 0))
+                    .collect::<Option<_>>()?,
+                _ => return None,
+            },
+        };
+        let complete = !matches.iter().any(|entry| {
+            !self.match_scope_is_complete_for(Some(host), entry.rule, entry.tree_scope)
+                || self.program.rule_is_gated_by_container_query(entry.rule)
+                || !self.program.declarations_are_complete_but_for_custom_properties(entry.rule)
+        }) && ElementDeclarationKind::ALL.iter().all(|&declaration_kind| {
+            self.facts
+                .element_declarations_are_complete_but_for_custom_properties(node, declaration_kind)
+        }) && self.facts.element_custom_declarations(node).is_empty();
+        complete.then_some(matches)
+    }
+
+    /// The record of an element standing for its shadow host's pseudo-element, the way C++
+    /// computes one: the host's rules for that pseudo-element cascaded with the element's own
+    /// declarations, the rules' custom declarations resolved over the element's parent's
+    /// environment, inheriting from the element's own flat-tree parent, with the element's own box
+    /// adjustments. `None` leaves it to C++.
+    pub(super) fn engine_backing_element_record(
+        &mut self,
+        node: StyleNodeID,
+        scratch: &mut EngineComputedRecordScratch,
+        counters: &mut Counters,
+    ) -> Option<(computed::FinalStyleRecordID, computed::FinalStyleRecordID)> {
+        use bridge::element_adjustment_fact as fact;
+        let facts = self.computed_group_sets.adjustment_facts(node);
+        if facts & (fact::HAS_ANIMATIONS | fact::HAS_DERIVED_PRESENTATIONAL_HINTS) != 0 {
+            counters.bump(Counter::EngineComputedRecordBailWinnerElement);
+            return None;
+        }
+        // A record it already holds is replaced by a full drive; one composing animations or
+        // running transitions starts them from itself, which C++ does.
+        let old_record = self.computed_group_sets.assigned_style_record(node);
+        if let Some(old) = old_record {
+            let Some(view) = self.computed_group_sets.style_record_view(old.raw()) else {
+                counters.bump(Counter::EngineComputedRecordBailRecord);
+                return None;
+            };
+            if !view.animated_overlay.is_null()
+                || (unsafe { view.longhand_table.as_ref() })
+                    .is_none_or(crate::css::style_compute::has_active_transition_properties)
+            {
+                counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
+                return None;
+            }
+        }
+        let kind = self.computed_group_sets.associated_pseudo_kind(node)?;
+        let host = self.tree.shadow_host_of(node)?;
+        let target = tree::PseudoElementTarget::new(tree::PseudoElementKind(u16::from(kind)));
+        // The host's rules for the pseudo-element, cascaded as the element's own with its own
+        // declarations, as C++ cascades them for it.
+        let Some(mut matches) = self.backing_element_rule_matches(node, host, target) else {
+            counters.bump(Counter::EngineComputedRecordBailIncompleteWinners);
+            return None;
+        };
+        for entry in &mut matches {
+            entry.node = node;
+            entry.pseudo_element = None;
+        }
+        let mut winners = self.resolved_cascade_winners_for_properties(node, &matches, None, None);
+        // A pseudo-element takes from its rules only the properties it supports; the element's
+        // own declarations are not held to that. A rule's winner hiding an own declaration of a
+        // property the pseudo-element does not support is not one the filter can undo.
+        let (declared_properties, _) = self
+            .facts
+            .element_declared_properties(node, ElementDeclarationKind::InlineStyle);
+        let own_declared: Vec<u16> = declared_properties.iter().map(|declared| declared.property).collect();
+        let mut hides_own_declaration = false;
+        winners.retain(|winner| {
+            let supported = !matches!(winner.source, WinnerSource::Rule(_))
+                || crate::css::property_metadata::pseudo_element_supports_property(kind, winner.property);
+            hides_own_declaration |= !supported && own_declared.contains(&winner.property);
+            supported
+        });
+        if hides_own_declaration {
+            counters.bump(Counter::EngineComputedRecordBailProperty);
+            return None;
+        }
+        let state = self.with_cascade_interning_counters(|groups| groups.intern_sorted(&winners, None), counters);
+        for property in self.winner_groups.semantic_delta_properties(None, state) {
+            if self.first_record_winner_needs_cpp(state, property) {
+                counters.bump(Counter::EngineComputedRecordBailProperty);
+                return None;
+            }
+        }
+        let Some(mut inputs) = self.document_style_computation_inputs else {
+            counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
+            return None;
+        };
+        if let Some((root, root_inputs)) = scratch.root_element_inputs
+            && root == node
+        {
+            root_inputs.apply_to(&mut inputs);
+        }
+        let parent = self.tree.flat_tree_parent(node)?;
+        let (Some(parent_record), Some(parent_environment)) = (
+            self.computed_group_sets.assigned_style_record(parent),
+            self.computed_group_sets.custom_property_environment_identity(parent),
+        ) else {
+            counters.bump(Counter::EngineComputedRecordBailRecordParent);
+            return None;
+        };
+        let Some(environment) =
+            self.engine_custom_property_environment_of(host, Some(kind), parent_environment, &inputs, counters)
+        else {
+            counters.bump(Counter::EngineComputedRecordBailCustomProperties);
+            return None;
+        };
+        let mut substituted = false;
+        let store = self.cascaded_store_for_state(node, state, None, environment, &mut substituted, counters)?;
+        let Some(pseudo_styles) = self.pseudo_style_mask(node) else {
+            counters.bump(Counter::EngineComputedRecordBailPseudoMask);
+            return None;
+        };
+        let target = computed::ComputedStyleTarget::new(node, u8::MAX);
+        let subject = DriveSubject {
+            target,
+            recascade_node: Some(node),
+            parent: Some(parent),
+            facts,
+        };
+        let mut explicitly_inherited_groups = 0;
+        let (table, length, longhand_evaluations, font) = self.engine_full_drive(
+            subject,
+            None,
+            &store,
+            &inputs,
+            &mut scratch.font_drive,
+            FontDriveGoal::Complete,
+            &mut explicitly_inherited_groups,
+            counters,
+        )?;
+        let font = font.expect("a full drive resolves the font");
+        let (record, _) = self.assemble_and_publish_engine_record(
+            target,
+            Some(parent_record),
+            table,
+            &length,
+            &font,
+            environment,
+            pseudo_styles,
+            0,
+            None,
+            &mut scratch.computability,
+            counters,
+        )?;
+        let _ = longhand_evaluations;
+        if explicitly_inherited_groups != 0 {
+            self.nodes_owing_explicit_inheritance
+                .insert(node, explicitly_inherited_groups);
+        }
+        counters.bump(Counter::EngineComputedRecordHostPseudoBackings);
+        scratch.noted_substitution = Some(substituted);
+        Some((old_record.unwrap_or(computed::FinalStyleRecordID::NONE), record))
+    }
+
     /// Whether every rule the node's answer matches for a pseudo-element declares only what the
     /// winner columns hold, and custom properties, which the engine resolves into the
     /// pseudo-element's own environment, with no container query deciding it.
