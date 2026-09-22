@@ -1398,6 +1398,56 @@ impl RetainedState {
         goal: FontDriveGoal,
         counters: &mut Counters,
     ) -> Option<(computed::FinalStyleRecordID, computed::FinalStyleRecordID)> {
+        // A first record whose winners declare CSS animations owes the host the plan that starts
+        // them, the way a warm row does: the element holds none yet, so every definition starts one.
+        let owes_an_animation_plan = self.cold_record_owes_an_animation_plan(node, cascade_state.1);
+        let delta =
+            self.engine_cold_record_impl(node, cascade_state, scratch, goal, counters, owes_an_animation_plan)?;
+        if owes_an_animation_plan {
+            // The plan is decided from the record the row installs, which carries the longhands the
+            // drive computed. A record without one is no record to settle a plan against.
+            let Some(plan) = self.settled_animation_plan_from_record(node, delta.1) else {
+                counters.bump(Counter::EngineComputedRecordBailProperty);
+                return None;
+            };
+            self.nodes_owing_animation_definitions.insert(node, plan);
+        }
+        Some(delta)
+    }
+
+    /// Whether a first record for this node would owe the host an animation plan: its winners
+    /// declare a CSS animation and nothing else the C++ computation has to decide, the element
+    /// holds no animation yet, and the document's own scope is the only one defining `@keyframes`.
+    fn cold_record_owes_an_animation_plan(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
+        let mut declares_an_animation = false;
+        for property in self.winner_groups.semantic_delta_properties(None, state) {
+            if longhand_declares_a_css_animation(property) {
+                declares_an_animation = true;
+                continue;
+            }
+            // Anything else the first-record gate refuses is still the C++ computation's, and a
+            // transition declaration beside an animation one is decided with it.
+            if self.first_record_winner_needs_cpp(state, property) {
+                return false;
+            }
+        }
+        declares_an_animation
+            && self
+                .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
+                .is_empty()
+            && self.animation_keyframes().a_first_record_may_start_an_animation()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn engine_cold_record_impl(
+        &mut self,
+        node: StyleNodeID,
+        cascade_state: (u64, CascadeStateID),
+        scratch: &mut EngineComputedRecordScratch,
+        goal: FontDriveGoal,
+        counters: &mut Counters,
+        owes_an_animation_plan: bool,
+    ) -> Option<(computed::FinalStyleRecordID, computed::FinalStyleRecordID)> {
         let target = computed::ComputedStyleTarget::new(node, u8::MAX);
         let (_, state) = cascade_state;
         let Some(mut inputs) = self.document_style_computation_inputs else {
@@ -1477,7 +1527,9 @@ impl RetainedState {
         // resolves the font from them and rebuilds every group, rejecting the values the font
         // resolution does not pass on yet.
         for property in self.winner_groups.semantic_delta_properties(None, state) {
-            if self.first_record_winner_needs_cpp(state, property) {
+            if self.first_record_winner_needs_cpp(state, property)
+                && !(owes_an_animation_plan && longhand_declares_a_css_animation(property))
+            {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
             }

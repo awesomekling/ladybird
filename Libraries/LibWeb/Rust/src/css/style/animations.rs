@@ -1916,6 +1916,21 @@ impl std::hash::Hash for KeyframesName {
 pub(crate) struct PublishedKeyframesSet {
     pub(crate) pointer: usize,
     pub(crate) description: PublishedEffect,
+    /// Whether starting this animation is more than creating it: a value that counts the tree -
+    /// `sibling-index()` and its kin - makes the element recompute when its siblings move, a
+    /// `url()` resolves against the sheet the rule was written in, and a custom property or an
+    /// unresolved value travels as the tokens it was written as, so nothing here can see what it
+    /// asks for. All of them are noted by the computation that resolves the keyframes, and a row
+    /// the engine settles never runs one: it leaves a plan naming such a rule to C++ whole.
+    pub(crate) needs_the_host: bool,
+    /// Whether the rule animates a value the element's descendants inherit. A C++ computation
+    /// samples an animation it starts into the very record it publishes, so a descendant computed
+    /// after it in the same batch inherits the animated value; a first record the engine settles
+    /// publishes the style beneath the animation and applies its plan once the whole batch is
+    /// installed, which is after those descendants were computed. Such a rule therefore keeps a
+    /// first record in C++. A later record's descendants already hold records of their own and
+    /// take the animated values through the overlay's invalidation, so it does not bind them.
+    pub(crate) declares_an_inherited_property: bool,
 }
 
 #[derive(Default)]
@@ -1925,6 +1940,50 @@ pub(crate) struct AnimationKeyframes {
     /// winning `animation-name` declaration to a shadow root by that identity, and the scope it
     /// names is where the declaration's `@keyframes` are looked for first.
     scope_by_shadow_root: HashMap<usize, TreeScopeID>,
+}
+
+/// Whether a rule animates a value an element's descendants inherit; see
+/// `declares_an_inherited_property`. A shorthand is read as one: `all` covers every inherited
+/// longhand, and the others are not worth expanding here.
+#[must_use]
+fn description_declares_an_inherited_property(description: &PublishedEffect) -> bool {
+    use crate::css::property_metadata::{property_is_inherited, property_is_shorthand};
+    // A custom property inherits, and every one of them is already refused by `needs_the_host`.
+    !description.custom_declarations.is_empty()
+        || description.declarations.iter().any(|declaration| {
+            property_is_inherited(declaration.property_id) || property_is_shorthand(declaration.property_id)
+        })
+}
+
+/// Whether starting an animation from this rule is more than creating it; see `needs_the_host`.
+#[must_use]
+fn description_needs_the_host(description: &PublishedEffect) -> bool {
+    if !description.is_covered() {
+        return true;
+    }
+    // Having a resource context is ordinary - every sheet with a base URL records one. Needing it
+    // is not: a `url()` in a keyframe resolves against the sheet the rule was written in, which
+    // only the computation that resolves the keyframes does.
+    if description.flags & effect_flag::HAS_RESOURCE_CONTEXT != 0
+        && description.declarations.iter().any(|declaration| {
+            declaration
+                .value
+                .optional_data()
+                .is_some_and(|data| crate::css::style_compute::value_may_need_style_sheet_resource_context(data))
+        })
+    {
+        return true;
+    }
+    // A custom property's keyframe value travels as the token stream it was written as, so nothing
+    // here can see what it asks for: a rule declaring one is refused outright.
+    if !description.custom_declarations.is_empty() {
+        return true;
+    }
+    description.declarations.iter().any(|declaration| {
+        declaration.value.optional_data().is_some_and(|data| {
+            crate::css::style_compute::collect_external_value_dependencies(data).uses_tree_counting_function
+        })
+    })
 }
 
 impl AnimationKeyframes {
@@ -1966,6 +2025,8 @@ impl AnimationKeyframes {
             assert!(end <= name_units.len(), "@keyframes name lengths overrun their buffer");
             let name = KeyframesName(CssString::from_utf16(&name_units[offset..end]));
             offset = end;
+            let needs_the_host = description_needs_the_host(&description);
+            let declares_an_inherited_property = description_declares_an_inherited_property(&description);
             sets.insert(
                 name,
                 PublishedKeyframesSet {
@@ -1973,6 +2034,8 @@ impl AnimationKeyframes {
                     // description's identity.
                     pointer: description.identity as usize,
                     description,
+                    needs_the_host,
+                    declares_an_inherited_property,
                 },
             );
         }
@@ -1982,6 +2045,26 @@ impl AnimationKeyframes {
     #[must_use]
     fn in_scope(&self, tree_scope: TreeScopeID, name: &KeyframesName) -> Option<&PublishedKeyframesSet> {
         self.scopes.get(&tree_scope)?.get(name)
+    }
+
+    /// Whether a first record may start the animations this document defines at all.
+    ///
+    /// A record the engine settles publishes the style beneath its animations and applies its plan
+    /// once the whole batch is installed. For a *first* record that is too late for two things the
+    /// C++ computation does inside itself: sampling the animation into the record its descendants
+    /// inherit from in this same batch, and noting what resolving the keyframes read. So a first
+    /// record starts an animation only where every rule in the document is one it can account for -
+    /// asked of the document rather than of the plan, because the question has to be answered
+    /// before the record is driven, and a plan refused after that would leave a record assigned
+    /// that nothing installs.
+    #[must_use]
+    pub(crate) fn a_first_record_may_start_an_animation(&self) -> bool {
+        self.only_the_document_scope_defines_keyframes()
+            && self
+                .scopes
+                .values()
+                .flat_map(HashMap::values)
+                .all(|set| !set.needs_the_host && !set.declares_an_inherited_property)
     }
 
     /// Whether every `@keyframes` the document defines is defined in the document's own scope.
