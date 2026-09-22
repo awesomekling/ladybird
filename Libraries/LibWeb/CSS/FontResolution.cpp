@@ -349,7 +349,11 @@ NonnullRefPtr<Gfx::FontCascadeList const> FontCascadeMemo::resolve(FontFaceSnaps
     if (it != m_cascades.end() && it->value.generation == snapshot.generation)
         return it->value.font_list;
 
-    auto font_list = resolve_font_cascade(snapshot, key.font_families.span(), key.font_size, key.font_slope, key.font_weight, key.font_width, key.font_optical_sizing, key.font_variation_settings, key.font_feature_data, font_feature_values_provider);
+    FontFeatureValuesProvider published_provider = [this](Utf16FlyString const& family) -> HashMap<FontFeatureValueKey, Vector<u32>> const& {
+        auto it = m_font_feature_values.find(family);
+        return it == m_font_feature_values.end() ? *s_no_font_feature_values : it->value;
+    };
+    auto font_list = resolve_font_cascade(snapshot, key.font_families.span(), key.font_size, key.font_slope, key.font_weight, key.font_width, key.font_optical_sizing, key.font_variation_settings, key.font_feature_data, font_feature_values_provider ? font_feature_values_provider : &published_provider);
     if (it != m_cascades.end()) {
         // OPTIMIZATION: An answer that a newer table did not change keeps its identity, so that
         //               every element holding it keeps holding the same cascade.
@@ -362,6 +366,15 @@ NonnullRefPtr<Gfx::FontCascadeList const> FontCascadeMemo::resolve(FontFaceSnaps
     }
     m_cascades.set(key, Entry { snapshot.generation, font_list });
     return font_list;
+}
+
+void FontCascadeMemo::publish_font_feature_values(HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>> const& values)
+{
+    MutexLocker locker { m_mutex };
+    if (m_font_feature_values == values)
+        return;
+    m_font_feature_values = values;
+    m_cascades.clear();
 }
 
 void FontCascadeMemo::take_matching(Function<bool(ComputedFontCacheKey const&, Gfx::FontCascadeList const&)> const& is_stale)
@@ -425,9 +438,7 @@ NonnullRefPtr<Gfx::FontCascadeList const> resolve_font_cascade(FontFaceSnapshotV
     auto font_feature_values_for_family = [&](Utf16FlyString const& family) -> HashMap<FontFeatureValueKey, Vector<u32>> const& {
         if (font_feature_values_provider)
             return (*font_feature_values_provider)(family);
-        // Without a provider the @font-feature-values table is not reachable, so no caller may
-        // need it. The style stage's requests carry no feature data at all, which is why the
-        // stage can resolve a font without ever entering the document.
+        // Other callers can omit a provider if they have no named feature values.
         VERIFY(!font_feature_data.font_variant_alternates.has_value()
             || font_feature_data.font_variant_alternates->font_feature_value_entries.is_empty());
         return *s_no_font_feature_values;

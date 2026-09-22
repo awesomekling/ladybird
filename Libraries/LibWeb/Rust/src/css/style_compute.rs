@@ -6143,6 +6143,7 @@ unsafe fn compute_longhands(
             (property_id::FONT_VARIANT_LIGATURES, keyword::NORMAL),
             (property_id::FONT_VARIANT_NUMERIC, keyword::NORMAL),
             (property_id::FONT_VARIANT_POSITION, keyword::NORMAL),
+            (property_id::FONT_VARIANT_ALTERNATES, keyword::NORMAL),
             (property_id::FONT_KERNING, keyword::AUTO),
             (property_id::TEXT_RENDERING, keyword::AUTO),
         ];

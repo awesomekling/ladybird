@@ -129,6 +129,7 @@ void StyleEngine::publish_font_faces()
     if (!m_style_computer)
         return;
     auto& font_computer = m_style_computer->document().font_computer();
+    font_computer.font_cascade_memo().publish_font_feature_values(font_computer.published_font_feature_values());
     style_engine_publish_font_face_snapshot(m_impl, font_computer.published_font_faces(), reinterpret_cast<uintptr_t>(&font_computer.font_cascade_memo()));
 }
 

@@ -69,12 +69,8 @@ struct FontFaceSnapshotView {
     }
 };
 
-// `@font-feature-values` maps a family to the feature indices an author named for it, and it is
-// document state the published table does not carry: the table would have to be rebuilt whenever
-// a sheet's condition changed, and the style stage's requests never need it. `to_shape_features`
-// reads the map only for `font-variant-alternates`, and the requests the stage builds carry no
-// feature data at all. Callers that do - canvas, getComputedStyle - pass a provider; the resolver
-// verifies it is never asked for one it was not given.
+// The font service reads a detached copy of the document's `@font-feature-values` table. Callers
+// outside the style stage can still supply their own provider.
 using FontFeatureValuesProvider = Function<HashMap<FontFeatureValueKey, Vector<u32>> const&(Utf16FlyString const&)>;
 
 // The `font-family` list, as the matcher wants it: generic families kept apart from names, and a
@@ -92,6 +88,7 @@ public:
     static NonnullRefPtr<FontCascadeMemo> create() { return adopt_ref(*new FontCascadeMemo); }
 
     [[nodiscard]] NonnullRefPtr<Gfx::FontCascadeList const> resolve(FontFaceSnapshotView const&, ComputedFontCacheKey const&, FontFeatureValuesProvider const* = nullptr);
+    void publish_font_feature_values(HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>> const&);
 
     // Answers every remembered resolution, so the caller can decide which a change to the table
     // has made stale, and forgets the ones it says so about.
@@ -110,6 +107,7 @@ private:
 
     Mutex m_mutex;
     HashMap<ComputedFontCacheKey, Entry> m_cascades;
+    HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>> m_font_feature_values;
 };
 
 // Resolve a font cascade from the published table and the process-wide font services alone. This

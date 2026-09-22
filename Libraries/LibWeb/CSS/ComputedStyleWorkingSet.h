@@ -286,8 +286,6 @@ NonnullRefPtr<StyleValue const> wrap_computed_longhand_slot(void const* value_da
 // The computed values the font resolver reads beside the family, as the style engine names them
 // in a resolution request. The engine resolves a font without a working set to read them from, so
 // each of these is reachable on its own.
-// `font-variant-alternates` is deliberately absent: it names features through the tree scope's
-// `@font-feature-values`, which the style stage's resolver has no provider for.
 enum class FontResolutionFeatureInput : u8 {
     FontFeatureSettings,
     FontVariationSettings,
@@ -297,6 +295,7 @@ enum class FontResolutionFeatureInput : u8 {
     FontVariantLigatures,
     FontVariantNumeric,
     FontVariantPosition,
+    FontVariantAlternates,
     FontKerning,
     TextRendering,
     Count,

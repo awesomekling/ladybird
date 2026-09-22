@@ -374,7 +374,7 @@ impl Default for FfiDocumentStyleComputationInputs {
 }
 
 /// Matches `Web::CSS::FontResolutionFeatureInput::Count`.
-pub const FONT_RESOLUTION_FEATURE_INPUT_COUNT: usize = 10;
+pub const FONT_RESOLUTION_FEATURE_INPUT_COUNT: usize = 11;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
