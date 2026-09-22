@@ -32,7 +32,6 @@ use crate::css::host_shared::{HostShared, SharedPayload};
 use crate::css::selector::CompiledSelector;
 use crate::css::selector::RustSelector;
 use crate::css::style_value::RetainedStyleValueData;
-use crate::css::style_value::StyleValueData;
 
 use super::HashSet;
 use super::PinnedAtoms;
@@ -2558,26 +2557,6 @@ pub unsafe extern "C" fn style_engine_match_element(
     result
 }
 
-fn declaration_inventory_is_complete(declared: &[DeclaredProperty], written: &[RetainedStyleValueData]) -> bool {
-    use crate::css::property_metadata::{longhands_for_shorthand, property_id, property_is_shorthand};
-    fn covers(property: u16, declared: &[DeclaredProperty]) -> bool {
-        if property_is_shorthand(property) {
-            longhands_for_shorthand(property)
-                .iter()
-                .all(|longhand| covers(*longhand, declared))
-        } else {
-            declared.iter().any(|declaration| declaration.property == property)
-        }
-    }
-    assert_eq!(declared.len(), written.len());
-    declared.iter().zip(written).all(|(declaration, value)| {
-        declaration.property != property_id::ALL
-            && (!property_is_shorthand(declaration.property)
-                || !matches!(value.data(), StyleValueData::Unresolved { .. })
-                || covers(declaration.property, declared))
-    })
-}
-
 fn collect_native_custom_declarations(
     engine: &mut StyleEngine,
     custom_properties: &[crate::css::declaration_block::CustomProperty],
@@ -2615,17 +2594,13 @@ fn register_element_declared_properties(
     kind: FfiElementDeclarationKind,
     declarations: &[crate::css::declaration_block::DeclaredProperty],
     custom_properties: &[crate::css::declaration_block::CustomProperty],
-    mut declarations_are_complete: bool,
+    declarations_are_complete: bool,
 ) -> bool {
-    use crate::css::property_metadata::{property_defines_a_css_transition, property_id};
-    declarations_are_complete &= declarations
-        .iter()
-        .all(|declaration| declaration.property_id != property_id::ALL);
+    use crate::css::property_metadata::property_defines_a_css_transition;
     let has_transitions = declarations
         .iter()
         .any(|declaration| property_defines_a_css_transition(declaration.property_id));
     let (declared, written_values) = engine.intern_element_declared_properties(declarations);
-    declarations_are_complete &= declaration_inventory_is_complete(&declared, &written_values);
     let (custom_declarations, custom_written_values) = collect_native_custom_declarations(engine, custom_properties);
     engine.set_element_declared_properties(
         node,
@@ -3709,14 +3684,13 @@ pub(crate) fn publish_rule_declarations(
     if rule == 0 {
         return false;
     }
-    let mut declarations_are_complete = true;
+    let declarations_are_complete = true;
     let mut has_transitions = false;
     let declared = data
         .properties
         .iter()
         .map(|declaration| {
-            use crate::css::property_metadata::{property_defines_a_css_transition, property_id};
-            declarations_are_complete &= declaration.property_id != property_id::ALL;
+            use crate::css::property_metadata::property_defines_a_css_transition;
             has_transitions |= property_defines_a_css_transition(declaration.property_id);
             engine.intern_declared_property(declaration)
         })
@@ -3728,7 +3702,6 @@ pub(crate) fn publish_rule_declarations(
             RetainedStyleValueData::from_retained_pointer(std::sync::Arc::into_raw(declaration.value.clone()))
         })
         .collect();
-    declarations_are_complete &= declaration_inventory_is_complete(&declared, &written_values);
     let (custom_declarations, custom_written_values) =
         collect_native_custom_declarations(engine, &data.custom_properties);
     engine.set_rule_declared_properties_with_written_values(
