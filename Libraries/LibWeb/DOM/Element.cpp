@@ -1800,12 +1800,14 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
             // What C++ installs beside a pseudo-element it computes: its element's inheritable
             // environment, or the one its own custom declarations resolved to over that.
             if (engine_record.has_value()) {
-                auto element_data = custom_property_data({});
-                auto inherited = element_data ? element_data->inheritable(document()) : nullptr;
                 auto environment = style_computer.style_engine().style_record_custom_property_environment(*engine_record);
-                auto data = inherited;
-                if (CSS::StyleEngine::is_engine_custom_property_environment(environment) && environment != (inherited ? inherited->identity() : 0))
-                    data = style_computer.engine_custom_property_environment(environment, inherited);
+                RefPtr<CSS::CustomPropertyData const> data;
+                if (CSS::StyleEngine::is_engine_custom_property_environment(environment)) {
+                    data = style_computer.engine_custom_property_environment(environment);
+                } else if (environment != 0) {
+                    auto element_data = custom_property_data({});
+                    data = element_data ? element_data->inheritable(document()) : nullptr;
+                }
                 set_custom_property_data(pseudo_element, move(data));
             }
         } else if (auto existing_pseudo_element = get_synthetic_pseudo_element(pseudo_element); existing_pseudo_element.has_value())
@@ -2324,18 +2326,22 @@ static bool unregister_current_anchor_names(Element& element, Node& tree_root)
 RefPtr<CSS::CustomPropertyData const> Element::custom_property_environment_of_engine_record(CSS::StyleRecordID style_record, bool& installable) const
 {
     auto& style_computer = document().style_computer();
+    auto identity = style_computer.style_engine().style_record_custom_property_environment(style_record);
+    installable = true;
+    if (identity == 0)
+        return {};
+    if (CSS::StyleEngine::is_engine_custom_property_environment(identity)) {
+        auto data = style_computer.engine_custom_property_environment(identity);
+        installable = data != nullptr;
+        return data;
+    }
     RefPtr<CSS::CustomPropertyData const> inherited_data;
     if (auto parent = DOM::AbstractElement { const_cast<Element&>(*this) }.element_to_inherit_style_from(); parent.has_value()) {
         if (auto parent_data = parent->custom_property_data())
             inherited_data = parent_data->inheritable(document());
     }
-    auto identity = style_computer.style_engine().style_record_custom_property_environment(style_record);
-    installable = true;
-    if (identity == (inherited_data ? inherited_data->identity() : 0))
-        return inherited_data;
-    auto data = style_computer.engine_custom_property_environment(identity, inherited_data);
-    installable = data != nullptr;
-    return data;
+    installable = inherited_data && identity == inherited_data->identity();
+    return installable ? inherited_data : nullptr;
 }
 
 // https://drafts.csswg.org/css-anchor-position-1/#determining

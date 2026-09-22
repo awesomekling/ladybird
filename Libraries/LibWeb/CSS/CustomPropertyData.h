@@ -36,6 +36,8 @@ public:
     static NonnullRefPtr<CustomPropertyData> create_animation_overlay(
         OrderedHashMap<Utf16FlyString, StyleProperty> animated_values,
         RefPtr<CustomPropertyData const> base, DOM::AbstractElement const& owner);
+    // Transfers one Rust store reference and materializes its entries for CSSOM readers.
+    static NonnullRefPtr<CustomPropertyData> from_rust_store(void const*, RefPtr<CustomPropertyData const> parent = nullptr, u64 identity = 0, bool effective_entries = false);
     ~CustomPropertyData();
 
     bool is_animation_overlay_for(DOM::AbstractElement const&) const;

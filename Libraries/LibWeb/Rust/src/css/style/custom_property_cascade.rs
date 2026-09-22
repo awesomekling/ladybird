@@ -592,6 +592,55 @@ impl RetainedState {
         }
     }
 
+    fn inheritable_custom_property_environment(
+        &mut self,
+        parent: u64,
+        inputs: &bridge::FfiDocumentStyleComputationInputs,
+    ) -> Option<u64> {
+        if parent == 0 || inputs.custom_property_registry.is_none() {
+            return Some(parent);
+        }
+        let registry = unsafe {
+            &*inputs
+                .custom_property_registry
+                .as_pointer()
+                .cast::<CustomPropertyRegistry>()
+        };
+        if !registry.has_non_inheriting_registrations() {
+            return Some(parent);
+        }
+        let key = Self::environment_inputs(parent, inputs.custom_property_registration_generation, &[]);
+        if let Some(identity) = self.custom_property_environments.memoized(&key) {
+            return Some(identity);
+        }
+        let source = self.custom_property_environments.store(parent)?;
+        let store = unsafe { CustomPropertyStore::inheritable(source.cast(), registry) };
+        let identity = if store == source {
+            unsafe { Arc::decrement_strong_count(store.cast::<CustomPropertyStore>()) };
+            parent
+        } else if store.is_null() {
+            0
+        } else if let Some(identity) = self.custom_property_environments.identity_for_store(store) {
+            unsafe { Arc::decrement_strong_count(store.cast::<CustomPropertyStore>()) };
+            identity
+        } else {
+            // These names are inherited by the subject, including any important names.
+            let flattened = unsafe { crate::css::custom_properties::rust_custom_property_store_flatten(store) };
+            unsafe { Arc::decrement_strong_count(store.cast::<CustomPropertyStore>()) };
+            let mut projection = unsafe { Arc::from_raw(flattened.cast::<CustomPropertyStore>()) };
+            Arc::get_mut(&mut projection)
+                .expect("fresh inherited projection")
+                .declared_names
+                .clear();
+            unsafe {
+                self.custom_property_environments
+                    .adopt_engine_environment(Arc::into_raw(projection).cast(), 0)
+            }
+        };
+        self.custom_property_environments.remember(key, identity, Vec::new());
+        Some(identity)
+    }
+
     /// The environment of a node the engine computes a record for: the one it inherits when its
     /// cascade declares no custom property, else what its declarations resolve to over that one.
     /// `None` when the environment is C++'s to compute: a registered name, a substitution the
@@ -621,6 +670,10 @@ impl RetainedState {
         if !self.any_custom_property_is_declared() {
             return Some(parent_environment);
         }
+        // Keep the unfiltered parent for an explicit inherit; ordinary inheritance drops
+        // non-inheriting registrations before layering this element's declarations.
+        let inheritance_environment = parent_environment;
+        let parent_environment = self.inheritable_custom_property_environment(parent_environment, inputs)?;
         let cascaded = self.cascaded_custom_declarations_of(node, pseudo)?;
         if cascaded.is_empty() {
             return Some(parent_environment);
@@ -631,30 +684,8 @@ impl RetainedState {
             return None;
         }
         let registry_ref = unsafe { &*registry.as_pointer().cast::<CustomPropertyRegistry>() };
-        // A registration decides how its name computes - against the registered syntax, from the
-        // registration's own initial value - which this resolution does not do: an element
-        // declaring a registered name is the host's. A name registered as *not* inheriting is the
-        // host's for every element instead, because the environment this builds over the parent's
-        // would hand that name to a descendant the registration keeps it from.
+        let mut has_registered_declaration = false;
         if registry_ref.has_registrations() {
-            // A name that does not inherit is in its element's environment and in none of its
-            // descendants'. This resolution layers declarations over the parent's environment, so
-            // it can only be trusted where the parent's holds no such name: then there is nothing
-            // for the layering to hand on that the registration keeps back.
-            if registry_ref.has_non_inheriting_registrations() {
-                let non_inheriting = registry_ref.non_inheriting_names();
-                let parent_holds_one = parent_environment != 0
-                    && self
-                        .custom_property_environments
-                        .store(parent_environment)
-                        .is_some_and(|store| unsafe {
-                            (*store.cast::<CustomPropertyStore>()).holds_any_name(&non_inheriting)
-                        });
-                if parent_holds_one {
-                    counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-                    return None;
-                }
-            }
             // A registration with a real syntax computes its name's value against the element's
             // own font and viewport, which this resolution has only where the row keeps the
             // record it reads them from. Without that context there is nothing to absolutize
@@ -664,19 +695,17 @@ impl RetainedState {
                     counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
                     return None;
                 };
-                // A name registered as not inheriting belongs to its element and to none of its
-                // descendants, and this resolution builds one environment that the children take
-                // whole: declaring such a name stays with the host however much context there is.
-                if let Some(facts) = registry_ref.registration_facts(&name.text)
-                    && (registered.is_none() || !facts.inherits)
-                {
-                    counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-                    return None;
+                if let Some(facts) = registry_ref.registration_facts(&name.text) {
+                    has_registered_declaration = true;
+                    if registered.is_none() || !facts.inherits {
+                        counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
+                        return None;
+                    }
                 }
             }
         }
         let key = Self::environment_inputs(
-            parent_environment,
+            inheritance_environment,
             inputs.custom_property_registration_generation,
             &cascaded,
         );
@@ -736,8 +765,8 @@ impl RetainedState {
         // engine's: handing it back settles a row the host then computes again. The memo is worth
         // only what it saves, so where it holds such an identity this resolves one of its own.
         // Random inputs can be element-scoped, so declarations alone cannot share their result.
-        let memoized = random_sources
-            .is_empty()
+        let can_memoize = random_sources.is_empty() && !has_registered_declaration;
+        let memoized = can_memoize
             .then(|| self.custom_property_environments.memoized(&key))
             .flatten();
         let keeps_cpp_environment = memoized.is_some_and(|identity| {
@@ -785,7 +814,9 @@ impl RetainedState {
         let resolution_context = engine_resolution_context(
             &parse_context,
             cascaded_store,
-            parent_store,
+            self.custom_property_environments
+                .store(inheritance_environment)
+                .unwrap_or(std::ptr::null()),
             registry.as_pointer(),
             length,
         );
@@ -821,7 +852,7 @@ impl RetainedState {
             }
         };
         let written_values = cascaded.into_iter().map(|(_, written)| written).collect();
-        if !keeps_cpp_environment && random_sources.is_empty() {
+        if !keeps_cpp_environment && can_memoize {
             self.custom_property_environments
                 .remember(key, identity, written_values);
         }

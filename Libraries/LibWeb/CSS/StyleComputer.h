@@ -216,7 +216,7 @@ public:
     // the identity is no engine environment or was resolved over another.
     // `did_materialize` reports that the environment object had to be made here, which is what an
     // identity the engine has not been asked for before costs.
-    [[nodiscard]] RefPtr<CustomPropertyData const> engine_custom_property_environment(u64 identity, RefPtr<CustomPropertyData const> const& inherited, bool* did_materialize = nullptr) const;
+    [[nodiscard]] RefPtr<CustomPropertyData const> engine_custom_property_environment(u64 identity, bool* did_materialize = nullptr) const;
 
     // Whether the collection refreshes a previously published style outside the drive; a refresh
     // re-runs the animated element style adjustments and leaves the non-inherited-property
