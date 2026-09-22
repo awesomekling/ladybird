@@ -2818,6 +2818,20 @@ impl ComputedGroupSets {
             .map(|identity| *self.custom_property_environments.get(identity))
     }
 
+    /// The base record behind a final record: itself, or the record an overlay was composed over.
+    #[must_use]
+    pub(crate) fn base_style_record_of(&self, raw_style_record: u64) -> u64 {
+        if raw_style_record & FinalStyleRecordID::ANIMATION_OVERLAY_TAG == 0 {
+            return raw_style_record;
+        }
+        self.animation_overlay_slots_by_record
+            .get(&FinalStyleRecordID(raw_style_record))
+            .and_then(|slot| self.animation_overlay_slots.get(*slot as usize)?.as_ref())
+            .map_or(raw_style_record, |record| {
+                self.final_base_style_record(record.base_style_record).raw()
+            })
+    }
+
     /// Whether a record is an animation overlay's rather than a style's own. Such a record lives in
     /// a slot the next sampling of that animation releases.
     #[must_use]

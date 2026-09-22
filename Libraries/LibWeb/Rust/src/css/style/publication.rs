@@ -308,7 +308,13 @@ impl RetainedState {
             .flat_tree_parent(node)
             .and_then(|parent| self.box_type_parent_display(parent));
         if context.parent_display != parent_display
-            || self.computed_group_sets.assigned_style_record(node)?.raw() != context.record
+            // A transition or an animation the drain started publishes an overlay over the very
+            // record this context was left for. The style beneath it is still that record, and
+            // that is what the context is about.
+            || self
+                .computed_group_sets
+                .base_style_record_of(self.computed_group_sets.assigned_style_record(node)?.raw())
+                != self.computed_group_sets.base_style_record_of(context.record)
             || self
                 .computed_group_sets
                 .style_record_view(context.record)?
