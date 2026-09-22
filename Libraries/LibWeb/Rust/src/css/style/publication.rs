@@ -741,8 +741,15 @@ impl RetainedState {
                 }
                 None => 0,
             };
+            // The row keeps the record it reads its own font from unless the font itself is
+            // moving, so that is when a registered name can be computed here rather than by the
+            // host: the value absolutizes against the same metrics C++ would use.
+            let registered = (!font_inputs_moved && !parent_inputs_moved.any() && !scratch.recompute_in_full)
+                .then(|| self.own_font_length_resolution_context(old_style_record, &inputs))
+                .flatten()
+                .map(|(length, color_scheme)| custom_property_cascade::RegisteredValueContext { length, color_scheme });
             let Some(environment) =
-                self.engine_custom_property_environment(node, parent_environment, &inputs, counters)
+                self.engine_custom_property_environment(node, parent_environment, &inputs, registered, counters)
             else {
                 counters.bump(Counter::EngineComputedRecordBailCustomProperties);
                 return None;
@@ -1655,7 +1662,8 @@ impl RetainedState {
                 return None;
             }
         }
-        let Some(environment) = self.engine_custom_property_environment(node, parent_environment, &inputs, counters)
+        let Some(environment) =
+            self.engine_custom_property_environment(node, parent_environment, &inputs, None, counters)
         else {
             counters.bump(Counter::EngineComputedRecordBailCustomProperties);
             return None;
@@ -2216,6 +2224,66 @@ impl RetainedState {
                 let moved_one = moved.iter().any(|property| transitionable.contains(property));
                 (!transitionable.is_empty(), moved_one)
             })
+    }
+
+    /// The context a registered custom property's lengths resolve against for a row that keeps
+    /// its record's font: the element's OWN font metrics, which is what C++ absolutizes a
+    /// registered value with once the font phase has run. `None` where the row has no record to
+    /// read them from, so the caller leaves the registered names to the host.
+    pub(super) fn own_font_length_resolution_context(
+        &self,
+        record: computed::FinalStyleRecordID,
+        inputs: &bridge::FfiDocumentStyleComputationInputs,
+    ) -> Option<(crate::css::style_compute::FfiLengthResolutionContext, u8)> {
+        use crate::css::computed_value_types::{STYLE_GROUP_INDEX_FONT, STYLE_GROUP_INDEX_INHERITED_BOX};
+        use crate::css::style_compute::{FfiFontMetrics, FfiLengthResolutionContext};
+
+        let view = self.computed_group_sets.style_record_view(record.raw())?;
+        let payloads = match view.base_payloads.is_empty() {
+            true => view.payloads,
+            false => view.base_payloads,
+        };
+        let table = unsafe { view.longhand_table.as_ref() }?;
+        let font = unsafe {
+            payloads[STYLE_GROUP_INDEX_FONT]
+                .cast::<crate::css::computed_value_types::FontValues>()
+                .deref()
+        };
+        let inherited_box = unsafe {
+            payloads[STYLE_GROUP_INDEX_INHERITED_BOX]
+                .cast::<crate::css::computed_values::InheritedBoxValues>()
+                .deref()
+        };
+        let length = FfiLengthResolutionContext {
+            viewport_width: inputs.viewport_width,
+            viewport_height: inputs.viewport_height,
+            font_metrics: FfiFontMetrics {
+                font_size: font.font_size.to_double(),
+                x_height: drive_font_metric(font.font_x_height),
+                cap_height: drive_font_metric(font.font_ascent),
+                zero_advance: drive_font_metric(font.font_zero_advance),
+                line_height: font.line_height_used.to_double(),
+            },
+            root_font_metrics: FfiFontMetrics {
+                font_size: inputs.root_font_size,
+                x_height: inputs.root_font_x_height,
+                cap_height: inputs.root_font_cap_height,
+                zero_advance: inputs.root_font_zero_advance,
+                line_height: inputs.root_line_height,
+            },
+            font_metrics_depend_on_viewport_metrics: view.dependency_flags & (1 << 1) != 0,
+            root_font_metrics_depend_on_viewport_metrics: inputs.root_font_metrics_depend_on_viewport_metrics,
+            has_container_width_basis: false,
+            has_container_height_basis: false,
+            container_width_basis: 0.0,
+            container_height_basis: 0.0,
+            container_width_basis_depends_on_viewport_metrics: false,
+            container_height_basis_depends_on_viewport_metrics: false,
+            subject_inline_axis_is_horizontal: inherited_box.writing_mode
+                == crate::css::css_enums::writing_mode::HORIZONTAL_TB,
+            resolved_viewport_relative_length: std::ptr::null_mut(),
+        };
+        Some((length, table.effective_color_scheme() as u8))
     }
 
     fn record_requires_cpp_animation(&self, record: computed::FinalStyleRecordID) -> bool {
