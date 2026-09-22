@@ -2087,7 +2087,7 @@ impl StyleEngineState {
                     } else {
                         None
                     };
-                    let resuming_font = engine_computed_record_scratch.font_drive.is_pending();
+                    let resuming_font = engine_computed_record_scratch.font_drive.is_pending_for(node);
                     // The immediate parent's own unresolved fact, which the direct inherited-group
                     // path reads without asking about the chain above it.
                     let direct_inherited_delta = (reaction == transaction::STYLE_REACTION_INHERITED_STYLE

@@ -483,6 +483,7 @@ impl RetainedState {
                 }
                 None => {
                     let subject = DriveSubject {
+                        target: crate::css::style::computed::ComputedStyleTarget::new(node, kind),
                         recascade_node: None,
                         parent: Some(node),
                         facts,
