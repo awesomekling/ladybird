@@ -1860,8 +1860,9 @@ impl RetainedState {
             // font is not one the engine resolves yet: the record would be derived and abandoned.
             return self.display_winner_is_list_item(state);
         }
-        property == prop::ANCHOR_NAME
-            || property_starts_animation_or_counter_environment(property)
+        // An anchor name is one the host registers from whichever record it installs, a first
+        // record included: `Element::update_anchor_name_registry` runs on that install too.
+        property_starts_animation_or_counter_environment(property)
             || (computed_group_dependency_mask(property).is_none() && !font_group_carries_longhand(property))
     }
 
