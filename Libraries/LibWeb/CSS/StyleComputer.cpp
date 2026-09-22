@@ -5956,7 +5956,14 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         StyleValueFFI::rust_style_ffi_note_host_driven_row(host_driven_row_kinds);
         // The engine knows why it sent this element here; the census pairs the two so it can rank
         // what reaches the host instead of what the engine attempted.
-        m_style_engine.note_host_entry(abstract_element.element().style_node_id(), 0, host_driven_row_kinds);
+        // An element-backed pseudo-element is computed for the element backing it, whose row the
+        // engine declined: the entry is that element's.
+        auto host_entry_node = abstract_element.element().style_node_id();
+        if (auto pseudo_element = abstract_element.pseudo_element(); pseudo_element.has_value() && is_element_reference_pseudo_element(*pseudo_element)) {
+            if (auto backing = abstract_element.element().get_pseudo_element(*pseudo_element); backing.has_value())
+                host_entry_node = as<DOM::ElementReferencePseudoElement>(*backing).referenced_element()->style_node_id();
+        }
+        m_style_engine.note_host_entry(host_entry_node, 0, host_driven_row_kinds);
     }
 
     ensure_style_metadata_tables_installed();
