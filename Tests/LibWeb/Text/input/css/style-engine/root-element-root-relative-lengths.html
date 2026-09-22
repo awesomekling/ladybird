@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<script src="../../include.js"></script>
+<style>
+    html { padding: 1rem; margin: 2em; }
+    html.big { font-size: 24px; }
+</style>
+<body>
+<script>
+    // `rem` on the document element names the document element's own computed font-size, and
+    // `em` names it too, so both move in the same computation that moves the font size.
+    test(() => {
+        const counters = () => Object.assign({}, internals.styleEngineCounters(), internals.getStyleInvalidationCounters());
+        let before = counters();
+        const report = (label) => {
+            internals.updateStyle();
+            const after = counters();
+            const engineRecords = (after.engineComputedStyleRecords ?? 0) - (before.engineComputedStyleRecords ?? 0);
+            const recomputations = (after.elementStyleRecomputations ?? 0) - (before.elementStyleRecomputations ?? 0);
+            const style = getComputedStyle(document.documentElement);
+            println(`${label}: font-size ${style.fontSize}, padding ${style.paddingTop}, margin ${style.marginTop}`);
+            println(`    settled by the engine ${engineRecords > 0}, C++ recomputations ${recomputations}`);
+            before = after;
+        };
+        report("initial");
+        document.documentElement.className = "big";
+        report("html.big");
+        document.documentElement.className = "";
+        report("html.none");
+    });
+</script>
+</body>
+</html>
