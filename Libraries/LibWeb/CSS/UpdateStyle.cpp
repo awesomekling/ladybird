@@ -549,6 +549,15 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
         bool registration_only;
     };
     Vector<TransitionEffectRow> transition_effect_rows;
+    // A row whose record read a non-inherited property straight from the parent, through an
+    // explicit `inherit`, owes the parent the mark C++ writes beside such a computation. The
+    // union is monotone and a parent applies before its children, so draining it after the batch
+    // marks the parent no later than the C++ path does.
+    struct ExplicitInheritanceEffectRow {
+        StyleNodeID style_node;
+        u32 style_groups;
+    };
+    Vector<ExplicitInheritanceEffectRow> explicit_inheritance_effect_rows;
     for (auto const& reaction : reactions) {
         auto element = document.style_computer().element_for_style_node(reaction.style_node);
         if (!element || (!element->is_svg_element() && !element->has_relevant_animations()))
@@ -798,6 +807,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 // the record is the one that installs: a C++ computation of this element runs the
                 // transition step itself, so the debt is discharged either way.
                 auto const transition_debt = document.style_computer().style_engine().take_transition_registration_debt(StyleNodeID { reaction.style_node });
+                auto const explicit_inheritance_debt = document.style_computer().style_engine().take_explicit_inheritance_debt(StyleNodeID { reaction.style_node });
                 if (!engine_computed_record_environment_is_installable(*element, StyleRecordID { reaction.new_style_record })) {
                     // The engine resolved the record's environment over the parent's own; when the
                     // parent's inheritable environment differs, C++ computes the style.
@@ -810,6 +820,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     // which the stabilization epoch is built to take, and publishes what it starts.
                     if (transition_debt != 0)
                         transition_effect_rows.append({ StyleNodeID { reaction.style_node }, StyleRecordID { reaction.old_style_record }, transition_debt == 1 });
+                    if (explicit_inheritance_debt != 0)
+                        explicit_inheritance_effect_rows.append({ StyleNodeID { reaction.style_node }, explicit_inheritance_debt });
                 }
             } else if (needs_regular_style_recompute || needs_inherited_style_recompute || needs_full_custom_property_recompute) {
                 if (needs_regular_style_recompute)
@@ -891,6 +903,13 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
     }
 
     // The batch is installed: drain what its rows left behind, in the order they were applied.
+    for (auto const& row : explicit_inheritance_effect_rows) {
+        auto element = document.style_computer().element_for_style_node(row.style_node);
+        if (!element || !element->is_connected() || &element->document() != &document)
+            continue;
+        if (auto* parent = element->parent())
+            parent->add_children_explicitly_inherited_non_inherited_style_groups(row.style_groups == NumericLimits<u32>::max() ? ComputedValues::all_style_groups : row.style_groups);
+    }
     for (auto const& row : transition_effect_rows) {
         auto element = document.style_computer().element_for_style_node(row.style_node);
         if (!element || !element->is_connected() || &element->document() != &document)

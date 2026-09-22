@@ -50,6 +50,27 @@ impl RetainedState {
     /// post-compute adjustments read element facts this context does not carry, so the table
     /// stands only when they came out exactly as before.
     #[allow(clippy::too_many_arguments)]
+    /// Whether what an explicit `inherit` of a non-inherited property would read from the parent
+    /// is the record the engine holds. A parent running an animation or transition holds an
+    /// overlay, and the value such an `inherit` takes is the after-change style the host
+    /// reconstructs instead, which this stage has no way to read.
+    fn parent_record_answers_explicit_inheritance(&self, parent: Option<StyleNodeID>) -> bool {
+        let Some(parent) = parent else {
+            return true;
+        };
+        let Some(record) = self.computed_group_sets.assigned_style_record(parent) else {
+            return false;
+        };
+        self.computed_group_sets
+            .style_record_view(record.raw())
+            .is_some_and(|view| {
+                view.animated_overlay.is_null()
+                    && unsafe { view.longhand_table.as_ref() }
+                        .is_some_and(|table| !crate::css::style_compute::has_active_transition_properties(table))
+            })
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn engine_driven_table(
         &self,
         node: StyleNodeID,
@@ -58,6 +79,7 @@ impl RetainedState {
         selected: &[u64],
         inputs: &bridge::FfiDocumentStyleComputationInputs,
         driver_input_moved: &mut bool,
+        explicitly_inherited_groups: &mut u32,
         counters: &mut Counters,
     ) -> Option<(
         ComputedLonghandTable,
@@ -219,14 +241,20 @@ impl RetainedState {
             Counter::EnginePartialLonghandEvaluations,
             u64::from(results.longhand_evaluations),
         );
-        if results.explicitly_inherited_non_inherited_style_groups != 0 || results.uses_tree_counting_function {
-            counters.bump(if results.uses_tree_counting_function {
-                Counter::EngineComputedRecordBailDriveTreeCounting
-            } else {
-                Counter::EngineComputedRecordBailDrive
-            });
+        if results.uses_tree_counting_function {
+            counters.bump(Counter::EngineComputedRecordBailDriveTreeCounting);
             return None;
         }
+        // An `inherit` of a non-inherited property reads the half of the parent's style a child
+        // normally cannot see. The value itself is computed here; what C++ does beside it is one
+        // write on the parent, which the row leaves for the host to drain after the batch.
+        if results.explicitly_inherited_non_inherited_style_groups != 0
+            && !self.parent_record_answers_explicit_inheritance(self.tree.flat_tree_parent(node))
+        {
+            counters.bump(Counter::EngineComputedRecordBailDrive);
+            return None;
+        }
+        *explicitly_inherited_groups |= results.explicitly_inherited_non_inherited_style_groups;
         // An input the drive reads for properties it did not select moved with the selection: the
         // caller drives the record in full instead.
         if table.display_before_box_type_transformation() != old_table.display_before_box_type_transformation() {
@@ -284,6 +312,7 @@ impl RetainedState {
         inputs: &bridge::FfiDocumentStyleComputationInputs,
         font_scratch: &mut FontDriveScratch,
         goal: FontDriveGoal,
+        explicitly_inherited_groups: &mut u32,
         counters: &mut Counters,
     ) -> Option<(
         ComputedLonghandTable,
@@ -829,14 +858,20 @@ impl RetainedState {
             &raw const input_line_height_metrics,
             line_height_value,
         );
-        if results.explicitly_inherited_non_inherited_style_groups != 0 || results.uses_tree_counting_function {
-            counters.bump(if results.uses_tree_counting_function {
-                Counter::EngineComputedRecordBailDriveTreeCounting
-            } else {
-                Counter::EngineComputedRecordBailDrive
-            });
+        if results.uses_tree_counting_function {
+            counters.bump(Counter::EngineComputedRecordBailDriveTreeCounting);
             return None;
         }
+        // An `inherit` of a non-inherited property reads the half of the parent's style a child
+        // normally cannot see. The value itself is computed here; what C++ does beside it is one
+        // write on the parent, which the row leaves for the host to drain after the batch.
+        if results.explicitly_inherited_non_inherited_style_groups != 0
+            && !self.parent_record_answers_explicit_inheritance(subject.parent)
+        {
+            counters.bump(Counter::EngineComputedRecordBailDrive);
+            return None;
+        }
+        *explicitly_inherited_groups |= results.explicitly_inherited_non_inherited_style_groups;
         let Some(line_height_used_after) = line_height_used(&table) else {
             counters.bump(Counter::EngineComputedRecordBailFontPhase);
             return None;

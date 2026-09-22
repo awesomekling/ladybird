@@ -486,6 +486,7 @@ impl RetainedState {
                         parent: Some(node),
                         facts,
                     };
+                    let mut explicitly_inherited_groups = 0;
                     let driven = self.engine_full_drive(
                         subject,
                         None,
@@ -493,6 +494,7 @@ impl RetainedState {
                         &inputs,
                         &mut scratch.font_drive,
                         FontDriveGoal::Complete,
+                        &mut explicitly_inherited_groups,
                         counters,
                     );
                     if driven.is_none() && scratch.font_drive.request.is_some() {
@@ -500,6 +502,12 @@ impl RetainedState {
                         scratch.pseudo_uses_substitution = pseudo_uses_substitution;
                     }
                     let (table, length, longhand_evaluations, font) = driven?;
+                    // The mark a pseudo-element's explicit `inherit` leaves is the originating
+                    // element's own, which this row does not answer for: it stays with C++.
+                    if explicitly_inherited_groups != 0 {
+                        counters.bump(Counter::EngineComputedRecordBailDrive);
+                        return None;
+                    }
                     let font = font.expect("a full drive resolves the font");
                     let (record, _) = self.assemble_and_publish_engine_record(
                         target,

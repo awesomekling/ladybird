@@ -744,7 +744,7 @@ impl RetainedState {
             environment.unwrap_or(0),
             RootFontInputs::from_document(&inputs),
         );
-        if let Some(&new_style_record) = scratch.cohorts.get(&cohort) {
+        if let Some(&(new_style_record, cohort_explicitly_inherited_groups)) = scratch.cohorts.get(&cohort) {
             self.note_node_substitution(node, scratch, state, current_environment);
             let delta =
                 self.computed_group_sets
@@ -754,6 +754,12 @@ impl RetainedState {
             }
             self.note_engine_computed_record(node, delta, (generation, state), delta_property_count, 0, counters);
             counters.bump(Counter::EngineComputedRecordCohortHits);
+            // The debt is per node, not per record: an element taking the record from the cohort
+            // owes its own parent the same mark the element that computed it owed.
+            if cohort_explicitly_inherited_groups != 0 {
+                self.nodes_owing_explicit_inheritance
+                    .insert(node, cohort_explicitly_inherited_groups);
+            }
             if let Some(registration_only) = owes_a_transition_registration {
                 self.nodes_owing_a_transition_registration
                     .insert(node, registration_only);
@@ -903,6 +909,7 @@ impl RetainedState {
         };
         self.note_node_substitution(node, scratch, state, current_environment);
         let mut driver_input_moved = false;
+        let mut explicitly_inherited_groups = 0;
         let partial = if full_drive {
             None
         } else {
@@ -913,6 +920,7 @@ impl RetainedState {
                 &selected,
                 &inputs,
                 &mut driver_input_moved,
+                &mut explicitly_inherited_groups,
                 counters,
             );
             if partial.is_none() && !driver_input_moved {
@@ -936,6 +944,7 @@ impl RetainedState {
                     &inputs,
                     &mut scratch.font_drive,
                     goal,
+                    &mut explicitly_inherited_groups,
                     counters,
                 )?
             }
@@ -980,7 +989,11 @@ impl RetainedState {
         // A record driven in full stands for a cohort keyed by the parent's inherited inputs only
         // when the drive was partial.
         if !driver_input_moved {
-            scratch.cohorts.insert(cohort, delta.1);
+            scratch.cohorts.insert(cohort, (delta.1, explicitly_inherited_groups));
+        }
+        if explicitly_inherited_groups != 0 {
+            self.nodes_owing_explicit_inheritance
+                .insert(node, explicitly_inherited_groups);
         }
         // A partial drive whose driver inputs moved was driven in full instead, so values the
         // delta does not name may have moved too: the host runs the whole step for such a row.
@@ -999,6 +1012,12 @@ impl RetainedState {
     /// What the engine-computed record the host is about to install for this node leaves to be
     /// applied after the batch, taking the debt with the answer so that exactly one application
     /// drains it: 0 nothing, 1 the registration alone, 2 the whole transition step.
+    /// The style groups an engine-computed record read straight from the parent through an
+    /// explicit `inherit`, taken with the answer so that exactly one application marks the parent.
+    pub(crate) fn take_explicit_inheritance_debt(&mut self, node: StyleNodeID) -> u32 {
+        self.nodes_owing_explicit_inheritance.remove(&node).unwrap_or(0)
+    }
+
     pub(crate) fn take_transition_registration_debt(&mut self, node: StyleNodeID) -> u8 {
         match self.nodes_owing_a_transition_registration.remove(&node) {
             Some(true) => 1,
@@ -1152,6 +1171,7 @@ impl RetainedState {
             root_inputs.apply_to(&mut inputs);
         }
         let facts = self.computed_group_sets.adjustment_facts(node);
+        let mut explicitly_inherited_groups = 0;
         let parent = self.tree.flat_tree_parent(node);
         // Only the document element is styled without a flat-tree parent: it inherits from the
         // initial values.
@@ -1325,6 +1345,7 @@ impl RetainedState {
                     &selected,
                     &inputs,
                     &mut false,
+                    &mut explicitly_inherited_groups,
                     counters,
                 )
             {
@@ -1358,17 +1379,30 @@ impl RetainedState {
                         let record = ColdRecord {
                             record: assembly.delta.1,
                             swap_eligible: self.computed_group_sets.node_inherited_group_swap_eligible(node),
+                            explicitly_inherited_groups,
                         };
                         scratch.cold_cohorts.insert(cache_key, record);
                         self.remember_cold_record(cache_key, record);
+                    }
+                    if explicitly_inherited_groups != 0 {
+                        self.nodes_owing_explicit_inheritance
+                            .insert(node, explicitly_inherited_groups);
                     }
                     return Some(assembly.delta);
                 }
             }
         }
         let subject = DriveSubject { parent, facts };
-        let (table, length, longhand_evaluations, font) =
-            self.engine_full_drive(subject, None, &store, &inputs, &mut scratch.font_drive, goal, counters)?;
+        let (table, length, longhand_evaluations, font) = self.engine_full_drive(
+            subject,
+            None,
+            &store,
+            &inputs,
+            &mut scratch.font_drive,
+            goal,
+            &mut explicitly_inherited_groups,
+            counters,
+        )?;
         let font = font.expect("a full drive resolves the font");
         let (new_style_record, swap_eligible) = self.assemble_and_publish_engine_record(
             target,
@@ -1390,9 +1424,14 @@ impl RetainedState {
             let record = ColdRecord {
                 record: delta.1,
                 swap_eligible,
+                explicitly_inherited_groups,
             };
             scratch.cold_cohorts.insert(cache_key, record);
             self.remember_cold_record(cache_key, record);
+        }
+        if explicitly_inherited_groups != 0 {
+            self.nodes_owing_explicit_inheritance
+                .insert(node, explicitly_inherited_groups);
         }
         self.note_engine_computed_record(
             node,
@@ -1432,7 +1471,14 @@ impl RetainedState {
                     )
             })
         };
-        let (ColdRecord { record, swap_eligible }, from_cache) = cache_key.and_then(|cache_key| {
+        let (
+            ColdRecord {
+                record,
+                swap_eligible,
+                explicitly_inherited_groups,
+            },
+            from_cache,
+        ) = cache_key.and_then(|cache_key| {
             scratch
                 .cold_cohorts
                 .get(&cache_key)
@@ -1470,6 +1516,10 @@ impl RetainedState {
         } else {
             Counter::EngineComputedRecordCohortHits
         });
+        if explicitly_inherited_groups != 0 {
+            self.nodes_owing_explicit_inheritance
+                .insert(node, explicitly_inherited_groups);
+        }
         Some(delta)
     }
 
@@ -1937,7 +1987,7 @@ impl RetainedState {
                 self.computed_group_sets.take_pending_cascade_state(target);
                 self.computed_group_sets
                     .revert_engine_computed_record(node, derived, pending.old_style_record);
-                scratch.cohorts.retain(|_, record| *record != derived);
+                scratch.cohorts.retain(|_, (record, _)| *record != derived);
                 scratch.cold_cohorts.retain(|_, record| record.record != derived);
                 self.engine_cold_record_cache
                     .retain(|_, record| record.record != derived);
@@ -2390,6 +2440,10 @@ impl RetainedState {
             ColdRecord {
                 record: style_record,
                 swap_eligible,
+                // FIXME: C++ computed this record and knows whether it read the parent's
+                //        non-inherited groups, but does not name that here, so an element the
+                //        engine hands it to cannot owe its own parent the mark.
+                explicitly_inherited_groups: 0,
             },
         );
     }
@@ -4080,11 +4134,19 @@ struct ColdRecordParent {
     parent_display: u32,
 }
 
+/// What a warm record's cohort is keyed by, and what it answers with: the record, and the style
+/// groups it read straight from the parent through an explicit `inherit`.
+type RecordCohortKey = (u64, CascadeStateID, u32, RecordDeltaParent, u64, RootFontInputs);
+type RecordCohortValue = (computed::FinalStyleRecordID, u32);
+
 /// A first record the engine keeps for reuse, with the swap eligibility its assignment carries.
 #[derive(Clone, Copy)]
 pub(super) struct ColdRecord {
     record: computed::FinalStyleRecordID,
     swap_eligible: bool,
+    /// The style groups the record read straight from the parent through an explicit `inherit`,
+    /// which every element the record answers for owes its own parent.
+    explicitly_inherited_groups: u32,
 }
 
 /// The value-independent half of a first-record key. Records under the same key may seed one
@@ -4246,7 +4308,7 @@ pub(super) struct EngineComputedRecordScratch {
     /// for every node it derives, and it is false for the whole of a flush that derives none.
     pub(super) font_environment_moved: bool,
     pub(super) prepared_root_font: Option<(StyleNodeID, ParentInputsMoved, drive::FontDriveScratch)>,
-    cohorts: HashMap<(u64, CascadeStateID, u32, RecordDeltaParent, u64, RootFontInputs), computed::FinalStyleRecordID>,
+    cohorts: HashMap<RecordCohortKey, RecordCohortValue>,
     computability: EngineComputabilityScratch,
     /// What each node the walk has reached tells its children: whether the chain above it is
     /// confined, and whether it resolved the record its children inherit from. A column with

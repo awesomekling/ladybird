@@ -909,6 +909,11 @@ pub struct RetainedState {
     /// moved values the step has to compare, so the host runs the whole step against the record
     /// the row moved away from.
     nodes_owing_a_transition_registration: HashMap<StyleNodeID, bool>,
+    /// The nodes whose engine-computed record read a non-inherited property straight from the
+    /// parent, through an explicit `inherit`, and the style groups it read. C++ marks the parent
+    /// with that union so a later change to those groups reaches this element again. It is an
+    /// effect of the row rather than a part of the record: the host drains it after the batch.
+    nodes_owing_explicit_inheritance: HashMap<StyleNodeID, u32>,
     /// The names of the CSS animations the host holds for each element, which the animation stage
     /// matches its newly computed definitions against.
     css_defined_animations: animations::CssDefinedAnimations,
