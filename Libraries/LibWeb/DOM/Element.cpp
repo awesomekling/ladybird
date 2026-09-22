@@ -1842,9 +1842,10 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
             || pseudo_element_is_list_item(CSS::PseudoElement::After)
             || pseudo_element_is_list_item(CSS::PseudoElement::Backdrop)))
         (void)style_computer.materialize_style_record({ *this, CSS::PseudoElement::Marker });
-    // Element-backed pseudo-elements are C++'s; an engine-computed record moving an element's own
-    // properties leaves them as they were, as it did before the engine settled the synthetic ones.
-    if (!engine_pseudo_element_records || !old_originating_style || settled_after_host_record) {
+    // An element-backed pseudo-element is the element that backs it, which its own row styles; an
+    // engine-computed record moving an element's own properties leaves it as it was, and an
+    // element's first record comes with a first record of the element backing it.
+    if (!engine_pseudo_element_records || settled_after_host_record) {
         for (auto i = to_underlying(CSS::first_element_reference_pseudo_element); i <= to_underlying(CSS::last_element_reference_pseudo_element); ++i) {
             auto pseudo_element = static_cast<CSS::PseudoElement>(i);
             if (get_pseudo_element(pseudo_element).has_value())
