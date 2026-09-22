@@ -256,6 +256,11 @@ pub struct FfiDocumentStyleComputationInputs {
     pub default_font_size_raw: i32,
     pub device_pixels_per_css_pixel: f64,
     pub font_environment_generation: u64,
+    /// The host's own version of everything a computation reads that is neither the element's
+    /// cascade nor its parent's style: the document environment and the viewport. A record the
+    /// engine settles is stamped with it, so the element's next C++ computation can tell that
+    /// nothing but its declarations moved.
+    pub style_environment_version: u64,
     /// The page's preferred color scheme and the document's supported schemes, as
     /// PreferredColorScheme codes; up to four supported schemes are carried.
     pub preferred_color_scheme: u8,
@@ -306,6 +311,7 @@ impl Default for FfiDocumentStyleComputationInputs {
             default_font_size_raw: 0,
             device_pixels_per_css_pixel: 0.0,
             font_environment_generation: 0,
+            style_environment_version: 0,
             preferred_color_scheme: 0,
             has_document_supported_schemes: false,
             document_supported_scheme_count: 0,

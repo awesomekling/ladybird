@@ -1842,6 +1842,7 @@ impl StyleEngineState {
                 nodes_owing_explicit_inheritance: HashMap::default(),
                 nodes_owing_animation_definitions: HashMap::default(),
                 animation_definitions_being_applied: None,
+                settled_computation_contexts: HashMap::default(),
                 css_defined_animations: Default::default(),
                 animation_timing_rows: Default::default(),
                 animation_effect_descriptions: Default::default(),
@@ -2600,6 +2601,7 @@ impl StyleEngineState {
             self.retained.nodes_owing_a_transition_registration.remove(&node);
             self.retained.nodes_owing_explicit_inheritance.remove(&node);
             self.retained.nodes_owing_animation_definitions.remove(&node);
+            self.retained.settled_computation_contexts.remove(&node);
             retired_nodes.push(node);
         }
         if !retired_nodes.is_empty() {

@@ -4,7 +4,7 @@ PASS: descendant attribute stress pseudo-warm: document: :has(.hit) after descen
 PASS: descendant attribute stress pseudo-cold: document: :has(.hit) after descendant class change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress warm: document: :has(.HIT) after matching uppercase descendant class change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress cold: document: :has(.HIT) after matching uppercase descendant class change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: descendant attribute stress pseudo-warm: document: :has(.HIT) after matching uppercase descendant class change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: descendant attribute stress pseudo-warm: document: :has(.HIT) after matching uppercase descendant class change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress pseudo-cold: document: :has(.HIT) after matching uppercase descendant class change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress warm: document: :has(.HIT) ignores lowercase descendant class change in standards mode | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress cold: document: :has(.HIT) ignores lowercase descendant class change in standards mode | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -16,15 +16,15 @@ PASS: descendant attribute stress pseudo-warm: document: :has(.hit) ignores uppe
 PASS: descendant attribute stress pseudo-cold: document: :has(.hit) ignores uppercase descendant class change in standards mode | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant attribute stress warm: document: :has([data-hit]) after descendant attribute change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress cold: document: :has([data-hit]) after descendant attribute change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: descendant attribute stress pseudo-warm: document: :has([data-hit]) after descendant attribute change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: descendant attribute stress pseudo-warm: document: :has([data-hit]) after descendant attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress pseudo-cold: document: :has([data-hit]) after descendant attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress warm: document: :has(#hit-id) after descendant id change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress cold: document: :has(#hit-id) after descendant id change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: descendant attribute stress pseudo-warm: document: :has(#hit-id) after descendant id change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: descendant attribute stress pseudo-warm: document: :has(#hit-id) after descendant id change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress pseudo-cold: document: :has(#hit-id) after descendant id change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress warm: document: :has(span.hit:not(.miss)) after descendant compound change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress cold: document: :has(span.hit:not(.miss)) after descendant compound change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: descendant attribute stress pseudo-warm: document: :has(span.hit:not(.miss)) after descendant compound change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: descendant attribute stress pseudo-warm: document: :has(span.hit:not(.miss)) after descendant compound change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress pseudo-cold: document: :has(span.hit:not(.miss)) after descendant compound change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress warm: document: :not(:has(.hit)) becomes false after descendant class change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress cold: document: :not(:has(.hit)) becomes false after descendant class change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0

@@ -922,6 +922,10 @@ pub struct RetainedState {
     /// The plan the host is applying right now, held for the length of that application: the host
     /// reads the definitions through the engine's own storage and copies what it keeps.
     animation_definitions_being_applied: Option<animations::SettledAnimationPlan>,
+    /// What each record the engine settled leaves in place of the style input record a C++
+    /// computation would have written, so that the element's next C++ computation can select what
+    /// it rebuilds instead of rebuilding every group.
+    settled_computation_contexts: HashMap<StyleNodeID, publication::SettledComputationContext>,
     /// The names of the CSS animations the host holds for each element, which the animation stage
     /// matches its newly computed definitions against.
     css_defined_animations: animations::CssDefinedAnimations,

@@ -31,6 +31,27 @@ pub(super) struct ExactCascadeContext {
     donor_used: bool,
 }
 
+/// What a record the engine settled leaves in place of the style input record a C++ computation
+/// would have written.
+///
+/// An engine-settled record never runs the C++ computation, so the element's next one has nothing
+/// to compare against and rebuilds every group. This is the comparison it would have made: the
+/// parent's record, the element's own adjustment facts and the document environment as they were
+/// when the record was settled. When all of them still hold, nothing but the element's own
+/// declarations can have moved, which is exactly what `take_shared_computation_context` answers for
+/// a record another element published.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SettledComputationContext {
+    record: u64,
+    parent_record: u64,
+    parent_display: Option<u32>,
+    adjustment_facts: u32,
+    environment: u64,
+    font_environment_generation: u64,
+    root_font_inputs: RootFontInputs,
+    tree_scope: u32,
+}
+
 /// Root-relative computation reads these inputs independently of its inheritance parent.
 /// Bitwise keys keep equality exact without using an invalidation generation as a substitute
 /// for the values. The viewport-dependence bit matters even when today's metrics agree.
@@ -244,6 +265,102 @@ impl RetainedState {
     }
 
     pub(crate) fn take_shared_computation_context(
+        &mut self,
+        node: StyleNodeID,
+        parent_record: u64,
+        environment: u64,
+        shape: [u64; 4],
+        pseudo_elements: u64,
+    ) -> Option<u64> {
+        if let Some(record) =
+            self.take_published_shared_computation_context(node, parent_record, environment, shape, pseudo_elements)
+        {
+            return Some(record);
+        }
+        self.take_settled_computation_context(node, parent_record, environment, pseudo_elements)
+    }
+
+    /// The context a record the engine settled left, for the element's next C++ computation: the
+    /// record itself when everything that computation would have compared still holds, so that the
+    /// only thing that can have moved is the element's own declarations.
+    fn take_settled_computation_context(
+        &mut self,
+        node: StyleNodeID,
+        parent_record: u64,
+        environment: u64,
+        pseudo_elements: u64,
+    ) -> Option<u64> {
+        let context = self.settled_computation_contexts.remove(&node)?;
+        let inputs = self.document_style_computation_inputs?;
+        if context.environment != environment
+            || context.font_environment_generation != inputs.font_environment_generation
+            || context.root_font_inputs != RootFontInputs::from_document(&inputs)
+            || context.tree_scope != self.tree.tree_scope(node).0
+            || context.parent_record != parent_record
+            || context.adjustment_facts != self.computed_group_sets.adjustment_facts(node)
+        {
+            return None;
+        }
+        // The box type a value was transformed under is the parent's display, which the record does
+        // not name and the cascade cannot report.
+        let parent_display = self
+            .tree
+            .flat_tree_parent(node)
+            .and_then(|parent| self.box_type_parent_display(parent));
+        if context.parent_display != parent_display
+            || self.computed_group_sets.assigned_style_record(node)?.raw() != context.record
+            || self
+                .computed_group_sets
+                .style_record_view(context.record)?
+                .pseudo_element_styles
+                != pseudo_elements
+        {
+            return None;
+        }
+        Some(context.record)
+    }
+
+    /// Remember, beside a record the engine settled, what the element's next C++ computation has to
+    /// compare to know that nothing but its declarations moved.
+    ///
+    /// Only for a record the engine can vouch for the way the host vouches for a shared one: no
+    /// custom-property substitution and no explicit `inherit` of a non-inherited property, which are
+    /// the two things that reach past what the record names. Everything else a computation could
+    /// read past the record - a container unit, a tree-counting function, a resource context - is
+    /// already refused by the gates that let the engine settle the record at all.
+    fn remember_settled_computation_context(&mut self, node: StyleNodeID) {
+        if self.nodes_with_substituted_records.contains(&node)
+            || self.node_explicitly_inherits_non_inherited_property(node)
+            || self.node_declares_custom_properties(node)
+        {
+            self.settled_computation_contexts.remove(&node);
+            return;
+        }
+        let Some(inputs) = self.document_style_computation_inputs else {
+            return;
+        };
+        let Some(record) = self.computed_group_sets.assigned_style_record(node) else {
+            return;
+        };
+        let parent = self.tree.flat_tree_parent(node);
+        let parent_record = parent
+            .and_then(|parent| self.computed_group_sets.assigned_style_record(parent))
+            .map_or(0, |record| record.raw());
+        let parent_display = parent.and_then(|parent| self.box_type_parent_display(parent));
+        let context = SettledComputationContext {
+            record: record.raw(),
+            parent_record,
+            parent_display,
+            adjustment_facts: self.computed_group_sets.adjustment_facts(node),
+            environment: inputs.style_environment_version,
+            font_environment_generation: inputs.font_environment_generation,
+            root_font_inputs: RootFontInputs::from_document(&inputs),
+            tree_scope: self.tree.tree_scope(node).0,
+        };
+        self.settled_computation_contexts.insert(node, context);
+    }
+
+    fn take_published_shared_computation_context(
         &mut self,
         node: StyleNodeID,
         parent_record: u64,
@@ -1216,6 +1333,12 @@ impl RetainedState {
                 self.computed_group_sets.take_pending_cascade_state(target);
                 if let Some(cascade_state) = pending.cascade_state {
                     self.computed_group_sets.bind_cascade_state(target, cascade_state);
+                }
+                // The record is installed and no C++ computation left an input record for it. Leave
+                // what that computation would have left instead, so the element's next one selects
+                // what it rebuilds rather than rebuilding every group.
+                if pending.pseudo_kind == u8::MAX {
+                    self.remember_settled_computation_context(node);
                 }
                 // A pseudo-element's record was computed from this very state, as the retained
                 // cascade would have observed had C++ computed it.
