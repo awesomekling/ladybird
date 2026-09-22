@@ -158,6 +158,7 @@
     [162, "SetNodeDomPaintFacts"],
     [163, "SetElementTableSpans"],
     [164, "RecordContainerQueryInput"],
+    [165, "SetSampledCompositionIdentity"],
     [170, "SettlePseudoRecordsAfterHostRecord"]
   ],
   "operations": [
@@ -192,6 +193,7 @@
     { "event": "SetElementUniqueNodeId", "ffi": "style_engine_set_element_unique_node_id", "cpp": "set_element_unique_node_id", "return": "void", "args": [["node", "style_node"], ["unique_node_id", "u64"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_element_unique_node_id(node, unique_node_id as i64);" },
     { "event": "SetElementIdName", "ffi": "style_engine_set_element_id_name", "cpp": "set_element_id_name", "return": "void", "args": [["node", "style_node"], ["name", "style_atom"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_element_id_name(node, StyleAtomID(name));" },
     { "event": "SetElementContainerQueryInputs", "ffi": "style_engine_set_element_container_query_inputs", "cpp": "set_element_container_query_inputs", "return": "void", "args": [["node", "style_node"], ["record", "style_record"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_element_container_query_inputs(node, record);" },
+    { "event": "SetSampledCompositionIdentity", "ffi": "style_engine_set_sampled_composition_identity", "cpp": "set_sampled_composition_identity", "return": "void", "args": [["node", "style_node"], ["record", "style_record"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_sampled_composition_identity(node, record);" },
     { "event": "ElementById", "ffi": "style_engine_element_by_id", "cpp": "element_by_id", "return": "u32", "receiver": "const", "args": [["tree_scope", "tree_scope_id"], ["name", "style_atom"]], "body": "let result = engine.element_by_id(TreeScopeID(tree_scope), StyleAtomID(name)).map_or(0, StyleNodeID::raw);" },
     { "event": "SetShadowRoot", "ffi": "style_engine_set_shadow_root", "cpp": "set_shadow_root", "return": "void", "args": [["host", "style_node"], ["shadow_root", "style_node"]], "body": "if let (Some(host), Some(shadow_root)) = (StyleNodeID::from_raw(host), StyleNodeID::from_raw(shadow_root)) { engine.set_shadow_root(host, shadow_root); }" },
     { "event": "SetSlotAssignedNodes", "ffi": "style_engine_set_slot_assigned_nodes", "cpp": "set_slot_assigned_nodes", "return": "void", "args": [["slot", "style_node"], ["assigned", "style_node_slice"]], "body": "let Some(slot) = StyleNodeID::from_raw(slot) else { return; }; let assigned: Vec<StyleNodeID> = assigned.iter().filter_map(|&node| StyleNodeID::from_raw(node)).collect(); engine.set_slot_assigned_nodes(slot, &assigned);" },
