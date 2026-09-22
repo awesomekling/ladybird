@@ -95,7 +95,11 @@ impl RetainedState {
         answer: &PublishedMatchAnswer,
     ) -> Option<Vec<BatchCustomPropertyMatch>> {
         let mut matches = Vec::new();
-        let mut push = |rule: RuleID, tree_scope: TreeScopeID, specificity: Specificity, scope_proximity: u32, pseudo: Option<u16>| {
+        let mut push = |rule: RuleID,
+                        tree_scope: TreeScopeID,
+                        specificity: Specificity,
+                        scope_proximity: u32,
+                        pseudo: Option<u16>| {
             if !self.program.custom_declarations_of(rule).is_empty() {
                 matches.push(BatchCustomPropertyMatch {
                     rule,

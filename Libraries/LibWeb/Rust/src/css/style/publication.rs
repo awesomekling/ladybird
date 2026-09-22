@@ -684,10 +684,9 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
             return None;
         }
-        // A record C++ computed holds no cascade state; when the reaction moved none of the
-        // node's own rules its winners are the ones the record was computed from, and a full
-        // drive against the moved parent inputs binds the state.
-        let winners_unchanged = exact_flipped_rules.is_some_and(|flipped| !flipped.element);
+        // A record C++ computed holds no cascade state, so there is no earlier state to take a
+        // delta from: the record is driven again in full from the node's winners, which binds
+        // the state.
         // A winner written with `attr()` computes to what the element's attributes hold now, which
         // no winner delta shows: such a record is driven again in full.
         if self.state_reads_attributes(node, state) {
@@ -701,17 +700,9 @@ impl RetainedState {
                 }
                 self.winner_groups.semantic_delta(Some(previous_state), state)
             }
-            None if winners_unchanged
-                && (parent_inputs_moved.any()
-                    || font_inputs_moved
-                    || scratch.document_environment_moved
-                    || scratch.recompute_in_full) =>
-            {
-                self.winner_groups.semantic_delta(Some(state), state)
-            }
             None => {
-                counters.bump(Counter::EngineComputedRecordBailNoCascadeState);
-                return None;
+                scratch.recompute_in_full = true;
+                self.winner_groups.semantic_delta(Some(state), state)
             }
         };
         let Some(mut inputs) = self.document_style_computation_inputs else {

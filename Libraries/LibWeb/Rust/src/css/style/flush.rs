@@ -2024,9 +2024,9 @@ impl StyleEngineState {
                     self.retained.computed_group_sets.set_node_pseudo_style_mask(node, mask);
                 }
                 if self.retained.any_custom_property_is_declared()
-                    && let Some(matches) =
-                        self.retained
-                            .batch_custom_property_matches_of(&published_match_answers, answer)
+                    && let Some(matches) = self
+                        .retained
+                        .batch_custom_property_matches_of(&published_match_answers, answer)
                 {
                     self.retained.batch_custom_property_matches.insert(node, matches);
                 }
