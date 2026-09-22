@@ -4148,6 +4148,32 @@ StyleEngine::StyleRecordDelta StyleComputer::record_computed_style_inputs(Option
     return publication;
 }
 
+Optional<RequiredInvalidationAfterStyleChange> StyleComputer::answer_record_demand(DOM::Element& element, bool& did_change_custom_properties, StringView& decline_cause, Optional<PseudoElement> pseudo, bool exclude_inline_style, bool targeted) const
+{
+    auto& engine = const_cast<StyleComputer&>(*this).style_engine();
+    Optional<u8> pseudo_kind;
+    if (pseudo.has_value())
+        pseudo_kind = pseudo_element_to_ffi(pseudo);
+    auto answer = engine.answer_record_demand(element.style_node_id(), pseudo_kind, exclude_inline_style, targeted);
+    if (!answer.record.style_record) {
+        decline_cause = { reinterpret_cast<char const*>(answer.decline_cause), answer.decline_cause_length };
+        return {};
+    }
+    decline_cause = {};
+
+    DOM::Element::EnginePseudoElementRecords pseudo_element_records {};
+    for (size_t kind = 0; kind < sizeof(answer.record.pseudo_records) / sizeof(answer.record.pseudo_records[0]); ++kind) {
+        if (answer.record.pseudo_records_present & (1 << kind))
+            pseudo_element_records[kind] = StyleRecordID { answer.record.pseudo_records[kind] };
+    }
+    auto invalidation = element.apply_engine_computed_style_record(StyleRecordID { answer.record.style_record }, pseudo_element_records, answer.record.uses_substitution, did_change_custom_properties);
+    auto container_effects = StyleEngineFFI::style_engine_take_container_effects(engine.rust_handle(), element.style_node_id().value());
+    ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
+    record_container_query_effects(DOM::AbstractElement { element }, container_effects);
+    engine.acknowledge_engine_computed_record(element.style_node_id());
+    return invalidation;
+}
+
 NonnullRefPtr<ComputedValues const> StyleComputer::materialize_style_record(DOM::AbstractElement abstract_element, Optional<bool&> did_change_custom_properties, StyleEngineMatchResult* reusable_matches, Optional<StyleEngine::StyleRecordDelta&> style_record_delta, StyleSharingMode style_sharing_mode) const
 {
     m_last_materialization_kept_pseudo_element_styles = false;

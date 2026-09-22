@@ -606,6 +606,13 @@ impl NormalizationJournal {
         self.entries.get(&key).map(|entry| entry.0)
     }
 
+    /// A one-node style observation has answered only this node's inputs. Keep every other
+    /// journal entry for the next batch, including entries with the same input kind.
+    pub(super) fn acknowledge_node(&mut self, node: StyleNodeID, memory: &mut MemoryController) {
+        self.entries.retain(|key, _| key.style_node() != Some(node));
+        self.settle(memory);
+    }
+
     /// Discard a transaction whose invalidation result is already known to cover its complete scope.
     pub fn discard(&mut self, memory: &mut MemoryController) {
         self.entries.clear();

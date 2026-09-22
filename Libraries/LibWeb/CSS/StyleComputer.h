@@ -11,6 +11,7 @@
 #include <AK/JsonArray.h>
 #include <AK/Optional.h>
 #include <AK/OwnPtr.h>
+#include <AK/StringView.h>
 #include <AK/Utf16String.h>
 #include <AK/Utf16View.h>
 #include <AK/WeakPtr.h>
@@ -96,6 +97,7 @@ public:
     // The document element's style installed: the metrics `rem` resolves against are its font's.
     void update_root_element_font_metrics(ComputedValues const&);
     [[nodiscard]] NonnullRefPtr<ComputedValues const> materialize_style_record(DOM::AbstractElement, Optional<bool&> did_change_custom_properties = {}, StyleEngineMatchResult* = nullptr, Optional<StyleEngine::StyleRecordDelta&> = {}, StyleSharingMode = StyleSharingMode::Enabled) const;
+    [[nodiscard]] Optional<RequiredInvalidationAfterStyleChange> answer_record_demand(DOM::Element&, bool& did_change_custom_properties, StringView& decline_cause, Optional<PseudoElement> pseudo = {}, bool exclude_inline_style = false, bool targeted = false) const;
     [[nodiscard]] StyleRecordID try_share_computed_style_record(DOM::Element&) const;
     void remember_shared_computed_style_record(DOM::Element&, StyleRecordID) const;
     // Compute the cascade supplied by rules, presentational hints, and inheritance while excluding the element's

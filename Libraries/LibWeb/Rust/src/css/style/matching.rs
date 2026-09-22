@@ -628,6 +628,22 @@ impl RetainedState {
         published.release();
     }
 
+    /// A demand rematches this node from current facts. Its previous batch answer must not be
+    /// consumed, while answers for other nodes remain available to their batch consumers.
+    pub(super) fn forget_node_match_answer_for_demand(&mut self, node: StyleNodeID) {
+        self.install_pending_matching_context();
+        let effects = std::mem::take(&mut self.published_match_answers.answer_effects);
+        self.install_answer_effects(effects);
+        self.published_match_answers
+            .entries
+            .retain(|answer| answer.node != node);
+        self.published_match_answers.memory.resize_required_to(
+            &mut self.memory,
+            self.published_match_answers.recompute_capacity_bytes(),
+        );
+        self.retained_match_answers.forget(&mut self.match_answers, node);
+    }
+
     pub(super) fn discard_retained_prefix_caches(&mut self) {
         let mut caches = self.prefix_caches.borrow_mut();
         caches.states.release();
@@ -3859,7 +3875,6 @@ impl RetainedState {
         )
     }
 
-    #[cfg(test)]
     pub(super) fn complete_published_match_answer(
         &mut self,
         node: StyleNodeID,

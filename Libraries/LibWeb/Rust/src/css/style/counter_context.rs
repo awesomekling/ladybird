@@ -1092,6 +1092,17 @@ impl StyleEngine {
         self.state.retry_engine_records_after_ancestor(node, &mut self.counters);
     }
 
+    pub(crate) fn answer_record_demand(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        exclude_inline_style: bool,
+        targeted: bool,
+    ) -> Result<publication::RetriedEngineRecord, &'static str> {
+        self.state
+            .answer_record_demand(node, pseudo, exclude_inline_style, targeted, &mut self.counters)
+    }
+
     /// Settle the pseudo-element records of an element whose record C++ just installed.
     #[inline]
     pub(crate) fn settle_pseudo_records_after_host_record(

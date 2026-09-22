@@ -152,6 +152,7 @@
     [153, "NoteHostEntry"],
     [154, "TakeExplicitInheritanceDebt"],
     [155, "SetCounterStyleEnvironmentIdentity"],
+    [156, "AnswerRecordDemand"],
     [160, "SetTextData"],
     [161, "SetTextIsPasswordInput"],
     [162, "SetNodeDomPaintFacts"],
@@ -288,6 +289,7 @@
     { "event": "SetSheetConditionsHold", "ffi": "style_engine_set_sheet_conditions_hold", "cpp": "set_sheet_conditions_hold", "return": "void", "args": [["sheet", "sheet_id"], ["conditions_hold", "bool"]], "body": "if sheet != 0 { engine.set_sheet_conditions_hold(SheetID(sheet - 1), conditions_hold); }" }
   ],
   "bespoke_events": [
+    "AnswerRecordDemand",
     "RetryEngineRecordAfterAncestor",
     "SettlePseudoRecordsAfterHostRecord",
     "CreateGraph",

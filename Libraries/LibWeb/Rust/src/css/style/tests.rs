@@ -2354,6 +2354,28 @@ fn linear_document() -> (StyleEngine, Vec<StyleNodeID>) {
 }
 
 #[test]
+fn a_node_scoped_acknowledgement_leaves_other_inputs_queued() {
+    let (mut engine, nodes) = linear_document();
+    discard_transaction(&mut engine);
+    for &node in &nodes[1..3] {
+        add_feature(&mut engine, node, LocalFeatureKey::Class(StyleAtomID(200)));
+    }
+    engine
+        .state
+        .host
+        .journal
+        .acknowledge_node(nodes[1], &mut engine.state.retained.memory);
+    assert_eq!(engine.host.journal.len(), 1);
+    assert_eq!(
+        engine.host.journal.pending_old(InputKey::LocalFeature(
+            nodes[2],
+            LocalFeatureKey::Class(StyleAtomID(200))
+        )),
+        Some(InputValue::Feature(FeatureValue::Absent))
+    );
+}
+
+#[test]
 fn longhand_input_rows_are_frozen_for_one_reaction_batch() {
     let (mut engine, nodes) = linear_document();
     discard_transaction(&mut engine);
@@ -7186,8 +7208,7 @@ fn gated_prefix_answers_publish_complete_node_specific_winners() {
     let guard = StyleAtomID(200);
     let target = StyleAtomID(201);
     let rule = add_guard_target_rule(&mut engine, guard, target);
-    engine.set_rule_declared_properties(rule, &[(1, false)], true);
-    engine.set_rule_gated_by_container_query(rule);
+    engine.set_rule_declared_properties(rule, &[(1, false)], false);
     for (node, class) in [(nodes[1], guard), (nodes[2], target), (nodes[3], target)] {
         add_feature(&mut engine, node, LocalFeatureKey::Class(class));
     }

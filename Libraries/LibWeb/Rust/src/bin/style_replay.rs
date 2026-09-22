@@ -785,6 +785,43 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .into());
                     }
                 }
+                EventKind::AnswerRecordDemand => {
+                    let engine = read_engine(&mut event.payload, &live_engines)?;
+                    let node = event.payload.read_u32()?;
+                    let pseudo_kind = event.payload.read_u8()?;
+                    let exclude_inline_style = event.payload.read_bool()?;
+                    let targeted = event.payload.read_bool()?;
+                    let expected_record = event.payload.read_u64()?;
+                    let expected_uses_substitution = event.payload.read_bool()?;
+                    let expected_pseudo_present = event.payload.read_u8()?;
+                    let mut expected_pseudo_records = [0_u64; bridge::RETRY_PSEUDO_RECORD_SLOTS];
+                    for record in &mut expected_pseudo_records {
+                        *record = event.payload.read_u64()?;
+                    }
+                    let expected_cause = event.payload.read_bytes()?;
+                    let actual = unsafe {
+                        bridge::style_engine_answer_record_demand(
+                            engine,
+                            node,
+                            pseudo_kind,
+                            exclude_inline_style,
+                            targeted,
+                        )
+                    };
+                    let actual_cause = if actual.decline_cause_length == 0 {
+                        &[][..]
+                    } else {
+                        unsafe { std::slice::from_raw_parts(actual.decline_cause, actual.decline_cause_length) }
+                    };
+                    if actual.record.style_record != expected_record
+                        || actual.record.uses_substitution != expected_uses_substitution
+                        || actual.record.pseudo_records_present != expected_pseudo_present
+                        || actual.record.pseudo_records != expected_pseudo_records
+                        || actual_cause != expected_cause
+                    {
+                        return Err(format!("record demand diverged for node {node}: {:?}", actual.record).into());
+                    }
+                }
                 EventKind::RetryEngineRecordAfterAncestor => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
                     let node = event.payload.read_u32()?;
