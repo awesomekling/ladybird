@@ -16,21 +16,6 @@ impl RetainedState {
         record: Option<computed::FinalStyleRecordID>,
         counters: &mut Counters,
     ) -> bool {
-        // A shadow tree's pseudo rows are all stale, their rules deciding from its scope; there the
-        // stale marker row is kept as the reason to leave the element's own record to C++.
-        let tolerates_unused_marker_row = self.tree.tree_scope(node) == TreeScopeID::DOCUMENT;
-        self.pseudo_inputs_available(node, record, tolerates_unused_marker_row, counters)
-    }
-
-    /// `tolerates_unused_marker_row` lets the stale marker row of an element that is no list item
-    /// pass; settling the records decides it against the element's new record.
-    fn pseudo_inputs_available(
-        &mut self,
-        node: StyleNodeID,
-        record: Option<computed::FinalStyleRecordID>,
-        tolerates_unused_marker_row: bool,
-        counters: &mut Counters,
-    ) -> bool {
         use pseudo_kind::{AFTER, BACKDROP, BEFORE, FIRST_LETTER, MARKER, SELECTION};
 
         // A marker is generated for a list item only: the stale marker row of an element that is
@@ -72,7 +57,7 @@ impl RetainedState {
                 continue;
             }
             if version != self.program.version() || !priority_current {
-                if tolerates_unused_marker_row && kind == usize::from(MARKER) && !marker_may_generate {
+                if kind == usize::from(MARKER) && !marker_may_generate {
                     continue;
                 }
                 counters.bump(Counter::EngineComputedRecordBailPseudoStale);
@@ -681,7 +666,7 @@ impl RetainedState {
                 counters.bump(Counter::EngineComputedRecordBailIncompleteWinners);
                 return None;
             }
-            if !self.pseudo_inputs_available(node, Some(record), true, counters) {
+            if !self.engine_pseudo_inputs_available(node, Some(record), counters) {
                 return None;
             }
             // The default marker's tabular numerals are not a font the engine resolves yet: a
