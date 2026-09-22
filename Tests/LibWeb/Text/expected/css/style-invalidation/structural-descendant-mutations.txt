@@ -353,9 +353,9 @@ PASS: descendant language mutation: document: :not(:has(:lang(he))) becomes fals
 PASS: inherited language mutation: document: :has(:lang(he)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language pseudo-element mutation: document: :has(:lang(he)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language mutation: document: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: inherited language pseudo-element mutation: document: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: inherited language pseudo-element mutation: document: :has(:lang(en)) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language mutation: document: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: inherited language pseudo-element mutation: document: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: inherited language pseudo-element mutation: document: :not(:has(:lang(he))) becomes false after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language mutation: document: :has(:lang(he):first-child) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language pseudo-element mutation: document: :has(:lang(he):first-child) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: inherited language mutation: document: :has(:is(:lang(he), .fallback)) after ancestor lang change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -461,15 +461,15 @@ PASS: inherited language mutation: slotted-shadow-host-named: :has(:where(:lang(
 PASS: descendant state mutation: document: :has(:checked) after checkbox checked | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state pseudo-element mutation: document: :has(:checked) after checkbox checked | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state mutation: document: :has(:checked) becomes false after checkbox unchecked | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant state pseudo-element mutation: document: :has(:checked) becomes false after checkbox unchecked | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: descendant state pseudo-element mutation: document: :has(:checked) becomes false after checkbox unchecked | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state mutation: document: :has(:required) after input required | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state pseudo-element mutation: document: :has(:required) after input required | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state mutation: document: :has(:optional) becomes false after input required | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant state pseudo-element mutation: document: :has(:optional) becomes false after input required | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: descendant state pseudo-element mutation: document: :has(:optional) becomes false after input required | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state mutation: document: :has(:disabled) after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state pseudo-element mutation: document: :has(:disabled) after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state mutation: document: :has(:enabled) becomes false after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant state pseudo-element mutation: document: :has(:enabled) becomes false after input disabled | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: descendant state pseudo-element mutation: document: :has(:enabled) becomes false after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state mutation: document: :has(:placeholder-shown) after textarea placeholder added | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant state pseudo-element mutation: document: :has(:placeholder-shown) after textarea placeholder added | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant state mutation: document: :has(:placeholder-shown) becomes false after textarea value append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
@@ -483,7 +483,7 @@ PASS: descendant state pseudo-element mutation: document: :has(:checked + .after
 PASS: descendant state mutation: document: :has(:checked ~ .after) after checkbox checked | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state pseudo-element mutation: document: :has(:checked ~ .after) after checkbox checked | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state mutation: document: :not(:has(:checked)) becomes false after checkbox checked | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant state pseudo-element mutation: document: :not(:has(:checked)) becomes false after checkbox checked | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: descendant state pseudo-element mutation: document: :not(:has(:checked)) becomes false after checkbox checked | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state mutation: document: :has(:is(:checked, .fallback)) after checkbox checked | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state pseudo-element mutation: document: :has(:is(:checked, .fallback)) after checkbox checked | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state mutation: document: :has(:checked):has(:disabled) after independent state changes | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
