@@ -19,37 +19,37 @@ PASS: part child mutation: part-document: ::part():dir(rtl) after dir=auto text 
 PASS: part pseudo-element child mutation: part-document: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-document: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-document: ::part():has(.hit) after direct child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-document: ::part():has(.hit) after direct child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-document: ::part():has(.hit) after direct child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-document: ::part():has(.hit) after direct child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-document: ::part():has(> .hit) after direct child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-document: ::part():has(> .hit) after direct child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-document: ::part():has(> .hit) after direct child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-document: ::part():has(> .hit) after direct child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-document: ::part():has(.outer .middle .hit) after deep child append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-document: ::part():has(.outer .middle .hit) after deep child append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-document: ::part():has(.outer .middle .hit) after deep child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-document: ::part():has(.outer .middle .hit) after deep child append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-document: ::part():has(.hit + .after) after adjacent sibling append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-document: ::part():has(.hit + .after) after adjacent sibling append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-document: ::part():has(.hit + .after) after adjacent sibling append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-document: ::part():has(.hit + .after) after adjacent sibling append | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-document: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-document: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-document: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-document: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-document: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=5, elementStyleNoopRecomputations=3
-PASS: part pseudo-element child mutation: part-document: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-document: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-document: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-document: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-document: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-document: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-document: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-document: ::part():has(.hit:last-child) becomes false after trailing sibling append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation: part-document: ::part():has(.hit:last-child) becomes false after trailing sibling append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
 PASS: part child mutation: part-document: ::part():not(:has(.hit)) becomes false after child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation: part-document: ::part():not(:has(.hit)) becomes false after child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-document: ::part():has(:is(.hit, [data-hit])) after child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-document: ::part():has(:is(.hit, [data-hit])) after child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-document: ::part():has(:is(.hit, [data-hit])) after child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-document: ::part():has(:is(.hit, [data-hit])) after child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-document: ::part():has(.hit) becomes false after child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation: part-document: ::part():has(.hit) becomes false after child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-document: ::part():has(.hit) after replaceChildren | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-document: ::part():has(.hit) after replaceChildren | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-document: ::part():has(.hit) after replaceChildren | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-document: ::part():has(.hit) after replaceChildren | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-document: ::part():empty becomes false after element append
 PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():empty becomes false after element append
@@ -69,40 +69,40 @@ PASS: part child mutation: part-shadow-host-document: ::part():empty becomes tru
 PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():empty becomes true after replaceChildren | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-document: ::part():empty becomes true after replaceChildren | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-document: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-document: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-document: ::part():has(.hit) after direct child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
-PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(.hit) after direct child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
+PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(.hit) after direct child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-document: ::part():has(.hit) after direct child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-document: ::part():has(> .hit) after direct child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
-PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(> .hit) after direct child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
+PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(> .hit) after direct child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-document: ::part():has(> .hit) after direct child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-document: ::part():has(.outer .middle .hit) after deep child append | elementStyleRecomputations=5, elementStyleNoopRecomputations=1
-PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(.outer .middle .hit) after deep child append | elementStyleRecomputations=5, elementStyleNoopRecomputations=1
+PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(.outer .middle .hit) after deep child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-document: ::part():has(.outer .middle .hit) after deep child append | elementStyleRecomputations=5, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-document: ::part():has(.hit + .after) after adjacent sibling append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
-PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(.hit + .after) after adjacent sibling append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
+PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(.hit + .after) after adjacent sibling append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-document: ::part():has(.hit + .after) after adjacent sibling append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-document: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=4, elementStyleNoopRecomputations=1
-PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=4, elementStyleNoopRecomputations=1
+PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-document: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=5, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-document: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-document: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-document: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
-PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
+PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-document: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-document: ::part():has(.hit:last-child) becomes false after trailing sibling append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(.hit:last-child) becomes false after trailing sibling append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
 PASS: part child mutation: part-shadow-host-document: ::part():not(:has(.hit)) becomes false after child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():not(:has(.hit)) becomes false after child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
 PASS: part child mutation: part-shadow-host-document: ::part():has(:is(.hit, [data-hit])) after child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
-PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(:is(.hit, [data-hit])) after child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
+PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(:is(.hit, [data-hit])) after child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-document: ::part():has(:is(.hit, [data-hit])) after child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-document: ::part():has(.hit) becomes false after child removal | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(.hit) becomes false after child removal | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part child mutation: part-shadow-host-document: ::part():has(.hit) after replaceChildren | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
-PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(.hit) after replaceChildren | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
+PASS: part pseudo-element child mutation: part-shadow-host-document: ::part():has(.hit) after replaceChildren | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-document: ::part():has(.hit) after replaceChildren | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():empty becomes false after element append
 PASS: part pseudo-element child mutation: part-shadow-internal: ::part():empty becomes false after element append
@@ -113,49 +113,49 @@ PASS: part pseudo-element child mutation: part-shadow-internal: ::part():is(:emp
 PASS: part child mutation: part-shadow-internal: ::part():where(:empty) becomes false after element append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation: part-shadow-internal: ::part():where(:empty) becomes false after element append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():not(:empty) becomes true after textContent | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-shadow-internal: ::part():not(:empty) becomes true after textContent | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-shadow-internal: ::part():not(:empty) becomes true after textContent | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-internal: ::part():not(:empty) becomes true after textContent | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():empty becomes true after child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-shadow-internal: ::part():empty becomes true after child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-shadow-internal: ::part():empty becomes true after child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-internal: ::part():empty becomes true after child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():empty becomes true after replaceChildren | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-shadow-internal: ::part():empty becomes true after replaceChildren | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-shadow-internal: ::part():empty becomes true after replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-internal: ::part():empty becomes true after replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-shadow-internal: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-shadow-internal: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-internal: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():has(.hit) after direct child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(.hit) after direct child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(.hit) after direct child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-internal: ::part():has(.hit) after direct child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():has(> .hit) after direct child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(> .hit) after direct child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(> .hit) after direct child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-internal: ::part():has(> .hit) after direct child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():has(.outer .middle .hit) after deep child append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(.outer .middle .hit) after deep child append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(.outer .middle .hit) after deep child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-internal: ::part():has(.outer .middle .hit) after deep child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():has(.hit + .after) after adjacent sibling append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(.hit + .after) after adjacent sibling append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(.hit + .after) after adjacent sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-internal: ::part():has(.hit + .after) after adjacent sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-internal: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-internal: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-internal: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():has(.hit:last-child) becomes false after trailing sibling append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(.hit:last-child) becomes false after trailing sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():not(:has(.hit)) becomes false after child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation: part-shadow-internal: ::part():not(:has(.hit)) becomes false after child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():has(:is(.hit, [data-hit])) after child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(:is(.hit, [data-hit])) after child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(:is(.hit, [data-hit])) after child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-internal: ::part():has(:is(.hit, [data-hit])) after child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():has(.hit) becomes false after child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(.hit) becomes false after child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-internal: ::part():has(.hit) after replaceChildren | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(.hit) after replaceChildren | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-shadow-internal: ::part():has(.hit) after replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-internal: ::part():has(.hit) after replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-internal: ::part():empty becomes false after element append
 PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():empty becomes false after element append
@@ -174,41 +174,41 @@ PASS: part pseudo-element child mutation without warmup: part-shadow-host-intern
 PASS: part child mutation: part-shadow-host-internal: ::part():empty becomes true after replaceChildren | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():empty becomes true after replaceChildren | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-internal: ::part():empty becomes true after replaceChildren | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part child mutation: part-shadow-host-internal: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part child mutation: part-shadow-host-internal: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-internal: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-internal: ::part():has(.hit) after direct child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
-PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(.hit) after direct child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
+PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(.hit) after direct child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-internal: ::part():has(.hit) after direct child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-internal: ::part():has(> .hit) after direct child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
-PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(> .hit) after direct child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
+PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(> .hit) after direct child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-internal: ::part():has(> .hit) after direct child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-internal: ::part():has(.outer .middle .hit) after deep child append | elementStyleRecomputations=5, elementStyleNoopRecomputations=1
-PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(.outer .middle .hit) after deep child append | elementStyleRecomputations=5, elementStyleNoopRecomputations=1
+PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(.outer .middle .hit) after deep child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-internal: ::part():has(.outer .middle .hit) after deep child append | elementStyleRecomputations=5, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-internal: ::part():has(.hit + .after) after adjacent sibling append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
-PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(.hit + .after) after adjacent sibling append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
+PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(.hit + .after) after adjacent sibling append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-internal: ::part():has(.hit + .after) after adjacent sibling append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-internal: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=4, elementStyleNoopRecomputations=1
-PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=4, elementStyleNoopRecomputations=1
+PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-internal: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=5, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-internal: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-internal: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-internal: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
-PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
+PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-internal: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-internal: ::part():has(.hit:last-child) becomes false after trailing sibling append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(.hit:last-child) becomes false after trailing sibling append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
 PASS: part child mutation: part-shadow-host-internal: ::part():not(:has(.hit)) becomes false after child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():not(:has(.hit)) becomes false after child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
 PASS: part child mutation: part-shadow-host-internal: ::part():has(:is(.hit, [data-hit])) after child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
-PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(:is(.hit, [data-hit])) after child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
+PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(:is(.hit, [data-hit])) after child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-internal: ::part():has(:is(.hit, [data-hit])) after child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-internal: ::part():has(.hit) becomes false after child removal | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(.hit) becomes false after child removal | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part child mutation: part-shadow-host-internal: ::part():has(.hit) after replaceChildren | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
-PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(.hit) after replaceChildren | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
+PASS: part pseudo-element child mutation: part-shadow-host-internal: ::part():has(.hit) after replaceChildren | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-internal: ::part():has(.hit) after replaceChildren | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-ancestor: ::part():empty becomes false after element append
 PASS: part pseudo-element child mutation: part-shadow-ancestor: ::part():empty becomes false after element append
@@ -280,8 +280,8 @@ PASS: part pseudo-element child mutation without warmup: part-shadow-host-ancest
 PASS: part child mutation: part-shadow-host-ancestor: ::part():empty becomes true after replaceChildren | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation: part-shadow-host-ancestor: ::part():empty becomes true after replaceChildren | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-ancestor: ::part():empty becomes true after replaceChildren | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part child mutation: part-shadow-host-ancestor: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: part pseudo-element child mutation: part-shadow-host-ancestor: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: part child mutation: part-shadow-host-ancestor: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: part pseudo-element child mutation: part-shadow-host-ancestor: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-shadow-host-ancestor: ::part():dir(rtl) after dir=auto text mutation | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-shadow-host-ancestor: ::part():has(.hit) after direct child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation: part-shadow-host-ancestor: ::part():has(.hit) after direct child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
