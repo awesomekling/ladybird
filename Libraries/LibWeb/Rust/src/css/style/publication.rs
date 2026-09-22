@@ -895,24 +895,20 @@ impl RetainedState {
                 parent_inputs_moved.inherited_style = true;
             }
         }
-        // Past the record that stands, every route derives another one from the record the element
-        // holds. The values its animations composed are in that record, so deriving one is only
-        // honest where the delta moves nothing those animations write: the base beneath them moves,
-        // the composition over it does not, and the host samples it again over the new base once
-        // the batch is applied.
-        let overlay_animates_a_moved_property = self
-            .computed_group_sets
-            .style_record_view(old_style_record.raw())
-            .and_then(|view| unsafe { view.animated_overlay.as_ref() })
-            .is_some_and(|overlay| {
-                overlay
-                    .entries()
-                    .iter()
-                    .any(|entry| delta.properties().contains(&entry.property))
+        let requires_full_drive = parent_inputs_moved.any()
+            || font_inputs_moved
+            || environment_moved_under_substitutions
+            || scratch.document_environment_moved
+            || scratch.recompute_in_full
+            || delta.properties().iter().any(|&property| {
+                !property_computes_in_remaining_phase(property) || property_feeds_box_type_transformation(property)
             });
+        // A remaining-phase delta can derive the new base beneath an existing WAAPI
+        // composition. The host samples the effect again after installing this base, including
+        // when the moved property is animated. A full drive still needs dependent-value closure.
         let derived_beneath_a_composition = animations_bind_the_record
+            && !requires_full_drive
             && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
-            && !overlay_animates_a_moved_property
             && self.animation_base_inherits_from_current_parent(node, state, old_style_record)
             && self.computed_group_sets.node_has_animation_overlay(node)
             && !self.css_defined_animations.node_runs_a_css_animation(node);
@@ -926,17 +922,10 @@ impl RetainedState {
         // takes the same route, as does a record whose parent inputs moved or a record that read
         // the viewport under a viewport move: the transformation and the inheritance are part of
         // the full drive.
-        let full_drive = derived_beneath_a_composition
-            || parent_inputs_moved.any()
-            || font_inputs_moved
+        let full_drive = requires_full_drive
+            || derived_beneath_a_composition
             || (scratch.viewport_moved && self.record_reads_the_viewport(old_style_record))
-            || environment_moved_under_substitutions
-            || scratch.document_environment_moved
-            || scratch.recompute_in_full
-            || (has_registered_declarations && environment.is_some())
-            || delta.properties().iter().any(|&property| {
-                !property_computes_in_remaining_phase(property) || property_feeds_box_type_transformation(property)
-            });
+            || (has_registered_declarations && environment.is_some());
         let delta_property_count = delta.properties().len() as u64;
         // A delta that moves a longhand declaring the element's CSS transitions is a row whose only
         // remaining obligation is the transition step, and the host can run that step after the
@@ -1033,6 +1022,7 @@ impl RetainedState {
             self.substitution_attributes_key(node, None, state),
         );
         if let Some(&(new_style_record, cohort_explicitly_inherited_groups)) = (container_unit_mask == 0
+            && !self.computed_group_sets.node_has_animation_overlay(node)
             && (!has_registered_declarations || !full_drive))
             .then(|| scratch.cohorts.get(&cohort))
             .flatten()
