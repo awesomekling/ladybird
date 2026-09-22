@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    .moved { color: rgb(0, 128, 0); }
+    #bordered.colored { border-color: rgb(0, 0, 255); }
+</style>
+<table id="padded" cellpadding="7"><tr><td id="padded-cell">cell</td></tr></table>
+<table id="bordered" border="1"><tr><td id="bordered-cell">cell</td></tr></table>
+<script>
+    // A cell's cellpadding hints come from its table, but a cellpadding change records the cells, so
+    // the engine computes a cell's record like any other. Its border hints read the table's computed
+    // border colors, which move without anything recorded on the cell.
+    test(() => {
+        const paddedCell = document.getElementById("padded-cell");
+        const borderedCell = document.getElementById("bordered-cell");
+        internals.updateStyle();
+        const before = internals.getStyleInvalidationCounters().engineComputedStyleRecords;
+        paddedCell.classList.add("moved");
+        internals.updateStyle();
+        const computed = internals.getStyleInvalidationCounters().engineComputedStyleRecords - before;
+        println(`engine computed the padded cell: ${computed >= 1}`);
+        println(`padded cell: color ${getComputedStyle(paddedCell).color}, padding ${getComputedStyle(paddedCell).paddingTop}`);
+
+        document.getElementById("padded").setAttribute("cellpadding", "3");
+        paddedCell.classList.remove("moved");
+        internals.updateStyle();
+        println(`after cellpadding change: padding ${getComputedStyle(paddedCell).paddingTop}`);
+
+        document.getElementById("bordered").classList.add("colored");
+        borderedCell.classList.add("moved");
+        internals.updateStyle();
+        println(`bordered cell: color ${getComputedStyle(borderedCell).color}, border ${getComputedStyle(borderedCell).borderTopColor}`);
+    });
+</script>
