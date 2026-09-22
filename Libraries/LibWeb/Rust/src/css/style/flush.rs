@@ -2180,9 +2180,8 @@ impl StyleEngineState {
                                 display: parent_inputs_moved_nodes.contains(&node)
                                     || self.retained.tree.assigned_slot_of(node).is_some(),
                             });
-                    let mut retry_after_ancestor = self.retained.tree.tree_scope(node) == TreeScopeID::DOCUMENT
-                        && (self.retained.published_container_verdicts.contains_key(&node)
-                            || self.retained.container_gates_unheld.contains(&node))
+                    let mut retry_after_ancestor = (self.retained.published_container_verdicts.contains_key(&node)
+                        || self.retained.container_gates_unheld.contains(&node))
                         && self
                             .retained
                             .container_ancestor_is_unsettled(node, &engine_computed_record_scratch);
