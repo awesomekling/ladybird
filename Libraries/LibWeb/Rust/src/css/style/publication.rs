@@ -1991,8 +1991,17 @@ impl RetainedState {
     /// What a record this node publishes must name, when what it computed reads the registry.
     /// Zero when it reads none, which is what the record carries for every other element.
     fn counter_style_environment_identity_for(&self, node: StyleNodeID) -> u64 {
+        // A counter style name is looked for in the element's own tree scope and then in the
+        // scope that one hangs off, which is where a shadow tree taking the document's style
+        // sheets finds it. C++ stamps the record with the identity of the scope that answered,
+        // so a lookup that stopped at the element's own tree scope named a different registry
+        // from the one the record was computed against, and no record ever matched.
         self.counter_style_environment_identities
             .get(&self.tree.tree_scope(node))
+            .or_else(|| {
+                self.counter_style_environment_identities
+                    .get(&crate::css::style::tree::TreeScopeID::DOCUMENT)
+            })
             .copied()
             .unwrap_or(0)
     }
@@ -2527,6 +2536,14 @@ impl RetainedState {
         // the one it read, so it carries the identity the host published for the scope.
         let counter_style_environment_identity = if counter_style_environment_identity != 0 {
             counter_style_environment_identity
+        } else if self
+            .counter_style_environment_identities
+            .values()
+            .all(|identity| *identity == 0)
+        {
+            // No scope in this document has registered a counter style, so no record can name
+            // one and nothing here needs to read the table to find out.
+            0
         } else {
             let names_one = {
                 use crate::css::property_metadata::property_id as prop;
