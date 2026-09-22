@@ -9,7 +9,9 @@
 #include <LibWeb/CSS/CustomPropertyRegistration.h>
 #include <LibWeb/CSS/StyleValues/StyleValue.h>
 #include <LibWeb/ComputedValuesRustFFI.h>
+#include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Element.h>
 
 namespace Web::CSS {
 
@@ -91,7 +93,7 @@ NonnullRefPtr<CustomPropertyData> CustomPropertyData::create(
 
 NonnullRefPtr<CustomPropertyData> CustomPropertyData::create_animation_overlay(
     OrderedHashMap<Utf16FlyString, StyleProperty> animated_values,
-    RefPtr<CustomPropertyData const> base)
+    RefPtr<CustomPropertyData const> base, DOM::AbstractElement const& owner)
 {
     Vector<ComputedValuesFFI::FfiCustomPropertyStoreEntry> entries;
     entries.ensure_capacity(animated_values.size());
@@ -109,8 +111,15 @@ NonnullRefPtr<CustomPropertyData> CustomPropertyData::create_animation_overlay(
     u8 ancestor_count = base ? base->m_ancestor_count + 1 : 0;
     auto inheritance_parent = base;
     auto data = adopt_ref(*new CustomPropertyData(move(animated_values), move(base), move(inheritance_parent), ancestor_count, declared_count, rust_store));
-    data->m_is_animation_overlay = true;
+    data->m_animation_owner = owner.element().unique_id();
+    data->m_animation_pseudo_element = owner.pseudo_element();
     return data;
+}
+
+bool CustomPropertyData::is_animation_overlay_for(DOM::AbstractElement const& element) const
+{
+    return m_animation_owner.has_value() && *m_animation_owner == element.element().unique_id()
+        && m_animation_pseudo_element == element.pseudo_element();
 }
 
 StyleProperty const* CustomPropertyData::get(Utf16FlyString const& name) const

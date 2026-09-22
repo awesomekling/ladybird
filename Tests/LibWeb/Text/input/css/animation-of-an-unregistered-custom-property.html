@@ -69,11 +69,6 @@
         check("own after the flip", own, ["--c", "width"]);
 
         // A descendant inherits it, because an unregistered custom property always inherits.
-        // NB: `child after the flip` reads the new value for `--c` and the old one for the `width`
-        //     that resolves against it. The environment the parent's animation installs marks its
-        //     descendants for recomputation, and that mark is only acted on by the *next* style
-        //     update - the child was not dirty when this one began. The line moves on the
-        //     recompute below, and both paths through the sampling behave alike.
         const parent = document.getElementById("parent");
         const child = document.getElementById("child");
         animate("parent", "moves");

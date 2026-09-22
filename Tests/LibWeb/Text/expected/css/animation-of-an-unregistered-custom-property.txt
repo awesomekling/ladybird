@@ -4,7 +4,7 @@ own after the flip: 40px 40px
 own after the flip after recompute: 40px 40px
 child before the flip: 10px 10px
 child before the flip after recompute: 10px 10px
-child after the flip: 40px 10px
+child after the flip: 40px 40px
 child after the flip after recompute: 40px 40px
 over: 40px
 over after recompute: 40px

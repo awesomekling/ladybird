@@ -4363,7 +4363,7 @@ impl<'a> ParentSnapshot<'a> {
     ) -> Self {
         Self {
             table,
-            inherited_value_overlay: None,
+            inherited_value_overlay: stored_animated_overlay,
             stored_animated_overlay,
             font_metrics_depend_on_viewport_metrics,
             in_display_none_subtree,

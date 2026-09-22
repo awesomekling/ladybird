@@ -674,12 +674,6 @@ impl RetainedState {
             || self
                 .css_defined_animations
                 .node_is_planned_against(node, self.animation_keyframes.generation());
-        // A record derived from the old one inherits what the parent's animations sampled when the
-        // old one was computed.
-        if self.parent_composes_animations(node) {
-            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-            return None;
-        }
         // A record C++ computed holds no cascade state, so there is no earlier state to take a
         // delta from: the record is driven again in full from the node's winners, which binds
         // the state.
@@ -2802,26 +2796,11 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailRecordParent);
             return None;
         }
-        if self.parent_composes_animations(node) {
-            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-            return None;
-        }
         Some(DriveSubject {
             target: computed::ComputedStyleTarget::new(node, u8::MAX),
             recascade_node: Some(node),
             parent,
             facts,
-        })
-    }
-
-    /// Whether a node inherits values its parent's animations sample, which C++ composes over the
-    /// parent's record. An animation that settles a custom property installs an environment of its
-    /// own on the parent, and sampling moves it without a publication the engine sees.
-    fn parent_composes_animations(&self, node: StyleNodeID) -> bool {
-        self.tree.flat_tree_parent(node).is_some_and(|parent| {
-            self.computed_group_sets.node_has_animation_overlay(parent)
-                || self.computed_group_sets.adjustment_facts(parent) & bridge::element_adjustment_fact::HAS_ANIMATIONS
-                    != 0
         })
     }
 

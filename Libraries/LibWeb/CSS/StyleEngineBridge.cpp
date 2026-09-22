@@ -353,7 +353,7 @@ StyleEngineFFI::FfiFrozenLonghandInputRow StyleEngine::frozen_longhand_input(Sty
 void StyleEngine::set_element_custom_property_data(StyleNodeID node, CustomPropertyData const* data)
 {
     StyleEngineFFI::style_engine_set_element_custom_property_data(
-        m_impl, node.value(), data, data ? data->rust_store() : nullptr);
+        m_impl, node.value(), data, data ? data->rust_store() : nullptr, data ? data->identity() : 0);
 }
 
 StyleEngineFFI::FfiRetainedCustomPropertyData StyleEngine::retained_inheritance_custom_property_data(StyleNodeID node, u8 pseudo_kind) const

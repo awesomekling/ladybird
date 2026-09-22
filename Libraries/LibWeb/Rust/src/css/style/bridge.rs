@@ -4472,12 +4472,13 @@ pub unsafe extern "C" fn style_engine_set_element_custom_property_data(
     node: u32,
     data: *const c_void,
     store: *const c_void,
+    environment: u64,
 ) {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return;
     };
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    unsafe { engine.set_element_custom_property_data(node, data, store) };
+    unsafe { engine.set_element_custom_property_data(node, data, store, environment) };
 }
 
 /// What a row inherits custom properties from, taken from the engine's retained environments
