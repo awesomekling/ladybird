@@ -1097,8 +1097,8 @@ impl StyleEngine {
     /// rejected while the batch was planned may become computable once its inheritance parent is
     /// authoritative.
     #[inline]
-    pub(crate) fn retry_engine_record_after_ancestor(&mut self, node: StyleNodeID) -> publication::RetriedEngineRecord {
-        self.state.retry_engine_record_after_ancestor(node, &mut self.counters)
+    pub(crate) fn retry_engine_records_after_ancestor(&mut self, node: StyleNodeID) {
+        self.state.retry_engine_records_after_ancestor(node, &mut self.counters);
     }
 
     /// Settle the pseudo-element records of an element whose record C++ just installed.

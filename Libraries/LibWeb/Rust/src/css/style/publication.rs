@@ -5865,12 +5865,58 @@ impl StyleEngineState {
         seal::note_host_entry(cause, kind, cold);
     }
 
+    /// Settle every armed row the ancestor the host has just applied unblocks, in flat-tree
+    /// order, as one crossing. The host asks about one node; the rows beside and below it wait on
+    /// the same ancestor and would each have asked for themselves. A row is taken only when its
+    /// flat-tree parent is the ancestor this call is anchored to, or a row this same call already
+    /// settled, so nothing here reads a record the host has yet to install.
+    pub(crate) fn retry_engine_records_after_ancestor(&mut self, node: StyleNodeID, counters: &mut Counters) {
+        self.host.retried_record_rows.clear();
+        self.note_host_entry(node, 1, 0);
+        let anchor = self.tree.flat_tree_parent(node);
+        let armed = std::mem::take(&mut self.host.armed_retry_nodes);
+        let mut settled: HashSet<StyleNodeID> = HashSet::default();
+        let mut still_armed = Vec::with_capacity(armed.len());
+        let mut reached = false;
+        for candidate in armed {
+            let unblocked = if candidate == node {
+                reached = true;
+                true
+            } else if !reached {
+                false
+            } else {
+                self.tree
+                    .flat_tree_parent(candidate)
+                    .is_some_and(|parent| Some(parent) == anchor || settled.contains(&parent))
+            };
+            if !unblocked {
+                still_armed.push(candidate);
+                continue;
+            }
+            let retried = self.retry_engine_record_after_ancestor(candidate, counters);
+            if retried.style_record == 0 {
+                continue;
+            }
+            settled.insert(candidate);
+            let uses_substitution = self.nodes_with_substituted_records.contains(&candidate);
+            self.host.retried_record_rows.push(bridge::FfiRetriedRecordRow {
+                style_node: candidate.raw(),
+                record: bridge::FfiEngineComputedRecord {
+                    style_record: retried.style_record,
+                    uses_substitution,
+                    pseudo_records_present: retried.pseudo_records_present,
+                    pseudo_records: retried.pseudo_records,
+                },
+            });
+        }
+        self.host.armed_retry_nodes = still_armed;
+    }
+
     pub(crate) fn retry_engine_record_after_ancestor(
         &mut self,
         node: StyleNodeID,
         counters: &mut Counters,
     ) -> RetriedEngineRecord {
-        self.note_host_entry(node, 1, 0);
         if let Some(inputs) = self.retained.document_style_computation_inputs
             && let Some(resolver) = &mut self.retained.font_resolution
         {

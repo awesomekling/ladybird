@@ -158,6 +158,32 @@ pub struct FfiEngineComputedRecord {
     pub pseudo_records: [u64; RETRY_PSEUDO_RECORD_SLOTS],
 }
 
+/// One row of a retried batch: the node the engine settled, and what it settled for it.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct FfiRetriedRecordRow {
+    pub style_node: u32,
+    pub record: FfiEngineComputedRecord,
+}
+
+/// What one retry crossing settled, in flat-tree order. The host applies the rows in order and
+/// needs no further crossing for any node named here.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct FfiRetriedRecordBatch {
+    pub rows: *const FfiRetriedRecordRow,
+    pub count: usize,
+}
+
+impl Default for FfiRetriedRecordBatch {
+    fn default() -> Self {
+        Self {
+            rows: std::ptr::null(),
+            count: 0,
+        }
+    }
+}
+
 /// One record slot per synthetic pseudo-element kind in a retried record.
 pub const RETRY_PSEUDO_RECORD_SLOTS: usize = 8;
 
@@ -3742,23 +3768,25 @@ fn record_target_is_under_verification(engine: &StyleEngine, node: u32, pseudo_k
 pub unsafe extern "C" fn style_engine_retry_engine_record_after_ancestor(
     engine: *mut c_void,
     node: u32,
-) -> FfiEngineComputedRecord {
+) -> FfiRetriedRecordBatch {
     abort_on_panic(|| {
         let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
         let Some(style_node) = StyleNodeID::from_raw(node) else {
-            return FfiEngineComputedRecord::default();
+            return FfiRetriedRecordBatch::default();
         };
-        let retried = engine.retry_engine_record_after_ancestor(style_node);
-        let result = FfiEngineComputedRecord {
-            style_record: retried.style_record,
-            uses_substitution: retried.style_record != 0 && engine.nodes_with_substituted_records.contains(&style_node),
-            pseudo_records_present: retried.pseudo_records_present,
-            pseudo_records: retried.pseudo_records,
+        engine.retry_engine_records_after_ancestor(style_node);
+        let rows = &engine.host.retried_record_rows;
+        let result = FfiRetriedRecordBatch {
+            rows: rows.as_ptr(),
+            count: rows.len(),
         };
+        // The replay compares what the asked-for node settled, as it did when the crossing
+        // answered for that node alone; the rest of the table is this call's own business.
+        let asked = rows.iter().find(|row| row.style_node == node).map(|row| row.record);
         engine.record_boundary_call(EventKind::RetryEngineRecordAfterAncestor, |payload| {
             payload.write_u32(node);
-            payload.write_u64(result.style_record);
-            payload.write_bool(result.uses_substitution);
+            payload.write_u64(asked.map_or(0, |record| record.style_record));
+            payload.write_bool(asked.is_some_and(|record| record.uses_substitution));
         });
         result
     })

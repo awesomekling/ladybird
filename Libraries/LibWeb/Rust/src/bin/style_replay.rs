@@ -794,12 +794,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     } else {
                         None
                     };
-                    let actual = unsafe { bridge::style_engine_retry_engine_record_after_ancestor(engine, node) };
-                    if actual.style_record != expected
-                        || expected_uses_substitution.is_some_and(|expected| actual.uses_substitution != expected)
+                    let batch = unsafe { bridge::style_engine_retry_engine_record_after_ancestor(engine, node) };
+                    let rows = unsafe { std::slice::from_raw_parts(batch.rows, batch.count) };
+                    let actual = rows.iter().find(|row| row.style_node == node).map(|row| row.record);
+                    let actual_style_record = actual.map_or(0, |record| record.style_record);
+                    if actual_style_record != expected
+                        || expected_uses_substitution
+                            .is_some_and(|expected| actual.is_some_and(|record| record.uses_substitution) != expected)
                     {
                         return Err(format!(
-                            "retried cold style record diverged for node {node}: expected {expected} (substitution {expected_uses_substitution:?}), got {actual:?}"
+                            "retried cold style record diverged for node {node}: expected {expected} (substitution {expected_uses_substitution:?}), got {actual_style_record}"
                         )
                         .into());
                     }

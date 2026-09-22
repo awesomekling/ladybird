@@ -406,9 +406,10 @@ StyleRecordID StyleEngine::republish_record_environment(StyleNodeID node, u64 en
     return StyleRecordID { StyleEngineFFI::style_engine_republish_record_environment(m_impl, node.value(), environment, store) };
 }
 
-StyleEngineFFI::FfiEngineComputedRecord StyleEngine::retry_engine_record_after_ancestor(StyleNodeID node)
+ReadonlySpan<StyleEngineFFI::FfiRetriedRecordRow> StyleEngine::retry_engine_records_after_ancestor(StyleNodeID node)
 {
-    return StyleEngineFFI::style_engine_retry_engine_record_after_ancestor(m_impl, node.value());
+    auto batch = StyleEngineFFI::style_engine_retry_engine_record_after_ancestor(m_impl, node.value());
+    return { batch.rows, batch.count };
 }
 
 StyleEngineFFI::FfiEngineComputedRecord StyleEngine::settle_pseudo_records_after_host_record(StyleNodeID node, bool old_is_list_item)
