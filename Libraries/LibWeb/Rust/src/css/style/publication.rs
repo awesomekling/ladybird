@@ -893,6 +893,7 @@ impl RetainedState {
             cohort_parent,
             environment.unwrap_or(0),
             RootFontInputs::from_document(&inputs),
+            self.monospace_cohort_key(node, state),
         );
         if let Some(&(new_style_record, cohort_explicitly_inherited_groups)) = scratch.cohorts.get(&cohort) {
             // The row takes another node's record whole, so its plan is decided from that record's
@@ -1431,6 +1432,7 @@ impl RetainedState {
             .zip(parent_record)
             .and_then(|(parent, parent_record)| self.cold_record_parent(node, parent, parent_record, state))
             .map(|parent| ColdRecordKey {
+                monospace_recascaded_font_size: self.monospace_cohort_key(node, state),
                 parent,
                 previous_style_record: 0,
                 generation: cascade_state.0,
@@ -1506,6 +1508,7 @@ impl RetainedState {
             .zip(parent_record)
             .and_then(|(parent, parent_record)| self.cold_record_parent(node, parent, parent_record, state))
             .map(|parent| ColdRecordKey {
+                monospace_recascaded_font_size: self.monospace_cohort_key(node, state),
                 parent,
                 previous_style_record: 0,
                 generation: cascade_state.0,
@@ -1618,7 +1621,11 @@ impl RetainedState {
                 }
             }
         }
-        let subject = DriveSubject { parent, facts };
+        let subject = DriveSubject {
+            recascade_node: Some(node),
+            parent,
+            facts,
+        };
         let (table, length, longhand_evaluations, font) = self.engine_full_drive(
             subject,
             None,
@@ -1807,6 +1814,71 @@ impl RetainedState {
                 Lookup::Known(value) => content_value_is_engine_computable(value),
                 _ => false,
             })
+    }
+
+    /// Whether the cascade state's winning `font-family` is monospace, which is what makes C++
+    /// recascade the element's font-size against a 13px default instead of the 16px one. It is the
+    /// element's own declaration that decides this, as it is in `cascaded_properties`, not what it
+    /// inherits.
+    pub(super) fn font_family_winner_is_monospace(&self, state: CascadeStateID) -> bool {
+        self.winner_groups
+            .winner_in_state(state, crate::css::property_metadata::property_id::FONT_FAMILY)
+            .and_then(|winner| self.winner_groups.resolved_winner(winner))
+            .is_some_and(|winner| match self.specified_values.value(winner.key.value) {
+                Lookup::Known(data) => crate::css::style_compute::font_family_is_monospace(data),
+                _ => true,
+            })
+    }
+
+    /// The font size the monospace recascade gives a node, walking the cascaded font-size of every
+    /// ancestor from a 13px default the way `recascade_font_size_if_needed` does. `None` when the
+    /// walk needs a resolution context only C++ can supply, or when its answer would depend on the
+    /// viewport, which C++ records on the element beside the size.
+    pub(super) fn monospace_recascaded_font_size(&self, node: StyleNodeID) -> Option<i32> {
+        use crate::css::style_compute::{FontSizeRecascadeStatus, recascade_font_size_batch};
+
+        let inputs = self.document_style_computation_inputs?;
+        let default_size = crate::css::css_pixels::CssPixels::from_integer(13).raw_value();
+        let records =
+            self.retained_inheritance_ancestor_style_records(node, crate::css::cascaded_properties::NO_PSEUDO_ELEMENT);
+        let batch = recascade_font_size_batch(
+            records.len(),
+            |index| {
+                let record = records[index];
+                if record == 0 {
+                    return std::ptr::null();
+                }
+                self.style_record_view(record)
+                    .and_then(|view| unsafe { view.longhand_table.as_ref() })
+                    .map_or(std::ptr::null(), ComputedLonghandTable::raw_cascaded_font_size)
+            },
+            0,
+            default_size,
+            false,
+            default_size,
+            crate::css::style_compute::FontSizeRecascadeDocumentInputs {
+                root_font_size: inputs.root_font_size,
+                root_font_metrics_depend_on_viewport_metrics: inputs.root_font_metrics_depend_on_viewport_metrics,
+                viewport_width: inputs.viewport_width,
+                viewport_height: inputs.viewport_height,
+            },
+            std::ptr::null(),
+        );
+        (batch.status == FontSizeRecascadeStatus::Complete
+            && !batch.depends_on_viewport_metrics
+            && !batch.skipped_calculated_value)
+            .then_some(batch.current_size_raw)
+    }
+
+    /// What a record for this node under this cascade state owes the monospace recascade, as a
+    /// cohort key carries it. Two nodes whose parents hold equal records can still sit under
+    /// different cascaded font-size chains, and the recascade reads the chain rather than the
+    /// records, so a cohort that ignored this would hand one node the other's font size.
+    fn monospace_cohort_key(&self, node: StyleNodeID, state: CascadeStateID) -> i32 {
+        if !self.font_family_winner_is_monospace(state) {
+            return 0;
+        }
+        self.monospace_recascaded_font_size(node).unwrap_or(i32::MIN)
     }
 
     fn display_winner_is_list_item(&self, state: CascadeStateID) -> bool {
@@ -1999,6 +2071,7 @@ impl RetainedState {
             let cache_key = self
                 .cold_record_parent(node, parent, parent_record, cascade_state.1)
                 .map(|parent| ColdRecordKey {
+                    monospace_recascaded_font_size: self.monospace_cohort_key(node, cascade_state.1),
                     parent,
                     previous_style_record: old_style_record.raw(),
                     generation: cascade_state.0,
@@ -2350,7 +2423,11 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
             return None;
         }
-        Some(DriveSubject { parent, facts })
+        Some(DriveSubject {
+            recascade_node: Some(node),
+            parent,
+            facts,
+        })
     }
 
     /// Whether a node inherits values its parent's animations sample, which C++ composes over the
@@ -2651,6 +2728,7 @@ impl RetainedState {
         };
         let swap_eligible = self.computed_group_sets.node_inherited_group_swap_eligible(node);
         let key = ColdRecordKey {
+            monospace_recascaded_font_size: self.monospace_cohort_key(node, cascade_state.1),
             parent,
             previous_style_record: previous_style_record.map_or(0, computed::FinalStyleRecordID::raw),
             generation: cascade_state.0,
@@ -4333,6 +4411,10 @@ impl StyleEngineState {
 /// element has rules for, and the font environment.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct ColdRecordKey {
+    /// What the monospace font-size recascade gives this node, or zero when its winning
+    /// font-family is not monospace. The recascade reads the whole cascaded chain, which equal
+    /// parent records do not pin down.
+    monospace_recascaded_font_size: i32,
     parent: ColdRecordParent,
     previous_style_record: u64,
     generation: u64,
@@ -4362,7 +4444,7 @@ struct ColdRecordParent {
 
 /// What a warm record's cohort is keyed by, and what it answers with: the record, and the style
 /// groups it read straight from the parent through an explicit `inherit`.
-type RecordCohortKey = (u64, CascadeStateID, u32, RecordDeltaParent, u64, RootFontInputs);
+type RecordCohortKey = (u64, CascadeStateID, u32, RecordDeltaParent, u64, RootFontInputs, i32);
 type RecordCohortValue = (computed::FinalStyleRecordID, u32);
 
 /// A first record the engine keeps for reuse, with the swap eligibility its assignment carries.
@@ -4685,6 +4767,10 @@ impl EngineComputedRecordScratch {
 /// adjustments read.
 #[derive(Clone, Copy)]
 pub(super) struct DriveSubject {
+    /// The element the drive is for, when the record is its own. A pseudo-element's row leaves it
+    /// unset: the monospace recascade it would need is the originating element's chain, which this
+    /// row does not answer for.
+    recascade_node: Option<StyleNodeID>,
     /// The flat-tree parent the element inherits from; the document element has none and
     /// inherits from the initial values.
     parent: Option<StyleNodeID>,

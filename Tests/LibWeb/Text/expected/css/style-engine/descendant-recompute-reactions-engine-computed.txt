@@ -1,2 +1,2 @@
-root font size: engine computed records: 8, width: 40px
+root font size: engine computed records: 9, width: 40px
 ancestor direction: engine computed records: 2, margin-right: 3px, margin-left: 0px
