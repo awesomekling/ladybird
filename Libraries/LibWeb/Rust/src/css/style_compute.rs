@@ -993,11 +993,44 @@ pub(crate) fn content_reads_counter_style_environment(value: &StyleValueData) ->
     }
 }
 
+pub(crate) fn counter_style_name_is_non_overridable(name: &[u16]) -> bool {
+    [
+        "decimal",
+        "disc",
+        "square",
+        "circle",
+        "disclosure-open",
+        "disclosure-closed",
+    ]
+    .iter()
+    .any(|candidate| {
+        candidate.len() == name.len()
+            && candidate
+                .bytes()
+                .zip(name)
+                .all(|(expected, &unit)| unit < 128 && (unit as u8).eq_ignore_ascii_case(&expected))
+    })
+}
+
+/// Whether the base computed table reads a counter-style registry. This is shared by
+/// host publication and the engine's canonical content representation.
+///
 /// # Safety
-/// `value` must point to a live style value.
+/// `table` must point to a live computed longhand table.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_content_reads_counter_style_environment(value: *const c_void) -> bool {
-    content_reads_counter_style_environment(unsafe { &*value.cast::<StyleValueData>() })
+pub unsafe extern "C" fn rust_computed_style_reads_counter_style_environment(
+    table: *const c_void,
+    is_pseudo: bool,
+) -> bool {
+    let table = unsafe { &*table.cast::<ComputedLonghandTable>() };
+    let content = table.effective_value(None, property_id::CONTENT, true).value;
+    if unsafe { content.cast::<StyleValueData>().as_ref() }.is_some_and(content_reads_counter_style_environment) {
+        return true;
+    }
+    let list = table.effective_value(None, property_id::LIST_STYLE_TYPE, true).value;
+    matches!(unsafe { list.cast::<StyleValueData>().as_ref() },
+        Some(StyleValueData::CounterStyle { is_symbols: false, name, .. })
+            if is_pseudo || !counter_style_name_is_non_overridable(name.units()))
 }
 
 /// Whether style computation for a pseudo-element bails because no

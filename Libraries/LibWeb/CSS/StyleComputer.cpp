@@ -4083,14 +4083,6 @@ static void report_shared_custom_property_environment_change(DOM::AbstractElemen
         *did_change_custom_properties = true;
 }
 
-static bool computed_style_depends_on_counter_style_environment(ComputedValues const& values, bool is_pseudo)
-{
-    auto const& base = values.base_values();
-    return ComputedValuesFFI::rust_content_reads_counter_style_environment(base.computed_content()->rust_style_value_data())
-        || (base.list_style_type_depends_on_counter_style_environment()
-            && (is_pseudo || !base.list_style_type_uses_non_overridable_counter_style()));
-}
-
 StyleEngine::StyleRecordDelta StyleComputer::publish_computed_style_inputs(DOM::AbstractElement abstract_element, ComputedValues const& values) const
 {
     auto publication = record_computed_style_inputs(Optional<DOM::AbstractElement> { abstract_element }, values, abstract_element.element().style_node_id());
@@ -4157,7 +4149,7 @@ StyleEngine::StyleRecordDelta StyleComputer::record_computed_style_inputs(Option
     }
     u64 counter_style_environment_identity = 0;
     if (abstract_element.has_value()
-        && computed_style_depends_on_counter_style_environment(values, abstract_element->pseudo_element().has_value()))
+        && ComputedValuesFFI::rust_computed_style_reads_counter_style_environment(values.base_values().computed_longhand_table(), abstract_element->pseudo_element().has_value()))
         counter_style_environment_identity = abstract_element->style_scope().counter_style_environment_identity();
     auto animated_properties = style_node_id != 0 ? values.animated_properties() : nullptr;
     u64 animation_overlay_identity = animated_properties ? animated_properties->identity() : 0;
@@ -5406,7 +5398,7 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
                 abstract_element.set_custom_property_data(inheritance_parent.has_value() ? inheritable_custom_property_data(*inheritance_parent) : nullptr);
             if (entry.style_record_identity.has_value()
                 && abstract_element.custom_property_data().ptr() == entry.custom_property_data.ptr()
-                && !computed_style_depends_on_counter_style_environment(*entry.values, abstract_element.pseudo_element().has_value()))
+                && !ComputedValuesFFI::rust_computed_style_reads_counter_style_environment(entry.values->base_values().computed_longhand_table(), abstract_element.pseudo_element().has_value()))
                 sharing->shared_style_record_identity = entry.style_record_identity;
             if (entry.style_uses_var_css_function)
                 abstract_element.element().set_style_uses_var_css_function();

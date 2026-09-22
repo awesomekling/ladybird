@@ -1012,8 +1012,6 @@ public:
 
     ListStyleType list_style_type(StyleScope const& style_scope) const { return m_inherited.list->list_style_type_value(style_scope); }
     RefPtr<AbstractImageStyleValue const> list_style_image() const { return m_inherited.list->list_style_image_value(); }
-    bool list_style_type_depends_on_counter_style_environment() const { return m_inherited.list->list_style_type_depends_on_counter_style_environment(); }
-    bool list_style_type_uses_non_overridable_counter_style() const { return m_inherited.list->list_style_type_uses_non_overridable_counter_style(); }
 
     RefPtr<AbstractImageStyleValue const> mask_image() const { return m_noninherited.mask_data->mask_image_value(); }
     Optional<MaskReference> mask() const { return m_noninherited.mask_data->mask_value(); }
@@ -1144,8 +1142,6 @@ public:
         static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::InheritedList;
 
         ListStyleType list_style_type_value(StyleScope const&) const;
-        bool list_style_type_depends_on_counter_style_environment() const;
-        bool list_style_type_uses_non_overridable_counter_style() const;
         RefPtr<AbstractImageStyleValue const> list_style_image_value() const;
 
         bool operator==(InheritedListValues const& other) const
