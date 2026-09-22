@@ -759,7 +759,11 @@ impl RetainedState {
         };
         let Some(current_environment) = environment.or_else(|| {
             self.computed_group_sets
-                .style_record_custom_property_environment(old_style_record.raw())
+                .animation_overlay_base_custom_property_environment(old_style_record.raw())
+                .or_else(|| {
+                    self.computed_group_sets
+                        .style_record_custom_property_environment(old_style_record.raw())
+                })
         }) else {
             counters.bump(Counter::EngineComputedRecordBailRecord);
             return None;
