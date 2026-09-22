@@ -748,11 +748,11 @@ pub struct FfiFontSizeRecascadeBatch {
 }
 
 #[derive(Clone, Copy)]
-struct FontSizeRecascadeDocumentInputs {
-    root_font_size: f64,
-    root_font_metrics_depend_on_viewport_metrics: bool,
-    viewport_width: f64,
-    viewport_height: f64,
+pub(crate) struct FontSizeRecascadeDocumentInputs {
+    pub(crate) root_font_size: f64,
+    pub(crate) root_font_metrics_depend_on_viewport_metrics: bool,
+    pub(crate) viewport_width: f64,
+    pub(crate) viewport_height: f64,
 }
 
 /// Drives the time-traveling font-size inheritance applied when the cascade
@@ -765,7 +765,7 @@ struct FontSizeRecascadeDocumentInputs {
 /// reports `NeedsLengthResolution` and resumes at the reported index.
 ///
 #[allow(clippy::too_many_arguments)]
-fn recascade_font_size_batch(
+pub(crate) fn recascade_font_size_batch(
     value_count: usize,
     mut value_at: impl FnMut(usize) -> *const c_void,
     start_index: usize,

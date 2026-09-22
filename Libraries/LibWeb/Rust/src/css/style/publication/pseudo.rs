@@ -483,6 +483,7 @@ impl RetainedState {
                 }
                 None => {
                     let subject = DriveSubject {
+                        recascade_node: None,
                         parent: Some(node),
                         facts,
                     };

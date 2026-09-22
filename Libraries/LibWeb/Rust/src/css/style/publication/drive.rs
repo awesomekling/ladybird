@@ -335,7 +335,11 @@ impl RetainedState {
         use crate::css::table_group_builder::FfiFontGroupBuildInputs;
         use bridge::element_adjustment_fact as fact;
 
-        let DriveSubject { parent, facts } = subject;
+        let DriveSubject {
+            recascade_node,
+            parent,
+            facts,
+        } = subject;
         let has = |bit: u32| facts & bit != 0;
         let is_document_element = has(fact::IS_DOCUMENT_ELEMENT);
         // An element with animations composes its style with their effects in C++.
@@ -347,13 +351,24 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
             return None;
         }
-        if store
+        // HACK: C++ answers a cascade that ends in `font-family: monospace` by re-running the
+        //       font-size cascade over the whole ancestor chain against a 13px default instead of
+        //       the 16px one, which changes what a keyword size an ancestor declared means. See
+        //       `StyleComputer::recascade_font_size_if_needed`. The stage keeps the record when
+        //       that walk reaches the same answer this drive does, and hands the element to C++
+        //       when it does not.
+        let recascaded_font_size = if store
             .winning_declaration(prop::FONT_FAMILY)
             .is_some_and(|(value, ..)| font_family_is_monospace(unsafe { &*value.cast::<StyleValueData>() }))
         {
-            counters.bump(Counter::EngineComputedRecordBailMonospaceQuirk);
-            return None;
-        }
+            let Some(recascaded) = recascade_node.and_then(|node| self.monospace_recascaded_font_size(node)) else {
+                counters.bump(Counter::EngineComputedRecordBailMonospaceQuirk);
+                return None;
+            };
+            Some(recascaded)
+        } else {
+            None
+        };
         let old_table = match old_style_record {
             Some(old_style_record) => {
                 let Some(view) = self.computed_group_sets.style_record_view(old_style_record.raw()) else {
@@ -518,7 +533,7 @@ impl RetainedState {
                 document_supported_scheme_count: usize::from(inputs.document_supported_scheme_count),
             },
             is_th_element: has(fact::IS_TH),
-            has_new_font_size: false,
+            has_new_font_size: recascaded_font_size.is_some(),
             has_tree_counting_context: false,
             sibling_count: 0,
             sibling_index: 0,
@@ -624,6 +639,20 @@ impl RetainedState {
             )
         };
         if !resuming {
+            // The recascaded size stands in for the element's cascaded `font-size`, which the drive
+            // then leaves alone, exactly as C++ writes it into the working set before driving. An
+            // element that declares its own `font-size` still has that declaration win, because the
+            // drive reads a winning declaration before it consults this.
+            if let Some(recascaded) = recascaded_font_size {
+                table.set_computed(
+                    prop::FONT_SIZE,
+                    StyleValueData::Length {
+                        value: CssPixels::from_raw(recascaded).to_double(),
+                        unit: crate::css::style_compute::px_length_unit(),
+                    },
+                    -1,
+                );
+            }
             drive(
                 counters,
                 &mut table,
