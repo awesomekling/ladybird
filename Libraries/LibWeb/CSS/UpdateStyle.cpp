@@ -1168,6 +1168,14 @@ static void update_style(DOM::Document& document)
             return;
     }
 
+    // Publish each tree scope's counter-style registry before the engine answers any rows.
+    // Shadow scopes can override names, and a warm transaction can already read a registry
+    // changed by a stylesheet edit; neither can wait for C++ to resolve a list style on demand.
+    (void)document.style_scope().counter_style_environment_identity();
+    document.for_each_shadow_root([](DOM::ShadowRoot& shadow_root) {
+        (void)shadow_root.style_scope().counter_style_environment_identity();
+    });
+
     // A style flush is a transaction boundary. Everything recorded since the last one crosses into
     // StyleEngine as one flat batch, is normalized there, and is routed into the region its
     // transpose programs reach. A transaction that could not be proven narrower publishes a
@@ -1201,12 +1209,6 @@ static void update_style(DOM::Document& document)
 
     if (style_engine_reactions.is_empty())
         return;
-
-    // A record whose marker or `content` names a counter style is resolved against the registry
-    // its scope publishes, and the engine computes such records now, so nothing is left to build
-    // that registry on demand. It depends on no layout, so settling it here settles it for the
-    // pass, the way the root's font metrics are settled.
-    (void)document.style_scope().counter_style_environment_identity();
 
     bool has_cold_matching_traversal = false;
     if (auto* root = document.document_element(); root && root->style_node_id() != 0) {

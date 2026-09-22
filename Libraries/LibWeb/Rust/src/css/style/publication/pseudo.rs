@@ -81,10 +81,7 @@ impl RetainedState {
         if required & !available == 0 {
             return true;
         }
-        let mut explicit_kinds = (1 << BEFORE) | (1 << AFTER) | (1 << FIRST_LETTER) | (1 << SELECTION);
-        if record_is_list_item || display_winner_is_list_item == Some(true) {
-            explicit_kinds |= 1 << MARKER;
-        }
+        let explicit_kinds = (1 << BEFORE) | (1 << AFTER) | (1 << FIRST_LETTER) | (1 << SELECTION);
         if required & explicit_kinds & !available != 0 {
             counters.bump(Counter::EngineComputedRecordBailPseudoRow);
             return false;

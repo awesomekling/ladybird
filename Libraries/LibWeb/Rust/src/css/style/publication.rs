@@ -1040,10 +1040,9 @@ impl RetainedState {
             (inherited_box.writing_mode, inherited_box.direction)
         };
         for &property in delta.properties() {
-            // The counter-style environment behind `content` and `list-style-type` is resolved in
-            // the C++ computation. A delta that moves the element's transition declarations owes
-            // the host the transition step, and one that moves its animation declarations owes the
-            // host the animation plan; both ride out of the batch as effects of the row.
+            // A content delta must carry the counter-style registry it reads. A delta that moves
+            // transition declarations owes the host the transition step, and one that moves
+            // animation declarations owes the animation plan; both leave the batch as row effects.
             if property_starts_animation_or_counter_environment(property)
                 && !(owes_a_transition_step && longhand_only_declares_a_css_transition(property))
                 && !(owes_an_animation_plan && longhand_declares_a_css_animation(property))
@@ -1947,17 +1946,12 @@ impl RetainedState {
     }
 
     /// Whether a first record's winner keeps the record's computation in C++: a property that
-    /// starts an animation or transition, or reads the counter-style environment. A
-    /// `list-style-type` reads it only through an overridable counter-style name. The font-phase
+    /// starts an animation or transition, or reads the counter-style environment. The font-phase
     /// longhands without a group of their own are inputs of the font group the full drive builds.
     fn first_record_winner_needs_cpp(&self, state: CascadeStateID, property: u16) -> bool {
         use crate::css::property_metadata::property_id as prop;
-        if property == prop::LIST_STYLE_TYPE {
-            return self.list_style_type_winner_reads_counter_style_environment(state);
-        }
         // A `content` that names no counter reads no counter-style environment, and a first record
-        // that needs none is published without one. The node's own custom properties are the other
-        // half of the question the warm gate asks, and it asks it of the same two properties.
+        // that needs none is published without one.
         if property == prop::CONTENT {
             return !self
                 .winner_groups
@@ -1974,14 +1968,6 @@ impl RetainedState {
             || (computed_group_dependency_mask(property).is_none() && !font_group_carries_longhand(property))
     }
 
-    /// Whether a moved `content` or `list-style-type` winner leaves the record's counter-style
-    /// environment where it is: the record it moves away from names none, and the winner's value
-    /// reads none, so the identity the engine copies from the old record stays right. C++ names the
-    /// environment on a record only when a named counter style has to be resolved against it.
-    ///
-    /// A node declaring custom properties is left to C++ with such a winner: the environment the
-    /// engine would name for it may be one the host resolved and no longer installs, and the host
-    /// then computes the element and its children over again.
     /// What a record this node publishes must name, when what it computed reads the registry.
     /// Zero when it reads none, which is what the record carries for every other element.
     fn counter_style_environment_identity_for(&self, node: StyleNodeID) -> u64 {
@@ -2008,7 +1994,7 @@ impl RetainedState {
         property: u16,
     ) -> bool {
         use crate::css::property_metadata::property_id as prop;
-        if property != prop::CONTENT && property != prop::LIST_STYLE_TYPE {
+        if property != prop::CONTENT {
             return false;
         }
         // The record names the registry it read, so a winner that reads one is the engine's to
@@ -2025,9 +2011,6 @@ impl RetainedState {
         }
         if named != 0 {
             return false;
-        }
-        if property == prop::LIST_STYLE_TYPE {
-            return !self.list_style_type_winner_reads_counter_style_environment(state);
         }
         // No winner is the initial `normal`, which reads no counter style either.
         let Some(winner) = self.winner_groups.winner_in_state(state, prop::CONTENT) else {
@@ -2156,38 +2139,10 @@ impl RetainedState {
         self.monospace_recascaded_font_size(node).unwrap_or(i32::MIN)
     }
 
-    fn list_style_type_winner_reads_counter_style_environment(&self, state: CascadeStateID) -> bool {
-        let Some(winner) = self
-            .winner_groups
-            .winner_in_state(state, crate::css::property_metadata::property_id::LIST_STYLE_TYPE)
-            .and_then(|winner| self.winner_groups.resolved_winner(winner))
-        else {
-            return true;
-        };
-        self.list_style_type_value_reads_counter_style_environment(&winner)
-    }
-
-    /// Whether a `list-style-type` winner names a counter style the environment may define: an
-    /// overridable name. `none`, a string, `symbols()` and the non-overridable names need none.
-    fn list_style_type_value_reads_counter_style_environment(&self, winner: &PropertyWinner) -> bool {
-        use crate::css::style_value::StyleValueData;
-        match self.specified_values.value(winner.key.value) {
-            Lookup::Known(StyleValueData::CounterStyle { is_symbols, name, .. }) => {
-                !*is_symbols && !counter_style_name_is_non_overridable(name.units())
-            }
-            Lookup::Known(StyleValueData::Keyword { keyword }) => *keyword != crate::css::style_compute::keyword::NONE,
-            Lookup::Known(StyleValueData::String { .. }) => false,
-            _ => true,
-        }
-    }
-
     /// Whether a pseudo-element's winner keeps its record in C++: the same rule as a first
     /// record's, since a pseudo-element record the engine settles is computed in full.
     fn pseudo_winner_needs_cpp(&self, winner: &PropertyWinner) -> bool {
         use crate::css::property_metadata::property_id as prop;
-        if winner.property == prop::LIST_STYLE_TYPE {
-            return self.list_style_type_value_reads_counter_style_environment(winner);
-        }
         winner.property == prop::ANCHOR_NAME || property_starts_animation_or_counter_environment(winner.property)
     }
 
@@ -5576,8 +5531,10 @@ fn property_starts_animation_or_counter_environment(property: u16) -> bool {
     // A view transition name is a plain computed value; it starts nothing. An anchor name is one
     // the host registers from whichever record it installs. A named timeline is a plain computed
     // value too: what finds it is the animation that names it in `animation-timeline`, and that
-    // animation reads it from whichever record the element holds when it starts.
-    matches!(property, prop::CONTENT | prop::LIST_STYLE_TYPE)
+    // animation reads it from whichever record the element holds when it starts. A list style
+    // retains its counter-style name, and record assembly stamps the published registry identity
+    // against which that name is resolved.
+    property == prop::CONTENT
         || (!matches!(
             property,
             prop::VIEW_TRANSITION_NAME

@@ -2038,12 +2038,14 @@ impl StyleEngineState {
             }
             let mut next_published_index = 0;
             let mut batching_start = None;
-            // Resumptions share the transaction scratch above, so complete them one at a time in
-            // canonical order. The requests discovered by a pass are still serviced together.
+            // Resumptions share the transaction scratch above and complete in canonical order.
+            // Consume every serviced continuation in this pass; rescanning the whole tail for
+            // each one makes a cohort of markers waiting for a font take cubic work.
             let mut ready_record = None::<publication::pending::ParkedEngineComputedRecord>;
             let mut waiting_records = Vec::<publication::pending::ParkedEngineComputedRecord>::new();
             while next_published_index < published_nodes.len() {
-                let mut next_parked_records = std::mem::take(&mut waiting_records);
+                let mut resumed_records = std::mem::take(&mut waiting_records).into_iter();
+                let mut next_parked_records = Vec::<publication::pending::ParkedEngineComputedRecord>::new();
                 for (published_index, node) in published_nodes.iter().copied().enumerate().skip(next_published_index) {
                     if let Some(record_deltas) = &record_deltas
                         && (record_deltas[published_index].is_some()
@@ -2058,6 +2060,7 @@ impl StyleEngineState {
                         .is_some_and(|parked| parked.published_index == published_index)
                     {
                         let parked = ready_record.take().unwrap();
+                        ready_record = resumed_records.next();
                         engine_computed_record_scratch.continuation = parked.continuation;
                         Some(parked.parent_inputs)
                     } else {
