@@ -1,4 +1,4 @@
-PASS: attribute id match set requires id attribute presence | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: attribute id match set requires id attribute presence | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: [id] descendant loses match | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: [id] child loses match | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: typed [id] descendant loses match | elementStyleRecomputations=1, elementStyleNoopRecomputations=0

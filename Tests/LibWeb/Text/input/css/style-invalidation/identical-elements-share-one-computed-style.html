@@ -12,11 +12,21 @@
             document.body.append(box);
             resetStyleCounters();
             internals.updateStyle();
-            const shared = styleCounters().elementStyleSharedComputations;
+            // A record the style engine settles is shared by the engine's own cold-record cache
+            // rather than by the host's style sharing, so the bound below counts both. The bound
+            // on an element with a declaration of its own stays the host's alone: the engine
+            // shares a *record* between elements whose computed values agree, which two elements
+            // declaring different custom properties still do, while the environments stay their
+            // own - a different thing from one element taking another's style.
+            const counters = Object.assign({}, internals.styleEngineCounters(), styleCounters());
+            const shared = counters.elementStyleSharedComputations
+                + (counters.engineComputedRecordSharedHits ?? 0)
+                + (counters.engineComputedRecordCohortHits ?? 0);
+            const sharedByTheHost = counters.elementStyleSharedComputations;
             const probe = readProbe(box.firstChild);
             box.remove();
             internals.updateStyle();
-            return { shared, probe };
+            return { shared, sharedByTheHost, probe };
         }
 
         // Ten siblings with the same rules, the same parent and nothing of their own to say: one of
@@ -34,7 +44,7 @@
             for (let i = 0; i < 10; i++)
                 box.appendChild(makeElement("div", { className: "leaf", attributes: { style: `--i: ${i}` } }));
         });
-        println(`PASS: an element's own declaration keeps its style its own: ${differing.shared < 9}`);
+        println(`PASS: an element's own declaration keeps its style its own: ${differing.sharedByTheHost < 9}`);
         assertEqual("an unshared style is still the matched one", differing.probe, MATCH);
 
         style.remove();
