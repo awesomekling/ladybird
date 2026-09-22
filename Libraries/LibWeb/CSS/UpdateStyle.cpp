@@ -695,7 +695,15 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         : to_underlying(StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged);
                     auto& counters = document.style_invalidation_counters();
                     auto const counters_before_verification = counters;
-                    style_engine.begin_computed_record_verification();
+                    // The kinds the engine settled: those records are what the reference computation
+                    // is checked against, and the rest of what it computes publishes for real.
+                    static_assert(DOM::Element::EnginePseudoElementRecords {}.size() <= 64);
+                    u64 settled_pseudo_element_kinds = 0;
+                    for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
+                        if (pseudo_element_records[kind].has_value())
+                            settled_pseudo_element_kinds |= 1ull << kind;
+                    }
+                    style_engine.begin_computed_record_verification(StyleNodeID { reaction.style_node }, settled_pseudo_element_kinds);
                     ScopeGuard end_computed_record_verification = [&] { style_engine.end_computed_record_verification(); };
                     DOM::Element::EnginePseudoElementRecords previous_pseudo_element_records;
                     for (size_t kind = 0; kind < previous_pseudo_element_records.size(); ++kind)
@@ -764,14 +772,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                             ? StyleRecordID { reaction.new_style_record }
                             : element->style_record_identity();
                         style_input_record->bind_next_published_style = false;
-                    }
-                    for (size_t kind = 0; kind < previous_pseudo_element_records.size(); ++kind) {
-                        auto pseudo_element = static_cast<PseudoElement>(kind);
-                        if (is_synthetic_pseudo_element(pseudo_element)
-                            && pseudo_element != PseudoElement::Backdrop
-                            && !is_highlight_pseudo_element(pseudo_element)
-                            && !pseudo_element_records[kind].has_value())
-                            element->set_computed_style(pseudo_element, *previous_pseudo_element_records[kind]);
                     }
                 } else {
                     // A first record answers the element's recorded arrival; nothing is left for a

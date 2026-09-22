@@ -269,9 +269,9 @@ u64 StyleEngine::style_record_custom_property_environment(StyleRecordID style_re
     return StyleEngineFFI::style_engine_style_record_custom_property_environment(m_impl, style_record.value());
 }
 
-void StyleEngine::begin_computed_record_verification()
+void StyleEngine::begin_computed_record_verification(StyleNodeID node, u64 settled_pseudo_element_kinds)
 {
-    StyleEngineFFI::style_engine_begin_computed_record_verification(m_impl);
+    StyleEngineFFI::style_engine_begin_computed_record_verification(m_impl, node.value(), settled_pseudo_element_kinds);
 }
 
 void StyleEngine::end_computed_record_verification()
