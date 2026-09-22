@@ -84,7 +84,7 @@ impl RetainedState {
 
     #[allow(clippy::too_many_arguments)]
     pub(super) fn engine_driven_table(
-        &self,
+        &mut self,
         node: StyleNodeID,
         old_style_record: computed::FinalStyleRecordID,
         store: &WinnerStore,
@@ -99,6 +99,7 @@ impl RetainedState {
         u32,
         Option<crate::css::table_group_builder::FfiFontGroupBuildInputs>,
     )> {
+        let random_base_values = store.drive_random_base_values(self, node)?;
         let resource_contexts = store.drive_resource_contexts(self);
         let document_base_url = &self.document_resource_contexts.document_base_url;
         let store = store.view(self);
@@ -212,8 +213,8 @@ impl RetainedState {
             has_tree_counting_context: false,
             sibling_count: 0,
             sibling_index: 0,
-            random_base_values: std::ptr::null(),
-            random_base_value_count: 0,
+            random_base_values: random_base_values.as_ptr(),
+            random_base_value_count: random_base_values.len(),
             document_base_url: document_base_url.as_ptr(),
             document_base_url_length: document_base_url.len(),
             style_sheet_resource_contexts: resource_contexts.as_ptr(),
@@ -324,7 +325,7 @@ impl RetainedState {
     /// phases and preserves them for completion. Monospace default-size recascade stays in C++.
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     pub(super) fn engine_full_drive(
-        &self,
+        &mut self,
         subject: DriveSubject,
         old_style_record: Option<computed::FinalStyleRecordID>,
         store: &WinnerStore,
@@ -339,6 +340,7 @@ impl RetainedState {
         u32,
         Option<crate::css::table_group_builder::FfiFontGroupBuildInputs>,
     )> {
+        let random_base_values = store.drive_random_base_values(self, subject.target.node())?;
         let resource_contexts = store.drive_resource_contexts(self);
         let document_base_url = &self.document_resource_contexts.document_base_url;
         let store = store.view(self);
@@ -557,8 +559,8 @@ impl RetainedState {
             has_tree_counting_context: false,
             sibling_count: 0,
             sibling_index: 0,
-            random_base_values: std::ptr::null(),
-            random_base_value_count: 0,
+            random_base_values: random_base_values.as_ptr(),
+            random_base_value_count: random_base_values.len(),
             document_base_url: document_base_url.as_ptr(),
             document_base_url_length: document_base_url.len(),
             style_sheet_resource_contexts: resource_contexts.as_ptr(),

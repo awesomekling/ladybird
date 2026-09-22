@@ -1839,6 +1839,8 @@ impl StyleEngineState {
                 font_face_snapshot: None,
                 font_cascade_memo: None,
                 root_font_request: None,
+                random_base_values: HashMap::default(),
+                random_base_requests: Vec::new(),
                 layout_style_snapshots: Default::default(),
                 container_query_inputs: Default::default(),
                 layer_topology_version: 0,
@@ -1930,7 +1932,6 @@ impl StyleEngineState {
                 armed_retry_nodes: Vec::new(),
                 retried_record_rows: Vec::new(),
                 font_resolver: None,
-                random_base_values: HashMap::default(),
                 random_state: std::collections::hash_map::RandomState::new(),
                 random_serial: 0,
                 #[cfg(feature = "style-recording")]
@@ -1975,13 +1976,13 @@ impl StyleEngineState {
         use std::hash::BuildHasher;
 
         let key = (name.to_vec(), (!element_shared).then_some(node));
-        if let Some(value) = self.host.random_base_values.get(&key) {
+        if let Some(value) = self.retained.random_base_values.get(&key) {
             return *value;
         }
         self.host.random_serial = self.host.random_serial.wrapping_add(1);
         let bits = self.host.random_state.hash_one((self.host.random_serial, &key));
         let value = (bits >> 11) as f64 / ((1_u64 << 53) as f64);
-        self.host.random_base_values.insert(key, value);
+        self.retained.random_base_values.insert(key, value);
         value
     }
 
@@ -2724,12 +2725,12 @@ mod random_base_value_tests {
 
         let document_value = engine.ensure_random_base_value(first, &name, true);
         assert_eq!(document_value, engine.ensure_random_base_value(second, &name, true));
-        assert_eq!(engine.host.random_base_values.len(), 1);
+        assert_eq!(engine.retained.random_base_values.len(), 1);
 
         let element_value = engine.ensure_random_base_value(first, &name, false);
         assert_eq!(element_value, engine.ensure_random_base_value(first, &name, false));
         engine.ensure_random_base_value(second, &name, false);
-        assert_eq!(engine.host.random_base_values.len(), 3);
+        assert_eq!(engine.retained.random_base_values.len(), 3);
     }
 }
 

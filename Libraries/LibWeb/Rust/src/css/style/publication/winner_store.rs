@@ -337,3 +337,60 @@ mod tests {
         assert_eq!(Arc::strong_count(&observer), owners);
     }
 }
+
+impl WinnerStore {
+    pub(super) fn drive_random_base_values(
+        &self,
+        engine: &mut RetainedState,
+        node: StyleNodeID,
+    ) -> Option<Vec<crate::css::style_compute::FfiRandomBaseValue>> {
+        let view = self.view(engine);
+        let mut sharings = Vec::new();
+        for declaration in &self.declarations {
+            if view.dependencies(declaration).has_unfixed_random_sharing {
+                crate::css::style_compute::collect_unfixed_random_sharings_in_value(
+                    view.value(declaration),
+                    &mut sharings,
+                );
+            }
+        }
+        engine.random_base_values_for_sources(node, &sharings)
+    }
+}
+
+impl RetainedState {
+    pub(in crate::css::style) fn random_base_values_for_sources(
+        &mut self,
+        node: StyleNodeID,
+        sharings: &[*const StyleValueData],
+    ) -> Option<Vec<crate::css::style_compute::FfiRandomBaseValue>> {
+        let mut bases = Vec::with_capacity(sharings.len());
+        let mut missing = false;
+        for &source in sharings {
+            // The winner recipe retains every source until this drive has finished.
+            let StyleValueData::RandomValueSharing {
+                has_name,
+                name,
+                is_auto,
+                element_shared,
+                ..
+            } = (unsafe { &*source })
+            else {
+                unreachable!()
+            };
+            let name = if *has_name { name.units() } else { &[] };
+            let shared = *element_shared || !*is_auto;
+            let key = (name.to_vec(), (!shared).then_some(node));
+            if let Some(&value) = self.random_base_values.get(&key) {
+                bases.push(crate::css::style_compute::FfiRandomBaseValue {
+                    source: source.cast(),
+                    value,
+                });
+            } else {
+                self.random_base_requests.push((node, key.0, shared));
+                missing = true;
+            }
+        }
+        (!missing).then_some(bases)
+    }
+}

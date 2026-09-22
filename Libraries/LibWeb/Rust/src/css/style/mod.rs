@@ -903,6 +903,9 @@ pub struct RetainedState {
     /// The last request computed for the document element, retained so the next update can
     /// publish its answer before evaluation begins.
     root_font_request: Option<font_resolution::FontRequest>,
+    /// Random bases are filled between record passes and read by the value drive.
+    random_base_values: HashMap<(Vec<u16>, Option<StyleNodeID>), f64>,
+    random_base_requests: Vec<(StyleNodeID, Vec<u16>, bool)>,
     /// The most recently committed layout outputs. Layout publishes a complete immutable
     /// generation; evaluation only reads it.
     layout_style_snapshots: std::sync::Arc<crate::layout::style_snapshot::LayoutStyleSnapshotStore>,
@@ -1148,7 +1151,6 @@ pub struct HostState {
     font_resolver: Option<font_resolution::FontResolverHost>,
     /// Random bases allocated while freezing style inputs. Named sharing scopes are document-wide;
     /// `auto` scopes include the element. This is host preparation state, not part of a sealed step.
-    random_base_values: HashMap<(Vec<u16>, Option<StyleNodeID>), f64>,
     random_state: std::collections::hash_map::RandomState,
     random_serial: u64,
     /// The capture-local document identity, absent when record-replay is disabled.

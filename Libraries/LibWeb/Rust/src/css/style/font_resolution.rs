@@ -251,7 +251,7 @@ impl FontResolverHost {
         let ffi_requests = requests.iter().map(|request| request.ffi).collect::<Vec<_>>();
         let mut resolved = vec![FfiResolvedFont::default(); requests.len()];
         let table = snapshot.map_or(std::ptr::null(), super::font_faces::as_pointer);
-        super::seal::between_pass_font_batch(service.name(), requests.len() as u64, || unsafe {
+        super::seal::between_pass_input_batch(service.name(), requests.len() as u64, || unsafe {
             (self.resolve)(
                 memo,
                 table,

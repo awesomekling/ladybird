@@ -2313,7 +2313,9 @@ impl StyleEngineState {
                             delta
                         })
                         .flatten();
-                    if engine_computed_record_scratch.font_drive.request.is_some() {
+                    if engine_computed_record_scratch.font_drive.request.is_some()
+                        || !self.random_base_requests.is_empty()
+                    {
                         let starts_batching = record_deltas.is_none();
                         if starts_batching {
                             record_deltas = Some((0..published_nodes.len()).map(|_| None).collect());
@@ -2328,7 +2330,7 @@ impl StyleEngineState {
                         // Establish the first canonical request before speculative siblings can
                         // observe or populate mutable host font-cascade state. Later passes can
                         // collect independent misses because this first request is then stable.
-                        if starts_batching {
+                        if starts_batching || !self.random_base_requests.is_empty() {
                             break;
                         }
                         continue;
@@ -2508,6 +2510,7 @@ impl StyleEngineState {
                             .map(|request| (Some(published_nodes[parked.published_index]), request))
                     })
                     .collect();
+                self.refill_random_base_requests();
                 self.refill_font_requests(requests, counters);
                 if !next_parked_records.is_empty() {
                     ready_record = Some(next_parked_records.remove(0));

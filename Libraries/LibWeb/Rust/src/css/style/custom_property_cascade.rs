@@ -680,19 +680,6 @@ impl RetainedState {
             inputs.custom_property_registration_generation,
             &cascaded,
         );
-        // An environment C++ resolved for an element alike in its declarations is C++'s own
-        // identity, and the host installs no record under one it does not recognise as the
-        // engine's: handing it back settles a row the host then computes again. The memo is worth
-        // only what it saves, so where it holds such an identity this resolves one of its own.
-        let memoized = self.custom_property_environments.memoized(&key);
-        let keeps_cpp_environment = memoized.is_some_and(|identity| {
-            identity != parent_environment
-                && identity & custom_property_environments::ENGINE_ENVIRONMENT_IDENTITY_BIT == 0
-        });
-        if let Some(identity) = memoized.filter(|_| !keeps_cpp_environment) {
-            counters.bump(Counter::EngineCustomPropertyEnvironmentMemoHits);
-            return Some(identity);
-        }
         let parent_store = match parent_environment {
             0 => std::ptr::null(),
             identity => {
@@ -727,15 +714,69 @@ impl RetainedState {
         }
         if values.is_empty() {
             let written_values = cascaded.into_iter().map(|(_, written)| written).collect();
-            if !keeps_cpp_environment {
-                self.custom_property_environments
-                    .remember(key, parent_environment, written_values);
-            }
+            self.custom_property_environments
+                .remember(key, parent_environment, written_values);
             return Some(parent_environment);
         }
         // SAFETY: The parent store is live for as long as a record names its environment, and the
         // values are the program's interned values, live for the call.
         let cascaded_store = unsafe { CustomPropertyStore::cascaded_child(parent_store, values) };
+        let mut random_sources = Vec::new();
+        let random_values = crate::css::custom_properties::collect_registered_custom_property_random_sharings(
+            unsafe { &*cascaded_store.cast::<CustomPropertyStore>() },
+            registry_ref,
+            &mut random_sources,
+        );
+        let Some(random_bases) = self.random_base_values_for_sources(node, &random_sources) else {
+            unsafe { Arc::decrement_strong_count(cascaded_store.cast::<CustomPropertyStore>()) };
+            return None;
+        };
+        // An environment C++ resolved for an element alike in its declarations is C++'s own
+        // identity, and the host installs no record under one it does not recognise as the
+        // engine's: handing it back settles a row the host then computes again. The memo is worth
+        // only what it saves, so where it holds such an identity this resolves one of its own.
+        // Random inputs can be element-scoped, so declarations alone cannot share their result.
+        let memoized = random_sources
+            .is_empty()
+            .then(|| self.custom_property_environments.memoized(&key))
+            .flatten();
+        let keeps_cpp_environment = memoized.is_some_and(|identity| {
+            identity != parent_environment
+                && identity & custom_property_environments::ENGINE_ENVIRONMENT_IDENTITY_BIT == 0
+        });
+        if let Some(identity) = memoized.filter(|_| !keeps_cpp_environment) {
+            unsafe { Arc::decrement_strong_count(cascaded_store.cast::<CustomPropertyStore>()) };
+            counters.bump(Counter::EngineCustomPropertyEnvironmentMemoHits);
+            return Some(identity);
+        }
+        let finalization_environment = crate::css::style_compute::FfiStyleComputationEnvironment {
+            box_type_input: crate::css::style_compute::rust_box_type_transformation_input(
+                0,
+                crate::css::style_compute::FfiStyleAdjustmentTarget::Element,
+                false,
+                crate::css::display::FfiDisplay::block(),
+            ),
+            color_scheme_input: crate::css::style_compute::FfiEffectiveColorSchemeInput {
+                preferred_color_scheme: 0,
+                has_document_supported_schemes: false,
+                document_supported_scheme_codes: std::ptr::null(),
+                document_supported_scheme_count: 0,
+            },
+            is_th_element: false,
+            has_new_font_size: false,
+            has_tree_counting_context: false,
+            sibling_count: 0,
+            sibling_index: 0,
+            random_base_values: random_bases.as_ptr(),
+            random_base_value_count: random_bases.len(),
+            document_base_url: std::ptr::null(),
+            document_base_url_length: 0,
+            style_sheet_resource_contexts: std::ptr::null(),
+            style_sheet_resource_context_count: 0,
+            device_pixels_per_css_pixel: inputs.device_pixels_per_css_pixel,
+            initial_font_size_raw: inputs.initial_font_size_raw,
+            default_font_size_raw: inputs.default_font_size_raw,
+        };
         let mut random_function_index = 0_usize;
         let parse_context = registry_ref.parse_context(&mut random_function_index);
         let length = registered
@@ -753,12 +794,13 @@ impl RetainedState {
             resolved_parent_store: parent_store,
             reuse_resolved_parent_if_empty: !parent_store.is_null(),
             resolution_context: &raw const resolution_context,
-            finalization_environment: std::ptr::null(),
+            finalization_environment: &raw const finalization_environment,
             finalization_color_scheme: registered.as_ref().map_or(0, |registered| registered.color_scheme),
         };
         // SAFETY: Every pointer the drive reads is live for the call, and the finalizer replaces
         // each output with one transferred reference.
         let resolved = unsafe { drive_custom_property_resolution(&drive) };
+        drop(random_values);
         // The resolved values live in the store; the listing transfers references of its own.
         let properties = match resolved.count {
             0 => &[],
@@ -779,7 +821,7 @@ impl RetainedState {
             }
         };
         let written_values = cascaded.into_iter().map(|(_, written)| written).collect();
-        if !keeps_cpp_environment {
+        if !keeps_cpp_environment && random_sources.is_empty() {
             self.custom_property_environments
                 .remember(key, identity, written_values);
         }
