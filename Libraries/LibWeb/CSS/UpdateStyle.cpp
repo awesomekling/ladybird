@@ -9,6 +9,7 @@
 #include <AK/ScopeGuard.h>
 #include <LibGC/RootVector.h>
 #include <LibWeb/Animations/Animation.h>
+#include <LibWeb/Animations/AnimationEffect.h>
 #include <LibWeb/Animations/KeyframeEffect.h>
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
@@ -200,6 +201,16 @@ static bool element_style_depends_on_more_than_the_inherited_groups(DOM::Element
             return true;
     }
     return false;
+}
+
+static void sample_animations_for_installed_record(DOM::AbstractElement abstract_element)
+{
+    auto record = abstract_element.style_record_identity();
+    if (!record)
+        return;
+    auto& style_computer = abstract_element.document().style_computer();
+    Animations::AnimationUpdateContext context;
+    context.elements.set(abstract_element, Animations::AnimationUpdateContext::ElementData { record, style_computer.reconstruct_computed_properties_for_animation(record) });
 }
 
 // Whether the custom-property environment an engine-computed record was published with can be
@@ -614,20 +625,12 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
         u32 style_groups;
     };
     Vector<ExplicitInheritanceEffectRow> explicit_inheritance_effect_rows;
-    struct AnimationEffectRow {
-        StyleNodeID style_node;
-        StyleComputer::SettledAnimationPlan plan;
-    };
-    Vector<AnimationEffectRow> animation_effect_rows;
     struct DeferredRecordVerification {
         StyleNodeID style_node;
         StyleRecordID reference_record;
         Optional<String> reference_font;
     };
     Vector<DeferredRecordVerification> deferred_record_verifications;
-    // The elements whose record the engine derived beneath what their animations composed: the
-    // composition is sampled again over the new record once the batch is installed.
-    Vector<StyleNodeID> animation_sample_rows;
     for (auto const& reaction : reactions) {
         auto element = document.style_computer().element_for_style_node(reaction.style_node);
         if (!element || (!element->is_svg_element() && !element->has_associated_animations()))
@@ -952,8 +955,22 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     StyleEngineFFI::style_engine_native_container_effects_release(StyleEngineFFI::style_engine_take_container_effects(document.style_computer().style_engine().rust_handle(), reaction.style_node).effects);
                     invalidation = element->apply_style_engine_reaction(did_change_custom_properties);
                 } else {
-                    bool const defer_final_comparison = row_effect_debt & (StyleEngine::SettledRowTransitionDebt | StyleEngine::SettledRowOwesAnAnimationSample);
+                    bool const defer_final_comparison = element->has_relevant_animations()
+                        || row_effect_debt & (StyleEngine::SettledRowTransitionDebt | StyleEngine::SettledRowOwesAnAnimationSample);
                     apply_engine_computed_records(pseudo_element_records, true, defer_final_comparison);
+                    DOM::AbstractElement settled { *element };
+                    if (animation_plan.has_value())
+                        document.style_computer().apply_settled_animation_plan(settled, *animation_plan);
+                    if (settled.has_style() && (element->has_relevant_animations() || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
+                        sample_animations_for_installed_record(settled);
+                    if (element->has_relevant_animations()) {
+                        for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
+                            if (pseudo_element_records[kind].has_value())
+                                sample_animations_for_installed_record(DOM::AbstractElement { *element, static_cast<PseudoElement>(kind) });
+                        }
+                    }
+                    document.style_computer().style_engine().set_sampled_composition_identity(
+                        StyleNodeID { reaction.style_node }, element->style_record_identity());
                     // Under verification the reference computation ran the step too, and then
                     // the engine record replaced what it published: the drain decides again,
                     // which the stabilization epoch is built to take, and publishes what it starts.
@@ -975,12 +992,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                             }
                         }
                     }
+                    if (transition_debt != 0)
+                        document.style_computer().style_engine().set_sampled_composition_identity(
+                            StyleNodeID { reaction.style_node }, element->style_record_identity());
                     if (explicit_inheritance_debt != 0)
                         explicit_inheritance_effect_rows.append({ StyleNodeID { reaction.style_node }, explicit_inheritance_debt });
-                    if (animation_plan.has_value())
-                        animation_effect_rows.append({ StyleNodeID { reaction.style_node }, animation_plan.release_value() });
-                    if (row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample)
-                        animation_sample_rows.append(StyleNodeID { reaction.style_node });
                 }
             } else if (needs_regular_style_recompute || needs_inherited_style_recompute || needs_full_custom_property_recompute) {
                 if (needs_regular_style_recompute)
@@ -1064,39 +1080,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
         if (auto* parent = element->parent())
             parent->add_children_explicitly_inherited_non_inherited_style_groups(row.style_groups == NumericLimits<u32>::max() ? ComputedValues::all_style_groups : row.style_groups);
     }
-    for (auto style_node : animation_sample_rows) {
-        auto element = document.style_computer().element_for_style_node(style_node);
-        if (!element || !element->is_connected() || &element->document() != &document)
-            continue;
-        // The record the row installed is the style beneath the element's animations. Asking for
-        // each of its effects to be sampled again composes them over that record, which is what the
-        // computation this row replaced did inside itself.
-        auto animations = element->get_animations_internal(
-            Animations::Animatable::GetAnimationsSorted::No,
-            Animations::Animatable::GetAnimationsOptions { .subtree = false, .pseudo_element = {} });
-        if (animations.is_exception())
-            continue;
-        for (auto& animation : animations.value()) {
-            if (auto effect = animation->effect(); effect && effect->is_keyframe_effect())
-                document.set_needs_animated_style_update(static_cast<Animations::KeyframeEffect&>(*effect));
-        }
-    }
-    for (auto const& row : animation_effect_rows) {
-        auto element = document.style_computer().element_for_style_node(row.style_node);
-        if (!element || !element->is_connected() || &element->document() != &document)
-            continue;
-        DOM::AbstractElement abstract_element { *element };
-        if (!abstract_element.has_style())
-            continue;
-        document.style_computer().apply_settled_animation_plan(abstract_element, row.plan);
-    }
-    // The animations the plans started are this pass's to sample: an animation composes into the
-    // style its element publishes, and what that publication means for the element's descendants
-    // is the next transaction of this same style update, which the reaction loop around this
-    // batch takes.
-    if (!animation_effect_rows.is_empty() || !animation_sample_rows.is_empty())
-        document.sample_animation_effects_needing_style_update();
-
     for (auto const& row : deferred_record_verifications) {
         auto element = document.style_computer().element_for_style_node(row.style_node);
         if (element && element->has_style()) {

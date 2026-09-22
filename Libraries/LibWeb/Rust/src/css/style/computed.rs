@@ -382,6 +382,7 @@ struct PublishedComputedColumns {
     custom_properties: Vec<u32>,
     fixed_metadata: Vec<u32>,
     animation_overlay_slots: Vec<u32>,
+    sampled_composition_identities: Vec<u64>,
     cascade_versions: Vec<u64>,
     cascade_states: Vec<u32>,
     flags: Vec<u8>,
@@ -421,6 +422,7 @@ impl PublishedComputedColumns {
         self.custom_properties.resize(len, 0);
         self.fixed_metadata.resize(len, 0);
         self.animation_overlay_slots.resize(len, 0);
+        self.sampled_composition_identities.resize(len, 0);
         self.cascade_versions.resize(len, 0);
         self.cascade_states.resize(len, 0);
         self.flags.resize(len, 0);
@@ -2977,6 +2979,24 @@ impl ComputedGroupSets {
                 .assigned_style_record(node)
                 .and_then(|record| self.style_record_view(record.raw()))
                 .is_some_and(|view| !view.animated_overlay.is_null())
+    }
+
+    pub(super) fn set_sampled_composition_identity(&mut self, node: StyleNodeID, record: u64) {
+        let Some(index) = node.element_index().map(|index| index as usize) else {
+            return;
+        };
+        self.columns.ensure(index);
+        self.columns.sampled_composition_identities[index] = record;
+    }
+
+    pub(super) fn sampled_composition_identity(&self, node: StyleNodeID) -> Option<u64> {
+        let index = node.element_index()? as usize;
+        let identity = *self.columns.sampled_composition_identities.get(index)?;
+        (identity != 0
+            && self
+                .assigned_style_record(node)
+                .is_some_and(|record| record.raw() == identity))
+        .then_some(identity)
     }
 
     pub(super) fn node_inherited_group_swap_eligible(&self, node: StyleNodeID) -> bool {

@@ -415,7 +415,12 @@ impl RetainedState {
         };
         let parent_view = match parent {
             Some(parent) => {
-                let Some(parent_record) = self.computed_group_sets.assigned_style_record(parent) else {
+                let Some(parent_record) = self
+                    .computed_group_sets
+                    .sampled_composition_identity(parent)
+                    .and_then(computed::FinalStyleRecordID::from_raw)
+                    .or_else(|| self.computed_group_sets.assigned_style_record(parent))
+                else {
                     counters.bump(Counter::EngineComputedRecordBailRecordParent);
                     return None;
                 };

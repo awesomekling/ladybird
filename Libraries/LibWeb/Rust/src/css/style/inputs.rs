@@ -197,6 +197,10 @@ impl RetainedState {
         self.font_resolution.as_ref()?.lookup(request)
     }
 
+    pub fn set_sampled_composition_identity(&mut self, node: StyleNodeID, record: u64) {
+        self.computed_group_sets.set_sampled_composition_identity(node, record);
+    }
+
     /// Refresh the container-query projection at the computed-record publication funnel. The
     /// projection owns the name spellings, so a sealed evaluator never has to follow an AK string
     /// or a computed-group payload.
