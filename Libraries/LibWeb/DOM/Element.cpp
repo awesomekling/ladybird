@@ -1796,7 +1796,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
                 set_computed_style(pseudo_element, style_record_delta.new_style_record);
             // What C++ installs beside a pseudo-element it computes: its element's inheritable
             // environment, or the one its own custom declarations resolved to over that.
-            if (settled_after_host_record && engine_record.has_value()) {
+            if (engine_record.has_value()) {
                 auto element_data = custom_property_data({});
                 auto inherited = element_data ? element_data->inheritable(document()) : nullptr;
                 auto environment = style_computer.style_engine().style_record_custom_property_environment(*engine_record);

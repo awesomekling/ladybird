@@ -16,7 +16,10 @@ impl RetainedState {
         record: Option<computed::FinalStyleRecordID>,
         counters: &mut Counters,
     ) -> bool {
-        self.pseudo_inputs_available(node, record, false, counters)
+        // A shadow tree's pseudo rows are all stale, their rules deciding from its scope; there the
+        // stale marker row is kept as the reason to leave the element's own record to C++.
+        let tolerates_unused_marker_row = self.tree.tree_scope(node) == TreeScopeID::DOCUMENT;
+        self.pseudo_inputs_available(node, record, tolerates_unused_marker_row, counters)
     }
 
     /// `tolerates_unused_marker_row` lets the stale marker row of an element that is no list item
@@ -381,9 +384,11 @@ impl RetainedState {
                     .computed_group_sets
                     .cascade_state(target)
                     .or_else(|| self.computed_group_sets.pseudo_retained_cascade_state(node, kind));
+                // Custom declarations resolve against registrations that move without the state.
                 let unchanged = match (state, bound) {
                     (Some(state), Some((bound_generation, bound_state))) => {
                         bound_generation == generation
+                            && self.winner_groups.custom_declarations_of(state) == Default::default()
                             && self.winner_groups.states_are_semantically_equal(bound_state, state)
                     }
                     (None, None) => true,
