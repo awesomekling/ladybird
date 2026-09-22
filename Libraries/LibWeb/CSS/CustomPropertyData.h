@@ -13,6 +13,7 @@
 #include <AK/RefCounted.h>
 #include <AK/RefPtr.h>
 #include <AK/Types.h>
+#include <LibWeb/CSS/PseudoElement.h>
 #include <LibWeb/CSS/StyleEngineIdentifiers.h>
 #include <LibWeb/CSS/StyleProperty.h>
 #include <LibWeb/Export.h>
@@ -34,10 +35,10 @@ public:
         u64 identity = 0);
     static NonnullRefPtr<CustomPropertyData> create_animation_overlay(
         OrderedHashMap<Utf16FlyString, StyleProperty> animated_values,
-        RefPtr<CustomPropertyData const> base);
+        RefPtr<CustomPropertyData const> base, DOM::AbstractElement const& owner);
     ~CustomPropertyData();
 
-    bool is_animation_overlay() const { return m_is_animation_overlay; }
+    bool is_animation_overlay_for(DOM::AbstractElement const&) const;
 
     StyleProperty const* get(Utf16FlyString const& name) const;
     RefPtr<CustomPropertyData const> inheritable_impl(RefPtr<CustomPropertyData const> inheritable_parent, AK::Function<Optional<CustomPropertyRegistration const&>(Utf16FlyString const&)> get_custom_property_registration) const;
@@ -111,7 +112,8 @@ private:
     mutable size_t m_cached_inheritable_generation { NumericLimits<size_t>::max() };
     mutable RefPtr<CustomPropertyData const> m_cached_inheritable_data;
     mutable bool m_cached_inheritable_is_self { false };
-    bool m_is_animation_overlay { false };
+    Optional<UniqueNodeID> m_animation_owner;
+    Optional<PseudoElement> m_animation_pseudo_element;
     void const* m_rust_store { nullptr };
 };
 

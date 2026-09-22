@@ -2448,7 +2448,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     CSS::StyleComputer::ComputedStyleInvalidation result;
     if (new_style_record != old_style_record) {
         auto current_environment = custom_property_data({});
-        if (current_environment && current_environment->is_animation_overlay())
+        if (current_environment && current_environment->is_animation_overlay_for({ *this }))
             current_environment = current_environment->parent();
         auto const current_identity = current_environment ? current_environment->identity() : 0;
         if (current_identity != style_computer.style_engine().style_record_custom_property_environment(new_style_record)) {
@@ -5587,14 +5587,14 @@ SyntheticPseudoElement& Element::ensure_synthetic_pseudo_element(CSS::PseudoElem
 
 void Element::set_custom_property_data(Optional<CSS::PseudoElement> pseudo_element, RefPtr<CSS::CustomPropertyData const> data)
 {
-    if (!data || !data->is_animation_overlay()) {
-        if (auto current = custom_property_data(pseudo_element); current && current->is_animation_overlay()) {
+    if (!data || !data->is_animation_overlay_for({ *this, pseudo_element })) {
+        if (auto current = custom_property_data(pseudo_element); current && current->is_animation_overlay_for({ *this, pseudo_element })) {
             if (current->parent() == data)
                 return;
             OrderedHashMap<Utf16FlyString, CSS::StyleProperty> animated_values;
             for (auto const& [name, property] : current->own_values())
                 animated_values.set(name, property);
-            data = CSS::CustomPropertyData::create_animation_overlay(move(animated_values), move(data));
+            data = CSS::CustomPropertyData::create_animation_overlay(move(animated_values), move(data), { *this, pseudo_element });
         }
     }
     install_custom_property_data(pseudo_element, move(data));
@@ -5670,13 +5670,13 @@ bool Element::refresh_inherited_custom_property_data()
             parent_data = data->inheritable(document());
     }
 
-    if (m_custom_property_data && m_custom_property_data->is_animation_overlay()) {
+    if (m_custom_property_data && m_custom_property_data->is_animation_overlay_for({ *this })) {
         if (m_custom_property_data->parent() == parent_data)
             return false;
         OrderedHashMap<Utf16FlyString, CSS::StyleProperty> animated_values;
         for (auto const& [name, property] : m_custom_property_data->own_values())
             animated_values.set(name, property);
-        m_custom_property_data = CSS::CustomPropertyData::create_animation_overlay(move(animated_values), move(parent_data));
+        m_custom_property_data = CSS::CustomPropertyData::create_animation_overlay(move(animated_values), move(parent_data), { *this });
         publish_custom_property_data_to_style_engine();
         return true;
     }
@@ -5693,7 +5693,7 @@ void Element::republish_style_record_environment()
     if (!has_style() || style_node_id() == 0)
         return;
     auto data = custom_property_data({});
-    if (data && data->is_animation_overlay())
+    if (data && data->is_animation_overlay_for({ *this }))
         data = data->parent();
     auto new_style_record = document().style_computer().style_engine().republish_record_environment(style_node_id(), data ? data->identity() : 0, data ? data->rust_store() : nullptr);
     if (!!new_style_record && new_style_record != style_record_identity())

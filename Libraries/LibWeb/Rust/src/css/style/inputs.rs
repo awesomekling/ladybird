@@ -146,6 +146,7 @@ impl RetainedState {
         node: StyleNodeID,
         data: *const std::ffi::c_void,
         store: *const std::ffi::c_void,
+        environment: u64,
     ) {
         if data.is_null() {
             self.element_custom_property_data.insert(node, None);
@@ -155,6 +156,10 @@ impl RetainedState {
             && existing.data() == data
         {
             return;
+        }
+        if environment != 0 {
+            self.computed_group_sets
+                .set_node_custom_property_environment(node, environment);
         }
         self.element_custom_property_data
             .insert(node, Some(unsafe { RetainedCustomPropertyData::retain(data, store) }));

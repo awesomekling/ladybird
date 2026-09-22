@@ -905,7 +905,7 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
     };
     auto base_custom_property_data = [&]() -> RefPtr<CustomPropertyData const> {
         auto data = abstract_element.custom_property_data();
-        if (data && data->is_animation_overlay())
+        if (data && data->is_animation_overlay_for(abstract_element))
             return data->parent();
         return data;
     }();
@@ -1457,7 +1457,7 @@ bool StyleComputer::publish_animated_custom_properties(ComputedStyleWorkingSet& 
 {
     auto data = abstract_element.custom_property_data();
     RefPtr<CustomPropertyData const> base = data;
-    if (data && data->is_animation_overlay())
+    if (data && data->is_animation_overlay_for(abstract_element))
         base = data->parent();
 
     auto const& animated_values = computed_properties.animated_custom_properties();
@@ -1469,7 +1469,7 @@ bool StyleComputer::publish_animated_custom_properties(ComputedStyleWorkingSet& 
         return true;
     }
 
-    if (data && data->is_animation_overlay() && data->own_values().size() == animated_values.size()) {
+    if (data && data->is_animation_overlay_for(abstract_element) && data->own_values().size() == animated_values.size()) {
         bool values_unchanged = true;
         for (auto const& [name, value] : animated_values) {
             auto existing = data->own_values().find(name);
@@ -1491,7 +1491,7 @@ bool StyleComputer::publish_animated_custom_properties(ComputedStyleWorkingSet& 
                 .value = value,
             });
     }
-    abstract_element.replace_custom_property_data(Badge<StyleComputer> {}, CustomPropertyData::create_animation_overlay(move(overlay_values), move(base)));
+    abstract_element.replace_custom_property_data(Badge<StyleComputer> {}, CustomPropertyData::create_animation_overlay(move(overlay_values), move(base), abstract_element));
     invalidate_animated_custom_property_readers(abstract_element, animated_values);
     return true;
 }
@@ -3496,7 +3496,7 @@ NonnullRefPtr<CascadedProperties> StyleComputer::compute_cascaded_values(DOM::Ab
     auto& document = bulk_context.abstract_element.document();
     SubstitutionData substitution_data { abstract_element, has_unresolved_declarations, has_custom_function_declarations };
     auto current_custom_property_data = abstract_element.custom_property_data();
-    bool current_custom_property_data_is_animation_overlay = current_custom_property_data && current_custom_property_data->is_animation_overlay();
+    bool current_custom_property_data_is_animation_overlay = current_custom_property_data && current_custom_property_data->is_animation_overlay_for(abstract_element);
     auto current_custom_property_base = current_custom_property_data_is_animation_overlay
         ? current_custom_property_data->parent()
         : nullptr;
@@ -4042,8 +4042,8 @@ static void report_custom_property_change(DOM::AbstractElement abstract_element,
         return;
     // An animation overlay holds only the animated values. A move of the environment under it
     // reaches the descendants whether or not those values moved too.
-    auto environment_under_overlay = [](CustomPropertyData const* data) -> CustomPropertyData const* {
-        if (data && data->is_animation_overlay())
+    auto environment_under_overlay = [&](CustomPropertyData const* data) -> CustomPropertyData const* {
+        if (data && data->is_animation_overlay_for(abstract_element))
             return data->parent().ptr();
         return data;
     };
@@ -4061,8 +4061,8 @@ static void report_custom_property_change(DOM::AbstractElement abstract_element,
             return;
         }
     }
-    bool const old_is_overlay = old_custom_property_data && old_custom_property_data->is_animation_overlay();
-    bool const new_is_overlay = new_custom_property_data && new_custom_property_data->is_animation_overlay();
+    bool const old_is_overlay = old_custom_property_data && old_custom_property_data->is_animation_overlay_for(abstract_element);
+    bool const new_is_overlay = new_custom_property_data && new_custom_property_data->is_animation_overlay_for(abstract_element);
     if (!old_is_overlay && !new_is_overlay)
         return;
     if (custom_property_own_values_differ(old_is_overlay ? old_custom_property_data.ptr() : nullptr, new_is_overlay ? new_custom_property_data.ptr() : nullptr))
@@ -5172,7 +5172,7 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
                     && !previous->style_uses_if_css_function
                     && !previous->style_uses_inherit_css_function
                     && !previous->style_uses_custom_function
-                    && !(existing_data && existing_data->is_animation_overlay())
+                    && !(existing_data && existing_data->is_animation_overlay_for(abstract_element))
                     && !environment_move_reaches_cascades(old_parent_data, new_parent_data);
                 if (!move_is_invisible) {
                     counters.element_style_input_changed_by_parent_custom_properties++;
@@ -5211,7 +5211,7 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
                 auto existing_data = abstract_element.custom_property_data();
                 auto new_parent_data = inheritable_custom_property_data(*inheritance_parent);
                 if (existing_data.ptr() != new_parent_data.ptr()) {
-                    if ((existing_data && existing_data->is_animation_overlay())
+                    if ((existing_data && existing_data->is_animation_overlay_for(abstract_element))
                         || environment_move_reaches_cascades(existing_data.ptr(), new_parent_data.ptr())) {
                         style_input_is_unchanged = false;
                     } else {
@@ -5366,7 +5366,7 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
             return false;
         if (new_style_input_record->explicitly_inherited_non_inherited_style_groups != 0)
             return false;
-        if (auto data = abstract_element.custom_property_data(); data && data->is_animation_overlay())
+        if (auto data = abstract_element.custom_property_data(); data && data->is_animation_overlay_for(abstract_element))
             return false;
         if (parent_custom_property_environment_moved && !install_moved_custom_property_environment())
             return false;
@@ -5383,7 +5383,7 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
     auto find_shared_style = [&]() {
         if (!sharing || !sharing->may_reuse_or_publish_shared_style)
             return false;
-        if (auto data = abstract_element.custom_property_data(); data && data->is_animation_overlay())
+        if (auto data = abstract_element.custom_property_data(); data && data->is_animation_overlay_for(abstract_element))
             return false;
         auto key_hash = sharing->key.hash();
         auto bucket = m_style_sharing_cache.get(key_hash);
@@ -5974,7 +5974,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     }
     auto inheritance_parent = abstract_element.element_to_inherit_style_from();
     auto custom_property_data = abstract_element.custom_property_data();
-    if (custom_property_data && custom_property_data->is_animation_overlay())
+    if (custom_property_data && custom_property_data->is_animation_overlay_for(abstract_element))
         custom_property_data = custom_property_data->parent();
     struct CustomPropertyResolutionState {
         AK_ALLOC_WITH_KMALLOC;
@@ -6664,9 +6664,9 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         // are handed over here rather than with the transaction's other inputs, which were taken
         // before the cascade resolved anything.
         auto base_custom_property_data = abstract_element.custom_property_data();
-        if (base_custom_property_data && base_custom_property_data->is_animation_overlay())
-            base_custom_property_data = base_custom_property_data->parent();
         auto inherit_from = abstract_element.element_to_inherit_style_from();
+        if (base_custom_property_data && base_custom_property_data->is_animation_overlay_for(abstract_element))
+            base_custom_property_data = base_custom_property_data->parent();
         RefPtr<CustomPropertyData const> inheritance_custom_property_data;
         if (inherit_from.has_value())
             inheritance_custom_property_data = inherit_from->custom_property_data();
@@ -6912,7 +6912,7 @@ NonnullRefPtr<StyleValue const> StyleComputer::compute_value_of_custom_property(
         if (declared_value_source == DeclaredValueSource::PublishedEnvironment)
             return element.get_custom_property(name);
         auto data = element.custom_property_data();
-        if (data && data->is_animation_overlay())
+        if (data && data->is_animation_overlay_for(element.abstract_element()))
             data = data->parent();
         if (!data)
             return nullptr;

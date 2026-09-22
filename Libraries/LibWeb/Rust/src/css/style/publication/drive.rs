@@ -135,15 +135,10 @@ impl RetainedState {
             None => None,
             Some(parent) => match self.computed_group_sets.assigned_style_record(parent) {
                 Some(record) => {
-                    let parent_has_animation_overlay = self
-                        .computed_group_sets
-                        .style_record_view(record.raw())
-                        .is_some_and(|view| !view.animated_overlay.is_null());
-                    if parent_has_animation_overlay {
-                        counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-                        return None;
-                    }
-                    Some(parent_snapshot_for_style_record(self, record.raw(), None))
+                    let view = self.computed_group_sets.style_record_view(record.raw())?;
+                    Some(parent_snapshot_for_style_record(self, record.raw(), unsafe {
+                        view.animated_overlay.as_ref()
+                    }))
                 }
                 None => {
                     counters.bump(Counter::EngineComputedRecordBailRecordParent);
@@ -428,10 +423,6 @@ impl RetainedState {
                     counters.bump(Counter::EngineComputedRecordBailRecordParent);
                     return None;
                 };
-                if !parent_view.animated_overlay.is_null() {
-                    counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-                    return None;
-                }
                 Some(parent_view)
             }
             None => None,

@@ -2,7 +2,7 @@ length at 25%: 17.5px
 length at 25% after recompute: 17.5px
 length at 60%: 28.000001px
 length at 60% after recompute: 28.000001px
-inheriting child: 25px 10px
+inheriting child: 25px 25px
 non-inherited parent: 25px
 non-inherited parent after recompute: 25px
 non-inherited child: 7px 7px

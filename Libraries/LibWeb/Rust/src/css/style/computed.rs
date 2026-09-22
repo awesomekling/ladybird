@@ -2761,6 +2761,19 @@ impl ComputedGroupSets {
             .is_some_and(|record| self.style_record_generation_is_live(record, final_style_record.base_generation()))
     }
 
+    /// Publish the sampled custom-property environment independently of the base record.
+    /// Animation samples replace the element's environment without recomputing that record.
+    pub(crate) fn set_node_custom_property_environment(&mut self, node: StyleNodeID, environment: u64) {
+        let Some(index) = node.element_index().map(|index| index as usize) else {
+            return;
+        };
+        if self.columns.custom_properties(index).is_none() {
+            return;
+        }
+        let identity = self.intern_custom_property_environment(environment).0;
+        self.columns.custom_properties[index] = identity.0;
+    }
+
     /// The raw custom-property environment identity behind a node's record.
     pub fn custom_property_environment_identity(&self, node: StyleNodeID) -> Option<u64> {
         let index = node.element_index()? as usize;

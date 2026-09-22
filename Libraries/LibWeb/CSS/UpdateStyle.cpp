@@ -306,7 +306,7 @@ static void verify_engine_computed_record_environment(DOM::Element& element, Sty
     if (!StyleEngine::is_engine_custom_property_environment(identity))
         return;
     auto actual = element.custom_property_data({});
-    if (actual && actual->is_animation_overlay())
+    if (actual && actual->is_animation_overlay_for({ element }))
         actual = actual->parent();
     // The reference computation materializes an environment only where something asks it to, and
     // an element that merely inherits one is left holding nothing. That is not an empty
@@ -340,9 +340,9 @@ static void verify_engine_computed_record_environment(DOM::Element& element, Sty
         actual->for_each_property([&](Utf16FlyString const& name, StyleProperty const&) { check(name); });
 }
 
-static RefPtr<CustomPropertyData const> custom_property_environment_base(RefPtr<CustomPropertyData const> data)
+static RefPtr<CustomPropertyData const> custom_property_environment_base(DOM::Element& element, RefPtr<CustomPropertyData const> data)
 {
-    if (data && data->is_animation_overlay())
+    if (data && data->is_animation_overlay_for({ element }))
         return data->parent();
     return data;
 }
@@ -495,16 +495,16 @@ private:
         if (!element.has_style())
             return;
         auto new_parent_inheritable = [&]() -> RefPtr<CustomPropertyData const> {
-            auto data = custom_property_environment_base(parent.custom_property_data({}));
+            auto data = custom_property_environment_base(parent, parent.custom_property_data({}));
             return data ? data->inheritable(m_document) : nullptr;
         }();
         auto old_parent_inheritable = [&]() -> RefPtr<CustomPropertyData const> {
-            auto data = custom_property_environment_base(old_parent_data);
+            auto data = custom_property_environment_base(parent, old_parent_data);
             return data ? data->inheritable(m_document) : nullptr;
         }();
         auto existing = element.custom_property_data({});
-        bool const has_animation_overlay = existing && existing->is_animation_overlay();
-        auto existing_base = custom_property_environment_base(existing);
+        bool const has_animation_overlay = existing && existing->is_animation_overlay_for({ element });
+        auto existing_base = custom_property_environment_base(element, existing);
         auto move_pseudo_element_environments = [&](RefPtr<CustomPropertyData const> const& moved) {
             auto existing_inheritable = existing_base ? existing_base->inheritable(m_document) : nullptr;
             auto moved_inheritable = moved ? moved->inheritable(m_document) : nullptr;
@@ -576,8 +576,8 @@ static void propagate_custom_property_environment_move(DOM::Document& document, 
     // Nothing inherits from an element with nothing below it in the flat tree.
     if (!origin.first_element_child() && !origin.shadow_root() && !is<HTML::HTMLSlotElement>(origin))
         return;
-    auto old_origin_base = custom_property_environment_base(move(old_origin_data));
-    auto new_origin_base = custom_property_environment_base(origin.custom_property_data({}));
+    auto old_origin_base = custom_property_environment_base(origin, move(old_origin_data));
+    auto new_origin_base = custom_property_environment_base(origin, origin.custom_property_data({}));
     CustomPropertyEnvironmentMove walk { document, changed_custom_property_names, old_origin_base.ptr(), new_origin_base.ptr() };
     walk.visit_children(origin, old_origin_base);
 }
@@ -761,7 +761,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 auto& style_engine = document.style_computer().style_engine();
                 if (verify_engine_computed_records) {
                     auto authoritative_custom_property_data = element->custom_property_data({});
-                    if (authoritative_custom_property_data && authoritative_custom_property_data->is_animation_overlay())
+                    if (authoritative_custom_property_data && authoritative_custom_property_data->is_animation_overlay_for({ *element }))
                         authoritative_custom_property_data = authoritative_custom_property_data->parent();
                     auto const authoritative_custom_property_environment = authoritative_custom_property_data
                         ? authoritative_custom_property_data->identity()
