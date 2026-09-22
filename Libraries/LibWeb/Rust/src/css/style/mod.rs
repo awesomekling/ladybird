@@ -914,6 +914,9 @@ pub struct RetainedState {
     /// with that union so a later change to those groups reaches this element again. It is an
     /// effect of the row rather than a part of the record: the host drains it after the batch.
     nodes_owing_explicit_inheritance: HashMap<StyleNodeID, u32>,
+    /// The nodes whose record the engine derived beneath a composition their animations made: the
+    /// host samples those animations again over the new record once the batch is applied.
+    nodes_owing_an_animation_sample: HashSet<StyleNodeID>,
     /// The nodes whose engine-computed record moved the longhands that declare the element's CSS
     /// animations, and the plan each one leaves for the host. Like the transition debt it is an
     /// effect of the row rather than a part of the record: the host drains it after the batch, in

@@ -11,6 +11,8 @@
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/Invalidation/SlotInvalidator.h>
+#include <LibWeb/Animations/Animation.h>
+#include <LibWeb/Animations/KeyframeEffect.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleInputRecord.h>
@@ -610,6 +612,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
         StyleComputer::SettledAnimationPlan plan;
     };
     Vector<AnimationEffectRow> animation_effect_rows;
+    // The elements whose record the engine derived beneath what their animations composed: the
+    // composition is sampled again over the new record once the batch is installed.
+    Vector<StyleNodeID> animation_sample_rows;
     for (auto const& reaction : reactions) {
         auto element = document.style_computer().element_for_style_node(reaction.style_node);
         if (!element || (!element->is_svg_element() && !element->has_associated_animations()))
@@ -909,6 +914,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         explicit_inheritance_effect_rows.append({ StyleNodeID { reaction.style_node }, explicit_inheritance_debt });
                     if (animation_plan.has_value())
                         animation_effect_rows.append({ StyleNodeID { reaction.style_node }, animation_plan.release_value() });
+                    if (row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample)
+                        animation_sample_rows.append(StyleNodeID { reaction.style_node });
                 }
             } else if (needs_regular_style_recompute || needs_inherited_style_recompute || needs_full_custom_property_recompute) {
                 if (needs_regular_style_recompute)
@@ -1009,6 +1016,23 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             transaction_invalidation |= invalidation;
         }
     }
+    for (auto style_node : animation_sample_rows) {
+        auto element = document.style_computer().element_for_style_node(style_node);
+        if (!element || !element->is_connected() || &element->document() != &document)
+            continue;
+        // The record the row installed is the style beneath the element's animations. Asking for
+        // each of its effects to be sampled again composes them over that record, which is what the
+        // computation this row replaced did inside itself.
+        auto animations = element->get_animations_internal(
+            Animations::Animatable::GetAnimationsSorted::No,
+            Animations::Animatable::GetAnimationsOptions { .subtree = false, .pseudo_element = {} });
+        if (animations.is_exception())
+            continue;
+        for (auto& animation : animations.value()) {
+            if (auto effect = animation->effect(); effect && effect->is_keyframe_effect())
+                document.set_needs_animated_style_update(static_cast<Animations::KeyframeEffect&>(*effect));
+        }
+    }
     for (auto const& row : animation_effect_rows) {
         auto element = document.style_computer().element_for_style_node(row.style_node);
         if (!element || !element->is_connected() || &element->document() != &document)
@@ -1022,7 +1046,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
     // style its element publishes, and what that publication means for the element's descendants
     // is the next transaction of this same style update, which the reaction loop around this
     // batch takes.
-    if (!animation_effect_rows.is_empty())
+    if (!animation_effect_rows.is_empty() || !animation_sample_rows.is_empty())
         document.sample_animation_effects_needing_style_update();
 
     return transaction_invalidation;

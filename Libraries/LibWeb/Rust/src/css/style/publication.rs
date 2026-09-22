@@ -869,7 +869,25 @@ impl RetainedState {
             }
         }
         // Past the record that stands, every route derives another one from the record the element
-        // holds, and the values its animations composed are in that record.
+        // holds. The values its animations composed are in that record, so deriving one is only
+        // honest where the delta moves nothing those animations write: the base beneath them moves,
+        // the composition over it does not, and the host samples it again over the new base once
+        // the batch is applied.
+        let overlay_animates_a_moved_property = self
+            .computed_group_sets
+            .style_record_view(old_style_record.raw())
+            .and_then(|view| unsafe { view.animated_overlay.as_ref() })
+            .is_some_and(|overlay| {
+                overlay
+                    .entries()
+                    .iter()
+                    .any(|entry| delta.properties().contains(&entry.property))
+            });
+        let derived_beneath_a_composition = animations_bind_the_record
+            && !overlay_animates_a_moved_property
+            && self.computed_group_sets.node_has_animation_overlay(node)
+            && !self.css_defined_animations.node_runs_a_css_animation(node);
+        let animations_bind_the_record = animations_bind_the_record && !derived_beneath_a_composition;
         if animations_bind_the_record {
             counters.bump(Counter::EngineComputedRecordBailWinnerElement);
             return None;
@@ -1235,6 +1253,9 @@ impl RetainedState {
         if let Some(plan) = animation_plan {
             self.nodes_owing_animation_definitions.insert(node, plan);
         }
+        if derived_beneath_a_composition {
+            self.nodes_owing_an_animation_sample.insert(node);
+        }
         Some(delta)
     }
 
@@ -1302,10 +1323,15 @@ impl RetainedState {
             Some(false) => 2,
             None => 0,
         };
-        match self.nodes_owing_animation_definitions.contains_key(&node) {
-            true => transition | OWES_AN_ANIMATION_PLAN,
-            false => transition,
-        }
+        let plan = match self.nodes_owing_animation_definitions.contains_key(&node) {
+            true => OWES_AN_ANIMATION_PLAN,
+            false => 0,
+        };
+        let sample = match self.nodes_owing_an_animation_sample.remove(&node) {
+            true => OWES_AN_ANIMATION_SAMPLE,
+            false => 0,
+        };
+        transition | plan | sample
     }
 
     pub(crate) fn republish_record_environment(&mut self, node: StyleNodeID, environment: u64) -> Option<u64> {
@@ -5221,6 +5247,10 @@ fn longhand_only_declares_a_css_transition(property: u16) -> bool {
 
 /// In a settled row's effect debt: the row left an animation plan for the host to take.
 pub(crate) const OWES_AN_ANIMATION_PLAN: u8 = 1 << 2;
+
+/// In a settled row's effect debt: the row derived a record beneath the element's animations, so
+/// the host samples them again over it once the batch is applied.
+pub(crate) const OWES_AN_ANIMATION_SAMPLE: u8 = 1 << 3;
 
 /// Whether a longhand does nothing but declare one of the element's CSS animations, so that a delta
 /// carrying it owes the host the animation plan and nothing else.
