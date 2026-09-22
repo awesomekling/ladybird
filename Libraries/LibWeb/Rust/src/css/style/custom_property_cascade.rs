@@ -185,8 +185,7 @@ impl RetainedState {
 
     /// Whether the node's winner inventory is complete once custom properties are set aside: the
     /// engine computes an environment from those itself, and a rule declaring them is otherwise as
-    /// complete as any. A pseudo-element's rules keep the strict reading, since a pseudo-element's
-    /// environment is still C++'s to compute.
+    /// complete as any, for the element and for each of its pseudo-elements alike.
     pub(super) fn cascade_winners_are_complete_but_for_custom_properties(&self, node: StyleNodeID) -> bool {
         if !ElementDeclarationKind::ALL.iter().all(|&kind| {
             self.facts
@@ -196,13 +195,9 @@ impl RetainedState {
         }
         // A rule deciding from another tree scope orders by its context like any other; the
         // record path reads the winners the cascade holds for it, whichever scope it decided from.
-        let rule_is_complete = |rule: RuleID, _tree_scope: TreeScopeID, pseudo: bool| {
+        let rule_is_complete = |rule: RuleID, _tree_scope: TreeScopeID, _pseudo: bool| {
             !self.program.rule_is_gated_by_container_query(rule)
-                && if pseudo {
-                    self.program.declarations_are_complete_for(rule)
-                } else {
-                    self.program.declarations_are_complete_but_for_custom_properties(rule)
-                }
+                && self.program.declarations_are_complete_but_for_custom_properties(rule)
         };
         if let Some((published, answer)) = Self::published_answer_lookup(
             &self.published_match_answers,
