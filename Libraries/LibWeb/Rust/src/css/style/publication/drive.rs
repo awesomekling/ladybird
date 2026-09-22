@@ -258,6 +258,12 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailDriveTreeCounting);
             return None;
         }
+        // A value the drive could not absolutize with this context leaves the table half meant;
+        // the row is whoever can supply what the context lacked.
+        if results.unsupported_native_computation {
+            counters.bump(Counter::EngineComputedRecordBailDriveUnsupportedValue);
+            return None;
+        }
         // An `inherit` of a non-inherited property reads the half of the parent's style a child
         // normally cannot see. The value itself is computed here; what C++ does beside it is one
         // write on the parent, which the row leaves for the host to drain after the batch.
@@ -920,6 +926,12 @@ impl RetainedState {
         );
         if results.uses_tree_counting_function {
             counters.bump(Counter::EngineComputedRecordBailDriveTreeCounting);
+            return None;
+        }
+        // A value the drive could not absolutize with this context leaves the table half meant;
+        // the row is whoever can supply what the context lacked.
+        if results.unsupported_native_computation {
+            counters.bump(Counter::EngineComputedRecordBailDriveUnsupportedValue);
             return None;
         }
         // An `inherit` of a non-inherited property reads the half of the parent's style a child
