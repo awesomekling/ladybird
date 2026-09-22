@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    .hidden { display: none; }
+    #child { width: 40px; height: 20px; }
+    #grandchild { color: rgb(0, 128, 0); }
+</style>
+<div id="hidden-ancestor" class="hidden"><div id="child"><span id="grandchild">text</span></div></div>
+<script>
+    // An element whose ancestor leaves display:none had its style cleared on the way in. The engine
+    // computes its record again, and the element takes it: its box is there for a hit test.
+    test(() => {
+        internals.updateStyle();
+        const before = internals.getStyleInvalidationCounters().engineComputedStyleRecords;
+        document.getElementById("hidden-ancestor").classList.remove("hidden");
+        internals.updateStyle();
+        const computed = internals.getStyleInvalidationCounters().engineComputedStyleRecords - before;
+        println(`engine computed records: ${computed}`);
+        println(`grandchild color: ${getComputedStyle(grandchild).color}`);
+        const rect = child.getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.left + 1, rect.top + 1);
+        println(`hit test finds the child: ${hit === child || child.contains(hit)}`);
+    });
+</script>
