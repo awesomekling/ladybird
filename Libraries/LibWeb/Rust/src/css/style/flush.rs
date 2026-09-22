@@ -1032,24 +1032,6 @@ impl StyleEngineState {
         self.retained
             .memory
             .reserve_required(MemoryCategory::BatchScratch, direct_action_node_bytes);
-        // A pseudo-only action does not invalidate the originating element's style. Keep
-        // that shortcut only when the transaction contains no other changes: a selector,
-        // declaration, or environment edit may independently require its normal cascade.
-        let only_pseudo_inputs_changed = transaction.markers.is_empty()
-            && transaction.program_joins.is_empty()
-            && transaction.rule_declaration_changes.is_empty()
-            && transaction.inputs.iter().all(|input| {
-                matches!(
-                    (input.key, input.new),
-                    (
-                        InputKey::ElementStyleInput(_),
-                        InputValue::ElementStyleInput {
-                            reaction: transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED,
-                            inherited_style_groups: 0,
-                        }
-                    )
-                )
-            });
         let mut style_input_reactions: Vec<(StyleNodeID, u8, u8)> = transaction
             .inputs
             .iter()
@@ -1061,9 +1043,7 @@ impl StyleEngineState {
                         inherited_style_groups,
                     },
                 ) => {
-                    let reaction = if reaction == transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED
-                        && !only_pseudo_inputs_changed
-                    {
+                    let reaction = if reaction == transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED {
                         reaction | transaction::STYLE_REACTION_PUBLISHED_STYLE
                     } else {
                         reaction
@@ -2165,12 +2145,9 @@ impl StyleEngineState {
                     // any other, and installing it recomputes the highlight pseudo-elements the
                     // engine leaves to C++. That makes every reaction kind the engine's; what is
                     // left to C++ is decided by what the reaction rides with.
-                    // A transaction of pseudo-element inputs alone leaves the element's own record
-                    // to C++, which refreshes only its pseudo-elements, as does one that also moved
-                    // the document environment.
-                    let reaction_is_settleable = reaction != transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED
-                        && !(environment_changed
-                            && reaction & transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED != 0)
+                    // A document environment change still leaves a concurrent pseudo input to C++.
+                    let reaction_is_settleable = !(environment_changed
+                        && reaction & transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED != 0)
                         && !(reaction & DERIVABLE_REACTIONS != 0 && style_input_nodes_for_cpp.contains(&node));
                     let mut parent_inputs_moved =
                         parked_parent_inputs

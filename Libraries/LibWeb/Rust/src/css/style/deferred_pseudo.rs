@@ -13,14 +13,18 @@ impl StyleEngineState {
     pub fn set_pseudo_element_style_deferred(&mut self, kind: tree::PseudoElementKind, deferred: bool) {
         let previously_observable = std::mem::take(&mut self.retained.deferred_pseudo_element_observable_nodes);
         for node in previously_observable {
-            self.record_element_style_input(node, transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED, 0);
+            self.record_derived_element_style_input(
+                node,
+                transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED,
+                0,
+            );
         }
         self.retained.deferred_pseudo_element = deferred.then_some(kind);
         self.retained.latent_deferred_pseudo_element = Some(kind);
     }
 
     /// Make a node part of the current observability interval. The document records its
-    /// pseudo-element input through the ordinary ordered C++ input path immediately afterwards.
+    /// pseudo-element input through the ordinary ordered input path immediately afterwards.
     pub fn make_deferred_pseudo_element_style_observable(&mut self, node: StyleNodeID) {
         match self
             .retained
