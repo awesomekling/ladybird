@@ -1439,6 +1439,12 @@ static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_updat
 {
     auto& style_computer = element.document().style_computer();
 
+    if (element.parent()) {
+        StringView decline_cause;
+        if (auto invalidation = style_computer.answer_record_demand(element, did_change_custom_properties, decline_cause, {}, false, true); invalidation.has_value())
+            return *invalidation;
+    }
+
     style_computer.style_engine().consume_recorded_element_style_input_change(element.style_node_id());
 
     if (element.parent())

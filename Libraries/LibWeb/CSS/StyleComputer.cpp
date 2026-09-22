@@ -4159,6 +4159,13 @@ Optional<RequiredInvalidationAfterStyleChange> StyleComputer::answer_record_dema
     }
     decline_cause = {};
 
+    bool environment_is_installable = false;
+    (void)element.custom_property_environment_of_engine_record(StyleRecordID { answer.record.style_record }, environment_is_installable);
+    if (!environment_is_installable) {
+        decline_cause = "engineComputedRecordBailNoEnvironment"sv;
+        return {};
+    }
+
     DOM::Element::EnginePseudoElementRecords pseudo_element_records {};
     for (size_t kind = 0; kind < sizeof(answer.record.pseudo_records) / sizeof(answer.record.pseudo_records[0]); ++kind) {
         if (answer.record.pseudo_records_present & (1 << kind))

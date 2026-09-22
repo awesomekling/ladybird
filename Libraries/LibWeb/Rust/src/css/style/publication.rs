@@ -4835,6 +4835,23 @@ impl StyleEngineState {
         {
             return Err("GateReaction");
         }
+        let mut ancestor = self.tree.flat_tree_parent(node);
+        while let Some(parent) = ancestor {
+            if self
+                .host
+                .journal
+                .inputs()
+                .any(|input| input.key.style_node() == Some(parent))
+                || self
+                    .host
+                    .deferred_element_style_inputs
+                    .iter()
+                    .any(|input| input.key.style_node() == Some(parent))
+            {
+                return Err("GateReaction");
+            }
+            ancestor = self.tree.flat_tree_parent(parent);
+        }
 
         self.forget_node_match_answer_for_demand(node);
         if !self.begin_cold_matching_batch(node, counters) {
