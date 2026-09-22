@@ -902,8 +902,13 @@ Optional<FontVariantLigatures> ComputedStyleWorkingSet::font_variant_ligatures()
 
 Optional<FontVariantNumeric> ComputedStyleWorkingSet::font_variant_numeric() const
 {
-    auto const& value = property(PropertyID::FontVariantNumeric);
+    return font_variant_numeric_from_style_value(property(PropertyID::FontVariantNumeric));
+}
 
+// The style engine resolves a font without a working set, so this half of the answer has to be
+// reachable from the computed value alone.
+Optional<FontVariantNumeric> font_variant_numeric_from_style_value(StyleValue const& value)
+{
     if (value.to_keyword() == Keyword::Normal)
         return {};
 

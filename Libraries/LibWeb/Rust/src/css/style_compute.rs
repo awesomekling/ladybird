@@ -6058,8 +6058,23 @@ unsafe fn compute_longhands(
     let font_family = unsafe { &*input.longhand_table }
         .effective_value(unsafe { animated_overlay.as_ref() }, property_id::FONT_FAMILY, true)
         .value;
+    // `normal` selects no features, so the request names nothing rather than a value the
+    // resolver would have to recognise as the default.
+    let font_variant_numeric = match value_of(property_id::FONT_VARIANT_NUMERIC) {
+        Some(StyleValueData::Keyword { keyword }) if *keyword == keyword::NORMAL => std::ptr::null(),
+        _ => {
+            unsafe { &*input.longhand_table }
+                .effective_value(
+                    unsafe { animated_overlay.as_ref() },
+                    property_id::FONT_VARIANT_NUMERIC,
+                    true,
+                )
+                .value
+        }
+    };
     let font_request = crate::css::style::bridge::FfiFontResolutionRequest {
         font_family: crate::css::style::bridge::FfiHostHandle::from_pointer(font_family.cast()),
+        font_variant_numeric: crate::css::style::bridge::FfiHostHandle::from_pointer(font_variant_numeric.cast()),
         font_size_raw: crate::css::css_pixels::CssPixels::nearest_value_for(font_size).raw_value(),
         font_slope,
         font_weight,

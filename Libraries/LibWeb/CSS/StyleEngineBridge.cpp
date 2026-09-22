@@ -7,6 +7,7 @@
 #include <AK/StdLibExtras.h>
 #include <AK/Time.h>
 #include <LibGfx/Font/SharedFontProvider.h>
+#include <LibWeb/CSS/ComputedStyleWorkingSet.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/FontResolution.h>
 #include <LibWeb/CSS/RustDeclarationBlock.h>
@@ -34,6 +35,16 @@ static StyleEngineFFI::FfiResolvedFont resolve_font(FontCascadeMemo& memo, FontF
     // follow; the bridge is where it becomes one again.
     auto font_family = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
         reinterpret_cast<StyleValueFFI::StyleValueData const*>(request.font_family)));
+    // A numeric variant selects shaping features, so it belongs to the resolution rather than to
+    // the record. The engine names nothing when it is `normal`.
+    // Value-initialized is exactly the all-default feature set this resolver has always sent;
+    // only the variant the request names is filled in.
+    FontFeatureData font_feature_data {};
+    if (request.font_variant_numeric) {
+        auto font_variant_numeric = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
+            reinterpret_cast<StyleValueFFI::StyleValueData const*>(request.font_variant_numeric)));
+        font_feature_data.font_variant_numeric = font_variant_numeric_from_style_value(*font_variant_numeric);
+    }
     ComputedFontCacheKey key {
         .font_families = computed_font_families_from_style_value(*font_family),
         .font_optical_sizing = static_cast<FontOpticalSizing>(request.font_optical_sizing),
@@ -42,7 +53,7 @@ static StyleEngineFFI::FfiResolvedFont resolve_font(FontCascadeMemo& memo, FontF
         .font_weight = request.font_weight,
         .font_width = Percentage(request.font_width),
         .font_variation_settings = {},
-        .font_feature_data = {},
+        .font_feature_data = move(font_feature_data),
     };
     auto font_list = memo.resolve(font_faces, key);
     // The metric probe must not load a face: the first available font answers without one.

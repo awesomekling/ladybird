@@ -619,7 +619,6 @@ impl RetainedState {
             (prop::FONT_VARIANT_EAST_ASIAN, keyword::NORMAL),
             (prop::FONT_VARIANT_EMOJI, keyword::NORMAL),
             (prop::FONT_VARIANT_LIGATURES, keyword::NORMAL),
-            (prop::FONT_VARIANT_NUMERIC, keyword::NORMAL),
             (prop::FONT_VARIANT_POSITION, keyword::NORMAL),
             (prop::FONT_KERNING, keyword::AUTO),
             (prop::TEXT_RENDERING, keyword::AUTO),
@@ -667,8 +666,19 @@ impl RetainedState {
             }
             _ => 0,
         };
+        // `normal` selects no features, so the request names nothing rather than a value the
+        // resolver would have to recognise as the default.
+        //
+        // A list item is left alone: its marker carries the default `tabular-nums`, and settling
+        // the marker's record in the engine is what decides whether the layout tree survives a
+        // change on the item. That belongs with the pseudo-element rows, not here.
+        let font_variant_numeric = match value_of(&table, prop::FONT_VARIANT_NUMERIC) {
+            Some(StyleValueData::Keyword { keyword }) if *keyword == keyword::NORMAL => std::ptr::null(),
+            _ => table.effective_value(None, prop::FONT_VARIANT_NUMERIC, true).value,
+        };
         let request = bridge::FfiFontResolutionRequest {
             font_family: bridge::FfiHostHandle::from_pointer(font_family.cast()),
+            font_variant_numeric: bridge::FfiHostHandle::from_pointer(font_variant_numeric.cast()),
             font_size_raw,
             font_slope,
             font_weight,

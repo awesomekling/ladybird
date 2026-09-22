@@ -34,6 +34,7 @@ impl FontService {
 
 struct FontResolutionKey {
     font_family: RetainedStyleValueData,
+    font_variant_numeric: Option<RetainedStyleValueData>,
     font_size_raw: i32,
     font_slope: i32,
     font_weight: u64,
@@ -49,6 +50,11 @@ impl FontResolutionKey {
                     request.font_family.as_pointer().cast(),
                 ))
             },
+            font_variant_numeric: (!request.font_variant_numeric.as_pointer().is_null()).then(|| unsafe {
+                RetainedStyleValueData::from_retained_pointer(retain_style_value(
+                    request.font_variant_numeric.as_pointer().cast(),
+                ))
+            }),
             font_size_raw: request.font_size_raw,
             font_slope: request.font_slope,
             font_weight: request.font_weight.to_bits(),
@@ -61,6 +67,7 @@ impl FontResolutionKey {
 impl PartialEq for FontResolutionKey {
     fn eq(&self, other: &Self) -> bool {
         self.font_family == other.font_family
+            && self.font_variant_numeric == other.font_variant_numeric
             && self.font_size_raw == other.font_size_raw
             && self.font_slope == other.font_slope
             && self.font_weight == other.font_weight
@@ -74,6 +81,10 @@ impl Eq for FontResolutionKey {}
 impl Hash for FontResolutionKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         unsafe { style_value_content_hash(self.font_family.pointer()) }.hash(state);
+        self.font_variant_numeric
+            .as_ref()
+            .map(|value| unsafe { style_value_content_hash(value.pointer()) })
+            .hash(state);
         self.font_size_raw.hash(state);
         self.font_slope.hash(state);
         self.font_weight.hash(state);
@@ -82,10 +93,12 @@ impl Hash for FontResolutionKey {
     }
 }
 
-/// Own the request's family until the boundary transfers it into the prepared table.
+/// Own the request's family and numeric variant until the boundary transfers them into the
+/// prepared table.
 pub(super) struct FontRequest {
     ffi: FfiFontResolutionRequest,
     family: RetainedStyleValueData,
+    font_variant_numeric: Option<RetainedStyleValueData>,
 }
 
 impl FontRequest {
@@ -93,7 +106,16 @@ impl FontRequest {
         let family = unsafe {
             RetainedStyleValueData::from_retained_pointer(retain_style_value(ffi.font_family.as_pointer().cast()))
         };
-        Self { ffi, family }
+        let font_variant_numeric = (!ffi.font_variant_numeric.as_pointer().is_null()).then(|| unsafe {
+            RetainedStyleValueData::from_retained_pointer(retain_style_value(
+                ffi.font_variant_numeric.as_pointer().cast(),
+            ))
+        });
+        Self {
+            ffi,
+            family,
+            font_variant_numeric,
+        }
     }
 
     pub fn for_generation(&self, generation: u64) -> Self {
@@ -102,6 +124,7 @@ impl FontRequest {
         Self {
             ffi,
             family: self.family.clone(),
+            font_variant_numeric: self.font_variant_numeric.clone(),
         }
     }
 }
@@ -276,6 +299,7 @@ mod tests {
         let mut resolver = FontResolutionCache::default();
         let mut request = FfiFontResolutionRequest {
             font_family: crate::css::style::bridge::FfiHostHandle::from_pointer(family.pointer().cast()),
+            font_variant_numeric: crate::css::style::bridge::FfiHostHandle::from_pointer(std::ptr::null()),
             font_size_raw: 1024,
             font_slope: 0,
             font_weight: 400.0,
@@ -349,6 +373,7 @@ mod tests {
         let family = RetainedStyleValueData::from_owned(StyleValueData::Keyword { keyword: 1 });
         let request = FfiFontResolutionRequest {
             font_family: crate::css::style::bridge::FfiHostHandle::from_pointer(family.pointer().cast()),
+            font_variant_numeric: crate::css::style::bridge::FfiHostHandle::from_pointer(std::ptr::null()),
             font_size_raw: 1024,
             font_slope: 0,
             font_weight: 400.0,

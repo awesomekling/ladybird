@@ -300,6 +300,9 @@ impl Default for FfiDocumentStyleComputationInputs {
 #[derive(Clone, Copy)]
 pub struct FfiFontResolutionRequest {
     pub font_family: FfiHostHandle,
+    /// The computed `font-variant-numeric`, or null when it is `normal`. It selects shaping
+    /// features, so two elements that differ only in it resolve to different fonts.
+    pub font_variant_numeric: FfiHostHandle,
     pub font_size_raw: i32,
     pub font_slope: i32,
     pub font_weight: f64,
