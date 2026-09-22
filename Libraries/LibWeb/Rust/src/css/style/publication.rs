@@ -1480,10 +1480,10 @@ impl RetainedState {
         counters.add(Counter::CascadeWinnerDeltaProperties, delta_property_count);
         counters.add(Counter::ComputedWinnerDeltaPropertiesConsumed, delta_property_count);
         counters.bump(Counter::EngineComputedRecordDeltas);
-        // The containers the node's descendants ask about are the ones its settled record
-        // describes, as the host publishes them when it installs a record: a descendant this batch
-        // derives after it reads the container as the host will leave it.
+        // Ordinary candidates already carry their final container facts. Effect-bearing rows
+        // refresh this projection again when the host completes their composition.
         self.set_element_container_query_inputs(node, delta.1.raw());
+        self.computed_group_sets.set_sampled_composition_identity(node, 0);
         self.engine_computed_records_pending
             .entry(node)
             .or_default()
@@ -1514,7 +1514,6 @@ impl RetainedState {
     }
 
     pub(crate) fn acknowledge_engine_computed_record(&mut self, node: StyleNodeID, counters: &mut Counters) {
-        self.drop_pinned_compositions(node);
         if let Some(pending_records) = self.engine_computed_records_pending.remove(&node) {
             for pending in pending_records {
                 let target = computed::ComputedStyleTarget::new(node, pending.pseudo_kind);
@@ -1546,6 +1545,10 @@ impl RetainedState {
                 );
             }
         }
+        if let Some(record) = self.computed_group_sets.assigned_style_record(node) {
+            self.set_element_container_query_inputs(node, record.raw());
+        }
+        self.drop_pinned_compositions(node);
         self.mark_published_answer_observed(node);
     }
 

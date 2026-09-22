@@ -977,7 +977,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 } else {
                     bool const defer_final_comparison = element->has_relevant_animations() || element->has_associated_animations()
                         || row_effect_debt & (StyleEngine::SettledRowTransitionDebt | StyleEngine::SettledRowOwesAnAnimationSample);
-                    apply_engine_computed_records(pseudo_element_records, true, defer_final_comparison);
+                    apply_engine_computed_records(pseudo_element_records, false, defer_final_comparison);
                     DOM::AbstractElement settled { *element };
                     if (animation_plan.has_value())
                         document.style_computer().apply_settled_animation_plan(settled, *animation_plan);
@@ -986,8 +986,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         sample_animations_for_installed_record(settled);
                     if (has_animation_effects)
                         sample_animations_for_installed_pseudos(*element);
-                    document.style_computer().style_engine().set_sampled_composition_identity(
-                        StyleNodeID { reaction.style_node }, element->style_record_identity());
                     // Under verification the reference computation ran the step too, and then
                     // the engine record replaced what it published: the drain decides again,
                     // which the stabilization epoch is built to take, and publishes what it starts.
@@ -1009,9 +1007,12 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                             }
                         }
                     }
-                    if (transition_debt != 0)
-                        document.style_computer().style_engine().set_sampled_composition_identity(
-                            StyleNodeID { reaction.style_node }, element->style_record_identity());
+                    // A descendant may read this row only after its effect decisions have
+                    // published their final composition. Keep the old composition pinned until
+                    // that point so transition selection can still read its before-change style.
+                    document.style_computer().style_engine().set_sampled_composition_identity(
+                        StyleNodeID { reaction.style_node }, element->style_record_identity());
+                    document.style_computer().style_engine().acknowledge_engine_computed_record(StyleNodeID { reaction.style_node });
                     if (explicit_inheritance_debt != 0)
                         explicit_inheritance_effect_rows.append({ StyleNodeID { reaction.style_node }, explicit_inheritance_debt });
                 }

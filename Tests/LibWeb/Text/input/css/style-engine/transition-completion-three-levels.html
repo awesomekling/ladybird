@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    #ancestor { color: red; transition: color 1000s linear; }
+    #ancestor.changed { color: blue; }
+    #child, #grandchild { color: inherit; }
+</style>
+<div id="ancestor"><div id="child"><div id="grandchild"></div></div></div>
+<script>
+    test(() => {
+        internals.updateStyle();
+        ancestor.className = "changed";
+        internals.updateStyle();
+
+        const transition = ancestor.getAnimations().find(animation => animation instanceof CSSTransition);
+        println(`transition started: ${transition !== undefined}`);
+        transition.currentTime = 500000;
+        internals.updateStyle();
+        println(`parent and child agree: ${getComputedStyle(ancestor).color === getComputedStyle(child).color}`);
+        println(`child and grandchild agree: ${getComputedStyle(child).color === getComputedStyle(grandchild).color}`);
+    });
+</script>
