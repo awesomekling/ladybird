@@ -5,6 +5,7 @@
  */
 
 #include <AK/HashTable.h>
+#include <AK/NeverDestroyed.h>
 #include <AK/QuickSort.h>
 #include <AK/SetUnion.h>
 #include <LibWeb/Animations/Animation.h>
@@ -1816,8 +1817,8 @@ static u32 s_noting_declaration_changes_during_apply = 0;
 
 static HashTable<StyleNodeID>& declaration_changes_during_apply()
 {
-    static HashTable<StyleNodeID> nodes;
-    return nodes;
+    static NeverDestroyed<HashTable<StyleNodeID>> nodes;
+    return *nodes;
 }
 
 void begin_noting_declaration_changes_during_apply()
