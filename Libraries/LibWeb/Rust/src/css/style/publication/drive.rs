@@ -830,20 +830,24 @@ impl RetainedState {
         );
         effective_color_scheme = table.effective_color_scheme();
 
-        let remaining_length = length_context(
-            own_metrics(line_height_before_adjustments),
-            results.font_metrics_depend_on_viewport_metrics,
-            if is_document_element {
-                own_metrics(line_height_before_adjustments)
-            } else {
-                document_root_font_metrics
-            },
-            if is_document_element {
-                results.font_metrics_depend_on_viewport_metrics
-            } else {
-                inputs.root_font_metrics_depend_on_viewport_metrics
-            },
-        );
+        // `rem` on the document element names the document element's own computed font-size, which
+        // this drive has just resolved, the way the line-height phase above already reads it. The
+        // document's retained root metrics still describe the font the root had before.
+        let remaining_length = if is_document_element {
+            length_context(
+                own_metrics(line_height_before_adjustments),
+                results.font_metrics_depend_on_viewport_metrics,
+                own_metrics(line_height_before_adjustments),
+                results.font_metrics_depend_on_viewport_metrics,
+            )
+        } else {
+            length_context(
+                own_metrics(line_height_before_adjustments),
+                results.font_metrics_depend_on_viewport_metrics,
+                document_root_font_metrics,
+                inputs.root_font_metrics_depend_on_viewport_metrics,
+            )
+        };
         let input_line_height_metrics = if has(fact::CHECK_INPUT_LINE_HEIGHT) {
             FfiInputLineHeightMetrics {
                 current_line_height: line_height_before_adjustments,
