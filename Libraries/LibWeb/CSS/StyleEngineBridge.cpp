@@ -417,9 +417,9 @@ ReadonlySpan<StyleEngineFFI::FfiRetriedRecordRow> StyleEngine::retry_engine_reco
     return { batch.rows, batch.count };
 }
 
-StyleEngineFFI::FfiRecordDemandAnswer StyleEngine::answer_record_demand(StyleNodeID node, Optional<u8> pseudo_kind, bool exclude_inline_style, bool targeted)
+StyleEngineFFI::FfiRecordDemandAnswer StyleEngine::answer_record_demand(StyleNodeID node, Optional<u8> pseudo_kind, bool exclude_inline_style, bool targeted, bool read_only)
 {
-    return StyleEngineFFI::style_engine_answer_record_demand(m_impl, node.value(), pseudo_kind.value_or(NumericLimits<u8>::max()), exclude_inline_style, targeted);
+    return StyleEngineFFI::style_engine_answer_record_demand(m_impl, node.value(), pseudo_kind.value_or(NumericLimits<u8>::max()), exclude_inline_style, targeted, read_only);
 }
 
 StyleEngineFFI::FfiEngineComputedRecord StyleEngine::settle_pseudo_records_after_host_record(StyleNodeID node, bool old_is_list_item)

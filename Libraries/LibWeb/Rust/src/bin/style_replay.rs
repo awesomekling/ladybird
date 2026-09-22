@@ -791,6 +791,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let pseudo_kind = event.payload.read_u8()?;
                     let exclude_inline_style = event.payload.read_bool()?;
                     let targeted = event.payload.read_bool()?;
+                    let read_only = event.payload.read_bool()?;
                     let expected_record = event.payload.read_u64()?;
                     let expected_absent = event.payload.read_bool()?;
                     let expected_uses_substitution = event.payload.read_bool()?;
@@ -807,6 +808,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             pseudo_kind,
                             exclude_inline_style,
                             targeted,
+                            read_only,
                         )
                     };
                     let actual_cause = if actual.decline_cause_length == 0 {
