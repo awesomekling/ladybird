@@ -1861,7 +1861,7 @@ impl StyleEngineState {
                 let can_prepare = !(named_rule_context_changed
                     && old_record.is_some()
                     && (font_feature_values_moved
-                        || custom_functions_moved
+                        || (custom_functions_moved && self.retained.facts.uses_custom_functions(root))
                         || (counter_styles_moved && self.node_reads_counter_styles(root))))
                     && (reaction_is_settleable
                         || (old_record.is_none() && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
@@ -2186,7 +2186,7 @@ impl StyleEngineState {
                         false
                     } else if (old_style_record != 0
                         && (font_feature_values_moved
-                            || custom_functions_moved
+                            || (custom_functions_moved && self.retained.facts.uses_custom_functions(node))
                             || (counter_styles_moved && self.node_reads_counter_styles(node))))
                         || !(reaction_is_settleable
                             || (old_style_record == 0 && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
