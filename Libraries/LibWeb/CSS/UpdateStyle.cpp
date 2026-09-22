@@ -619,6 +619,12 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
         StyleComputer::SettledAnimationPlan plan;
     };
     Vector<AnimationEffectRow> animation_effect_rows;
+    struct DeferredRecordVerification {
+        StyleNodeID style_node;
+        StyleRecordID reference_record;
+        Optional<String> reference_font;
+    };
+    Vector<DeferredRecordVerification> deferred_record_verifications;
     // The elements whose record the engine derived beneath what their animations composed: the
     // composition is sampled again over the new record once the batch is installed.
     Vector<StyleNodeID> animation_sample_rows;
@@ -757,7 +763,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             // The engine settled the element's record, and the pseudo-element records beside it:
             // C++ installs them. Under verification the ordinary computation runs instead and its
             // records must equal the engine's by value.
-            auto apply_engine_computed_records = [&](DOM::Element::EnginePseudoElementRecords const& pseudo_element_records, bool acknowledge) {
+            auto apply_engine_computed_records = [&](DOM::Element::EnginePseudoElementRecords const& pseudo_element_records, bool acknowledge, bool defer_final_comparison) {
                 auto& style_engine = document.style_computer().style_engine();
                 if (verify_engine_computed_records) {
                     auto authoritative_custom_property_data = element->custom_property_data({});
@@ -812,11 +818,20 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     if (auto const missing = dependency_marks() & ~marks_the_engine_row_left; missing != 0) {
                         dbgln("Engine record for {} leaves dependency marks {:#x} unset that the computation sets", element->debug_description(), missing);
                     }
-                    auto packed = style_engine.compare_style_records(StyleRecordID { reaction.new_style_record }, element->style_record_identity(), true, false, false);
-                    if (packed & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged)
-                        && !style_engine.style_records_match_for_verification(reaction.style_node, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, element->style_record_identity())) {
-                        report_engine_computed_record_difference(style_engine, *element, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, element->style_record_identity());
-                        VERIFY_NOT_REACHED();
+                    if (defer_final_comparison) {
+                        auto reference_record = element->style_record_identity();
+                        Optional<String> reference_font;
+                        if (auto const* font = element->style_group<ComputedValues::FontValues>())
+                            reference_font = describe_resolved_font(font->font_list_value());
+                        document.style_computer().pin_style_record(reference_record);
+                        deferred_record_verifications.append({ StyleNodeID { reaction.style_node }, reference_record, move(reference_font) });
+                    } else {
+                        auto packed = style_engine.compare_style_records(StyleRecordID { reaction.new_style_record }, element->style_record_identity(), true, false, false);
+                        if (packed & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged)
+                            && !style_engine.style_records_match_for_verification(reaction.style_node, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, element->style_record_identity())) {
+                            report_engine_computed_record_difference(style_engine, *element, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, element->style_record_identity());
+                            VERIFY_NOT_REACHED();
+                        }
                     }
                     // A custom-property environment reaction can jump over ancestors whose computed
                     // values did not change. Their engine environments are authoritative, but the
@@ -831,7 +846,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     // from; an engine-settled record holds the font of the style beneath the
                     // animation, which reaches the element as an overlay published on top of it.
                     // The two fonts are then answers to different questions.
-                    if (!animation_plan.has_value())
+                    if (!animation_plan.has_value() && !defer_final_comparison)
                         verify_engine_computed_record_font(*element, StyleRecordID { reaction.new_style_record });
                     for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
                         auto const& engine_record = pseudo_element_records[kind];
@@ -910,7 +925,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 if (element_style_depends_on_more_than_the_inherited_groups(*element))
                     invalidation = element->apply_style_engine_reaction(did_change_custom_properties);
                 else
-                    apply_engine_computed_records({}, false);
+                    apply_engine_computed_records({}, false, false);
             } else if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Computed) {
                 // The engine computed the new record from this element's moved cascade winners,
                 // from its parent's moved inherited style or display, or from its moved
@@ -937,7 +952,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     StyleEngineFFI::style_engine_native_container_effects_release(StyleEngineFFI::style_engine_take_container_effects(document.style_computer().style_engine().rust_handle(), reaction.style_node).effects);
                     invalidation = element->apply_style_engine_reaction(did_change_custom_properties);
                 } else {
-                    apply_engine_computed_records(pseudo_element_records, true);
+                    bool const defer_final_comparison = row_effect_debt & (StyleEngine::SettledRowTransitionDebt | StyleEngine::SettledRowOwesAnAnimationSample);
+                    apply_engine_computed_records(pseudo_element_records, true, defer_final_comparison);
                     // Under verification the reference computation ran the step too, and then
                     // the engine record replaced what it published: the drain decides again,
                     // which the stabilization epoch is built to take, and publishes what it starts.
@@ -1080,6 +1096,29 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
     // batch takes.
     if (!animation_effect_rows.is_empty() || !animation_sample_rows.is_empty())
         document.sample_animation_effects_needing_style_update();
+
+    for (auto const& row : deferred_record_verifications) {
+        auto element = document.style_computer().element_for_style_node(row.style_node);
+        if (element && element->has_style()) {
+            auto installed = element->style_record_identity();
+            auto& style_engine = document.style_computer().style_engine();
+            auto packed = style_engine.compare_style_records(installed, row.reference_record, true, false, false);
+            if (packed & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged)
+                && !style_engine.style_records_match_for_verification(row.style_node.value(), NumericLimits<u8>::max(), installed, row.reference_record)) {
+                report_engine_computed_record_difference(style_engine, *element, NumericLimits<u8>::max(), installed, row.reference_record);
+                VERIFY_NOT_REACHED();
+            }
+            if (row.reference_font.has_value()) {
+                auto const* font = element->style_group<ComputedValues::FontValues>();
+                VERIFY(font);
+                auto installed_font = describe_resolved_font(font->font_list_value());
+                if (installed_font != *row.reference_font)
+                    dbgln("Engine record resolved {} where the computation resolved {}", installed_font, *row.reference_font);
+                VERIFY(installed_font == *row.reference_font);
+            }
+        }
+        document.style_computer().unpin_style_record(row.reference_record);
+    }
 
     return transaction_invalidation;
 }
