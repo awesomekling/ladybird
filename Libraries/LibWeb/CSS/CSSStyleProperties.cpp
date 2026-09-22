@@ -653,7 +653,35 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
         highlight_parent_style_record = highlight_parent.has_value() ? highlight_parent->style_record_identity() : StyleRecordID {};
     }
     RefPtr<ComputedValues const> target_style;
-    auto compute = [&](DOM::AbstractElement target) {
+    auto compute = [&](DOM::AbstractElement target) -> RefPtr<ComputedValues const> {
+        // A read-only answer is independent of the element's installed style. Copy its record
+        // before the demand slot is reused by another style read.
+        if (first_is_one_of(*target.pseudo_element(), PseudoElement::Before, PseudoElement::After, PseudoElement::FirstLetter, PseudoElement::Marker, PseudoElement::Backdrop)) {
+            auto kind = *target.pseudo_element();
+            auto demand = style_computer.style_engine().answer_record_demand(target.element().style_node_id(), to_underlying(kind), false, false, true);
+            if (demand.is_absent && first_is_one_of(kind, PseudoElement::Before, PseudoElement::After)
+                && !target.element().style_depends_on_size_container_query()) {
+                // A private absence does not replace the published match answer. Settle that
+                // answer before leaving C++'s negative pseudo computation out of this read.
+                auto published = style_computer.style_engine().answer_record_demand(target.element().style_node_id(), to_underlying(kind), false, false, false);
+                if (published.is_absent) {
+                    target.set_custom_property_data(nullptr);
+                    highlight_parent_style_record = StyleRecordID {};
+                    return {};
+                }
+                if (published.record.style_record)
+                    demand = published;
+            }
+            if (demand.record.style_record) {
+                auto record = StyleRecordID { demand.record.style_record };
+                auto view = style_computer.computed_style_record_view(record);
+                if (view) {
+                    highlight_parent_style_record = record;
+                    return ComputedValues::Builder { *view }.build();
+                }
+            }
+        }
+        // A declined demand, or one whose container verdict may change after layout, stays with C++.
         bool did_change_custom_properties = false;
         StyleEngine::StyleRecordDelta style_record_delta {};
         auto style = style_computer.compute_pseudo_element_style_if_needed(target, did_change_custom_properties, nullptr, style_record_delta, highlight_parent_style_record);
