@@ -123,7 +123,11 @@ impl RetainedState {
     /// A node whose gated rules decide differently over the containers as they stand now than
     /// when its winners were published needs new winners from the retained selector answer.
     /// If the exact answer was evicted, ordinary answer completion must reconstruct it.
-    pub(super) fn refresh_winners_whose_container_verdicts_moved(&mut self, counters: &mut Counters) {
+    pub(super) fn refresh_winners_whose_container_verdicts_moved(
+        &mut self,
+        rule_program_is_changing: bool,
+        counters: &mut Counters,
+    ) {
         if self.published_container_verdicts.is_empty() {
             return;
         }
@@ -134,7 +138,9 @@ impl RetainedState {
             .filter(|&node| self.container_verdicts_moved(node))
             .collect();
         for node in moved {
-            if self.republish_winners_from_retained_answer(node, counters).is_none() {
+            // The old exact answer can name a rule this transaction removes or replaces. Let
+            // routing under the new program publish its winners instead of reviving that rule.
+            if rule_program_is_changing || self.republish_winners_from_retained_answer(node, counters).is_none() {
                 self.published_container_verdicts.remove(&node);
                 self.winner_groups.remove(node);
             }
@@ -174,7 +180,10 @@ impl RetainedState {
                     entry.pseudo_element.is_some(),
                 )
             });
-        self.matches_for_cascade_immediately(matches, true, Some(node), counters);
+        let mut effects = AnswerEffects::default();
+        let compact = self.matches_for_cascade(&mut effects, matches, true, Some(node), counters);
+        self.remember_cascade_input_with_effects(&mut effects, node, &compact, counters);
+        self.install_answer_effects(effects);
         self.batch_answers_complete_but_for_custom_properties
             .insert(node, complete_but_for_custom_properties);
         let answer_is_incomplete = !complete && !complete_but_for_custom_properties;

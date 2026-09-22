@@ -208,7 +208,10 @@ impl StyleEngineState {
         }
         self.discard_prepared_batch_matching_traversal();
         self.discard_published_match_answers(counters);
-        self.retained.refresh_winners_whose_container_verdicts_moved(counters);
+        self.retained.refresh_winners_whose_container_verdicts_moved(
+            self.host.program_staging.is_dirty() || self.host.sheet_rule_replacement.is_some(),
+            counters,
+        );
         // A transaction made of derived child reactions alone continues the style change whose
         // reactions C++ applied last, one tree generation further.
         self.retained.last_transaction_only_derived_child_reactions =
