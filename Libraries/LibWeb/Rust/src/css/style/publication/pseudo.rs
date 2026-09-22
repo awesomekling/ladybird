@@ -358,6 +358,8 @@ impl RetainedState {
                     (Some(state), Some((bound_generation, bound_state))) => {
                         bound_generation == generation
                             && self.winner_groups.custom_declarations_of(state) == Default::default()
+                            && !(self.custom_property_registrations_changed
+                                && self.state_has_substitutions(node, state))
                             && !self.state_reads_attributes(node, state)
                             && self.winner_groups.states_are_semantically_equal(bound_state, state)
                     }
@@ -443,6 +445,7 @@ impl RetainedState {
                     state,
                     facts,
                     font_environment_generation: inputs.font_environment_generation,
+                    custom_property_registration_generation: inputs.custom_property_registration_generation,
                     root_font_inputs: RootFontInputs::from_document(&inputs),
                     substitution_attributes: state
                         .map_or(0, |state| self.substitution_attributes_key(node, Some(kind), state)),

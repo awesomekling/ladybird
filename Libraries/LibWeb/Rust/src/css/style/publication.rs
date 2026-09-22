@@ -701,9 +701,11 @@ impl RetainedState {
         // A record C++ computed holds no cascade state, so there is no earlier state to take a
         // delta from: the record is driven again in full from the node's winners, which binds
         // the state.
-        // A winner written with `attr()` computes to what the element's attributes hold now, which
-        // no winner delta shows: such a record is driven again in full.
-        if self.state_reads_attributes(node, state) {
+        // A winner written with `attr()` reads the element's attributes, and a substituted value
+        // reads the custom-property registry. Neither change appears in a winner delta.
+        if self.state_reads_attributes(node, state)
+            || (self.custom_property_registrations_changed && self.node_style_reads_custom_properties(node))
+        {
             scratch.recompute_in_full = true;
         }
         let delta = match self.computed_group_sets.cascade_state(target) {
@@ -5397,6 +5399,7 @@ pub(super) struct PseudoCohortKey {
     state: Option<CascadeStateID>,
     facts: u32,
     font_environment_generation: u64,
+    custom_property_registration_generation: u64,
     root_font_inputs: RootFontInputs,
     substitution_attributes: u64,
 }

@@ -983,8 +983,8 @@ pub struct RetainedState {
     /// resolved them when the style update began.
     animation_keyframes: animations::AnimationKeyframes,
     /// Whether the registrations used by this transaction differ from the preceding one. A
-    /// previously substituted record must then be recomputed by C++, which implements registered
-    /// custom properties, even when its cascade winners did not move.
+    /// previously substituted record must then be driven again even when its cascade winners
+    /// did not move.
     custom_property_registrations_changed: bool,
     /// Whether an environment action since the last flush changed a document fact the engine's own
     /// record drive does not hold, so a record that stands on its winners still recomputes in C++.
