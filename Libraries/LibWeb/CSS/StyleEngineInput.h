@@ -299,4 +299,11 @@ enum class ElementDeclarationKind : u8 {
 };
 WEB_API void record_element_declarations_changed(DOM::Element&, ElementDeclarationKind, bool had_declarations, bool has_declarations);
 
+// While a batch's reactions are applied, a host's own style application may rewrite the
+// declarations of an element in its shadow tree, after the engine computed that element's record
+// from the ones it had. These name the elements whose declarations changed that way.
+void begin_noting_declaration_changes_during_apply();
+void end_noting_declaration_changes_during_apply();
+bool declarations_changed_during_apply(StyleNodeID);
+
 }

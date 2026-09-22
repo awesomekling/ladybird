@@ -623,7 +623,7 @@ impl RetainedState {
         element_top_1.clear();
         for (match_index, entry) in all.iter().enumerate() {
             if compaction_blocked
-                && (entry.tree_scope != TreeScopeID::DOCUMENT
+                && (!self.match_scope_is_complete_for(publish_winners_for, entry.rule, entry.tree_scope)
                     || self.program.rule_is_gated_by_container_query(entry.rule)
                     || !self
                         .program
@@ -772,8 +772,9 @@ impl RetainedState {
                 let pseudo_custom_declarations = target
                     .filter(|&target| {
                         !self.cascade_winner_inventory_is_complete_for_target(all, Some(node), Some(target))
-                            && self
-                                .cascade_winner_inventory_is_complete_but_for_custom_properties_for_target(all, target)
+                            && self.cascade_winner_inventory_is_complete_but_for_custom_properties_for_target(
+                                node, all, target,
+                            )
                     })
                     .and_then(|target| self.cascaded_pseudo_custom_declarations_in(node, all, target));
                 let state = match &pseudo_custom_declarations {
@@ -1408,7 +1409,7 @@ impl RetainedState {
             .any(|entry| {
                 self.program.rule_is_gated_by_container_query(entry.rule)
                     || !self.program.declarations_are_complete_for(entry.rule)
-                    || entry.tree_scope != TreeScopeID::DOCUMENT
+                    || !self.match_scope_is_complete_for(node, entry.rule, entry.tree_scope)
             })
             || (pseudo.is_none()
                 && node.is_some_and(|node| {
@@ -1422,6 +1423,7 @@ impl RetainedState {
     /// properties, which its state holds itself.
     fn cascade_winner_inventory_is_complete_but_for_custom_properties_for_target(
         &self,
+        node: StyleNodeID,
         matches: &[RuleMatch],
         pseudo: tree::PseudoElementTarget,
     ) -> bool {
@@ -1433,8 +1435,23 @@ impl RetainedState {
                     || !self
                         .program
                         .declarations_are_complete_but_for_custom_properties(entry.rule)
-                    || entry.tree_scope != TreeScopeID::DOCUMENT
+                    || !self.match_scope_is_complete_for(Some(node), entry.rule, entry.tree_scope)
             })
+    }
+
+    /// Whether the winners the cascade publishes for a node hold a match from a rule in the given
+    /// tree scope: a document rule's do, and so does a rule's from the element's own tree scope,
+    /// for the element and its pseudo-elements alike, whose cascade then orders one context. A
+    /// rule reaching across a shadow boundary (`:host`, `::slotted`, `::part`) is ordered by its
+    /// context, which the winners do not model yet.
+    pub(super) fn match_scope_is_complete_for(
+        &self,
+        node: Option<StyleNodeID>,
+        rule: RuleID,
+        scope: TreeScopeID,
+    ) -> bool {
+        let _ = rule;
+        scope == TreeScopeID::DOCUMENT || node.is_some_and(|node| self.tree.tree_scope(node) == scope)
     }
 
     pub(super) fn cascade_winner_inventory_is_complete(
@@ -1447,7 +1464,7 @@ impl RetainedState {
         !matches.iter().any(|entry| {
             self.program.rule_is_gated_by_container_query(entry.rule)
                 || !self.program.declarations_are_complete_for(entry.rule)
-                || entry.tree_scope != TreeScopeID::DOCUMENT
+                || !self.match_scope_is_complete_for(node, entry.rule, entry.tree_scope)
         }) && !node.is_some_and(|node| {
             ElementDeclarationKind::ALL
                 .iter()

@@ -4246,7 +4246,7 @@ impl RetainedState {
                     || !self
                         .program
                         .declarations_are_complete_but_for_custom_properties(entry.rule)
-                    || entry.tree_scope != TreeScopeID::DOCUMENT
+                    || !self.match_scope_is_complete_for(Some(node), entry.rule, entry.tree_scope)
                 {
                     return Some(false);
                 }

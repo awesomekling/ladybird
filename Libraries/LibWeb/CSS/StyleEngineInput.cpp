@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/HashTable.h>
 #include <AK/QuickSort.h>
 #include <AK/SetUnion.h>
 #include <LibWeb/Animations/Animation.h>
@@ -1812,8 +1813,35 @@ bool record_element_presentational_hint_properties(DOM::Element& element, Readon
     return true;
 }
 
+static u32 s_noting_declaration_changes_during_apply = 0;
+
+static HashTable<StyleNodeID>& declaration_changes_during_apply()
+{
+    static HashTable<StyleNodeID> nodes;
+    return nodes;
+}
+
+void begin_noting_declaration_changes_during_apply()
+{
+    ++s_noting_declaration_changes_during_apply;
+}
+
+void end_noting_declaration_changes_during_apply()
+{
+    VERIFY(s_noting_declaration_changes_during_apply > 0);
+    if (--s_noting_declaration_changes_during_apply == 0)
+        declaration_changes_during_apply().clear_with_capacity();
+}
+
+bool declarations_changed_during_apply(StyleNodeID node)
+{
+    return s_noting_declaration_changes_during_apply > 0 && declaration_changes_during_apply().contains(node);
+}
+
 void record_element_declarations_changed(DOM::Element& element, ElementDeclarationKind kind, bool had_declarations, bool has_declarations)
 {
+    if (s_noting_declaration_changes_during_apply > 0 && element.style_node_id() != no_style_node)
+        declaration_changes_during_apply().set(element.style_node_id());
     element.document().flush_deferred_style_change_event();
     auto* style_engine = style_engine_for(element);
     if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
