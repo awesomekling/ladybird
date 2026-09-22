@@ -894,7 +894,9 @@ impl RetainedState {
                     .any(|entry| delta.properties().contains(&entry.property))
             });
         let derived_beneath_a_composition = animations_bind_the_record
+            && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
             && !overlay_animates_a_moved_property
+            && self.animation_base_inherits_from_current_parent(node, state, old_style_record)
             && self.computed_group_sets.node_has_animation_overlay(node)
             && !self.css_defined_animations.node_runs_a_css_animation(node);
         let animations_bind_the_record = animations_bind_the_record && !derived_beneath_a_composition;
@@ -2189,6 +2191,43 @@ impl RetainedState {
         self.computed_group_sets
             .style_record_view(record.raw())
             .is_none_or(|view| !view.animated_overlay.is_null())
+    }
+
+    /// A partial drive reuses the base groups beneath an element's own composition. They must
+    /// still inherit the parent's sampled values, since the drive only rebuilds moved groups.
+    fn animation_base_inherits_from_current_parent(
+        &self,
+        node: StyleNodeID,
+        state: CascadeStateID,
+        record: computed::FinalStyleRecordID,
+    ) -> bool {
+        let Some(parent) = self.tree.flat_tree_parent(node) else {
+            return false;
+        };
+        let Some(parent_record) = self.computed_group_sets.assigned_style_record(parent) else {
+            return false;
+        };
+        let Some(view) = self.computed_group_sets.style_record_view(record.raw()) else {
+            return false;
+        };
+        let Some(parent_view) = self.computed_group_sets.style_record_view(parent_record.raw()) else {
+            return false;
+        };
+        let base_payloads = if view.base_payloads.is_empty() {
+            view.payloads
+        } else {
+            view.base_payloads
+        };
+        let own_groups = self.state_owned_inherited_groups(state);
+        (0..computed::ENGINE_INHERITED_GROUP_COUNT).all(|group| {
+            own_groups & (1 << group) != 0
+                || base_payloads[group] == parent_view.payloads[group]
+                || crate::css::computed_values::style_group_payloads_equal(
+                    group,
+                    base_payloads[group].as_ptr(),
+                    parent_view.payloads[group].as_ptr(),
+                )
+        })
     }
 
     /// Whether the table a record was computed into declares transitions at all, and whether any
