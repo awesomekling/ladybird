@@ -1479,19 +1479,7 @@ impl ComputedGroupSets {
             return None;
         }
         let index = node.element_index()? as usize;
-        // A node whose animations composed a record gives that composition up here: the base this
-        // assembles is the style beneath it, and the caller has the host sample the animations
-        // again over it once the batch is applied. Until then the host's element still names the
-        // composition, so the batch keeps the slot alive - giving up the assignment is not giving
-        // up the record - and the caller drops the pin when the host acknowledges the row.
-        let pinned_composition = self.columns.animation_overlay_slot(index).and_then(|slot| {
-            let base = (*self.style_record_column.get(index)?)?;
-            let composed = self.final_style_record(base, Some(slot)).raw();
-            self.pin_style_record(composed);
-            self.release_animation_overlay_assignment(slot);
-            self.columns.set_animation_overlay_slot(index, None);
-            Some(composed)
-        });
+        let base_style_record = FinalStyleRecordID(self.base_style_record_of(base_style_record.raw()));
         let base_style_record_identity = base_style_record.base_record()?;
         if !self.style_record_generation_is_live(base_style_record_identity, base_style_record.base_generation()) {
             return None;
@@ -1636,6 +1624,19 @@ impl ComputedGroupSets {
         };
         let new_style_record = self.intern_style_record(new_record).0;
         // Descendant swaps read the node's inherited groups from their own column.
+        // A node whose animations composed a record gives that composition up here: the base this
+        // assembles is the style beneath it, and the caller has the host sample the animations
+        // again over it once the batch is applied. Until then the host's element still names the
+        // composition, so the batch keeps the slot alive - giving up the assignment is not giving
+        // up the record - and the caller drops the pin when the host acknowledges the row.
+        let pinned_composition = self.columns.animation_overlay_slot(index).and_then(|slot| {
+            let base = (*self.style_record_column.get(index)?)?;
+            let composed = self.final_style_record(base, Some(slot)).raw();
+            self.pin_style_record(composed);
+            self.release_animation_overlay_assignment(slot);
+            self.columns.set_animation_overlay_slot(index, None);
+            Some(composed)
+        });
         self.columns.publish(
             index,
             PublishedComputedInputs {
