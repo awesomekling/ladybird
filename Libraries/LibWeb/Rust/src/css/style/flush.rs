@@ -2004,6 +2004,7 @@ impl StyleEngineState {
             // publishes for it before that answer is installed.
             self.retained.batch_pseudo_style_masks.clear();
             self.retained.batch_answers_complete_but_for_custom_properties.clear();
+            self.retained.batch_custom_property_matches.clear();
             for &node in &published_nodes {
                 let Some(answer) = published_match_answers.lookup(node) else {
                     continue;
@@ -2022,6 +2023,13 @@ impl StyleEngineState {
                 };
                 if let Some(mask) = mask {
                     self.retained.batch_pseudo_style_masks.insert(node, mask);
+                }
+                if self.retained.any_custom_property_is_declared()
+                    && let Some(matches) =
+                        self.retained
+                            .batch_custom_property_matches_of(&published_match_answers, answer)
+                {
+                    self.retained.batch_custom_property_matches.insert(node, matches);
                 }
                 if let Some(complete) =
                     self.retained
@@ -2550,6 +2558,7 @@ impl StyleEngineState {
         published_match_answers.discard_unobserved_retained_answers = publish_document_root_arrival || plan_is_broad;
         self.retained.batch_pseudo_style_masks.clear();
         self.retained.batch_answers_complete_but_for_custom_properties.clear();
+        self.retained.batch_custom_property_matches.clear();
         self.retained.published_match_answers = published_match_answers;
         if initial_tree_was_bulk_loaded {
             counters.bump(Counter::InitialBulkMatchLoads);
