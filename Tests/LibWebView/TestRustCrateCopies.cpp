@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/ByteString.h>
+#include <AK/Platform.h>
 #include <LibTest/TestCase.h>
 #include <dlfcn.h>
 
@@ -17,8 +19,15 @@
 // by name, checks that they really are two, and then checks that the state they share is one.
 TEST_CASE(the_graphics_crate_is_compiled_twice_and_its_process_state_once)
 {
-    auto* gfx = dlopen("liblagom-gfx.so", RTLD_NOW | RTLD_LOCAL);
-    auto* web = dlopen("liblagom-web.so", RTLD_NOW | RTLD_LOCAL);
+#ifdef AK_OS_MACOS
+    constexpr auto gfx_library_name = "liblagom-gfx.dylib"sv;
+    constexpr auto web_library_name = "liblagom-web.dylib"sv;
+#else
+    constexpr auto gfx_library_name = "liblagom-gfx.so"sv;
+    constexpr auto web_library_name = "liblagom-web.so"sv;
+#endif
+    auto* gfx = dlopen(ByteString { gfx_library_name }.characters(), RTLD_NOW | RTLD_LOCAL);
+    auto* web = dlopen(ByteString { web_library_name }.characters(), RTLD_NOW | RTLD_LOCAL);
     EXPECT(gfx);
     EXPECT(web);
 
