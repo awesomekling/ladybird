@@ -972,6 +972,7 @@ impl StyleEngineState {
         if !self.retained.prefix_caches.borrow().states.is_current() {
             self.discard_retained_prefix_caches();
         }
+        self.offer_backing_elements_of_flipped_hosts(&mut transaction, &mut regions);
         let batch_compilation_timer = PassTimer::start();
         regions.normalize(&self.retained.tree);
         let impact_region_scratch_bytes = regions.region_index_capacity_bytes();
@@ -2671,5 +2672,61 @@ impl StyleEngineState {
         // Include transaction-local destruction on both ordinary and early-return paths.
         clock.finish(counters);
         scoped
+    }
+}
+
+impl StyleEngineState {
+    /// An element-backed pseudo-element is the element in its host's shadow tree that backs it,
+    /// and the host's rules for the pseudo-element are what that element's record is cascaded
+    /// from. A host whose rules for one flipped takes the elements backing it into the batch,
+    /// where they are driven again against the rules as they now match.
+    fn offer_backing_elements_of_flipped_hosts(&self, transaction: &mut StyleTransaction, regions: &mut ImpactRegions) {
+        if regions.covers_document() {
+            return;
+        }
+        let mut backing_elements = Vec::new();
+        for delta in self.retained.selector_truth_changes.deltas.as_slice() {
+            let Some(kind) = self
+                .retained
+                .programs
+                .entry(delta.entry)
+                .1
+                .pseudo_element
+                .map(|pseudo| pseudo.kind.0)
+            else {
+                continue;
+            };
+            if !(u16::from(bridge::FIRST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND)
+                ..=u16::from(bridge::LAST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND))
+                .contains(&kind)
+            {
+                continue;
+            }
+            let Some(shadow_root) = self.retained.tree.shadow_root_of(delta.node) else {
+                continue;
+            };
+            backing_elements.extend(self.retained.tree.preorder(shadow_root).filter(|&node| {
+                self.retained
+                    .computed_group_sets
+                    .associated_pseudo_kind(node)
+                    .is_some_and(|backed| u16::from(backed) == kind)
+            }));
+        }
+        backing_elements.sort_unstable();
+        backing_elements.dedup();
+        for node in backing_elements {
+            regions.add(ImpactRegion::Node(node));
+            transaction.inputs.push(NormalizedInput {
+                key: InputKey::ElementStyleInput(node),
+                old: InputValue::ElementStyleInput {
+                    reaction: 0,
+                    inherited_style_groups: 0,
+                },
+                new: InputValue::ElementStyleInput {
+                    reaction: transaction::STYLE_REACTION_RECOMPUTE_STYLE,
+                    inherited_style_groups: 0,
+                },
+            });
+        }
     }
 }

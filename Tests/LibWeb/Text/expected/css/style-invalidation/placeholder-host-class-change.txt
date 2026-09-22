@@ -1,6 +1,8 @@
 input before: rgb(4, 5, 6)
+input C++ recomputations: 0
 input after adding: rgb(0, 0, 255)
 input after removing: rgb(4, 5, 6)
 textarea before: rgb(4, 5, 6)
+textarea C++ recomputations: 0
 textarea after adding: rgb(0, 0, 255)
 textarea after removing: rgb(4, 5, 6)
