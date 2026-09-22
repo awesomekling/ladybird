@@ -36,5 +36,5 @@ cancels while running: 40px
 cancels while running after recompute: 40px
 cancels after the animation is removed: (none)
 cancels after the animation is removed after recompute: (none)
-cancels after cancelling: 40px
-cancels after cancelling after recompute: 40px
+cancels after cancelling: (none)
+cancels after cancelling after recompute: (none)

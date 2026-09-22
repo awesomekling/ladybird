@@ -2476,7 +2476,7 @@ void Document::sample_animation_effects_needing_style_update()
     } else {
         for (auto& effect : m_effects_needing_animated_style_update) {
             auto animation = effect.associated_animation();
-            // NB: A canceled animation still needs to remove its last sampled values.
+            // NB: A cancelled animation is idle, but its dirty effect must clear the old overlay.
             if (!animation)
                 continue;
             animations.append(*animation);
