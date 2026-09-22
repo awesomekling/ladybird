@@ -952,20 +952,22 @@ impl StyleEngineState {
             .inputs
             .iter()
             .any(|input| matches!(input.key, InputKey::RuleField(_, RuleField::Declarations)));
-        let named_rule_context_changed = transaction.program_joins.iter().any(|delta| {
-            matches!(
-                self.retained.program.rule_version(delta.rule).kind,
-                RuleKind::CounterStyle | RuleKind::FontFeatureValues | RuleKind::Function
-            )
-        });
-        // A counter style reaches only the records that resolved one; the other named rules reach
-        // values a record does not say it read.
-        let named_rule_context_is_counter_styles_only = transaction.program_joins.iter().all(|delta| {
-            !matches!(
-                self.retained.program.rule_version(delta.rule).kind,
-                RuleKind::FontFeatureValues | RuleKind::Function
-            )
-        });
+        // Which named rule contexts moved. Each reaches a record by a route of its own, so a node
+        // is asked about the ones that moved rather than about all of them: a counter style
+        // reaches only a record that resolved one, a `@function` reaches a value only through a
+        // substitution, and `@font-feature-values` reaches values a record does not say it read.
+        let mut counter_styles_moved = false;
+        let mut custom_functions_moved = false;
+        let mut font_feature_values_moved = false;
+        for delta in &transaction.program_joins {
+            match self.retained.program.rule_version(delta.rule).kind {
+                RuleKind::CounterStyle => counter_styles_moved = true,
+                RuleKind::Function => custom_functions_moved = true,
+                RuleKind::FontFeatureValues => font_feature_values_moved = true,
+                _ => {}
+            }
+        }
+        let named_rule_context_changed = counter_styles_moved || custom_functions_moved || font_feature_values_moved;
         let pseudo_inputs_may_have_changed = environment_changed
             || rule_declarations_edited
             || named_rule_context_changed
@@ -1883,7 +1885,11 @@ impl StyleEngineState {
                     | transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES;
                 let reaction_is_settleable = reaction & !(transaction::STYLE_REACTION_PUBLISHED_STYLE | DERIVABLE) == 0
                     && !(reaction & DERIVABLE != 0 && style_input_nodes_for_cpp.contains(&root));
-                let can_prepare = !(named_rule_context_changed && old_record.is_some())
+                let can_prepare = !(named_rule_context_changed
+                    && old_record.is_some()
+                    && (font_feature_values_moved
+                        || custom_functions_moved
+                        || (counter_styles_moved && self.node_reads_counter_styles(root))))
                     && (reaction_is_settleable
                         || (old_record.is_none() && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
                     && nodes_with_declaration_changes.binary_search(&root).is_err()
@@ -2181,9 +2187,10 @@ impl StyleEngineState {
                         // is no element record to recompute or compare against the parent's groups.
                         decline_cause = "InheritedCustomPropertiesNonConsumer";
                         false
-                    } else if (named_rule_context_changed
-                        && old_style_record != 0
-                        && (!named_rule_context_is_counter_styles_only || self.node_reads_counter_styles(node)))
+                    } else if (old_style_record != 0
+                        && (font_feature_values_moved
+                            || custom_functions_moved
+                            || (counter_styles_moved && self.node_reads_counter_styles(node))))
                         || !(reaction_is_settleable
                             || (old_style_record == 0 && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
                     {
