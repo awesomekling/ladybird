@@ -41,10 +41,10 @@ PASS: child mutation: document: :has(> *) after child append | elementStyleRecom
 PASS: child mutation: document: :has(:checked) after checked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: document: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: document: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: document: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: document: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: document: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: document: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: document: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: document: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: document: :has(:dir(rtl)) after dir=auto child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -56,7 +56,7 @@ PASS: child mutation: document: :has(:only-child) becomes false after sibling ap
 PASS: child mutation: document: :has(:nth-child(2)) after second child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: document: :has(:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: document: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: child mutation: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: child mutation: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: document: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: document: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: document: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -136,10 +136,10 @@ PASS: child mutation: document-styled-use-shadow: :has(> *) after child append |
 PASS: child mutation: document-styled-use-shadow: :has(:checked) after checked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: document-styled-use-shadow: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: document-styled-use-shadow: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: child mutation: document-styled-use-shadow: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: document-styled-use-shadow: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: document-styled-use-shadow: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: document-styled-use-shadow: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: child mutation: document-styled-use-shadow: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: document-styled-use-shadow: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: document-styled-use-shadow: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: document-styled-use-shadow: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: document-styled-use-shadow: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: child mutation: document-styled-use-shadow: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: document-styled-use-shadow: :has(:dir(rtl)) after dir=auto child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -151,7 +151,7 @@ PASS: child mutation: document-styled-use-shadow: :has(:only-child) becomes fals
 PASS: child mutation: document-styled-use-shadow: :has(:nth-child(2)) after second child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: document-styled-use-shadow: :has(:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: document-styled-use-shadow: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: child mutation: document-styled-use-shadow: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: child mutation: document-styled-use-shadow: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: document-styled-use-shadow: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: document-styled-use-shadow: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: document-styled-use-shadow: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -235,10 +235,10 @@ PASS: child mutation: shadow-internal: :has(> *) after child append | elementSty
 PASS: child mutation: shadow-internal: :has(:checked) after checked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: shadow-internal: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: shadow-internal: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: child mutation: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: child mutation: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: shadow-internal: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: child mutation: shadow-internal: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: shadow-internal: :has(:dir(rtl)) after dir=auto child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -250,7 +250,7 @@ PASS: child mutation: shadow-internal: :has(:only-child) becomes false after sib
 PASS: child mutation: shadow-internal: :has(:nth-child(2)) after second child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: shadow-internal: :has(:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: shadow-internal: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: child mutation: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: child mutation: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: shadow-internal: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: shadow-internal: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: shadow-internal: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -430,10 +430,10 @@ PASS: child mutation: slotted-default: :has(> *) after child append | elementSty
 PASS: child mutation: slotted-default: :has(:checked) after checked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-default: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-default: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: child mutation: slotted-default: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: slotted-default: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: slotted-default: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: slotted-default: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: child mutation: slotted-default: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: slotted-default: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: slotted-default: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: slotted-default: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-default: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-default: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-default: :has(:dir(rtl)) after dir=auto child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -445,7 +445,7 @@ PASS: child mutation: slotted-default: :has(:only-child) becomes false after sib
 PASS: child mutation: slotted-default: :has(:nth-child(2)) after second child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-default: :has(:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-default: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: child mutation: slotted-default: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: child mutation: slotted-default: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-default: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-default: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-default: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -529,10 +529,10 @@ PASS: child mutation: slotted-named: :has(> *) after child append | elementStyle
 PASS: child mutation: slotted-named: :has(:checked) after checked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-named: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-named: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: child mutation: slotted-named: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: slotted-named: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: slotted-named: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: slotted-named: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: child mutation: slotted-named: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: slotted-named: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: slotted-named: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: slotted-named: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-named: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-named: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-named: :has(:dir(rtl)) after dir=auto child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -544,7 +544,7 @@ PASS: child mutation: slotted-named: :has(:only-child) becomes false after sibli
 PASS: child mutation: slotted-named: :has(:nth-child(2)) after second child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-named: :has(:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-named: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: child mutation: slotted-named: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: child mutation: slotted-named: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-named: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-named: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-named: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -847,14 +847,14 @@ PASS: pseudo-element child mutation without warmup: document: :has(:checked) aft
 PASS: pseudo-element child mutation: document: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation without warmup: document: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation without warmup: document: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation without warmup: document: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation without warmup: document: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation without warmup: document: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation without warmup: document: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation without warmup: document: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation without warmup: document: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -875,8 +875,8 @@ PASS: pseudo-element child mutation: document: :has(:nth-last-child(2)) after tr
 PASS: pseudo-element child mutation without warmup: document: :has(:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation without warmup: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation without warmup: document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: document: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: document: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -1018,14 +1018,14 @@ PASS: pseudo-element child mutation without warmup: shadow-internal: :has(:check
 PASS: pseudo-element child mutation: shadow-internal: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: shadow-internal: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: shadow-internal: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation without warmup: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation without warmup: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation without warmup: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation without warmup: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation without warmup: shadow-internal: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation without warmup: shadow-internal: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation without warmup: shadow-internal: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation without warmup: shadow-internal: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: shadow-internal: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: shadow-internal: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: shadow-internal: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -1046,8 +1046,8 @@ PASS: pseudo-element child mutation: shadow-internal: :has(:nth-last-child(2)) a
 PASS: pseudo-element child mutation without warmup: shadow-internal: :has(:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: shadow-internal: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: shadow-internal: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: pseudo-element child mutation without warmup: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: pseudo-element child mutation without warmup: shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: shadow-internal: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation without warmup: shadow-internal: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: pseudo-element child mutation: shadow-internal: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0

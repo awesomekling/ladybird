@@ -777,7 +777,17 @@ impl RetainedState {
         host: StyleNodeID,
         target: tree::PseudoElementTarget,
     ) -> Option<Vec<RuleMatch>> {
-        let matches: Vec<RuleMatch> = match Self::published_answer_lookup(
+        let batch_matches = self.batch_backing_pseudo_matches.get(&host).map(|matches| {
+            matches
+                .iter()
+                .filter(|entry| entry.pseudo_element == Some(target))
+                .copied()
+                .collect()
+        });
+        let matches: Vec<RuleMatch> = if let Some(matches) = batch_matches {
+            matches
+        } else {
+            match Self::published_answer_lookup(
             &self.published_match_answers,
             self.batch_matching_traversal.as_deref(),
             host,
@@ -799,6 +809,7 @@ impl RetainedState {
                     .collect::<Option<_>>()?,
                 _ => return None,
             },
+        }
         };
         let complete = !matches.iter().any(|entry| {
             !self.match_scope_is_complete_for(Some(host), entry.rule, entry.tree_scope)
@@ -811,6 +822,33 @@ impl RetainedState {
                 .element_declarations_are_complete_but_for_custom_properties(node, declaration_kind)
         }) && self.facts.element_custom_declarations(node).is_empty();
         complete.then_some(matches)
+    }
+
+    /// The matches for element-backed pseudo-elements in the answer a transaction publishes for a
+    /// node, read before that answer is installed. `None` when it has none.
+    pub(in crate::css::style) fn batch_backing_pseudo_matches_of(
+        &self,
+        node: StyleNodeID,
+        published: &PublishedMatchAnswers,
+        answer: &PublishedMatchAnswer,
+    ) -> Option<Vec<RuleMatch>> {
+        let is_backed = |pseudo: Option<tree::PseudoElementTarget>| {
+            pseudo.is_some_and(|pseudo| {
+                (u16::from(bridge::FIRST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND)..=u16::from(bridge::LAST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND))
+                    .contains(&pseudo.kind.0)
+            })
+        };
+        let matches: Vec<RuleMatch> = match published.matches_for(answer) {
+            Some(matches) => matches.iter().filter(|entry| is_backed(entry.pseudo_element)).copied().collect(),
+            None => self
+                .match_answers
+                .answer(answer.cascade_input?)?
+                .iter()
+                .filter(|entry| is_backed(self.programs.get(entry.program).entries()[entry.entry as usize].pseudo_element))
+                .map(|entry| entry.materialize(node, &self.programs, 0))
+                .collect::<Option<_>>()?,
+        };
+        (!matches.is_empty()).then_some(matches)
     }
 
     /// The record of an element standing for its shadow host's pseudo-element, the way C++

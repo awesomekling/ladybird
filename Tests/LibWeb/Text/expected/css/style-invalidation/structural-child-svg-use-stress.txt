@@ -232,30 +232,30 @@ PASS: stress warm pseudo-element child mutation: document-styled-use-shadow: :ha
 PASS: stress cold pseudo-element child mutation: document-styled-use-shadow: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: document-styled-use-shadow: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: document-styled-use-shadow: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: document-styled-use-shadow: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: document-styled-use-shadow: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: document-styled-use-shadow: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: document-styled-use-shadow: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: document-styled-use-shadow: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: document-styled-use-shadow: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: document-styled-use-shadow: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: document-styled-use-shadow: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: document-styled-use-shadow: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: document-styled-use-shadow: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: document-styled-use-shadow: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: document-styled-use-shadow: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: document-styled-use-shadow: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: document-styled-use-shadow: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: document-styled-use-shadow: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: document-styled-use-shadow: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: document-styled-use-shadow: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: document-styled-use-shadow: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: document-styled-use-shadow: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: document-styled-use-shadow: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: document-styled-use-shadow: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: document-styled-use-shadow: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: document-styled-use-shadow: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: document-styled-use-shadow: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: document-styled-use-shadow: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: document-styled-use-shadow: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm pseudo-element child mutation: document-styled-use-shadow: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: document-styled-use-shadow: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: document-styled-use-shadow: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached pseudo-element child mutation: document-styled-use-shadow: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: document-styled-use-shadow: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: document-styled-use-shadow: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm pseudo-element child mutation: document-styled-use-shadow: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: document-styled-use-shadow: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: document-styled-use-shadow: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached pseudo-element child mutation: document-styled-use-shadow: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: document-styled-use-shadow: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: document-styled-use-shadow: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm pseudo-element child mutation: document-styled-use-shadow: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: document-styled-use-shadow: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: document-styled-use-shadow: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached pseudo-element child mutation: document-styled-use-shadow: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: document-styled-use-shadow: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: document-styled-use-shadow: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm pseudo-element child mutation: document-styled-use-shadow: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: document-styled-use-shadow: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: document-styled-use-shadow: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached pseudo-element child mutation: document-styled-use-shadow: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: document-styled-use-shadow: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: stress cold child mutation: document-styled-use-shadow: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: document-styled-use-shadow: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -322,12 +322,12 @@ PASS: stress warm pseudo-element child mutation: document-styled-use-shadow: :ha
 PASS: stress cold pseudo-element child mutation: document-styled-use-shadow: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: document-styled-use-shadow: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: document-styled-use-shadow: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: document-styled-use-shadow: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: document-styled-use-shadow: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: document-styled-use-shadow: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: document-styled-use-shadow: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: document-styled-use-shadow: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: document-styled-use-shadow: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: document-styled-use-shadow: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: document-styled-use-shadow: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm pseudo-element child mutation: document-styled-use-shadow: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: document-styled-use-shadow: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: document-styled-use-shadow: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached pseudo-element child mutation: document-styled-use-shadow: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: document-styled-use-shadow: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: document-styled-use-shadow: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: document-styled-use-shadow: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0

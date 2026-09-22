@@ -41,10 +41,10 @@ PASS: detached child mutation: slotted-default: :has(> *) after child append | e
 PASS: detached child mutation: slotted-default: :has(:checked) after checked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-default: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-default: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-default: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-default: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-default: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-default: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-default: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-default: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-default: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-default: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-default: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-default: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-default: :has(:dir(rtl)) after dir=auto child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -56,7 +56,7 @@ PASS: detached child mutation: slotted-default: :has(:only-child) becomes false 
 PASS: detached child mutation: slotted-default: :has(:nth-child(2)) after second child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-default: :has(:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-default: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-default: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-default: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-default: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-default: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-default: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -140,10 +140,10 @@ PASS: detached child mutation: slotted-named: :has(> *) after child append | ele
 PASS: detached child mutation: slotted-named: :has(:checked) after checked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-named: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-named: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-named: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-named: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-named: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-named: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-named: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-named: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-named: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-named: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-named: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-named: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-named: :has(:dir(rtl)) after dir=auto child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -155,7 +155,7 @@ PASS: detached child mutation: slotted-named: :has(:only-child) becomes false af
 PASS: detached child mutation: slotted-named: :has(:nth-child(2)) after second child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-named: :has(:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-named: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-named: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-named: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-named: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-named: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-named: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -236,10 +236,10 @@ PASS: detached child mutation: slotted-shadow-host-default: :has(> *) after chil
 PASS: detached child mutation: slotted-shadow-host-default: :has(:checked) after checked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-default: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-default: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-shadow-host-default: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-shadow-host-default: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-shadow-host-default: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-shadow-host-default: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-shadow-host-default: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-shadow-host-default: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-shadow-host-default: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-shadow-host-default: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-default: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-default: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-default: :has(:dir(rtl)) after dir=auto child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -251,7 +251,7 @@ PASS: detached child mutation: slotted-shadow-host-default: :has(:only-child) be
 PASS: detached child mutation: slotted-shadow-host-default: :has(:nth-child(2)) after second child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-default: :has(:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-default: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-shadow-host-default: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-shadow-host-default: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-default: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-default: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-default: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -332,10 +332,10 @@ PASS: detached child mutation: slotted-shadow-host-named: :has(> *) after child 
 PASS: detached child mutation: slotted-shadow-host-named: :has(:checked) after checked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-named: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-named: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-shadow-host-named: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-shadow-host-named: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-shadow-host-named: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-shadow-host-named: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-shadow-host-named: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-shadow-host-named: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-shadow-host-named: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-shadow-host-named: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-named: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-named: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-named: :has(:dir(rtl)) after dir=auto child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -347,7 +347,7 @@ PASS: detached child mutation: slotted-shadow-host-named: :has(:only-child) beco
 PASS: detached child mutation: slotted-shadow-host-named: :has(:nth-child(2)) after second child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-named: :has(:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-named: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: detached child mutation: slotted-shadow-host-named: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: detached child mutation: slotted-shadow-host-named: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-named: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-named: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: slotted-shadow-host-named: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
