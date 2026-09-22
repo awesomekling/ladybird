@@ -1120,6 +1120,10 @@ void StyleScope::publish_counter_styles() const
             names.data(),
             counter_styles.data(),
             names.size());
+        // The style engine names the same registry on every record computed against it, so it
+        // learns the identity wherever the registry is published.
+        document().style_computer().style_engine().set_counter_style_environment_identity(
+            scope.style_engine_tree_scope().value(), scope.m_counter_style_environment_identity);
     };
 
     publish(*this);

@@ -917,6 +917,11 @@ pub struct RetainedState {
     /// The nodes whose record the engine derived beneath a composition their animations made: the
     /// host samples those animations again over the new record once the batch is applied.
     nodes_owing_an_animation_sample: HashSet<StyleNodeID>,
+    /// What each tree scope's registered counter styles are, as one identity per scope. A record
+    /// whose `content` or `list-style-type` names an overridable counter style is only the answer
+    /// while the registry it named is the one in place, so the record carries the identity and a
+    /// later edit to `@counter-style` moves it.
+    counter_style_environment_identities: HashMap<tree::TreeScopeID, u64>,
     /// The nodes whose engine-computed record moved the longhands that declare the element's CSS
     /// animations, and the plan each one leaves for the host. Like the transition debt it is an
     /// effect of the row rather than a part of the record: the host drains it after the batch, in

@@ -1028,8 +1028,31 @@ impl RetainedState {
             if property_starts_animation_or_counter_environment(property)
                 && !(owes_a_transition_step && longhand_only_declares_a_css_transition(property))
                 && !(owes_an_animation_plan && longhand_declares_a_css_animation(property))
-                && !self.counter_environment_winner_keeps_the_record(state, old_style_record, property)
+                && !self.counter_environment_winner_keeps_the_record(node, state, old_style_record, property)
             {
+                if crate::css::style::seal::is_reporting() {
+                    use crate::css::property_metadata::property_id as prop;
+                    let stamped = self
+                        .computed_group_sets
+                        .style_record_view(old_style_record.raw())
+                        .is_none_or(|view| view.counter_style_environment_identity != 0);
+                    let value_plain = self
+                        .winner_groups
+                        .winner_in_state(state, property)
+                        .and_then(|winner| self.winner_groups.resolved_winner(winner))
+                        .is_some_and(|winner| match self.specified_values.value(winner.key.value) {
+                            Lookup::Known(value) => content_value_is_engine_computable(value),
+                            _ => false,
+                        });
+                    crate::css::style::seal::note_probe(match (property, stamped, value_plain) {
+                        (prop::CONTENT, true, true) => "content: old record stamped",
+                        (prop::CONTENT, true, false) => "content: stamped and value not plain",
+                        (prop::CONTENT, false, false) => "content: value not plain",
+                        (prop::CONTENT, false, true) => "content: other",
+                        (prop::LIST_STYLE_TYPE, ..) => "list-style-type",
+                        _ => "other property",
+                    });
+                }
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
             }
@@ -1924,8 +1947,18 @@ impl RetainedState {
     /// A node declaring custom properties is left to C++ with such a winner: the environment the
     /// engine would name for it may be one the host resolved and no longer installs, and the host
     /// then computes the element and its children over again.
+    /// What a record this node publishes must name, when what it computed reads the registry.
+    /// Zero when it reads none, which is what the record carries for every other element.
+    fn counter_style_environment_identity_for(&self, node: StyleNodeID) -> u64 {
+        self.counter_style_environment_identities
+            .get(&self.tree.tree_scope(node))
+            .copied()
+            .unwrap_or(0)
+    }
+
     fn counter_environment_winner_keeps_the_record(
         &self,
+        node: StyleNodeID,
         state: CascadeStateID,
         old_style_record: computed::FinalStyleRecordID,
         property: u16,
@@ -1934,11 +1967,19 @@ impl RetainedState {
         if property != prop::CONTENT && property != prop::LIST_STYLE_TYPE {
             return false;
         }
-        if self
+        // The record names the registry it read, so a winner that reads one is the engine's to
+        // compute as long as the host has told it what that scope's registry is now and the
+        // record it moves away from read that same registry. One that named an older registry is
+        // not what the element holds any more.
+        let current = self.counter_style_environment_identity_for(node);
+        let named = self
             .computed_group_sets
             .style_record_view(old_style_record.raw())
-            .is_none_or(|view| view.counter_style_environment_identity != 0)
-        {
+            .map_or(u64::MAX, |view| view.counter_style_environment_identity);
+        if current != 0 && (named == 0 || named == current) {
+            return true;
+        }
+        if named != 0 {
             return false;
         }
         if property == prop::LIST_STYLE_TYPE {
@@ -2367,6 +2408,25 @@ impl RetainedState {
         let dependency_flags = unsafe { &*table }.publication_dependency_flags()
             | (u8::from(swap_eligible) * computed::INHERITED_GROUP_SWAP_ELIGIBLE)
             | (u8::from(holds_image_values) * computed::HOLDS_IMAGE_VALUES);
+        // A record that named a counter style is the answer only while that scope's registry is
+        // the one it read, so it carries the identity the host published for the scope.
+        let counter_style_environment_identity = if counter_style_environment_identity != 0 {
+            counter_style_environment_identity
+        } else {
+            let names_one = {
+                use crate::css::property_metadata::property_id as prop;
+                let table = unsafe { &*table };
+                [prop::CONTENT, prop::LIST_STYLE_TYPE].into_iter().any(|property| {
+                    let value = table.effective_value(None, property, true).value;
+                    !value.is_null()
+                        && value_names_an_overridable_counter_style(unsafe { &*value.cast::<StyleValueData>() })
+                })
+            };
+            match names_one {
+                true => self.counter_style_environment_identity_for(target.node()),
+                false => 0,
+            }
+        };
         let metadata_input = computed::ComputedMetadataInput {
             pseudo_element_styles: pseudo_styles,
             dependency_flags,
@@ -5150,6 +5210,31 @@ fn font_group_carries_longhand(property: u16) -> bool {
 
 /// The counter-style names no @counter-style rule overrides: decimal, disc, square, circle,
 /// disclosure-open and disclosure-closed.
+/// Whether a computed value names a counter style the registry can override, which is what makes
+/// a record depend on the registry it was computed against. The twin of
+/// `computed_content_depends_on_counter_style_environment` in `StyleComputer.cpp`.
+fn value_names_an_overridable_counter_style(value: &StyleValueData) -> bool {
+    match value {
+        StyleValueData::Counter { counter_style, .. } => counter_style.optional_data().is_some_and(|style| {
+            matches!(style, StyleValueData::CounterStyle { is_symbols, name, .. }
+                if !*is_symbols && !counter_style_name_is_non_overridable(name.units()))
+        }),
+        StyleValueData::Content { content, alt_text } => [content, alt_text].into_iter().any(|part| {
+            part.optional_data()
+                .is_some_and(value_names_an_overridable_counter_style)
+        }),
+        StyleValueData::ValueList { values, .. } => values.as_slice().iter().any(|value| {
+            value
+                .optional_data()
+                .is_some_and(value_names_an_overridable_counter_style)
+        }),
+        StyleValueData::CounterStyle { is_symbols, name, .. } => {
+            !*is_symbols && !counter_style_name_is_non_overridable(name.units())
+        }
+        _ => false,
+    }
+}
+
 fn counter_style_name_is_non_overridable(name: &[u16]) -> bool {
     [
         "decimal",
@@ -5687,6 +5772,15 @@ impl StyleEngineState {
 }
 
 impl StyleEngineState {
+    /// What the host registered for one tree scope's `@counter-style` rules, as an identity that
+    /// moves when the registry does. A record that read the registry names the identity it read,
+    /// so an edit to those rules is what moves the record rather than the loss of the record.
+    pub(crate) fn set_counter_style_environment_identity(&mut self, tree_scope: TreeScopeID, identity: u64) {
+        self.retained
+            .counter_style_environment_identities
+            .insert(tree_scope, identity);
+    }
+
     /// Establish the document element's font input before the consumer pass. The root's
     /// remaining properties and pseudos complete in their normal canonical position.
     pub(super) fn prepare_root_font_inputs(
