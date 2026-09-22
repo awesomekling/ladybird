@@ -95,20 +95,41 @@ impl RetainedState {
             counters: &mut Counters,
         ) {
             use crate::css::property_metadata::{longhands_for_shorthand, property_is_shorthand};
-            // Element declarations decide longhands. Presentation attributes can name shorthands
-            // whose children are themselves shorthands, so expand the complete property inventory.
-            if property_is_shorthand(property) && !matches!(&*declaration.value, StyleValueData::Unresolved { .. }) {
+            if property_is_shorthand(property) && matches!(&*declaration.value, StyleValueData::Unresolved { .. }) {
+                crate::css::style_compute::expand_shorthands_with(
+                    property,
+                    Arc::as_ptr(&declaration.value).cast(),
+                    false,
+                    &mut |property_id, value, _| {
+                        let value = unsafe {
+                            Arc::increment_strong_count(value.cast::<StyleValueData>());
+                            Arc::from_raw(value.cast::<StyleValueData>())
+                        };
+                        let expanded = declaration_block::DeclaredProperty {
+                            property_id,
+                            important: declaration.important,
+                            value,
+                        };
+                        declared.push(engine.intern_declared_property(&expanded, counters));
+                        written.push(unsafe {
+                            RetainedStyleValueData::from_retained_pointer(Arc::into_raw(expanded.value))
+                        });
+                    },
+                );
+                return;
+            }
+            if property_is_shorthand(property) {
                 for &longhand in longhands_for_shorthand(property) {
                     append(engine, longhand, declaration, declared, written, counters);
                 }
-            } else {
-                let mut value = engine.intern_declared_property(declaration, counters);
-                value.property = property;
-                declared.push(value);
-                written.push(unsafe {
-                    RetainedStyleValueData::from_retained_pointer(Arc::into_raw(declaration.value.clone()))
-                });
+                return;
             }
+            let mut value = engine.intern_declared_property(declaration, counters);
+            value.property = property;
+            declared.push(value);
+            written.push(unsafe {
+                RetainedStyleValueData::from_retained_pointer(Arc::into_raw(declaration.value.clone()))
+            });
         }
         let mut declared = Vec::with_capacity(declarations.len());
         let mut written = Vec::with_capacity(declarations.len());
