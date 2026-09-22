@@ -299,14 +299,14 @@ pub(crate) fn note_stage_interleave(name: &'static str) {
     }
 }
 
-/// Run the between-pass font batch.
+/// Run a between-pass input batch.
 ///
 /// This used to be a main-thread resource service: the batch entered the document's font computer,
 /// which could resolve a pending web face and run its GC-visible callbacks. It is now a stage-local
 /// computation over the published `@font-face` table and the process-wide font services, so it is
 /// counted but not a crossing. The count stays because the batch is still a round *between* passes
 /// rather than part of one, and that is what a single sealed pass would have to absorb.
-pub(crate) fn between_pass_font_batch<T>(name: &'static str, requests: u64, batch: impl FnOnce() -> T) -> T {
+pub(crate) fn between_pass_input_batch<T>(name: &'static str, requests: u64, batch: impl FnOnce() -> T) -> T {
     if mode() == Mode::Off || UPDATE_DEPTH.with(|depth| depth.get() == 0) {
         return batch();
     }

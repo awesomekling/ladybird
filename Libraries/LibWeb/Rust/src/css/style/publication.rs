@@ -549,7 +549,7 @@ impl RetainedState {
             .engine_pseudo_records(node, old_style_record, delta.1, generation, scratch, counters)
             .is_none()
         {
-            if scratch.font_drive.request.is_some() {
+            if scratch.font_drive.request.is_some() || !self.random_base_requests.is_empty() {
                 scratch.pending_element = Some(delta);
             } else {
                 self.abandon_engine_computed_record(node, scratch, counters);
@@ -2114,13 +2114,39 @@ impl RetainedState {
         self.tree.shadow_host_of(node).unwrap_or(node)
     }
 
-    /// A key for what a node's attributes hold, for the record caches, when its winners read them.
+    /// The per-element inputs a record cache must distinguish: attributes and element-scoped random bases.
     fn substitution_attributes_key(&self, node: StyleNodeID, pseudo_kind: Option<u8>, state: CascadeStateID) -> u64 {
         use std::hash::{Hash, Hasher};
-        if !self.state_reads_attributes(node, state) {
+        let environment = self
+            .computed_group_sets
+            .custom_property_environment_identity(node)
+            .unwrap_or(0);
+        let reads_random = self.winner_groups.winners_in_state(state).any(|winner| {
+            let Some(winner) = self.winner_groups.resolved_winner(winner) else {
+                return false;
+            };
+            let Ok(Some((_, value, _))) = self.written_winner_value(node, &winner) else {
+                return false;
+            };
+            match value.data() {
+                StyleValueData::Unresolved { .. } => self
+                    .custom_property_environments
+                    .substitution(value, winner.property, environment)
+                    .is_none_or(|value| {
+                        crate::css::style_compute::collect_external_value_dependencies(value.data())
+                            .has_unfixed_random_sharing
+                    }),
+                StyleValueData::PendingSubstitution { .. } => true,
+                data => value_reads_element_random(data),
+            }
+        });
+        if !reads_random && !self.state_reads_attributes(node, state) {
             return 0;
         }
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        if reads_random {
+            node.hash(&mut hasher);
+        }
         self.facts
             .substitution_attributes(self.substitution_attribute_element(node, pseudo_kind))
             .hash(&mut hasher);
@@ -2412,7 +2438,7 @@ impl RetainedState {
                 }
                 if !pseudos_settled {
                     // A pseudo-element the engine cannot settle sends the element to C++.
-                    if scratch.font_drive.request.is_some() {
+                    if scratch.font_drive.request.is_some() || !self.random_base_requests.is_empty() {
                         scratch.pending_element = Some((old_record, record));
                     } else {
                         counters.bump(Counter::RetryAfterAncestorPseudoAbandons);
@@ -3477,7 +3503,8 @@ impl RetainedState {
             let context_free = checks
                 .longhand_context_free
                 .unwrap_or_else(|| value_computes_without_document_context(data))
-                || (resources_are_known && value_computes_without_document_context_but_for_resources(data).is_some());
+                || (resources_are_known && value_computes_without_document_context_but_for_resources(data).is_some())
+                || value_computes_with_random_inputs(data, resources_are_known);
             if !context_free
                 || (pseudo_kind.is_some()
                     && winner.property == prop::CONTENT
@@ -5553,6 +5580,34 @@ fn property_starts_animation_or_counter_environment(property: u16) -> bool {
             .is_some_and(|group| usize::from(group) == crate::css::table_group_builder::group_index::ANIMATION))
 }
 
+fn value_reads_element_random(value: &StyleValueData) -> bool {
+    let mut sharings = Vec::new();
+    crate::css::style_compute::collect_unfixed_random_sharings_in_value(value, &mut sharings);
+    sharings.into_iter().any(|source| {
+        matches!(
+            unsafe { &*source },
+            StyleValueData::RandomValueSharing {
+                is_auto: true,
+                element_shared: false,
+                ..
+            }
+        )
+    })
+}
+
+/// Random bases are retained inputs, filled by the between-pass service before a drive resumes.
+fn value_computes_with_random_inputs(value: &StyleValueData, resources_are_known: bool) -> bool {
+    if crate::css::style_compute::value_is_computationally_independent(value).is_none() {
+        return false;
+    }
+    let dependencies = crate::css::style_compute::external_value_dependencies(value);
+    dependencies.uses_random_function
+        && !dependencies.uses_tree_counting_function
+        && dependencies.container_relative_length_unit_mask == 0
+        && (resources_are_known
+            || (!dependencies.needs_document_base_url && !dependencies.may_need_style_sheet_resource_context))
+}
+
 /// Whether a written value computes from the record, the parent and the document's computation
 /// inputs alone: no custom-property substitution, and none of the element or sheet facts the C++
 /// computation gathers per drive.
@@ -6081,6 +6136,18 @@ impl StyleEngineState {
             FontDriveGoal::RootInputs,
             counters,
         );
+        if !self.random_base_requests.is_empty() {
+            self.refill_random_base_requests();
+            self.engine_computed_element_record_delta(
+                node,
+                cascade_winners_are_complete,
+                exact_flipped_rules,
+                parent_inputs_moved,
+                scratch,
+                FontDriveGoal::RootInputs,
+                counters,
+            );
+        }
         if let Some(request) = scratch.font_drive.request.take() {
             self.root_font_request = Some(request.for_generation(inputs.font_environment_generation));
             // This update computed a new root request after the begin boundary. Complete that
@@ -6245,6 +6312,10 @@ impl StyleEngineState {
     ) -> u64 {
         loop {
             let record = self.retry_engine_record_after_ancestor_step(node, scratch, counters);
+            if !self.random_base_requests.is_empty() {
+                self.refill_random_base_requests();
+                continue;
+            }
             let Some(request) = scratch.font_drive.request.take() else {
                 if record != 0 {
                     counters.bump(Counter::RetryAfterAncestorSettled);
@@ -6268,3 +6339,17 @@ const _: () = {
     const fn assert_send<T: Send>() {}
     assert_send::<EngineComputedRecordScratch>();
 };
+
+impl StyleEngineState {
+    pub(super) fn refill_random_base_requests(&mut self) {
+        let requests = std::mem::take(&mut self.retained.random_base_requests);
+        if requests.is_empty() {
+            return;
+        }
+        super::seal::between_pass_input_batch("random_base", requests.len() as u64, || {
+            for (node, name, shared) in requests {
+                self.ensure_random_base_value(node, &name, shared);
+            }
+        });
+    }
+}

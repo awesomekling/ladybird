@@ -2190,3 +2190,104 @@ mod color_channel_tests {
         }
     }
 }
+
+/// The legacy adapter publishes container bases and installs the tree dependency before resolving.
+///
+/// # Safety
+/// `value` must point to live style value data.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_random_sharing_input_dependencies(value: *const StyleValueData) -> u8 {
+    let dependencies = crate::css::style_compute::collect_external_value_dependencies(unsafe { &*value });
+    dependencies.container_relative_length_unit_mask | (u8::from(dependencies.uses_tree_counting_function) << 6)
+}
+
+/// Resolves random sharing for legacy calculation callers from the engine's random cache.
+/// The record drive consumes the same bases after its between-pass refill.
+///
+/// # Safety
+/// The value and length pointers must be live. An unfixed draw requires a live engine and node.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_random_sharing_absolutize(
+    value: *const StyleValueData,
+    length: *const core::ffi::c_void,
+    engine: *mut core::ffi::c_void,
+    node: u32,
+) -> *const StyleValueData {
+    let data = unsafe { &*value };
+    let StyleValueData::RandomValueSharing {
+        fixed_value,
+        has_name,
+        name,
+        element_shared,
+        is_auto,
+    } = data
+    else {
+        unreachable!();
+    };
+    let mut engine = unsafe { engine.cast::<crate::css::style::StyleEngine>().as_mut() };
+    let node = crate::css::style::tree::StyleNodeID::from_raw(node);
+    let fixed = match fixed_value.optional_data() {
+        Some(fixed) => {
+            let mut sources = Vec::new();
+            crate::css::style_compute::collect_unfixed_random_sharings_in_value(fixed, &mut sources);
+            let mut bases = Vec::with_capacity(sources.len());
+            for source in sources {
+                let StyleValueData::RandomValueSharing {
+                    has_name,
+                    name,
+                    element_shared,
+                    is_auto,
+                    ..
+                } = (unsafe { &*source })
+                else {
+                    unreachable!()
+                };
+                let name = if *has_name { name.units() } else { &[] };
+                bases.push(crate::css::style_compute::FfiRandomBaseValue {
+                    source: source.cast(),
+                    value: engine
+                        .as_mut()
+                        .expect("random input needs an engine")
+                        .ensure_random_base_value(
+                            node.expect("random input needs an element"),
+                            name,
+                            *element_shared || !*is_auto,
+                        ),
+                });
+            }
+            let context = AbsolutizationContext {
+                length: unsafe { &*length.cast::<FfiLengthResolutionContext>() },
+                scheme: None,
+                resolved_viewport_relative_length: Cell::new(false),
+                tree_counting: engine.as_ref().zip(node).and_then(|(engine, node)| {
+                    let packed = engine.element_tree_counting_inputs(node);
+                    (packed != 0).then_some((packed >> 32, packed & u64::from(u32::MAX)))
+                }),
+                random_base_values: &bases,
+                document_base_url: &[],
+                style_sheet_resource_context: None,
+            };
+            match absolutize(fixed, &context).expect("random fixed value must absolutize") {
+                Absolutized::Unchanged => return unsafe { crate::css::style_value::retain_style_value(value) },
+                Absolutized::Changed(value) => value,
+            }
+        }
+        None => RetainedStyleValueData::from_owned(StyleValueData::Number {
+            value: engine.expect("random input needs an engine").ensure_random_base_value(
+                node.expect("random input needs an element"),
+                if *has_name { name.units() } else { &[] },
+                *element_shared || !*is_auto,
+            ),
+        }),
+    };
+    let result = RetainedStyleValueData::from_owned(StyleValueData::RandomValueSharing {
+        fixed_value: fixed,
+        has_name: false,
+        name: crate::css::style_value::CssString::none(),
+        element_shared: false,
+        is_auto: false,
+    });
+    let pointer = result.pointer();
+    core::mem::forget(result);
+    pointer
+}

@@ -76,6 +76,8 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         font_face_snapshot,
         font_cascade_memo,
         root_font_request,
+        random_base_values,
+        random_base_requests,
         layout_style_snapshots,
         container_query_inputs,
         layer_topology_version,
@@ -205,6 +207,8 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(font_cascade_memo);
     assert_member_is_sync(layout_style_snapshots);
     assert_member_is_sync(container_query_inputs);
+    assert_member_is_sync(random_base_values);
+    assert_member_is_sync(random_base_requests);
     assert_member_is_sync(layer_topology_version);
     assert_member_is_sync(sheet_order_version);
     assert_member_is_sync(specified_values);
