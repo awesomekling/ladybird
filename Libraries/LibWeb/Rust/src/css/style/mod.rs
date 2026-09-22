@@ -1139,6 +1139,10 @@ pub struct HostState {
     computed_record_verification_element: u32,
     computed_record_verification_settled_pseudos: u64,
     computed_record_verification_pins: Vec<u64>,
+    /// The records a verification scope interned that something outside the engine may still be
+    /// holding when the scope ends: a layout row stamped from one roots it and pins it again when
+    /// the tree is torn down, which is after every scope. They stay pinned for the document.
+    computed_record_verification_keep_alive: Vec<u64>,
     journal: NormalizationJournal,
     /// Local selector facts through the latest geometry read which reused committed layout. A
     /// normal style observation merges this into `journal`; a newly introduced transition can

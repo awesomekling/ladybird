@@ -3181,9 +3181,11 @@ pub unsafe extern "C" fn style_engine_begin_computed_record_verification(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_end_computed_record_verification(engine: *mut c_void) {
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    for style_record in std::mem::take(&mut engine.host.computed_record_verification_pins) {
-        engine.unpin_style_record(style_record);
-    }
+    // The pins stay: a layout row stamped from a record this scope interned outlives the scope,
+    // and roots that record again when the tree is torn down. Releasing them here is what makes
+    // `prepare_row_for_detach` pin a record whose base generation is already gone.
+    let pins = std::mem::take(&mut engine.host.computed_record_verification_pins);
+    engine.host.computed_record_verification_keep_alive.extend(pins);
     engine.host.computed_record_verification_element = 0;
     engine.host.computed_record_verification_settled_pseudos = 0;
     engine.counters = *engine
