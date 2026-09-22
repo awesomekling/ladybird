@@ -125,11 +125,8 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailRecordTable);
             return None;
         };
-        // A record under display:none may no longer be the style C++ holds, and a property change
-        // on an element with active transitions starts one in the C++ computation.
-        if view.dependency_flags & (1 << 2) != 0
-            || crate::css::style_compute::has_active_transition_properties(old_table)
-        {
+        // A record under display:none may no longer be the style C++ holds.
+        if view.dependency_flags & (1 << 2) != 0 {
             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
             return None;
         }
