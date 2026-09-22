@@ -13,6 +13,7 @@
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/Invalidation/SlotInvalidator.h>
+#include <LibWeb/CSS/StyleComputeFFI.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleInputRecord.h>
@@ -1087,6 +1088,39 @@ static void update_style(DOM::Document& document)
 
     if (!document.browsing_context())
         return;
+
+    // The sealed pass parks what only the host can answer instead of asking for it mid-pass, and
+    // this is where those answers are made: before a pass rather than inside one, against the
+    // same layout the C++ computation would have read. A row whose answer lands here is driven by
+    // the engine on this pass; one that never gets an answer keeps going to C++ as before.
+    document.style_computer().style_engine().refresh_container_query_basis_requests();
+    for (auto const& request : document.style_computer().style_engine().take_host_requests()) {
+        // Matches `host_request_kind::CONTAINER_QUERY_BASIS` in `bridge.rs`.
+        constexpr u8 container_query_basis_request = 0;
+        if (request.kind != container_query_basis_request)
+            continue;
+        auto element = document.style_computer().element_for_style_node(request.style_node);
+        if (!element || !element->is_connected() || &element->document() != &document)
+            continue;
+        DOM::AbstractElement abstract_element { *element };
+        if (!abstract_element.has_style())
+            continue;
+        auto const unit_mask = static_cast<u8>(request.detail);
+        auto const context = to_ffi_length_resolution_context_with_container_bases(
+            Length::ResolutionContext::for_element(abstract_element), unit_mask);
+        u8 flags = 0;
+        if (context.has_container_width_basis)
+            flags |= 1;
+        if (context.has_container_height_basis)
+            flags |= 2;
+        if (context.container_width_basis_depends_on_viewport_metrics)
+            flags |= 4;
+        if (context.container_height_basis_depends_on_viewport_metrics)
+            flags |= 8;
+        document.style_computer().style_engine().answer_container_query_basis(
+            StyleNodeID { request.style_node }, unit_mask, flags,
+            bit_cast<u64>(context.container_width_basis), bit_cast<u64>(context.container_height_basis));
+    }
 
     // NOTE: If this is a document hosting <template> contents, style update is unnecessary.
     if (document.created_for_appropriate_template_contents())
