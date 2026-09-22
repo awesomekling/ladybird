@@ -1452,7 +1452,7 @@ impl RetainedState {
             }
             // Anything else the first-record gate refuses is still the C++ computation's, and a
             // transition declaration beside an animation one is decided with it.
-            if self.first_record_winner_needs_cpp(state, property) {
+            if self.first_record_winner_needs_cpp(node, state, property) {
                 return false;
             }
         }
@@ -1552,7 +1552,7 @@ impl RetainedState {
         // resolves the font from them and rebuilds every group, rejecting the values the font
         // resolution does not pass on yet.
         for property in self.winner_groups.semantic_delta_properties(None, state) {
-            if self.first_record_winner_needs_cpp(state, property)
+            if self.first_record_winner_needs_cpp(node, state, property)
                 && !(owes_an_animation_plan && longhand_declares_a_css_animation(property))
             {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
@@ -1850,10 +1850,24 @@ impl RetainedState {
     /// starts an animation or transition, or reads the counter-style environment. A
     /// `list-style-type` reads it only through an overridable counter-style name. The font-phase
     /// longhands without a group of their own are inputs of the font group the full drive builds.
-    fn first_record_winner_needs_cpp(&self, state: CascadeStateID, property: u16) -> bool {
+    fn first_record_winner_needs_cpp(&self, node: StyleNodeID, state: CascadeStateID, property: u16) -> bool {
         use crate::css::property_metadata::property_id as prop;
         if property == prop::LIST_STYLE_TYPE {
             return self.list_style_type_winner_reads_counter_style_environment(state);
+        }
+        // A `content` that names no counter reads no counter-style environment, and a first record
+        // that needs none is published without one. The node's own custom properties are the other
+        // half of the question the warm gate asks, and it asks it of the same two properties.
+        if property == prop::CONTENT {
+            return self.node_declares_custom_properties(node)
+                || !self
+                    .winner_groups
+                    .winner_in_state(state, prop::CONTENT)
+                    .and_then(|winner| self.winner_groups.resolved_winner(winner))
+                    .is_some_and(|winner| match self.specified_values.value(winner.key.value) {
+                        Lookup::Known(value) => content_value_is_engine_computable(value),
+                        _ => false,
+                    });
         }
         if property == prop::DISPLAY {
             // A list item's marker is derived beside its first record, and the default marker's
