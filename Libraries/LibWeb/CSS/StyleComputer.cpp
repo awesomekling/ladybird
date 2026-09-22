@@ -335,6 +335,10 @@ StyleComputer::StyleComputer(DOM::Document& document)
     , m_root_element_font_metrics(m_default_font_metrics)
     , m_style_engine(StyleEngine::DeviceClass::ForegroundDesktop, this)
 {
+    // The style engine decides which groups a winner reaches from the dependency masks the default
+    // group payloads register. Register them before the engine computes its first record, which is
+    // the document element's, rather than when C++ first reads a group.
+    style_group_default_payload(0);
     set_root_element_font_metrics(m_root_element_font_metrics, m_root_element_font_metrics_depend_on_viewport_metrics);
 }
 
