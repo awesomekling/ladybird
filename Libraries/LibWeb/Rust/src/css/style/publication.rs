@@ -1217,6 +1217,7 @@ impl RetainedState {
             .and_then(|parent| self.computed_group_sets.assigned_style_record(parent))
             .and_then(|record| self.computed_group_sets.style_record_view(record.raw()))
             .is_some_and(|view| view.dependency_flags & (1 << 2) != 0);
+        let counter_environment = self.table_counter_style_environment_identity(node, &table);
         let Some(assembly) = self.computed_group_sets.replace_engine_computed_table(
             node,
             old_style_record,
@@ -1227,6 +1228,7 @@ impl RetainedState {
             font.as_ref(),
             parent_in_display_none_subtree,
             environment,
+            counter_environment,
         ) else {
             counters.bump(Counter::EngineComputedRecordBailAssemble);
             return None;
@@ -1738,6 +1740,7 @@ impl RetainedState {
                         && self
                             .computed_group_sets
                             .final_style_record_is_live(donor.record.record.raw())
+                        && self.record_counter_environment_is_current(node, donor.record.record)
                 })
                 .min_by_key(|donor| {
                     self.winner_groups
@@ -1765,6 +1768,7 @@ impl RetainedState {
                 let parent_in_display_none_subtree = parent_record
                     .and_then(|record| self.computed_group_sets.style_record_view(record.raw()))
                     .is_some_and(|view| view.dependency_flags & (1 << 2) != 0);
+                let counter_environment = self.table_counter_style_environment_identity(node, &table);
                 if let Some(assembly) = self.computed_group_sets.replace_engine_computed_table(
                     node,
                     donor.record.record,
@@ -1775,6 +1779,7 @@ impl RetainedState {
                     None,
                     parent_in_display_none_subtree,
                     Some(environment),
+                    counter_environment,
                 ) {
                     self.computed_group_sets
                         .set_pending_cascade_state(target, cascade_state);
@@ -1885,6 +1890,7 @@ impl RetainedState {
                 engine
                     .computed_group_sets
                     .final_style_record_is_live(record.record.raw())
+                    && engine.record_counter_environment_is_current(node, record.record)
                     && engine.computed_group_sets.style_record_inherits_from_node(
                         record.record.raw(),
                         parent,
@@ -1950,7 +1956,9 @@ impl RetainedState {
     fn first_record_winner_needs_cpp(&self, state: CascadeStateID, property: u16) -> bool {
         use crate::css::property_metadata::property_id as prop;
         // A `content` that names no counter reads no counter-style environment, and a first record
-        // that needs none is published without one.
+        // that needs none is published without one. Counter functions retain their canonical
+        // values in the content group: publication stamps the registry identity for counter
+        // names, and the layout consumer resolves their representation against that registry.
         if property == prop::CONTENT {
             return !self
                 .winner_groups
@@ -1983,6 +1991,30 @@ impl RetainedState {
             })
             .copied()
             .unwrap_or(0)
+    }
+
+    fn table_counter_style_environment_identity(&self, node: StyleNodeID, table: &ComputedLonghandTable) -> u64 {
+        use crate::css::property_metadata::property_id as prop;
+        let current = self.counter_style_environment_identity_for(node);
+        if current == 0 {
+            return 0;
+        }
+        let names_one = [prop::CONTENT, prop::LIST_STYLE_TYPE].into_iter().any(|property| {
+            let value = table.effective_value(None, property, true).value;
+            !value.is_null() && value_reads_counter_style_environment(unsafe { &*value.cast::<StyleValueData>() })
+        });
+        if names_one { current } else { 0 }
+    }
+
+    /// Reuse preserves publication metadata, so a cached record must name the registry this
+    /// subject would publish. This also separates identical declarations in different scopes.
+    fn record_counter_environment_is_current(&self, node: StyleNodeID, record: computed::FinalStyleRecordID) -> bool {
+        self.computed_group_sets
+            .style_record_view(record.raw())
+            .is_some_and(|view| {
+                view.counter_style_environment_identity == 0
+                    || view.counter_style_environment_identity == self.counter_style_environment_identity_for(node)
+            })
     }
 
     fn counter_environment_winner_keeps_the_record(
@@ -2570,28 +2602,8 @@ impl RetainedState {
         // the one it read, so it carries the identity the host published for the scope.
         let counter_style_environment_identity = if counter_style_environment_identity != 0 {
             counter_style_environment_identity
-        } else if self
-            .counter_style_environment_identities
-            .values()
-            .all(|identity| *identity == 0)
-        {
-            // No scope in this document has registered a counter style, so no record can name
-            // one and nothing here needs to read the table to find out.
-            0
         } else {
-            let names_one = {
-                use crate::css::property_metadata::property_id as prop;
-                let table = unsafe { &*table };
-                [prop::CONTENT, prop::LIST_STYLE_TYPE].into_iter().any(|property| {
-                    let value = table.effective_value(None, property, true).value;
-                    !value.is_null()
-                        && value_names_an_overridable_counter_style(unsafe { &*value.cast::<StyleValueData>() })
-                })
-            };
-            match names_one {
-                true => self.counter_style_environment_identity_for(target.node()),
-                false => 0,
-            }
+            self.table_counter_style_environment_identity(target.node(), unsafe { &*table })
         };
         let metadata_input = computed::ComputedMetadataInput {
             pseudo_element_styles: pseudo_styles,
@@ -5299,23 +5311,29 @@ const PSEUDO_ELEMENT_ADJUSTMENT_FACTS: u32 = {
         | fact::HAS_ANIMATIONS
 };
 
-/// Whether a `content` value computes without the element or its counter environment: keywords,
-/// and lists of strings and keywords; counters, attributes and images resolve in C++.
+/// Whether the Rust drive produces canonical content values. Image URLs and gradients use
+/// the resource and length inputs checked by the winner store. Counter functions stay in
+/// the content group for the Rust layout consumer; publication carries the registry dependency.
+/// Overridable names need their scope's current registry published before the transaction.
 fn content_value_is_engine_computable(value: &StyleValueData) -> bool {
-    fn plain(value: &StyleValueData) -> bool {
+    fn supported(value: &StyleValueData) -> bool {
         match value {
             StyleValueData::Keyword { .. } | StyleValueData::String { .. } => true,
+            StyleValueData::Counter { counter_style, .. } => {
+                matches!(counter_style.optional_data(), Some(StyleValueData::CounterStyle { is_symbols, name, .. })
+                    if *is_symbols || counter_style_name_is_non_overridable(name.units()))
+            }
             StyleValueData::ValueList { values, .. } => values
                 .as_slice()
                 .iter()
-                .all(|value| value.optional_data().is_none_or(plain)),
-            _ => false,
+                .all(|value| value.optional_data().is_none_or(supported)),
+            value => value.is_image(),
         }
     }
     match value {
         StyleValueData::Keyword { .. } => true,
         StyleValueData::Content { content, alt_text } => {
-            content.optional_data().is_none_or(plain) && alt_text.optional_data().is_none_or(plain)
+            content.optional_data().is_none_or(supported) && alt_text.optional_data().is_none_or(supported)
         }
         _ => false,
     }
@@ -5464,26 +5482,18 @@ fn font_group_carries_longhand(property: u16) -> bool {
         )
 }
 
-/// The counter-style names no @counter-style rule overrides: decimal, disc, square, circle,
-/// disclosure-open and disclosure-closed.
-/// Whether a computed value names a counter style the registry can override, which is what makes
-/// a record depend on the registry it was computed against. The twin of
-/// `computed_content_depends_on_counter_style_environment` in `StyleComputer.cpp`.
-fn value_names_an_overridable_counter_style(value: &StyleValueData) -> bool {
+/// Whether publication must stamp a counter-style registry identity. Generated content
+/// carries the same dependency as the host producer, including predefined counter names;
+/// list-style-type only needs it for overridable names.
+fn value_reads_counter_style_environment(value: &StyleValueData) -> bool {
     match value {
-        StyleValueData::Counter { counter_style, .. } => counter_style.optional_data().is_some_and(|style| {
-            matches!(style, StyleValueData::CounterStyle { is_symbols, name, .. }
-                if !*is_symbols && !counter_style_name_is_non_overridable(name.units()))
-        }),
-        StyleValueData::Content { content, alt_text } => [content, alt_text].into_iter().any(|part| {
-            part.optional_data()
-                .is_some_and(value_names_an_overridable_counter_style)
-        }),
-        StyleValueData::ValueList { values, .. } => values.as_slice().iter().any(|value| {
-            value
-                .optional_data()
-                .is_some_and(value_names_an_overridable_counter_style)
-        }),
+        StyleValueData::Counter { .. } | StyleValueData::Content { .. } => {
+            crate::css::style_compute::content_reads_counter_style_environment(value)
+        }
+        StyleValueData::ValueList { values, .. } => values
+            .as_slice()
+            .iter()
+            .any(|value| value.optional_data().is_some_and(value_reads_counter_style_environment)),
         StyleValueData::CounterStyle { is_symbols, name, .. } => {
             !*is_symbols && !counter_style_name_is_non_overridable(name.units())
         }

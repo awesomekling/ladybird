@@ -973,6 +973,33 @@ pub extern "C" fn rust_pseudo_element_has_implicit_style(pseudo_element: u8) -> 
     )
 }
 
+/// Whether generated content names a counter-style registry entry, including predefined
+/// names. This is the publication dependency used by both record producers.
+pub(crate) fn content_reads_counter_style_environment(value: &StyleValueData) -> bool {
+    match value {
+        StyleValueData::Counter { counter_style, .. } => matches!(
+            counter_style.optional_data(),
+            Some(StyleValueData::CounterStyle { is_symbols: false, .. })
+        ),
+        StyleValueData::Content { content, alt_text } => [content, alt_text].into_iter().any(|part| {
+            part.optional_data()
+                .is_some_and(content_reads_counter_style_environment)
+        }),
+        StyleValueData::ValueList { values, .. } => values.as_slice().iter().any(|part| {
+            part.optional_data()
+                .is_some_and(content_reads_counter_style_environment)
+        }),
+        _ => false,
+    }
+}
+
+/// # Safety
+/// `value` must point to a live style value.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_content_reads_counter_style_environment(value: *const c_void) -> bool {
+    content_reads_counter_style_environment(unsafe { &*value.cast::<StyleValueData>() })
+}
+
 /// Whether style computation for a pseudo-element bails because no
 /// pseudo-element box would be generated for the winning cascaded content
 /// value: content: none generates nothing, and content: normal (also the

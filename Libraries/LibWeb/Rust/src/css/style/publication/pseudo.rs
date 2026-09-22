@@ -270,16 +270,6 @@ impl RetainedState {
         };
         // A marker's named counter style can move without changing any inherited group or
         // winner. Both retained and shared pseudo records must name the current registry.
-        let counter_style_environment = self.counter_style_environment_identity_for(node);
-        let counter_environment_is_current = |engine: &Self, record: computed::FinalStyleRecordID| {
-            engine
-                .computed_group_sets
-                .style_record_view(record.raw())
-                .is_some_and(|view| {
-                    view.counter_style_environment_identity == 0
-                        || view.counter_style_environment_identity == counter_style_environment
-                })
-        };
         let mut pseudo_uses_substitution = scratch.pseudo_uses_substitution;
         for (pseudo_index, kind) in [BEFORE, AFTER, FIRST_LETTER, SELECTION, MARKER]
             .into_iter()
@@ -353,7 +343,7 @@ impl RetainedState {
             }
             // Reuse only when the originating element preserves every input the pseudo reads,
             // including display transformation and explicit inheritance of non-inherited values.
-            if old.is_some_and(|record| counter_environment_is_current(self, record))
+            if old.is_some_and(|record| self.record_counter_environment_is_current(node, record))
                 && originating_inputs_unchanged
                 && (old_element_record == Some(new_element_record)
                     || !state.is_some_and(|state| self.state_explicitly_inherits_non_inherited_property(node, state)))
@@ -461,7 +451,7 @@ impl RetainedState {
             let own_groups = state.map_or(0, |state| self.state_owned_inherited_groups(state));
             let derived_under_element = |engine: &Self, record: computed::FinalStyleRecordID| {
                 engine.computed_group_sets.final_style_record_is_live(record.raw())
-                    && counter_environment_is_current(engine, record)
+                    && engine.record_counter_environment_is_current(node, record)
                     && engine
                         .computed_group_sets
                         .style_record_inherits_from_node(record.raw(), node, own_groups)
