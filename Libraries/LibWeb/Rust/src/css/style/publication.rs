@@ -1972,11 +1972,6 @@ impl RetainedState {
                     _ => false,
                 });
         }
-        if property == prop::DISPLAY {
-            // A list item's marker is derived beside its first record, and the default marker's
-            // font is not one the engine resolves yet: the record would be derived and abandoned.
-            return self.display_winner_is_list_item(state);
-        }
         // An anchor name is one the host registers from whichever record it installs, a first
         // record included: `Element::update_anchor_name_registry` runs on that install too.
         property_starts_animation_or_counter_environment(property)
@@ -2160,19 +2155,6 @@ impl RetainedState {
             return 0;
         }
         self.monospace_recascaded_font_size(node).unwrap_or(i32::MIN)
-    }
-
-    fn display_winner_is_list_item(&self, state: CascadeStateID) -> bool {
-        use crate::css::style_value::StyleValueData;
-        self.winner_groups
-            .winner_in_state(state, crate::css::property_metadata::property_id::DISPLAY)
-            .and_then(|winner| self.winner_groups.resolved_winner(winner))
-            .is_some_and(|winner| match self.specified_values.value(winner.key.value) {
-                Lookup::Known(StyleValueData::Display { raw }) => {
-                    crate::css::display::FfiDisplay::from_raw(*raw).is_list_item()
-                }
-                _ => true,
-            })
     }
 
     fn list_style_type_winner_reads_counter_style_environment(&self, state: CascadeStateID) -> bool {
