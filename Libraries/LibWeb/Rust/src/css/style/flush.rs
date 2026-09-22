@@ -2204,9 +2204,15 @@ impl StyleEngineState {
                     let awaits_sampled_parent = self.tree.flat_tree_parent(node).is_some_and(|parent| {
                         nodes_waiting_for_sampled_composition.contains(&parent)
                             || (self.retained.engine_computed_records_pending.contains_key(&parent)
-                                && self.retained.computed_group_sets.adjustment_facts(parent)
+                                && (self.retained.computed_group_sets.adjustment_facts(parent)
                                     & bridge::element_adjustment_fact::HAS_ANIMATIONS
-                                    != 0)
+                                    != 0
+                                    || self
+                                        .retained
+                                        .nodes_owing_a_transition_registration
+                                        .contains_key(&parent)
+                                    || self.retained.nodes_owing_animation_definitions.contains_key(&parent)
+                                    || self.retained.nodes_owing_an_animation_sample.contains(&parent)))
                     });
                     // Why this row would reach the host, for the seal's by-cause census. Naming
                     // it here is what lets the census rank entries instead of attempts.

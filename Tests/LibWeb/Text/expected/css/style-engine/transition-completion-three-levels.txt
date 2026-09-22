@@ -1,0 +1,3 @@
+transition started: true
+parent and child agree: true
+child and grandchild agree: true
