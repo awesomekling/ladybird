@@ -1196,6 +1196,12 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
     if (style_engine_reactions.is_empty())
         return;
 
+    // A record whose marker or `content` names a counter style is resolved against the registry
+    // its scope publishes, and the engine computes such records now, so nothing is left to build
+    // that registry on demand. It depends on no layout, so settling it here settles it for the
+    // pass, the way the root's font metrics are settled.
+    (void)document.style_scope().counter_style_environment_identity();
+
     bool has_cold_matching_traversal = false;
     if (auto* root = document.document_element(); root && root->style_node_id() != 0) {
         if (prefers_broad_matching_batch) {

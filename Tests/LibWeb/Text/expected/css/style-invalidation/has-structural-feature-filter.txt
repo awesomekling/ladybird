@@ -249,22 +249,22 @@ PASS: featureless-sensitive structural mutation keeps :has walk: child universal
 PASS: featureless-sensitive structural mutation keeps :has walk: descendant universal insertion | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: featureless-sensitive structural mutation keeps :has walk: child :not(class) insertion | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: featureless-sensitive structural mutation keeps :has walk: adjacent :not(class) starts matching | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: featureless-sensitive structural mutation keeps :has walk: adjacent :not(class) stops matching | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: featureless-sensitive structural mutation keeps :has walk: adjacent :not(class) stops matching | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: featureless-sensitive structural mutation keeps :has walk: following :not(id) starts matching | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: featureless-sensitive structural mutation keeps :has walk: following :not(attribute) stops matching | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: featureless-sensitive structural mutation keeps :has walk: following :not(attribute) stops matching | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: featureless-sensitive structural mutation keeps :has walk: child :not(tag) insertion | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: featureless-sensitive structural mutation keeps :has walk: child :is(:not(class)) insertion | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: featureless-sensitive structural mutation keeps :has walk: child :where(:not(attribute)) insertion | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: featureless-sensitive structural mutation keeps :has walk: child :not(class, id) insertion | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: featureless-sensitive structural mutation keeps :has walk: descendant :not(class) nested insertion | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: featureless-sensitive structural mutation keeps :has walk: child :empty insertion | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: featureless-sensitive structural mutation keeps :has walk: child :empty stops matching after text append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: featureless-sensitive structural mutation keeps :has walk: child :empty stops matching after text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: featureless-sensitive structural mutation keeps :has walk: child :first-child insertion | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: featureless-sensitive structural mutation keeps :has walk: child :last-child insertion | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: featureless-sensitive structural mutation keeps :has walk: child :only-child stops matching | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: featureless-sensitive structural mutation keeps :has walk: child :only-child stops matching | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: featureless-sensitive structural mutation keeps :has walk: child :nth-child(2) starts matching | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: featureless-sensitive structural mutation keeps :has walk: child :nth-last-child(2) starts matching | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: featureless-sensitive structural mutation keeps :has walk: child :only-of-type stops matching | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: featureless-sensitive structural mutation keeps :has walk: child :only-of-type stops matching | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: unprobeable pseudo structural mutation keeps :has walk: child :focus insertion with unrelated metadata | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: unprobeable pseudo structural mutation keeps :has walk: descendant :focus insertion through wrapper with unrelated metadata | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: unprobeable pseudo structural mutation keeps :has walk: child :focus-within insertion with unrelated metadata | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -285,9 +285,9 @@ PASS: case-sensitive name structural mutation keeps :has walk: svg case-sensitiv
 PASS: case-sensitive name structural mutation keeps :has walk: svg case-sensitive attribute nested insertion | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: case-sensitive name structural mutation keeps :has walk: mathml case-sensitive attribute insertion | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: case-sensitive name structural mutation keeps :has walk: svg lower-case selector does not match camel-case attribute | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: sibling relationship mutation keeps sibling-aware :has updates: featureless insertion breaks adjacent subject match | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: sibling relationship mutation keeps sibling-aware :has updates: featureless insertion breaks adjacent subject match | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: sibling relationship mutation keeps sibling-aware :has updates: featureless removal restores adjacent subject match | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: sibling relationship mutation keeps sibling-aware :has updates: featureless insertion breaks complex following subject match | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: sibling relationship mutation keeps sibling-aware :has updates: featureless insertion breaks complex following subject match | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: sibling relationship mutation keeps sibling-aware :has updates: featureless removal restores complex following subject match | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: sibling relationship mutation keeps sibling-aware :has updates: featureless insertion updates non-subject sibling target | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: sibling relationship mutation keeps sibling-aware :has updates: featureless insertion updates non-subject sibling target | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: sibling relationship mutation keeps sibling-aware :has updates: featureless removal updates non-subject sibling target | elementStyleRecomputations=0, elementStyleNoopRecomputations=0

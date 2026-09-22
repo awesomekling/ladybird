@@ -19,7 +19,7 @@ PASS: actual mutation root keeps related :has anchor: checked pseudo-class argum
 PASS: actual mutation root skips unrelated :has anchor: checked pseudo-class argument after unrelated disabled mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: actual mutation root keeps related :has anchor: checked pseudo-class argument after unrelated disabled mutation | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: actual mutation root skips unrelated sibling-combinator :has anchor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: actual mutation root keeps sibling-combinator :has anchor for child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: actual mutation root keeps sibling-combinator :has anchor for child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: actual mutation root skips unrelated RHS sibling-combinator :has anchor: adjacent sibling argument | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: actual mutation root keeps RHS sibling-combinator :has anchor: adjacent sibling argument | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: actual mutation root skips unrelated RHS sibling-combinator :has anchor: subsequent sibling argument | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
