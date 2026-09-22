@@ -610,6 +610,8 @@ static void republish_presentational_hints_after_derivation_moved(DOM::Element& 
     element.did_publish_presentational_hint_properties({});
     if (eager)
         StyleComputer::collect_presentational_hint_properties({ element });
+    // The hints moved, and so does the style they are cascaded into.
+    record_element_declarations_changed(element, eager ? ElementDeclarationKind::SvgPresentationAttribute : ElementDeclarationKind::PresentationalHint, true, true);
 }
 
 static bool element_has_own_presentational_hint_attributes(DOM::Element const& element)
