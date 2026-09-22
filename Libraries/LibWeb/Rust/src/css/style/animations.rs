@@ -215,6 +215,10 @@ impl AppliedAnimationDefinition {
 pub(crate) struct CssDefinedAnimations {
     /// Owning a CSS animation is rare, so only the elements that do have a row.
     rows: HashMap<(StyleNodeID, AnimationSlot), CssDefinedAnimationRow>,
+    /// The `@keyframes` generation each row was published at: what the plan that made it was
+    /// decided against. A row published before the table moved says nothing about what its
+    /// animations run now.
+    keyframes_generations: HashMap<(StyleNodeID, AnimationSlot), u64>,
 }
 
 /// One element's list: the animations' names, and the definition the last plan applied to each.
@@ -229,12 +233,25 @@ impl CssDefinedAnimations {
         slot: AnimationSlot,
         names: Box<[CssString]>,
         definitions: Box<[AppliedAnimationDefinition]>,
+        keyframes_generation: u64,
     ) {
         if names.is_empty() {
             self.rows.remove(&(node, slot));
+            self.keyframes_generations.remove(&(node, slot));
             return;
         }
         self.rows.insert((node, slot), (names, definitions));
+        self.keyframes_generations.insert((node, slot), keyframes_generation);
+    }
+
+    /// Whether every list this element holds was published against the `@keyframes` table as it
+    /// stands. Where one was not, what its animations run may have moved with the table, and only
+    /// the computation that re-plans them can say.
+    #[must_use]
+    pub(crate) fn node_is_planned_against(&self, node: StyleNodeID, keyframes_generation: u64) -> bool {
+        self.rows
+            .keys()
+            .all(|key| key.0 != node || self.keyframes_generations.get(key) == Some(&keyframes_generation))
     }
 
     #[must_use]
@@ -1942,6 +1959,10 @@ pub(crate) struct PublishedKeyframesSet {
 
 #[derive(Default)]
 pub(crate) struct AnimationKeyframes {
+    /// Bumped whenever any scope's row is replaced. What an element's animations run is decided
+    /// against the table as it was, so a reader that wants to know whether a plan is still the
+    /// plan compares this against the generation the plan was published at.
+    generation: u64,
     scopes: HashMap<TreeScopeID, HashMap<KeyframesName, PublishedKeyframesSet>>,
     /// Which scope a shadow root's host-side pointer identity names. The cascade attributes the
     /// winning `animation-name` declaration to a shadow root by that identity, and the scope it
@@ -2001,6 +2022,11 @@ impl AnimationKeyframes {
     /// # Safety
     /// Every declaration's `value` must be a live style value the host holds a reference to for the
     /// duration of the call.
+    #[must_use]
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
     pub(crate) unsafe fn set(
         &mut self,
         tree_scope: TreeScopeID,
@@ -2013,6 +2039,7 @@ impl AnimationKeyframes {
             name_lengths.len() == published_buffers.effects.len(),
             "a published @keyframes name must come with its keyframe set"
         );
+        self.generation += 1;
         if name_lengths.is_empty() {
             self.scopes.remove(&tree_scope);
             // A scope that defines nothing and a scope with no row answer alike, so the identity

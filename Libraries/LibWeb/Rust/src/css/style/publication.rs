@@ -673,13 +673,17 @@ impl RetainedState {
         // transition the moved values would start.
         let animations_bind_the_record =
             animations_bind_the_record || self.record_requires_cpp_animation(old_style_record);
-        // Even the record that stands is not an answer for an element running a CSS animation: a
-        // `@keyframes` rule that moves re-plans which keyframes that animation runs, and the plan
-        // is no part of the record, so the computation has to run for the element to hear about it.
-        // An element animating through the Web Animations API or a transition has no such rule
-        // behind it, and that is most of them.
-        let record_may_stand_while_animating =
-            !animations_bind_the_record || !self.css_defined_animations.node_runs_a_css_animation(node);
+        // Even the record that stands is not an answer for an element whose CSS animations were
+        // planned against a `@keyframes` table that has since moved: which keyframes an animation
+        // runs is decided by the plan, the plan is no part of the record, and only the computation
+        // that re-plans it can tell the element. An element animating through the Web Animations
+        // API or a transition has no rule behind it at all, and one whose plan was published
+        // against the table as it stands has already been told.
+        let record_may_stand_while_animating = !animations_bind_the_record
+            || !self.css_defined_animations.node_runs_a_css_animation(node)
+            || self
+                .css_defined_animations
+                .node_is_planned_against(node, self.animation_keyframes.generation());
         // A record derived from the old one inherits what the parent's animations sampled when the
         // old one was computed.
         if self.parent_composes_animations(node) {

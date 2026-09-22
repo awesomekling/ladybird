@@ -1257,8 +1257,14 @@ impl RetainedState {
             .iter()
             .map(|words| animations::AppliedAnimationDefinition::from_words(words))
             .collect::<Vec<_>>();
-        self.css_defined_animations
-            .set(node, slot, names.into_boxed_slice(), definitions.into_boxed_slice());
+        let keyframes_generation = self.animation_keyframes.generation();
+        self.css_defined_animations.set(
+            node,
+            slot,
+            names.into_boxed_slice(),
+            definitions.into_boxed_slice(),
+            keyframes_generation,
+        );
     }
 
     /// The definition the last plan applied to each of the CSS animations the host holds for one of
