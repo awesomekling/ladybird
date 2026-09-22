@@ -520,9 +520,6 @@ impl RetainedState {
             scratch.pseudo_uses_substitution = false;
             scratch.noted_substitution = None;
             scratch.flipped_pseudo_rules = exact_flipped_rules.map_or(0, |flipped| flipped.pseudos);
-            if parent_inputs_moved.inherited_style && !self.engine_marker_font_supported(node, counters) {
-                return None;
-            }
             if !self.engine_pseudo_inputs_available(
                 node,
                 self.computed_group_sets.assigned_style_record(node),
@@ -6070,9 +6067,7 @@ impl StyleEngineState {
             return;
         };
         let assigned_style_record = self.computed_group_sets.assigned_style_record(node);
-        if (parent_inputs_moved.inherited_style && !self.engine_marker_font_supported(node, counters))
-            || !self.engine_pseudo_inputs_available(node, assigned_style_record, counters)
-        {
+        if !self.engine_pseudo_inputs_available(node, assigned_style_record, counters) {
             counters.bump(Counter::RootFontInputsUnprovenFallbacks);
             return;
         }

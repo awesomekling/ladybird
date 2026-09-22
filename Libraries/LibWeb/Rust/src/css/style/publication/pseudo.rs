@@ -89,32 +89,6 @@ impl RetainedState {
         true
     }
 
-    pub(super) fn engine_marker_font_supported(&mut self, node: StyleNodeID, counters: &mut Counters) -> bool {
-        // Reject unsupported existing marker fonts before computing the originating element.
-        // A later change to supported settings still computes correctly through C++ and makes
-        // the next attempt eligible. The default marker's tabular numerals are not supported by
-        // the engine font resolver yet.
-        if let Some(marker) = self.computed_group_sets.pseudo_style_record(node, pseudo_kind::MARKER)
-            && let Some(view) = self.computed_group_sets.style_record_view(marker.raw())
-            && let Some(table) = unsafe { view.longhand_table.as_ref() }
-        {
-            let value = table
-                .effective_value(
-                    None,
-                    crate::css::property_metadata::property_id::FONT_VARIANT_NUMERIC,
-                    true,
-                )
-                .value;
-            if !matches!(unsafe { value.cast::<StyleValueData>().as_ref() },
-                Some(StyleValueData::Keyword { keyword }) if *keyword == crate::css::style_compute::keyword::NORMAL)
-            {
-                counters.bump(Counter::EngineComputedRecordBailFontPhase);
-                return false;
-            }
-        }
-        true
-    }
-
     /// Settle the synthetic pseudo-elements of an element the engine derived a record for, the
     /// way the C++ computation refreshes them after the element's own: each kind the element has
     /// rules for, and the marker a list item generates, is driven against the element's new
@@ -294,6 +268,18 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailPseudoMask);
             return None;
         };
+        // A marker's named counter style can move without changing any inherited group or
+        // winner. Both retained and shared pseudo records must name the current registry.
+        let counter_style_environment = self.counter_style_environment_identity_for(node);
+        let counter_environment_is_current = |engine: &Self, record: computed::FinalStyleRecordID| {
+            engine
+                .computed_group_sets
+                .style_record_view(record.raw())
+                .is_some_and(|view| {
+                    view.counter_style_environment_identity == 0
+                        || view.counter_style_environment_identity == counter_style_environment
+                })
+        };
         let mut pseudo_uses_substitution = scratch.pseudo_uses_substitution;
         for (pseudo_index, kind) in [BEFORE, AFTER, FIRST_LETTER, SELECTION, MARKER]
             .into_iter()
@@ -367,7 +353,7 @@ impl RetainedState {
             }
             // Reuse only when the originating element preserves every input the pseudo reads,
             // including display transformation and explicit inheritance of non-inherited values.
-            if old.is_some()
+            if old.is_some_and(|record| counter_environment_is_current(self, record))
                 && originating_inputs_unchanged
                 && (old_element_record == Some(new_element_record)
                     || !state.is_some_and(|state| self.state_explicitly_inherits_non_inherited_property(node, state)))
@@ -475,6 +461,7 @@ impl RetainedState {
             let own_groups = state.map_or(0, |state| self.state_owned_inherited_groups(state));
             let derived_under_element = |engine: &Self, record: computed::FinalStyleRecordID| {
                 engine.computed_group_sets.final_style_record_is_live(record.raw())
+                    && counter_environment_is_current(engine, record)
                     && engine
                         .computed_group_sets
                         .style_record_inherits_from_node(record.raw(), node, own_groups)
@@ -707,17 +694,6 @@ impl RetainedState {
             if !self.engine_pseudo_inputs_available(node, Some(record), counters) {
                 return None;
             }
-            // The default marker's tabular numerals are not a font the engine resolves yet: a
-            // list item's marker would be derived only to be discarded at its font.
-            let is_list_item = self
-                .computed_group_sets
-                .style_record_view(record.raw())
-                .and_then(|view| unsafe { view.longhand_table.as_ref() })
-                .is_none_or(|table| table.display_is_list_item());
-            if (old_is_list_item || is_list_item) && self.marker_declares_unresolvable_numerals(node) {
-                counters.bump(Counter::EngineComputedRecordBailFontPhase);
-                return None;
-            }
         }
         let generation = self.winner_groups.generation();
         if self
@@ -746,19 +722,6 @@ impl RetainedState {
             return None;
         }
         Some(record)
-    }
-
-    fn marker_declares_unresolvable_numerals(&self, node: StyleNodeID) -> bool {
-        use crate::css::property_metadata::property_id::FONT_VARIANT_NUMERIC;
-        self.current_winner_groups()
-            .pseudo_states(node)
-            .find(|(pseudo, ..)| pseudo.kind.0 == u16::from(pseudo_kind::MARKER))
-            .and_then(|(_, _, state, _)| self.winner_groups.winner_in_state(state, FONT_VARIANT_NUMERIC))
-            .and_then(|winner| self.winner_groups.resolved_winner(winner))
-            .is_some_and(|winner| {
-                !matches!(self.specified_values.value(winner.key.value),
-                    Lookup::Known(StyleValueData::Keyword { keyword }) if *keyword == crate::css::style_compute::keyword::NORMAL)
-            })
     }
 
     /// Whether the node is an element standing for its shadow host's pseudo-element (the element
