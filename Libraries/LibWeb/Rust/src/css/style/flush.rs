@@ -1841,6 +1841,13 @@ impl StyleEngineState {
             engine_computed_record_scratch.document_environment_moved =
                 environment_changed && !environment_action_needs_host_computation;
             engine_computed_record_scratch.environment_changed = environment_changed;
+            // The viewport the records were driven against, against the one they are driven against
+            // now. A record that reads it cannot stand across the difference.
+            if let Some(inputs) = self.retained.document_style_computation_inputs {
+                let viewport = (inputs.viewport_width, inputs.viewport_height);
+                engine_computed_record_scratch.viewport_moved = self.retained.driven_viewport != viewport;
+                self.retained.driven_viewport = viewport;
+            }
             let computation_loop_timer = PassTimer::start();
             computation_scratch_memory.resize_required_to(
                 &mut self.retained.memory,
