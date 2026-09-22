@@ -754,16 +754,22 @@ static Optional<PreparedComputedStyle> prepare_computed_style_and_layout_for_pro
 
     // Container queries and container-relative units need layout to resolve. Avoid forcing layout for every
     // getComputedStyle() call; only elements that actually depend on a query container need the post-layout style.
-    bool style_or_inheritance_ancestor_depends_on_size_container_query = abstract_element.element().style_depends_on_size_container_query();
+    bool style_or_inheritance_ancestor_depends_on_container_query = abstract_element.element().style_depends_on_size_container_query()
+        || abstract_element.element().style_depends_on_style_container_query();
     for (auto ancestor = abstract_element.element_to_inherit_style_from();
-        ancestor.has_value() && !style_or_inheritance_ancestor_depends_on_size_container_query;
+        ancestor.has_value() && !style_or_inheritance_ancestor_depends_on_container_query;
         ancestor = ancestor->element_to_inherit_style_from()) {
-        style_or_inheritance_ancestor_depends_on_size_container_query = ancestor->element().style_depends_on_size_container_query();
+        style_or_inheritance_ancestor_depends_on_container_query = ancestor->element().style_depends_on_size_container_query()
+            || ancestor->element().style_depends_on_style_container_query();
     }
-    bool const needs_layout_for_container_queries = style_or_inheritance_ancestor_depends_on_size_container_query
+    bool const needs_layout_for_container_queries = style_or_inheritance_ancestor_depends_on_container_query
         && !abstract_element.document().layout_is_up_to_date();
     if (needs_layout_for_container_queries) {
         abstract_element.document().update_layout_if_needed_for_node(abstract_element.element(), DOM::UpdateLayoutReason::ResolvedCSSStyleDeclarationProperty);
+        layout_node = abstract_element.layout_node();
+        // A style query can change its verdict after layout, for example when its comparison
+        // value uses viewport units. Refresh the target against that settled verdict.
+        abstract_element.document().update_style_for_element(abstract_element);
         layout_node = abstract_element.layout_node();
         // A synthetic pseudo which is not rendered is not part of the layout-driven pseudo
         // recomputation above. Refresh its CSSOM-only style against the settled container size.
