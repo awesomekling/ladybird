@@ -1837,7 +1837,7 @@ impl StyleEngineState {
                 computed_group_sets: ComputedGroupSets::default(),
                 custom_property_environments: Default::default(),
                 nodes_with_substituted_records: HashSet::default(),
-                nodes_owing_a_transition_registration: HashSet::default(),
+                nodes_owing_a_transition_registration: HashMap::default(),
                 css_defined_animations: Default::default(),
                 animation_timing_rows: Default::default(),
                 animation_effect_descriptions: Default::default(),

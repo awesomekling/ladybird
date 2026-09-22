@@ -899,10 +899,13 @@ pub struct RetainedState {
     /// C++ notes as reading custom properties when it installs the record.
     nodes_with_substituted_records: HashSet<StyleNodeID>,
     /// The nodes whose engine-computed record moved the longhands that declare the element's CSS
-    /// transitions and nothing else. Registering those transitions is the whole of what the C++
-    /// computation would have done with such a record, and it is an effect of the row rather than
-    /// a part of the record: the host drains it after the batch, in the order it applied the rows.
-    nodes_owing_a_transition_registration: HashSet<StyleNodeID>,
+    /// transitions, and whether the registration is the whole of the debt. It is an effect of the
+    /// row rather than a part of the record: the host drains it after the batch, in the order it
+    /// applied the rows. `true` means a delta that moved nothing but those longhands, so no value
+    /// a transition runs on moved and only the registration is owed; `false` means the row also
+    /// moved values the step has to compare, so the host runs the whole step against the record
+    /// the row moved away from.
+    nodes_owing_a_transition_registration: HashMap<StyleNodeID, bool>,
     /// The names of the CSS animations the host holds for each element, which the animation stage
     /// matches its newly computed definitions against.
     css_defined_animations: animations::CssDefinedAnimations,

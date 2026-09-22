@@ -543,7 +543,12 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
     // the C++ computation would have done beside the record it computed; the host applies it once
     // the whole batch is installed, in the order the batch applied the rows, which is flat-tree
     // order. Nothing a later row in the batch computes may depend on one of these being applied.
-    Vector<StyleNodeID> transition_registration_effect_rows;
+    struct TransitionEffectRow {
+        StyleNodeID style_node;
+        StyleRecordID before_change_style_record;
+        bool registration_only;
+    };
+    Vector<TransitionEffectRow> transition_effect_rows;
     for (auto const& reaction : reactions) {
         auto element = document.style_computer().element_for_style_node(reaction.style_node);
         if (!element || (!element->is_svg_element() && !element->has_relevant_animations()))
@@ -799,7 +804,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 // The row's own effects come with the decision that settled it, whether or not
                 // the record is the one that installs: a C++ computation of this element runs the
                 // transition step itself, so the debt is discharged either way.
-                bool const owes_a_transition_registration = document.style_computer().style_engine().take_transition_registration_debt(StyleNodeID { reaction.style_node });
+                auto const transition_debt = document.style_computer().style_engine().take_transition_registration_debt(StyleNodeID { reaction.style_node });
                 if (!engine_computed_record_environment_is_installable(*element, StyleRecordID { reaction.new_style_record })) {
                     // The engine resolved the record's environment over the parent's own; when the
                     // parent's inheritable environment differs, C++ computes the style.
@@ -807,8 +812,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     invalidation = element->apply_style_engine_reaction(did_change_custom_properties);
                 } else {
                     apply_engine_computed_records(pseudo_element_records, true);
-                    if (owes_a_transition_registration)
-                        transition_registration_effect_rows.append(StyleNodeID { reaction.style_node });
+                    // Under verification the reference computation ran the step too, and then
+                    // the engine record replaced what it published: the drain decides again,
+                    // which the stabilization epoch is built to take, and publishes what it starts.
+                    if (transition_debt != 0)
+                        transition_effect_rows.append({ StyleNodeID { reaction.style_node }, StyleRecordID { reaction.old_style_record }, transition_debt == 1 });
                 }
             } else if (needs_regular_style_recompute || needs_inherited_style_recompute || needs_full_custom_property_recompute) {
                 if (needs_regular_style_recompute)
@@ -890,14 +898,22 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
     }
 
     // The batch is installed: drain what its rows left behind, in the order they were applied.
-    for (auto style_node : transition_registration_effect_rows) {
-        auto element = document.style_computer().element_for_style_node(style_node);
+    for (auto const& row : transition_effect_rows) {
+        auto element = document.style_computer().element_for_style_node(row.style_node);
         if (!element || !element->is_connected() || &element->document() != &document)
             continue;
         DOM::AbstractElement abstract_element { *element };
         if (!abstract_element.has_style())
             continue;
-        document.style_computer().register_transitions_for_settled_record(abstract_element);
+        if (row.registration_only) {
+            document.style_computer().register_transitions_for_settled_record(abstract_element);
+            continue;
+        }
+        auto invalidation = document.style_computer().run_transition_step_for_settled_record(abstract_element, row.before_change_style_record);
+        if (!invalidation.is_none()) {
+            apply_element_style_invalidation_after_style_change(*element, invalidation);
+            transaction_invalidation |= invalidation;
+        }
     }
 
     return transaction_invalidation;
