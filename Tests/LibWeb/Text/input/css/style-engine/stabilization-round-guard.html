@@ -30,6 +30,8 @@
         internals.resetStyleInvalidationCounters();
         target.getBoundingClientRect();
 
+        // Retained container verdicts let this nested chain settle before the continuation
+        // reaches its old round guard; the final query result must still be stable.
         const counters = internals.getStyleInvalidationCounters();
         println(`continuation adds passes: ${counters.provisionalStylePasses > 8}`);
         println(`round guard reached: ${counters.styleStabilizationRoundGuardHits === 1}`);

@@ -251,6 +251,13 @@ impl RetainedState {
         let wants = |property| properties.is_none_or(|properties| properties.binary_search(&property).is_ok());
         candidates.clear();
         for entry in matches.iter().filter(|entry| entry.pseudo_element == pseudo) {
+            if self.program.rule_is_gated_by_container_query(entry.rule)
+                && !self
+                    .rule_container_verdict(entry.rule, node.raw(), pseudo.is_some())
+                    .is_some_and(|verdict| verdict.matches)
+            {
+                continue;
+            }
             let mut priority_and_stratum_by_importance = [None; 2];
             for &declared in self.program.declared_properties_of(entry.rule) {
                 // A shorthand written with a substitution is declared whole beside the longhands
@@ -484,9 +491,9 @@ impl RetainedState {
                 && let Some(node) = publish_winners_for
             {
                 let holds = self
-                    .rule_container_verdict(entry.rule, node.raw(), false)
+                    .rule_container_verdict(entry.rule, node.raw(), entry.pseudo_element.is_some())
                     .is_some_and(|verdict| verdict.matches);
-                container_verdicts.push((entry.rule, holds));
+                container_verdicts.push((entry.rule, entry.pseudo_element.is_some(), holds));
                 if !holds {
                     continue;
                 }
@@ -1253,7 +1260,7 @@ impl RetainedState {
             .iter()
             .filter(|entry| entry.pseudo_element == Some(pseudo))
             .any(|entry| {
-                self.program.rule_is_gated_by_container_query(entry.rule)
+                !self.container_gate_is_held(Some(node), entry.rule, true)
                     || !self
                         .program
                         .declarations_are_complete_but_for_custom_properties(entry.rule)

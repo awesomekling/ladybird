@@ -208,7 +208,7 @@ impl StyleEngineState {
         }
         self.discard_prepared_batch_matching_traversal();
         self.discard_published_match_answers(counters);
-        self.retained.drop_winners_whose_container_verdicts_moved();
+        self.retained.refresh_winners_whose_container_verdicts_moved(counters);
         // A transaction made of derived child reactions alone continues the style change whose
         // reactions C++ applied last, one tree generation further.
         self.retained.last_transaction_only_derived_child_reactions =
@@ -224,6 +224,7 @@ impl StyleEngineState {
         self.host.externally_recorded_style_input_nodes.clear();
         // The nodes whose style input the C++ computation has to settle this transaction.
         let style_input_nodes_for_cpp = std::mem::take(&mut self.retained.style_input_nodes_for_cpp);
+        let container_input_nodes = std::mem::take(&mut self.retained.container_input_nodes);
         let environment_action_needs_host_computation =
             std::mem::take(&mut self.retained.environment_action_needs_host_computation);
         let parent_inputs_moved_nodes = std::mem::take(&mut self.retained.parent_inputs_moved_nodes);
@@ -2179,7 +2180,12 @@ impl StyleEngineState {
                                 display: parent_inputs_moved_nodes.contains(&node)
                                     || self.retained.tree.assigned_slot_of(node).is_some(),
                             });
-                    let mut retry_after_ancestor = false;
+                    let mut retry_after_ancestor = self.retained.tree.tree_scope(node) == TreeScopeID::DOCUMENT
+                        && (self.retained.published_container_verdicts.contains_key(&node)
+                            || self.retained.container_gates_unheld.contains(&node))
+                        && self
+                            .retained
+                            .container_ancestor_is_unsettled(node, &engine_computed_record_scratch);
                     // Why this row would reach the host, for the seal's by-cause census. Naming
                     // it here is what lets the census rank entries instead of attempts.
                     let mut decline_cause: &'static str = "";
@@ -2300,7 +2306,9 @@ impl StyleEngineState {
                             engine_computed_record_scratch.recompute_in_full = reaction
                                 & (transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES
                                     | transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE)
-                                != 0;
+                                != 0
+                                || (container_input_nodes.contains(&node)
+                                    && self.container_input_requires_full_drive(node));
                             let delta = self.engine_computed_record_delta(
                                 node,
                                 answer_winners_are_complete,

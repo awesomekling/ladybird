@@ -822,10 +822,11 @@ pub struct RetainedState {
     container_effects_for_host: HashMap<StyleNodeID, container_queries::ContainerVerdict>,
     /// Each node's gated rules and whether their conditions held when its winners were published:
     /// the winners hold a gated rule's declarations exactly where it did.
-    published_container_verdicts: HashMap<StyleNodeID, Vec<(RuleID, bool)>>,
+    published_container_verdicts: HashMap<StyleNodeID, Vec<(RuleID, bool, bool)>>,
     /// Nodes whose winners were published while an ancestor's answer was moving in the same
     /// transaction, so their gated rules' conditions could not be decided when they were.
     container_gates_unheld: HashSet<StyleNodeID>,
+    container_input_nodes: HashSet<StyleNodeID>,
     declaration_block_version: u32,
     /// Whether the last transaction taken planned nothing but derived child reactions.
     last_transaction_only_derived_child_reactions: bool,

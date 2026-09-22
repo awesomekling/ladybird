@@ -50,7 +50,7 @@ void invalidate_descendant_styles_depending_on_size_container_query(DOM::Element
     // The container's own pseudo-elements select it as their query container too, and their styles are recomputed
     // with the element's.
     if (query_container.style_depends_on_size_container_query())
-        query_container.document().style_computer().style_engine().record_element_style_input_change(query_container.style_node_id());
+        query_container.document().style_computer().style_engine().record_container_query_input_change(query_container.style_node_id());
 
     GC::RootVector<GC::Ref<DOM::Node>> stack;
     append_flat_tree_children(query_container, stack);
@@ -59,7 +59,7 @@ void invalidate_descendant_styles_depending_on_size_container_query(DOM::Element
         if (auto* element = as_if<DOM::Element>(*node)) {
             ++counters.size_query_container_scan_visits;
             if (element->style_depends_on_size_container_query())
-                element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id());
+                element->document().style_computer().style_engine().record_container_query_input_change(element->style_node_id());
         }
         append_flat_tree_children(*node, stack);
     }

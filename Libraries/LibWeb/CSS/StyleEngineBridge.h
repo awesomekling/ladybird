@@ -230,6 +230,7 @@ public:
         HasStyle = 1 << 10,
         DisplayChanged = 1 << 11,
     };
+    void record_container_query_input_change(StyleNodeID);
     void record_element_style_input_change(StyleNodeID style_node, u8 reaction = PublishedStyle | RecomputeStyle, u8 inherited_style_groups = 0);
     // A reaction C++ derived from one it applied, for the engine to settle where it can.
     void record_derived_element_style_input_change(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups = 0);
