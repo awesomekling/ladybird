@@ -65,7 +65,12 @@
         internals.updateStyle();
         const counters = internals.getStyleInvalidationCounters();
         println(`no-op reactions suppressed: ${counters.styleEnginePublishedReactions < 700}`);
-        println(`none animation names remain shareable: ${counters.elementStyleSharedComputations >= 100}`);
+        // The engine shares a first record it derived earlier the way the C++ computation shares.
+        const sharedByEngine = () => {
+            const engine = internals.styleEngineCounters();
+            return ((engine.engineComputedRecordSharedHits ?? 0) + (engine.engineComputedRecordCohortHits ?? 0)) >= 100;
+        };
+        println(`none animation names remain shareable: ${counters.elementStyleSharedComputations >= 100 || sharedByEngine()}`);
         println(`inserted elements were styled: ${counters.elementComputedStyleChanges >= 271}`);
     });
 </script>

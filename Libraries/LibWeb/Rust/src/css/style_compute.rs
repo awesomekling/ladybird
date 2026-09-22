@@ -6710,6 +6710,11 @@ pub(crate) fn build_settled_animation_plan(
     }
     // SAFETY: The list's storage is the box `build_computed_animation_list` leaked into it.
     drop(unsafe { Box::from_raw(list.storage.cast::<Box<[FfiComputedAnimation]>>()) });
+    // A rule whose keyframes ask for more than the values they name - counting the tree, a `url()`
+    // against the sheet they were written in, a custom property - is one only the computation that
+    // resolves them can start. A first record answers for its descendants as well, which are
+    // computed before its plan is applied, so it also leaves a rule animating what they inherit.
+    // The whole plan then stays in C++.
     crate::css::style::animations::SettledAnimationPlan::new(
         definitions.into_boxed_slice(),
         names,
