@@ -1969,7 +1969,7 @@ fn description_needs_the_host(description: &PublishedEffect) -> bool {
             declaration
                 .value
                 .optional_data()
-                .is_some_and(|data| crate::css::style_compute::value_may_need_style_sheet_resource_context(data))
+                .is_some_and(crate::css::style_compute::value_may_need_style_sheet_resource_context)
         })
     {
         return true;
