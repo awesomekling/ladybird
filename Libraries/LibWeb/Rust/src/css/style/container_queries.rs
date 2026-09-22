@@ -162,6 +162,14 @@ impl RetainedState {
         node: StyleNodeID,
         scratch: &super::publication::EngineComputedRecordScratch,
     ) -> bool {
+        // Every element is a container a style query can ask about; a size or scroll-state query
+        // asks about the containers the element's ancestors declare.
+        let asks_about_style = self.published_container_verdicts.get(&node).is_some_and(|verdicts| {
+            verdicts.iter().any(|&(rule, _)| {
+                self.rule_container_verdict(rule, node.raw(), false)
+                    .is_none_or(|verdict| verdict.depends_on_style)
+            })
+        });
         let mut ancestor = self.tree.flat_tree_parent(node);
         while let Some(current) = ancestor {
             if let Some(index) = current.element_index()
@@ -169,12 +177,35 @@ impl RetainedState {
                     .derived_child_inputs
                     .get(index as usize)
                     .is_some_and(|row| !row.settled)
+                && (asks_about_style || self.may_be_a_query_container(current))
             {
                 return true;
             }
             ancestor = self.tree.flat_tree_parent(current);
         }
         false
+    }
+
+    /// Whether an element is a size, scroll-state or named container, or its winners may make it
+    /// one: an element that is none now and declares no `container-type` is none a size or
+    /// scroll-state query asks about.
+    fn may_be_a_query_container(&self, node: StyleNodeID) -> bool {
+        use crate::css::property_metadata::property_id::CONTAINER_TYPE;
+        if self.container_query_inputs(node).is_some_and(|inputs| {
+            inputs.is_size_container
+                || inputs.is_inline_size_container
+                || inputs.is_scroll_state_container
+                || !inputs.names.is_empty()
+        }) {
+            return true;
+        }
+        match self
+            .current_winner_groups()
+            .token_for(WinnerGroupKey::current(node, self.program.version()))
+        {
+            Lookup::Known((_, state)) => self.winner_groups.winner_in_state(state, CONTAINER_TYPE).is_some(),
+            _ => true,
+        }
     }
 
     pub(crate) fn take_container_effects_for_host(&mut self, node: StyleNodeID) -> Option<ContainerVerdict> {
