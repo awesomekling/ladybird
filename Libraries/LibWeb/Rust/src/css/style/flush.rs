@@ -2024,6 +2024,10 @@ impl StyleEngineState {
             }
             let mut next_published_index = 0;
             let mut batching_start = None;
+            // A hidden ancestor's unstyled descendants have an answer without a record in
+            // this batch. Consumers needing their style use the scoped record demand, which
+            // drives the unstyled inheritance chain when the read occurs.
+            let mut skipped_hidden_nodes = HashSet::default();
             // Resumptions share the transaction scratch above and complete in canonical order.
             // Consume every serviced continuation in this pass; rescanning the whole tail for
             // each one makes a cohort of markers waiting for a font take cubic work.
@@ -2077,6 +2081,35 @@ impl StyleEngineState {
                         .computed_group_sets
                         .assigned_style_record(node)
                         .map_or(0, |style_record| style_record.raw());
+                    let skip_hidden = old_style_record == 0 && {
+                        let mut ancestor = self.tree.inheritance_parent(node);
+                        let mut hidden = false;
+                        while let Some(current) = ancestor {
+                            // An ancestor C++ still has to settle may change visibility when
+                            // this batch applies it. Its old record cannot decide the skip.
+                            if row_of(&engine_computed_record_scratch.derived_child_inputs, current)
+                                .is_some_and(|row| !row.settled)
+                            {
+                                break;
+                            }
+                            if skipped_hidden_nodes.contains(&current) {
+                                hidden = true;
+                                break;
+                            }
+                            if let Some(record) = self.computed_group_sets.assigned_style_record(current) {
+                                hidden = self
+                                    .computed_group_sets
+                                    .style_record_dependency_flags(record.raw())
+                                    .is_some_and(|flags| flags & (1 << 2) != 0);
+                                break;
+                            }
+                            ancestor = self.tree.inheritance_parent(current);
+                        }
+                        hidden
+                    };
+                    if skip_hidden {
+                        skipped_hidden_nodes.insert(node);
+                    }
                     // A record computed from an answer declaring past its winners (custom properties,
                     // Custom properties alone leave an answer complete enough: the engine computes
                     // the environment they decide.
@@ -2102,7 +2135,8 @@ impl StyleEngineState {
                     // path reads without asking about the chain above it.
                     // A node whose winners hold gated rules is derived where their conditions are
                     // decided again and what they read of the containers is handed to the host.
-                    let direct_inherited_delta = (reaction == transaction::STYLE_REACTION_INHERITED_STYLE
+                    let direct_inherited_delta = (!skip_hidden
+                        && reaction == transaction::STYLE_REACTION_INHERITED_STYLE
                         && !resuming_font
                         && !self.retained.published_container_verdicts.contains_key(&node))
                     .then(|| self.retained.tree.flat_tree_parent(node))
@@ -2179,7 +2213,9 @@ impl StyleEngineState {
                     let mut decline_cause: &'static str = "";
                     // NB: Entry gates were already established for a suspended computation.
                     //     Its completed originating record must not change that decision.
-                    let engine_computed_gate_passes = if resuming_font {
+                    let engine_computed_gate_passes = if skip_hidden {
+                        false
+                    } else if resuming_font {
                         true
                     } else if direct_inherited_delta.is_some() {
                         decline_cause = "DirectInheritedDelta";
@@ -2340,6 +2376,7 @@ impl StyleEngineState {
                     // processed node keeps a row, settled or not: that is what lets a
                     // descendant's fold stop at it instead of walking past it to the root.
                     if let Some(bail_marks) = bail_marks
+                        && !skip_hidden
                         && engine_computed_delta.is_none()
                         && direct_inherited_delta.is_none()
                     {
@@ -2352,7 +2389,7 @@ impl StyleEngineState {
                             .host_entry_causes
                             .insert(node, (decline_cause, old_style_record == 0));
                     }
-                    let settled = direct_inherited_delta.is_some() || engine_computed_delta.is_some();
+                    let settled = skip_hidden || direct_inherited_delta.is_some() || engine_computed_delta.is_some();
                     if let Some(index) = node.element_index() {
                         engine_computed_record_scratch.derived_child_inputs.insert(
                             index as usize,
@@ -2366,7 +2403,9 @@ impl StyleEngineState {
                             },
                         );
                     }
-                    let (old_style_record, new_style_record, damage, gap) =
+                    let (old_style_record, new_style_record, damage, gap) = if skip_hidden {
+                        (0, 0, FfiStyleDeltaDamage::None, FfiStyleDeltaGap::SkippedHidden)
+                    } else {
                         match (direct_inherited_delta, engine_computed_delta) {
                             (Some((old_style_record, new_style_record)), _) => (
                                 old_style_record.raw(),
@@ -2390,7 +2429,8 @@ impl StyleEngineState {
                                     FfiStyleDeltaGap::Materialize
                                 },
                             ),
-                        };
+                        }
+                    };
                     // A moved inherited environment the engine leaves to C++ reaches what the node's
                     // custom declarations and substitutions read: C++ recomputes such a node, which
                     // it cannot tell from an engine-computed record.

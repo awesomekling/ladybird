@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/FragmentIdentifier.h>
@@ -67,6 +68,8 @@ SpreadMethod SVGGradientElement::spread_method_impl(GC::RootHashTable<SVGGradien
 
 Gfx::InterpolationColorSpace SVGGradientElement::color_space() const
 {
+    if (!has_style())
+        const_cast<DOM::Document&>(document()).update_style_for_element(DOM::AbstractElement { *this });
     auto style = computed_style();
     VERIFY(style);
     return CSS::to_interpolation_color_space(style->color_interpolation());

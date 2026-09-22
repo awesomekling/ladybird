@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/DOM/AbstractElement.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/SVG/SVGFEDropShadowElement.h>
 
 namespace Web::SVG {
@@ -29,6 +31,8 @@ void SVGFEDropShadowElement::visit_edges(Cell::Visitor& visitor)
 // https://www.w3.org/TR/filter-effects-1/#FloodColorProperty
 Gfx::Color SVGFEDropShadowElement::flood_color()
 {
+    if (!has_style())
+        document().update_style_for_element(DOM::AbstractElement { *this });
     auto style = computed_style();
     VERIFY(style);
     return style->flood_color();
@@ -37,6 +41,8 @@ Gfx::Color SVGFEDropShadowElement::flood_color()
 // https://www.w3.org/TR/filter-effects-1/#FloodOpacityProperty
 float SVGFEDropShadowElement::flood_opacity() const
 {
+    if (!has_style())
+        const_cast<DOM::Document&>(document()).update_style_for_element(DOM::AbstractElement { *this });
     auto style = computed_style();
     VERIFY(style);
     return style->flood_opacity();

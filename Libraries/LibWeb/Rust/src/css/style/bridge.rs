@@ -116,6 +116,8 @@ pub enum FfiStyleDeltaGap {
     Computed,
     /// Retry a cold drive while applying the preorder batch, after its parent is authoritative.
     RetryAfterAncestor,
+    /// An unstyled descendant of a hidden ancestor needs no record in this batch.
+    SkippedHidden,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
