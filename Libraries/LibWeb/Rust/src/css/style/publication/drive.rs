@@ -351,7 +351,7 @@ impl RetainedState {
             .winning_declaration(prop::FONT_FAMILY)
             .is_some_and(|(value, ..)| font_family_is_monospace(unsafe { &*value.cast::<StyleValueData>() }))
         {
-            counters.bump(Counter::EngineComputedRecordBailFontPhase);
+            counters.bump(Counter::EngineComputedRecordBailMonospaceQuirk);
             return None;
         }
         let old_table = match old_style_record {
