@@ -685,6 +685,12 @@ impl RetainedState {
         // record was computed from has moved, and the overlay on it is the host's either way.
         let animations_bind_the_record = facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0;
         let Some(old_style_record) = self.computed_group_sets.assigned_style_record(node) else {
+            // A batch first record cannot settle the host's existing animation composition.
+            // A scoped demand instead installs its base and samples the effects over it.
+            if animations_bind_the_record && !scratch.targeted_record_demand {
+                counters.bump(Counter::EngineComputedRecordBailWinnerElement);
+                return None;
+            }
             return self.engine_cold_record(node, (generation, state), scratch, goal, counters);
         };
         // The same of a record that holds an animation overlay. What the transitions its table
@@ -1637,6 +1643,9 @@ impl RetainedState {
         };
         let cache_key = parent
             .zip(parent_record)
+            .filter(|_| {
+                !(scratch.targeted_record_demand && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0)
+            })
             .and_then(|(parent, parent_record)| self.cold_record_parent(node, parent, parent_record, state))
             .map(|parent| ColdRecordKey {
                 monospace_recascaded_font_size: self.monospace_cohort_key(node, state),
@@ -1652,7 +1661,8 @@ impl RetainedState {
                 root_font_inputs: RootFontInputs::from_document(&inputs),
             });
         let delta_property_count = self.winner_groups.winner_count_in_state(state) as u64;
-        if !self.node_declares_custom_properties(node)
+        if !(scratch.targeted_record_demand && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0)
+            && !self.node_declares_custom_properties(node)
             && let Some(delta) = self.assign_cached_cold_record(
                 node,
                 target,
@@ -1846,7 +1856,13 @@ impl RetainedState {
             target,
             recascade_node: Some(node),
             parent,
-            facts,
+            // A scoped demand computes the base style of a cold animation target.
+            // The host samples its animation over that base after installation.
+            facts: if scratch.targeted_record_demand {
+                facts & !bridge::element_adjustment_fact::HAS_ANIMATIONS
+            } else {
+                facts
+            },
         };
         let (table, length, longhand_evaluations, font) = self.engine_full_drive(
             subject,
@@ -5006,6 +5022,7 @@ impl StyleEngineState {
                 let before = counters.record_bail_marks();
                 let mut scratch = EngineComputedRecordScratch {
                     recompute_in_full: targeted,
+                    targeted_record_demand: targeted,
                     ..EngineComputedRecordScratch::default()
                 };
                 let mut suspended_memory = MemoryLease::new(MemoryCategory::BatchScratch);
@@ -5378,6 +5395,8 @@ impl EngineComputedRecordContinuation {
 
 #[derive(Default)]
 pub(super) struct EngineComputedRecordScratch {
+    /// A scoped read can request the base record of a cold animation target.
+    pub(super) targeted_record_demand: bool,
     /// Whether this transaction carries a document environment action requiring host computation.
     pub(super) environment_requires_host_computation: bool,
     pub(super) continuation: EngineComputedRecordContinuation,

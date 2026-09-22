@@ -2304,6 +2304,7 @@ fn read_style_transaction_outputs(
                     1 => FfiStyleDeltaGap::Materialize,
                     2 => FfiStyleDeltaGap::Computed,
                     3 => FfiStyleDeltaGap::RetryAfterAncestor,
+                    4 => FfiStyleDeltaGap::SkippedHidden,
                     tag => return Err(format!("unknown style delta gap tag {tag}").into()),
                 },
                 uses_substitution: format_version >= 16 && payload.read_bool()?,

@@ -464,15 +464,6 @@ impl RetainedState {
                 }
                 None => (initial_metrics, false, 0.0),
             };
-        // C++ computes no style under a display:none ancestor.
-        if old_table.is_none()
-            && parent_view
-                .as_ref()
-                .is_some_and(|parent_view| parent_view.dependency_flags & (1 << 2) != 0)
-        {
-            counters.bump(Counter::EngineComputedRecordBailRecordParent);
-            return None;
-        }
         // The parent's display, past any display:contents ancestor, is what the box-type
         // transformation reads.
         let mut parent_display = None;

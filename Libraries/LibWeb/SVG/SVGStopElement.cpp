@@ -7,6 +7,8 @@
 
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/Parser/Parser.h>
+#include <LibWeb/DOM/AbstractElement.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/SVGStopElement.h>
 
@@ -21,6 +23,8 @@ SVGStopElement::SVGStopElement(DOM::Document& document, DOM::QualifiedName quali
 
 Gfx::Color SVGStopElement::stop_color()
 {
+    if (!has_style())
+        document().update_style_for_element(DOM::AbstractElement { *this });
     if (auto const* values = style_group<CSS::ComputedValues::SVGResetValues>())
         return Gfx::Color::from_bgra(values->stop_color);
     return CSS::InitialValues::stop_color();
@@ -28,6 +32,8 @@ Gfx::Color SVGStopElement::stop_color()
 
 float SVGStopElement::stop_opacity() const
 {
+    if (!has_style())
+        const_cast<DOM::Document&>(document()).update_style_for_element(DOM::AbstractElement { *this });
     if (auto const* values = style_group<CSS::ComputedValues::SVGResetValues>())
         return values->stop_opacity;
     return 1;

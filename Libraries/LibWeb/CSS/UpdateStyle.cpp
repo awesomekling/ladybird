@@ -669,6 +669,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 reaction.reaction = static_cast<u8>(absorbed & 0xff);
                 reaction.inherited_style_groups = static_cast<u8>(absorbed >> 8);
             }
+            if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::SkippedHidden)
+                continue;
 
             if (!element->has_style() && !required_in_hidden_subtrees.contains(element->style_node_id())) {
                 bool hidden = false;
@@ -1445,9 +1447,26 @@ static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_updat
     auto const* box_values = element.style_group<ComputedValues::BoxValues>();
     bool const has_scroll_state_pseudo_dependency = box_values && box_values->is_scroll_state_container && element.style_depends_on_size_container_query();
     if (element.parent() && !has_scroll_state_pseudo_dependency) {
+        bool const was_unstyled = !element.has_style();
         StringView decline_cause;
-        if (auto invalidation = style_computer.answer_record_demand(element, did_change_custom_properties, decline_cause, {}, false, true); invalidation.has_value())
+        auto invalidation = style_computer.answer_record_demand(element, did_change_custom_properties, decline_cause, {}, false, true);
+        if (invalidation.has_value()) {
+            // A scoped read of an unstyled hidden animation target installs its
+            // base record first. Sample its effects over that record now: the
+            // document's ordinary animation tick skips hidden descendants.
+            if (was_unstyled && element.has_relevant_animations()) {
+                Animations::AnimationUpdateContext context;
+                for (auto& animation : element.associated_animations_in_composite_order()) {
+                    if (animation->is_idle() || !animation->effect() || !is<Animations::KeyframeEffect>(*animation->effect()))
+                        continue;
+                    auto& effect = static_cast<Animations::KeyframeEffect&>(*animation->effect());
+                    if (effect.target().ptr() != &element || effect.pseudo_element_type().has_value())
+                        continue;
+                    effect.update_computed_properties_for_style(context, DOM::AbstractElement { element });
+                }
+            }
             return *invalidation;
+        }
     }
 
     style_computer.style_engine().consume_recorded_element_style_input_change(element.style_node_id());

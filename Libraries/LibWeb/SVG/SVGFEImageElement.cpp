@@ -94,6 +94,8 @@ Optional<Gfx::IntRect> SVGFEImageElement::content_rect() const
     auto bitmap = current_image_frame();
     if (!bitmap.has_value())
         return {};
+    if (!has_style())
+        const_cast<DOM::Document&>(document()).update_style_for_element(DOM::AbstractElement { *this });
     auto computed_style = this->computed_style();
     if (!computed_style)
         return {};
