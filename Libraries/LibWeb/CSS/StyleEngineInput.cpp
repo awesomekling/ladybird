@@ -33,7 +33,6 @@
 #include <LibWeb/HTML/HTMLHeadingElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
-#include <LibWeb/HTML/HTMLPictureElement.h>
 #include <LibWeb/HTML/HTMLSelectElement.h>
 #include <LibWeb/HTML/HTMLSlotElement.h>
 #include <LibWeb/HTML/HTMLTableCellElement.h>
@@ -557,68 +556,31 @@ static void publish_element_selector_features(StyleEngine& style_engine, DOM::El
         custom_states);
 }
 
-// Whether the element's cascade may include presentational hints. The hints themselves are
-// collected during the C++ computation, and a table cell's read the table's computed style, so
-// this decides from the element kind and its attributes alone, conservatively.
-// Hints mapped from another element's attributes, which move without the element's own moving.
-static bool element_may_have_derived_presentational_hints(DOM::Element const& element)
-{
-    if (element.namespace_uri() == Namespace::HTML) {
-        // A table cell's border hints come from its table's border attribute and computed border
-        // colors. Its cellpadding hints come from the table too, but a cellpadding change records
-        // the cells themselves.
-        if (first_is_one_of(element.local_name(), HTML::TagNames::td, HTML::TagNames::th)) {
-            auto const* table = element.first_ancestor_of_type<HTML::HTMLTableElement>();
-            return table && table->border() != 0;
-        }
-        // An image's hints come from the <source> its <picture> selected.
-        if (element.local_name() == HTML::TagNames::img)
-            return is<HTML::HTMLPictureElement>(element.parent());
-    }
-    // A body's link, vlink and alink attributes are presentational hints on every link, by the
-    // link's :link, :visited and :active state.
-    if ((element.matches_link_pseudo_class() || element.matches_visited_pseudo_class())
-        && (element.document().normal_link_color().has_value() || element.document().visited_link_color().has_value() || element.document().active_link_color().has_value()))
-        return true;
-    return false;
-}
-
-// Whether an element's hints are mapped where they move, at its arrival and at the attribute
-// funnel, rather than by the cascade: every element but the ones whose hints come from another
-// element's state, which may not exist yet when the attribute moves. The engine leaves those to
-// C++ by their adjustment fact.
-bool element_publishes_presentational_hints_eagerly(DOM::Element const& element)
-{
-    if (element.publishes_presentational_hints_on_arrival())
-        return true;
-    // A link's colour hints come from the body's link attributes, whichever state it is in.
-    return !element_may_have_derived_presentational_hints(element)
-        && !element.matches_link_pseudo_class() && !element.matches_visited_pseudo_class();
-}
-
-// A cell's or image's hints move between the two ways of publishing them when the table or
-// <picture> it is under changes: publish them again the way that holds now.
-static void republish_presentational_hints_after_derivation_moved(DOM::Element& element)
+// An element's hints move when something beside its own attributes that they are mapped from
+// moves: the table a cell is under, the <source> an image takes its dimensions from, the body's
+// link colours for a link. Publish them again.
+void republish_presentational_hints(DOM::Element& element)
 {
     auto* style_engine = style_engine_for(element);
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
-    // The hints move to the kind that holds now, and leave nothing in the other one.
-    auto eager = element_publishes_presentational_hints_eagerly(element);
-    style_engine->set_element_presentational_hint_properties(element.style_node_id(),
-        eager ? StyleEngineFFI::FfiElementDeclarationKind::PresentationalHint : StyleEngineFFI::FfiElementDeclarationKind::SvgPresentationAttribute, {});
-    element.did_publish_presentational_hint_properties({});
-    if (eager)
-        StyleComputer::collect_presentational_hint_properties({ element });
+    StyleComputer::collect_presentational_hint_properties({ element });
     // The hints moved, and so does the style they are cascaded into.
-    record_element_declarations_changed(element, eager ? ElementDeclarationKind::SvgPresentationAttribute : ElementDeclarationKind::PresentationalHint, true, true);
+    record_element_declarations_changed(element, ElementDeclarationKind::SvgPresentationAttribute, true, true);
 }
 
-static bool element_has_own_presentational_hint_attributes(DOM::Element const& element)
+static bool element_has_presentational_hints_to_publish(DOM::Element const& element)
 {
+    if (element.publishes_presentational_hints_on_arrival())
+        return true;
     // A table cell can take hints from its table's cellpadding, and an image from its <picture>'s
     // <source>, without a presentational attribute of its own.
     if (element.namespace_uri() == Namespace::HTML && first_is_one_of(element.local_name(), HTML::TagNames::td, HTML::TagNames::th, HTML::TagNames::img))
+        return true;
+    // A body's link, vlink and alink attributes are presentational hints on every link, by the
+    // link's :link, :visited and :active state.
+    if ((element.matches_link_pseudo_class() || element.matches_visited_pseudo_class())
+        && (element.document().normal_link_color().has_value() || element.document().visited_link_color().has_value() || element.document().active_link_color().has_value()))
         return true;
     // The cascade also reads the width and height attributes of an element that supports them.
     if (element.supports_dimension_attributes()
@@ -630,16 +592,6 @@ static bool element_has_own_presentational_hint_attributes(DOM::Element const& e
             has_presentational_hint = true;
     });
     return has_presentational_hint;
-}
-
-static bool element_may_have_presentational_hints(DOM::Element const& element)
-{
-    if (element_may_have_derived_presentational_hints(element))
-        return true;
-    // Hints published where they move are current in the engine, as its declarations.
-    if (element_publishes_presentational_hints_eagerly(element))
-        return false;
-    return element_has_own_presentational_hint_attributes(element);
 }
 
 u32 element_box_type_adjustment_facts(DOM::Element const& element)
@@ -768,9 +720,7 @@ u32 element_style_adjustment_facts(DOM::Element const& element)
     // An animation the element is associated with composes into its style once it is relevant,
     // which its timeline can make it after the element's arrival.
     set(element.has_relevant_animations() || element.has_associated_animations(), ElementStyleAdjustmentFact::HasAnimations);
-    set(element_may_have_presentational_hints(element), ElementStyleAdjustmentFact::HasPresentationalHints);
     set(element.associated_shadow_host_pseudo_element().has_value(), ElementStyleAdjustmentFact::IsShadowHostPseudoElement);
-    set(element_may_have_derived_presentational_hints(element), ElementStyleAdjustmentFact::HasDerivedPresentationalHints);
     set(is<SVG::SVGElement>(element), ElementStyleAdjustmentFact::IsSvgElement);
     set(is<SVG::SVGSwitchElement>(element), ElementStyleAdjustmentFact::IsSvgSwitchElement);
     set(element.is_svg_container(), ElementStyleAdjustmentFact::IsSvgContainer);
@@ -1022,8 +972,7 @@ static void record_element_initial_features(DOM::Element& element)
     // NB: Asking the block itself does not build the views of its declarations.
     if (auto const inline_style = element.inline_style(); inline_style && !inline_style->declaration_block().is_empty())
         record_element_inline_style_properties(element);
-    if (element_publishes_presentational_hints_eagerly(element)
-        && (element.publishes_presentational_hints_on_arrival() || element_has_own_presentational_hint_attributes(element)))
+    if (element_has_presentational_hints_to_publish(element))
         StyleComputer::collect_presentational_hint_properties({ element });
 }
 
@@ -1068,13 +1017,10 @@ void record_element_moved(DOM::Element& element, DOM::Node* old_parent, DOM::Ele
                 style_engine->set_element_adjustment_facts(descendant->style_node_id(), element_style_adjustment_facts(*descendant));
                 style_engine->record_derived_element_style_input_change(descendant->style_node_id(), StyleEngine::RecomputeStyle);
             }
-            // Whether a table cell's or an image's hints come from another element depends on the
-            // table or <picture> it is now under.
+            // A table cell's hints come from the table it is now under.
             if (auto* descendant = as_if<DOM::Element>(node); descendant && descendant->namespace_uri() == Namespace::HTML && descendant->style_node_id() != no_style_node
-                && first_is_one_of(descendant->local_name(), HTML::TagNames::td, HTML::TagNames::th, HTML::TagNames::img)) {
-                style_engine->set_element_adjustment_facts(descendant->style_node_id(), element_style_adjustment_facts(*descendant));
-                republish_presentational_hints_after_derivation_moved(*descendant);
-            }
+                && first_is_one_of(descendant->local_name(), HTML::TagNames::td, HTML::TagNames::th))
+                republish_presentational_hints(*descendant);
             return TraversalDecision::Continue;
         });
 
@@ -1848,11 +1794,8 @@ bool record_element_presentational_hint_properties(DOM::Element& element, Readon
     if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
         return false;
     // NB: The SvgPresentationAttribute kind is the one whose declarations the engine takes as
-    //     current: every element whose hints are published where they move uses it.
-    auto kind = element_publishes_presentational_hints_eagerly(element)
-        ? StyleEngineFFI::FfiElementDeclarationKind::SvgPresentationAttribute
-        : StyleEngineFFI::FfiElementDeclarationKind::PresentationalHint;
-    style_engine->set_element_presentational_hint_properties(element.style_node_id(), kind, hints);
+    //     current: every element's hints are published where they move.
+    style_engine->set_element_presentational_hint_properties(element.style_node_id(), StyleEngineFFI::FfiElementDeclarationKind::SvgPresentationAttribute, hints);
     return true;
 }
 
@@ -2774,11 +2717,10 @@ void record_element_attribute_changed(DOM::Element& element, Utf16FlyString cons
     // box adjustments and whether it supports dimension attributes.
     if (old_value.has_value() != new_value.has_value() || name == HTML::AttributeNames::type)
         record_element_adjustment_facts(element);
-    // A table's border attribute decides whether its cells' hints come from the table.
+    // A table's border attribute moves its cells' border hints.
     if (name == HTML::AttributeNames::border && is<HTML::HTMLTableElement>(element)) {
         element.for_each_in_subtree_of_type<HTML::HTMLTableCellElement>([](auto& cell) {
-            record_element_adjustment_facts(cell);
-            republish_presentational_hints_after_derivation_moved(cell);
+            republish_presentational_hints(cell);
             return TraversalDecision::Continue;
         });
     }

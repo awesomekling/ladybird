@@ -239,7 +239,7 @@ void HTMLImageElement::set_dimension_attribute_source(DOM::Element const* source
 {
     if (m_dimension_attribute_source.ptr() != source) {
         m_dimension_attribute_source = source;
-        document().style_computer().style_engine().record_element_style_input_change(style_node_id());
+        CSS::republish_presentational_hints(*this);
     }
 }
 

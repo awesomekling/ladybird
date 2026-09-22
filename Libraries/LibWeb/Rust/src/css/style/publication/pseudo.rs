@@ -877,7 +877,7 @@ impl RetainedState {
     ) -> Option<(computed::FinalStyleRecordID, computed::FinalStyleRecordID)> {
         use bridge::element_adjustment_fact as fact;
         let facts = self.computed_group_sets.adjustment_facts(node);
-        if facts & (fact::HAS_ANIMATIONS | fact::HAS_DERIVED_PRESENTATIONAL_HINTS) != 0 {
+        if facts & fact::HAS_ANIMATIONS != 0 {
             counters.bump(Counter::EngineComputedRecordBailWinnerElement);
             return None;
         }
