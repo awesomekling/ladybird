@@ -26,6 +26,14 @@ impl FontDriveScratch {
         self.pending.is_some()
     }
 
+    /// Whether the suspended drive is this element's own. A row resumes only its own drive: the
+    /// one left behind by an element the record loop settled another way is not an answer to it.
+    pub(in crate::css::style) fn is_pending_for(&self, node: StyleNodeID) -> bool {
+        self.pending
+            .as_ref()
+            .is_some_and(|pending| pending.target == computed::ComputedStyleTarget::new(node, u8::MAX))
+    }
+
     pub(in crate::css::style) fn capacity_bytes(&self) -> u64 {
         self.pending
             .as_ref()
@@ -36,6 +44,10 @@ impl FontDriveScratch {
 /// The completed font phase owns its table. No parent/context borrow survives refill;
 /// the caller resumes the same subject before evaluating any later canonical element.
 struct PendingFontDrive {
+    /// What the suspended drive belongs to. The record loop can settle that element another way
+    /// before the retry comes, which leaves the drive behind; whoever is driven next must not
+    /// take up someone else's table.
+    target: computed::ComputedStyleTarget,
     root_font_complete: bool,
     table: ComputedLonghandTable,
     results: crate::css::style_compute::FfiLonghandDriverResults,
@@ -336,6 +348,7 @@ impl RetainedState {
         use bridge::element_adjustment_fact as fact;
 
         let DriveSubject {
+            target: _,
             recascade_node,
             parent,
             facts,
@@ -573,7 +586,10 @@ impl RetainedState {
                 subject_inline_axis_is_horizontal,
                 resolved_viewport_relative_length: resolved_viewport_relative_length_pointer,
             };
-        let resumed = font_scratch.pending.take();
+        let resumed = font_scratch
+            .pending
+            .take()
+            .filter(|pending| pending.target == subject.target);
         let resuming = resumed.is_some();
         let root_font_complete = resumed.as_ref().is_some_and(|pending| pending.root_font_complete);
         if !resuming {
@@ -763,6 +779,7 @@ impl RetainedState {
         else {
             font_scratch.request = Some(font_resolution::FontRequest::new(request));
             font_scratch.pending = Some(PendingFontDrive {
+                target: subject.target,
                 root_font_complete: false,
                 table,
                 results,
@@ -839,6 +856,7 @@ impl RetainedState {
                 depends_on_viewport: results.font_metrics_depend_on_viewport_metrics,
             });
             font_scratch.pending = Some(PendingFontDrive {
+                target: subject.target,
                 root_font_complete: true,
                 table,
                 results,

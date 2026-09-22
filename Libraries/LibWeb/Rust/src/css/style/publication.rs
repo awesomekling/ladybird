@@ -1688,6 +1688,7 @@ impl RetainedState {
             }
         }
         let subject = DriveSubject {
+            target,
             recascade_node: Some(node),
             parent,
             facts,
@@ -2501,6 +2502,7 @@ impl RetainedState {
             return None;
         }
         Some(DriveSubject {
+            target: computed::ComputedStyleTarget::new(node, u8::MAX),
             recascade_node: Some(node),
             parent,
             facts,
@@ -4865,6 +4867,9 @@ impl EngineComputedRecordScratch {
 /// adjustments read.
 #[derive(Clone, Copy)]
 pub(super) struct DriveSubject {
+    /// What is being driven, element or pseudo-element. A drive that suspends to wait for a font
+    /// names it, so the suspended drive can only be resumed by the one it belongs to.
+    target: computed::ComputedStyleTarget,
     /// The element the drive is for, when the record is its own. A pseudo-element's row leaves it
     /// unset: the monospace recascade it would need is the originating element's chain, which this
     /// row does not answer for.
