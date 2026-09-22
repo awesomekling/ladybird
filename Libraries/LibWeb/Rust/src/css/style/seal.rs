@@ -76,15 +76,14 @@ thread_local! {
     static LONGHAND_INPUT_FREEZE_REASONS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
     static BETWEEN_PASS_BATCHES: RefCell<HashMap<&'static str, (u64, u64)>> = RefCell::new(HashMap::new());
     static HOST_DRIVEN_ROWS: Cell<u64> = const { Cell::new(0) };
-    static HOST_RETRY_ENTRIES: Cell<u64> = const { Cell::new(0) };
     static HOST_SAMPLED_ANIMATION_ROWS: Cell<u64> = const { Cell::new(0) };
     static HOST_DRIVEN_ROW_KINDS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
     static HOST_ENTRY_CAUSES: RefCell<HashMap<HostEntryKey, HostEntryCounts>> = RefCell::new(HashMap::new());
     static CURRENT_HOST_ENTRY: RefCell<Option<HostEntryKey>> = const { RefCell::new(None) };
 }
 
-/// What one host entry is: the reason the engine sent this element to the host, which of the
-/// three ways in it took, and whether it had a record already.
+/// What one host entry is: the reason the engine sent this element to the host, which way in it
+/// took, and whether it had a record already.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct HostEntryKey {
     pub(crate) cause: &'static str,
@@ -92,11 +91,10 @@ pub(crate) struct HostEntryKey {
     pub(crate) cold: bool,
 }
 
-/// The three ways one element is entered from the host during an update.
+/// The ways one element is entered from the host during an update.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum HostEntryKind {
     Row,
-    Retry,
     Sampled,
 }
 
@@ -104,7 +102,6 @@ impl HostEntryKind {
     fn name(self) -> &'static str {
         match self {
             Self::Row => "row",
-            Self::Retry => "retry",
             Self::Sampled => "sampled",
         }
     }
@@ -127,12 +124,6 @@ pub(crate) fn note_host_entry(cause: &'static str, kind: HostEntryKind, cold: bo
     HOST_ENTRY_CAUSES.with(|causes| {
         causes.borrow_mut().entry(key).or_default().entries += 1;
     });
-    // Counted here rather than from the engine's own counter: the counter dies with its engine while this
-    // census belongs to the thread, and the two must add up. `flush_engine_decline_census` leaves
-    // `retryAfterAncestorCalls` out of its report for that reason.
-    if kind == HostEntryKind::Retry {
-        HOST_RETRY_ENTRIES.with(|entries| entries.set(entries.get().wrapping_add(1)));
-    }
     if kind == HostEntryKind::Row {
         CURRENT_HOST_ENTRY.with(|current| *current.borrow_mut() = Some(key));
     }
@@ -181,12 +172,8 @@ pub(crate) fn note_host_driven_row(kinds: u8) {
 /// Report how often the engine declined to compute a record itself, by the reason it recorded.
 /// A host-driven row inside a published batch is a row one of these declined.
 ///
-/// These numbers belong to one engine and are reported when that engine is destroyed, so they are not a run
-/// total: an engine that outlives reporting never prints its own. That is why the retries are not reported from
-/// `retryAfterAncestorCalls` here as well. The counter and the host-entry census count the same call, one per
-/// engine and one per thread, so summing both over a run reads two totals for one population - a full suite run
-/// reported 77,170 retry entries beside 75,461 calls. The retry count now has one home, the census, which is
-/// drained as the thread runs and so covers the engines that are never destroyed.
+/// These numbers belong to one engine and are reported when that engine is destroyed, so they
+/// are not a run total: an engine that outlives reporting never prints its own.
 pub(crate) fn flush_engine_decline_census<'a>(counters: impl Iterator<Item = (&'a str, u64)>) {
     if mode() == Mode::Off {
         return;
@@ -377,13 +364,7 @@ pub(crate) fn flush_census() {
         write_report(&format!("STYLE SEAL COUNT: host_driven_rows: {host_driven_rows}\n"));
     }
     let sampled = HOST_SAMPLED_ANIMATION_ROWS.with(|rows| rows.replace(0));
-    // Every way one element is entered from the host during an update, in one number. A row the
-    // host computed and a retry the host asked for after applying an ancestor cost the same
-    // thing: control on the host side between two elements. Relaxing a gate usually moves rows
-    // from the first to the second, so only the total says whether the stage got closer to being
-    // one function.
-    let host_retries = HOST_RETRY_ENTRIES.with(|entries| entries.replace(0));
-    let host_entries = host_driven_rows + host_retries + sampled;
+    let host_entries = host_driven_rows + sampled;
     CURRENT_HOST_ENTRY.with(|current| *current.borrow_mut() = None);
     let mut causes = HOST_ENTRY_CAUSES.with(|causes| {
         std::mem::take(&mut *causes.borrow_mut())
@@ -405,7 +386,7 @@ pub(crate) fn flush_census() {
         ));
     }
     if attributed != host_entries {
-        // Log-only: every host entry is meant to pass through one of the three notes, so a
+        // Log-only: every host entry is meant to pass through a note, so a
         // difference means a way in that the census does not know about.
         write_report(&format!(
             "STYLE SEAL COUNT: host_entries unattributed: {}\n",
@@ -414,7 +395,7 @@ pub(crate) fn flush_census() {
     }
     if host_entries != 0 {
         write_report(&format!(
-            "STYLE SEAL COUNT: host_entries: {host_entries} (rows {host_driven_rows} + retries {host_retries} + sampled {sampled})\n"
+            "STYLE SEAL COUNT: host_entries: {host_entries} (rows {host_driven_rows} + sampled {sampled})\n"
         ));
     }
     if sampled != 0 {
