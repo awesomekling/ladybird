@@ -788,28 +788,29 @@ impl RetainedState {
             matches
         } else {
             match Self::published_answer_lookup(
-            &self.published_match_answers,
-            self.batch_matching_traversal.as_deref(),
-            host,
-        )
-        .and_then(|(published, answer)| published.matches_for(answer))
-        {
-            Some(matches) => matches
-                .iter()
-                .filter(|entry| entry.pseudo_element == Some(target))
-                .copied()
-                .collect(),
-            None => match self.retained_match_answer(host) {
-                Lookup::Known(answer) => answer
+                &self.published_match_answers,
+                self.batch_matching_traversal.as_deref(),
+                host,
+            )
+            .and_then(|(published, answer)| published.matches_for(answer))
+            {
+                Some(matches) => matches
                     .iter()
-                    .filter(|entry| {
-                        self.programs.get(entry.program).entries()[entry.entry as usize].pseudo_element == Some(target)
-                    })
-                    .map(|entry| entry.materialize(host, &self.programs, 0))
-                    .collect::<Option<_>>()?,
-                _ => return None,
-            },
-        }
+                    .filter(|entry| entry.pseudo_element == Some(target))
+                    .copied()
+                    .collect(),
+                None => match self.retained_match_answer(host) {
+                    Lookup::Known(answer) => answer
+                        .iter()
+                        .filter(|entry| {
+                            self.programs.get(entry.program).entries()[entry.entry as usize].pseudo_element
+                                == Some(target)
+                        })
+                        .map(|entry| entry.materialize(host, &self.programs, 0))
+                        .collect::<Option<_>>()?,
+                    _ => return None,
+                },
+            }
         };
         let complete = !matches.iter().any(|entry| {
             !self.match_scope_is_complete_for(Some(host), entry.rule, entry.tree_scope)
@@ -834,17 +835,24 @@ impl RetainedState {
     ) -> Option<Vec<RuleMatch>> {
         let is_backed = |pseudo: Option<tree::PseudoElementTarget>| {
             pseudo.is_some_and(|pseudo| {
-                (u16::from(bridge::FIRST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND)..=u16::from(bridge::LAST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND))
+                (u16::from(bridge::FIRST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND)
+                    ..=u16::from(bridge::LAST_ELEMENT_REFERENCE_PSEUDO_ELEMENT_KIND))
                     .contains(&pseudo.kind.0)
             })
         };
         let matches: Vec<RuleMatch> = match published.matches_for(answer) {
-            Some(matches) => matches.iter().filter(|entry| is_backed(entry.pseudo_element)).copied().collect(),
+            Some(matches) => matches
+                .iter()
+                .filter(|entry| is_backed(entry.pseudo_element))
+                .copied()
+                .collect(),
             None => self
                 .match_answers
                 .answer(answer.cascade_input?)?
                 .iter()
-                .filter(|entry| is_backed(self.programs.get(entry.program).entries()[entry.entry as usize].pseudo_element))
+                .filter(|entry| {
+                    is_backed(self.programs.get(entry.program).entries()[entry.entry as usize].pseudo_element)
+                })
                 .map(|entry| entry.materialize(node, &self.programs, 0))
                 .collect::<Option<_>>()?,
         };

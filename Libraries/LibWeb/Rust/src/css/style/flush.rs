@@ -2017,7 +2017,9 @@ impl StyleEngineState {
                 {
                     self.retained.batch_custom_property_matches.insert(node, matches);
                 }
-                if let Some(matches) = self.retained.batch_backing_pseudo_matches_of(node, &published_match_answers, answer)
+                if let Some(matches) =
+                    self.retained
+                        .batch_backing_pseudo_matches_of(node, &published_match_answers, answer)
                 {
                     self.retained.batch_backing_pseudo_matches.insert(node, matches);
                 }
