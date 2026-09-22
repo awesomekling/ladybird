@@ -5248,11 +5248,21 @@ fn property_starts_animation_or_counter_environment(property: u16) -> bool {
         return true;
     }
     // A view transition name is a plain computed value; it starts nothing. An anchor name is one
-    // the host registers from whichever record it installs.
+    // the host registers from whichever record it installs. A named timeline is a plain computed
+    // value too: what finds it is the animation that names it in `animation-timeline`, and that
+    // animation reads it from whichever record the element holds when it starts.
     matches!(property, prop::CONTENT | prop::LIST_STYLE_TYPE)
-        || (property != prop::VIEW_TRANSITION_NAME
-            && property_style_group_index(property)
-                .is_some_and(|group| usize::from(group) == crate::css::table_group_builder::group_index::ANIMATION))
+        || (!matches!(
+            property,
+            prop::VIEW_TRANSITION_NAME
+                | prop::SCROLL_TIMELINE_NAME
+                | prop::SCROLL_TIMELINE_AXIS
+                | prop::TIMELINE_SCOPE
+                | prop::VIEW_TIMELINE_NAME
+                | prop::VIEW_TIMELINE_AXIS
+                | prop::VIEW_TIMELINE_INSET
+        ) && property_style_group_index(property)
+            .is_some_and(|group| usize::from(group) == crate::css::table_group_builder::group_index::ANIMATION))
 }
 
 /// Whether a written value computes from the record, the parent and the document's computation
