@@ -1036,10 +1036,9 @@ impl RetainedState {
             // A content delta must carry the counter-style registry it reads. A delta that moves
             // transition declarations owes the host the transition step, and one that moves
             // animation declarations owes the animation plan; both leave the batch as row effects.
-            if property_starts_animation_or_counter_environment(property)
+            if property_starts_animation(property)
                 && !(owes_a_transition_step && longhand_only_declares_a_css_transition(property))
                 && !(owes_an_animation_plan && longhand_declares_a_css_animation(property))
-                && !self.counter_environment_winner_keeps_the_record(node, state, old_style_record, property)
             {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
@@ -1965,7 +1964,7 @@ impl RetainedState {
         }
         // An anchor name is one the host registers from whichever record it installs, a first
         // record included: `Element::update_anchor_name_registry` runs on that install too.
-        property_starts_animation_or_counter_environment(property)
+        property_starts_animation(property)
             || (computed_group_dependency_mask(property).is_none() && !font_group_carries_longhand(property))
     }
 
@@ -2009,44 +2008,6 @@ impl RetainedState {
                 view.counter_style_environment_identity == 0
                     || view.counter_style_environment_identity == self.counter_style_environment_identity_for(node)
             })
-    }
-
-    fn counter_environment_winner_keeps_the_record(
-        &self,
-        node: StyleNodeID,
-        state: CascadeStateID,
-        old_style_record: computed::FinalStyleRecordID,
-        property: u16,
-    ) -> bool {
-        use crate::css::property_metadata::property_id as prop;
-        if property != prop::CONTENT {
-            return false;
-        }
-        // The record names the registry it read, so a winner that reads one is the engine's to
-        // compute as long as the host has told it what that scope's registry is now and the
-        // record it moves away from read that same registry. One that named an older registry is
-        // not what the element holds any more.
-        let current = self.counter_style_environment_identity_for(node);
-        let named = self
-            .computed_group_sets
-            .style_record_view(old_style_record.raw())
-            .map_or(u64::MAX, |view| view.counter_style_environment_identity);
-        if current != 0 && (named == 0 || named == current) {
-            return true;
-        }
-        if named != 0 {
-            return false;
-        }
-        // No winner is the initial `normal`, which reads no counter style either.
-        let Some(winner) = self.winner_groups.winner_in_state(state, prop::CONTENT) else {
-            return true;
-        };
-        self.winner_groups.resolved_winner(winner).is_some_and(|winner| {
-            match self.specified_values.value(winner.key.value) {
-                Lookup::Known(value) => content_value_is_engine_computable(value),
-                _ => false,
-            }
-        })
     }
 
     /// Whether the record holds a value resolved against the viewport, its own or its font's.
@@ -2194,7 +2155,7 @@ impl RetainedState {
     /// record's, since a pseudo-element record the engine settles is computed in full.
     fn pseudo_winner_needs_cpp(&self, winner: &PropertyWinner) -> bool {
         use crate::css::property_metadata::property_id as prop;
-        winner.property == prop::ANCHOR_NAME || property_starts_animation_or_counter_environment(winner.property)
+        winner.property == prop::ANCHOR_NAME || property_starts_animation(winner.property)
     }
 
     /// Whether a record holds a composition its animations made. The transitions its table
@@ -2324,7 +2285,7 @@ impl RetainedState {
                 .deref()
         };
         for &property in properties {
-            if property_starts_animation_or_counter_environment(property) {
+            if property_starts_animation(property) {
                 return None;
             }
             let groups = computed_group_dependency_mask(property)?;
@@ -5299,8 +5260,7 @@ fn content_value_is_engine_computable(value: &StyleValueData) -> bool {
         match value {
             StyleValueData::Keyword { .. } | StyleValueData::String { .. } => true,
             StyleValueData::Counter { counter_style, .. } => {
-                matches!(counter_style.optional_data(), Some(StyleValueData::CounterStyle { is_symbols, name, .. })
-                    if *is_symbols || counter_style_name_is_non_overridable(name.units()))
+                matches!(counter_style.optional_data(), Some(StyleValueData::CounterStyle { .. }))
             }
             StyleValueData::ValueList { values, .. } => values
                 .as_slice()
@@ -5474,29 +5434,10 @@ fn value_reads_counter_style_environment(value: &StyleValueData) -> bool {
             .iter()
             .any(|value| value.optional_data().is_some_and(value_reads_counter_style_environment)),
         StyleValueData::CounterStyle { is_symbols, name, .. } => {
-            !*is_symbols && !counter_style_name_is_non_overridable(name.units())
+            !*is_symbols && !crate::css::style_compute::counter_style_name_is_non_overridable(name.units())
         }
         _ => false,
     }
-}
-
-fn counter_style_name_is_non_overridable(name: &[u16]) -> bool {
-    [
-        "decimal",
-        "disc",
-        "square",
-        "circle",
-        "disclosure-open",
-        "disclosure-closed",
-    ]
-    .iter()
-    .any(|candidate| {
-        candidate.len() == name.len()
-            && candidate
-                .bytes()
-                .zip(name)
-                .all(|(expected, &unit)| unit < 128 && (unit as u8).eq_ignore_ascii_case(&expected))
-    })
 }
 
 /// Whether the longhand is one of the five that declare an element's CSS transitions. The
@@ -5542,7 +5483,7 @@ fn longhand_declares_a_css_animation(property: u16) -> bool {
         )
 }
 
-fn property_starts_animation_or_counter_environment(property: u16) -> bool {
+fn property_starts_animation(property: u16) -> bool {
     use crate::css::property_metadata::{
         FIRST_LONGHAND_PROPERTY_ID, LAST_LONGHAND_PROPERTY_ID, property_id as prop, property_style_group_index,
     };
@@ -5555,18 +5496,17 @@ fn property_starts_animation_or_counter_environment(property: u16) -> bool {
     // animation reads it from whichever record the element holds when it starts. A list style
     // retains its counter-style name, and record assembly stamps the published registry identity
     // against which that name is resolved.
-    property == prop::CONTENT
-        || (!matches!(
-            property,
-            prop::VIEW_TRANSITION_NAME
-                | prop::SCROLL_TIMELINE_NAME
-                | prop::SCROLL_TIMELINE_AXIS
-                | prop::TIMELINE_SCOPE
-                | prop::VIEW_TIMELINE_NAME
-                | prop::VIEW_TIMELINE_AXIS
-                | prop::VIEW_TIMELINE_INSET
-        ) && property_style_group_index(property)
-            .is_some_and(|group| usize::from(group) == crate::css::table_group_builder::group_index::ANIMATION))
+    !matches!(
+        property,
+        prop::VIEW_TRANSITION_NAME
+            | prop::SCROLL_TIMELINE_NAME
+            | prop::SCROLL_TIMELINE_AXIS
+            | prop::TIMELINE_SCOPE
+            | prop::VIEW_TIMELINE_NAME
+            | prop::VIEW_TIMELINE_AXIS
+            | prop::VIEW_TIMELINE_INSET
+    ) && property_style_group_index(property)
+        .is_some_and(|group| usize::from(group) == crate::css::table_group_builder::group_index::ANIMATION)
 }
 
 fn value_reads_element_random(value: &StyleValueData) -> bool {

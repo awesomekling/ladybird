@@ -6,7 +6,6 @@
 
 #include <AK/AnyOf.h>
 #include <AK/Utf16StringBuilder.h>
-#include <LibWeb/CSS/CSSCounterStyleRule.h>
 #include <LibWeb/CSS/ComputedStyleWorkingSet.h>
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/CountersSet.h>
@@ -1079,21 +1078,6 @@ ListStyleType ComputedValues::InheritedListValues::list_style_type_value(StyleSc
         .type = symbols.type,
         .symbols = symbols.symbols,
     };
-}
-
-bool ComputedValues::InheritedListValues::list_style_type_depends_on_counter_style_environment() const
-{
-    auto value = animation_style_value(list_style_type);
-    return value->is_counter_style() && value->as_counter_style().value().has<Utf16FlyString>();
-}
-
-bool ComputedValues::InheritedListValues::list_style_type_uses_non_overridable_counter_style() const
-{
-    auto value = animation_style_value(list_style_type);
-    return value->is_counter_style()
-        && value->as_counter_style().value().has<Utf16FlyString>()
-        && CSSCounterStyleRule::matches_non_overridable_counter_style_name(
-            value->as_counter_style().value().get<Utf16FlyString>());
 }
 
 bool marker_text_depends_on_list_item_counter_value(ListStyleType const& list_style_type)
