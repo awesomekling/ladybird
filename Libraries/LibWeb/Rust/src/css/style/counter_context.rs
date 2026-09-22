@@ -1098,7 +1098,7 @@ impl StyleEngine {
         pseudo: Option<u8>,
         exclude_inline_style: bool,
         targeted: bool,
-    ) -> Result<publication::RetriedEngineRecord, &'static str> {
+    ) -> Result<Option<publication::RetriedEngineRecord>, &'static str> {
         self.state
             .answer_record_demand(node, pseudo, exclude_inline_style, targeted, &mut self.counters)
     }

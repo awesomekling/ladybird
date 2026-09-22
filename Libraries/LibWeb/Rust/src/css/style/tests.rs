@@ -2354,6 +2354,59 @@ fn linear_document() -> (StyleEngine, Vec<StyleNodeID>) {
 }
 
 #[test]
+fn pseudo_record_demand_reports_absence_without_rules() {
+    let (mut engine, nodes) = linear_document();
+    for &node in &nodes {
+        set_atom_feature(&mut engine, node, LocalFeatureKey::TagName, StyleAtomID(100));
+    }
+    discard_transaction(&mut engine);
+    engine.publish_computed_groups(
+        computed::ComputedStyleTarget::new(nodes[1], u8::MAX),
+        &[],
+        0,
+        0,
+        computed::ComputedMetadataInput {
+            pseudo_element_styles: 0,
+            dependency_flags: 0,
+            counter_style_environment_identity: 0,
+            animation_overlay_identity: 0,
+            animated_overlay: HostShared::null(),
+            animation_overlay_payloads: &[],
+            longhand_table: HostShared::null(),
+        },
+    );
+    let answer = engine.answer_record_demand(nodes[1], Some(2), false, false);
+    assert!(matches!(answer, Ok(None)), "{answer:?}");
+}
+
+#[test]
+fn pseudo_record_demand_slot_is_released_by_the_next_batch_attempt() {
+    let (mut engine, nodes) = linear_document();
+    discard_transaction(&mut engine);
+    let record = engine
+        .publish_computed_groups(
+            computed::ComputedStyleTarget::new(nodes[1], u8::MAX),
+            &[],
+            0,
+            0,
+            computed::ComputedMetadataInput {
+                pseudo_element_styles: 0,
+                dependency_flags: 0,
+                counter_style_environment_identity: 0,
+                animation_overlay_identity: 0,
+                animated_overlay: HostShared::null(),
+                animation_overlay_payloads: &[],
+                longhand_table: HostShared::null(),
+            },
+        )
+        .style_record_identity;
+    engine.computed_group_sets.pin_style_record(record.raw());
+    engine.demand_pseudo_records.insert((nodes[1], 2), record);
+    let _ = engine.settle_pseudo_records_after_host_record(nodes[1], false);
+    assert!(engine.demand_pseudo_records.is_empty());
+}
+
+#[test]
 fn a_node_scoped_acknowledgement_leaves_other_inputs_queued() {
     let (mut engine, nodes) = linear_document();
     discard_transaction(&mut engine);

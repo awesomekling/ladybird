@@ -4867,9 +4867,21 @@ impl StyleEngineState {
         exclude_inline_style: bool,
         targeted: bool,
         counters: &mut Counters,
-    ) -> Result<RetriedEngineRecord, &'static str> {
-        if pseudo.is_some() {
+    ) -> Result<Option<RetriedEngineRecord>, &'static str> {
+        if pseudo.is_some_and(|kind| {
+            ![
+                pseudo_kind::BEFORE,
+                pseudo_kind::AFTER,
+                pseudo_kind::FIRST_LETTER,
+                pseudo_kind::MARKER,
+                pseudo_kind::BACKDROP,
+            ]
+            .contains(&kind)
+        }) {
             return Err("NotOfferedPseudoElement");
+        }
+        if pseudo.is_some() && (!self.host.journal.is_empty() || !self.host.deferred_element_style_inputs.is_empty()) {
+            return Err("GateReaction");
         }
         if exclude_inline_style {
             return Err("GateDeclarations");
@@ -4905,6 +4917,10 @@ impl StyleEngineState {
             ancestor = self.tree.flat_tree_parent(parent);
         }
 
+        if pseudo.is_some() && self.computed_group_sets.assigned_style_record(node).is_none() {
+            self.answer_record_demand(node, None, false, targeted, counters)?;
+        }
+
         self.forget_node_match_answer_for_demand(node);
         if !self.begin_cold_matching_batch(node, counters) {
             self.begin_adaptive_cold_matching_batch(node, counters);
@@ -4919,6 +4935,14 @@ impl StyleEngineState {
             .published_match_answers
             .push(answer, &mut self.retained.memory, counters);
         self.retained.published_match_answers.sort();
+
+        if let Some(kind) = pseudo {
+            let record = self.demand_pseudo_record(node, kind, counters)?;
+            return Ok(record.map(|record| RetriedEngineRecord {
+                style_record: record.raw(),
+                ..RetriedEngineRecord::default()
+            }));
+        }
 
         let before = counters.record_bail_marks();
         let mut scratch = EngineComputedRecordScratch {
@@ -4968,7 +4992,7 @@ impl StyleEngineState {
         self.host.journal.acknowledge_node(node, &mut self.retained.memory);
         self.consume_element_style_input(node);
         self.style_input_nodes_for_cpp.remove(&node);
-        Ok(result)
+        Ok(Some(result))
     }
 
     pub(super) fn reclaim_computed_memory_if_needed(&mut self, counters: &mut Counters) {
