@@ -127,8 +127,9 @@ pub(crate) fn note_host_entry(cause: &'static str, kind: HostEntryKind, cold: bo
     HOST_ENTRY_CAUSES.with(|causes| {
         causes.borrow_mut().entry(key).or_default().entries += 1;
     });
-    // Counted here rather than from the engine's own counter: the counter dies with its engine
-    // while this census belongs to the thread, and the two must add up.
+    // Counted here rather than from the engine's own counter: the counter dies with its engine while this
+    // census belongs to the thread, and the two must add up. `flush_engine_decline_census` leaves
+    // `retryAfterAncestorCalls` out of its report for that reason.
     if kind == HostEntryKind::Retry {
         HOST_RETRY_ENTRIES.with(|entries| entries.set(entries.get().wrapping_add(1)));
     }
@@ -179,14 +180,19 @@ pub(crate) fn note_host_driven_row(kinds: u8) {
 
 /// Report how often the engine declined to compute a record itself, by the reason it recorded.
 /// A host-driven row inside a published batch is a row one of these declined.
+///
+/// These numbers belong to one engine and are reported when that engine is destroyed, so they are not a run
+/// total: an engine that outlives reporting never prints its own. That is why the retries are not reported from
+/// `retryAfterAncestorCalls` here as well. The counter and the host-entry census count the same call, one per
+/// engine and one per thread, so summing both over a run reads two totals for one population - a full suite run
+/// reported 77,170 retry entries beside 75,461 calls. The retry count now has one home, the census, which is
+/// drained as the thread runs and so covers the engines that are never destroyed.
 pub(crate) fn flush_engine_decline_census<'a>(counters: impl Iterator<Item = (&'a str, u64)>) {
     if mode() == Mode::Off {
         return;
     }
     let mut rows = counters
-        .filter(|(name, value)| {
-            *value != 0 && (name.starts_with("engineComputedRecord") || name.starts_with("retryAfterAncestor"))
-        })
+        .filter(|(name, value)| *value != 0 && name.starts_with("engineComputedRecord"))
         .collect::<Vec<_>>();
     rows.sort_unstable_by_key(|(name, _)| *name);
     for (name, value) in rows {
