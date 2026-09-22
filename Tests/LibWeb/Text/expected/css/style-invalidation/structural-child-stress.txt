@@ -1372,7 +1372,7 @@ PASS: stress warm pseudo-element child mutation: shadow-host: :empty becomes fal
 PASS: stress cold pseudo-element child mutation: shadow-host: :empty becomes false after whitespace text append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: detached child mutation: shadow-host: :empty becomes false after whitespace text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: shadow-host: :empty becomes false after whitespace text append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: stress warm child mutation: shadow-host: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: shadow-host: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: shadow-host: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: shadow-host: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: shadow-host: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=3, elementStyleNoopRecomputations=0

@@ -861,15 +861,10 @@ impl RetainedState {
                     );
                     return Some((old_style_record, old_style_record));
                 }
-                let owned_groups = self
-                    .winner_groups
-                    .winners_in_state(state)
-                    .filter_map(|winner| crate::css::property_metadata::property_style_group_index(winner.property))
-                    .fold(0_u32, |mask, group| mask | (1 << group));
-                if !self.record_inherits_from_current_parent(node, state, owned_groups) {
-                    counters.bump(Counter::EngineComputedRecordBailUnchangedWinners);
-                    return None;
-                }
+                // Otherwise the parent's inherited style moved under the record without the row
+                // being told: the parent is authoritative here (an ancestor the host drives in this
+                // batch holds the row back before it gets this far), so the record is driven again
+                // in full against it.
                 parent_inputs_moved.inherited_style = true;
             }
         }

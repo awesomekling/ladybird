@@ -112,7 +112,7 @@ PASS: stress warm pseudo-element child mutation: part-shadow-internal: :has(:is(
 PASS: stress cold pseudo-element child mutation: part-shadow-internal: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-internal: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-internal: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: part-shadow-internal: :has(rect.hit) after SVG child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=3
+PASS: stress warm pseudo-element child mutation: part-shadow-internal: :has(rect.hit) after SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: stress cold pseudo-element child mutation: part-shadow-internal: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-internal: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-internal: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -258,7 +258,7 @@ PASS: stress warm pseudo-element child mutation: part-shadow-host-internal: :emp
 PASS: stress cold pseudo-element child mutation: part-shadow-host-internal: :empty stays true after comment append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-internal: :empty becomes false after whitespace text append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: stress cold pseudo-element child mutation: part-shadow-host-internal: :empty becomes false after whitespace text append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: stress warm pseudo-element child mutation: part-shadow-host-internal: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: stress warm pseudo-element child mutation: part-shadow-host-internal: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-internal: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-internal: :has(*) after child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: stress cold pseudo-element child mutation: part-shadow-host-internal: :has(*) after child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
