@@ -664,10 +664,11 @@ impl RetainedState {
             }
             return self.engine_cold_record(node, (generation, state), scratch, goal, counters);
         };
-        // The same of a record that holds an animation overlay, or whose table declares a
-        // transition the moved values would start.
+        // The same of a record that holds an animation overlay. What the transitions its table
+        // declares would start is a different question, decided below against the values the
+        // delta moves.
         let animations_bind_the_record =
-            animations_bind_the_record || self.record_requires_cpp_animation(old_style_record);
+            animations_bind_the_record || self.record_holds_an_animation_overlay(old_style_record);
         // Even the record that stands is not an answer for an element whose CSS animations were
         // planned against a `@keyframes` table that has since moved: which keyframes an animation
         // runs is decided by the plan, the plan is no part of the record, and only the computation
@@ -912,18 +913,32 @@ impl RetainedState {
         // When the delta moves nothing else, every other group is copied from the record the delta
         // starts at, so no value a transition runs on moved either: the registration is the whole
         // of the step, and the host takes the cheaper of the two drains.
+        //
+        // A record whose table already declares transitions owes the step whatever the delta
+        // moved, since the step is where the element's before-change style is kept up to date.
+        // Which longhands those transitions run on is in the table: a delta that moves one of them
+        // starts a transition, and a started transition samples its own start value into the style
+        // this very update - a value the row's record does not hold - so that one stays in C++.
+        let (record_declares_transitions, transitionable_property_moved) =
+            self.record_transition_facts(old_style_record, delta.properties());
         let owes_a_transition_step = !full_drive
-            && delta
-                .properties()
-                .iter()
-                .any(|&property| longhand_only_declares_a_css_transition(property))
-            && !self.record_requires_cpp_animation(old_style_record);
+            && (record_declares_transitions
+                || delta
+                    .properties()
+                    .iter()
+                    .any(|&property| longhand_only_declares_a_css_transition(property)))
+            && !self.record_holds_an_animation_overlay(old_style_record);
         let owes_a_transition_registration = owes_a_transition_step.then(|| {
-            delta
-                .properties()
-                .iter()
-                .all(|&property| longhand_only_declares_a_css_transition(property))
+            !record_declares_transitions
+                && delta
+                    .properties()
+                    .iter()
+                    .all(|&property| longhand_only_declares_a_css_transition(property))
         });
+        if record_declares_transitions && (transitionable_property_moved || !owes_a_transition_step) {
+            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
+            return None;
+        }
         // A delta that moves a longhand declaring the element's CSS animations is a row whose only
         // remaining obligation is the animation plan, and the host can apply that after the batch:
         // the plan is a function of the longhands this drive computes, the `@keyframes` the host
@@ -2122,6 +2137,29 @@ impl RetainedState {
             return self.list_style_type_value_reads_counter_style_environment(winner);
         }
         winner.property == prop::ANCHOR_NAME || property_starts_animation_or_counter_environment(winner.property)
+    }
+
+    /// Whether a record holds a composition its animations made. The transitions its table
+    /// declares are a different question: what they start is decided against the values a delta
+    /// moves, and the step the row leaves runs where the row is applied.
+    fn record_holds_an_animation_overlay(&self, record: computed::FinalStyleRecordID) -> bool {
+        self.computed_group_sets
+            .style_record_view(record.raw())
+            .is_none_or(|view| !view.animated_overlay.is_null())
+    }
+
+    /// Whether the table a record was computed into declares transitions at all, and whether any
+    /// of the moved properties is a longhand one of them runs on. A record the engine cannot look
+    /// into answers both, so the row that asks is refused.
+    fn record_transition_facts(&self, record: computed::FinalStyleRecordID, moved: &[u16]) -> (bool, bool) {
+        self.computed_group_sets
+            .style_record_view(record.raw())
+            .and_then(|view| unsafe { view.longhand_table.as_ref() })
+            .map_or((true, true), |table| {
+                let transitionable = crate::css::style_compute::active_transition_longhands(table);
+                let moved_one = moved.iter().any(|property| transitionable.contains(property));
+                (!transitionable.is_empty(), moved_one)
+            })
     }
 
     fn record_requires_cpp_animation(&self, record: computed::FinalStyleRecordID) -> bool {
