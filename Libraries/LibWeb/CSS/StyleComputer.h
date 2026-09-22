@@ -140,6 +140,20 @@ public:
     // Style sharing has a self-validating key and survives ordinary transaction boundaries.
     void prepare_for_style_engine_transaction() const;
 
+    // The longhand work this update has deferred. A reference computation run for record
+    // verification evaluates longhands production never evaluates, and this is what lets the
+    // verifier put back the number production would have handed the document.
+    struct DeferredLonghandWork {
+        u64 evaluations { 0 };
+        u64 drives_started { 0 };
+    };
+    [[nodiscard]] DeferredLonghandWork deferred_longhand_work() const { return { m_deferred_longhand_evaluations, m_deferred_longhand_drives_started }; }
+    void set_deferred_longhand_work(DeferredLonghandWork work) const
+    {
+        m_deferred_longhand_evaluations = work.evaluations;
+        m_deferred_longhand_drives_started = work.drives_started;
+    }
+
     void begin_style_update() const;
     void end_style_update() const;
     [[nodiscard]] Parser::ValueParserFFI::FfiMediaEnvironment const* ensure_media_environment_for_style_update() const;

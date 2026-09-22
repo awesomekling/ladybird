@@ -703,6 +703,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         if (pseudo_element_records[kind].has_value())
                             settled_pseudo_element_kinds |= 1ull << kind;
                     }
+                    // The reference computation evaluates longhands production never evaluates, and
+                    // they reach the document's counters after this scope rather than inside it.
+                    auto const deferred_longhand_work = document.style_computer().deferred_longhand_work();
                     style_engine.begin_computed_record_verification(StyleNodeID { reaction.style_node }, settled_pseudo_element_kinds);
                     ScopeGuard end_computed_record_verification = [&] { style_engine.end_computed_record_verification(); };
                     DOM::Element::EnginePseudoElementRecords previous_pseudo_element_records;
@@ -746,6 +749,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     bool const engine_record_is_installable = engine_computed_record_environment_is_installable(*element, StyleRecordID { reaction.new_style_record });
                     auto const verification_invalidation = invalidation;
                     counters = counters_before_verification;
+                    document.style_computer().set_deferred_longhand_work(deferred_longhand_work);
                     auto const computed_style_changes_before_application = counters.element_computed_style_changes;
                     if (engine_record_is_installable) {
                         invalidation = element->apply_engine_computed_style_record(StyleRecordID { reaction.new_style_record }, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties);
