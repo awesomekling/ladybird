@@ -134,7 +134,7 @@ impl RetainedState {
             .filter(|&node| self.container_verdicts_moved(node))
             .collect();
         for node in moved {
-            if self.republish_container_winners(node, counters).is_none() {
+            if self.republish_winners_from_retained_answer(node, counters).is_none() {
                 self.published_container_verdicts.remove(&node);
                 self.winner_groups.remove(node);
             }
@@ -151,7 +151,11 @@ impl RetainedState {
     }
 
     /// Publish new winners from the exact selector answer without matching selectors again.
-    pub(super) fn republish_container_winners(&mut self, node: StyleNodeID, counters: &mut Counters) -> Option<bool> {
+    pub(super) fn republish_winners_from_retained_answer(
+        &mut self,
+        node: StyleNodeID,
+        counters: &mut Counters,
+    ) -> Option<bool> {
         let identity = self.current_answer_identity(node)?;
         let answer = self.match_answers.answer(identity).cloned()?;
         for entry in answer.iter() {

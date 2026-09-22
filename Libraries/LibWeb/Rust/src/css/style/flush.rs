@@ -1911,6 +1911,9 @@ impl StyleEngineState {
                                 && flipped_rules
                                     .iter()
                                     .all(|delta| self.retained.program.declarations_are_complete_for(delta.rule))));
+                    engine_computed_record_scratch.answer_or_declarations_moved = rule_declarations_edited
+                        || !flipped_rules.is_empty()
+                        || !selector_truth_changes.refreshes_for(root).is_empty();
                     self.prepare_root_font_inputs(
                         root,
                         answer_winners_are_complete,
@@ -2285,6 +2288,9 @@ impl StyleEngineState {
                                         && flipped_rules.iter().all(|delta| {
                                             self.retained.program.declarations_are_complete_for(delta.rule)
                                         })));
+                            engine_computed_record_scratch.answer_or_declarations_moved = rule_declarations_edited
+                                || !flipped_rules.is_empty()
+                                || !selector_truth_changes.refreshes_for(node).is_empty();
                             // The element's font environment moved: its record resolves a font
                             // cascade out of the published `@font-face` table, and that table is
                             // not the one the record holds.
