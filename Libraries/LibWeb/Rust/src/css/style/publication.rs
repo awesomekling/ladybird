@@ -763,18 +763,14 @@ impl RetainedState {
         // is driven again in full under the new one.
         let environment_moved_under_substitutions = environment.is_some() && self.state_has_substitutions(node, state);
         if delta.is_empty() {
-            // The winners the record was computed from are the winners now. When everything else
-            // the record was computed from is as it was too - the document environment, the rules
-            // that flipped (custom properties are no winners), the parent's inherited style and
-            // custom-property environment - the record stands, and the reaction may still move a
-            // pseudo-element. The state has to hold the flips: a row this flush published holds
-            // the cascade of the node's current answer, whichever rules flipped for it. Anything
-            // else recomputes in C++, as does a record under a moved environment, which reaches
-            // values its winners do not name.
+            // A current row holds the cascade after this flush's rule flips. An environment
+            // action the engine handles does not invalidate that answer: document_environment_moved
+            // drives its values again against the new inputs below. Other environment actions
+            // still require host computation.
             let row_is_current = self.current_winner_groups().row_stamp(node) == Some(self.flush_stamp);
             let flips_are_reflected = match exact_flipped_rules {
                 Some(flipped) => !flipped.element || row_is_current,
-                None => row_is_current && !scratch.environment_changed,
+                None => row_is_current && !scratch.environment_requires_host_computation,
             };
             if !flips_are_reflected {
                 counters.bump(Counter::EngineComputedRecordBailUnchangedWinners);
@@ -5056,11 +5052,10 @@ impl EngineComputedRecordContinuation {
 
 #[derive(Default)]
 pub(super) struct EngineComputedRecordScratch {
-    /// Whether the transaction moved the document environment, which reaches computed values the
-    /// winners do not name.
-    pub(super) environment_changed: bool,
+    /// Whether this transaction carries a document environment action requiring host computation.
+    pub(super) environment_requires_host_computation: bool,
     pub(super) continuation: EngineComputedRecordContinuation,
-    /// Whether this flush carries a document environment action. A record's winners can stand
+    /// Whether this flush carries an engine-supported environment action. A record's winners can stand
     /// through one while the values they computed to do not, so such a record is driven again in
     /// full rather than kept - and rather than handed back to C++.
     pub(super) document_environment_moved: bool,

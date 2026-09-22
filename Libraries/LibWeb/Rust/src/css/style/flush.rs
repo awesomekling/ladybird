@@ -1829,7 +1829,8 @@ impl StyleEngineState {
             let mut engine_computed_record_scratch = publication::EngineComputedRecordScratch::default();
             engine_computed_record_scratch.document_environment_moved =
                 environment_changed && !environment_action_needs_host_computation;
-            engine_computed_record_scratch.environment_changed = environment_changed;
+            engine_computed_record_scratch.environment_requires_host_computation =
+                environment_changed && environment_action_needs_host_computation;
             // The viewport the records were driven against, against the one they are driven against
             // now. A record that reads it cannot stand across the difference.
             if let Some(inputs) = self.retained.document_style_computation_inputs {
