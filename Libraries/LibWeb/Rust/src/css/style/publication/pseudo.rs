@@ -397,9 +397,14 @@ impl RetainedState {
             }
             // A pseudo-element's own custom declarations resolve over its element's environment,
             // as an element's resolve over its parent's.
-            let Some(environment) =
-                self.engine_custom_property_environment_of(node, Some(kind), element_environment, &inputs, counters)
-            else {
+            let Some(environment) = self.engine_custom_property_environment_of(
+                node,
+                Some(kind),
+                element_environment,
+                &inputs,
+                None,
+                counters,
+            ) else {
                 counters.bump(Counter::EngineComputedRecordBailCustomProperties);
                 return None;
             };
@@ -949,7 +954,7 @@ impl RetainedState {
             return None;
         };
         let Some(environment) =
-            self.engine_custom_property_environment_of(host, Some(kind), parent_environment, &inputs, counters)
+            self.engine_custom_property_environment_of(host, Some(kind), parent_environment, &inputs, None, counters)
         else {
             counters.bump(Counter::EngineComputedRecordBailCustomProperties);
             return None;

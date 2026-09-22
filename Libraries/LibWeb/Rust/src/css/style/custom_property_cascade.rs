@@ -39,6 +39,7 @@ fn engine_resolution_context(
     store: *const c_void,
     inheritance_store: *const c_void,
     registry: *const c_void,
+    length: *const crate::css::style_compute::FfiLengthResolutionContext,
 ) -> FfiCascadeResolutionContext {
     FfiCascadeResolutionContext {
         parse_context: std::ptr::from_ref(parse_context).cast(),
@@ -62,10 +63,18 @@ fn engine_resolution_context(
         custom_function_scope_identity: 0,
         custom_function_visibilities: std::ptr::null(),
         custom_function_visibility_count: 0,
-        style_query_length_resolution_context: std::ptr::null(),
+        style_query_length_resolution_context: length.cast(),
         style_query_dependencies: std::ptr::null_mut(),
         callback_context: std::ptr::null_mut(),
     }
+}
+
+/// What a registered custom property's value is computed against: the element's own font metrics
+/// and viewport, as the font phase leaves them, and the colour scheme its table carries. A row
+/// that cannot offer these leaves every registered declaration to the host.
+pub(super) struct RegisteredValueContext {
+    pub length: crate::css::style_compute::FfiLengthResolutionContext,
+    pub color_scheme: u8,
 }
 
 /// Whether a token stream is a substitution the engine resolves itself: one whose only
@@ -586,9 +595,10 @@ impl RetainedState {
         node: StyleNodeID,
         parent_environment: u64,
         inputs: &bridge::FfiDocumentStyleComputationInputs,
+        registered: Option<RegisteredValueContext>,
         counters: &mut Counters,
     ) -> Option<u64> {
-        self.engine_custom_property_environment_of(node, None, parent_environment, inputs, counters)
+        self.engine_custom_property_environment_of(node, None, parent_environment, inputs, registered, counters)
     }
 
     /// What `engine_custom_property_environment` says of the element, for one of its
@@ -599,6 +609,7 @@ impl RetainedState {
         pseudo: Option<u8>,
         parent_environment: u64,
         inputs: &bridge::FfiDocumentStyleComputationInputs,
+        registered: Option<RegisteredValueContext>,
         counters: &mut Counters,
     ) -> Option<u64> {
         if !self.any_custom_property_is_declared() {
@@ -638,12 +649,21 @@ impl RetainedState {
                     return None;
                 }
             }
+            // A registration with a real syntax computes its name's value against the element's
+            // own font and viewport, which this resolution has only where the row keeps the
+            // record it reads them from. Without that context there is nothing to absolutize
+            // against, so the declaration stays with the host.
             for (declared, _) in &cascaded {
                 let Some(name) = self.custom_property_environments.name(declared.name) else {
                     counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
                     return None;
                 };
-                if registry_ref.name_is_registered(&name.text) {
+                // A name registered as not inheriting belongs to its element and to none of its
+                // descendants, and this resolution builds one environment that the children take
+                // whole: declaring such a name stays with the host however much context there is.
+                if let Some(facts) = registry_ref.registration_facts(&name.text)
+                    && (registered.is_none() || !facts.inherits)
+                {
                     counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
                     return None;
                 }
@@ -712,15 +732,23 @@ impl RetainedState {
         let cascaded_store = unsafe { CustomPropertyStore::cascaded_child(parent_store, values) };
         let mut random_function_index = 0_usize;
         let parse_context = registry_ref.parse_context(&mut random_function_index);
-        let resolution_context =
-            engine_resolution_context(&parse_context, cascaded_store, parent_store, registry.as_pointer());
+        let length = registered
+            .as_ref()
+            .map_or(std::ptr::null(), |registered| &raw const registered.length);
+        let resolution_context = engine_resolution_context(
+            &parse_context,
+            cascaded_store,
+            parent_store,
+            registry.as_pointer(),
+            length,
+        );
         let drive = FfiCustomPropertyDriveInput {
             store: cascaded_store,
             resolved_parent_store: parent_store,
             reuse_resolved_parent_if_empty: !parent_store.is_null(),
             resolution_context: &raw const resolution_context,
             finalization_environment: std::ptr::null(),
-            finalization_color_scheme: 0,
+            finalization_color_scheme: registered.as_ref().map_or(0, |registered| registered.color_scheme),
         };
         // SAFETY: Every pointer the drive reads is live for the call, and the finalizer replaces
         // each output with one transferred reference.

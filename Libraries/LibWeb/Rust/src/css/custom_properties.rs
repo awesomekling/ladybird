@@ -248,11 +248,6 @@ impl CustomPropertyRegistry {
             .collect()
     }
 
-    /// Whether a name is registered at all, for a reader that only needs to keep its hands off it.
-    pub(crate) fn name_is_registered(&self, name: &[u16]) -> bool {
-        self.registrations.contains_key(name)
-    }
-
     /// What a registration says about a name, for a caller that has to answer for it without the
     /// host: `None` where the name is not registered at all.
     pub(crate) fn registration_facts(&self, name: &[u16]) -> Option<RegistrationFacts> {
