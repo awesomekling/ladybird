@@ -61,6 +61,7 @@ mod child_reactions;
 mod column;
 pub mod compiler;
 mod computed;
+mod container_queries;
 mod counter_context;
 pub(crate) mod custom_property_cascade;
 mod custom_property_environments;
