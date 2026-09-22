@@ -150,9 +150,6 @@ impl RetainedState {
                 }
             },
         };
-        // What the host measured for this row's query container, when it was asked. A row whose
-        // values read no container-relative unit carries the default, which claims no basis.
-        let container_basis = self.container_query_bases.get(&node).copied().unwrap_or_default();
         let font = unsafe {
             payloads[STYLE_GROUP_INDEX_FONT]
                 .cast::<crate::css::computed_value_types::FontValues>()
@@ -184,12 +181,12 @@ impl RetainedState {
             },
             font_metrics_depend_on_viewport_metrics: view.dependency_flags & (1 << 1) != 0,
             root_font_metrics_depend_on_viewport_metrics: inputs.root_font_metrics_depend_on_viewport_metrics,
-            has_container_width_basis: container_basis.has_width,
-            has_container_height_basis: container_basis.has_height,
-            container_width_basis: container_basis.width,
-            container_height_basis: container_basis.height,
-            container_width_basis_depends_on_viewport_metrics: container_basis.width_depends_on_viewport,
-            container_height_basis_depends_on_viewport_metrics: container_basis.height_depends_on_viewport,
+            has_container_width_basis: false,
+            has_container_height_basis: false,
+            container_width_basis: 0.0,
+            container_height_basis: 0.0,
+            container_width_basis_depends_on_viewport_metrics: false,
+            container_height_basis_depends_on_viewport_metrics: false,
             subject_inline_axis_is_horizontal: inherited_box.writing_mode
                 == crate::css::css_enums::writing_mode::HORIZONTAL_TB,
             resolved_viewport_relative_length: &raw mut resolved_viewport_relative_length,

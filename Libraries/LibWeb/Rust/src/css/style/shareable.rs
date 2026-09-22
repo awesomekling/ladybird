@@ -87,9 +87,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         batch_pinned_compositions,
         nodes_owing_an_animation_sample,
         counter_style_environment_identities,
-        container_query_bases,
-        pending_host_requests,
-        host_request_drain,
         nodes_owing_animation_definitions,
         animation_definitions_being_applied,
         settled_computation_contexts,
@@ -212,9 +209,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(batch_pinned_compositions);
     assert_member_is_sync(nodes_owing_an_animation_sample);
     assert_member_is_sync(counter_style_environment_identities);
-    assert_member_is_sync(container_query_bases);
-    assert_member_is_sync(pending_host_requests);
-    assert_member_is_sync(host_request_drain);
     assert_member_is_sync(nodes_owing_animation_definitions);
     assert_member_is_sync(animation_definitions_being_applied);
     assert_member_is_sync(settled_computation_contexts);

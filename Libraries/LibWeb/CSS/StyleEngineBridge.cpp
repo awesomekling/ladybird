@@ -411,12 +411,6 @@ StyleRecordID StyleEngine::republish_record_environment(StyleNodeID node, u64 en
     return StyleRecordID { StyleEngineFFI::style_engine_republish_record_environment(m_impl, node.value(), environment, store) };
 }
 
-ReadonlySpan<StyleEngineFFI::FfiHostRequest> StyleEngine::take_host_requests()
-{
-    auto batch = StyleEngineFFI::style_engine_take_host_requests(m_impl);
-    return { batch.requests, batch.count };
-}
-
 ReadonlySpan<StyleEngineFFI::FfiRetriedRecordRow> StyleEngine::retry_engine_records_after_ancestor(StyleNodeID node)
 {
     auto batch = StyleEngineFFI::style_engine_retry_engine_record_after_ancestor(m_impl, node.value());

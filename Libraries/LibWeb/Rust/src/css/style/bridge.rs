@@ -158,46 +158,6 @@ pub struct FfiEngineComputedRecord {
     pub pseudo_records: [u64; RETRY_PSEUDO_RECORD_SLOTS],
 }
 
-/// One thing the sealed pass needs the host to answer. The pass never calls out for it: it names
-/// what it needs and goes on, the host answers the whole batch between passes, and a later pass
-/// drives the row with the answer in place as a published input.
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiHostRequest {
-    /// Which answer this asks for; see `host_request_kind`.
-    pub kind: u8,
-    /// The row that needs it.
-    pub style_node: u32,
-    /// What the kind needs named. A container-query basis names the container.
-    pub subject: u32,
-    /// The rest of the question, per kind. A container-query basis names the axes it reads.
-    pub detail: u64,
-}
-
-/// What a sealed pass can ask the host for between passes.
-pub mod host_request_kind {
-    /// The size and style basis of a query container, which a container-relative unit resolves
-    /// against and only layout can give.
-    pub const CONTAINER_QUERY_BASIS: u8 = 0;
-}
-
-/// The requests one pass parked, in the order it parked them.
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiHostRequestBatch {
-    pub requests: *const FfiHostRequest,
-    pub count: usize,
-}
-
-impl Default for FfiHostRequestBatch {
-    fn default() -> Self {
-        Self {
-            requests: std::ptr::null(),
-            count: 0,
-        }
-    }
-}
-
 /// One row of a retried batch: the node the engine settled, and what it settled for it.
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -3823,24 +3783,6 @@ fn record_target_is_under_verification(engine: &StyleEngine, node: u32, pseudo_k
         && (pseudo_kind == u8::MAX
             || pseudo_kind >= 64
             || engine.host.computed_record_verification_settled_pseudos & (1u64 << pseudo_kind) != 0)
-}
-
-/// The questions the last sealed pass parked for the host, which the host answers between passes.
-/// Draining is what marks them asked: a row still without its answer parks again next pass.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_take_host_requests(engine: *mut c_void) -> FfiHostRequestBatch {
-    abort_on_panic(|| {
-        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-        engine.host_request_drain = std::mem::take(&mut engine.pending_host_requests);
-        let requests = &engine.host_request_drain;
-        FfiHostRequestBatch {
-            requests: requests.as_ptr(),
-            count: requests.len(),
-        }
-    })
 }
 
 /// Retry after the ancestor's style was installed, returning installation metadata together

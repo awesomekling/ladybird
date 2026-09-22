@@ -939,15 +939,6 @@ pub struct RetainedState {
     /// while the registry it named is the one in place, so the record carries the identity and a
     /// later edit to `@counter-style` moves it.
     counter_style_environment_identities: HashMap<tree::TreeScopeID, u64>,
-    /// What the host answered for a row that asked for its query container's basis, and which
-    /// units it answered for. A container-relative length resolves against this, and only layout
-    /// can give it, so the pass asks and a later pass reads what came back.
-    container_query_bases: HashMap<StyleNodeID, ContainerQueryBasis>,
-    /// What this pass needs the host to answer, in the order it asked. The host drains this
-    /// between passes, outside the seal window, so no host computation runs inside a pass.
-    pending_host_requests: Vec<bridge::FfiHostRequest>,
-    /// The batch the host is reading now, kept alive for the length of its drain.
-    host_request_drain: Vec<bridge::FfiHostRequest>,
     /// The nodes whose engine-computed record moved the longhands that declare the element's CSS
     /// animations, and the plan each one leaves for the host. Like the transition debt it is an
     /// effect of the row rather than a part of the record: the host drains it after the batch, in
@@ -1133,32 +1124,6 @@ pub struct RetainedState {
 
 /// Host-facing engine state: C++ ownership, journal intake and the record/replay adapters.
 /// Never reachable from an evaluation step.
-/// The basis a container-relative length resolves against, as the host measured it.
-#[derive(Clone, Copy, Default)]
-pub(crate) struct ContainerQueryBasis {
-    /// The units this was measured for; a row needing more than these asks again.
-    pub(crate) answered_unit_mask: u8,
-    pub(crate) has_width: bool,
-    pub(crate) has_height: bool,
-    pub(crate) width: f64,
-    pub(crate) height: f64,
-    pub(crate) width_depends_on_viewport: bool,
-    pub(crate) height_depends_on_viewport: bool,
-}
-
-impl ContainerQueryBasis {
-    /// Whether two answers say the same thing about the same units.
-    pub(crate) fn is_the_same_measurement_as(&self, other: &Self) -> bool {
-        self.answered_unit_mask == other.answered_unit_mask
-            && self.has_width == other.has_width
-            && self.has_height == other.has_height
-            && self.width.to_bits() == other.width.to_bits()
-            && self.height.to_bits() == other.height.to_bits()
-            && self.width_depends_on_viewport == other.width_depends_on_viewport
-            && self.height_depends_on_viewport == other.height_depends_on_viewport
-    }
-}
-
 pub struct HostState {
     /// The nodes the record loop armed for a retry, in the order it processed them, which is
     /// flat-tree order. A retry the host asks for settles the whole run of them that hangs off
