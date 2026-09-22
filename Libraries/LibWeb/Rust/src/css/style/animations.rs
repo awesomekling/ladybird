@@ -242,6 +242,13 @@ impl CssDefinedAnimations {
         self.rows.get(&(node, slot)).map_or(&[][..], |row| &row.0[..])
     }
 
+    /// Whether the element runs a CSS animation at all, in any of its lists. Only such an element
+    /// is re-planned when a `@keyframes` rule moves, and the plan is no part of its record.
+    #[must_use]
+    pub(crate) fn node_runs_a_css_animation(&self, node: StyleNodeID) -> bool {
+        self.rows.keys().any(|&(row_node, _)| row_node == node)
+    }
+
     #[must_use]
     pub(crate) fn applied_definitions(&self, node: StyleNodeID, slot: AnimationSlot) -> &[AppliedAnimationDefinition] {
         self.rows.get(&(node, slot)).map_or(&[][..], |row| &row.1[..])
