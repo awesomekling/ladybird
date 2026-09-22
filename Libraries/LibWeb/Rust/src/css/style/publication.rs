@@ -1390,6 +1390,10 @@ impl RetainedState {
         counters.add(Counter::CascadeWinnerDeltaProperties, delta_property_count);
         counters.add(Counter::ComputedWinnerDeltaPropertiesConsumed, delta_property_count);
         counters.bump(Counter::EngineComputedRecordDeltas);
+        // The containers the node's descendants ask about are the ones its settled record
+        // describes, as the host publishes them when it installs a record: a descendant this batch
+        // derives after it reads the container as the host will leave it.
+        self.set_element_container_query_inputs(node, delta.1.raw());
         self.engine_computed_records_pending
             .entry(node)
             .or_default()
