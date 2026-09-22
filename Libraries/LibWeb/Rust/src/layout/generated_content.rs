@@ -10,7 +10,7 @@
 
 use super::counters::{CounterName, CounterOwner, LIST_ITEM_COUNTER_NAME, style_of};
 use super::layout_node_arena::LayoutNodeArena;
-use super::node_data::NodeSlotId;
+use super::node_data::{GENERATED_FOR_MARKER, NodeSlotId};
 use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::counter_representation::{CounterStyle, generate_a_counter_representation};
 use crate::css::css_string::CssString;
@@ -380,12 +380,32 @@ pub(crate) fn content_counter_styles_changed(arena: &LayoutNodeArena, owner: Cou
         .clone();
     let styles = arena.with_style_store(|engine| {
         let tree_scope = engine.tree().tree_scope(owner.element).0;
-        content_counter_styles(
-            arena,
-            style_of(arena, engine, owner).and_then(ComputedValuesView::content_value),
-            tree_scope,
-        )
-    });
+        let style = style_of(arena, engine, owner)?;
+        let content = style.content_value();
+        // A list marker whose `content` is `normal` shows its marker string, and the marker
+        // string is what the build recorded for it. Re-deriving from `content` would answer
+        // about a value that names no counter at all, so the two sets could never agree and
+        // every recomputation of the marker's style would read as a counter-style change.
+        // Answer the same question the build did instead.
+        if owner.generated_for == GENERATED_FOR_MARKER
+            && matches!(content, Some(StyleValueData::Keyword { keyword }) if *keyword == keyword::NORMAL)
+        {
+            if style.list_style_image_is_set() {
+                return Some(Vec::new());
+            }
+            let list_style_type = style_of(arena, engine, CounterOwner::element(owner.element))?
+                .inherited_list()
+                .list_style_type
+                .data();
+            if matches!(list_style_type, Some(StyleValueData::String { .. })) {
+                return Some(Vec::new());
+            }
+            return Some(vec![arena.with_counter_style_registry(|registry| {
+                crate::css::counter_representation::resolve_counter_style_value(registry, tree_scope, list_style_type)
+            })]);
+        }
+        Some(content_counter_styles(arena, content, tree_scope))
+    })?;
     Some(in_use != styles)
 }
 
