@@ -2814,6 +2814,13 @@ impl ComputedGroupSets {
             .map(|identity| *self.custom_property_environments.get(identity))
     }
 
+    /// Whether a record is an animation overlay's rather than a style's own. Such a record lives in
+    /// a slot the next sampling of that animation releases.
+    #[must_use]
+    pub(crate) fn record_is_animation_overlay(raw_style_record: u64) -> bool {
+        raw_style_record & FinalStyleRecordID::ANIMATION_OVERLAY_TAG != 0
+    }
+
     /// The custom-property environment the style beneath an animation overlay was published with.
     /// An overlay record carries none of its own: it is the composition, and what the element's own
     /// declarations resolved to is on the record it was composed over.

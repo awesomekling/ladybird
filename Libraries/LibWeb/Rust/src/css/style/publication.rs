@@ -833,7 +833,15 @@ impl RetainedState {
                         self.note_engine_computed_record(node, delta, (generation, state), 0, 0, counters);
                         return Some(delta);
                     }
-                    if !record_may_stand_while_animating {
+                    // The record the row answers with has to be one the host can still read when
+                    // the batch installs it. An animation overlay's record lives in a slot the next
+                    // sampling of that animation releases, and a sampling runs between the flush
+                    // that settles this row and the batch that applies it: answering with one hands
+                    // the element a record that has stopped existing. The style beneath it is not an
+                    // answer either - installing it would drop the animation for a frame.
+                    if !record_may_stand_while_animating
+                        || computed::ComputedGroupSets::record_is_animation_overlay(old_style_record.raw())
+                    {
                         counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
                         return None;
                     }
