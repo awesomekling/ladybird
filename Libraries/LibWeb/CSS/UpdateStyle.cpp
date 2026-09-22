@@ -8,11 +8,11 @@
 #include <AK/QuickSort.h>
 #include <AK/ScopeGuard.h>
 #include <LibGC/RootVector.h>
+#include <LibWeb/Animations/Animation.h>
+#include <LibWeb/Animations/KeyframeEffect.h>
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/Invalidation/SlotInvalidator.h>
-#include <LibWeb/Animations/Animation.h>
-#include <LibWeb/Animations/KeyframeEffect.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleInputRecord.h>
@@ -589,12 +589,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
     // the C++ computation would have done beside the record it computed; the host applies it once
     // the whole batch is installed, in the order the batch applied the rows, which is flat-tree
     // order. Nothing a later row in the batch computes may depend on one of these being applied.
-    struct TransitionEffectRow {
-        StyleNodeID style_node;
-        StyleRecordID before_change_style_record;
-        bool registration_only;
-    };
-    Vector<TransitionEffectRow> transition_effect_rows;
     // What one retry crossing settled, keyed by node. A row armed for a retry asks the engine only
     // when the table has no answer for it, which is once per ancestor rather than once per row.
     HashMap<StyleNodeID, StyleEngineFFI::FfiEngineComputedRecord> retried_records;
@@ -908,8 +902,24 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     // Under verification the reference computation ran the step too, and then
                     // the engine record replaced what it published: the drain decides again,
                     // which the stabilization epoch is built to take, and publishes what it starts.
-                    if (transition_debt != 0)
-                        transition_effect_rows.append({ StyleNodeID { reaction.style_node }, StyleRecordID { reaction.old_style_record }, transition_debt == 1 });
+                    // The step runs here rather than after the batch: a descendant applied later
+                    // reads this element's after-change style, which is what the step decides
+                    // against, and the C++ computation this row replaces runs it inside itself.
+                    if (transition_debt != 0) {
+                        DOM::AbstractElement settled { *element };
+                        if (settled.has_style()) {
+                            if (transition_debt == 1) {
+                                document.style_computer().register_transitions_for_settled_record(settled);
+                            } else {
+                                auto step_invalidation = document.style_computer().run_transition_step_for_settled_record(
+                                    settled, StyleRecordID { reaction.old_style_record });
+                                if (!step_invalidation.is_none()) {
+                                    apply_element_style_invalidation_after_style_change(*element, step_invalidation);
+                                    transaction_invalidation |= step_invalidation;
+                                }
+                            }
+                        }
+                    }
                     if (explicit_inheritance_debt != 0)
                         explicit_inheritance_effect_rows.append({ StyleNodeID { reaction.style_node }, explicit_inheritance_debt });
                     if (animation_plan.has_value())
@@ -998,23 +1008,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             continue;
         if (auto* parent = element->parent())
             parent->add_children_explicitly_inherited_non_inherited_style_groups(row.style_groups == NumericLimits<u32>::max() ? ComputedValues::all_style_groups : row.style_groups);
-    }
-    for (auto const& row : transition_effect_rows) {
-        auto element = document.style_computer().element_for_style_node(row.style_node);
-        if (!element || !element->is_connected() || &element->document() != &document)
-            continue;
-        DOM::AbstractElement abstract_element { *element };
-        if (!abstract_element.has_style())
-            continue;
-        if (row.registration_only) {
-            document.style_computer().register_transitions_for_settled_record(abstract_element);
-            continue;
-        }
-        auto invalidation = document.style_computer().run_transition_step_for_settled_record(abstract_element, row.before_change_style_record);
-        if (!invalidation.is_none()) {
-            apply_element_style_invalidation_after_style_change(*element, invalidation);
-            transaction_invalidation |= invalidation;
-        }
     }
     for (auto style_node : animation_sample_rows) {
         auto element = document.style_computer().element_for_style_node(style_node);
