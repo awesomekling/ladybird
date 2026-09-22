@@ -3369,20 +3369,6 @@ impl RetainedState {
                 crate::css::style_value::StyleValueData::Unresolved { .. } => {
                     *substituted = true;
                     let value = value.clone_retained();
-                    // A pseudo-element's `attr()` reads its originating element's attributes;
-                    // it stays with C++, as its record caches hold no attributes.
-                    if pseudo_kind.is_some()
-                        && matches!(
-                            value.data(),
-                            crate::css::style_value::StyleValueData::Unresolved {
-                                presence_attr: true,
-                                ..
-                            }
-                        )
-                    {
-                        counters.bump(Counter::EngineComputedRecordBailSubstitution);
-                        return None;
-                    }
                     let attributes = super::inputs::SubstitutionAttributeSnapshot {
                         text: self.facts.substitution_attributes(node),
                         names_are_ascii_case_insensitive: !self.html_element_namespace.is_none()
@@ -5230,6 +5216,7 @@ pub(super) struct PseudoCohortKey {
     facts: u32,
     font_environment_generation: u64,
     root_font_inputs: RootFontInputs,
+    substitution_attributes: u64,
 }
 
 /// The synthetic pseudo-element kinds, as the C++ `PseudoElement` enumeration numbers them.

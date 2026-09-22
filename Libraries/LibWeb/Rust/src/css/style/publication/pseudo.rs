@@ -369,11 +369,13 @@ impl RetainedState {
                     .computed_group_sets
                     .cascade_state(target)
                     .or_else(|| self.computed_group_sets.pseudo_retained_cascade_state(node, kind));
-                // Custom declarations resolve against registrations that move without the state.
+                // Custom declarations resolve against registrations that move without the state,
+                // and a winner written with `attr()` against attributes that move without it.
                 let unchanged = match (state, bound) {
                     (Some(state), Some((bound_generation, bound_state))) => {
                         bound_generation == generation
                             && self.winner_groups.custom_declarations_of(state) == Default::default()
+                            && !self.state_reads_attributes(node, state)
                             && self.winner_groups.states_are_semantically_equal(bound_state, state)
                     }
                     (None, None) => true,
@@ -391,8 +393,15 @@ impl RetainedState {
                 counters.bump(Counter::EngineComputedRecordBailCustomProperties);
                 return None;
             };
+            // A store substituting `attr()` holds the element's attributes, which no other
+            // element shares.
+            let reads_attributes = state.is_some_and(|state| self.state_reads_attributes(node, state));
             let store = match state {
-                Some(state) => match scratch.pseudo_stores.get(&(kind, state, environment)) {
+                Some(state) => match scratch
+                    .pseudo_stores
+                    .get(&(kind, state, environment))
+                    .filter(|_| !reads_attributes)
+                {
                     Some(store) => store.clone(),
                     None => {
                         let mut substituted = false;
@@ -408,7 +417,9 @@ impl RetainedState {
                             scratch.substituted_states.insert((state, environment));
                         }
                         scratch.store_capacity_bytes += store.capacity_bytes();
-                        scratch.pseudo_stores.insert((kind, state, environment), store.clone());
+                        if !reads_attributes {
+                            scratch.pseudo_stores.insert((kind, state, environment), store.clone());
+                        }
                         store
                     }
                 },
@@ -445,6 +456,7 @@ impl RetainedState {
                     facts,
                     font_environment_generation: inputs.font_environment_generation,
                     root_font_inputs: RootFontInputs::from_document(&inputs),
+                    substitution_attributes: state.map_or(0, |state| self.substitution_attributes_key(node, state)),
                 });
             let cascade_state = state.map(|state| (generation, state));
             let own_groups = state.map_or(0, |state| self.state_owned_inherited_groups(state));

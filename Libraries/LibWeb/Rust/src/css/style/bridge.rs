@@ -3376,8 +3376,8 @@ pub unsafe extern "C" fn style_engine_style_record_dependency_flags(engine: *con
     engine.style_record_dependency_flags(style_record).unwrap_or(0)
 }
 
-/// Whether the winners the node's record was computed from substitute `attr()`: an attribute
-/// change reaches such a record.
+/// Whether the winners the node's records were computed from substitute `attr()`: an attribute
+/// change reaches such records.
 ///
 /// # Safety
 /// `engine` must be live.
@@ -3387,13 +3387,17 @@ pub unsafe extern "C" fn style_engine_node_record_reads_attributes(engine: *cons
     let Some(node) = StyleNodeID::from_raw(node) else {
         return false;
     };
-    match engine
-        .current_winner_groups()
-        .token_for(super::cascade::WinnerGroupKey::current(node, engine.program.version()))
+    // A pseudo-element's winners read its originating element's attributes.
+    let groups = engine.current_winner_groups();
+    let element_reads = match groups.token_for(super::cascade::WinnerGroupKey::current(node, engine.program.version()))
     {
         super::partial_view::Lookup::Known((_, state)) => engine.state_reads_attributes(node, state),
         _ => false,
-    }
+    };
+    element_reads
+        || groups
+            .pseudo_states(node)
+            .any(|(_, _, state, _)| engine.state_reads_attributes(node, state))
 }
 
 /// The raw custom-property environment identity a style record was published with.
