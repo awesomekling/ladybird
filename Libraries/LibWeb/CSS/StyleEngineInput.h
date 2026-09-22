@@ -224,6 +224,7 @@ WEB_API u32 element_box_type_adjustment_facts(DOM::Element const&);
 WEB_API void record_element_adjustment_facts(DOM::Element&);
 WEB_API void record_element_construction_facts(DOM::Element&);
 WEB_API bool record_element_presentational_hint_properties(DOM::Element&, ReadonlySpan<StyleProperty>);
+WEB_API bool element_publishes_presentational_hints_eagerly(DOM::Element const&);
 WEB_API void record_element_animation_names(DOM::Element&, ReadonlySpan<Utf16FlyString>);
 WEB_API void record_element_css_defined_animations(DOM::Element&, u8 slot, ReadonlySpan<Utf16FlyString> names, ReadonlySpan<u64> definition_words);
 WEB_API void record_element_animation_timing_rows(DOM::Element&, u8 slot, ReadonlySpan<u32> words, ReadonlySpan<u64> times, ReadonlySpan<u64> linear_points);
