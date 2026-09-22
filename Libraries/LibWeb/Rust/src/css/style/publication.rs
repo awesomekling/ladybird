@@ -690,6 +690,11 @@ impl RetainedState {
         // node's own rules its winners are the ones the record was computed from, and a full
         // drive against the moved parent inputs binds the state.
         let winners_unchanged = exact_flipped_rules.is_some_and(|flipped| !flipped.element);
+        // A winner written with `attr()` computes to what the element's attributes hold now, which
+        // no winner delta shows: such a record is driven again in full.
+        if self.state_reads_attributes(node, state) {
+            scratch.recompute_in_full = true;
+        }
         let delta = match self.computed_group_sets.cascade_state(target) {
             Some((previous_generation, previous_state)) => {
                 if previous_generation != generation {
@@ -982,6 +987,7 @@ impl RetainedState {
             environment.unwrap_or(0),
             RootFontInputs::from_document(&inputs),
             self.monospace_cohort_key(node, state),
+            self.substitution_attributes_key(node, state),
         );
         if let Some(&(new_style_record, cohort_explicitly_inherited_groups)) = scratch.cohorts.get(&cohort) {
             // The row takes another node's record whole, so its plan is decided from that record's
@@ -1142,7 +1148,14 @@ impl RetainedState {
             return None;
         }
 
-        let store = match scratch.stores.get(&(state, current_environment)) {
+        // A store whose values substitute `attr()` holds this element's attributes, and is the
+        // element's alone.
+        let reads_attributes = self.state_reads_attributes(node, state);
+        let store = match scratch
+            .stores
+            .get(&(state, current_environment))
+            .filter(|_| !reads_attributes)
+        {
             Some(store) => store.clone(),
             None => {
                 let mut substituted = false;
@@ -1155,7 +1168,9 @@ impl RetainedState {
                     counters,
                 )?);
                 scratch.store_capacity_bytes += store.capacity_bytes();
-                scratch.stores.insert((state, current_environment), store.clone());
+                if !reads_attributes {
+                    scratch.stores.insert((state, current_environment), store.clone());
+                }
                 if substituted {
                     scratch.substituted_states.insert((state, current_environment));
                 }
@@ -1600,6 +1615,7 @@ impl RetainedState {
             .and_then(|(parent, parent_record)| self.cold_record_parent(node, parent, parent_record, state))
             .map(|parent| ColdRecordKey {
                 monospace_recascaded_font_size: self.monospace_cohort_key(node, state),
+                substitution_attributes: self.substitution_attributes_key(node, state),
                 parent,
                 previous_style_record: 0,
                 generation: cascade_state.0,
@@ -1648,7 +1664,8 @@ impl RetainedState {
         // it: a record C++ computed for a per-element value, such as a `random()` draw, is that
         // element's alone. A store with substituted values is the environment's as well as the
         // state's, and admits nothing for the state alone.
-        let store = match scratch.stores.get(&(state, environment)) {
+        let reads_attributes = self.state_reads_attributes(node, state);
+        let store = match scratch.stores.get(&(state, environment)).filter(|_| !reads_attributes) {
             Some(store) => store.clone(),
             None => {
                 let mut substituted = false;
@@ -1665,7 +1682,9 @@ impl RetainedState {
                 );
                 let store = std::sync::Arc::new(store?);
                 scratch.store_capacity_bytes += store.capacity_bytes();
-                scratch.stores.insert((state, environment), store.clone());
+                if !reads_attributes {
+                    scratch.stores.insert((state, environment), store.clone());
+                }
                 if substituted {
                     scratch.substituted_states.insert((state, environment));
                 }
@@ -1678,6 +1697,7 @@ impl RetainedState {
             .and_then(|(parent, parent_record)| self.cold_record_parent(node, parent, parent_record, state))
             .map(|parent| ColdRecordKey {
                 monospace_recascaded_font_size: self.monospace_cohort_key(node, state),
+                substitution_attributes: self.substitution_attributes_key(node, state),
                 parent,
                 previous_style_record: 0,
                 generation: cascade_state.0,
@@ -1712,6 +1732,7 @@ impl RetainedState {
                 environment: key.environment,
                 font_environment_generation: key.font_environment_generation,
                 root_font_inputs: key.root_font_inputs,
+                substitution_attributes: key.substitution_attributes,
             };
             self.engine_cold_record_donors
                 .get(&donor_key)?
@@ -2080,6 +2101,30 @@ impl RetainedState {
             .then_some(batch.current_size_raw)
     }
 
+    /// Whether any of a state's longhand winners is written with `attr()`.
+    pub(super) fn state_reads_attributes(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
+        self.state_substitution_values(node, state).any(|value| {
+            matches!(
+                value.data(),
+                crate::css::style_value::StyleValueData::Unresolved {
+                    presence_attr: true,
+                    ..
+                }
+            )
+        })
+    }
+
+    /// A key for what a node's attributes hold, for the record caches, when its winners read them.
+    fn substitution_attributes_key(&self, node: StyleNodeID, state: CascadeStateID) -> u64 {
+        use std::hash::{Hash, Hasher};
+        if !self.state_reads_attributes(node, state) {
+            return 0;
+        }
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.facts.substitution_attributes(node).hash(&mut hasher);
+        hasher.finish() | 1
+    }
+
     /// What a record for this node under this cascade state owes the monospace recascade, as a
     /// cohort key carries it. Two nodes whose parents hold equal records can still sit under
     /// different cascaded font-size chains, and the recascade reads the chain rather than the
@@ -2305,6 +2350,7 @@ impl RetainedState {
                 .cold_record_parent(node, parent, parent_record, cascade_state.1)
                 .map(|parent| ColdRecordKey {
                     monospace_recascaded_font_size: self.monospace_cohort_key(node, cascade_state.1),
+                    substitution_attributes: self.substitution_attributes_key(node, cascade_state.1),
                     parent,
                     previous_style_record: old_style_record.raw(),
                     generation: cascade_state.0,
@@ -2712,6 +2758,7 @@ impl RetainedState {
                 environment: key.environment,
                 font_environment_generation: key.font_environment_generation,
                 root_font_inputs: key.root_font_inputs,
+                substitution_attributes: key.substitution_attributes,
             };
             let donors = self.engine_cold_record_donors.entry(donor_key).or_default();
             if let Some(existing) = donors.iter_mut().find(|donor| donor.state == key.state) {
@@ -2982,6 +3029,7 @@ impl RetainedState {
         let swap_eligible = self.computed_group_sets.node_inherited_group_swap_eligible(node);
         let key = ColdRecordKey {
             monospace_recascaded_font_size: self.monospace_cohort_key(node, cascade_state.1),
+            substitution_attributes: self.substitution_attributes_key(node, cascade_state.1),
             parent,
             previous_style_record: previous_style_record.map_or(0, computed::FinalStyleRecordID::raw),
             generation: cascade_state.0,
@@ -3173,12 +3221,20 @@ impl RetainedState {
     /// Whether any winner of a state was written with a substitution, so the record computed
     /// from it reads the node's custom-property environment.
     pub(super) fn state_has_substitutions(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
-        self.winner_groups.winners_in_state(state).any(|winner| {
-            let Some(winner) = self.winner_groups.resolved_winner(winner) else {
-                return false;
-            };
+        self.state_substitution_values(node, state).next().is_some()
+    }
+
+    /// The written values of a state's longhand winners that substitute: `var()`, `attr()` and
+    /// the like, or a longhand pending its shorthand's substitution.
+    fn state_substitution_values(
+        &self,
+        node: StyleNodeID,
+        state: CascadeStateID,
+    ) -> impl Iterator<Item = &crate::css::style_value::RetainedStyleValueData> {
+        self.winner_groups.winners_in_state(state).filter_map(move |winner| {
+            let winner = self.winner_groups.resolved_winner(winner)?;
             if winner.property < crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID {
-                return false;
+                return None;
             }
             let value = match winner.source {
                 WinnerSource::Rule(rule) => {
@@ -3198,14 +3254,13 @@ impl RetainedState {
                         .and_then(|index| written.get(index))
                 }
                 WinnerSource::ExactCascade => None,
-            };
-            value.is_some_and(|value| {
-                matches!(
-                    value.data(),
-                    crate::css::style_value::StyleValueData::Unresolved { .. }
-                        | crate::css::style_value::StyleValueData::PendingSubstitution { .. }
-                )
-            })
+            }?;
+            matches!(
+                value.data(),
+                crate::css::style_value::StyleValueData::Unresolved { .. }
+                    | crate::css::style_value::StyleValueData::PendingSubstitution { .. }
+            )
+            .then_some(value)
         })
     }
 
@@ -3282,12 +3337,32 @@ impl RetainedState {
                 crate::css::style_value::StyleValueData::Unresolved { .. } => {
                     *substituted = true;
                     let value = value.clone_retained();
+                    // A pseudo-element's `attr()` reads its originating element's attributes;
+                    // it stays with C++, as its record caches hold no attributes.
+                    if pseudo_kind.is_some()
+                        && matches!(
+                            value.data(),
+                            crate::css::style_value::StyleValueData::Unresolved {
+                                presence_attr: true,
+                                ..
+                            }
+                        )
+                    {
+                        counters.bump(Counter::EngineComputedRecordBailSubstitution);
+                        return None;
+                    }
+                    let attributes = super::inputs::SubstitutionAttributeSnapshot {
+                        text: self.facts.substitution_attributes(node),
+                        names_are_ascii_case_insensitive: !self.html_element_namespace.is_none()
+                            && self.facts.namespace_of(node) == self.html_element_namespace,
+                    };
                     let value = Self::substitute_written_value(
                         &mut self.custom_property_environments,
                         self.document_style_computation_inputs,
                         environment,
                         winner.property,
                         value,
+                        Some(&attributes),
                         counters,
                     )?;
                     (
@@ -3316,6 +3391,7 @@ impl RetainedState {
                         environment,
                         shorthand,
                         written,
+                        None,
                         counters,
                     )?;
                     let value = match resolved.data() {
@@ -4700,6 +4776,9 @@ pub(super) struct ColdRecordKey {
     environment: u64,
     font_environment_generation: u64,
     root_font_inputs: RootFontInputs,
+    /// What the node's attributes hold, when its winners substitute `attr()`: two elements alike
+    /// in everything else do not share a record their attributes computed. Zero otherwise.
+    substitution_attributes: u64,
 }
 
 /// What a first record reads of the parent's style: its inherited groups, its custom-property
@@ -4717,7 +4796,16 @@ struct ColdRecordParent {
 
 /// What a warm record's cohort is keyed by, and what it answers with: the record, and the style
 /// groups it read straight from the parent through an explicit `inherit`.
-type RecordCohortKey = (u64, CascadeStateID, u32, RecordDeltaParent, u64, RootFontInputs, i32);
+type RecordCohortKey = (
+    u64,
+    CascadeStateID,
+    u32,
+    RecordDeltaParent,
+    u64,
+    RootFontInputs,
+    i32,
+    u64,
+);
 type RecordCohortValue = (computed::FinalStyleRecordID, u32);
 
 /// A first record the engine keeps for reuse, with the swap eligibility its assignment carries.
@@ -4742,6 +4830,7 @@ pub(super) struct ColdRecordDonorKey {
     environment: u64,
     font_environment_generation: u64,
     root_font_inputs: RootFontInputs,
+    substitution_attributes: u64,
 }
 
 #[derive(Clone, Copy)]
