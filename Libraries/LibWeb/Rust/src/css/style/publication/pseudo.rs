@@ -619,6 +619,9 @@ impl RetainedState {
     }
 
     pub(super) fn pseudo_style_mask(&self, node: StyleNodeID) -> Option<u64> {
+        if let Some(&mask) = self.batch_pseudo_style_masks.get(&node) {
+            return Some(mask);
+        }
         let bit = |pseudo: Option<tree::PseudoElementTarget>| {
             pseudo
                 .map(|pseudo| pseudo.kind.0)

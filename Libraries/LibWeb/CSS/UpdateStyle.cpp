@@ -570,6 +570,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
     // transaction of this style update.
     RequiredInvalidationAfterStyleChange transaction_invalidation;
     ChangedCustomPropertyNames changed_custom_property_names;
+    begin_noting_declaration_changes_during_apply();
+    ScopeGuard end_noting_declaration_changes = [] { end_noting_declaration_changes_during_apply(); };
     // Unstyled descendants of display:none need no record until a targeted read or visibility
     // change asks for one. SVG resources and existing animations can still consume style while
     // hidden, so retain their inheritance prerequisites in this batch.
@@ -873,9 +875,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 auto const transition_debt = row_effect_debt & StyleEngine::SettledRowTransitionDebt;
                 if (row_effect_debt & StyleEngine::SettledRowOwesAnAnimationPlan)
                     animation_plan = document.style_computer().take_settled_animation_plan(StyleNodeID { reaction.style_node });
-                if (!engine_computed_record_environment_is_installable(*element, StyleRecordID { reaction.new_style_record })) {
+                if (!engine_computed_record_environment_is_installable(*element, StyleRecordID { reaction.new_style_record })
+                    || declarations_changed_during_apply(StyleNodeID { reaction.style_node })) {
                     // The engine resolved the record's environment over the parent's own; when the
-                    // parent's inheritable environment differs, C++ computes the style.
+                    // parent's inheritable environment differs, C++ computes the style. So it does
+                    // when a host rewrote the element's declarations after the engine computed it.
                     document.style_computer().style_engine().consume_recorded_element_style_input_change(reaction.style_node);
                     invalidation = element->apply_style_engine_reaction(did_change_custom_properties);
                 } else {
