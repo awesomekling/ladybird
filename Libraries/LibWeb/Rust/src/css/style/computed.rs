@@ -1469,6 +1469,7 @@ impl ComputedGroupSets {
         font: Option<&crate::css::table_group_builder::FfiFontGroupBuildInputs>,
         parent_in_display_none_subtree: bool,
         environment: Option<u64>,
+        counter_style_environment_identity: u64,
     ) -> Option<EngineComputedAssembly> {
         use crate::css::computed_value_types::STYLE_GROUP_INDEX_FONT;
         if groups_to_rebuild == 0 || (groups_to_rebuild & (1 << STYLE_GROUP_INDEX_FONT) != 0 && font.is_none()) {
@@ -1601,11 +1602,14 @@ impl ComputedGroupSets {
         let swap_eligible = table_inherited_group_swap_eligible(&table);
         let dependency_flags =
             table.publication_dependency_flags() | (u8::from(holds_image_values) * HOLDS_IMAGE_VALUES);
-        let fixed_metadata = if dependency_flags == old_metadata.dependency_flags {
+        let fixed_metadata = if dependency_flags == old_metadata.dependency_flags
+            && counter_style_environment_identity == old_metadata.counter_style_environment_identity
+        {
             old_record.fixed_metadata
         } else {
             self.intern_fixed_metadata(ComputedFixedMetadata {
                 dependency_flags,
+                counter_style_environment_identity,
                 ..old_metadata
             })
             .0
