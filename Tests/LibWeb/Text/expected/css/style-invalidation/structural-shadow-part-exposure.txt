@@ -33,7 +33,7 @@ PASS: part pseudo-element child mutation without warmup: part-document: ::part()
 PASS: part child mutation: part-document: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=4, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation: part-document: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=4, elementStyleNoopRecomputations=1
 PASS: part pseudo-element child mutation without warmup: part-document: ::part():has(.hit ~ .after) after indirect sibling append | elementStyleRecomputations=5, elementStyleNoopRecomputations=0
-PASS: part child mutation: part-document: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=8, elementStyleNoopRecomputations=6
+PASS: part child mutation: part-document: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=5, elementStyleNoopRecomputations=3
 PASS: part pseudo-element child mutation: part-document: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: part pseudo-element child mutation without warmup: part-document: ::part():has(rect.hit) after SVG child append | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
 PASS: part child mutation: part-document: ::part():has(.hit:first-child) after prepend | elementStyleRecomputations=3, elementStyleNoopRecomputations=1
