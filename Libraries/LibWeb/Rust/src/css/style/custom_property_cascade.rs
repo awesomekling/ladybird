@@ -413,13 +413,14 @@ impl RetainedState {
                     .get_or_insert_with(|| {
                         (
                             self.cascade_priority_of(
+                                Some(node),
                                 rule,
                                 tree_scope,
                                 specificity,
                                 scope_proximity,
                                 declared.important,
                             ),
-                            self.cascade_stratum_of(rule, tree_scope, declared.important),
+                            self.cascade_stratum_of(Some(node), rule, tree_scope, declared.important),
                         )
                     });
                 candidates.push(Candidate {

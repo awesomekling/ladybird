@@ -1260,7 +1260,7 @@ impl RetainedState {
         } else {
             dispatch.assign_cascade_order(|candidate| {
                 let entry = &self.programs.get(candidate.program).entries()[candidate.entry as usize];
-                self.cascade_priority_of(candidate.rule, scope, entry.specificity, u32::MAX, false)
+                self.cascade_priority_of(None, candidate.rule, scope, entry.specificity, u32::MAX, false)
             });
         }
         // A rule declaring custom properties beside its longhands contributes those longhands
@@ -3125,6 +3125,7 @@ impl RetainedState {
                             return false;
                         }
                         let priority = self.cascade_priority_of(
+                            None,
                             delta.rule,
                             TreeScopeID::DOCUMENT,
                             entry.specificity,
@@ -4237,6 +4238,7 @@ impl RetainedState {
                     return false;
                 }
                 let priority = self.cascade_priority_of(
+                    Some(node),
                     added.rule,
                     added.tree_scope,
                     entry.specificity,
