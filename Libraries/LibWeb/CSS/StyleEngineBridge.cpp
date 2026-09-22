@@ -839,6 +839,7 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
             .default_font_size_raw = StyleComputer::default_user_font_size().raw_value(),
             .device_pixels_per_css_pixel = m_style_computer->document().page().client().device_pixels_per_css_pixel(),
             .font_environment_generation = m_style_computer->document().font_computer().environment_generation(),
+            .style_environment_version = m_style_computer->style_environment_version_for_sharing(),
             .preferred_color_scheme = static_cast<u8>(to_underlying(m_style_computer->document().page().preferred_color_scheme())),
             .has_document_supported_schemes = false,
             .document_supported_scheme_count = 0,
