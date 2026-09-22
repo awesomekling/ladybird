@@ -86,6 +86,51 @@ impl RetainedState {
     }
 
     /// The element's matches when `pseudo` is `None`, else the matches for that pseudo-element.
+    /// The matches declaring custom properties in the answer a transaction publishes for the node,
+    /// read before that answer is installed: the answers the lookups below find are the installed
+    /// ones, which a node published in this transaction does not have yet, or has from before.
+    pub(super) fn batch_custom_property_matches_of(
+        &self,
+        published: &PublishedMatchAnswers,
+        answer: &PublishedMatchAnswer,
+    ) -> Option<Vec<BatchCustomPropertyMatch>> {
+        let mut matches = Vec::new();
+        let mut push = |rule: RuleID, tree_scope: TreeScopeID, specificity: Specificity, scope_proximity: u32, pseudo: Option<u16>| {
+            if !self.program.custom_declarations_of(rule).is_empty() {
+                matches.push(BatchCustomPropertyMatch {
+                    rule,
+                    tree_scope,
+                    specificity,
+                    scope_proximity,
+                    pseudo,
+                });
+            }
+        };
+        if let Some(published_matches) = published.matches_for(answer) {
+            for entry in published_matches {
+                push(
+                    entry.rule,
+                    entry.tree_scope,
+                    entry.specificity,
+                    entry.scope_proximity,
+                    entry.pseudo_element.map(|target| target.kind.0),
+                );
+            }
+        } else {
+            for rule_match in self.match_answers.answer(answer.cascade_input?)?.iter() {
+                let entry = &self.programs.get(rule_match.program).entries()[rule_match.entry as usize];
+                push(
+                    rule_match.rule,
+                    rule_match.tree_scope,
+                    entry.specificity,
+                    rule_match.scope_proximity,
+                    entry.pseudo_element.map(|target| target.kind.0),
+                );
+            }
+        }
+        Some(matches)
+    }
+
     fn try_for_each_match(
         &self,
         node: StyleNodeID,
@@ -94,6 +139,14 @@ impl RetainedState {
     ) -> Option<ControlFlow<()>> {
         let wanted =
             |target: Option<tree::PseudoElementTarget>| target.map(|target| target.kind.0) == pseudo.map(u16::from);
+        if let Some(matches) = self.batch_custom_property_matches.get(&node) {
+            for entry in matches.iter().filter(|entry| entry.pseudo == pseudo.map(u16::from)) {
+                if visit(entry.rule, entry.tree_scope, entry.specificity, entry.scope_proximity).is_break() {
+                    return Some(ControlFlow::Break(()));
+                }
+            }
+            return Some(ControlFlow::Continue(()));
+        }
         if let Some((published, answer)) = Self::published_answer_lookup(
             &self.published_match_answers,
             self.batch_matching_traversal.as_deref(),
@@ -107,8 +160,20 @@ impl RetainedState {
             }
             return Some(ControlFlow::Continue(()));
         }
-        let Lookup::Known(answer) = self.retained_match_answer(node) else {
-            return None;
+        // An answer published by its identity alone names the matches the catalog holds for it;
+        // the answer the node retains from before is not the one it is being published with.
+        let published_identity = Self::published_answer_lookup(
+            &self.published_match_answers,
+            self.batch_matching_traversal.as_deref(),
+            node,
+        )
+        .map(|(_, answer)| answer.cascade_input);
+        let answer = match published_identity {
+            Some(identity) => identity.and_then(|identity| self.match_answers.answer(identity))?,
+            None => match self.retained_match_answer(node) {
+                Lookup::Known(answer) => answer,
+                _ => return None,
+            },
         };
         for rule_match in answer.iter() {
             let entry = &self.programs.get(rule_match.program).entries()[rule_match.entry as usize];
@@ -131,7 +196,7 @@ impl RetainedState {
 
     /// Whether anything in the document declares a custom property. Nothing declaring one means
     /// every environment is the inherited one, and no cascade need look.
-    fn any_custom_property_is_declared(&self) -> bool {
+    pub(super) fn any_custom_property_is_declared(&self) -> bool {
         self.program.any_rule_declares_custom_properties() || self.facts.any_element_declares_custom_properties()
     }
 

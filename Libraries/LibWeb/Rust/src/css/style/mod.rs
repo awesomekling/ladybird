@@ -788,6 +788,16 @@ struct QuerySortedCandidatesStamp {
     keys: Vec<DispatchKey>,
 }
 
+/// One match of an answer a transaction publishes, as the custom-property cascade reads it.
+#[derive(Clone, Copy)]
+pub(super) struct BatchCustomPropertyMatch {
+    rule: RuleID,
+    tree_scope: TreeScopeID,
+    specificity: Specificity,
+    scope_proximity: u32,
+    pseudo: Option<u16>,
+}
+
 /// Long-lived engine state: the document, its program, derived results and cross-flush
 /// caches. This is the whole read side of an evaluation step; it holds no
 /// host handle, no journal intake and no borrowed FFI result storage.
@@ -992,6 +1002,9 @@ pub struct RetainedState {
     batch_pseudo_style_masks: HashMap<StyleNodeID, u64>,
     /// Beside it, whether the answer's winners are complete but for custom properties.
     batch_answers_complete_but_for_custom_properties: HashMap<StyleNodeID, bool>,
+    /// Beside them, the matches in each answer that declare custom properties, read the same way:
+    /// what the node's custom-property cascade runs over while its answer is not installed.
+    batch_custom_property_matches: HashMap<StyleNodeID, Vec<BatchCustomPropertyMatch>>,
     engine_cold_record_cache: HashMap<publication::ColdRecordKey, publication::ColdRecord>,
     engine_cold_record_donors: HashMap<publication::ColdRecordDonorKey, Vec<publication::ColdRecordDonor>>,
     computed_group_set_memory: MemoryLease,

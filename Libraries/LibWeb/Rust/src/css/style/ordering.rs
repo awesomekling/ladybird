@@ -1224,9 +1224,10 @@ impl RetainedState {
 
     /// Whether the winners the cascade publishes for a node hold a match from a rule in the given
     /// tree scope: a document rule's do, and so does a rule's from the element's own tree scope,
-    /// for the element and its pseudo-elements alike, whose cascade then orders one context. A
-    /// rule reaching across a shadow boundary (`:host`, `::slotted`, `::part`) is ordered by its
-    /// context, which the winners do not model yet.
+    /// for the element and its pseudo-elements alike. A rule reaching across a shadow boundary
+    /// (`:host`, `::slotted`, `::part`) decides from its own context, and the winners hold it when
+    /// that context is one the element's cascade weighs where a rule's priority places it, which
+    /// is at its encapsulation depth, the same for every element it matches.
     pub(super) fn match_scope_is_complete_for(
         &self,
         node: Option<StyleNodeID>,
@@ -1234,7 +1235,53 @@ impl RetainedState {
         scope: TreeScopeID,
     ) -> bool {
         let _ = rule;
-        scope == TreeScopeID::DOCUMENT || node.is_some_and(|node| self.tree.tree_scope(node) == scope)
+        if scope == TreeScopeID::DOCUMENT {
+            return true;
+        }
+        let Some(node) = node else {
+            return false;
+        };
+        if self.tree.tree_scope(node) == scope {
+            return true;
+        }
+        self.author_context_index(node, scope)
+            .is_some_and(|index| index == self.tree_scope_depth(scope))
+    }
+
+    /// Where a tree scope stands among the encapsulation contexts that decide for an element,
+    /// outermost first, the order its cascade applies them in: the document, the shadow trees the
+    /// element is in from the outermost inwards, the ones holding the slots it is assigned to along
+    /// its assignment chain, then the element's own shadow tree, for `:host`. `None` when the scope
+    /// is none of them.
+    pub(super) fn author_context_index(&self, node: StyleNodeID, scope: TreeScopeID) -> Option<u32> {
+        let mut contexts: Vec<TreeScopeID> = Vec::with_capacity(4);
+        let mut append = |scope: TreeScopeID| {
+            if !contexts.contains(&scope) {
+                contexts.push(scope);
+            }
+        };
+        append(TreeScopeID::DOCUMENT);
+        let own_scope = self.tree.tree_scope(node);
+        let mut chain = Vec::with_capacity(4);
+        let mut current = own_scope;
+        while current != TreeScopeID::DOCUMENT {
+            if chain.contains(&current) {
+                return None;
+            }
+            chain.push(current);
+            let host = self.scope_root(current).and_then(|root| self.tree.host_of(root))?;
+            current = self.tree.tree_scope(host);
+        }
+        for &scope in chain.iter().rev() {
+            append(scope);
+        }
+        for slotted_into in self.scopes_slotted_into(node) {
+            append(slotted_into);
+        }
+        if let Some(shadow_root) = self.tree.shadow_root_of(node) {
+            append(self.tree.tree_scope(shadow_root));
+        }
+        contexts.iter().position(|&context| context == scope).map(|index| index as u32)
     }
 
     pub(super) fn cascade_winner_inventory_is_complete(

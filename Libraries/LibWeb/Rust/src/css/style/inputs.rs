@@ -1870,6 +1870,7 @@ impl StyleEngineState {
                 engine_pseudo_record_cache: HashMap::default(),
                 batch_pseudo_style_masks: HashMap::default(),
                 batch_answers_complete_but_for_custom_properties: HashMap::default(),
+                batch_custom_property_matches: HashMap::default(),
                 engine_cold_record_cache: HashMap::default(),
                 engine_cold_record_donors: HashMap::default(),
                 computed_group_set_memory: MemoryLease::new(MemoryCategory::ComputedGroupSet),

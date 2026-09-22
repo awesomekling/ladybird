@@ -1,0 +1,10 @@
+A initial p=[] rgb(0, 0, 0)
+A after p=[match]
+B initial p=[] rgb(0, 0, 0)
+B after p=[]
+C initial p=[match] rgb(0, 0, 0)
+C after p=[]
+D initial p=[match] rgb(0, 0, 0)
+D after p=[]
+E initial p=[match] rgb(0, 128, 0)
+E after p=[]
