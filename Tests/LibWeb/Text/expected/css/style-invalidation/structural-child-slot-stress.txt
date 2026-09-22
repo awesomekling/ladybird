@@ -654,7 +654,7 @@ PASS: stress warm child mutation: slotted-shadow-host-named: :empty stays true a
 PASS: stress cold child mutation: slotted-shadow-host-named: :empty stays true after comment append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-named: :empty becomes false after whitespace text append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: stress cold child mutation: slotted-shadow-host-named: :empty becomes false after whitespace text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: slotted-shadow-host-named: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: slotted-shadow-host-named: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: slotted-shadow-host-named: :dir(rtl) after dir=auto text mutation | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-named: :has(*) after child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: stress cold child mutation: slotted-shadow-host-named: :has(*) after child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=0

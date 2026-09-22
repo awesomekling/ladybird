@@ -64,7 +64,7 @@ PASS: descendant text stress detached-pseudo: document-styled-use-shadow: :has(:
 PASS: descendant text stress detached-pseudo-cold: document-styled-use-shadow: :has(:empty) becomes false after descendant text insert | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant text stress warm: document-styled-use-shadow: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant text stress cold: document-styled-use-shadow: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: descendant text stress pseudo-warm: document-styled-use-shadow: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: descendant text stress pseudo-warm: document-styled-use-shadow: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress pseudo-cold: document-styled-use-shadow: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached: document-styled-use-shadow: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached-cold: document-styled-use-shadow: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
@@ -80,7 +80,7 @@ PASS: descendant text stress detached-pseudo: document-styled-use-shadow: :has(.
 PASS: descendant text stress detached-pseudo-cold: document-styled-use-shadow: :has(.hit:empty) becomes false after descendant textContent insert | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant text stress warm: document-styled-use-shadow: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant text stress cold: document-styled-use-shadow: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: descendant text stress pseudo-warm: document-styled-use-shadow: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: descendant text stress pseudo-warm: document-styled-use-shadow: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress pseudo-cold: document-styled-use-shadow: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached: document-styled-use-shadow: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached-cold: document-styled-use-shadow: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
@@ -96,7 +96,7 @@ PASS: descendant text stress detached-pseudo: document-styled-use-shadow: :has(:
 PASS: descendant text stress detached-pseudo-cold: document-styled-use-shadow: :has(:empty:first-child) becomes false after descendant text insert | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant text stress warm: document-styled-use-shadow: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant text stress cold: document-styled-use-shadow: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: descendant text stress pseudo-warm: document-styled-use-shadow: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: descendant text stress pseudo-warm: document-styled-use-shadow: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress pseudo-cold: document-styled-use-shadow: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached: document-styled-use-shadow: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached-cold: document-styled-use-shadow: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
@@ -120,7 +120,7 @@ PASS: descendant text stress detached-pseudo: shadow-internal: :has(:empty) beco
 PASS: descendant text stress detached-pseudo-cold: shadow-internal: :has(:empty) becomes false after descendant text insert | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant text stress warm: shadow-internal: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant text stress cold: shadow-internal: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: descendant text stress pseudo-warm: shadow-internal: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: descendant text stress pseudo-warm: shadow-internal: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress pseudo-cold: shadow-internal: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached: shadow-internal: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached-cold: shadow-internal: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
@@ -136,7 +136,7 @@ PASS: descendant text stress detached-pseudo: shadow-internal: :has(.hit:empty) 
 PASS: descendant text stress detached-pseudo-cold: shadow-internal: :has(.hit:empty) becomes false after descendant textContent insert | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant text stress warm: shadow-internal: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant text stress cold: shadow-internal: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: descendant text stress pseudo-warm: shadow-internal: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: descendant text stress pseudo-warm: shadow-internal: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress pseudo-cold: shadow-internal: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached: shadow-internal: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached-cold: shadow-internal: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
@@ -152,7 +152,7 @@ PASS: descendant text stress detached-pseudo: shadow-internal: :has(:empty:first
 PASS: descendant text stress detached-pseudo-cold: shadow-internal: :has(:empty:first-child) becomes false after descendant text insert | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant text stress warm: shadow-internal: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant text stress cold: shadow-internal: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: descendant text stress pseudo-warm: shadow-internal: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: descendant text stress pseudo-warm: shadow-internal: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress pseudo-cold: shadow-internal: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached: shadow-internal: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached-cold: shadow-internal: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
@@ -344,7 +344,7 @@ PASS: descendant text stress detached-pseudo: part-document: :has(:empty) become
 PASS: descendant text stress detached-pseudo-cold: part-document: :has(:empty) becomes false after descendant text insert | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant text stress warm: part-document: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant text stress cold: part-document: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: descendant text stress pseudo-warm: part-document: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: descendant text stress pseudo-warm: part-document: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: descendant text stress pseudo-cold: part-document: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached: part-document: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached-cold: part-document: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
@@ -360,7 +360,7 @@ PASS: descendant text stress detached-pseudo: part-document: :has(.hit:empty) be
 PASS: descendant text stress detached-pseudo-cold: part-document: :has(.hit:empty) becomes false after descendant textContent insert | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant text stress warm: part-document: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant text stress cold: part-document: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: descendant text stress pseudo-warm: part-document: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: descendant text stress pseudo-warm: part-document: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: descendant text stress pseudo-cold: part-document: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached: part-document: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached-cold: part-document: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
@@ -376,7 +376,7 @@ PASS: descendant text stress detached-pseudo: part-document: :has(:empty:first-c
 PASS: descendant text stress detached-pseudo-cold: part-document: :has(:empty:first-child) becomes false after descendant text insert | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant text stress warm: part-document: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant text stress cold: part-document: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: descendant text stress pseudo-warm: part-document: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: descendant text stress pseudo-warm: part-document: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: descendant text stress pseudo-cold: part-document: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached: part-document: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached-cold: part-document: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
@@ -456,7 +456,7 @@ PASS: descendant text stress detached-pseudo: part-shadow-internal: :has(:empty)
 PASS: descendant text stress detached-pseudo-cold: part-shadow-internal: :has(:empty) becomes false after descendant text insert | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant text stress warm: part-shadow-internal: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant text stress cold: part-shadow-internal: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: descendant text stress pseudo-warm: part-shadow-internal: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: descendant text stress pseudo-warm: part-shadow-internal: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress pseudo-cold: part-shadow-internal: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached: part-shadow-internal: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached-cold: part-shadow-internal: :has(:not(:empty)) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
@@ -472,7 +472,7 @@ PASS: descendant text stress detached-pseudo: part-shadow-internal: :has(.hit:em
 PASS: descendant text stress detached-pseudo-cold: part-shadow-internal: :has(.hit:empty) becomes false after descendant textContent insert | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant text stress warm: part-shadow-internal: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant text stress cold: part-shadow-internal: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: descendant text stress pseudo-warm: part-shadow-internal: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: descendant text stress pseudo-warm: part-shadow-internal: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress pseudo-cold: part-shadow-internal: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached: part-shadow-internal: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached-cold: part-shadow-internal: :has(.hit:not(:empty)) becomes true after descendant textContent insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
@@ -488,7 +488,7 @@ PASS: descendant text stress detached-pseudo: part-shadow-internal: :has(:empty:
 PASS: descendant text stress detached-pseudo-cold: part-shadow-internal: :has(:empty:first-child) becomes false after descendant text insert | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant text stress warm: part-shadow-internal: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant text stress cold: part-shadow-internal: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
-PASS: descendant text stress pseudo-warm: part-shadow-internal: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: descendant text stress pseudo-warm: part-shadow-internal: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress pseudo-cold: part-shadow-internal: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached: part-shadow-internal: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: descendant text stress detached-cold: part-shadow-internal: :has(:not(:empty):first-child) becomes true after descendant text insert | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
