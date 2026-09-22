@@ -4473,7 +4473,7 @@ fn retained_answer_patching_matches_only_unresolved_rules_after_signed_deltas() 
 }
 
 #[test]
-fn retained_answer_patching_preserves_incomplete_cascade_winners() {
+fn retained_answer_patching_preserves_held_container_cascade_winners() {
     let (mut engine, nodes) = linear_document();
     let target = StyleAtomID(200);
     let winning_target = StyleAtomID(201);
@@ -4520,7 +4520,7 @@ fn retained_answer_patching_preserves_incomplete_cascade_winners() {
         )
         .unwrap();
     let incremental = outcome.incremental_cascade_answer.unwrap();
-    assert!(!incremental.cascade_winners_are_complete);
+    assert!(incremental.cascade_winners_are_complete);
 }
 
 #[test]
