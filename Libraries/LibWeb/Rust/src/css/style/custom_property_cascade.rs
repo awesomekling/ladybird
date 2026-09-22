@@ -544,9 +544,26 @@ impl RetainedState {
             return None;
         }
         let registry_ref = unsafe { &*registry.as_pointer().cast::<CustomPropertyRegistry>() };
+        // A registration decides how its name computes - against the registered syntax, from the
+        // registration's own initial value - which this resolution does not do: an element
+        // declaring a registered name is the host's. A name registered as *not* inheriting is the
+        // host's for every element instead, because the environment this builds over the parent's
+        // would hand that name to a descendant the registration keeps it from.
         if registry_ref.has_registrations() {
-            counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-            return None;
+            if registry_ref.has_non_inheriting_registrations() {
+                counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
+                return None;
+            }
+            for (declared, _) in &cascaded {
+                let Some(name) = self.custom_property_environments.name(declared.name) else {
+                    counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
+                    return None;
+                };
+                if registry_ref.name_is_registered(&name.text) {
+                    counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
+                    return None;
+                }
+            }
         }
         let key = Self::environment_inputs(
             parent_environment,
