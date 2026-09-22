@@ -318,7 +318,7 @@ impl RetainedState {
         Some(self.retained_matches_are_complete_but_for_custom_properties(node, matches))
     }
 
-    fn element_declarations_are_complete_but_for_custom_properties(&self, node: StyleNodeID) -> bool {
+    pub(super) fn element_declarations_are_complete_but_for_custom_properties(&self, node: StyleNodeID) -> bool {
         ElementDeclarationKind::ALL.iter().all(|&kind| {
             self.facts
                 .element_declarations_are_complete_but_for_custom_properties(node, kind)
@@ -344,7 +344,7 @@ impl RetainedState {
     /// Whether the winners the cascade publishes hold a match: its scope is one they are
     /// published for (`match_scope_is_complete_for`), no container query gates it, and its rule
     /// declares nothing past its longhand winners but custom properties.
-    fn match_is_complete_but_for_custom_properties(
+    pub(super) fn match_is_complete_but_for_custom_properties(
         &self,
         node: StyleNodeID,
         rule: RuleID,
@@ -413,9 +413,7 @@ impl RetainedState {
             }
             // A gated rule declares for the node where its container conditions held when its
             // winners were published, as its longhands do.
-            if pseudo.is_some() && self.program.rule_is_gated_by_container_query(rule)
-                || !self.published_container_verdict_holds(node, rule)
-            {
+            if !self.published_container_verdict_holds(node, rule, pseudo.is_some()) {
                 return ControlFlow::Continue(());
             }
             let written = self.program.custom_written_values_of(rule);

@@ -543,6 +543,19 @@ impl RetainedState {
         // The element's pseudo-elements are settled beside its record, as the C++ computation
         // refreshes them after the element's own; a pseudo-element the engine cannot settle
         // sends the whole element to C++.
+        // A pseudo-element asks about its originating element too. The element's new record may
+        // have changed that container's type, name or style after the first verdict check.
+        if self.container_verdicts_moved(node) {
+            if self.republish_container_winners(node, counters).is_none() {
+                self.abandon_engine_computed_record(node, scratch, counters);
+                return None;
+            }
+            self.container_effects_for_host.remove(&node);
+            if !self.container_verdicts_stand(node) {
+                self.abandon_engine_computed_record(node, scratch, counters);
+                return None;
+            }
+        }
         let old_style_record = (delta.0 != computed::FinalStyleRecordID::NONE).then_some(delta.0);
         let generation = self.winner_groups.generation();
         if self
@@ -580,7 +593,7 @@ impl RetainedState {
     fn engine_computed_element_record_delta(
         &mut self,
         node: StyleNodeID,
-        cascade_winners_are_complete: bool,
+        mut cascade_winners_are_complete: bool,
         exact_flipped_rules: Option<FlippedRules>,
         mut parent_inputs_moved: ParentInputsMoved,
         scratch: &mut EngineComputedRecordScratch,
@@ -600,9 +613,20 @@ impl RetainedState {
         // The winners hold a gated rule where its container conditions held when they were
         // published; they answer for the node while every one decides as it did, over containers
         // its settled ancestors published. One a declined ancestor may still move is the host's.
-        if self.published_container_verdicts.contains_key(&node)
-            && (self.container_ancestor_is_unsettled(node, scratch) || !self.container_verdicts_stand(node))
+        if (self.published_container_verdicts.contains_key(&node) || self.container_gates_unheld.contains(&node))
+            && self.container_ancestor_is_unsettled(node, scratch)
         {
+            counters.bump(Counter::EngineComputedRecordBailContainerVerdict);
+            return None;
+        }
+        if self.container_gates_unheld.contains(&node) || self.container_verdicts_moved(node) {
+            let Some(complete) = self.republish_container_winners(node, counters) else {
+                counters.bump(Counter::EngineComputedRecordBailContainerVerdict);
+                return None;
+            };
+            cascade_winners_are_complete = complete;
+        }
+        if !self.container_verdicts_stand(node) {
             counters.bump(Counter::EngineComputedRecordBailContainerVerdict);
             return None;
         }
@@ -2170,7 +2194,7 @@ impl RetainedState {
     /// Whether the table a record was computed into declares transitions at all, and whether any
     /// of the moved properties is a longhand one of them runs on. A record the engine cannot look
     /// into answers both, so the row that asks is refused.
-    fn record_transition_facts(&self, record: computed::FinalStyleRecordID, moved: &[u16]) -> (bool, bool) {
+    pub(super) fn record_transition_facts(&self, record: computed::FinalStyleRecordID, moved: &[u16]) -> (bool, bool) {
         self.computed_group_sets
             .style_record_view(record.raw())
             .and_then(|view| unsafe { view.longhand_table.as_ref() })
@@ -2366,6 +2390,15 @@ impl RetainedState {
                 .engine_computed_record_delta(node, true, None, parent_inputs_moved, scratch, counters)
                 .map_or(0, |(_, record)| record.raw());
         }
+        let republished_complete = if self.container_gates_unheld.contains(&node) || self.container_verdicts_moved(node)
+        {
+            let Some(complete) = self.republish_container_winners(node, counters) else {
+                return 0;
+            };
+            Some(complete)
+        } else {
+            None
+        };
         let Lookup::Known(cascade_state) = self
             .current_winner_groups()
             .token_for(WinnerGroupKey::current(node, self.program.version()))
@@ -2442,9 +2475,10 @@ impl RetainedState {
         if !scratch.font_drive.is_pending() && self.computed_group_sets.node_answer_is_incomplete(node) {
             return 0;
         }
-        let cascade_winners_are_complete = self
-            .current_published_answer(node)
-            .is_some_and(|answer| answer.cascade_winners_are_complete);
+        let cascade_winners_are_complete = republished_complete.unwrap_or_else(|| {
+            self.current_published_answer(node)
+                .is_some_and(|answer| answer.cascade_winners_are_complete)
+        });
         let record = self.engine_computed_record_delta(
             node,
             cascade_winners_are_complete,
@@ -2835,6 +2869,43 @@ impl RetainedState {
             .is_some();
         scratch.remember(key, admitted);
         admitted
+    }
+
+    /// A query verdict can stand while a container-relative value changes. Only a row whose
+    /// entire retained value inventory excludes those reads may keep its record on this input.
+    pub(super) fn container_input_requires_full_drive(&self, node: StyleNodeID) -> bool {
+        if !self.published_container_verdicts.contains_key(&node)
+            || self.computed_group_sets.adjustment_facts(node) & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
+        {
+            return true;
+        }
+        let Lookup::Known((_, state)) = self
+            .current_winner_groups()
+            .token_for(WinnerGroupKey::current(node, self.program.version()))
+        else {
+            return true;
+        };
+        std::iter::once(state)
+            .chain(
+                self.current_winner_groups()
+                    .pseudo_states(node)
+                    .map(|(_, _, state, _)| state),
+            )
+            .any(|state| {
+                self.state_has_substitutions(node, state)
+                    || self
+                        .winner_groups
+                        .winners_in_state(state)
+                        .filter_map(|winner| self.winner_groups.resolved_winner(winner))
+                        .any(|winner| match self.written_winner_value(node, &winner) {
+                            Ok(Some((_, value, _))) => {
+                                crate::css::style_compute::external_value_dependencies(value.data())
+                                    .container_relative_length_unit_mask
+                                    != 0
+                            }
+                            _ => true,
+                        })
+            })
     }
 
     /// Whether C++ may publish one record as the answer for another element with this winner

@@ -624,6 +624,15 @@ void StyleEngine::record_element_declaration_delta(StyleEngineFFI::FfiElementDec
     m_element_declaration_deltas.append(delta);
 }
 
+void StyleEngine::record_container_query_input_change(StyleNodeID style_node)
+{
+    if (style_node == 0)
+        return;
+    flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
+    note_recorded_input(*this, m_style_computer);
+    record_container_query_input(style_node);
+}
+
 void StyleEngine::record_element_style_input_change(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups)
 {
     if (style_node != 0 && reaction != 0) {

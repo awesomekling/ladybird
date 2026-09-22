@@ -769,7 +769,7 @@ impl RetainedState {
         };
         let complete = !matches.iter().any(|entry| {
             !self.match_scope_is_complete_for(Some(host), entry.rule, entry.tree_scope)
-                || self.program.rule_is_gated_by_container_query(entry.rule)
+                || !self.container_gate_is_held(Some(host), entry.rule, true)
                 || !self
                     .program
                     .declarations_are_complete_but_for_custom_properties(entry.rule)
@@ -959,10 +959,10 @@ impl RetainedState {
 
     /// Whether every rule the node's answer matches for a pseudo-element declares only what the
     /// winner columns hold, and custom properties, which the engine resolves into the
-    /// pseudo-element's own environment, with no container query deciding it.
+    /// pseudo-element's own environment, including a container verdict held with its origin.
     fn pseudo_winners_are_complete(&self, node: StyleNodeID) -> bool {
         let rule_is_complete = |rule: RuleID| {
-            !self.program.rule_is_gated_by_container_query(rule)
+            self.container_gate_is_held(Some(node), rule, true)
                 && self.program.declarations_are_complete_but_for_custom_properties(rule)
         };
         if let Some((published, answer)) = Self::published_answer_lookup(

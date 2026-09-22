@@ -1815,6 +1815,7 @@ impl StyleEngineState {
                 container_effects_for_host: HashMap::default(),
                 published_container_verdicts: HashMap::default(),
                 container_gates_unheld: HashSet::default(),
+                container_input_nodes: HashSet::default(),
                 declaration_block_version: 1,
                 last_transaction_only_derived_child_reactions: false,
                 sheets_excluded_from_routing: BitColumn::default(),
@@ -2218,6 +2219,24 @@ impl StyleEngineState {
             self.host.externally_recorded_style_input_nodes.insert(node);
         }
         self.retained.style_input_nodes_for_cpp.insert(node);
+    }
+
+    /// A container's measurements or style moved under this dependent's retained answer.
+    pub fn record_container_query_input(&mut self, node: StyleNodeID) {
+        if self.retained.container_reaction_needs_host_transition(node) {
+            self.record_element_style_input(
+                node,
+                transaction::STYLE_REACTION_PUBLISHED_STYLE | transaction::STYLE_REACTION_RECOMPUTE_STYLE,
+                0,
+            );
+            return;
+        }
+        self.retained.container_input_nodes.insert(node);
+        self.record_derived_element_style_input(
+            node,
+            transaction::STYLE_REACTION_PUBLISHED_STYLE | transaction::STYLE_REACTION_RECOMPUTE_STYLE,
+            0,
+        );
     }
 
     /// Record a style reaction the engine derived itself for one element, or one C++ derived from

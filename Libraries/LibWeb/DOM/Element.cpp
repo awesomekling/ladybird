@@ -2827,7 +2827,7 @@ void Element::invalidate_descendant_styles_depending_on_style_container_query()
         auto* element = as_if<Element>(node);
         if (!element || !element->style_depends_on_style_container_query())
             return TraversalDecision::Continue;
-        element->document().style_computer().style_engine().record_element_style_input_change(element->style_node_id());
+        element->document().style_computer().style_engine().record_container_query_input_change(element->style_node_id());
         return TraversalDecision::Continue;
     });
 }
