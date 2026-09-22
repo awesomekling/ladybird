@@ -14,9 +14,12 @@
         };
         internals.updateStyle();
         report("initial");
+        const before = internals.getStyleInvalidationCounters();
         bordered.classList.add("colored");
         internals.updateStyle();
+        const after = internals.getStyleInvalidationCounters();
         report("table colour change");
+        println(`table colour change stays in the engine: ${after.elementStyleRecomputations - before.elementStyleRecomputations === 0}`);
         bordered.setAttribute("cellpadding", "5");
         internals.updateStyle();
         report("cellpadding change");

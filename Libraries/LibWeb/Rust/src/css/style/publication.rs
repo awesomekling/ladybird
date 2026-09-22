@@ -637,9 +637,7 @@ impl RetainedState {
                 return None;
             }
         };
-        // An element's animations compose into its style in the C++ computation, and a hint
-        // mapped from another element's attributes moves without anything recorded on the
-        // element.
+        // An element's animations compose into its style in the C++ computation.
         let facts = self.computed_group_sets.adjustment_facts(node);
         // Either the root's font inputs moved under this element, or the element's own font
         // environment did: a face its cascade names became available or failed. The winners are
@@ -648,10 +646,6 @@ impl RetainedState {
         let font_inputs_moved = (scratch.root_font_inputs_changed
             && facts & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT == 0)
             || scratch.font_environment_moved;
-        if facts & bridge::element_adjustment_fact::HAS_DERIVED_PRESENTATIONAL_HINTS != 0 {
-            counters.bump(Counter::EngineComputedRecordBailWinnerElement);
-            return None;
-        }
         // An element's animations compose into its style in the C++ computation, and the record it
         // holds is the one they were composed into. Deriving another record from it, or moving it
         // to another environment, would publish the composition as if it were the element's own
@@ -660,14 +654,10 @@ impl RetainedState {
         // record was computed from has moved, and the overlay on it is the host's either way.
         let animations_bind_the_record = facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0;
         let Some(old_style_record) = self.computed_group_sets.assigned_style_record(node) else {
-            // Presentational hints are mapped from the attributes by the C++ computation, which
-            // publishes them as the element's declarations: a first record waits for that
-            // computation, and an attribute change asks for it through a recorded input, so a
-            // later record's winners carry the hints.
             // A first record for an element that already animates would be a record the engine
             // computed for a style the host composes into, and the plan it may leave was decided
             // against the animations the host published, which are not the only ones it holds.
-            if facts & bridge::element_adjustment_fact::HAS_PRESENTATIONAL_HINTS != 0 || animations_bind_the_record {
+            if animations_bind_the_record {
                 counters.bump(Counter::EngineComputedRecordBailWinnerElement);
                 return None;
             }
@@ -3103,13 +3093,9 @@ impl RetainedState {
         if self.node_declares_custom_properties(node) {
             return;
         }
-        // A record C++ computed for an element with hints or animations is not what its winner
-        // state alone describes.
-        if facts
-            & (bridge::element_adjustment_fact::HAS_PRESENTATIONAL_HINTS
-                | bridge::element_adjustment_fact::HAS_ANIMATIONS)
-            != 0
-        {
+        // A record C++ computed for an element with animations is not what its winner state alone
+        // describes.
+        if facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0 {
             return;
         }
         // A state minted before the winner groups were evicted names nothing in the table now.

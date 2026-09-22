@@ -1,5 +1,6 @@
 initial: inset 1px rgb(0, 0, 0), padding 2px
 table colour change: inset 1px rgb(0, 0, 255), padding 2px
+table colour change stays in the engine: true
 cellpadding change: inset 1px rgb(0, 0, 255), padding 5px
 border removed: none 0px rgb(0, 0, 0), padding 5px
 border restored: inset 1px rgb(0, 0, 255), padding 5px
