@@ -66,6 +66,7 @@ struct ComputedFontFamilyName {
 using ComputedFontFamily = Variant<GenericFontFamily, ComputedFontFamilyName>;
 
 struct ComputedFontCacheKey {
+    u32 tree_scope { 0 };
     Vector<ComputedFontFamily> font_families;
     FontOpticalSizing font_optical_sizing;
     CSSPixels font_size;
@@ -77,6 +78,9 @@ struct ComputedFontCacheKey {
 
     [[nodiscard]] bool operator==(ComputedFontCacheKey const& other) const = default;
 };
+
+using FontFeatureValuesTable = HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>>;
+using ScopedFontFeatureValuesTables = HashMap<u32, FontFeatureValuesTable>;
 
 class FontLoader final : public GC::Cell {
     GC_CELL(FontLoader, GC::Cell);
@@ -164,7 +168,7 @@ public:
     // funnel that bumps the generation, and nowhere else.
     [[nodiscard]] void const* published_font_faces() const { return m_published_font_faces; }
     [[nodiscard]] FontCascadeMemo& font_cascade_memo() const { return *m_font_cascade_memo; }
-    [[nodiscard]] HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>> const& published_font_feature_values() const;
+    [[nodiscard]] ScopedFontFeatureValuesTables const& published_font_feature_values() const;
 
 private:
     virtual void visit_edges(Visitor&) override;
@@ -188,7 +192,7 @@ private:
     // Shared rather than owned: the style stage's between-pass batch fills this too.
     NonnullRefPtr<FontCascadeMemo> m_font_cascade_memo;
     mutable HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>> m_font_feature_values_cache;
-    mutable HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>> m_published_font_feature_values;
+    mutable ScopedFontFeatureValuesTables m_published_font_feature_values;
     mutable bool m_font_feature_values_snapshot_dirty { true };
 
     bool m_has_completed_initial_paint { false };
@@ -214,7 +218,7 @@ template<>
 struct Traits<Web::CSS::ComputedFontCacheKey> : public DefaultTraits<Web::CSS::ComputedFontCacheKey> {
     static unsigned hash(Web::CSS::ComputedFontCacheKey const& key)
     {
-        unsigned hash = 0;
+        unsigned hash = key.tree_scope;
         for (auto const& family : key.font_families) {
             if (family.has<Web::CSS::GenericFontFamily>()) {
                 hash = pair_int_hash(hash, to_underlying(family.get<Web::CSS::GenericFontFamily>()));

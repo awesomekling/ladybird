@@ -6322,6 +6322,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             .computed_property_words = computed_properties_to_evaluate,
             .font_length_resolution_context = font_length_resolution_context,
             .font_environment_generation = style_computer.document().font_computer().environment_generation(),
+            .tree_scope = abstract_element.style_scope().style_engine_tree_scope().value(),
             .style_engine = style_computer.style_engine().rust_handle(),
             .custom_property_store = custom_property_store,
             .resolved_parent_custom_property_store = resolved_parent_custom_property_store,

@@ -34,6 +34,7 @@ impl FontService {
 
 struct FontResolutionKey {
     font_family: RetainedStyleValueData,
+    tree_scope: u32,
     font_feature_values: [Option<RetainedStyleValueData>; FONT_RESOLUTION_FEATURE_INPUT_COUNT],
     font_size_raw: i32,
     font_slope: i32,
@@ -50,6 +51,7 @@ impl FontResolutionKey {
                     request.font_family.as_pointer().cast(),
                 ))
             },
+            tree_scope: request.tree_scope,
             font_feature_values: retained_feature_values(&request),
             font_size_raw: request.font_size_raw,
             font_slope: request.font_slope,
@@ -63,6 +65,7 @@ impl FontResolutionKey {
 impl PartialEq for FontResolutionKey {
     fn eq(&self, other: &Self) -> bool {
         self.font_family == other.font_family
+            && self.tree_scope == other.tree_scope
             && self.font_feature_values == other.font_feature_values
             && self.font_size_raw == other.font_size_raw
             && self.font_slope == other.font_slope
@@ -77,6 +80,7 @@ impl Eq for FontResolutionKey {}
 impl Hash for FontResolutionKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         unsafe { style_value_content_hash(self.font_family.pointer()) }.hash(state);
+        self.tree_scope.hash(state);
         for value in &self.font_feature_values {
             value
                 .as_ref()
@@ -305,6 +309,7 @@ mod tests {
         let mut resolver = FontResolutionCache::default();
         let mut request = FfiFontResolutionRequest {
             font_family: crate::css::style::bridge::FfiHostHandle::from_pointer(family.pointer().cast()),
+            tree_scope: 0,
             font_feature_values: [crate::css::style::bridge::FfiHostHandle::from_pointer(std::ptr::null());
                 FONT_RESOLUTION_FEATURE_INPUT_COUNT],
             font_size_raw: 1024,
@@ -326,6 +331,14 @@ mod tests {
             FontService::ParkedBatch,
         );
         let first = resolver.lookup(request).unwrap();
+        assert!(
+            resolver
+                .lookup(FfiFontResolutionRequest {
+                    tree_scope: 1,
+                    ..request
+                })
+                .is_none()
+        );
         assert_eq!(
             resolver.lookup(request).unwrap().font_cascade_list,
             first.font_cascade_list
@@ -380,6 +393,7 @@ mod tests {
         let family = RetainedStyleValueData::from_owned(StyleValueData::Keyword { keyword: 1 });
         let request = FfiFontResolutionRequest {
             font_family: crate::css::style::bridge::FfiHostHandle::from_pointer(family.pointer().cast()),
+            tree_scope: 0,
             font_feature_values: [crate::css::style::bridge::FfiHostHandle::from_pointer(std::ptr::null());
                 FONT_RESOLUTION_FEATURE_INPUT_COUNT],
             font_size_raw: 1024,

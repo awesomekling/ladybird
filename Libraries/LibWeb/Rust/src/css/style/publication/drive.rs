@@ -766,6 +766,7 @@ impl RetainedState {
         };
         let request = bridge::FfiFontResolutionRequest {
             font_family: bridge::FfiHostHandle::from_pointer(font_family.cast()),
+            tree_scope: self.tree.tree_scope(subject.target.node()).0,
             font_feature_values,
             font_size_raw,
             font_slope,

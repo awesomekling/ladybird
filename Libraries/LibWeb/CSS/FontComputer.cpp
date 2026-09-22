@@ -408,7 +408,7 @@ HashMap<FontFeatureValueKey, Vector<u32>> const& FontComputer::font_feature_valu
     return m_font_feature_values_cache.get(family_name).value();
 }
 
-HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>> const& FontComputer::published_font_feature_values() const
+ScopedFontFeatureValuesTables const& FontComputer::published_font_feature_values() const
 {
     if (!m_font_feature_values_snapshot_dirty)
         return m_published_font_feature_values;
@@ -425,8 +425,39 @@ HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>> const& FontCo
     });
 
     m_published_font_feature_values.clear();
+    FontFeatureValuesTable document_values;
     for (auto const& family : families)
-        m_published_font_feature_values.set(family, font_feature_values_for_family(family));
+        document_values.set(family, font_feature_values_for_family(family));
+    m_published_font_feature_values.set(m_document->style_scope().style_engine_tree_scope().value(), move(document_values));
+
+    m_document->for_each_shadow_root([&](DOM::ShadowRoot& shadow_root) {
+        FontFeatureValuesTable scope_values;
+        shadow_root.style_scope().for_each_active_css_style_sheet([&](CSS::StyleSheetState const& sheet) {
+            sheet.for_each_effective_rule_data(TraversalOrder::Preorder, [&](RustRuleView const& rule, Utf16View) {
+                if (rule.type() != RustRule::Type::FontFeatureValues)
+                    return;
+                auto values = rule.font_feature_values();
+                for (size_t index = 0; index < values.family_count(); ++index) {
+                    auto family = Utf16FlyString::from_utf16(values.family_at(index));
+                    auto& family_values = scope_values.ensure(family, [] { return HashMap<FontFeatureValueKey, Vector<u32>> {}; });
+                    auto append = [&](FontFeatureValuesRuleKind kind, FontFeatureValueType type) {
+                        values.for_each_entry(kind, [&](auto key, auto feature_values) {
+                            Vector<u32> copy;
+                            copy.append(feature_values.data(), feature_values.size());
+                            family_values.set({ type, Utf16FlyString::from_utf16(key) }, move(copy));
+                        });
+                    };
+                    append(FontFeatureValuesRuleKind::Annotation, FontFeatureValueType::Annotation);
+                    append(FontFeatureValuesRuleKind::Ornaments, FontFeatureValueType::Ornaments);
+                    append(FontFeatureValuesRuleKind::Stylistic, FontFeatureValueType::Stylistic);
+                    append(FontFeatureValuesRuleKind::Swash, FontFeatureValueType::Swash);
+                    append(FontFeatureValuesRuleKind::CharacterVariant, FontFeatureValueType::CharacterVariant);
+                    append(FontFeatureValuesRuleKind::Styleset, FontFeatureValueType::Styleset);
+                }
+            });
+        });
+        m_published_font_feature_values.set(shadow_root.style_scope().style_engine_tree_scope().value(), move(scope_values));
+    });
     m_font_feature_values_snapshot_dirty = false;
     return m_published_font_feature_values;
 }

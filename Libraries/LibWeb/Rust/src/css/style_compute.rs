@@ -2749,6 +2749,7 @@ pub struct FfiLonghandTransactionInput {
     pub computed_property_words: *const u64,
     pub font_length_resolution_context: FfiLengthResolutionContext,
     pub font_environment_generation: u64,
+    pub tree_scope: u32,
     pub style_engine: *const c_void,
     pub custom_property_store: *const c_void,
     pub resolved_parent_custom_property_store: *const c_void,
@@ -6162,6 +6163,7 @@ unsafe fn compute_longhands(
     };
     let font_request = crate::css::style::bridge::FfiFontResolutionRequest {
         font_family: crate::css::style::bridge::FfiHostHandle::from_pointer(font_family.cast()),
+        tree_scope: input.tree_scope,
         font_feature_values,
         font_size_raw: crate::css::css_pixels::CssPixels::nearest_value_for(font_size).raw_value(),
         font_slope,

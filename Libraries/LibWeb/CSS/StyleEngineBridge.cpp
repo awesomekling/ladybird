@@ -60,6 +60,7 @@ static StyleEngineFFI::FfiResolvedFont resolve_font(FontCascadeMemo& memo, FontF
     }
     auto font_feature_data = font_feature_data_from_style_values(feature_values);
     ComputedFontCacheKey key {
+        .tree_scope = request.tree_scope,
         .font_families = computed_font_families_from_style_value(*font_family),
         .font_optical_sizing = static_cast<FontOpticalSizing>(request.font_optical_sizing),
         .font_size = CSSPixels::from_raw(request.font_size_raw),

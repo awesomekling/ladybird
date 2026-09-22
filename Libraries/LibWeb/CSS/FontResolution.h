@@ -88,7 +88,7 @@ public:
     static NonnullRefPtr<FontCascadeMemo> create() { return adopt_ref(*new FontCascadeMemo); }
 
     [[nodiscard]] NonnullRefPtr<Gfx::FontCascadeList const> resolve(FontFaceSnapshotView const&, ComputedFontCacheKey const&, FontFeatureValuesProvider const* = nullptr);
-    void publish_font_feature_values(HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>> const&);
+    void publish_font_feature_values(ScopedFontFeatureValuesTables const&);
 
     // Answers every remembered resolution, so the caller can decide which a change to the table
     // has made stale, and forgets the ones it says so about.
@@ -107,7 +107,7 @@ private:
 
     Mutex m_mutex;
     HashMap<ComputedFontCacheKey, Entry> m_cascades;
-    HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>> m_font_feature_values;
+    ScopedFontFeatureValuesTables m_font_feature_values;
 };
 
 // Resolve a font cascade from the published table and the process-wide font services alone. This
