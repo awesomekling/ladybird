@@ -778,7 +778,27 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         && !style_engine.style_records_match_for_verification(reaction.style_node, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, previous_style_record);
                     style_engine.consume_recorded_element_style_input_change(reaction.style_node);
                     bool verification_did_change_custom_properties = false;
+                    // The dependency marks the row leaves on the element. They are what the
+                    // invalidators read afterwards, and they are cleared and rewritten by a C++
+                    // computation, so a row the engine answers leaves whatever the last computation
+                    // left. Over-setting one costs work; leaving one unset that the computation
+                    // would set costs an invalidation, so only that direction is reported.
+                    auto const dependency_marks = [&] {
+                        return (u32(element->style_uses_attr_css_function()) << 0)
+                            | (u32(element->style_uses_var_css_function()) << 1)
+                            | (u32(element->style_uses_if_css_function()) << 2)
+                            | (u32(element->style_uses_custom_function()) << 3)
+                            | (u32(element->style_uses_inherit_css_function()) << 4)
+                            | (u32(element->style_uses_tree_counting_function()) << 5)
+                            | (u32(element->style_depends_on_viewport_metrics()) << 6)
+                            | (u32(element->style_depends_on_size_container_query()) << 7)
+                            | (u32(element->style_depends_on_style_container_query()) << 8);
+                    };
+                    auto const marks_the_engine_row_left = dependency_marks();
                     invalidation = element->apply_style_engine_reaction(verification_did_change_custom_properties, DOM::Element::StyleRecomputeMode::Verification);
+                    if (auto const missing = dependency_marks() & ~marks_the_engine_row_left; missing != 0) {
+                        dbgln("Engine record for {} leaves dependency marks {:#x} unset that the computation sets", element->debug_description(), missing);
+                    }
                     auto packed = style_engine.compare_style_records(StyleRecordID { reaction.new_style_record }, element->style_record_identity(), true, false, false);
                     if (packed & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged)
                         && !style_engine.style_records_match_for_verification(reaction.style_node, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, element->style_record_identity())) {
