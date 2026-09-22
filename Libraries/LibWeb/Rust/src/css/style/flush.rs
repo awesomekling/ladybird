@@ -2029,9 +2029,6 @@ impl StyleEngineState {
                         .assigned_style_record(node)
                         .map_or(0, |style_record| style_record.raw());
                     // A record computed from an answer declaring past its winners (custom properties,
-                    // `all`) is no function of a winner state: the engine derives nothing from it.
-                    let previous_answer_was_incomplete =
-                        self.retained.computed_group_sets.node_answer_is_incomplete(node);
                     // Custom properties alone leave an answer complete enough: the engine computes
                     // the environment they decide.
                     let answer_is_incomplete = !answer_winners_are_complete
@@ -2142,13 +2139,11 @@ impl StyleEngineState {
                         counters.bump(Counter::EngineComputedRecordBailSubstitution);
                         decline_cause = "GateSubstitution";
                         false
-                    } else if previous_answer_was_incomplete
-                        || selector_truth_changes.deltas_for(node).iter().any(|delta| {
-                            !self
-                                .program
-                                .declarations_are_complete_but_for_custom_properties(delta.rule)
-                        })
-                    {
+                    } else if selector_truth_changes.deltas_for(node).iter().any(|delta| {
+                        !self
+                            .program
+                            .declarations_are_complete_but_for_custom_properties(delta.rule)
+                    }) {
                         // Custom declarations are resolved by the engine's environment computation.
                         // Other declarations missing from the winner columns still require C++.
                         counters.bump(Counter::EngineComputedRecordGateIncompleteAnswer);
