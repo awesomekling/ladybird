@@ -2343,6 +2343,33 @@ RefPtr<CSS::CustomPropertyData const> Element::custom_property_environment_of_en
     return data;
 }
 
+// https://drafts.csswg.org/css-anchor-position-1/#determining
+// Update the anchor name registry when anchor-name changes.
+// FIXME: The tree root should be determined by the stylesheet origin, not the element's position in the tree.
+void Element::update_anchor_name_registry(CSS::ComputedValues const* old_computed_values, CSS::ComputedValues const& new_style)
+{
+    if (!is_connected())
+        return;
+    auto scope = anchor_name_scope_of(*this, root());
+    bool element_had_registered_anchor_names = false;
+    if (old_computed_values) {
+        for (auto const& name : old_computed_values->anchor_names()) {
+            element_had_registered_anchor_names = true;
+            scope.names.unregister_name(name, *this, scope.host);
+        }
+    }
+    bool element_has_anchor_names = false;
+    for (auto const& name : new_style.anchor_names()) {
+        element_has_anchor_names = true;
+        scope.names.register_name(name, *this, scope.host);
+    }
+
+    // Anchor names that vanish here become invisible to the partial relayout planner's
+    // subtree check, while positioned boxes anywhere may hold geometry resolved against them.
+    if (element_had_registered_anchor_names && !element_has_anchor_names)
+        document().record_partial_relayout_escape(PartialRelayoutEscapeReason::AnchorNamesUnregisteredByStyleChange);
+}
+
 CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, bool& did_change_custom_properties)
 {
     VERIFY(parent());
@@ -2374,6 +2401,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         // with the pseudo-element styles it still computes.
         install_custom_property_environment();
         set_computed_style({}, new_style_record);
+        update_anchor_name_registry(nullptr, *computed_style());
         if (is_document_element())
             style_computer.update_root_element_font_metrics(*computed_style());
         counters.element_computed_style_changes++;
@@ -2383,10 +2411,10 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         apply_computed_style_to_layout_node_if_needed(invalidation);
         return invalidation;
     }
-    // The engine derives records this way only when the element's anchor names and animation names
-    // are exactly what they were; what is left to decide is what the layout tree and paint need.
-    // The record itself may be the one the element holds, when the reaction moved only its
-    // pseudo-elements. Its custom properties may have moved with it: the engine resolves the
+    // The engine derives records this way only when the element's animation names are exactly what
+    // they were; what is left to decide is what the layout tree and paint need, and the anchor
+    // names the record registers. The record itself may be the one the element holds, when the
+    // reaction moved only its pseudo-elements. Its custom properties may have moved with it: the engine resolves the
     // element's own declarations, and a moved environment is what its descendants react to.
     CSS::StyleComputer::ComputedStyleInvalidation result;
     if (new_style_record != old_style_record) {
@@ -2417,6 +2445,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         // the next computation on this element derives a fresh one.
         set_style_input_record(nullptr);
         set_computed_style({}, new_style_record);
+        update_anchor_name_registry(&*old_computed_values, *new_computed_values);
         if (is_document_element()) {
             // Root-relative units read document-global font metrics rather than inherited style.
             // Every descendant must recompute when they move.
@@ -2634,29 +2663,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_style_engine_reaction(b
         invalidation.recompute_descendant_styles = true;
     }
 
-    // https://drafts.csswg.org/css-anchor-position-1/#determining
-    // Update the anchor name registry when anchor-name changes.
-    // FIXME: The tree root should be determined by the stylesheet origin, not the element's position in the tree.
-    if (is_connected()) {
-        auto scope = anchor_name_scope_of(*this, root());
-        bool element_had_registered_anchor_names = false;
-        if (old_computed_values) {
-            for (auto const& name : old_computed_values->anchor_names()) {
-                element_had_registered_anchor_names = true;
-                scope.names.unregister_name(name, *this, scope.host);
-            }
-        }
-        bool element_has_anchor_names = false;
-        for (auto const& name : new_style->anchor_names()) {
-            element_has_anchor_names = true;
-            scope.names.register_name(name, *this, scope.host);
-        }
-
-        // Anchor names that vanish here become invisible to the partial relayout planner's
-        // subtree check, while positioned boxes anywhere may hold geometry resolved against them.
-        if (element_had_registered_anchor_names && !element_has_anchor_names)
-            document().record_partial_relayout_escape(PartialRelayoutEscapeReason::AnchorNamesUnregisteredByStyleChange);
-    }
+    update_anchor_name_registry(old_computed_values ? &*old_computed_values : nullptr, *new_style);
 
     // Which animations an element references is an index StyleEngine keeps, in the same shape as the
     // anchor-name registry above: nothing about selector matching can say it, and without it a

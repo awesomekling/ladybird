@@ -806,6 +806,7 @@ impl RetainedState {
             // batch as an effect of the row.
             if property_starts_animation_or_counter_environment(property)
                 && !(owes_a_transition_step && longhand_only_declares_a_css_transition(property))
+                && !self.counter_environment_winner_keeps_the_record(node, state, old_style_record, property)
             {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
@@ -1506,8 +1507,50 @@ impl RetainedState {
             // font is not one the engine resolves yet: the record would be derived and abandoned.
             return self.display_winner_is_list_item(state);
         }
-        property_starts_animation_or_counter_environment(property)
+        property == prop::ANCHOR_NAME
+            || property_starts_animation_or_counter_environment(property)
             || (computed_group_dependency_mask(property).is_none() && !font_group_carries_longhand(property))
+    }
+
+    /// Whether a moved `content` or `list-style-type` winner leaves the record's counter-style
+    /// environment where it is: the record it moves away from names none, and the winner's value
+    /// reads none, so the identity the engine copies from the old record stays right. C++ names the
+    /// environment on a record only when a named counter style has to be resolved against it.
+    ///
+    /// A node declaring custom properties is left to C++ with such a winner: the environment the
+    /// engine would name for it may be one the host resolved and no longer installs, and the host
+    /// then computes the element and its children over again.
+    fn counter_environment_winner_keeps_the_record(
+        &self,
+        node: StyleNodeID,
+        state: CascadeStateID,
+        old_style_record: computed::FinalStyleRecordID,
+        property: u16,
+    ) -> bool {
+        use crate::css::property_metadata::property_id as prop;
+        if property != prop::CONTENT && property != prop::LIST_STYLE_TYPE {
+            return false;
+        }
+        if self.node_declares_custom_properties(node) {
+            return false;
+        }
+        if self
+            .computed_group_sets
+            .style_record_view(old_style_record.raw())
+            .is_none_or(|view| view.counter_style_environment_identity != 0)
+        {
+            return false;
+        }
+        if property == prop::LIST_STYLE_TYPE {
+            return !self.list_style_type_winner_reads_counter_style_environment(state);
+        }
+        self.winner_groups
+            .winner_in_state(state, prop::CONTENT)
+            .and_then(|winner| self.winner_groups.resolved_winner(winner))
+            .is_some_and(|winner| match self.specified_values.value(winner.key.value) {
+                Lookup::Known(value) => content_value_is_engine_computable(value),
+                _ => false,
+            })
     }
 
     fn display_winner_is_list_item(&self, state: CascadeStateID) -> bool {
@@ -1555,7 +1598,7 @@ impl RetainedState {
         if winner.property == prop::LIST_STYLE_TYPE {
             return self.list_style_type_value_reads_counter_style_environment(winner);
         }
-        property_starts_animation_or_counter_environment(winner.property)
+        winner.property == prop::ANCHOR_NAME || property_starts_animation_or_counter_environment(winner.property)
     }
 
     fn record_requires_cpp_animation(&self, record: computed::FinalStyleRecordID) -> bool {
@@ -4678,8 +4721,9 @@ fn property_starts_animation_or_counter_environment(property: u16) -> bool {
     if !(FIRST_LONGHAND_PROPERTY_ID..=LAST_LONGHAND_PROPERTY_ID).contains(&property) {
         return true;
     }
-    // A view transition name is a plain computed value; it starts nothing.
-    matches!(property, prop::CONTENT | prop::LIST_STYLE_TYPE | prop::ANCHOR_NAME)
+    // A view transition name is a plain computed value; it starts nothing. An anchor name is one
+    // the host registers from whichever record it installs.
+    matches!(property, prop::CONTENT | prop::LIST_STYLE_TYPE)
         || (property != prop::VIEW_TRANSITION_NAME
             && property_style_group_index(property)
                 .is_some_and(|group| usize::from(group) == crate::css::table_group_builder::group_index::ANIMATION))
