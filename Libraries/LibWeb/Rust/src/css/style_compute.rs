@@ -4446,6 +4446,10 @@ pub struct FfiLonghandDriverResults {
     /// the parent. `u32::MAX` means the owning group is unknown.
     pub explicitly_inherited_non_inherited_style_groups: u32,
     pub uses_tree_counting_function: bool,
+    /// A longhand whose value the native computation cannot absolutize with the context it was
+    /// given: a container-relative length with no basis is the one that occurs. The caller drives
+    /// nothing from such a table; the row belongs to whoever can supply what is missing.
+    pub unsupported_native_computation: bool,
     pub post_adjusted_longhands: u8,
     /// https://drafts.csswg.org/css-pseudo-4/#paired-defaults
     pub highlight_colors_authored: bool,
@@ -4472,6 +4476,7 @@ pub(crate) fn empty_longhand_driver_results() -> FfiLonghandDriverResults {
         font_metrics_depend_on_viewport_metrics: false,
         explicitly_inherited_non_inherited_style_groups: 0,
         uses_tree_counting_function: false,
+        unsupported_native_computation: false,
         post_adjusted_longhands: 0,
         highlight_colors_authored: false,
         highlight_color_is_current_color: false,
@@ -5698,8 +5703,12 @@ pub(crate) unsafe fn drive_property_computation(
                     }
                     NativeValue::StyleValue(value) => (COMPUTED_KIND_STYLE_VALUE, 0.0, Arc::into_raw(value).cast()),
                     NativeValue::Unchanged => (COMPUTED_KIND_UNCHANGED, 0.0, std::ptr::null()),
+                    // Not every value can be absolutized with the context this drive was given:
+                    // a container-relative length needs a basis only the host can measure. Say so
+                    // and let the caller decide, rather than treating it as impossible.
                     NativeValue::Unsupported => {
-                        unreachable!("unsupported native computation for longhand property {inherited_property_id}")
+                        results.unsupported_native_computation = true;
+                        (COMPUTED_KIND_UNCHANGED, 0.0, std::ptr::null())
                     }
                 };
                 ComputedStoreEntry {
