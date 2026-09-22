@@ -1,3 +1,5 @@
+initial consumers answered by engine: true
+initial C++ recomputations: 0
 all shared consumers update: true
 records were shared: true
 all shared consumers restore: true
