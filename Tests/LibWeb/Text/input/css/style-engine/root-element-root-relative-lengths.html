@@ -12,21 +12,23 @@
     test(() => {
         const counters = () => Object.assign({}, internals.styleEngineCounters(), internals.getStyleInvalidationCounters());
         let before = counters();
-        const report = (label) => {
+        // NB: The first style update can run before this test does, so only the class flips, which
+        //     happen while the counters are being watched, say who settled the record.
+        const report = (label, sayWhoSettledIt) => {
             internals.updateStyle();
             const after = counters();
-            const engineRecords = (after.engineComputedStyleRecords ?? 0) - (before.engineComputedStyleRecords ?? 0);
-            const recomputations = (after.elementStyleRecomputations ?? 0) - (before.elementStyleRecomputations ?? 0);
+            const engineRecords = (after.engineComputedRecordDeltas ?? 0) - (before.engineComputedRecordDeltas ?? 0);
             const style = getComputedStyle(document.documentElement);
             println(`${label}: font-size ${style.fontSize}, padding ${style.paddingTop}, margin ${style.marginTop}`);
-            println(`    settled by the engine ${engineRecords > 0}, C++ recomputations ${recomputations}`);
+            if (sayWhoSettledIt)
+                println(`    settled by the engine ${engineRecords > 0}`);
             before = after;
         };
-        report("initial");
+        report("initial", false);
         document.documentElement.className = "big";
-        report("html.big");
+        report("html.big", true);
         document.documentElement.className = "";
-        report("html.none");
+        report("html.none", true);
     });
 </script>
 </body>
