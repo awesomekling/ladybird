@@ -13,6 +13,9 @@
 #include <LibGfx/RustProcessState.h>
 #include <RustFFI.h>
 
+namespace Gfx {
+
+// NB: Declared in the namespace the definitions below are in, so each has a previous declaration.
 extern "C" {
 void* ladybird_gfx_decoded_image_frame_retain(void const*, Gfx::FFI::FfiImageFrameSnapshot*);
 void ladybird_gfx_decoded_image_frame_release(void*);
@@ -30,8 +33,6 @@ void ladybird_gfx_process_note_crate_copy(void const* marker);
 size_t ladybird_gfx_process_crate_copies_seen();
 size_t ladybird_gfx_process_wanted_pending_face_count();
 }
-
-namespace Gfx {
 
 namespace {
 
