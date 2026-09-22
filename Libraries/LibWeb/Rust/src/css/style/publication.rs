@@ -1030,29 +1030,6 @@ impl RetainedState {
                 && !(owes_an_animation_plan && longhand_declares_a_css_animation(property))
                 && !self.counter_environment_winner_keeps_the_record(node, state, old_style_record, property)
             {
-                if crate::css::style::seal::is_reporting() {
-                    use crate::css::property_metadata::property_id as prop;
-                    let stamped = self
-                        .computed_group_sets
-                        .style_record_view(old_style_record.raw())
-                        .is_none_or(|view| view.counter_style_environment_identity != 0);
-                    let value_plain = self
-                        .winner_groups
-                        .winner_in_state(state, property)
-                        .and_then(|winner| self.winner_groups.resolved_winner(winner))
-                        .is_some_and(|winner| match self.specified_values.value(winner.key.value) {
-                            Lookup::Known(value) => content_value_is_engine_computable(value),
-                            _ => false,
-                        });
-                    crate::css::style::seal::note_probe(match (property, stamped, value_plain) {
-                        (prop::CONTENT, true, true) => "content: old record stamped",
-                        (prop::CONTENT, true, false) => "content: stamped and value not plain",
-                        (prop::CONTENT, false, false) => "content: value not plain",
-                        (prop::CONTENT, false, true) => "content: other",
-                        (prop::LIST_STYLE_TYPE, ..) => "list-style-type",
-                        _ => "other property",
-                    });
-                }
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
             }
