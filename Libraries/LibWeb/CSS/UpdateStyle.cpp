@@ -260,6 +260,41 @@ static void verify_engine_computed_record_font(DOM::Element& element, StyleRecor
     VERIFY(engine_font == installed_font);
 }
 
+// Name what differs before the comparison fails. Several streams read this mode's output, and a
+// record comparison that says only "not equal" leaves the whole record to search.
+static void report_engine_computed_record_difference(StyleEngine& style_engine, DOM::Element const& element, u8 pseudo_kind, StyleRecordID engine_record, StyleRecordID installed)
+{
+    auto engine_view = style_engine.style_record_view(engine_record);
+    auto installed_view = style_engine.style_record_view(installed);
+    StringBuilder builder;
+    builder.appendff("Engine record {} differs from the computation's {} for {}", engine_record.value(), installed.value(), element.debug_description());
+    if (pseudo_kind != NumericLimits<u8>::max())
+        builder.appendff(" pseudo-element kind {}", pseudo_kind);
+    if (!engine_view.present || !installed_view.present || engine_view.payload_count != installed_view.payload_count) {
+        builder.appendff(", payload counts {} and {}", engine_view.payload_count, installed_view.payload_count);
+    } else {
+        builder.append(", style groups"sv);
+        for (size_t index = 0; index < engine_view.payload_count; ++index) {
+            if (engine_view.payloads[index] == installed_view.payloads[index])
+                continue;
+            if (ComputedValuesFFI::rust_style_group_payloads_equal(index, engine_view.payloads[index], installed_view.payloads[index]))
+                continue;
+            builder.appendff(" {}", index);
+            if (index != ComputedValues::FontValues::style_group_index)
+                continue;
+            // The font group carries the resolved cascade beside its own values, and a difference
+            // in either reads the same here without it.
+            auto const* engine_font_values = static_cast<ComputedValues::FontValues const*>(engine_view.payloads[index]);
+            auto const* installed_font_values = static_cast<ComputedValues::FontValues const*>(installed_view.payloads[index]);
+            builder.appendff(" (size {} vs {}, weight {} vs {}, cascade {} vs {})",
+                engine_font_values->font_size, installed_font_values->font_size,
+                engine_font_values->font_weight, installed_font_values->font_weight,
+                describe_resolved_font(engine_font_values->font_list_value()), describe_resolved_font(installed_font_values->font_list_value()));
+        }
+    }
+    dbgln("{}", builder.string_view());
+}
+
 // Under verification, the environment the engine resolved for a record must hold, name for name,
 // what the C++ computation installed on the element.
 static void verify_engine_computed_record_environment(DOM::Element& element, StyleRecordID style_record)
@@ -735,8 +770,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     bool verification_did_change_custom_properties = false;
                     invalidation = element->apply_style_engine_reaction(verification_did_change_custom_properties, DOM::Element::StyleRecomputeMode::Verification);
                     auto packed = style_engine.compare_style_records(StyleRecordID { reaction.new_style_record }, element->style_record_identity(), true, false, false);
-                    VERIFY(!(packed & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged))
-                        || style_engine.style_records_match_for_verification(reaction.style_node, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, element->style_record_identity()));
+                    if (packed & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged)
+                        && !style_engine.style_records_match_for_verification(reaction.style_node, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, element->style_record_identity())) {
+                        report_engine_computed_record_difference(style_engine, *element, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, element->style_record_identity());
+                        VERIFY_NOT_REACHED();
+                    }
                     // A custom-property environment reaction can jump over ancestors whose computed
                     // values did not change. Their engine environments are authoritative, but the
                     // legacy verification pass never materialized them, so it has no independent
@@ -763,8 +801,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         }
                         VERIFY(!!installed);
                         auto pseudo_packed = style_engine.compare_style_records(*engine_record, installed, true, false, false);
-                        VERIFY(!(pseudo_packed & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged))
-                            || style_engine.style_records_match_for_verification(reaction.style_node, kind, *engine_record, installed));
+                        if (pseudo_packed & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged)
+                            && !style_engine.style_records_match_for_verification(reaction.style_node, kind, *engine_record, installed)) {
+                            report_engine_computed_record_difference(style_engine, *element, static_cast<u8>(kind), *engine_record, installed);
+                            VERIFY_NOT_REACHED();
+                        }
                     }
                     // A skipped ancestor can make the engine record temporarily unattachable only
                     // because the verification pass installed a legacy environment on that
