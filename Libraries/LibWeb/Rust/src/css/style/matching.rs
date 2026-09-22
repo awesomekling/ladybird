@@ -1085,6 +1085,35 @@ impl RetainedState {
         }
     }
 
+    pub(super) fn discard_private_record_demand_matching_batch(&mut self) {
+        let Some(mut traversal) = self.batch_matching_traversal.take() else {
+            return;
+        };
+        std::mem::take(&mut traversal.answer_effects)
+            .release_pending_all(&mut self.match_answers, &mut self.winner_groups);
+        traversal.pending_published.release();
+        if let Some(batch) = traversal.batch {
+            self.memory
+                .release(MemoryCategory::BatchScratch, batch.capacity_bytes());
+        }
+        if let Some(topology) = traversal.topology {
+            self.memory
+                .release(MemoryCategory::BatchScratch, topology.capacity_bytes());
+        }
+        traversal.ancestor_requirements.release(&mut self.memory);
+        self.memory
+            .release(MemoryCategory::BatchScratch, traversal.match_workspace_bytes);
+        self.memory
+            .release(MemoryCategory::BatchScratch, traversal.dispatch_workspace_bytes);
+        self.memory.release(
+            MemoryCategory::BatchScratch,
+            traversal.cascade_compaction_workspace_bytes,
+        );
+        let mut caches = self.prefix_caches.borrow_mut();
+        caches.states.release();
+        caches.answers.release(&mut self.match_answers);
+    }
+
     /// Every element the document holds, shadow trees included, in tree order per tree.
     ///
     /// A host's shadow tree is not below it in the style tree, so a preorder from the document

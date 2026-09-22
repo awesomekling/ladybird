@@ -579,7 +579,7 @@ impl RetainedState {
         Some(())
     }
 
-    fn drop_demand_pseudo_record(&mut self, node: StyleNodeID, kind: u8) {
+    pub(super) fn drop_demand_pseudo_record(&mut self, node: StyleNodeID, kind: u8) {
         if let Some(record) = self.demand_pseudo_records.remove(&(node, kind)) {
             self.computed_group_sets.unpin_style_record(record.raw());
         }

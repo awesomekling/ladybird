@@ -2426,8 +2426,51 @@ fn pseudo_record_demand_reports_absence_without_rules() {
             longhand_table: HostShared::null(),
         },
     );
-    let answer = engine.answer_record_demand(nodes[1], Some(2), false, false);
+    let answer = engine.answer_record_demand(nodes[1], Some(2), false, false, false);
     assert!(matches!(answer, Ok(None)), "{answer:?}");
+}
+
+#[test]
+fn read_only_pseudo_demand_does_not_publish_match_state() {
+    let (mut engine, nodes) = linear_document();
+    for &node in &nodes {
+        set_atom_feature(&mut engine, node, LocalFeatureKey::TagName, StyleAtomID(100));
+    }
+    discard_transaction(&mut engine);
+    engine.publish_computed_groups(
+        computed::ComputedStyleTarget::new(nodes[1], u8::MAX),
+        &[],
+        0,
+        0,
+        computed::ComputedMetadataInput {
+            pseudo_element_styles: 0,
+            dependency_flags: 0,
+            counter_style_environment_identity: 0,
+            animation_overlay_identity: 0,
+            animated_overlay: HostShared::null(),
+            animation_overlay_payloads: &[],
+            longhand_table: HostShared::null(),
+        },
+    );
+    let retained_answers = engine.retained_match_answers.column.clone();
+    let retained_cascade_inputs = engine.retained_match_answers.cascade_input_column.clone();
+    let winner_generation = engine.winner_groups.generation();
+    let winner_rows: Vec<_> = engine.winner_groups.pseudo_states(nodes[1]).collect();
+    let published_count = engine.published_match_answers.entries.len();
+
+    let answer = engine.answer_record_demand(nodes[1], Some(2), false, false, true);
+    assert!(matches!(answer, Ok(None)), "{answer:?}");
+    assert_eq!(engine.retained_match_answers.column, retained_answers);
+    assert_eq!(
+        engine.retained_match_answers.cascade_input_column,
+        retained_cascade_inputs
+    );
+    assert_eq!(engine.winner_groups.generation(), winner_generation);
+    assert_eq!(
+        engine.winner_groups.pseudo_states(nodes[1]).collect::<Vec<_>>(),
+        winner_rows
+    );
+    assert_eq!(engine.published_match_answers.entries.len(), published_count);
 }
 
 #[test]

@@ -4857,14 +4857,16 @@ impl RetainedState {
 }
 
 impl StyleEngineState {
-    /// Answer an observation of one node against current facts without draining the document's
-    /// transaction. The match is cold: no winner row from the preceding batch is read.
+    /// Answer an observation of one node without draining the document's transaction. A
+    /// read-only observation uses a retained match answer or a private matching traversal and
+    /// leaves the published winner rows and invalidation facts untouched.
     pub(crate) fn answer_record_demand(
         &mut self,
         node: StyleNodeID,
         pseudo: Option<u8>,
         exclude_inline_style: bool,
         targeted: bool,
+        read_only: bool,
         counters: &mut Counters,
     ) -> Result<Option<RetriedEngineRecord>, &'static str> {
         if pseudo.is_some_and(|kind| {
@@ -4916,82 +4918,204 @@ impl StyleEngineState {
             ancestor = self.tree.flat_tree_parent(parent);
         }
 
+        if read_only
+            && (self.engine_computed_records_pending.contains_key(&node)
+                || self.batch_pinned_compositions.iter().any(|(owner, _)| *owner == node))
+        {
+            return Err("GateReaction");
+        }
+        let previous_container_inputs = read_only.then(|| self.container_query_inputs.get(node).cloned());
+        let previous_substitution = read_only.then(|| self.nodes_with_substituted_records.contains(&node));
+        let previous_explicit_inheritance =
+            read_only.then(|| self.nodes_owing_explicit_inheritance.get(&node).copied());
+        let previous_container_effect = read_only.then(|| self.container_effects_for_host.get(&node).cloned());
+        let mut private_origin_record = None;
         if pseudo.is_some() && self.computed_group_sets.assigned_style_record(node).is_none() {
-            self.answer_record_demand(node, None, false, targeted, counters)?;
+            let parent = self.answer_record_demand(node, None, false, targeted, read_only, counters)?;
+            if read_only {
+                let record = parent.ok_or("EngineComputedRecordBailRecord")?.style_record;
+                self.computed_group_sets
+                    .assign_shared_style_record(
+                        computed::ComputedStyleTarget::new(node, u8::MAX),
+                        record,
+                        computed::ENGINE_INHERITED_GROUP_COUNT,
+                        false,
+                    )
+                    .ok_or("EngineComputedRecordBailRecord")?;
+                self.set_element_container_query_inputs(node, record);
+                private_origin_record = computed::FinalStyleRecordID::from_raw(record);
+            }
         }
 
-        self.forget_node_match_answer_for_demand(node);
-        if !self.begin_cold_matching_batch(node, counters) {
+        if !read_only {
+            self.forget_node_match_answer_for_demand(node);
+        }
+        let published_answers = read_only.then(|| std::mem::take(&mut self.published_match_answers));
+        if read_only || !self.begin_cold_matching_batch(node, counters) {
             self.begin_adaptive_cold_matching_batch(node, counters);
         }
-        let answer = self.complete_published_match_answer(node, None, counters);
-        self.end_cold_matching_batch(counters);
-        let answer = answer.map_err(|_| "GateIncompleteAnswer")?;
-        let complete =
-            answer.cascade_winners_are_complete || self.cascade_winners_are_complete_but_for_custom_properties(node);
-        self.computed_group_sets.set_node_answer_incomplete(node, !complete);
-        self.retained
-            .published_match_answers
-            .push(answer, &mut self.retained.memory, counters);
-        self.retained.published_match_answers.sort();
-
-        if let Some(kind) = pseudo {
-            let record = self.demand_pseudo_record(node, kind, counters)?;
-            return Ok(record.map(|record| RetriedEngineRecord {
-                style_record: record.raw(),
-                ..RetriedEngineRecord::default()
-            }));
+        let retained_dispatch = read_only
+            .then(|| self.retained_answer_dispatch_for_traversal(true))
+            .flatten();
+        let answer = self.complete_published_match_answer(node, retained_dispatch.as_deref(), counters);
+        if read_only {
+            if let Ok(answer) = &answer {
+                let mut traversal = self
+                    .batch_matching_traversal
+                    .take()
+                    .expect("a demand has a matching traversal");
+                traversal.pending_published.push(
+                    PublishedMatchAnswer {
+                        node,
+                        cascade_input: answer.cascade_input,
+                        matches: answer.matches.clone(),
+                        cascade_winners_are_complete: answer.cascade_winners_are_complete,
+                        observed: false,
+                    },
+                    &mut self.memory,
+                    counters,
+                );
+                traversal.answer_effects.note_published(
+                    node,
+                    traversal.pending_published.entries.len() - 1,
+                    &mut self.memory,
+                );
+                self.batch_matching_traversal = Some(traversal);
+            }
+        } else {
+            self.end_cold_matching_batch(counters);
         }
+        let result = (|| {
+            let answer = answer.map_err(|_| "GateIncompleteAnswer")?;
+            let complete = answer.cascade_winners_are_complete
+                || self.cascade_winners_are_complete_but_for_custom_properties(node);
+            if !read_only {
+                self.computed_group_sets.set_node_answer_incomplete(node, !complete);
+                self.retained
+                    .published_match_answers
+                    .push(answer, &mut self.retained.memory, counters);
+                self.retained.published_match_answers.sort();
+            }
 
-        let before = counters.record_bail_marks();
-        let mut scratch = EngineComputedRecordScratch {
-            recompute_in_full: targeted,
-            ..EngineComputedRecordScratch::default()
-        };
-        let mut suspended_memory = MemoryLease::new(MemoryCategory::BatchScratch);
-        let record = loop {
-            let delta = self.engine_computed_record_delta(
-                node,
-                complete,
-                None,
-                ParentInputsMoved {
-                    inherited_style: targeted,
-                    display: targeted,
-                },
-                &mut scratch,
-                counters,
-            );
-            if !self.random_base_requests.is_empty() {
-                self.refill_random_base_requests();
-                continue;
+            if let Some(kind) = pseudo {
+                let record = self.demand_pseudo_record(node, kind, counters)?;
+                Ok(record.map(|record| RetriedEngineRecord {
+                    style_record: record.raw(),
+                    ..RetriedEngineRecord::default()
+                }))
+            } else {
+                let before = counters.record_bail_marks();
+                let mut scratch = EngineComputedRecordScratch {
+                    recompute_in_full: targeted,
+                    ..EngineComputedRecordScratch::default()
+                };
+                let mut suspended_memory = MemoryLease::new(MemoryCategory::BatchScratch);
+                let record = loop {
+                    let delta = self.engine_computed_record_delta(
+                        node,
+                        complete,
+                        None,
+                        ParentInputsMoved {
+                            inherited_style: targeted,
+                            display: targeted,
+                        },
+                        &mut scratch,
+                        counters,
+                    );
+                    if !self.random_base_requests.is_empty() {
+                        self.refill_random_base_requests();
+                        continue;
+                    }
+                    if let Some(request) = scratch.font_drive.request.take() {
+                        suspended_memory.resize_required_to(&mut self.memory, scratch.font_drive.capacity_bytes());
+                        self.refill_font_requests(vec![(Some(node), request)], counters);
+                        continue;
+                    }
+                    break delta;
+                };
+                let Some((_, record)) = record else {
+                    return Err(counters
+                        .first_changed_record_bail(&before)
+                        .unwrap_or("ComputationBailUnnamed"));
+                };
+                let mut result = RetriedEngineRecord {
+                    style_record: record.raw(),
+                    ..RetriedEngineRecord::default()
+                };
+                for delta in &scratch.pseudo_deltas {
+                    let kind = usize::from(delta.kind);
+                    if kind < bridge::RETRY_PSEUDO_RECORD_SLOTS {
+                        result.pseudo_records_present |= 1 << kind;
+                        result.pseudo_records[kind] = delta.new_style_record.raw();
+                    }
+                }
+                if !read_only {
+                    self.host.journal.acknowledge_node(node, &mut self.retained.memory);
+                    self.consume_element_style_input(node);
+                    self.style_input_nodes_for_cpp.remove(&node);
+                }
+                Ok(Some(result))
             }
-            if let Some(request) = scratch.font_drive.request.take() {
-                suspended_memory.resize_required_to(&mut self.memory, scratch.font_drive.capacity_bytes());
-                self.refill_font_requests(vec![(Some(node), request)], counters);
-                continue;
+        })();
+        if read_only {
+            if let Ok(Some(record)) = result
+                && pseudo.is_none()
+            {
+                self.drop_demand_pseudo_record(node, u8::MAX);
+                self.computed_group_sets.pin_style_record(record.style_record);
+                self.demand_pseudo_records.insert(
+                    (node, u8::MAX),
+                    computed::FinalStyleRecordID::from_raw(record.style_record).unwrap(),
+                );
             }
-            break delta;
-        };
-        let Some((_, record)) = record else {
-            return Err(counters
-                .first_changed_record_bail(&before)
-                .unwrap_or("ComputationBailUnnamed"));
-        };
-        let mut result = RetriedEngineRecord {
-            style_record: record.raw(),
-            ..RetriedEngineRecord::default()
-        };
-        for delta in &scratch.pseudo_deltas {
-            let kind = usize::from(delta.kind);
-            if kind < bridge::RETRY_PSEUDO_RECORD_SLOTS {
-                result.pseudo_records_present |= 1 << kind;
-                result.pseudo_records[kind] = delta.new_style_record.raw();
+            for pending in self.engine_computed_records_pending.remove(&node).into_iter().flatten() {
+                if pending.pseudo_kind == u8::MAX {
+                    self.computed_group_sets.revert_engine_computed_record(
+                        node,
+                        pending.new_style_record,
+                        pending.old_style_record,
+                    );
+                } else {
+                    self.revert_engine_computed_pseudo_record(&pending, counters);
+                }
             }
+            if let Some(record) = private_origin_record {
+                self.computed_group_sets.revert_engine_computed_record(
+                    node,
+                    record,
+                    computed::FinalStyleRecordID::NONE,
+                );
+            }
+            self.drop_pinned_compositions(node);
+            match previous_container_inputs.expect("read-only demand saved container inputs") {
+                Some(row) => self.container_query_inputs.set(node, row),
+                None => self.container_query_inputs.clear(node),
+            }
+            if previous_substitution.expect("read-only demand saved substitution") {
+                self.nodes_with_substituted_records.insert(node);
+            } else {
+                self.nodes_with_substituted_records.remove(&node);
+            }
+            match previous_explicit_inheritance.expect("read-only demand saved inheritance") {
+                Some(groups) => {
+                    self.nodes_owing_explicit_inheritance.insert(node, groups);
+                }
+                None => {
+                    self.nodes_owing_explicit_inheritance.remove(&node);
+                }
+            }
+            match previous_container_effect.expect("read-only demand saved container effects") {
+                Some(effect) => {
+                    self.container_effects_for_host.insert(node, effect);
+                }
+                None => {
+                    self.container_effects_for_host.remove(&node);
+                }
+            }
+            self.discard_private_record_demand_matching_batch();
+            self.published_match_answers = published_answers.expect("read-only demand saved published answers");
         }
-        self.host.journal.acknowledge_node(node, &mut self.retained.memory);
-        self.consume_element_style_input(node);
-        self.style_input_nodes_for_cpp.remove(&node);
-        Ok(Some(result))
+        result
     }
 
     pub(super) fn reclaim_computed_memory_if_needed(&mut self, counters: &mut Counters) {

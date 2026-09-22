@@ -1107,9 +1107,16 @@ impl StyleEngine {
         pseudo: Option<u8>,
         exclude_inline_style: bool,
         targeted: bool,
+        read_only: bool,
     ) -> Result<Option<publication::RetriedEngineRecord>, &'static str> {
-        self.state
-            .answer_record_demand(node, pseudo, exclude_inline_style, targeted, &mut self.counters)
+        self.state.answer_record_demand(
+            node,
+            pseudo,
+            exclude_inline_style,
+            targeted,
+            read_only,
+            &mut self.counters,
+        )
     }
 
     /// Settle the pseudo-element records of an element whose record C++ just installed.
