@@ -110,10 +110,13 @@ void invalidate_style_after_attribute_change(
         || (element.supports_dimension_attributes() && attribute_name.is_one_of(HTML::AttributeNames::width, HTML::AttributeNames::height))) {
         // The width and height attributes of an element that supports them map to hints the way
         // the presentational hint attributes do.
-        auto kind = element.publishes_presentational_hints_on_arrival() && !element.style_uses_attr_css_function()
-            ? ElementDeclarationKind::SvgPresentationAttribute
-            : ElementDeclarationKind::PresentationalHint;
+        // An element whose hints are published where they move publishes them now, as a
+        // declaration input the engine takes as current.
+        auto eager = element_publishes_presentational_hints_eagerly(element);
+        auto kind = eager ? ElementDeclarationKind::SvgPresentationAttribute : ElementDeclarationKind::PresentationalHint;
         record_element_declarations_changed(element, kind, true, true);
+        if (eager && !element.publishes_presentational_hints_on_arrival())
+            StyleComputer::collect_presentational_hint_properties({ element });
     }
 
     // The pseudo-classes an attribute implies are separate facts about the element, and each is its
