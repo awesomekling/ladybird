@@ -1,6 +1,6 @@
 initial: font-size 16px, padding 16px, margin 32px
-    settled by the engine true, C++ recomputations 1
+    settled by the engine true, C++ recomputations 0
 html.big: font-size 24px, padding 24px, margin 48px
-    settled by the engine true, C++ recomputations 1
+    settled by the engine true, C++ recomputations 0
 html.none: font-size 16px, padding 16px, margin 32px
-    settled by the engine true, C++ recomputations 1
+    settled by the engine true, C++ recomputations 0
