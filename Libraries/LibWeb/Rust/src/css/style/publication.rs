@@ -313,7 +313,8 @@ impl RetainedState {
             // that is what the context is about.
             || self
                 .computed_group_sets
-                .base_style_record_of(self.computed_group_sets.assigned_style_record(node)?.raw())
+                .assigned_base_style_record(computed::ComputedStyleTarget::new(node, u8::MAX))?
+                .raw()
                 != self.computed_group_sets.base_style_record_of(context.record)
             || self
                 .computed_group_sets
@@ -1052,7 +1053,7 @@ impl RetainedState {
             selected[index / 64] |= 1 << (index % 64);
         };
         let (writing_mode, direction) = {
-            let Some(view) = self.computed_group_sets.style_record_view(old_style_record.raw()) else {
+            let Some(view) = self.computed_group_sets.base_style_record_view(old_style_record) else {
                 counters.bump(Counter::EngineComputedRecordBailRecord);
                 return None;
             };

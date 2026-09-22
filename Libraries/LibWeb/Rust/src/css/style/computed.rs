@@ -960,6 +960,21 @@ impl ComputedGroupSets {
         Some(self.final_style_record(assignment.style_record, assignment.animation_overlay_slot))
     }
 
+    /// The installed target's underlying style, without its own sampled effects.
+    pub(super) fn assigned_base_style_record(&self, target: ComputedStyleTarget) -> Option<FinalStyleRecordID> {
+        let style_record = if target.is_pseudo() {
+            self.pseudo_row(target.node, target.pseudo_kind)?
+                .assignment?
+                .style_record
+        } else {
+            *self
+                .style_record_column
+                .get(target.node.element_index()? as usize)?
+                .as_ref()?
+        };
+        Some(self.final_base_style_record(style_record))
+    }
+
     pub(super) fn viewport_dependent_nodes(&self) -> Vec<u32> {
         let depends_on_viewport = |fixed_metadata: ComputedFixedMetadataID| {
             self.computed_fixed_metadata.get(fixed_metadata).dependency_flags & 1 != 0
@@ -3672,6 +3687,16 @@ impl ComputedGroupSets {
         })
     }
 
+    /// Read the underlying style of a final record, including a retained old composition.
+    pub(crate) fn base_style_record_view(&self, record: FinalStyleRecordID) -> Option<StyleRecordView<'_>> {
+        let base = FinalStyleRecordID(self.base_style_record_of(record.raw()));
+        let identity = base.base_record()?;
+        if !self.style_record_generation_is_live(identity, base.base_generation()) {
+            return None;
+        }
+        self.style_record_view(base.raw())
+    }
+
     pub(crate) fn style_records_match_for_verification(
         &self,
         target: ComputedStyleTarget,
@@ -4408,6 +4433,38 @@ mod tests {
         );
         sets.remove(node);
         assert_eq!(sets.live_animation_overlay_records(), 0);
+    }
+
+    #[test]
+    fn base_access_keeps_the_installed_composition_separate() {
+        let mut sets = ComputedGroupSets::default();
+        let node = StyleNodeID::from_raw(1).unwrap();
+        let target = ComputedStyleTarget::new(node, u8::MAX);
+        let base = sets.publish_unowned(Some(target), &[], 0, 7, metadata(0, 0, 0));
+        let animated_overlay = crate::css::animated_overlay::AnimatedOverlay::default();
+        let mut animated_metadata = metadata(0, 0, 0);
+        animated_metadata.animation_overlay_identity = 1;
+        animated_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
+        let composed = sets.publish_unowned(Some(target), &[], 0, 7, animated_metadata);
+
+        assert_eq!(
+            sets.assigned_base_style_record(target),
+            Some(base.style_record_identity)
+        );
+        assert_eq!(
+            sets.assigned_final_style_record(target),
+            Some(composed.style_record_identity)
+        );
+        assert_ne!(base.style_record_identity, composed.style_record_identity);
+        assert_eq!(
+            sets.base_style_record_view(composed.style_record_identity)
+                .unwrap()
+                .payloads,
+            sets.style_record_view(base.style_record_identity.raw())
+                .unwrap()
+                .payloads
+        );
+        assert!(sets.base_style_record_view(FinalStyleRecordID::NONE).is_none());
     }
 
     #[test]

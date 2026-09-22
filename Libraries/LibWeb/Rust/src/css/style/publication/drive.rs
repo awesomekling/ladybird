@@ -116,18 +116,12 @@ impl RetainedState {
             is_required_driver_input, parent_snapshot_for_style_record, property_computation_order_for_phase,
         };
 
-        let Some(view) = self.computed_group_sets.style_record_view(old_style_record.raw()) else {
+        let Some(view) = self.computed_group_sets.base_style_record_view(old_style_record) else {
             counters.bump(Counter::EngineComputedRecordBailRecord);
             return None;
         };
-        // A record whose animations composed into it holds two payload sets: what they composed,
-        // and the style beneath. This drive rebuilds the style beneath, so it reads the beneath -
-        // the font a length resolves against and the writing mode a logical property maps through
-        // are the record's own, not the ones an animation is moving through right now.
-        let payloads = match view.base_payloads.is_empty() {
-            true => view.payloads,
-            false => view.base_payloads,
-        };
+        // The font and writing mode for this drive come from the underlying style.
+        let payloads = view.payloads;
         let Some(old_table) = (unsafe { view.longhand_table.as_ref() }) else {
             counters.bump(Counter::EngineComputedRecordBailRecordTable);
             return None;
