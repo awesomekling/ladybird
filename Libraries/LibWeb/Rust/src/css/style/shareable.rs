@@ -105,7 +105,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         style_input_nodes_for_cpp,
         parent_inputs_moved_nodes,
         engine_pseudo_record_cache,
-        batch_pseudo_style_masks,
         batch_answers_complete_but_for_custom_properties,
         batch_custom_property_matches,
         engine_cold_record_cache,
@@ -227,7 +226,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(style_input_nodes_for_cpp);
     assert_member_is_sync(parent_inputs_moved_nodes);
     assert_member_is_sync(engine_pseudo_record_cache);
-    assert_member_is_sync(batch_pseudo_style_masks);
     assert_member_is_sync(batch_answers_complete_but_for_custom_properties);
     assert_member_is_sync(batch_custom_property_matches);
     assert_member_is_sync(engine_cold_record_cache);
