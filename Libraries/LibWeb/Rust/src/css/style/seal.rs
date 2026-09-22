@@ -116,6 +116,17 @@ pub(crate) struct HostEntryCounts {
     applied: u64,
 }
 
+thread_local! {
+    static PROBE_COUNTS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
+}
+
+pub(crate) fn note_probe(name: &'static str) {
+    if !is_reporting() {
+        return;
+    }
+    PROBE_COUNTS.with(|counts| *counts.borrow_mut().entry(name).or_insert(0) += 1);
+}
+
 /// Record one host entry under the reason the engine declined the element, so the census ranks
 /// what reaches the host rather than what the engine attempted. An attempt that declines for a
 /// class the host then skips costs nothing; only an entry does.
@@ -412,6 +423,13 @@ pub(crate) fn flush_census() {
             host_entries as i64 - attributed as i64
         ));
     }
+    PROBE_COUNTS.with(|counts| {
+        let mut counts: Vec<_> = counts.borrow_mut().drain().collect();
+        counts.sort_unstable();
+        for (name, count) in counts {
+            write_report(&format!("STYLE SEAL COUNT: probe {name}: {count}\n"));
+        }
+    });
     if host_entries != 0 {
         write_report(&format!(
             "STYLE SEAL COUNT: host_entries: {host_entries} (rows {host_driven_rows} + retries {host_retries} + sampled {sampled})\n"

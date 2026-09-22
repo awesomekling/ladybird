@@ -1847,6 +1847,7 @@ impl StyleEngineState {
                 nodes_owing_a_transition_registration: HashMap::default(),
                 nodes_owing_explicit_inheritance: HashMap::default(),
                 nodes_owing_an_animation_sample: HashSet::default(),
+                counter_style_environment_identities: HashMap::default(),
                 nodes_owing_animation_definitions: HashMap::default(),
                 animation_definitions_being_applied: None,
                 settled_computation_contexts: HashMap::default(),
