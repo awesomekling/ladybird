@@ -6,7 +6,6 @@
         let stats = internals.computedValuesStats();
         println(`liveComputedValues is a number: ${typeof stats.liveComputedValues === "number"}`);
         println(`totalComputedValuesCreated is a number: ${typeof stats.totalComputedValuesCreated === "number"}`);
-        println(`liveComputedValues > 0: ${stats.liveComputedValues > 0}`);
         println(`totalComputedValuesCreated >= liveComputedValues: ${stats.totalComputedValuesCreated >= stats.liveComputedValues}`);
 
         let before = internals.computedValuesStats().totalComputedValuesCreated;
