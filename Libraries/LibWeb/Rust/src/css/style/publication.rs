@@ -2035,9 +2035,12 @@ impl RetainedState {
         if property == prop::LIST_STYLE_TYPE {
             return !self.list_style_type_winner_reads_counter_style_environment(state);
         }
+        // No winner is the initial `normal`, which reads no counter style either.
+        let Some(winner) = self.winner_groups.winner_in_state(state, prop::CONTENT) else {
+            return true;
+        };
         self.winner_groups
-            .winner_in_state(state, prop::CONTENT)
-            .and_then(|winner| self.winner_groups.resolved_winner(winner))
+            .resolved_winner(winner)
             .is_some_and(|winner| match self.specified_values.value(winner.key.value) {
                 Lookup::Known(value) => content_value_is_engine_computable(value),
                 _ => false,
