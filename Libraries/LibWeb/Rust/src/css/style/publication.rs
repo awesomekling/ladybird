@@ -387,6 +387,7 @@ impl RetainedState {
         counters: &mut Counters,
     ) -> Option<(computed::FinalStyleRecordID, computed::FinalStyleRecordID)> {
         if scratch.root_computation_unsupported == Some(node) {
+            counters.bump(Counter::EngineComputedRecordBailRootFontInputs);
             return None;
         }
         let pending_element = scratch.pending_element.take();

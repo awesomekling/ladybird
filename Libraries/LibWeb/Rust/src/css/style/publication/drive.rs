@@ -218,7 +218,11 @@ impl RetainedState {
             u64::from(results.longhand_evaluations),
         );
         if results.explicitly_inherited_non_inherited_style_groups != 0 || results.uses_tree_counting_function {
-            counters.bump(Counter::EngineComputedRecordBailDrive);
+            counters.bump(if results.uses_tree_counting_function {
+                Counter::EngineComputedRecordBailDriveTreeCounting
+            } else {
+                Counter::EngineComputedRecordBailDrive
+            });
             return None;
         }
         // An input the drive reads for properties it did not select moved with the selection: the
@@ -822,7 +826,11 @@ impl RetainedState {
             line_height_value,
         );
         if results.explicitly_inherited_non_inherited_style_groups != 0 || results.uses_tree_counting_function {
-            counters.bump(Counter::EngineComputedRecordBailDrive);
+            counters.bump(if results.uses_tree_counting_function {
+                Counter::EngineComputedRecordBailDriveTreeCounting
+            } else {
+                Counter::EngineComputedRecordBailDrive
+            });
             return None;
         }
         let Some(line_height_used_after) = line_height_used(&table) else {
