@@ -2370,6 +2370,29 @@ void Element::update_anchor_name_registry(CSS::ComputedValues const* old_compute
         document().record_partial_relayout_escape(PartialRelayoutEscapeReason::AnchorNamesUnregisteredByStyleChange);
 }
 
+// The animation names a style references, as the index a `@keyframes` rule finds its elements by
+// holds them.
+static Vector<Utf16FlyString> indexable_animation_names(CSS::ComputedValues const& style)
+{
+    Vector<Utf16FlyString> animation_names;
+    for (auto const& animation_name : style.animation_names()) {
+        if (animation_name.syntax != CSS::ComputedAnimationNameSyntax::None)
+            animation_names.append(animation_name.name);
+    }
+    return animation_names;
+}
+
+// Republishes the index for an element whose animation declarations moved in a record the engine
+// settled. The row is a set rather than a delta, and the row only exists because those declarations
+// moved, so it is published whatever the names were before.
+void Element::republish_animation_name_registry()
+{
+    auto style = computed_style();
+    if (!style)
+        return;
+    CSS::record_element_animation_names(*this, indexable_animation_names(*style));
+}
+
 CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, bool& did_change_custom_properties)
 {
     VERIFY(parent());
@@ -2668,14 +2691,6 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_style_engine_reaction(b
     // Which animations an element references is an index StyleEngine keeps, in the same shape as the
     // anchor-name registry above: nothing about selector matching can say it, and without it a
     // `@keyframes` rule cannot find the elements running the animation it describes.
-    auto indexable_animation_names = [](CSS::ComputedValues const& style) {
-        Vector<Utf16FlyString> animation_names;
-        for (auto const& animation_name : style.animation_names()) {
-            if (animation_name.syntax != CSS::ComputedAnimationNameSyntax::None)
-                animation_names.append(animation_name.name);
-        }
-        return animation_names;
-    };
     auto animation_names = indexable_animation_names(*new_style);
     if (old_computed_values ? indexable_animation_names(*old_computed_values) != animation_names : !animation_names.is_empty())
         CSS::record_element_animation_names(*this, animation_names);

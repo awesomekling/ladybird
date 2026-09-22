@@ -3466,6 +3466,48 @@ pub unsafe extern "C" fn style_engine_compare_animation_overlay(
     engine.compare_animation_overlay(old_style_record, animated_overlay.cast(), payloads, is_document_element)
 }
 
+/// The animation definitions one engine-settled row left for the host, as the host's own plan
+/// application takes them: a borrowed array of `ComputedValuesFFI::FfiComputedAnimation`.
+#[repr(C)]
+pub struct FfiSettledAnimationDefinitions {
+    /// Borrowed until the next row's definitions are taken, and null for a row that names no
+    /// animation - which is still a row whose animation declarations moved.
+    pub definitions: *const c_void,
+    pub count: usize,
+    /// Whether the row owed a plan at all.
+    pub owed: bool,
+    /// Whether the record the row installed computes `display: none` for the element itself.
+    pub element_display_is_none: bool,
+}
+
+/// Takes the animation plan an engine-settled row left for the host, so that exactly one
+/// application drains it.
+///
+/// # Safety
+/// `engine` must be live for this call, and the definitions must be read before the next call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_take_settled_animation_definitions(
+    engine: *mut c_void,
+    node: u32,
+) -> FfiSettledAnimationDefinitions {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    let plan = StyleNodeID::from_raw(node).and_then(|node| engine.take_settled_animation_definitions(node));
+    match plan {
+        None => FfiSettledAnimationDefinitions {
+            definitions: std::ptr::null(),
+            count: 0,
+            owed: false,
+            element_display_is_none: false,
+        },
+        Some(plan) => FfiSettledAnimationDefinitions {
+            definitions: plan.definitions().as_ptr().cast(),
+            count: plan.definitions().len(),
+            owed: true,
+            element_display_is_none: plan.element_display_is_none(),
+        },
+    }
+}
+
 /// Returns a synchronous borrowed view of a base or live animation-overlay record.
 ///
 /// # Safety

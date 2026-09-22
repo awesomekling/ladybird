@@ -25,6 +25,9 @@ use std::collections::HashMap;
 /// the element itself, and the pseudo-element's value plus one for each pseudo-element.
 pub(crate) type AnimationSlot = u8;
 
+/// The animation list of the element itself, rather than one of its pseudo-elements'.
+pub(crate) const ELEMENT_ANIMATION_SLOT: AnimationSlot = 0;
+
 /// The definition that claimed no existing animation and asks for a new one.
 pub(crate) const NO_MATCHED_ANIMATION: i32 = -1;
 
@@ -1981,6 +1984,19 @@ impl AnimationKeyframes {
         self.scopes.get(&tree_scope)?.get(name)
     }
 
+    /// Whether every `@keyframes` the document defines is defined in the document's own scope.
+    ///
+    /// The chain `resolve` walks ends at the document scope, so where no other scope defines
+    /// anything the answer is the document's rule for the name whatever the first two links are:
+    /// neither the scope the winning `animation-name` declaration was written in nor the scope the
+    /// element is in can change it. That is what lets a record the engine settled carry an
+    /// animation plan at all, since the winner store the engine cascades from does not record
+    /// which shadow root a declaration was written in.
+    #[must_use]
+    pub(crate) fn only_the_document_scope_defines_keyframes(&self) -> bool {
+        self.scopes.keys().all(|&scope| scope == TreeScopeID::DOCUMENT)
+    }
+
     /// The keyframe set an animation of this name runs, or `None` where no scope in its chain
     /// defines one and the host makes an effect with no keyframes.
     ///
@@ -2015,6 +2031,70 @@ impl AnimationKeyframes {
             return Some(set);
         }
         self.in_scope(TreeScopeID::DOCUMENT, &name)
+    }
+}
+
+/// The animation definitions a record the engine settled leaves for the host to apply, in the shape
+/// the host's own plan application takes them in.
+///
+/// A record the engine settles never enters the C++ computation that would have decided the
+/// element's animations beside it, so the plan is decided here and rides out of the batch as an
+/// effect of the row, the way a transition step does. The host applies it once the whole batch is
+/// installed, in the order the batch applied the rows.
+///
+/// The plan owns everything its definitions name - each name, and each computed
+/// `animation-timing-function` - so none of it depends on the table the drive built them from, or
+/// on the record that table went into, surviving the batch.
+pub(crate) struct SettledAnimationPlan {
+    definitions: Box<[crate::css::style_compute::FfiComputedAnimation]>,
+    #[expect(
+        dead_code,
+        reason = "the names the definitions point at, owned for as long as they are"
+    )]
+    names: Box<[CssString]>,
+    #[expect(
+        dead_code,
+        reason = "the timing functions the definitions point at, retained for as long as they are"
+    )]
+    timing_functions: Box<[crate::css::style_value::RetainedStyleValueData]>,
+    element_display_is_none: bool,
+}
+
+// SAFETY: Every pointer a definition holds addresses something the plan owns and only ever shares -
+//         one of its own names, one of its own retained timing functions - except the keyframe-set
+//         identity, which is a host pointer this side never dereferences and only hands back, as
+//         `PublishedKeyframesSet` holds one.
+unsafe impl Send for SettledAnimationPlan {}
+unsafe impl Sync for SettledAnimationPlan {}
+
+impl SettledAnimationPlan {
+    /// Assume ownership of the definitions and of the name and timing function each one names. The
+    /// pointers in `definitions` must address the entries of `names` and `timing_functions`.
+    pub(crate) fn new(
+        definitions: Box<[crate::css::style_compute::FfiComputedAnimation]>,
+        names: Box<[CssString]>,
+        timing_functions: Box<[crate::css::style_value::RetainedStyleValueData]>,
+        element_display_is_none: bool,
+    ) -> Self {
+        Self {
+            definitions,
+            names,
+            timing_functions,
+            element_display_is_none,
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn definitions(&self) -> &[crate::css::style_compute::FfiComputedAnimation] {
+        &self.definitions
+    }
+
+    /// Whether the record the row installs computes `display: none` for the element itself, which
+    /// is the half of "is this element rendered" the plan can answer. The host walks the element's
+    /// ancestors for the other half, as it does for a plan a C++ computation decided.
+    #[must_use]
+    pub(crate) fn element_display_is_none(&self) -> bool {
+        self.element_display_is_none
     }
 }
 

@@ -307,6 +307,16 @@ StyleEngineFFI::FfiAnimationInvalidation StyleEngine::compare_animation_overlay(
     return StyleEngineFFI::style_engine_compare_animation_overlay(m_impl, old_style_record.value(), animated_overlay, payloads.data(), payloads.size(), is_document_element);
 }
 
+StyleEngine::SettledAnimationDefinitions StyleEngine::take_settled_animation_definitions(StyleNodeID node)
+{
+    auto taken = StyleEngineFFI::style_engine_take_settled_animation_definitions(m_impl, node.value());
+    return {
+        .definitions = { static_cast<ComputedValuesFFI::FfiComputedAnimation const*>(taken.definitions), taken.count },
+        .owed = taken.owed,
+        .element_display_is_none = taken.element_display_is_none,
+    };
+}
+
 StyleEngine::StyleRecordView StyleEngine::style_record_view(StyleRecordID style_record) const
 {
     return StyleEngineFFI::style_engine_style_record_view(m_impl, style_record.value());
