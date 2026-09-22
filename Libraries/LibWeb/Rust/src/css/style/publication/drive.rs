@@ -63,13 +63,19 @@ impl RetainedState {
     /// stands only when they came out exactly as before.
     #[allow(clippy::too_many_arguments)]
     /// Whether what an explicit `inherit` of a non-inherited property would read from the parent
-    /// is the record the engine holds. A parent running an animation or transition holds an
-    /// overlay, and the value such an `inherit` takes is the after-change style the host
-    /// reconstructs instead, which this stage has no way to read.
+    /// is the record the engine holds. The installer's sampled composition is an authoritative
+    /// parent record, including its active animation or transition overlay.
     fn parent_record_answers_explicit_inheritance(&self, parent: Option<StyleNodeID>) -> bool {
         let Some(parent) = parent else {
             return true;
         };
+        if self
+            .computed_group_sets
+            .sampled_composition_identity(parent)
+            .is_some_and(computed::ComputedGroupSets::record_is_animation_overlay)
+        {
+            return true;
+        }
         let Some(record) = self.computed_group_sets.assigned_style_record(parent) else {
             return false;
         };
