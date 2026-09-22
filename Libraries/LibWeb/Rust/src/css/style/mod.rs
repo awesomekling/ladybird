@@ -1093,6 +1093,12 @@ pub struct HostState {
     recording_id: Option<u64>,
     /// The instrumentation state to restore after C++ materializes a record for verification.
     computed_record_verification_counters: Option<Box<Counters>>,
+    /// The targets the engine settled for the element under verification: its own record, and one
+    /// bit per pseudo-element kind the engine decided. Only those are interned for comparison; a
+    /// target the verification pass computes beside them publishes as an ordinary recompute does,
+    /// so the element and the engine still agree on what each target holds when the scope ends.
+    computed_record_verification_element: u32,
+    computed_record_verification_settled_pseudos: u64,
     computed_record_verification_pins: Vec<u64>,
     journal: NormalizationJournal,
     /// Local selector facts through the latest geometry read which reused committed layout. A
