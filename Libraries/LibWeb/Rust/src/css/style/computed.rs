@@ -1465,8 +1465,12 @@ impl ComputedGroupSets {
             return None;
         }
         let index = node.element_index()? as usize;
-        if self.columns.animation_overlay_slot(index).is_some() {
-            return None;
+        // A node whose animations composed a record gives that composition up here: the base this
+        // assembles is the style beneath it, and the caller has the host sample the animations
+        // again over it once the batch is applied.
+        if let Some(slot) = self.columns.animation_overlay_slot(index) {
+            self.release_animation_overlay_assignment(slot);
+            self.columns.set_animation_overlay_slot(index, None);
         }
         let base_style_record_identity = base_style_record.base_record()?;
         if !self.style_record_generation_is_live(base_style_record_identity, base_style_record.base_generation()) {

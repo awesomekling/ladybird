@@ -212,6 +212,7 @@ public:
     enum SettledRowEffectDebt : u8 {
         SettledRowTransitionDebt = 3,
         SettledRowOwesAnAnimationPlan = 1 << 2,
+        SettledRowOwesAnAnimationSample = 1 << 3,
     };
     // What applying a style reaction found, reported so the engine derives the children's reactions.
     enum StyleReactionAppliedFact : u32 {

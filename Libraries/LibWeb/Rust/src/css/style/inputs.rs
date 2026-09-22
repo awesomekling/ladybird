@@ -1846,6 +1846,7 @@ impl StyleEngineState {
                 nodes_with_substituted_records: HashSet::default(),
                 nodes_owing_a_transition_registration: HashMap::default(),
                 nodes_owing_explicit_inheritance: HashMap::default(),
+                nodes_owing_an_animation_sample: HashSet::default(),
                 nodes_owing_animation_definitions: HashMap::default(),
                 animation_definitions_being_applied: None,
                 settled_computation_contexts: HashMap::default(),
@@ -2626,6 +2627,7 @@ impl StyleEngineState {
             self.retained.nodes_with_substituted_records.remove(&node);
             self.retained.nodes_owing_a_transition_registration.remove(&node);
             self.retained.nodes_owing_explicit_inheritance.remove(&node);
+            self.retained.nodes_owing_an_animation_sample.remove(&node);
             self.retained.nodes_owing_animation_definitions.remove(&node);
             self.retained.settled_computation_contexts.remove(&node);
             retired_nodes.push(node);
