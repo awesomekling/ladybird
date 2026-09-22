@@ -2243,10 +2243,15 @@ impl StyleEngineState {
                                         .map(|pseudo| pseudo.kind.0)
                                 })
                                 .collect();
+                            // No rule flipped for the node and nothing refreshed its answer: the
+                            // state it holds is its cascade, unless the environment moved, which
+                            // reaches values the winners do not name.
+                            let nothing_flipped = flipped_rules.is_empty() && !environment_changed;
                             let winners_are_exact = !(environment_changed && environment_action_needs_host_computation)
                                 && !rule_declarations_edited
                                 && selector_truth_changes.refreshes_for(node).is_empty()
                                 && (answer_is_unchanged
+                                    || nothing_flipped
                                     || (!flipped_rules.is_empty()
                                         && flipped_rules.iter().all(|delta| {
                                             self.retained.program.declarations_are_complete_for(delta.rule)
