@@ -634,7 +634,7 @@ impl RetainedState {
     }
 
     pub(super) fn pseudo_style_mask(&self, node: StyleNodeID) -> Option<u64> {
-        if let Some(&mask) = self.batch_pseudo_style_masks.get(&node) {
+        if let Some(mask) = self.computed_group_sets.node_pseudo_style_mask(node) {
             return Some(mask);
         }
         let bit = |pseudo: Option<tree::PseudoElementTarget>| {

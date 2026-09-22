@@ -2000,8 +2000,8 @@ impl StyleEngineState {
                 chain
             };
             // Each published node's pseudo-element inventory, read from the answer this transaction
-            // publishes for it before that answer is installed.
-            self.retained.batch_pseudo_style_masks.clear();
+            // publishes for it before that answer is installed, and kept with the node's record
+            // columns for as long as that answer stands.
             self.retained.batch_answers_complete_but_for_custom_properties.clear();
             self.retained.batch_custom_property_matches.clear();
             for &node in &published_nodes {
@@ -2021,7 +2021,7 @@ impl StyleEngineState {
                     }),
                 };
                 if let Some(mask) = mask {
-                    self.retained.batch_pseudo_style_masks.insert(node, mask);
+                    self.retained.computed_group_sets.set_node_pseudo_style_mask(node, mask);
                 }
                 if self.retained.any_custom_property_is_declared()
                     && let Some(matches) =
@@ -2555,7 +2555,6 @@ impl StyleEngineState {
         published_match_answers.match_element_calls_at_publication =
             counters.get(Counter::MatchElementCallsDuringPublishedStyleTransaction);
         published_match_answers.discard_unobserved_retained_answers = publish_document_root_arrival || plan_is_broad;
-        self.retained.batch_pseudo_style_masks.clear();
         self.retained.batch_answers_complete_but_for_custom_properties.clear();
         self.retained.batch_custom_property_matches.clear();
         self.retained.published_match_answers = published_match_answers;

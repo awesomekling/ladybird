@@ -997,10 +997,8 @@ pub struct RetainedState {
     /// box-type transformation reads it, so their record is driven again in full.
     parent_inputs_moved_nodes: HashSet<StyleNodeID>,
     engine_pseudo_record_cache: HashMap<publication::PseudoCohortKey, computed::FinalStyleRecordID>,
-    /// The synthetic pseudo-element mask of each node the current transaction answered, published
-    /// beside its answer for the record loop: the answers themselves are installed after it.
-    batch_pseudo_style_masks: HashMap<StyleNodeID, u64>,
-    /// Beside it, whether the answer's winners are complete but for custom properties.
+    /// Whether the answer the current transaction publishes for each node has winners complete
+    /// but for custom properties, read for the record loop: the answers are installed after it.
     batch_answers_complete_but_for_custom_properties: HashMap<StyleNodeID, bool>,
     /// Beside them, the matches in each answer that declare custom properties, read the same way:
     /// what the node's custom-property cascade runs over while its answer is not installed.
