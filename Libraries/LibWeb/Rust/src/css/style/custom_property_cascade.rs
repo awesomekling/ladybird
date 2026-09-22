@@ -550,9 +550,23 @@ impl RetainedState {
         // host's for every element instead, because the environment this builds over the parent's
         // would hand that name to a descendant the registration keeps it from.
         if registry_ref.has_registrations() {
+            // A name that does not inherit is in its element's environment and in none of its
+            // descendants'. This resolution layers declarations over the parent's environment, so
+            // it can only be trusted where the parent's holds no such name: then there is nothing
+            // for the layering to hand on that the registration keeps back.
             if registry_ref.has_non_inheriting_registrations() {
-                counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-                return None;
+                let non_inheriting = registry_ref.non_inheriting_names();
+                let parent_holds_one = parent_environment != 0
+                    && self
+                        .custom_property_environments
+                        .store(parent_environment)
+                        .is_some_and(|store| unsafe {
+                            (*store.cast::<CustomPropertyStore>()).holds_any_name(&non_inheriting)
+                        });
+                if parent_holds_one {
+                    counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
+                    return None;
+                }
             }
             for (declared, _) in &cascaded {
                 let Some(name) = self.custom_property_environments.name(declared.name) else {
