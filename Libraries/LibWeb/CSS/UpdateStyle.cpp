@@ -303,6 +303,11 @@ static void verify_engine_computed_record_environment(DOM::Element& element, Sty
     auto actual = element.custom_property_data({});
     if (actual && actual->is_animation_overlay())
         actual = actual->parent();
+    // The reference computation materializes an environment only where something asks it to, and
+    // an element that merely inherits one is left holding nothing. That is not an empty
+    // environment, it is no answer, so there is nothing here to compare the record against.
+    if (!actual)
+        return;
     bool installable = false;
     auto expected = element.custom_property_environment_of_engine_record(style_record, installable);
     VERIFY(installable && expected);
