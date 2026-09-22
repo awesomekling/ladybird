@@ -803,8 +803,11 @@ FontFeatureData ComputedStyleWorkingSet::font_feature_data() const
 
 Optional<FontVariantAlternates> ComputedStyleWorkingSet::font_variant_alternates() const
 {
-    auto const& value = property(PropertyID::FontVariantAlternates);
+    return font_variant_alternates_from_style_value(property(PropertyID::FontVariantAlternates));
+}
 
+Optional<FontVariantAlternates> font_variant_alternates_from_style_value(StyleValue const& value)
+{
     // normal
     if (value.is_keyword()) {
         VERIFY(value.to_keyword() == Keyword::Normal);
@@ -844,8 +847,11 @@ FontVariantCaps ComputedStyleWorkingSet::font_variant_caps() const
 
 Optional<FontVariantEastAsian> ComputedStyleWorkingSet::font_variant_east_asian() const
 {
-    auto const& value = property(PropertyID::FontVariantEastAsian);
+    return font_variant_east_asian_from_style_value(property(PropertyID::FontVariantEastAsian));
+}
 
+Optional<FontVariantEastAsian> font_variant_east_asian_from_style_value(StyleValue const& value)
+{
     if (value.to_keyword() == Keyword::Normal)
         return {};
 
@@ -873,8 +879,11 @@ FontVariantEmoji ComputedStyleWorkingSet::font_variant_emoji() const
 
 Optional<FontVariantLigatures> ComputedStyleWorkingSet::font_variant_ligatures() const
 {
-    auto const& value = property(PropertyID::FontVariantLigatures);
+    return font_variant_ligatures_from_style_value(property(PropertyID::FontVariantLigatures));
+}
 
+Optional<FontVariantLigatures> font_variant_ligatures_from_style_value(StyleValue const& value)
+{
     if (value.to_keyword() == Keyword::Normal)
         return {};
 
@@ -898,6 +907,41 @@ Optional<FontVariantLigatures> ComputedStyleWorkingSet::font_variant_ligatures()
         ligatures.contextual = keyword_to_contextual_alt_value(tuple[TupleStyleValue::Indices::FontVariantLigatures::Contextual]->to_keyword()).value();
 
     return ligatures;
+}
+
+// The values the style engine names in a font resolution request, in the order
+// `FontResolutionFeatureInput` gives them. A null entry means the property has its initial value,
+// which is what an absent entry in the feature set means too.
+FontFeatureData font_feature_data_from_style_values(ReadonlySpan<StyleValue const*> values)
+{
+    auto at = [&](FontResolutionFeatureInput input) -> StyleValue const* {
+        return values[to_underlying(input)];
+    };
+    auto keyword_of = [&](FontResolutionFeatureInput input, auto fallback) {
+        auto const* value = at(input);
+        return value ? value->to_keyword() : fallback;
+    };
+    FontFeatureData data {};
+    data.font_variant_caps = keyword_to_font_variant_caps(keyword_of(FontResolutionFeatureInput::FontVariantCaps, Keyword::Normal)).release_value();
+    if (auto const* value = at(FontResolutionFeatureInput::FontVariantEastAsian))
+        data.font_variant_east_asian = font_variant_east_asian_from_style_value(*value);
+    data.font_variant_emoji = keyword_to_font_variant_emoji(keyword_of(FontResolutionFeatureInput::FontVariantEmoji, Keyword::Normal)).release_value();
+    if (auto const* value = at(FontResolutionFeatureInput::FontVariantLigatures))
+        data.font_variant_ligatures = font_variant_ligatures_from_style_value(*value);
+    if (auto const* value = at(FontResolutionFeatureInput::FontVariantNumeric))
+        data.font_variant_numeric = font_variant_numeric_from_style_value(*value);
+    data.font_variant_position = keyword_to_font_variant_position(keyword_of(FontResolutionFeatureInput::FontVariantPosition, Keyword::Normal)).release_value();
+    if (auto const* value = at(FontResolutionFeatureInput::FontFeatureSettings))
+        data.font_feature_settings = font_feature_settings_from_style_value(*value);
+    data.font_kerning = keyword_to_font_kerning(keyword_of(FontResolutionFeatureInput::FontKerning, Keyword::Auto)).release_value();
+    data.text_rendering = keyword_to_text_rendering(keyword_of(FontResolutionFeatureInput::TextRendering, Keyword::Auto)).release_value();
+    return data;
+}
+
+HashMap<Utf16FlyString, double> font_variation_settings_from_style_values(ReadonlySpan<StyleValue const*> values)
+{
+    auto const* value = values[to_underlying(FontResolutionFeatureInput::FontVariationSettings)];
+    return value ? font_variation_settings_from_style_value(*value) : HashMap<Utf16FlyString, double> {};
 }
 
 Optional<FontVariantNumeric> ComputedStyleWorkingSet::font_variant_numeric() const
@@ -942,8 +986,11 @@ FontVariantPosition ComputedStyleWorkingSet::font_variant_position() const
 
 HashMap<Utf16FlyString, u8> ComputedStyleWorkingSet::font_feature_settings() const
 {
-    auto const& value = property(PropertyID::FontFeatureSettings);
+    return font_feature_settings_from_style_value(property(PropertyID::FontFeatureSettings));
+}
 
+HashMap<Utf16FlyString, u8> font_feature_settings_from_style_value(StyleValue const& value)
+{
     if (value.is_keyword())
         return {}; // normal
 
@@ -964,8 +1011,11 @@ HashMap<Utf16FlyString, u8> ComputedStyleWorkingSet::font_feature_settings() con
 
 HashMap<Utf16FlyString, double> ComputedStyleWorkingSet::font_variation_settings() const
 {
-    auto const& value = property(PropertyID::FontVariationSettings);
+    return font_variation_settings_from_style_value(property(PropertyID::FontVariationSettings));
+}
 
+HashMap<Utf16FlyString, double> font_variation_settings_from_style_value(StyleValue const& value)
+{
     if (value.is_keyword())
         return {}; // normal
 

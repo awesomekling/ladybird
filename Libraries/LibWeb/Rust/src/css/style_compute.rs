@@ -5980,7 +5980,9 @@ type LonghandDriveOutcome = Result<
         FfiAnimationLengthContexts,
         LegacyFontBuildState,
     ),
-    crate::css::style::bridge::FfiFontResolutionRequest,
+    // Boxed: the request names a value for each font input, which makes it much larger than
+    // the answer it stands in for.
+    Box<crate::css::style::bridge::FfiFontResolutionRequest>,
 >;
 
 unsafe fn compute_longhands(
@@ -6058,23 +6060,38 @@ unsafe fn compute_longhands(
     let font_family = unsafe { &*input.longhand_table }
         .effective_value(unsafe { animated_overlay.as_ref() }, property_id::FONT_FAMILY, true)
         .value;
-    // `normal` selects no features, so the request names nothing rather than a value the
-    // resolver would have to recognise as the default.
-    let font_variant_numeric = match value_of(property_id::FONT_VARIANT_NUMERIC) {
-        Some(StyleValueData::Keyword { keyword }) if *keyword == keyword::NORMAL => std::ptr::null(),
-        _ => {
-            unsafe { &*input.longhand_table }
-                .effective_value(
-                    unsafe { animated_overlay.as_ref() },
-                    property_id::FONT_VARIANT_NUMERIC,
-                    true,
-                )
-                .value
-        }
+    // The resolver reads these beside the family, so the request names each one whose value is
+    // not the initial one and nothing for the rest.
+    let font_feature_values: [crate::css::style::bridge::FfiHostHandle;
+        crate::css::style::bridge::FONT_RESOLUTION_FEATURE_INPUT_COUNT] = {
+        let inputs = [
+            (property_id::FONT_FEATURE_SETTINGS, keyword::NORMAL),
+            (property_id::FONT_VARIATION_SETTINGS, keyword::NORMAL),
+            (property_id::FONT_VARIANT_CAPS, keyword::NORMAL),
+            (property_id::FONT_VARIANT_EAST_ASIAN, keyword::NORMAL),
+            (property_id::FONT_VARIANT_EMOJI, keyword::NORMAL),
+            (property_id::FONT_VARIANT_LIGATURES, keyword::NORMAL),
+            (property_id::FONT_VARIANT_NUMERIC, keyword::NORMAL),
+            (property_id::FONT_VARIANT_POSITION, keyword::NORMAL),
+            (property_id::FONT_KERNING, keyword::AUTO),
+            (property_id::TEXT_RENDERING, keyword::AUTO),
+        ];
+        std::array::from_fn(|index| {
+            let (property, default_keyword) = inputs[index];
+            let pointer = match value_of(property) {
+                Some(StyleValueData::Keyword { keyword }) if *keyword == default_keyword => std::ptr::null(),
+                _ => {
+                    unsafe { &*input.longhand_table }
+                        .effective_value(unsafe { animated_overlay.as_ref() }, property, true)
+                        .value
+                }
+            };
+            crate::css::style::bridge::FfiHostHandle::from_pointer(pointer.cast())
+        })
     };
     let font_request = crate::css::style::bridge::FfiFontResolutionRequest {
         font_family: crate::css::style::bridge::FfiHostHandle::from_pointer(font_family.cast()),
-        font_variant_numeric: crate::css::style::bridge::FfiHostHandle::from_pointer(font_variant_numeric.cast()),
+        font_feature_values,
         font_size_raw: crate::css::css_pixels::CssPixels::nearest_value_for(font_size).raw_value(),
         font_slope,
         font_weight,
@@ -6086,7 +6103,7 @@ unsafe fn compute_longhands(
     // there yet, the drive produces the request and stops: its caller services the request
     // between passes and drives the element again, which then reads the installed answer.
     let Some(resolved_font) = style_engine.resolved_font_for_longhand_drive(font_request) else {
-        return Err(font_request);
+        return Err(Box::new(font_request));
     };
     let inherited_line_height = input.font_length_resolution_context.font_metrics.line_height;
     let own_metrics = |line_height| FfiFontMetrics {
@@ -6882,7 +6899,7 @@ pub unsafe extern "C" fn rust_compute_properties(
                     );
                     let style_engine =
                         unsafe { &mut *input.style_engine.cast_mut().cast::<crate::css::style::StyleEngine>() };
-                    style_engine.service_longhand_drive_font_request(input.style_node, request);
+                    style_engine.service_longhand_drive_font_request(input.style_node, *request);
                 }
             }
         }

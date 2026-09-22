@@ -296,13 +296,17 @@ impl Default for FfiDocumentStyleComputationInputs {
     }
 }
 
+/// Matches `Web::CSS::FontResolutionFeatureInput::Count`.
+pub const FONT_RESOLUTION_FEATURE_INPUT_COUNT: usize = 10;
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct FfiFontResolutionRequest {
     pub font_family: FfiHostHandle,
-    /// The computed `font-variant-numeric`, or null when it is `normal`. It selects shaping
-    /// features, so two elements that differ only in it resolve to different fonts.
-    pub font_variant_numeric: FfiHostHandle,
+    /// The computed values the resolver reads beside the family, in `FontResolutionFeatureInput`
+    /// order, each null when the property has its initial value. They select shaping features and
+    /// variations, so two elements differing only in one of them resolve to different fonts.
+    pub font_feature_values: [FfiHostHandle; FONT_RESOLUTION_FEATURE_INPUT_COUNT],
     pub font_size_raw: i32,
     pub font_slope: i32,
     pub font_weight: f64,
