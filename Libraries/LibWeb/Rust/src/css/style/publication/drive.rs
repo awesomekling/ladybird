@@ -113,10 +113,14 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailRecord);
             return None;
         };
-        if !view.animated_overlay.is_null() {
-            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-            return None;
-        }
+        // A record whose animations composed into it holds two payload sets: what they composed,
+        // and the style beneath. This drive rebuilds the style beneath, so it reads the beneath -
+        // the font a length resolves against and the writing mode a logical property maps through
+        // are the record's own, not the ones an animation is moving through right now.
+        let payloads = match view.base_payloads.is_empty() {
+            true => view.payloads,
+            false => view.base_payloads,
+        };
         let Some(old_table) = (unsafe { view.longhand_table.as_ref() }) else {
             counters.bump(Counter::EngineComputedRecordBailRecordTable);
             return None;
@@ -150,12 +154,12 @@ impl RetainedState {
             },
         };
         let font = unsafe {
-            view.payloads[STYLE_GROUP_INDEX_FONT]
+            payloads[STYLE_GROUP_INDEX_FONT]
                 .cast::<crate::css::computed_value_types::FontValues>()
                 .deref()
         };
         let inherited_box = unsafe {
-            view.payloads[STYLE_GROUP_INDEX_INHERITED_BOX]
+            payloads[STYLE_GROUP_INDEX_INHERITED_BOX]
                 .cast::<crate::css::computed_values::InheritedBoxValues>()
                 .deref()
         };

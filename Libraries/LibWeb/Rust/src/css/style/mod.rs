@@ -914,6 +914,9 @@ pub struct RetainedState {
     /// with that union so a later change to those groups reaches this element again. It is an
     /// effect of the row rather than a part of the record: the host drains it after the batch.
     nodes_owing_explicit_inheritance: HashMap<StyleNodeID, u32>,
+    /// The compositions this batch derived beneath and keeps alive: the host's element still names
+    /// one until the row that replaced it is applied, so the pin is dropped at acknowledgement.
+    batch_pinned_compositions: Vec<(StyleNodeID, u64)>,
     /// The nodes whose record the engine derived beneath a composition their animations made: the
     /// host samples those animations again over the new record once the batch is applied.
     nodes_owing_an_animation_sample: HashSet<StyleNodeID>,

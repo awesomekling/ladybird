@@ -83,6 +83,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         nodes_with_substituted_records,
         nodes_owing_a_transition_registration,
         nodes_owing_explicit_inheritance,
+        batch_pinned_compositions,
         nodes_owing_an_animation_sample,
         counter_style_environment_identities,
         nodes_owing_animation_definitions,
@@ -202,6 +203,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(nodes_with_substituted_records);
     assert_member_is_sync(nodes_owing_a_transition_registration);
     assert_member_is_sync(nodes_owing_explicit_inheritance);
+    assert_member_is_sync(batch_pinned_compositions);
     assert_member_is_sync(nodes_owing_an_animation_sample);
     assert_member_is_sync(counter_style_environment_identities);
     assert_member_is_sync(nodes_owing_animation_definitions);

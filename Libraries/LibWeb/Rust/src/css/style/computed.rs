@@ -73,6 +73,9 @@ pub(super) fn table_inherited_group_swap_eligible(table: &ComputedLonghandTable)
 /// What assembling an engine-computed record produced, for the publication counters.
 pub(super) struct EngineComputedAssembly {
     pub(super) delta: (FinalStyleRecordID, FinalStyleRecordID),
+    /// The composition this assembly derived beneath, kept alive for the batch: the host's element
+    /// still names it until the row is applied. The caller drops the pin at that point.
+    pub(super) pinned_composition: Option<u64>,
     /// Rebuilt groups whose payload equalled the old one and kept its identity.
     pub(super) canonicalized_groups: u32,
     /// Whether the node's group tuple identity stayed put, so nothing propagates from it.
@@ -1467,11 +1470,17 @@ impl ComputedGroupSets {
         let index = node.element_index()? as usize;
         // A node whose animations composed a record gives that composition up here: the base this
         // assembles is the style beneath it, and the caller has the host sample the animations
-        // again over it once the batch is applied.
-        if let Some(slot) = self.columns.animation_overlay_slot(index) {
+        // again over it once the batch is applied. Until then the host's element still names the
+        // composition, so the batch keeps the slot alive - giving up the assignment is not giving
+        // up the record - and the caller drops the pin when the host acknowledges the row.
+        let pinned_composition = self.columns.animation_overlay_slot(index).and_then(|slot| {
+            let base = (*self.style_record_column.get(index)?)?;
+            let composed = self.final_style_record(base, Some(slot)).raw();
+            self.pin_style_record(composed);
             self.release_animation_overlay_assignment(slot);
             self.columns.set_animation_overlay_slot(index, None);
-        }
+            Some(composed)
+        });
         let base_style_record_identity = base_style_record.base_record()?;
         if !self.style_record_generation_is_live(base_style_record_identity, base_style_record.base_generation()) {
             return None;
@@ -1633,6 +1642,7 @@ impl ComputedGroupSets {
             delta: (previous_style_record, self.final_base_style_record(new_style_record)),
             canonicalized_groups,
             group_set_unchanged: group_set == old_record.groups,
+            pinned_composition,
         })
     }
 
