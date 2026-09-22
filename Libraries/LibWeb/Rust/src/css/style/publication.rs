@@ -597,6 +597,9 @@ impl RetainedState {
         use crate::css::property_metadata::{FIRST_LONGHAND_PROPERTY_ID, LONGHAND_WORD_COUNT};
 
         let target = computed::ComputedStyleTarget::new(node, u8::MAX);
+        if self.backs_host_pseudo_element(node) {
+            return self.engine_backing_element_record(node, scratch, counters);
+        }
         // A custom property the cascade declares is no winner the columns hold; the engine
         // computes the environment it decides itself.
         if !cascade_winners_are_complete && !self.cascade_winners_are_complete_but_for_custom_properties(node) {
@@ -623,10 +626,9 @@ impl RetainedState {
                 return None;
             }
         };
-        // An element's animations compose into its style in the C++ computation, an element
-        // standing for its host's pseudo-element takes the style C++ computes for that
-        // pseudo-element, and a hint mapped from another element's attributes moves without
-        // anything recorded on the element.
+        // An element's animations compose into its style in the C++ computation, and a hint
+        // mapped from another element's attributes moves without anything recorded on the
+        // element.
         let facts = self.computed_group_sets.adjustment_facts(node);
         // Either the root's font inputs moved under this element, or the element's own font
         // environment did: a face its cascade names became available or failed. The winners are
@@ -635,11 +637,7 @@ impl RetainedState {
         let font_inputs_moved = (scratch.root_font_inputs_changed
             && facts & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT == 0)
             || scratch.font_environment_moved;
-        if facts
-            & (bridge::element_adjustment_fact::IS_SHADOW_HOST_PSEUDO_ELEMENT
-                | bridge::element_adjustment_fact::HAS_DERIVED_PRESENTATIONAL_HINTS)
-            != 0
-        {
+        if facts & bridge::element_adjustment_fact::HAS_DERIVED_PRESENTATIONAL_HINTS != 0 {
             counters.bump(Counter::EngineComputedRecordBailWinnerElement);
             return None;
         }
@@ -2344,6 +2342,16 @@ impl RetainedState {
         let facts = self.computed_group_sets.adjustment_facts(node);
         if facts & bridge::element_adjustment_fact::DISALLOW_DISPLAY_CONTENTS != 0 {
             return 0;
+        }
+        // An element standing for its host's pseudo-element is its host's to cascade.
+        if self.backs_host_pseudo_element(node) {
+            let parent_inputs_moved = ParentInputsMoved {
+                inherited_style: true,
+                display: true,
+            };
+            return self
+                .engine_computed_record_delta(node, true, None, parent_inputs_moved, scratch, counters)
+                .map_or(0, |(_, record)| record.raw());
         }
         let Lookup::Known(cascade_state) = self
             .current_winner_groups()

@@ -2219,7 +2219,10 @@ impl StyleEngineState {
                         !self
                             .program
                             .declarations_are_complete_but_for_custom_properties(delta.rule)
-                    }) {
+                    })
+                        // An element standing for its host's pseudo-element takes the host's rules.
+                        && !self.backs_host_pseudo_element(node)
+                    {
                         // Custom declarations are resolved by the engine's environment computation.
                         // Other declarations missing from the winner columns still require C++.
                         counters.bump(Counter::EngineComputedRecordGateIncompleteAnswer);
