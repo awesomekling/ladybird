@@ -1899,7 +1899,8 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_sett
     // Box-type, overflow and text-alignment adjustments consume the unadjusted base values, which
     // an animation-only overlay update deliberately does not reconstruct.
     if (animated_property_invalidation.requires_base_style_recomputation)
-        const_cast<StyleComputer&>(*this).style_engine().record_element_style_input_change(element.style_node_id());
+        const_cast<StyleComputer&>(*this).style_engine().record_derived_element_style_input_change(
+            element.style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle);
     auto invalidation = decode_style_invalidation(animated_property_invalidation.invalidation);
     // The published values reach the element's pseudo-elements and its flat-tree descendants the
     // way an animation refresh's do: the descendants as one feedback batch the ordinary transaction
