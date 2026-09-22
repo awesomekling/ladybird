@@ -831,7 +831,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 // The row's own effects come with the decision that settled it, whether or not
                 // the record is the one that installs: a C++ computation of this element runs the
                 // transition step itself, so the debt is discharged either way.
-                auto const transition_debt = document.style_computer().style_engine().take_transition_registration_debt(StyleNodeID { reaction.style_node });
                 auto const explicit_inheritance_debt = document.style_computer().style_engine().take_explicit_inheritance_debt(StyleNodeID { reaction.style_node });
                 auto const row_effect_debt = document.style_computer().style_engine().take_settled_row_effect_debt(StyleNodeID { reaction.style_node });
                 auto const transition_debt = row_effect_debt & StyleEngine::SettledRowTransitionDebt;
