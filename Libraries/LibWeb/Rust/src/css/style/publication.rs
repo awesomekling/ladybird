@@ -684,13 +684,6 @@ impl RetainedState {
         // record was computed from has moved, and the overlay on it is the host's either way.
         let animations_bind_the_record = facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0;
         let Some(old_style_record) = self.computed_group_sets.assigned_style_record(node) else {
-            // A first record for an element that already animates would be a record the engine
-            // computed for a style the host composes into, and the plan it may leave was decided
-            // against the animations the host published, which are not the only ones it holds.
-            if animations_bind_the_record {
-                counters.bump(Counter::EngineComputedRecordBailWinnerElement);
-                return None;
-            }
             return self.engine_cold_record(node, (generation, state), scratch, goal, counters);
         };
         // The same of a record that holds an animation overlay. What the transitions its table
@@ -1613,7 +1606,12 @@ impl RetainedState {
             return None;
         }
         let parent_record = match parent {
-            Some(parent) => match self.computed_group_sets.assigned_style_record(parent) {
+            Some(parent) => match self
+                .computed_group_sets
+                .sampled_composition_identity(parent)
+                .and_then(computed::FinalStyleRecordID::from_raw)
+                .or_else(|| self.computed_group_sets.assigned_style_record(parent))
+            {
                 Some(parent_record) => Some(parent_record),
                 None => {
                     counters.bump(Counter::EngineComputedRecordBailRecordParent);

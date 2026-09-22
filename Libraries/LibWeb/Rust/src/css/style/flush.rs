@@ -1925,6 +1925,7 @@ impl StyleEngineState {
                 node.element_index().and_then(|index| rows.get(index as usize))
             };
             let mut crossed_ancestors = Vec::new();
+            let mut nodes_waiting_for_sampled_composition = HashSet::<StyleNodeID>::default();
             let ancestor_chain = |engine: &Self,
                                   rows: &mut DerivedChildInputRows,
                                   crossed: &mut Vec<StyleNodeID>,
@@ -2166,6 +2167,13 @@ impl StyleEngineState {
                         && self
                             .retained
                             .container_ancestor_is_unsettled(node, &engine_computed_record_scratch);
+                    let awaits_sampled_parent = self.tree.flat_tree_parent(node).is_some_and(|parent| {
+                        nodes_waiting_for_sampled_composition.contains(&parent)
+                            || (self.retained.engine_computed_records_pending.contains_key(&parent)
+                                && self.retained.computed_group_sets.adjustment_facts(parent)
+                                    & bridge::element_adjustment_fact::HAS_ANIMATIONS
+                                    != 0)
+                    });
                     // Why this row would reach the host, for the seal's by-cause census. Naming
                     // it here is what lets the census rank entries instead of attempts.
                     let mut decline_cause: &'static str = "";
@@ -2193,6 +2201,12 @@ impl StyleEngineState {
                     {
                         counters.bump(Counter::EngineComputedRecordGateReaction);
                         decline_cause = "GateReaction";
+                        false
+                    } else if awaits_sampled_parent {
+                        nodes_waiting_for_sampled_composition.insert(node);
+                        retry_after_ancestor = answer_winners_are_complete
+                            || self.cascade_winners_are_complete_but_for_custom_properties(node);
+                        decline_cause = "AwaitSampledParent";
                         false
                     } else if selector_truth_changes.deltas_for(node).iter().any(|delta| {
                         !self

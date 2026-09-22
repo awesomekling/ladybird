@@ -208,6 +208,19 @@ static void sample_animations_for_installed_record(DOM::AbstractElement abstract
     context.elements.set(abstract_element, Animations::AnimationUpdateContext::ElementData { record, style_computer.reconstruct_computed_properties_for_animation(record) });
 }
 
+static void sample_animations_for_installed_pseudos(DOM::Element& element)
+{
+    // A dirty effect may have been visited before a newly generated pseudo had a record.
+    // Compose it at installation so its first observable style includes that effect.
+    if (!element.has_associated_animations())
+        return;
+    for (size_t kind = 0; kind < to_underlying(PseudoElement::KnownPseudoElementCount); ++kind) {
+        DOM::AbstractElement pseudo { element, static_cast<PseudoElement>(kind) };
+        if (pseudo.has_style())
+            sample_animations_for_installed_record(pseudo);
+    }
+}
+
 // Whether the custom-property environment an engine-computed record was published with can be
 // installed: the one the element inherits - the parent's inheritable data, which is the parent's
 // own unless a registration made some of it non-inherited - or one the engine resolved over it.
@@ -818,7 +831,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                             | (u32(element->style_depends_on_style_container_query()) << 8);
                     };
                     auto const marks_the_engine_row_left = dependency_marks();
+                    auto const counters_were_suspended = StyleValueFFI::rust_style_ffi_counters_suspend_for_verification(true);
                     invalidation = element->apply_style_engine_reaction(verification_did_change_custom_properties, DOM::Element::StyleRecomputeMode::Verification);
+                    StyleValueFFI::rust_style_ffi_counters_suspend_for_verification(counters_were_suspended);
                     if (auto const missing = dependency_marks() & ~marks_the_engine_row_left; missing != 0) {
                         dbgln("Engine record for {} leaves dependency marks {:#x} unset that the computation sets", element->debug_description(), missing);
                     }
@@ -956,20 +971,17 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     StyleEngineFFI::style_engine_native_container_effects_release(StyleEngineFFI::style_engine_take_container_effects(document.style_computer().style_engine().rust_handle(), reaction.style_node).effects);
                     invalidation = element->apply_style_engine_reaction(did_change_custom_properties);
                 } else {
-                    bool const defer_final_comparison = element->has_relevant_animations()
+                    bool const defer_final_comparison = element->has_relevant_animations() || element->has_associated_animations()
                         || row_effect_debt & (StyleEngine::SettledRowTransitionDebt | StyleEngine::SettledRowOwesAnAnimationSample);
                     apply_engine_computed_records(pseudo_element_records, true, defer_final_comparison);
                     DOM::AbstractElement settled { *element };
                     if (animation_plan.has_value())
                         document.style_computer().apply_settled_animation_plan(settled, *animation_plan);
-                    if (settled.has_style() && (element->has_relevant_animations() || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
+                    bool const has_animation_effects = element->has_relevant_animations() || element->has_associated_animations();
+                    if (settled.has_style() && (has_animation_effects || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
                         sample_animations_for_installed_record(settled);
-                    if (element->has_relevant_animations()) {
-                        for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
-                            if (pseudo_element_records[kind].has_value())
-                                sample_animations_for_installed_record(DOM::AbstractElement { *element, static_cast<PseudoElement>(kind) });
-                        }
-                    }
+                    if (has_animation_effects)
+                        sample_animations_for_installed_pseudos(*element);
                     document.style_computer().style_engine().set_sampled_composition_identity(
                         StyleNodeID { reaction.style_node }, element->style_record_identity());
                     // Under verification the reference computation ran the step too, and then
@@ -1014,10 +1026,20 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     document.style_computer().set_materializing_for_derived_reaction(false);
                 };
                 invalidation = element->apply_style_engine_reaction(did_change_custom_properties, DOM::Element::StyleRecomputeMode::Normal, pseudo_element_inputs);
+                if (pseudo_element_inputs == DOM::Element::PseudoElementInputs::Changed)
+                    sample_animations_for_installed_pseudos(*element);
             } else if (needs_custom_property_recompute && element->refresh_inherited_custom_property_data()) {
                 did_change_custom_properties = true;
                 element->republish_style_record_environment();
                 element->invalidate_descendant_styles_depending_on_style_container_query();
+            }
+
+            // NB: Making deferred pseudo-element styles observable changes only their inputs.
+            //     The originating element's cascade and computed style remain valid.
+            if (!needs_regular_style_recompute && !needs_inherited_style_recompute && !needs_full_custom_property_recompute
+                && (reaction.reaction & StyleEngine::PseudoInputsMayHaveChanged) && element->has_style()) {
+                invalidation |= element->recompute_pseudo_element_styles();
+                sample_animations_for_installed_pseudos(*element);
             }
 
             auto const* current_inherited_box_values = element->style_group<ComputedValues::InheritedBoxValues>();

@@ -365,8 +365,9 @@ impl RetainedState {
         } = subject;
         let has = |bit: u32| facts & bit != 0;
         let is_document_element = has(fact::IS_DOCUMENT_ELEMENT);
-        // An element with animations composes its style with their effects in C++.
-        if facts & fact::HAS_ANIMATIONS != 0 {
+        // A first record is a base for the host to compose at installation. A warm record
+        // still needs its old composition separated from the base before this drive.
+        if old_style_record.is_some() && facts & fact::HAS_ANIMATIONS != 0 {
             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
             return None;
         }
