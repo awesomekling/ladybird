@@ -16,8 +16,48 @@ impl RetainedState {
         record: Option<computed::FinalStyleRecordID>,
         counters: &mut Counters,
     ) -> bool {
+        self.pseudo_inputs_available(node, record, false, counters)
+    }
+
+    /// `tolerates_unused_marker_row` lets the stale marker row of an element that is no list item
+    /// pass; settling the records decides it against the element's new record.
+    fn pseudo_inputs_available(
+        &mut self,
+        node: StyleNodeID,
+        record: Option<computed::FinalStyleRecordID>,
+        tolerates_unused_marker_row: bool,
+        counters: &mut Counters,
+    ) -> bool {
         use pseudo_kind::{AFTER, BACKDROP, BEFORE, FIRST_LETTER, MARKER, SELECTION};
 
+        // A marker is generated for a list item only: the stale marker row of an element that is
+        // no list item decides nothing. Settling the records checks it again against the
+        // element's new record.
+        let record_is_list_item = record
+            .and_then(|record| self.computed_group_sets.style_record_view(record.raw()))
+            .and_then(|view| unsafe { view.longhand_table.as_ref() })
+            .is_some_and(|table| table.display_is_list_item());
+        // What the element's display winner says: `None` when the state or the value cannot say.
+        let display_winner_is_list_item = match self
+            .current_winner_groups()
+            .token_for(WinnerGroupKey::current(node, self.program.version()))
+        {
+            Lookup::Known((_, state)) => match self
+                .winner_groups
+                .winner_in_state(state, crate::css::property_metadata::property_id::DISPLAY)
+                .and_then(|winner| self.winner_groups.resolved_winner(winner))
+            {
+                None => Some(false),
+                Some(winner) => match self.specified_values.value(winner.key.value) {
+                    Lookup::Known(StyleValueData::Display { raw }) => {
+                        Some(crate::css::display::FfiDisplay::from_raw(*raw).is_list_item())
+                    }
+                    _ => None,
+                },
+            },
+            _ => None,
+        };
+        let marker_may_generate = record_is_list_item || display_winner_is_list_item != Some(false);
         let mut available = 0_u64;
         for (pseudo, version, _, priority_current) in self.current_winner_groups().pseudo_states(node) {
             if self.deferred_pseudo_element == Some(pseudo.kind) {
@@ -29,6 +69,9 @@ impl RetainedState {
                 continue;
             }
             if version != self.program.version() || !priority_current {
+                if tolerates_unused_marker_row && kind == usize::from(MARKER) && !marker_may_generate {
+                    continue;
+                }
                 counters.bump(Counter::EngineComputedRecordBailPseudoStale);
                 return false;
             }
@@ -46,23 +89,7 @@ impl RetainedState {
             return true;
         }
         let mut explicit_kinds = (1 << BEFORE) | (1 << AFTER) | (1 << FIRST_LETTER) | (1 << SELECTION);
-        if record
-            .and_then(|record| self.computed_group_sets.style_record_view(record.raw()))
-            .and_then(|view| unsafe { view.longhand_table.as_ref() })
-            .is_some_and(|table| table.display_is_list_item())
-        {
-            explicit_kinds |= 1 << MARKER;
-        }
-        if let Lookup::Known((_, state)) = self
-            .current_winner_groups()
-            .token_for(WinnerGroupKey::current(node, self.program.version()))
-            && let Some(winner) = self
-                .winner_groups
-                .winner_in_state(state, crate::css::property_metadata::property_id::DISPLAY)
-                .and_then(|winner| self.winner_groups.resolved_winner(winner))
-            && let Lookup::Known(StyleValueData::Display { raw }) = self.specified_values.value(winner.key.value)
-            && crate::css::display::FfiDisplay::from_raw(*raw).is_list_item()
-        {
+        if record_is_list_item || display_winner_is_list_item == Some(true) {
             explicit_kinds |= 1 << MARKER;
         }
         if required & explicit_kinds & !available != 0 {
@@ -150,6 +177,7 @@ impl RetainedState {
         }
         let program_version = self.program.version();
         let mut states: [Option<CascadeStateID>; pseudo_kind::SYNTHETIC_COUNT] = [None; pseudo_kind::SYNTHETIC_COUNT];
+        let mut marker_row_is_stale = false;
         for (pseudo, version, state, priority_current) in self.current_winner_groups().pseudo_states(node) {
             if self.deferred_pseudo_element == Some(pseudo.kind) {
                 continue;
@@ -167,6 +195,11 @@ impl RetainedState {
                 continue;
             }
             if version != program_version || !priority_current {
+                // Whether a marker is generated is known once the element's display is.
+                if kind == MARKER {
+                    marker_row_is_stale = true;
+                    continue;
+                }
                 counters.bump(Counter::EngineComputedRecordBailPseudoStale);
                 return None;
             }
@@ -209,6 +242,10 @@ impl RetainedState {
             }
             (None, None) => false,
         };
+        if marker_row_is_stale && (new_is_list_item || old_is_list_item) {
+            counters.bump(Counter::EngineComputedRecordBailPseudoStale);
+            return None;
+        }
         // What a pseudo-element inherits from its element: an element record that kept its
         // inherited groups left them alone.
         let inherited_inputs_unchanged = match old_element_record {
@@ -252,7 +289,7 @@ impl RetainedState {
                             .computed_group_sets
                             .style_record_custom_property_environment(new_element_record.raw())
             });
-        let Some(environment) = self.computed_group_sets.custom_property_environment_identity(node) else {
+        let Some(element_environment) = self.computed_group_sets.custom_property_environment_identity(node) else {
             counters.bump(Counter::EngineComputedRecordBailRecord);
             return None;
         };
@@ -356,6 +393,14 @@ impl RetainedState {
                     continue;
                 }
             }
+            // A pseudo-element's own custom declarations resolve over its element's environment,
+            // as an element's resolve over its parent's.
+            let Some(environment) =
+                self.engine_custom_property_environment_of(node, Some(kind), element_environment, &inputs, counters)
+            else {
+                counters.bump(Counter::EngineComputedRecordBailCustomProperties);
+                return None;
+            };
             let store = match state {
                 Some(state) => match scratch.pseudo_stores.get(&(kind, state, environment)) {
                     Some(store) => store.clone(),
@@ -631,7 +676,7 @@ impl RetainedState {
                 counters.bump(Counter::EngineComputedRecordBailIncompleteWinners);
                 return None;
             }
-            if !self.engine_pseudo_inputs_available(node, Some(record), counters) {
+            if !self.pseudo_inputs_available(node, Some(record), true, counters) {
                 return None;
             }
             // The default marker's tabular numerals are not a font the engine resolves yet: a
@@ -689,11 +734,12 @@ impl RetainedState {
     }
 
     /// Whether every rule the node's answer matches for a pseudo-element declares only what the
-    /// winner columns hold, with no container query deciding it: the strict reading
-    /// `cascade_winners_are_complete_but_for_custom_properties` gives pseudo-element rules.
+    /// winner columns hold, and custom properties, which the engine resolves into the
+    /// pseudo-element's own environment, with no container query deciding it.
     fn pseudo_winners_are_complete(&self, node: StyleNodeID) -> bool {
         let rule_is_complete = |rule: RuleID| {
-            !self.program.rule_is_gated_by_container_query(rule) && self.program.declarations_are_complete_for(rule)
+            !self.program.rule_is_gated_by_container_query(rule)
+                && self.program.declarations_are_complete_but_for_custom_properties(rule)
         };
         if let Some((published, answer)) = Self::published_answer_lookup(
             &self.published_match_answers,
