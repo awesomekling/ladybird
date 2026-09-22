@@ -2962,15 +2962,7 @@ pub(crate) fn publish_computed_groups_from_inputs(
     if animation_overlay_identity != 0 && animated_overlay.is_null() {
         return FfiStyleRecordDelta::default();
     }
-    // Only a target the engine settled is under test. The verification pass recomputes everything
-    // the element holds, and a target the engine left alone publishes as an ordinary C++ recompute
-    // would: its record is equal by value to the one already assigned, so it interns into the same
-    // identity, and the element and the engine do not disagree about who holds what.
-    let verifying_computed_record = engine.host.computed_record_verification_counters.is_some()
-        && node == engine.host.computed_record_verification_element
-        && (pseudo_kind == u8::MAX
-            || pseudo_kind >= 64
-            || engine.host.computed_record_verification_settled_pseudos & (1u64 << pseudo_kind) != 0);
+    let verifying_computed_record = record_target_is_under_verification(engine, node, pseudo_kind);
     let metadata_input = super::computed::ComputedMetadataInput {
         pseudo_element_styles,
         dependency_flags,
@@ -3264,7 +3256,7 @@ pub unsafe extern "C" fn style_engine_assign_shared_style_record(
         StyleNodeID::from_raw(node).expect("a nonzero node must be a style node"),
         pseudo_kind,
     );
-    if engine.host.computed_record_verification_counters.is_some() {
+    if record_target_is_under_verification(engine, node, pseudo_kind) {
         let style_record = engine
             .computed_group_sets
             .style_record_for_shared_assignment(target, style_record)
@@ -3715,6 +3707,19 @@ pub unsafe fn replay_republish_record_environment(engine: *mut c_void, node: u32
     StyleNodeID::from_raw(node)
         .and_then(|node| engine.republish_record_environment(node, environment))
         .unwrap_or(0)
+}
+
+/// Whether the target is one the open record-verification scope is checking. Only those are
+/// interned for comparison: the verification pass recomputes everything the element holds, and a
+/// target the engine left alone publishes as an ordinary C++ recompute would. Its record is equal
+/// by value to the one already assigned, so it interns into the same identity, and the element and
+/// the engine do not disagree about who holds what.
+fn record_target_is_under_verification(engine: &StyleEngine, node: u32, pseudo_kind: u8) -> bool {
+    engine.host.computed_record_verification_counters.is_some()
+        && node == engine.host.computed_record_verification_element
+        && (pseudo_kind == u8::MAX
+            || pseudo_kind >= 64
+            || engine.host.computed_record_verification_settled_pseudos & (1u64 << pseudo_kind) != 0)
 }
 
 /// Retry after the ancestor's style was installed, returning installation metadata together
