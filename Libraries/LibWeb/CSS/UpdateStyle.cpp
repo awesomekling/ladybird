@@ -625,11 +625,14 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 }
             }
 
-            // An engine-computed first record installs on an element without style; other record
-            // deltas assume the style they move.
+            // An engine-computed first record installs on an element without style, as does one
+            // for an element whose ancestor became visible: its style was cleared on entry to
+            // display:none while the engine kept the record. Other record deltas assume the style
+            // they move.
             if (!element->has_style()
                 && reaction.gap != StyleEngineFFI::FfiStyleDeltaGap::Materialize
-                && !(reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Computed && reaction.old_style_record == 0))
+                && !(reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Computed
+                    && (reaction.old_style_record == 0 || (reaction.reaction & StyleEngine::AncestorBecameVisible))))
                 continue;
             // An earlier display:none reaction in this batch can clear the style of a materialization gap after the
             // inheritance closure was built. The gap must then rematerialize rather than letting its descendants

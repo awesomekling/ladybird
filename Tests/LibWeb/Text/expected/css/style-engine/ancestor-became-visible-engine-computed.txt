@@ -1,0 +1,3 @@
+engine computed records: 3
+grandchild color: rgb(0, 128, 0)
+hit test finds the child: true

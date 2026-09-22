@@ -2088,13 +2088,14 @@ impl StyleEngineState {
                         | transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES;
                     // A font-environment reaction is the engine's too: the `@font-face` table it
                     // resolves against is a published input now, and a record from an older
-                    // font-environment generation is already one the engine refuses to reuse. So is
-                    // a descendant recompute: C++ answers it with a full recompute, and so does the
-                    // engine (see `recompute_in_full`).
+                    // font-environment generation is already one the engine refuses to reuse. So are
+                    // a descendant recompute and an ancestor becoming visible: C++ answers both with a
+                    // full recompute, and so does the engine (see `recompute_in_full`).
                     const SETTLEABLE_REACTIONS: u8 = transaction::STYLE_REACTION_PUBLISHED_STYLE
                         | transaction::STYLE_REACTION_FONT_INPUTS_CHANGED
                         | DERIVABLE_REACTIONS
-                        | transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES;
+                        | transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES
+                        | transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE;
                     let reaction_is_settleable = reaction & !SETTLEABLE_REACTIONS == 0
                         && !(reaction & DERIVABLE_REACTIONS != 0 && style_input_nodes_for_cpp.contains(&node));
                     let mut parent_inputs_moved =
@@ -2215,8 +2216,12 @@ impl StyleEngineState {
                                 reaction & transaction::STYLE_REACTION_FONT_INPUTS_CHANGED != 0;
                             // A descendant recompute stands for inputs no winner shows: the root's
                             // font metrics, an ancestor's direction, writing mode or container type.
-                            engine_computed_record_scratch.recompute_in_full =
-                                reaction & transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES != 0;
+                            // An ancestor becoming visible stands for a record whose style was cleared
+                            // on entry to display:none.
+                            engine_computed_record_scratch.recompute_in_full = reaction
+                                & (transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES
+                                    | transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE)
+                                != 0;
                             let delta = self.engine_computed_record_delta(
                                 node,
                                 answer_winners_are_complete,
