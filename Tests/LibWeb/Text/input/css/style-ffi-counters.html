@@ -93,9 +93,10 @@
             `;
             document.body.appendChild(variables);
         });
-        println(`custom-property cascade used the bulk Rust entry: ${
-            customPropertyCounters.cascadeBulkEntries > 0
+        println(`custom-property cascade stayed in engine: ${
+            customPropertyCounters.cascadeBulkEntries === 0
             && !("cascadeCustomPropertyEntries" in customPropertyCounters)
+            && getComputedStyle(variables).height === "7px"
         }`);
 
         const relativeLengths = document.createElement("div");

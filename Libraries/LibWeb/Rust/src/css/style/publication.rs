@@ -684,6 +684,9 @@ impl RetainedState {
         // record the element already holds does not: it is what the row asks for when nothing the
         // record was computed from has moved, and the overlay on it is the host's either way.
         let animations_bind_the_record = facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0;
+        let has_registered_declarations = self
+            .document_style_computation_inputs
+            .is_some_and(|inputs| self.declares_registered_custom_property(node, None, &inputs));
         let Some(old_style_record) = self.computed_group_sets.assigned_style_record(node) else {
             // A batch first record cannot settle the host's existing animation composition.
             // A scoped demand instead installs its base and samples the effects over it.
@@ -744,7 +747,7 @@ impl RetainedState {
         // The environment the node's own custom declarations resolve to over the parent's. A node
         // declaring none keeps its record's, which is the parent's; a moved environment
         // republishes the record under the new one.
-        let environment = {
+        let mut environment = {
             let parent_environment = match self.tree.flat_tree_parent(node) {
                 Some(parent) => {
                     let Some(parent_environment) =
@@ -760,9 +763,8 @@ impl RetainedState {
             // The row keeps the record it reads its own font from unless the font itself is
             // moving, so that is when a registered name can be computed here rather than by the
             // host: the value absolutizes against the same metrics C++ would use.
-            let registered = (!font_inputs_moved && !parent_inputs_moved.any() && !scratch.recompute_in_full)
-                .then(|| self.own_font_length_resolution_context(old_style_record, &inputs))
-                .flatten()
+            let registered = self
+                .own_font_length_resolution_context(old_style_record, &inputs)
                 .map(|(length, color_scheme)| custom_property_cascade::RegisteredValueContext { length, color_scheme });
             let Some(environment) =
                 self.engine_custom_property_environment(node, parent_environment, &inputs, registered, counters)
@@ -785,7 +787,7 @@ impl RetainedState {
             };
             (environment != old_environment).then_some(environment)
         };
-        let Some(current_environment) = environment.or_else(|| {
+        let Some(mut current_environment) = environment.or_else(|| {
             self.computed_group_sets
                 .animation_overlay_base_custom_property_environment(old_style_record.raw())
                 .or_else(|| {
@@ -923,6 +925,7 @@ impl RetainedState {
             || environment_moved_under_substitutions
             || scratch.document_environment_moved
             || scratch.recompute_in_full
+            || (has_registered_declarations && environment.is_some())
             || delta.properties().iter().any(|&property| {
                 !property_computes_in_remaining_phase(property) || property_feeds_box_type_transformation(property)
             });
@@ -1011,7 +1014,11 @@ impl RetainedState {
             self.monospace_cohort_key(node, state),
             self.substitution_attributes_key(node, None, state),
         );
-        if let Some(&(new_style_record, cohort_explicitly_inherited_groups)) = scratch.cohorts.get(&cohort) {
+        if let Some(&(new_style_record, cohort_explicitly_inherited_groups)) = (!has_registered_declarations
+            || !full_drive)
+            .then(|| scratch.cohorts.get(&cohort))
+            .flatten()
+        {
             // The row takes another node's record whole, so its plan is decided from that record's
             // own longhands rather than from a drive of this node's.
             let animation_plan = match owes_an_animation_plan {
@@ -1171,7 +1178,7 @@ impl RetainedState {
         // A store whose values substitute `attr()` holds this element's attributes, and is the
         // element's alone.
         let reads_attributes = self.state_reads_attributes(node, state);
-        let store = match scratch
+        let mut store = match scratch
             .stores
             .get(&(state, current_environment))
             .filter(|_| !reads_attributes)
@@ -1227,16 +1234,59 @@ impl RetainedState {
                     groups_to_rebuild = (1 << crate::css::table_group_builder::group_index::COUNT) - 1;
                 }
                 let subject = self.element_drive_subject(node, counters)?;
-                self.engine_full_drive(
+                let driven = self.engine_full_drive(
                     subject,
                     Some(old_style_record),
                     &store,
                     &inputs,
                     &mut scratch.font_drive,
                     goal,
+                    has_registered_declarations,
                     &mut explicitly_inherited_groups,
                     counters,
-                )?
+                );
+                let driven = if let Some(registered) = scratch.font_drive.registered_context.take() {
+                    let parent_environment = parent
+                        .map(|parent| self.computed_group_sets.custom_property_environment_identity(parent))
+                        .unwrap_or(Some(0))?;
+                    current_environment = self.engine_custom_property_environment(
+                        node,
+                        parent_environment,
+                        &inputs,
+                        Some(registered),
+                        counters,
+                    )?;
+                    environment = Some(current_environment);
+                    let mut substituted = false;
+                    let final_store = self.cascaded_store_for_state(
+                        node,
+                        state,
+                        None,
+                        current_environment,
+                        &mut substituted,
+                        counters,
+                    )?;
+                    scratch.store_capacity_bytes += final_store.capacity_bytes();
+                    store = std::sync::Arc::new(final_store);
+                    if substituted {
+                        scratch.substituted_states.insert((state, current_environment));
+                    }
+                    self.note_node_substitution(node, scratch, state, current_environment);
+                    self.engine_full_drive(
+                        subject,
+                        Some(old_style_record),
+                        &store,
+                        &inputs,
+                        &mut scratch.font_drive,
+                        goal,
+                        false,
+                        &mut explicitly_inherited_groups,
+                        counters,
+                    )
+                } else {
+                    driven
+                };
+                driven?
             }
         };
         // The plan is decided from the longhands this drive computed, before the table goes into
@@ -1286,7 +1336,7 @@ impl RetainedState {
         );
         // A record driven in full stands for a cohort keyed by the parent's inherited inputs only
         // when the drive was partial.
-        if !driver_input_moved {
+        if !driver_input_moved && (!has_registered_declarations || !full_drive) {
             scratch.cohorts.insert(cohort, (delta.1, explicitly_inherited_groups));
         }
         if explicitly_inherited_groups != 0 {
@@ -1637,6 +1687,7 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailRecordParent);
             return None;
         };
+        let has_registered_declarations = self.declares_registered_custom_property(node, None, &inputs);
         let Some(pseudo_styles) = self.pseudo_style_mask(node) else {
             counters.bump(Counter::EngineComputedRecordBailWinner);
             return None;
@@ -1690,9 +1741,15 @@ impl RetainedState {
                 return None;
             }
         }
-        let Some(environment) =
-            self.engine_custom_property_environment(node, parent_environment, &inputs, None, counters)
-        else {
+        let provisional_registered =
+            has_registered_declarations.then(|| self.provisional_registered_value_context(parent_record, &inputs));
+        let Some(mut environment) = self.engine_custom_property_environment(
+            node,
+            parent_environment,
+            &inputs,
+            provisional_registered,
+            counters,
+        ) else {
             counters.bump(Counter::EngineComputedRecordBailCustomProperties);
             return None;
         };
@@ -1701,7 +1758,7 @@ impl RetainedState {
         // element's alone. A store with substituted values is the environment's as well as the
         // state's, and admits nothing for the state alone.
         let reads_attributes = self.state_reads_attributes(node, state);
-        let store = match scratch.stores.get(&(state, environment)).filter(|_| !reads_attributes) {
+        let mut store = match scratch.stores.get(&(state, environment)).filter(|_| !reads_attributes) {
             Some(store) => store.clone(),
             None => {
                 let mut substituted = false;
@@ -1728,7 +1785,9 @@ impl RetainedState {
             }
         };
         self.note_node_substitution(node, scratch, state, environment);
-        let cache_key = parent
+        let cache_key = (!has_registered_declarations)
+            .then_some(())
+            .and(parent)
             .zip(parent_record)
             .and_then(|(parent, parent_record)| self.cold_record_parent(node, parent, parent_record, state))
             .map(|parent| ColdRecordKey {
@@ -1864,16 +1923,44 @@ impl RetainedState {
                 facts
             },
         };
-        let (table, length, longhand_evaluations, font) = self.engine_full_drive(
+        let driven = self.engine_full_drive(
             subject,
             None,
             &store,
             &inputs,
             &mut scratch.font_drive,
             goal,
+            has_registered_declarations,
             &mut explicitly_inherited_groups,
             counters,
-        )?;
+        );
+        let driven = if let Some(registered) = scratch.font_drive.registered_context.take() {
+            environment =
+                self.engine_custom_property_environment(node, parent_environment, &inputs, Some(registered), counters)?;
+            let mut substituted = false;
+            let final_store =
+                self.cascaded_store_for_state(node, state, None, environment, &mut substituted, counters)?;
+            scratch.store_capacity_bytes += final_store.capacity_bytes();
+            store = std::sync::Arc::new(final_store);
+            if substituted {
+                scratch.substituted_states.insert((state, environment));
+            }
+            self.note_node_substitution(node, scratch, state, environment);
+            self.engine_full_drive(
+                subject,
+                None,
+                &store,
+                &inputs,
+                &mut scratch.font_drive,
+                goal,
+                false,
+                &mut explicitly_inherited_groups,
+                counters,
+            )
+        } else {
+            driven
+        };
+        let (table, length, longhand_evaluations, font) = driven?;
         let font = font.expect("a full drive resolves the font");
         let (new_style_record, swap_eligible) = self.assemble_and_publish_engine_record(
             target,
@@ -2329,6 +2416,45 @@ impl RetainedState {
             resolved_viewport_relative_length: std::ptr::null_mut(),
         };
         Some((length, table.effective_color_scheme() as u8))
+    }
+
+    fn provisional_registered_value_context(
+        &self,
+        parent_record: Option<computed::FinalStyleRecordID>,
+        inputs: &bridge::FfiDocumentStyleComputationInputs,
+    ) -> custom_property_cascade::RegisteredValueContext {
+        use crate::css::style_compute::{FfiFontMetrics, FfiLengthResolutionContext};
+        if let Some((length, color_scheme)) =
+            parent_record.and_then(|record| self.own_font_length_resolution_context(record, inputs))
+        {
+            return custom_property_cascade::RegisteredValueContext { length, color_scheme };
+        }
+        let metrics = FfiFontMetrics {
+            font_size: inputs.initial_font_size,
+            x_height: inputs.initial_font_x_height,
+            cap_height: inputs.initial_font_cap_height,
+            zero_advance: inputs.initial_font_zero_advance,
+            line_height: 0.0,
+        };
+        custom_property_cascade::RegisteredValueContext {
+            length: FfiLengthResolutionContext {
+                viewport_width: inputs.viewport_width,
+                viewport_height: inputs.viewport_height,
+                font_metrics: metrics,
+                root_font_metrics: metrics,
+                font_metrics_depend_on_viewport_metrics: false,
+                root_font_metrics_depend_on_viewport_metrics: false,
+                has_container_width_basis: false,
+                has_container_height_basis: false,
+                container_width_basis: 0.0,
+                container_height_basis: 0.0,
+                container_width_basis_depends_on_viewport_metrics: false,
+                container_height_basis_depends_on_viewport_metrics: false,
+                subject_inline_axis_is_horizontal: true,
+                resolved_viewport_relative_length: std::ptr::null_mut(),
+            },
+            color_scheme: inputs.preferred_color_scheme,
+        }
     }
 
     fn record_requires_cpp_animation(&self, record: computed::FinalStyleRecordID) -> bool {

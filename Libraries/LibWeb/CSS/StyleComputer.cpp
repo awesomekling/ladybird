@@ -1182,7 +1182,24 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
         return custom_property_name_ids.ensure(property.name(), [&] {
             auto registration = m_document->get_registered_custom_property(property.name());
             bool is_important = false;
-            if (element_declares_own_custom_properties) {
+            bool exact_importance_answer = false;
+            if (base_custom_property_data
+                && StyleEngine::is_engine_custom_property_environment(base_custom_property_data->identity())
+                && abstract_element.element().style_node_id() != 0) {
+                // An engine environment can flatten inherited entries into its
+                // store. Only this element's own cascade can make an animation
+                // lose to !important; an ancestor's declaration cannot.
+                auto raw_name = property.name().to_raw_leaked();
+                auto own_importance = StyleEngineFFI::style_engine_cascaded_custom_property_importance(
+                    m_style_engine.rust_handle(), abstract_element.element().style_node_id().value(),
+                    pseudo_element_to_ffi(abstract_element.pseudo_element()), raw_name);
+                Utf16FlyString::unref_raw(raw_name);
+                if (own_importance != 3) {
+                    is_important = own_importance == 2;
+                    exact_importance_answer = true;
+                }
+            }
+            if (!exact_importance_answer && element_declares_own_custom_properties) {
                 size_t declared_index = 0;
                 for (auto const& [name, style_property] : base_custom_property_data->own_values()) {
                     if (declared_index++ >= base_custom_property_data->declared_count())

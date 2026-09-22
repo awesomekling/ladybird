@@ -3938,6 +3938,28 @@ pub unsafe extern "C" fn style_engine_borrow_engine_custom_property_environment(
     store
 }
 
+/// Whether the node's own cascade declares `name_raw`: zero for none, one for
+/// a normal declaration, two for an important declaration, and three when
+/// the match answer is unavailable. An inherited
+/// engine environment may flatten its ancestor's declarations into its store,
+/// so the store's own-entry importance cannot answer this animation question.
+///
+/// # Safety
+/// `engine` must be live and `name_raw` must name a live UTF-16 fly string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_cascaded_custom_property_importance(
+    engine: *const c_void,
+    node: u32,
+    pseudo_kind: u8,
+    name_raw: usize,
+) -> u8 {
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return 0;
+    };
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    engine.cascaded_custom_property_importance(node, (pseudo_kind != u8::MAX).then_some(pseudo_kind), name_raw)
+}
+
 /// Records what a custom property's name atom spells, and the fly string it is. The fly string is
 /// retained and never recorded: a replay has no strings, and names its entries by atom alone.
 ///

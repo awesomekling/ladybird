@@ -186,6 +186,8 @@ define_counters! {
     EngineComputedRecordBailWinnerElement => "engineComputedRecordBailWinnerElement",
     EngineComputedRecordBailWinnerAnimated => "engineComputedRecordBailWinnerAnimated",
     EngineComputedRecordBailNoEnvironment => "engineComputedRecordBailNoEnvironment",
+    EngineComputedRecordBailCustomPropertyUnsupportedSubstitution => "engineComputedRecordBailCustomPropertyUnsupportedSubstitution",
+    EngineComputedRecordBailCustomPropertyCssWide => "engineComputedRecordBailCustomPropertyCssWide",
     EngineComputedRecordBailCustomProperties => "engineComputedRecordBailCustomProperties",
     EngineComputedRecordBailSubstitution => "engineComputedRecordBailSubstitution",
     EngineComputedRecordSubstitutions => "engineComputedRecordSubstitutions",

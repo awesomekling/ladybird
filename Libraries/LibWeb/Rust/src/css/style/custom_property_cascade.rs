@@ -77,6 +77,12 @@ pub(super) struct RegisteredValueContext {
     pub color_scheme: u8,
 }
 
+// The context retained across a font request carries only copied metrics and a
+// null output pointer. Every constructor of this value sets that pointer to
+// null before the context enters batch scratch, so moving it between workers
+// cannot move an aliased output location.
+unsafe impl Send for RegisteredValueContext {}
+
 /// Whether a token stream is a substitution the engine resolves itself: one whose only
 /// substitution functions are `var()` references.
 pub(super) fn value_is_engine_resolvable_substitution(value: &StyleValueData) -> bool {
@@ -84,6 +90,29 @@ pub(super) fn value_is_engine_resolvable_substitution(value: &StyleValueData) ->
 }
 
 impl RetainedState {
+    pub(super) fn declares_registered_custom_property(
+        &self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        inputs: &bridge::FfiDocumentStyleComputationInputs,
+    ) -> bool {
+        let registry = inputs.custom_property_registry;
+        if registry.is_none() {
+            return false;
+        }
+        let registry = unsafe { &*registry.as_pointer().cast::<CustomPropertyRegistry>() };
+        if !registry.has_registrations() {
+            return false;
+        }
+        self.cascaded_custom_declarations_of(node, pseudo)
+            .is_some_and(|declarations| {
+                declarations.iter().any(|(declared, _)| {
+                    self.custom_property_environments
+                        .name(declared.name)
+                        .is_some_and(|name| registry.registration_facts(&name.text).is_some())
+                })
+            })
+    }
     /// Hand each of a node's element-target matches, with the cascade inputs its priority is
     /// computed from, to `visit`, stopping when it breaks. `None` when the node has no answer to read.
     fn try_for_each_element_match(
@@ -376,6 +405,28 @@ impl RetainedState {
         pseudo: Option<u8>,
     ) -> Option<Vec<(CustomDeclaration, RetainedStyleValueData)>> {
         self.cascade_custom_declarations(node, pseudo, None)
+    }
+
+    /// The element's own winning declaration, without importance inherited
+    /// from an ancestor's flattened engine environment. Animation precedence
+    /// reads this rather than the inherited store's entry metadata.
+    pub(crate) fn cascaded_custom_property_importance(
+        &self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        name_raw: usize,
+    ) -> u8 {
+        let Some(declarations) = self.cascaded_custom_declarations_of(node, pseudo) else {
+            return 3;
+        };
+        declarations
+            .into_iter()
+            .find(|(declared, _)| {
+                self.custom_property_environments
+                    .name(declared.name)
+                    .is_some_and(|name| name.raw.raw() == name_raw)
+            })
+            .map_or(0, |(declared, _)| if declared.important { 2 } else { 1 })
     }
 
     /// What a pseudo-element's custom declarations cascade to, from the matches being published
@@ -693,9 +744,9 @@ impl RetainedState {
                     counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
                     return None;
                 };
-                if let Some(facts) = registry_ref.registration_facts(&name.text) {
+                if registry_ref.registration_facts(&name.text).is_some() {
                     has_registered_declaration = true;
-                    if registered.is_none() || !facts.inherits {
+                    if registered.is_none() {
                         counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
                         return None;
                     }
@@ -724,7 +775,12 @@ impl RetainedState {
                 counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
                 return None;
             };
-            if name.raw.raw() == 0 || !custom_property_value_is_engine_resolvable(value.data()) {
+            if name.raw.raw() == 0 {
+                counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
+                return None;
+            }
+            if !custom_property_value_is_engine_resolvable(value.data()) {
+                counters.bump(Counter::EngineComputedRecordBailCustomPropertyUnsupportedSubstitution);
                 counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
                 return None;
             }
