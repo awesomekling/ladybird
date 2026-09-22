@@ -4156,6 +4156,35 @@ pub unsafe extern "C" fn style_engine_native_rule_target(
     true
 }
 
+/// What the container conditions of an element's engine-answered row left for the host to record,
+/// in the shape an evaluation answers with. `matches` is unused.
+///
+/// # Safety
+/// Engine must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_take_container_effects(
+    engine: *mut c_void,
+    node: u32,
+) -> FfiNativeContainerMatchResult {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    let Some(verdict) = StyleNodeID::from_raw(node).and_then(|node| engine.take_container_effects_for_host(node))
+    else {
+        return FfiNativeContainerMatchResult::default();
+    };
+    let effects = (!verdict.effects.is_empty()).then(|| {
+        Box::into_raw(Box::new(ContainerEffects {
+            effects: verdict.effects,
+        }))
+        .cast()
+    });
+    FfiNativeContainerMatchResult {
+        matches: true,
+        depends_on_size: verdict.depends_on_size,
+        depends_on_style: verdict.depends_on_style,
+        effects: effects.unwrap_or(std::ptr::null_mut()),
+    }
+}
+
 /// Evaluate native container conditions while keeping their ownership independent of the host.
 ///
 /// # Safety

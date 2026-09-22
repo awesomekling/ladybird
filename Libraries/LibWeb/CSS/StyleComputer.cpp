@@ -2383,6 +2383,42 @@ Vector<GC::Ptr<DOM::ShadowRoot const>, 4> StyleComputer::author_context_shadow_r
     return context_shadow_roots;
 }
 
+// What an evaluation of an element's container conditions read of its containers, recorded for the
+// commit: the containers it asked about, the facts that re-evaluate it after layout, and that the
+// element's style depends on its containers, which bounds the scan that re-styles it when they move.
+void StyleComputer::record_container_query_effects(DOM::AbstractElement abstract_element, StyleEngineFFI::FfiNativeContainerMatchResult const& match_result)
+{
+    auto effect_count = StyleEngineFFI::style_engine_native_container_effect_count(match_result.effects);
+    for (size_t effect_index = 0; effect_index < effect_count; ++effect_index) {
+        auto effect = StyleEngineFFI::style_engine_native_container_effect(match_result.effects, effect_index);
+        auto identity = DOM::NodeIdentity::of_style_node(StyleNodeID { effect.style_node });
+        switch (effect.kind) {
+        case StyleEngineFFI::FfiContainerEffectKind::SizeContainerUsage:
+            abstract_element.document().commit_messages().note_style_query_container_usage(identity, 1);
+            break;
+        case StyleEngineFFI::FfiContainerEffectKind::StyleContainerUsage:
+            abstract_element.document().commit_messages().note_style_query_container_usage(identity, 2);
+            break;
+        case StyleEngineFFI::FfiContainerEffectKind::ScrollStateContainerUsage:
+            abstract_element.document().commit_messages().note_scroll_state_query_container_usage(identity);
+            break;
+        case StyleEngineFFI::FfiContainerEffectKind::NeedsEvaluationAfterLayout:
+            abstract_element.document().commit_messages().note_style_query_needs_evaluation_after_layout(identity);
+            break;
+        case StyleEngineFFI::FfiContainerEffectKind::SubjectViewportDependency:
+            abstract_element.document().commit_messages().note_style_viewport_dependency(identity);
+            break;
+        case StyleEngineFFI::FfiContainerEffectKind::CustomPropertyReference:
+            abstract_element.document().commit_messages().note_style_query_custom_property_reference(
+                identity, abstract_element.pseudo_element(), Utf16FlyString::from_utf16({ reinterpret_cast<char16_t const*>(effect.name), effect.name_length }));
+            break;
+        }
+    }
+    u8 dependencies = (match_result.depends_on_size ? 1 : 0) | (match_result.depends_on_style ? 2 : 0);
+    if (dependencies)
+        abstract_element.document().commit_messages().note_style_container_query_dependencies(DOM::NodeIdentity::of(abstract_element.element()), dependencies);
+}
+
 void StyleComputer::register_style_engine_sheet_source(StyleSheetState const& sheet)
 {
     auto identity = Parser::ValueParserFFI::rust_style_sheet_identity(sheet.native_sheet().handle());
@@ -3107,38 +3143,9 @@ RefPtr<StyleComputer::CascadeInput const> StyleComputer::style_engine_cascade_in
             ScopeGuard release_container_effects = [&] {
                 StyleEngineFFI::style_engine_native_container_effects_release(match_result.effects);
             };
-            auto effect_count = StyleEngineFFI::style_engine_native_container_effect_count(match_result.effects);
-            for (size_t effect_index = 0; effect_index < effect_count; ++effect_index) {
-                auto effect = StyleEngineFFI::style_engine_native_container_effect(match_result.effects, effect_index);
-                auto identity = DOM::NodeIdentity::of_style_node(StyleNodeID { effect.style_node });
-                switch (effect.kind) {
-                case StyleEngineFFI::FfiContainerEffectKind::SizeContainerUsage:
-                    abstract_element.document().commit_messages().note_style_query_container_usage(identity, 1);
-                    break;
-                case StyleEngineFFI::FfiContainerEffectKind::StyleContainerUsage:
-                    abstract_element.document().commit_messages().note_style_query_container_usage(identity, 2);
-                    break;
-                case StyleEngineFFI::FfiContainerEffectKind::ScrollStateContainerUsage:
-                    abstract_element.document().commit_messages().note_scroll_state_query_container_usage(identity);
-                    break;
-                case StyleEngineFFI::FfiContainerEffectKind::NeedsEvaluationAfterLayout:
-                    abstract_element.document().commit_messages().note_style_query_needs_evaluation_after_layout(identity);
-                    break;
-                case StyleEngineFFI::FfiContainerEffectKind::SubjectViewportDependency:
-                    abstract_element.document().commit_messages().note_style_viewport_dependency(identity);
-                    break;
-                case StyleEngineFFI::FfiContainerEffectKind::CustomPropertyReference:
-                    abstract_element.document().commit_messages().note_style_query_custom_property_reference(
-                        identity, abstract_element.pseudo_element(), Utf16FlyString::from_utf16({ reinterpret_cast<char16_t const*>(effect.name), effect.name_length }));
-                    break;
-                }
-            }
-            u8 dependencies = (match_result.depends_on_size ? 1 : 0) | (match_result.depends_on_style ? 2 : 0);
-            if (dependencies) {
-                input->depends_on_size_container_query |= match_result.depends_on_size;
-                input->depends_on_style_container_query |= match_result.depends_on_style;
-                abstract_element.document().commit_messages().note_style_container_query_dependencies(DOM::NodeIdentity::of(abstract_element.element()), dependencies);
-            }
+            record_container_query_effects(abstract_element, match_result);
+            input->depends_on_size_container_query |= match_result.depends_on_size;
+            input->depends_on_style_container_query |= match_result.depends_on_style;
             if (!match_result.matches)
                 continue;
         }

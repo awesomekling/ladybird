@@ -600,6 +600,15 @@ impl RetainedState {
         if self.backs_host_pseudo_element(node) {
             return self.engine_backing_element_record(node, scratch, counters);
         }
+        // The winners hold a gated rule where its container conditions held when they were
+        // published; they answer for the node while every one decides as it did, over containers
+        // its settled ancestors published. One a declined ancestor may still move is the host's.
+        if self.published_container_verdicts.contains_key(&node)
+            && (self.container_ancestor_is_unsettled(node, scratch) || !self.container_verdicts_stand(node))
+        {
+            counters.bump(Counter::EngineComputedRecordBailContainerVerdict);
+            return None;
+        }
         // A custom property the cascade declares is no winner the columns hold; the engine
         // computes the environment it decides itself.
         if !cascade_winners_are_complete && !self.cascade_winners_are_complete_but_for_custom_properties(node) {
