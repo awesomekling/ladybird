@@ -642,7 +642,7 @@ bool StyleComputer::pin_transition_stabilization_baseline_if_a_later_pass_may_ne
     return record_transition_stabilization_baseline(abstract_element);
 }
 
-bool StyleComputer::record_transition_stabilization_baseline(DOM::AbstractElement abstract_element) const
+bool StyleComputer::record_transition_stabilization_baseline(DOM::AbstractElement abstract_element, Optional<StyleRecordID> before_change_style_record) const
 {
     auto style_node_id = abstract_element.element().style_node_id();
     if (style_node_id == 0)
@@ -652,7 +652,9 @@ bool StyleComputer::record_transition_stabilization_baseline(DOM::AbstractElemen
     if (m_transition_stabilization_baselines.contains(transition_target_key))
         return false;
 
-    auto style_record_identity = abstract_element.style_record_identity();
+    // A row the engine settled is drained once its record is installed, so the style the element
+    // holds is already the after-change one. The row names the style it moved away from.
+    auto style_record_identity = before_change_style_record.value_or_lazy_evaluated([&] { return abstract_element.style_record_identity(); });
     if (!style_record_identity)
         return false;
     pin_style_record(style_record_identity);
@@ -1740,8 +1742,113 @@ void StyleComputer::register_transitions_for_settled_record(DOM::AbstractElement
     compute_transitioned_properties(*style, abstract_element);
 }
 
+// The whole transition step for a record the engine settled, run once the record is installed.
+//
+// The step needs two styles: the one the element moved away from, which the row names, and the one
+// it moved to, which is the record the host has just installed. Both are records, and the step
+// reads the before-change half only through `decide_transitions`' baseline, so naming the row's old
+// record is the whole of what a deferred row needs. A transition the step starts layers its current
+// values into the working set to keep the frame from jumping; publishing that is the same animation
+// overlay publication an animation sampling performs, on the same element, against the same base.
+RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_settled_record(DOM::AbstractElement abstract_element, StyleRecordID before_change_style_record) const
+{
+    VERIFY(!abstract_element.pseudo_element().has_value());
+    auto installed_style = abstract_element.computed_style();
+    if (!installed_style)
+        return {};
+    auto installed_style_record = abstract_element.style_record_identity();
+    VERIFY(installed_style_record);
+
+    // Transition declarations [css-transitions-1], as `finish_properties` runs them for a row the
+    // host computed: the registration first, then what it lets start.
+    compute_transitioned_properties(*installed_style, abstract_element);
+
+    // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
+    if (abstract_element.element().style_node_id() != 0
+        && (abstract_element.style_scope().rule_cache().has_size_container_queries
+            || document().is_in_style_stabilization_feedback_epoch()))
+        (void)record_transition_stabilization_baseline(abstract_element, before_change_style_record);
+
+    if (installed_style->in_display_none_subtree())
+        return {};
+    if (auto parent = abstract_element.element_to_inherit_style_from(); parent.has_value()) {
+        if (auto parent_style = parent->computed_style(); parent_style && parent_style->in_display_none_subtree())
+            return {};
+    }
+    // OPTIMIZATION: The two lists `start_needed_transitions` decides over, plus this element's own
+    //               provisional states. With none of them there is nothing to decide, and the
+    //               after-change style need not be reconstructed at all.
+    if (abstract_element.element().property_ids_with_matching_transition_property_entry(abstract_element.pseudo_element()).is_empty()
+        && abstract_element.element().property_ids_with_existing_transitions(abstract_element.pseudo_element()).is_empty()
+        && !has_provisional_transition_states(abstract_element))
+        return {};
+
+    begin_style_update();
+    ScopeGuard end_style_update = [&] { this->end_style_update(); };
+    auto new_style = reconstruct_computed_properties_for_animation(installed_style_record);
+    start_needed_transitions(*new_style, abstract_element, nullptr, before_change_style_record);
+    // Starting a transition associates a new animation with the element.
+    abstract_element.element().publish_animation_timing_rows();
+    clear_computation_context_caches();
+
+    // A C++ computation publishes the working set with whatever the started transitions layered
+    // into it, whether or not a layered value differs from the base: the overlay is what says the
+    // element holds a transition. The record the row installed holds none, so this does the same.
+    auto animated_properties = new_style->animated_properties_snapshot();
+    if (!animated_properties || animated_properties->is_empty())
+        return {};
+
+    auto computed_values = build_animated_computed_values(*new_style, abstract_element, abstract_element.style_scope(), *installed_style);
+    Array<void const*, to_underlying(StyleGroupIndex::Count)> payloads;
+    for (size_t index = 0; index < payloads.size(); ++index)
+        payloads[index] = computed_values->style_group_payload(static_cast<StyleGroupIndex>(index));
+    auto animated_property_invalidation = const_cast<StyleComputer&>(*this).style_engine().compare_animation_overlay(
+        installed_style_record,
+        new_style->animated_overlay(),
+        payloads,
+        !abstract_element.pseudo_element().has_value() && abstract_element.element().is_document_element());
+    auto publication = publish_animation_overlay(abstract_element, *computed_values);
+    auto& element = abstract_element.element();
+    element.refresh_computed_style({}, publication.new_style_record);
+    if (auto* svg_element = as_if<SVG::SVGElement>(element))
+        svg_element->note_svg_paint_resource_description_may_have_changed();
+    // Box-type, overflow and text-alignment adjustments consume the unadjusted base values, which
+    // an animation-only overlay update deliberately does not reconstruct.
+    if (animated_property_invalidation.requires_base_style_recomputation)
+        const_cast<StyleComputer&>(*this).style_engine().record_element_style_input_change(element.style_node_id());
+    auto invalidation = decode_style_invalidation(animated_property_invalidation.invalidation);
+    // The published values reach the element's pseudo-elements and its flat-tree descendants the
+    // way an animation refresh's do: the descendants as one feedback batch the ordinary transaction
+    // materializes, the pseudo-elements here.
+    if (invalidation.inherited_style_changed())
+        invalidation |= element.recompute_pseudo_element_styles();
+    auto inherited_style_groups = invalidation.inherited_style_groups_changed();
+    if (!invalidation.inherited_style_changed()) {
+        auto child_explicit_inheritance_groups = element.children_explicitly_inherited_non_inherited_style_groups();
+        if (auto shadow_root = element.shadow_root())
+            child_explicit_inheritance_groups |= shadow_root->children_explicitly_inherited_non_inherited_style_groups();
+        auto descendants_may_observe_non_inherited_properties = (child_explicit_inheritance_groups & animated_property_invalidation.changed_non_inherited_style_groups) != 0
+            || invalidation.recompute_descendant_styles
+            || invalidation.needs_layout_tree_rebuild()
+            || element.is_html_slot_element();
+        if (descendants_may_observe_non_inherited_properties)
+            inherited_style_groups = RequiredInvalidationAfterStyleChange::all_inherited_style_groups;
+    }
+    if (inherited_style_groups != 0)
+        const_cast<StyleComputer&>(*this).style_engine().record_flat_tree_descendant_style_input_changes(element.style_node_id(), StyleEngine::InheritedStyle, inherited_style_groups);
+    // Refreshing the computed style published the record to the layout node; inherited values and
+    // image resources need the C++ side effects on top.
+    if (auto* layout_node = element.unsafe_layout_node()) {
+        if (animated_property_invalidation.requires_layout_node_style_application)
+            layout_node->apply_style(element.style_record_identity());
+        else if (animated_property_invalidation.requires_style_resource_update)
+            layout_node->attach_style_resources();
+    }
+    return invalidation;
+}
+
 // https://drafts.csswg.org/css-transitions/#starting
-Vector<GC::Ref<Animations::KeyframeEffect>> StyleComputer::start_needed_transitions(ComputedStyleWorkingSet& new_style, DOM::AbstractElement abstract_element, bool* did_write_main_side_state) const
+Vector<GC::Ref<Animations::KeyframeEffect>> StyleComputer::start_needed_transitions(ComputedStyleWorkingSet& new_style, DOM::AbstractElement abstract_element, bool* did_write_main_side_state, Optional<StyleRecordID> before_change_style_record) const
 {
     auto had_pending_animated_style_update = m_document->needs_animated_style_update();
 
@@ -1752,12 +1859,12 @@ Vector<GC::Ref<Animations::KeyframeEffect>> StyleComputer::start_needed_transiti
     Optional<u64> transition_target_key;
     if (style_node_id != 0)
         transition_target_key = (static_cast<u64>(style_node_id.value()) << 8) | pseudo_element_to_ffi(pseudo_element);
-    auto transition_baseline_style_record = abstract_element.style_record_identity();
+    auto transition_baseline_style_record = before_change_style_record.value_or_lazy_evaluated([&] { return abstract_element.style_record_identity(); });
     VERIFY(transition_baseline_style_record);
     if (transition_target_key.has_value()
         && (abstract_element.style_scope().rule_cache().has_size_container_queries
             || document().is_in_style_stabilization_feedback_epoch())) {
-        if (record_transition_stabilization_baseline(abstract_element) && did_write_main_side_state)
+        if (record_transition_stabilization_baseline(abstract_element, before_change_style_record) && did_write_main_side_state)
             *did_write_main_side_state = true;
     }
     if (transition_target_key.has_value()) {

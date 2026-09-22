@@ -715,19 +715,29 @@ impl RetainedState {
                 !property_computes_in_remaining_phase(property) || property_feeds_box_type_transformation(property)
             });
         let delta_property_count = delta.properties().len() as u64;
-        // A delta that moves only the longhands declaring the element's CSS transitions moves no
-        // value a transition could run on: every other group is copied from the record the delta
-        // starts at, so the before-change and after-change styles agree everywhere a transition
-        // reads. Nothing can start, and nothing the element already holds can be cancelled -
-        // which is what the record's animation state is asked about here, not somewhere else's.
-        // What is left is the registration, and the host applies it from the record itself.
-        let owes_a_transition_registration = !full_drive
-            && !delta.properties().is_empty()
+        // A delta that moves a longhand declaring the element's CSS transitions is a row whose only
+        // remaining obligation is the transition step, and the host can run that step after the
+        // batch: it needs the style the row moved away from, which the published delta names, and
+        // the style it moved to, which is the record the host installs. The record the delta starts
+        // at is asked to hold no animation of its own - which is what the record's animation state
+        // is asked about here, not somewhere else's - so the step decides over transitions alone,
+        // and nothing the element already holds can be cancelled.
+        //
+        // When the delta moves nothing else, every other group is copied from the record the delta
+        // starts at, so no value a transition runs on moved either: the registration is the whole
+        // of the step, and the host takes the cheaper of the two drains.
+        let owes_a_transition_step = !full_drive
             && delta
                 .properties()
                 .iter()
-                .all(|&property| longhand_only_declares_a_css_transition(property))
+                .any(|&property| longhand_only_declares_a_css_transition(property))
             && !self.record_requires_cpp_animation(old_style_record);
+        let owes_a_transition_registration = owes_a_transition_step.then(|| {
+            delta
+                .properties()
+                .iter()
+                .all(|&property| longhand_only_declares_a_css_transition(property))
+        });
         // Partial drives can share across parents whose inherited inputs agree. Keep the full
         // parent record in the key when a non-inherited property explicitly inherits, including
         // through substitution, or when a full drive may read more of the parent's style.
@@ -761,8 +771,9 @@ impl RetainedState {
             }
             self.note_engine_computed_record(node, delta, (generation, state), delta_property_count, 0, counters);
             counters.bump(Counter::EngineComputedRecordCohortHits);
-            if owes_a_transition_registration {
-                self.nodes_owing_a_transition_registration.insert(node);
+            if let Some(registration_only) = owes_a_transition_registration {
+                self.nodes_owing_a_transition_registration
+                    .insert(node, registration_only);
             }
             return Some(delta);
         }
@@ -789,11 +800,13 @@ impl RetainedState {
             (inherited_box.writing_mode, inherited_box.direction)
         };
         for &property in delta.properties() {
-            // Animations and transitions start from the C++ computation, and the counter-style
-            // environment behind `content` and `list-style-type` is resolved there. A delta that
-            // only re-declares the element's transitions starts nothing: it owes the host the
-            // registration, which rides out of the batch as an effect of the row.
-            if property_starts_animation_or_counter_environment(property) && !owes_a_transition_registration {
+            // Animations start from the C++ computation, and the counter-style environment behind
+            // `content` and `list-style-type` is resolved there. A delta that moves the element's
+            // transition declarations owes the host the transition step, which rides out of the
+            // batch as an effect of the row.
+            if property_starts_animation_or_counter_environment(property)
+                && !(owes_a_transition_step && longhand_only_declares_a_css_transition(property))
+            {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
             }
@@ -985,8 +998,11 @@ impl RetainedState {
         if !driver_input_moved {
             scratch.cohorts.insert(cohort, delta.1);
         }
-        if owes_a_transition_registration {
-            self.nodes_owing_a_transition_registration.insert(node);
+        // A partial drive whose driver inputs moved was driven in full instead, so values the
+        // delta does not name may have moved too: the host runs the whole step for such a row.
+        if let Some(registration_only) = owes_a_transition_registration {
+            self.nodes_owing_a_transition_registration
+                .insert(node, registration_only && !driver_input_moved);
         }
         Some(delta)
     }
@@ -996,11 +1012,15 @@ impl RetainedState {
     /// to, without recomputing anything: what an inherited-custom-properties reaction C++ settled
     /// by refreshing the data alone publishes. The new record's identity, or nothing when the node
     /// holds no base record to move.
-    /// Whether the engine-computed record the host is about to install for this node leaves the
-    /// element's transition registration to be applied after the batch, taking the debt with the
-    /// answer so that exactly one application drains it.
-    pub(crate) fn take_transition_registration_debt(&mut self, node: StyleNodeID) -> bool {
-        self.nodes_owing_a_transition_registration.remove(&node)
+    /// What the engine-computed record the host is about to install for this node leaves to be
+    /// applied after the batch, taking the debt with the answer so that exactly one application
+    /// drains it: 0 nothing, 1 the registration alone, 2 the whole transition step.
+    pub(crate) fn take_transition_registration_debt(&mut self, node: StyleNodeID) -> u8 {
+        match self.nodes_owing_a_transition_registration.remove(&node) {
+            Some(true) => 1,
+            Some(false) => 2,
+            None => 0,
+        }
     }
 
     pub(crate) fn republish_record_environment(&mut self, node: StyleNodeID, environment: u64) -> Option<u64> {
