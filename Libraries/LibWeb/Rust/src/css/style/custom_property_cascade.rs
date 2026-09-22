@@ -692,8 +692,32 @@ impl RetainedState {
         environment: u64,
         property: u16,
         written: RetainedStyleValueData,
+        attributes: Option<&super::inputs::SubstitutionAttributeSnapshot<'_>>,
         counters: &mut Counters,
     ) -> Option<RetainedStyleValueData> {
+        // An `attr()` substitutes the element's own attributes, so the value is the element's and
+        // takes no memo shared across the environment.
+        let reads_attributes = matches!(
+            written.data(),
+            StyleValueData::Unresolved {
+                presence_attr: true,
+                ..
+            }
+        );
+        if reads_attributes {
+            let attributes = attributes?;
+            return substitute_written_value_against_store_with_attributes(
+                match environment {
+                    0 => std::ptr::null(),
+                    identity => environments.store(identity)?,
+                },
+                inputs?,
+                property,
+                &written,
+                attributes,
+                counters,
+            );
+        }
         if !custom_property_value_is_engine_resolvable(written.data()) {
             counters.bump(Counter::EngineComputedRecordBailSubstitution);
             return None;
@@ -744,6 +768,58 @@ pub(crate) fn substitute_written_value_against_store(
         counters.bump(Counter::EngineComputedRecordBailSubstitution);
         return None;
     }
+    substitute_written_value_against_store_with_attributes(
+        store,
+        inputs,
+        property,
+        written,
+        &super::inputs::SubstitutionAttributeSnapshot::default(),
+        counters,
+    )
+}
+
+/// The same substitution with the element's attributes, which an `attr()` reads. The other
+/// substitutions a callback resolves (custom functions, `if()`, `inherit()`) stay C++'s.
+fn substitute_written_value_against_store_with_attributes(
+    store: *const c_void,
+    inputs: bridge::FfiDocumentStyleComputationInputs,
+    property: u16,
+    written: &RetainedStyleValueData,
+    attributes: &super::inputs::SubstitutionAttributeSnapshot<'_>,
+    counters: &mut Counters,
+) -> Option<RetainedStyleValueData> {
+    if matches!(
+        written.data(),
+        StyleValueData::Unresolved {
+            presence_dashed_function: true,
+            ..
+        } | StyleValueData::Unresolved { presence_if: true, .. }
+            | StyleValueData::Unresolved {
+                presence_inherit: true,
+                ..
+            }
+    ) {
+        counters.bump(Counter::EngineComputedRecordBailSubstitution);
+        return None;
+    }
+    let substitution_attributes = attributes
+        .text
+        .iter()
+        .map(
+            |&(name, value)| crate::css::custom_properties::FfiSubstitutionAttribute {
+                name: FfiUtf16View {
+                    ascii: std::ptr::null(),
+                    utf16: name.as_ptr(),
+                    length: name.len(),
+                },
+                value: FfiUtf16View {
+                    ascii: std::ptr::null(),
+                    utf16: value.as_ptr(),
+                    length: value.len(),
+                },
+            },
+        )
+        .collect::<Vec<_>>();
     let registry = inputs.custom_property_registry;
     if registry.is_none() {
         counters.bump(Counter::EngineComputedRecordBailSubstitution);
@@ -754,7 +830,15 @@ pub(crate) fn substitute_written_value_against_store(
     let mut parse_context = registry_ref.parse_context(&mut random_function_index);
     parse_context.in_quirks_mode = inputs.in_quirks_mode;
     let Some(mut resolution_environment) = (unsafe {
-        prepare_var_resolution_environment(std::ptr::null(), 0, std::ptr::null(), 0, 0, std::ptr::null(), 0)
+        prepare_var_resolution_environment(
+            substitution_attributes.as_ptr(),
+            substitution_attributes.len(),
+            std::ptr::null(),
+            0,
+            0,
+            std::ptr::null(),
+            0,
+        )
     }) else {
         counters.bump(Counter::EngineComputedRecordBailSubstitution);
         return None;
@@ -777,7 +861,7 @@ pub(crate) fn substitute_written_value_against_store(
             },
             written.pointer().cast(),
             &mut resolution_environment,
-            false,
+            attributes.names_are_ascii_case_insensitive,
             std::ptr::null_mut(),
             std::ptr::null(),
             std::ptr::null_mut(),

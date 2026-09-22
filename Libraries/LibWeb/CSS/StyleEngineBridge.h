@@ -116,6 +116,7 @@ public:
     [[nodiscard]] void const* style_record_payloads(StyleRecordID style_record) const;
     [[nodiscard]] StyleRecordDependencyFlag style_record_dependency_flags(StyleRecordID style_record) const;
     [[nodiscard]] u64 style_record_custom_property_environment(StyleRecordID style_record) const;
+    [[nodiscard]] bool node_record_reads_attributes(StyleNodeID) const;
     void begin_computed_record_verification(StyleNodeID, u64 settled_pseudo_element_kinds);
     void end_computed_record_verification();
     [[nodiscard]] bool style_records_match_for_verification(StyleNodeID, u8 pseudo_kind, StyleRecordID, StyleRecordID) const;

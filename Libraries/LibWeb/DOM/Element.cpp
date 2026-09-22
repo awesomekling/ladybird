@@ -2407,8 +2407,13 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
 
     // The engine substituted custom properties into the record's winners the way a C++
     // computation notes it read them, even if the custom-property environment stayed the same.
-    if (uses_substitution)
+    // An attr() among the substitutions reads the element's attributes, so an attribute change
+    // has to reach the element again.
+    if (uses_substitution) {
         m_style_uses_var_css_function = true;
+        if (style_computer.style_engine().node_record_reads_attributes(style_node_id()))
+            m_style_uses_attr_css_function = true;
+    }
 
     // The environment the record was published with: what the element inherits, or what the
     // engine resolved its own custom declarations to over that.
