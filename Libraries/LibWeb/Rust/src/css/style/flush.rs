@@ -2239,9 +2239,8 @@ impl StyleEngineState {
                             None => {
                                 counters.bump(Counter::EngineComputedRecordGateAncestors);
                                 decline_cause = "GateAncestors";
-                                retry_after_ancestor = self.retained.tree.tree_scope(node) == TreeScopeID::DOCUMENT
-                                    && (answer_winners_are_complete
-                                        || self.cascade_winners_are_complete_but_for_custom_properties(node));
+                                retry_after_ancestor = answer_winners_are_complete
+                                    || self.cascade_winners_are_complete_but_for_custom_properties(node);
                                 false
                             }
                             Some(relied_on_settled_ancestor) => {
@@ -2396,9 +2395,8 @@ impl StyleEngineState {
                     // A moved inherited environment the engine leaves to C++ reaches what the node's
                     // custom declarations and substitutions read: C++ recomputes such a node, which
                     // it cannot tell from an engine-computed record.
-                    // The rows armed here wait on the same handful of ancestors, so the host
-                    // settles a whole run of them per crossing rather than one row per crossing.
-                    // The order is this loop's, which is flat-tree order.
+                    // The host retries each armed row at its own place in flat-tree order, after
+                    // installing the parent record and its inherited and container inputs.
                     if gap == FfiStyleDeltaGap::RetryAfterAncestor {
                         self.host.armed_retry_nodes.push(node);
                     }
