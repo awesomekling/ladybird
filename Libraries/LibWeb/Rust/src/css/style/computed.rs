@@ -2810,6 +2810,24 @@ impl ComputedGroupSets {
             .map(|identity| *self.custom_property_environments.get(identity))
     }
 
+    /// The custom-property environment the style beneath an animation overlay was published with.
+    /// An overlay record carries none of its own: it is the composition, and what the element's own
+    /// declarations resolved to is on the record it was composed over.
+    pub(crate) fn animation_overlay_base_custom_property_environment(&self, raw_style_record: u64) -> Option<u64> {
+        let final_style_record = FinalStyleRecordID(raw_style_record);
+        if raw_style_record & FinalStyleRecordID::ANIMATION_OVERLAY_TAG == 0 {
+            return None;
+        }
+        let slot = *self.animation_overlay_slots_by_record.get(&final_style_record)?;
+        let base = self
+            .animation_overlay_slots
+            .get(slot as usize)?
+            .as_ref()?
+            .base_style_record;
+        let record = self.style_records.get_index(base.index())?;
+        Some(self.custom_property_environments[record.custom_properties])
+    }
+
     /// The raw custom-property environment identity a record was published with.
     pub fn style_record_custom_property_environment(&self, raw_style_record: u64) -> Option<u64> {
         let record = self

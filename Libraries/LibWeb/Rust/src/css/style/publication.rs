@@ -731,9 +731,15 @@ impl RetainedState {
                 counters.bump(Counter::EngineComputedRecordBailCustomProperties);
                 return None;
             };
+            // A record an animation composed into was published with no environment of its own:
+            // what the element's own declarations resolved to is on the style beneath it.
             let Some(old_environment) = self
                 .computed_group_sets
-                .style_record_custom_property_environment(old_style_record.raw())
+                .animation_overlay_base_custom_property_environment(old_style_record.raw())
+                .or_else(|| {
+                    self.computed_group_sets
+                        .style_record_custom_property_environment(old_style_record.raw())
+                })
             else {
                 counters.bump(Counter::EngineComputedRecordBailRecord);
                 return None;
