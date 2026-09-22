@@ -1919,6 +1919,8 @@ impl StyleEngineState {
                 diagnostic_plan_capture: None,
             },
             host: HostState {
+                armed_retry_nodes: Vec::new(),
+                retried_record_rows: Vec::new(),
                 font_resolver: None,
                 random_base_values: HashMap::default(),
                 random_state: std::collections::hash_map::RandomState::new(),

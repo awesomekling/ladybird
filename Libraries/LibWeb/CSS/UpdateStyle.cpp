@@ -586,6 +586,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
         bool registration_only;
     };
     Vector<TransitionEffectRow> transition_effect_rows;
+    // What one retry crossing settled, keyed by node. A row armed for a retry asks the engine only
+    // when the table has no answer for it, which is once per ancestor rather than once per row.
+    HashMap<StyleNodeID, StyleEngineFFI::FfiEngineComputedRecord> retried_records;
     // A row whose record read a non-inherited property straight from the parent, through an
     // explicit `inherit`, owes the parent the mark C++ writes beside such a computation. The
     // union is monotone and a parent applies before its children, so draining it after the batch
@@ -645,7 +648,13 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             // The pseudo-element records a retry settled beside the element's record.
             Optional<DOM::Element::EnginePseudoElementRecords> retried_pseudo_element_records;
             if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetryAfterAncestor) {
-                if (auto retried = document.style_computer().style_engine().retry_engine_record_after_ancestor(reaction.style_node);
+                // One crossing settles every armed row hanging off the ancestor just applied, so
+                // the rows that follow this one read their record from the table it filled.
+                if (!retried_records.contains(reaction.style_node)) {
+                    for (auto const& row : document.style_computer().style_engine().retry_engine_records_after_ancestor(reaction.style_node))
+                        retried_records.set(StyleNodeID { row.style_node }, row.record);
+                }
+                if (auto retried = retried_records.get(reaction.style_node).value_or(StyleEngineFFI::FfiEngineComputedRecord {});
                     retried.style_record != 0) {
                     reaction.new_style_record = retried.style_record;
                     reaction.uses_substitution = retried.uses_substitution;

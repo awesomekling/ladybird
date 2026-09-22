@@ -1794,6 +1794,9 @@ impl StyleEngineState {
         // arrives in style-node identity order, which is not tree order, so a descendant is
         // routinely reached before the ancestor it inherits from and declines for an ancestor
         // that is in the same batch. Visit it in the order C++ applies the deltas in instead.
+        // Nothing an earlier batch armed is still waiting: the host either retried it or
+        // computed the row itself before this batch was planned.
+        self.host.armed_retry_nodes.clear();
         if published_nodes.len() > 1 {
             let ranks = self.tree.style_reaction_order_ranks(published_nodes.iter().copied());
             let mut order: Vec<u32> = (0..published_nodes.len() as u32).collect();
@@ -2362,6 +2365,12 @@ impl StyleEngineState {
                     // A moved inherited environment the engine leaves to C++ reaches what the node's
                     // custom declarations and substitutions read: C++ recomputes such a node, which
                     // it cannot tell from an engine-computed record.
+                    // The rows armed here wait on the same handful of ancestors, so the host
+                    // settles a whole run of them per crossing rather than one row per crossing.
+                    // The order is this loop's, which is flat-tree order.
+                    if gap == FfiStyleDeltaGap::RetryAfterAncestor {
+                        self.host.armed_retry_nodes.push(node);
+                    }
                     let reaction = if gap == FfiStyleDeltaGap::Materialize
                         && reaction & transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES != 0
                         && reaction & transaction::STYLE_REACTION_RECOMPUTE_STYLE == 0
