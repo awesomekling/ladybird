@@ -397,12 +397,15 @@ impl RetainedState {
             }
             // A pseudo-element's own custom declarations resolve over its element's environment,
             // as an element's resolve over its parent's.
-            let Some(environment) = self.engine_custom_property_environment_of(
+            let has_registered_declarations = self.declares_registered_custom_property(node, Some(kind), &inputs);
+            let provisional_registered = has_registered_declarations
+                .then(|| self.provisional_registered_value_context(Some(new_element_record), &inputs));
+            let Some(mut environment) = self.engine_custom_property_environment_of(
                 node,
                 Some(kind),
                 element_environment,
                 &inputs,
-                None,
+                provisional_registered,
                 counters,
             ) else {
                 counters.bump(Counter::EngineComputedRecordBailCustomProperties);
@@ -411,7 +414,7 @@ impl RetainedState {
             // A store substituting `attr()` holds the element's attributes, which no other
             // element shares.
             let reads_attributes = state.is_some_and(|state| self.state_reads_attributes(node, state));
-            let store = match state {
+            let mut store = match state {
                 Some(state) => match scratch
                     .pseudo_stores
                     .get(&(kind, state, environment))
@@ -442,39 +445,40 @@ impl RetainedState {
             };
             pseudo_uses_substitution |=
                 state.is_some_and(|state| scratch.substituted_states.contains(&(state, environment)));
-            if pseudo_content_generates_nothing(&store.view(self), kind) {
+            if !has_registered_declarations && pseudo_content_generates_nothing(&store.view(self), kind) {
                 remove(self, scratch, counters);
                 continue;
             }
             // What the record is derived from: the element's inherited style, display and
             // environment, and the element's record itself only when the state inherits a
             // non-inherited property from it.
-            let key = self
-                .computed_group_sets
-                .node_inherited_groups_identity(node)
-                .zip(self.box_type_parent_display(node))
-                .map(|(inherited_groups, parent_display)| PseudoCohortKey {
-                    parent_record: if state
-                        .is_some_and(|state| self.state_explicitly_inherits_non_inherited_property(node, state))
-                    {
-                        new_element_record.raw()
-                    } else {
-                        0
-                    },
-                    inherited_groups,
-                    parent_display,
-                    dependency_flags: new_view_dependency_flags,
-                    environment,
-                    kind,
-                    generation,
-                    state,
-                    facts,
-                    font_environment_generation: inputs.font_environment_generation,
-                    custom_property_registration_generation: inputs.custom_property_registration_generation,
-                    root_font_inputs: RootFontInputs::from_document(&inputs),
-                    substitution_attributes: state
-                        .map_or(0, |state| self.substitution_attributes_key(node, Some(kind), state)),
-                });
+            let key = (!has_registered_declarations).then_some(()).and(
+                self.computed_group_sets
+                    .node_inherited_groups_identity(node)
+                    .zip(self.box_type_parent_display(node))
+                    .map(|(inherited_groups, parent_display)| PseudoCohortKey {
+                        parent_record: if state
+                            .is_some_and(|state| self.state_explicitly_inherits_non_inherited_property(node, state))
+                        {
+                            new_element_record.raw()
+                        } else {
+                            0
+                        },
+                        inherited_groups,
+                        parent_display,
+                        dependency_flags: new_view_dependency_flags,
+                        environment,
+                        kind,
+                        generation,
+                        state,
+                        facts,
+                        font_environment_generation: inputs.font_environment_generation,
+                        custom_property_registration_generation: inputs.custom_property_registration_generation,
+                        root_font_inputs: RootFontInputs::from_document(&inputs),
+                        substitution_attributes: state
+                            .map_or(0, |state| self.substitution_attributes_key(node, Some(kind), state)),
+                    }),
+            );
             let cascade_state = state.map(|state| (generation, state));
             let own_groups = state.map_or(0, |state| self.state_owned_inherited_groups(state));
             let derived_under_element = |engine: &Self, record: computed::FinalStyleRecordID| {
@@ -526,14 +530,54 @@ impl RetainedState {
                         &inputs,
                         &mut scratch.font_drive,
                         FontDriveGoal::Complete,
+                        has_registered_declarations,
                         &mut explicitly_inherited_groups,
                         counters,
                     );
+                    let driven = if let Some(registered) = scratch.font_drive.registered_context.take() {
+                        environment = self.engine_custom_property_environment_of(
+                            node,
+                            Some(kind),
+                            element_environment,
+                            &inputs,
+                            Some(registered),
+                            counters,
+                        )?;
+                        let mut substituted = false;
+                        let final_store = self.cascaded_store_for_state(
+                            node,
+                            state?,
+                            Some(kind),
+                            environment,
+                            &mut substituted,
+                            counters,
+                        )?;
+                        scratch.store_capacity_bytes += final_store.capacity_bytes();
+                        store = std::sync::Arc::new(final_store);
+                        pseudo_uses_substitution |= substituted;
+                        self.engine_full_drive(
+                            subject,
+                            None,
+                            &store,
+                            &inputs,
+                            &mut scratch.font_drive,
+                            FontDriveGoal::Complete,
+                            false,
+                            &mut explicitly_inherited_groups,
+                            counters,
+                        )
+                    } else {
+                        driven
+                    };
                     if driven.is_none() && scratch.font_drive.request.is_some() {
                         scratch.next_pseudo = pseudo_index;
                         scratch.pseudo_uses_substitution = pseudo_uses_substitution;
                     }
                     let (table, length, longhand_evaluations, font) = driven?;
+                    if has_registered_declarations && pseudo_content_generates_nothing(&store.view(self), kind) {
+                        remove(self, scratch, counters);
+                        continue;
+                    }
                     // The mark a pseudo-element's explicit `inherit` leaves is the originating
                     // element's own, which this row does not answer for: it stays with C++.
                     if explicitly_inherited_groups != 0 {
@@ -939,14 +983,22 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailRecordParent);
             return None;
         };
-        let Some(environment) =
-            self.engine_custom_property_environment_of(host, Some(kind), parent_environment, &inputs, None, counters)
-        else {
+        let has_registered_declarations = self.declares_registered_custom_property(host, Some(kind), &inputs);
+        let provisional_registered = has_registered_declarations
+            .then(|| self.provisional_registered_value_context(Some(parent_record), &inputs));
+        let Some(mut environment) = self.engine_custom_property_environment_of(
+            host,
+            Some(kind),
+            parent_environment,
+            &inputs,
+            provisional_registered,
+            counters,
+        ) else {
             counters.bump(Counter::EngineComputedRecordBailCustomProperties);
             return None;
         };
         let mut substituted = false;
-        let store = self.cascaded_store_for_state(node, state, None, environment, &mut substituted, counters)?;
+        let mut store = self.cascaded_store_for_state(node, state, None, environment, &mut substituted, counters)?;
         let Some(pseudo_styles) = self.pseudo_style_mask(node) else {
             counters.bump(Counter::EngineComputedRecordBailPseudoMask);
             return None;
@@ -959,16 +1011,43 @@ impl RetainedState {
             facts,
         };
         let mut explicitly_inherited_groups = 0;
-        let (table, length, longhand_evaluations, font) = self.engine_full_drive(
+        let driven = self.engine_full_drive(
             subject,
             None,
             &store,
             &inputs,
             &mut scratch.font_drive,
             FontDriveGoal::Complete,
+            has_registered_declarations,
             &mut explicitly_inherited_groups,
             counters,
-        )?;
+        );
+        let driven = if let Some(registered) = scratch.font_drive.registered_context.take() {
+            environment = self.engine_custom_property_environment_of(
+                host,
+                Some(kind),
+                parent_environment,
+                &inputs,
+                Some(registered),
+                counters,
+            )?;
+            substituted = false;
+            store = self.cascaded_store_for_state(node, state, None, environment, &mut substituted, counters)?;
+            self.engine_full_drive(
+                subject,
+                None,
+                &store,
+                &inputs,
+                &mut scratch.font_drive,
+                FontDriveGoal::Complete,
+                false,
+                &mut explicitly_inherited_groups,
+                counters,
+            )
+        } else {
+            driven
+        };
+        let (table, length, longhand_evaluations, font) = driven?;
         let font = font.expect("a full drive resolves the font");
         let (record, _) = self.assemble_and_publish_engine_record(
             target,

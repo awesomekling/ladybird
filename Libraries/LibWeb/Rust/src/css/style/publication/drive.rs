@@ -19,6 +19,7 @@ pub(in crate::css::style) struct FontDriveScratch {
     pub(super) root_inputs_unproven: bool,
     pub(in crate::css::style) request: Option<font_resolution::FontRequest>,
     pending: Option<PendingFontDrive>,
+    pub(super) registered_context: Option<custom_property_cascade::RegisteredValueContext>,
 }
 
 impl FontDriveScratch {
@@ -49,6 +50,8 @@ struct PendingFontDrive {
     /// take up someone else's table.
     target: computed::ComputedStyleTarget,
     root_font_complete: bool,
+    registered_finalization_ready: bool,
+    recascaded_font_size: Option<i32>,
     table: ComputedLonghandTable,
     results: crate::css::style_compute::FfiLonghandDriverResults,
     effective_color_scheme: i16,
@@ -327,6 +330,7 @@ impl RetainedState {
         inputs: &bridge::FfiDocumentStyleComputationInputs,
         font_scratch: &mut FontDriveScratch,
         goal: FontDriveGoal,
+        has_registered_declarations: bool,
         explicitly_inherited_groups: &mut u32,
         counters: &mut Counters,
     ) -> Option<(
@@ -375,7 +379,13 @@ impl RetainedState {
         //       `StyleComputer::recascade_font_size_if_needed`. The stage keeps the record when
         //       that walk reaches the same answer this drive does, and hands the element to C++
         //       when it does not.
-        let recascaded_font_size = if store
+        let recascaded_font_size = if let Some(pending) = font_scratch
+            .pending
+            .as_ref()
+            .filter(|pending| pending.target == subject.target && pending.registered_finalization_ready)
+        {
+            pending.recascaded_font_size
+        } else if store
             .winning_declaration(prop::FONT_FAMILY)
             .is_some_and(|(value, ..)| font_family_is_monospace(unsafe { &*value.cast::<StyleValueData>() }))
         {
@@ -589,6 +599,9 @@ impl RetainedState {
             .filter(|pending| pending.target == subject.target);
         let resuming = resumed.is_some();
         let root_font_complete = resumed.as_ref().is_some_and(|pending| pending.root_font_complete);
+        let registered_finalization_ready = resumed
+            .as_ref()
+            .is_some_and(|pending| pending.registered_finalization_ready);
         if !resuming {
             counters.bump(Counter::EngineFullDrivesStarted);
         }
@@ -770,6 +783,8 @@ impl RetainedState {
             font_scratch.pending = Some(PendingFontDrive {
                 target: subject.target,
                 root_font_complete: false,
+                registered_finalization_ready: false,
+                recascaded_font_size,
                 table,
                 results,
                 effective_color_scheme,
@@ -847,6 +862,8 @@ impl RetainedState {
             font_scratch.pending = Some(PendingFontDrive {
                 target: subject.target,
                 root_font_complete: true,
+                registered_finalization_ready: false,
+                recascaded_font_size,
                 table,
                 results,
                 effective_color_scheme,
@@ -854,16 +871,18 @@ impl RetainedState {
             });
             return None;
         }
-        drive(
-            counters,
-            &mut table,
-            &mut results,
-            &mut effective_color_scheme,
-            LONGHAND_DRIVE_PHASE_COLOR_SCHEME,
-            std::ptr::null(),
-            std::ptr::null(),
-            std::ptr::null(),
-        );
+        if !registered_finalization_ready {
+            drive(
+                counters,
+                &mut table,
+                &mut results,
+                &mut effective_color_scheme,
+                LONGHAND_DRIVE_PHASE_COLOR_SCHEME,
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+            );
+        }
         effective_color_scheme = table.effective_color_scheme();
 
         // `rem` on the document element names the document element's own computed font-size, which
@@ -884,6 +903,26 @@ impl RetainedState {
                 inputs.root_font_metrics_depend_on_viewport_metrics,
             )
         };
+        if has_registered_declarations && !registered_finalization_ready {
+            font_scratch.registered_context = Some(custom_property_cascade::RegisteredValueContext {
+                length: FfiLengthResolutionContext {
+                    resolved_viewport_relative_length: std::ptr::null_mut(),
+                    ..remaining_length
+                },
+                color_scheme: effective_color_scheme as u8,
+            });
+            font_scratch.pending = Some(PendingFontDrive {
+                target: subject.target,
+                root_font_complete: true,
+                registered_finalization_ready: true,
+                recascaded_font_size,
+                table,
+                results,
+                effective_color_scheme,
+                resolved_viewport_relative_length,
+            });
+            return None;
+        }
         let input_line_height_metrics = if has(fact::CHECK_INPUT_LINE_HEIGHT) {
             FfiInputLineHeightMetrics {
                 current_line_height: line_height_before_adjustments,
