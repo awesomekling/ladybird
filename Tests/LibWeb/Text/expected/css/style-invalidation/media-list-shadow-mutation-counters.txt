@@ -6,19 +6,19 @@ PASS: shadow media mutation activates :host :is selector | elementStyleRecomputa
 PASS: shadow media mutation activates :host :where selector | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
 PASS: shadow media mutation deactivates classed :host selector | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: shadow media appendMedium activates :host selector | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
-PASS: shadow media deleteMedium deactivates :host selector | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
+PASS: shadow media deleteMedium deactivates :host selector | elementStyleRecomputations=2, elementStyleNoopRecomputations=0
 PASS: shadow media mutation activates internal rule guarded by :host | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: shadow media mutation activates ::slotted class selector | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: shadow media mutation activates ::slotted type and class selector | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: shadow media mutation activates ::slotted attribute selector | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: shadow media mutation activates ::slotted :is selector | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: shadow media mutation activates ::slotted :not selector | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: shadow media mutation activates named-slot ::slotted selector | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: shadow media mutation activates slotted background style | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: shadow media mutation activates ::slotted class selector | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: shadow media mutation activates ::slotted type and class selector | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: shadow media mutation activates ::slotted attribute selector | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: shadow media mutation activates ::slotted :is selector | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: shadow media mutation activates ::slotted :not selector | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: shadow media mutation activates named-slot ::slotted selector | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: shadow media mutation activates slotted background style | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: shadow media mutation activates bare slot inheritance | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: shadow media mutation activates named slot inheritance | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: shadow media mutation activates descendant slot inheritance | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: shadow media mutation activates nested host structure | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
-PASS: shadow media mutation activates paragraph assigned node | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: shadow media mutation activates compound host and slotted selectors | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
-PASS: shadow media mutation activates inner and slotted selectors together | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: shadow media mutation activates paragraph assigned node | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: shadow media mutation activates compound host and slotted selectors | elementStyleRecomputations=3, elementStyleNoopRecomputations=0
+PASS: shadow media mutation activates inner and slotted selectors together | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
