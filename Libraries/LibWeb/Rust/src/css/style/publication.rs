@@ -1000,7 +1000,7 @@ impl RetainedState {
             current_environment,
             RootFontInputs::from_document(&inputs),
             self.monospace_cohort_key(node, state),
-            self.substitution_attributes_key(node, state),
+            self.substitution_attributes_key(node, None, state),
         );
         if let Some(&(new_style_record, cohort_explicitly_inherited_groups)) = scratch.cohorts.get(&cohort) {
             // The row takes another node's record whole, so its plan is decided from that record's
@@ -1628,7 +1628,7 @@ impl RetainedState {
             .and_then(|(parent, parent_record)| self.cold_record_parent(node, parent, parent_record, state))
             .map(|parent| ColdRecordKey {
                 monospace_recascaded_font_size: self.monospace_cohort_key(node, state),
-                substitution_attributes: self.substitution_attributes_key(node, state),
+                substitution_attributes: self.substitution_attributes_key(node, None, state),
                 parent,
                 previous_style_record: 0,
                 generation: cascade_state.0,
@@ -1710,7 +1710,7 @@ impl RetainedState {
             .and_then(|(parent, parent_record)| self.cold_record_parent(node, parent, parent_record, state))
             .map(|parent| ColdRecordKey {
                 monospace_recascaded_font_size: self.monospace_cohort_key(node, state),
-                substitution_attributes: self.substitution_attributes_key(node, state),
+                substitution_attributes: self.substitution_attributes_key(node, None, state),
                 parent,
                 previous_style_record: 0,
                 generation: cascade_state.0,
@@ -2130,14 +2130,28 @@ impl RetainedState {
         })
     }
 
+    /// The element whose attributes `attr()` reads for a node's record or one of its pseudo-elements':
+    /// an element standing for its shadow host's pseudo-element is computed as that pseudo-element,
+    /// so it reads the host's, as C++ does for all but its ::first-letter.
+    pub(super) fn substitution_attribute_element(&self, node: StyleNodeID, pseudo_kind: Option<u8>) -> StyleNodeID {
+        if pseudo_kind == Some(pseudo_kind::FIRST_LETTER)
+            || self.computed_group_sets.associated_pseudo_kind(node).is_none()
+        {
+            return node;
+        }
+        self.tree.shadow_host_of(node).unwrap_or(node)
+    }
+
     /// A key for what a node's attributes hold, for the record caches, when its winners read them.
-    fn substitution_attributes_key(&self, node: StyleNodeID, state: CascadeStateID) -> u64 {
+    fn substitution_attributes_key(&self, node: StyleNodeID, pseudo_kind: Option<u8>, state: CascadeStateID) -> u64 {
         use std::hash::{Hash, Hasher};
         if !self.state_reads_attributes(node, state) {
             return 0;
         }
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.facts.substitution_attributes(node).hash(&mut hasher);
+        self.facts
+            .substitution_attributes(self.substitution_attribute_element(node, pseudo_kind))
+            .hash(&mut hasher);
         hasher.finish() | 1
     }
 
@@ -2366,7 +2380,7 @@ impl RetainedState {
                 .cold_record_parent(node, parent, parent_record, cascade_state.1)
                 .map(|parent| ColdRecordKey {
                     monospace_recascaded_font_size: self.monospace_cohort_key(node, cascade_state.1),
-                    substitution_attributes: self.substitution_attributes_key(node, cascade_state.1),
+                    substitution_attributes: self.substitution_attributes_key(node, None, cascade_state.1),
                     parent,
                     previous_style_record: old_style_record.raw(),
                     generation: cascade_state.0,
@@ -3055,7 +3069,7 @@ impl RetainedState {
         let swap_eligible = self.computed_group_sets.node_inherited_group_swap_eligible(node);
         let key = ColdRecordKey {
             monospace_recascaded_font_size: self.monospace_cohort_key(node, cascade_state.1),
-            substitution_attributes: self.substitution_attributes_key(node, cascade_state.1),
+            substitution_attributes: self.substitution_attributes_key(node, None, cascade_state.1),
             parent,
             previous_style_record: previous_style_record.map_or(0, computed::FinalStyleRecordID::raw),
             generation: cascade_state.0,
@@ -3369,10 +3383,11 @@ impl RetainedState {
                 crate::css::style_value::StyleValueData::Unresolved { .. } => {
                     *substituted = true;
                     let value = value.clone_retained();
+                    let attribute_element = self.substitution_attribute_element(node, pseudo_kind);
                     let attributes = super::inputs::SubstitutionAttributeSnapshot {
-                        text: self.facts.substitution_attributes(node),
+                        text: self.facts.substitution_attributes(attribute_element),
                         names_are_ascii_case_insensitive: !self.html_element_namespace.is_none()
-                            && self.facts.namespace_of(node) == self.html_element_namespace,
+                            && self.facts.namespace_of(attribute_element) == self.html_element_namespace,
                     };
                     let value = Self::substitute_written_value(
                         &mut self.custom_property_environments,

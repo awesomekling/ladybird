@@ -456,7 +456,8 @@ impl RetainedState {
                     facts,
                     font_environment_generation: inputs.font_environment_generation,
                     root_font_inputs: RootFontInputs::from_document(&inputs),
-                    substitution_attributes: state.map_or(0, |state| self.substitution_attributes_key(node, state)),
+                    substitution_attributes: state
+                        .map_or(0, |state| self.substitution_attributes_key(node, Some(kind), state)),
                 });
             let cascade_state = state.map(|state| (generation, state));
             let own_groups = state.map_or(0, |state| self.state_owned_inherited_groups(state));
