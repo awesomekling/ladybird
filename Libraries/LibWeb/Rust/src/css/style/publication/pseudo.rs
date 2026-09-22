@@ -60,6 +60,11 @@ impl RetainedState {
                 if kind == usize::from(MARKER) && !marker_may_generate {
                     continue;
                 }
+                // A row the node's current answer has no rules for is one left from rules that
+                // no longer match: the pseudo-element it styled is not generated.
+                if self.pseudo_style_mask(node).is_some_and(|mask| mask & (1 << kind) == 0) {
+                    continue;
+                }
                 counters.bump(Counter::EngineComputedRecordBailPseudoStale);
                 return false;
             }
@@ -183,6 +188,11 @@ impl RetainedState {
                 continue;
             }
             if version != program_version || !priority_current {
+                // A row the node's current answer has no rules for is one left from rules that
+                // no longer match: the pseudo-element it styled is not generated.
+                if self.pseudo_style_mask(node).is_some_and(|mask| mask & (1 << kind) == 0) {
+                    continue;
+                }
                 // Whether a marker is generated is known once the element's display is.
                 if kind == MARKER {
                     marker_row_is_stale = true;
