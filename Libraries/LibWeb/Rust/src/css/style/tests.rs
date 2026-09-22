@@ -7163,8 +7163,26 @@ fn closure_identity_stop_verification_is_observer_only() {
 }
 
 #[test]
-fn a_cached_prefix_answer_preserves_incomplete_cascade_winners() {
-    let (mut engine, nodes) = nested_document();
+fn gated_prefix_answers_publish_complete_node_specific_winners() {
+    let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
+    let mut raw = [0_u32; 4];
+    engine.allocate_style_nodes(&mut raw);
+    let nodes: Vec<StyleNodeID> = raw.iter().map(|&raw| StyleNodeID::from_raw(raw).unwrap()).collect();
+    engine.record_tree_delta(nodes[0], None, Some(relations(None, None, None)));
+    engine.record_tree_delta(nodes[1], None, Some(relations(Some(nodes[0].raw()), None, None)));
+    engine.record_tree_delta(
+        nodes[2],
+        None,
+        Some(relations(Some(nodes[1].raw()), None, Some(nodes[3].raw()))),
+    );
+    engine.record_tree_delta(
+        nodes[3],
+        None,
+        Some(relations(Some(nodes[1].raw()), Some(nodes[2].raw()), None)),
+    );
+    for &node in &nodes {
+        set_atom_feature(&mut engine, node, LocalFeatureKey::TagName, StyleAtomID(100));
+    }
     let guard = StyleAtomID(200);
     let target = StyleAtomID(201);
     let rule = add_guard_target_rule(&mut engine, guard, target);
@@ -7198,10 +7216,12 @@ fn a_cached_prefix_answer_preserves_incomplete_cascade_winners() {
             Some(&mut second_complete),
         )
         .unwrap();
-    assert!(!first_complete);
-    assert!(!second_complete);
-    assert_eq!(engine.counters().get(Counter::PrefixAnswerCacheMisses), 1);
-    assert_eq!(engine.counters().get(Counter::PrefixAnswerCacheHits), 1);
+    // A gated rule's verdict belongs to the node, so neither sibling may reuse the other's
+    // compacted prefix winners. Both exact answers must still publish complete winners.
+    assert!(first_complete);
+    assert!(second_complete);
+    assert_eq!(engine.counters().get(Counter::PrefixAnswerCacheMisses), 2);
+    assert_eq!(engine.counters().get(Counter::PrefixAnswerCacheHits), 0);
     engine.end_cold_matching_batch();
 }
 
