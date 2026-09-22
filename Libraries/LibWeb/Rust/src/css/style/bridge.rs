@@ -382,6 +382,7 @@ pub const FONT_RESOLUTION_FEATURE_INPUT_COUNT: usize = 11;
 #[derive(Clone, Copy)]
 pub struct FfiFontResolutionRequest {
     pub font_family: FfiHostHandle,
+    pub tree_scope: u32,
     /// The computed values the resolver reads beside the family, in `FontResolutionFeatureInput`
     /// order, each null when the property has its initial value. They select shaping features and
     /// variations, so two elements differing only in one of them resolve to different fonts.

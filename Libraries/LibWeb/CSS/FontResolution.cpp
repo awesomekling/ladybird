@@ -349,9 +349,12 @@ NonnullRefPtr<Gfx::FontCascadeList const> FontCascadeMemo::resolve(FontFaceSnaps
     if (it != m_cascades.end() && it->value.generation == snapshot.generation)
         return it->value.font_list;
 
-    FontFeatureValuesProvider published_provider = [this](Utf16FlyString const& family) -> HashMap<FontFeatureValueKey, Vector<u32>> const& {
-        auto it = m_font_feature_values.find(family);
-        return it == m_font_feature_values.end() ? *s_no_font_feature_values : it->value;
+    FontFeatureValuesProvider published_provider = [this, &key](Utf16FlyString const& family) -> HashMap<FontFeatureValueKey, Vector<u32>> const& {
+        auto scope = m_font_feature_values.find(key.tree_scope);
+        if (scope == m_font_feature_values.end())
+            return *s_no_font_feature_values;
+        auto it = scope->value.find(family);
+        return it == scope->value.end() ? *s_no_font_feature_values : it->value;
     };
     auto font_list = resolve_font_cascade(snapshot, key.font_families.span(), key.font_size, key.font_slope, key.font_weight, key.font_width, key.font_optical_sizing, key.font_variation_settings, key.font_feature_data, font_feature_values_provider ? font_feature_values_provider : &published_provider);
     if (it != m_cascades.end()) {
@@ -368,7 +371,7 @@ NonnullRefPtr<Gfx::FontCascadeList const> FontCascadeMemo::resolve(FontFaceSnaps
     return font_list;
 }
 
-void FontCascadeMemo::publish_font_feature_values(HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>> const& values)
+void FontCascadeMemo::publish_font_feature_values(ScopedFontFeatureValuesTables const& values)
 {
     MutexLocker locker { m_mutex };
     if (m_font_feature_values == values)
