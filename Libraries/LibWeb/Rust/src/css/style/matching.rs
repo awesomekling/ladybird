@@ -5387,15 +5387,22 @@ impl RetainedState {
                                 let answer_cascade_input = self.intern_cascade_input(&answer, counters);
                                 let cascade_winner_inventory_is_complete =
                                     self.cascade_winner_inventory_is_complete(&answer, Some(node));
-                                prefix_caches.borrow_mut().answers.remember(
-                                    &mut self.match_answers,
-                                    key,
-                                    &answer,
-                                    winner_group,
-                                    pseudo_winner_groups,
-                                    answer_cascade_input,
-                                    cascade_winner_inventory_is_complete,
-                                );
+                                // The winners of an answer holding a gated rule are this node's: its
+                                // containers decided them, and another node's may not.
+                                if !answer
+                                    .iter()
+                                    .any(|entry| self.program.rule_is_gated_by_container_query(entry.rule))
+                                {
+                                    prefix_caches.borrow_mut().answers.remember(
+                                        &mut self.match_answers,
+                                        key,
+                                        &answer,
+                                        winner_group,
+                                        pseudo_winner_groups,
+                                        answer_cascade_input,
+                                        cascade_winner_inventory_is_complete,
+                                    );
+                                }
                                 cascade_input = Some(answer_cascade_input);
                                 answer
                             }

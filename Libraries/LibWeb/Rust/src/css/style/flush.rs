@@ -208,6 +208,7 @@ impl StyleEngineState {
         }
         self.discard_prepared_batch_matching_traversal();
         self.discard_published_match_answers(counters);
+        self.retained.drop_winners_whose_container_verdicts_moved();
         // A transaction made of derived child reactions alone continues the style change whose
         // reactions C++ applied last, one tree generation further.
         self.retained.last_transaction_only_derived_child_reactions =
@@ -1991,6 +1992,8 @@ impl StyleEngineState {
             // columns for as long as that answer stands.
             self.retained.batch_answers_complete_but_for_custom_properties.clear();
             self.retained.batch_custom_property_matches.clear();
+            // The host took the effects of the rows it installed from the last transaction.
+            self.retained.container_effects_for_host.clear();
             self.retained.batch_backing_pseudo_matches.clear();
             for &node in &published_nodes {
                 let Some(answer) = published_match_answers.lookup(node) else {
@@ -2108,21 +2111,24 @@ impl StyleEngineState {
                     let resuming_font = engine_computed_record_scratch.font_drive.is_pending_for(node);
                     // The immediate parent's own unresolved fact, which the direct inherited-group
                     // path reads without asking about the chain above it.
+                    // A node whose winners hold gated rules is derived where their conditions are
+                    // decided again and what they read of the containers is handed to the host.
                     let direct_inherited_delta = (reaction == transaction::STYLE_REACTION_INHERITED_STYLE
-                        && !resuming_font)
-                        .then(|| self.retained.tree.flat_tree_parent(node))
-                        .flatten()
-                        .filter(|parent| {
-                            !row_of(&engine_computed_record_scratch.derived_child_inputs, *parent)
-                                .is_some_and(|row| row.inheritance_unresolved)
-                        })
-                        .and_then(|parent| {
-                            self.computed_group_sets.replace_engine_resolvable_inherited_groups(
-                                node,
-                                parent,
-                                inherited_style_groups,
-                            )
-                        });
+                        && !resuming_font
+                        && !self.retained.published_container_verdicts.contains_key(&node))
+                    .then(|| self.retained.tree.flat_tree_parent(node))
+                    .flatten()
+                    .filter(|parent| {
+                        !row_of(&engine_computed_record_scratch.derived_child_inputs, *parent)
+                            .is_some_and(|row| row.inheritance_unresolved)
+                    })
+                    .and_then(|parent| {
+                        self.computed_group_sets.replace_engine_resolvable_inherited_groups(
+                            node,
+                            parent,
+                            inherited_style_groups,
+                        )
+                    });
                     // A regular style reaction whose moved winners the engine can compute itself
                     // publishes its new record here, so C++ applies a record instead of running a
                     // style computation. A reaction that also carries a style input, or that may have

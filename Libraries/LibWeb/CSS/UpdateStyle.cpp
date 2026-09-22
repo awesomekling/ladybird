@@ -885,6 +885,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         style_engine.consume_recorded_element_style_input_change(reaction.style_node);
                     invalidation = element->apply_engine_computed_style_record(StyleRecordID { reaction.new_style_record }, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties);
                 }
+                // What the row's container conditions read of its containers, recorded as the host
+                // records it for a row it computes.
+                auto container_effects = StyleEngineFFI::style_engine_take_container_effects(style_engine.rust_handle(), reaction.style_node);
+                ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
+                StyleComputer::record_container_query_effects(DOM::AbstractElement { *element }, container_effects);
                 if (acknowledge)
                     style_engine.acknowledge_engine_computed_record(StyleNodeID { reaction.style_node });
             };
@@ -922,6 +927,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     // parent's inheritable environment differs, C++ computes the style. So it does
                     // when a host rewrote the element's declarations after the engine computed it.
                     document.style_computer().style_engine().consume_recorded_element_style_input_change(reaction.style_node);
+                    StyleEngineFFI::style_engine_native_container_effects_release(StyleEngineFFI::style_engine_take_container_effects(document.style_computer().style_engine().rust_handle(), reaction.style_node).effects);
                     invalidation = element->apply_style_engine_reaction(did_change_custom_properties);
                 } else {
                     apply_engine_computed_records(pseudo_element_records, true);

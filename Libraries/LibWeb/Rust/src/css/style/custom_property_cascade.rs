@@ -351,9 +351,8 @@ impl RetainedState {
         tree_scope: TreeScopeID,
         pseudo: bool,
     ) -> bool {
-        let _ = pseudo;
         self.match_scope_is_complete_for(Some(node), rule, tree_scope)
-            && !self.program.rule_is_gated_by_container_query(rule)
+            && self.container_gate_is_held(Some(node), rule, pseudo)
             && self.program.declarations_are_complete_but_for_custom_properties(rule)
     }
 
@@ -410,6 +409,13 @@ impl RetainedState {
         let mut visit = |rule: RuleID, tree_scope: TreeScopeID, specificity: Specificity, scope_proximity: u32| {
             let declared = self.program.custom_declarations_of(rule);
             if declared.is_empty() {
+                return ControlFlow::Continue(());
+            }
+            // A gated rule declares for the node where its container conditions held when its
+            // winners were published, as its longhands do.
+            if pseudo.is_some() && self.program.rule_is_gated_by_container_query(rule)
+                || !self.published_container_verdict_holds(node, rule)
+            {
                 return ControlFlow::Continue(());
             }
             let written = self.program.custom_written_values_of(rule);

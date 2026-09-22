@@ -16,6 +16,7 @@ use super::*;
 
 /// What a rule's container conditions say for one subject: whether they hold, what kinds of
 /// container query they depend on, and the effects the evaluation leaves for the host to record.
+#[derive(Clone, Default)]
 pub(crate) struct ContainerVerdict {
     pub(crate) matches: bool,
     pub(crate) depends_on_size: bool,
@@ -51,6 +52,135 @@ unsafe extern "C" fn retained_container_style_feature(
 }
 
 impl RetainedState {
+    /// Keep what a row the engine answers read of its containers for the host, which records it
+    /// when it installs the element's record, as it does for a row it computes itself.
+    pub(crate) fn note_container_effects_for_host(&mut self, node: StyleNodeID, verdict: &ContainerVerdict) {
+        let noted = self.container_effects_for_host.entry(node).or_default();
+        noted.depends_on_size |= verdict.depends_on_size;
+        noted.depends_on_style |= verdict.depends_on_style;
+        noted.effects.extend(verdict.effects.iter().cloned());
+    }
+
+    /// Whether the winners published for a node hold a rule's container conditions: an element's
+    /// winners hold a gated rule where its conditions held when they were published, and the record
+    /// loop checks that they still do. A pseudo-element's are not checked there, so its gated rules
+    /// stay the host's.
+    pub(crate) fn container_gate_is_held(&self, node: Option<StyleNodeID>, rule: RuleID, pseudo: bool) -> bool {
+        !self.program.rule_is_gated_by_container_query(rule)
+            || (!pseudo && node.is_some_and(|node| !self.container_gates_unheld.contains(&node)))
+    }
+
+    /// Decide, as a node's winners are published, whether its gated rules can be: their
+    /// conditions read the containers above it, which are final only when no ancestor's answer
+    /// moves in the same transaction.
+    pub(super) fn note_container_gates_for_publication(&mut self, node: StyleNodeID, effects: &AnswerEffects) {
+        let mut ancestor = self.tree.flat_tree_parent(node);
+        let mut moving = false;
+        while let Some(current) = ancestor {
+            if effects.lookup(current).is_some() {
+                moving = true;
+                break;
+            }
+            ancestor = self.tree.flat_tree_parent(current);
+        }
+        if moving {
+            self.container_gates_unheld.insert(node);
+        } else {
+            self.container_gates_unheld.remove(&node);
+        }
+    }
+
+    /// A node whose gated rules decide differently over the containers as they stand now than
+    /// when its winners were published holds winners no record may be derived from: they are
+    /// dropped, and the node is the host's until they are published again.
+    pub(super) fn drop_winners_whose_container_verdicts_moved(&mut self) {
+        if self.published_container_verdicts.is_empty() {
+            return;
+        }
+        let moved: Vec<StyleNodeID> = self
+            .published_container_verdicts
+            .iter()
+            .filter(|(node, verdicts)| {
+                verdicts.iter().any(|&(rule, held)| {
+                    self.rule_container_verdict(rule, node.raw(), false)
+                        .is_none_or(|verdict| verdict.matches != held)
+                })
+            })
+            .map(|(&node, _)| node)
+            .collect();
+        for node in moved {
+            self.published_container_verdicts.remove(&node);
+            self.winner_groups.remove(node);
+        }
+    }
+
+    /// Whether a rule decides for the node as far as its container conditions go: an ungated rule
+    /// always does, a gated one where they held when the node's winners were published.
+    pub(crate) fn published_container_verdict_holds(&self, node: StyleNodeID, rule: RuleID) -> bool {
+        !self.program.rule_is_gated_by_container_query(rule)
+            || self
+                .published_container_verdicts
+                .get(&node)
+                .is_some_and(|verdicts| verdicts.iter().any(|&(gated, held)| gated == rule && held))
+    }
+
+    pub(super) fn publish_container_verdicts(&mut self, node: StyleNodeID, verdicts: Vec<(RuleID, bool)>) {
+        if verdicts.is_empty() {
+            self.published_container_verdicts.remove(&node);
+        } else {
+            self.published_container_verdicts.insert(node, verdicts);
+        }
+    }
+
+    /// Whether every gated rule of a node's winners decides now as it did when they were published,
+    /// over its containers as its settled ancestors left them. What the evaluations read of the
+    /// containers is kept for the host, which records it with the node's record.
+    pub(super) fn container_verdicts_stand(&mut self, node: StyleNodeID) -> bool {
+        let Some(published) = self.published_container_verdicts.get(&node).cloned() else {
+            return true;
+        };
+        let mut verdicts = Vec::with_capacity(published.len());
+        for (rule, held) in published {
+            let Some(verdict) = self.rule_container_verdict(rule, node.raw(), false) else {
+                return false;
+            };
+            if verdict.matches != held {
+                return false;
+            }
+            verdicts.push(verdict);
+        }
+        for verdict in &verdicts {
+            self.note_container_effects_for_host(node, verdict);
+        }
+        true
+    }
+
+    /// Whether a flat-tree ancestor of the node was declined in this batch: the record the host
+    /// computes for it is installed after the batch, and so are the container inputs it publishes.
+    pub(super) fn container_ancestor_is_unsettled(
+        &self,
+        node: StyleNodeID,
+        scratch: &super::publication::EngineComputedRecordScratch,
+    ) -> bool {
+        let mut ancestor = self.tree.flat_tree_parent(node);
+        while let Some(current) = ancestor {
+            if let Some(index) = current.element_index()
+                && scratch
+                    .derived_child_inputs
+                    .get(index as usize)
+                    .is_some_and(|row| !row.settled)
+            {
+                return true;
+            }
+            ancestor = self.tree.flat_tree_parent(current);
+        }
+        false
+    }
+
+    pub(crate) fn take_container_effects_for_host(&mut self, node: StyleNodeID) -> Option<ContainerVerdict> {
+        self.container_effects_for_host.remove(&node)
+    }
+
     /// Evaluate a rule's container conditions for a subject. `None` when the rule has no target.
     pub(crate) fn rule_container_verdict(
         &self,
