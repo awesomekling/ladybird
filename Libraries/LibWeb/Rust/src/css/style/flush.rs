@@ -2096,7 +2096,10 @@ impl StyleEngineState {
                         .computed_group_sets
                         .assigned_style_record(node)
                         .map_or(0, |style_record| style_record.raw());
-                    let skip_hidden = old_style_record == 0 && {
+                    let hidden_svg_resource_style = self.retained.computed_group_sets.adjustment_facts(node)
+                        & bridge::element_adjustment_fact::IS_SVG_ELEMENT
+                        != 0;
+                    let skip_hidden = old_style_record == 0 && !hidden_svg_resource_style && {
                         let mut ancestor = self.tree.inheritance_parent(node);
                         let mut hidden = false;
                         while let Some(current) = ancestor {

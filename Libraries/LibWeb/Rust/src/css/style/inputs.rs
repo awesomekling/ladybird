@@ -2231,6 +2231,23 @@ impl StyleEngineState {
         );
     }
 
+    /// A hidden SVG descendant loses its host style before the style transaction completes.
+    /// Keep that loss as an input and derive the resource's replacement record in the engine.
+    pub fn set_element_container_query_inputs(&mut self, node: StyleNodeID, style_record: u64) {
+        self.retained.set_element_container_query_inputs(node, style_record);
+        if style_record == 0
+            && self.retained.computed_group_sets.adjustment_facts(node)
+                & bridge::element_adjustment_fact::IS_SVG_ELEMENT
+                != 0
+        {
+            self.record_derived_element_style_input(
+                node,
+                transaction::STYLE_REACTION_PUBLISHED_STYLE | transaction::STYLE_REACTION_RECOMPUTE_STYLE,
+                0,
+            );
+        }
+    }
+
     /// Record a style reaction the engine derived itself for one element, or one C++ derived from
     /// a reaction it applied: the engine settles it where it can.
     pub fn record_derived_element_style_input(&mut self, node: StyleNodeID, reaction: u8, inherited_style_groups: u8) {

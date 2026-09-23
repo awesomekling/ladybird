@@ -749,11 +749,13 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             // for an element whose ancestor became visible: its style was cleared on entry to
             // display:none while the engine kept the record. A materialization retried above is
             // also an install even when the engine held an old record the DOM never received.
+            // Hidden SVG resource styles are cleared and then restored from derived records.
             // Other record deltas assume the style they move.
             if (!element->has_style()
                 && reaction.gap != StyleEngineFFI::FfiStyleDeltaGap::Materialize
                 && !(reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Computed
-                    && (reaction.old_style_record == 0 || (reaction.reaction & StyleEngine::AncestorBecameVisible) || retried_unstyled_materialization)))
+                    && (reaction.old_style_record == 0 || (reaction.reaction & StyleEngine::AncestorBecameVisible)
+                        || retried_unstyled_materialization || element->is_svg_element())))
                 continue;
             // An earlier display:none reaction in this batch can clear the style of a materialization gap after the
             // inheritance closure was built. The gap must then rematerialize rather than letting its descendants
