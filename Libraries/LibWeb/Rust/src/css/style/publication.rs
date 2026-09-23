@@ -2745,6 +2745,11 @@ impl RetainedState {
         counters: &mut Counters,
     ) -> u64 {
         let facts = self.computed_group_sets.adjustment_facts(node);
+        if facts & bridge::element_adjustment_fact::DISALLOW_DISPLAY_CONTENTS != 0
+            && facts & bridge::element_adjustment_fact::IS_SVG_ELEMENT != 0
+        {
+            return 0;
+        }
         // An element standing for its host's pseudo-element is its host's to cascade.
         if self.backs_host_pseudo_element(node) {
             let parent_inputs_moved = ParentInputsMoved {
@@ -6963,8 +6968,16 @@ impl StyleEngineState {
         if let Some(index) = armed {
             self.host.armed_retry_nodes.remove(index);
         }
+        let bail_marks = (armed.is_none() && seal::is_reporting()).then(|| counters.record_bail_marks());
         let retried = self.retry_engine_record_after_ancestor(node, counters);
         if retried.style_record == 0 {
+            if let Some(bail_marks) = bail_marks {
+                let cause = counters
+                    .first_changed_record_bail(&bail_marks)
+                    .unwrap_or("InBatchRetryNoRecord");
+                let cold = self.retained.computed_group_sets.assigned_style_record(node).is_none();
+                self.retained.host_entry_causes.insert(node, (cause, cold));
+            }
             return;
         }
         let uses_substitution = self.nodes_with_substituted_records.contains(&node);
