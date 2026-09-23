@@ -1,4 +1,4 @@
 none
 none
 none
-shared computations: 2
+shared styles: 2
