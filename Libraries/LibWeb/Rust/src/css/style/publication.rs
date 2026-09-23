@@ -3591,7 +3591,15 @@ impl RetainedState {
                 declared.property < crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID
                     && std::ptr::eq(written.pointer(), written_value)
             })
-            .map(|(declared, written)| (declared.property, written.clone_retained()))
+            .map(|(declared, written)| {
+                let value = match written.data() {
+                    crate::css::style_value::StyleValueData::PendingSubstitution {
+                        original_shorthand_value,
+                    } => original_shorthand_value.clone_retained(),
+                    _ => written.clone_retained(),
+                };
+                (declared.property, value)
+            })
     }
 
     /// Whether any winner of a state was written with a substitution, so the record computed
