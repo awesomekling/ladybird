@@ -113,7 +113,13 @@ unsafe extern "C" fn style_engine_publish_custom_function(
 impl RetainedState {
     fn prepare_custom_functions(&mut self, node: StyleNodeID, pseudo: Option<u8>) -> Option<PreparedCustomFunctions> {
         let snapshot = &self.document_function_snapshot;
-        let caller_scope = *snapshot.caller_scopes.get(&self.tree.tree_scope(node).0)?;
+        // The host publishes a caller scope when that scope can see a definition. With no
+        // visible definition, an empty registry still resolves an unknown function's fallback.
+        let caller_scope = snapshot
+            .caller_scopes
+            .get(&self.tree.tree_scope(node).0)
+            .copied()
+            .unwrap_or(0);
         let mut scopes = vec![caller_scope];
         let mut identities = Vec::new();
         let mut seen = HashSet::default();
@@ -319,20 +325,24 @@ pub(super) struct RegisteredValueContext {
 // cannot move an aliased output location.
 unsafe impl Send for RegisteredValueContext {}
 
-/// Whether a token stream is a substitution the engine resolves itself: `var()` references,
-/// or an `inherit()` reference whose parent value is available without a fallback.
+/// Whether a token stream is a substitution the engine can resolve with the published inputs.
 pub(super) fn value_is_engine_resolvable_substitution(value: &StyleValueData) -> bool {
+    if let StyleValueData::PendingSubstitution {
+        original_shorthand_value,
+    } = value
+    {
+        return value_is_engine_resolvable_substitution(original_shorthand_value.data());
+    }
     (matches!(value, StyleValueData::Unresolved { .. }) && custom_property_value_is_engine_resolvable(value))
         || matches!(
             value,
             StyleValueData::Unresolved {
                 presence_inherit: true,
-                presence_attr: false,
-                presence_dashed_function: false,
-                presence_if: false,
-                source_text,
                 ..
-            } if !source_text.units().contains(&u16::from(b','))
+            } | StyleValueData::Unresolved {
+                presence_dashed_function: true,
+                ..
+            } | StyleValueData::Unresolved { presence_if: true, .. }
         )
 }
 
@@ -1276,34 +1286,49 @@ impl RetainedState {
         reason = "the written value and its independent resolution inputs travel together"
     )]
     pub(super) fn substitute_written_value(
-        environments: &mut custom_property_environments::CustomPropertyEnvironments,
-        inputs: Option<bridge::FfiDocumentStyleComputationInputs>,
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
         environment: u64,
         property: u16,
         written: RetainedStyleValueData,
-        attributes: Option<&super::inputs::SubstitutionAttributeSnapshot<'_>>,
         inheritance_store: *const c_void,
         counters: &mut Counters,
     ) -> Option<RetainedStyleValueData> {
-        let has_inheritance = matches!(
+        let reads_inheritance = matches!(
             written.data(),
             StyleValueData::Unresolved {
                 presence_inherit: true,
                 ..
             }
         );
-        let reads_inheritance = matches!(
+        let reads_functions = matches!(
             written.data(),
             StyleValueData::Unresolved {
-                presence_inherit: true,
-                source_text,
+                presence_dashed_function: true,
                 ..
-            } if !source_text.units().contains(&u16::from(b','))
+            }
         );
-        if has_inheritance && !reads_inheritance {
-            counters.bump(Counter::EngineComputedRecordBailSubstitution);
-            return None;
-        }
+        let reads_conditions = matches!(written.data(), StyleValueData::Unresolved { presence_if: true, .. });
+        let functions = if reads_functions {
+            match self.prepare_custom_functions(node, pseudo) {
+                Some(functions) => Some(functions),
+                None => {
+                    counters.bump(Counter::EngineComputedRecordBailSubstitution);
+                    counters.bump(Counter::EngineComputedRecordBailSubstitutionFunctions);
+                    return None;
+                }
+            }
+        } else {
+            None
+        };
+        let media_environment = self.document_media_snapshot.as_ffi();
+        let resolution_inputs = OrdinarySubstitutionInputs {
+            functions: functions.as_ref(),
+            media_environment: &media_environment,
+            style_query_length: self.document_media_snapshot.length.as_ref(),
+        };
+        let inputs = self.document_style_computation_inputs;
         // An `attr()` substitutes the element's own attributes, so the value is the element's and
         // takes no memo shared across the environment.
         let reads_attributes = matches!(
@@ -1313,8 +1338,14 @@ impl RetainedState {
                 ..
             }
         );
-        if reads_attributes {
-            let attributes = attributes?;
+        let attribute_element = self.substitution_attribute_element(node, pseudo);
+        let attributes = super::inputs::SubstitutionAttributeSnapshot {
+            text: self.facts.substitution_attributes(attribute_element),
+            names_are_ascii_case_insensitive: !self.html_element_namespace.is_none()
+                && self.facts.namespace_of(attribute_element) == self.html_element_namespace,
+        };
+        let environments = &mut self.custom_property_environments;
+        if reads_attributes || functions.as_ref().is_some_and(|functions| functions.reads_attributes) {
             return substitute_written_value_against_store_with_attributes(
                 match environment {
                     0 => std::ptr::null(),
@@ -1323,25 +1354,42 @@ impl RetainedState {
                 inputs?,
                 property,
                 &written,
-                attributes,
+                &attributes,
                 inheritance_store,
+                Some(&resolution_inputs),
                 counters,
             );
         }
-        if !custom_property_value_is_engine_resolvable(written.data()) && !reads_inheritance {
+        if !value_is_engine_resolvable_substitution(written.data()) {
             counters.bump(Counter::EngineComputedRecordBailSubstitution);
+            counters.bump(Counter::EngineComputedRecordBailSubstitutionSource);
+            counters.bump(Counter::EngineComputedRecordBailSubstitutionOrdinarySource);
+            counters.bump(match written.data() {
+                StyleValueData::PendingSubstitution { .. } => {
+                    Counter::EngineComputedRecordBailSubstitutionPendingSource
+                }
+                StyleValueData::Shorthand { .. } => Counter::EngineComputedRecordBailSubstitutionShorthandSource,
+                StyleValueData::Unresolved { .. } => Counter::EngineComputedRecordBailSubstitutionUnresolvedSource,
+                _ => Counter::EngineComputedRecordBailSubstitutionOtherSource,
+            });
             return None;
         }
         let Some(inputs) = inputs else {
             counters.bump(Counter::EngineComputedRecordBailSubstitution);
+            counters.bump(Counter::EngineComputedRecordBailSubstitutionInputs);
             return None;
         };
         let registry = inputs.custom_property_registry;
         if registry.is_none() {
             counters.bump(Counter::EngineComputedRecordBailSubstitution);
+            counters.bump(Counter::EngineComputedRecordBailSubstitutionInputs);
             return None;
         }
-        if !reads_inheritance && let Some(value) = environments.substitution(&written, property, environment) {
+        if !reads_inheritance
+            && !reads_functions
+            && !reads_conditions
+            && let Some(value) = environments.substitution(&written, property, environment)
+        {
             counters.bump(Counter::EngineComputedRecordSubstitutionMemoHits);
             return Some(value);
         }
@@ -1350,30 +1398,34 @@ impl RetainedState {
             identity => {
                 let Some(store) = environments.store(identity) else {
                     counters.bump(Counter::EngineComputedRecordBailSubstitution);
+                    counters.bump(Counter::EngineComputedRecordBailSubstitutionStore);
                     return None;
                 };
                 store
             }
         };
-        let value = if reads_inheritance {
-            substitute_written_value_against_store_with_attributes(
-                store,
-                inputs,
-                property,
-                &written,
-                &super::inputs::SubstitutionAttributeSnapshot::default(),
-                inheritance_store,
-                counters,
-            )?
-        } else {
-            substitute_written_value_against_store(store, inputs, property, &written, counters)?
-        };
+        let value = substitute_written_value_against_store_with_attributes(
+            store,
+            inputs,
+            property,
+            &written,
+            &attributes,
+            inheritance_store,
+            Some(&resolution_inputs),
+            counters,
+        )?;
         counters.bump(Counter::EngineComputedRecordSubstitutions);
-        if !reads_inheritance {
+        if !reads_inheritance && !reads_functions && !reads_conditions {
             environments.remember_substitution(written, property, environment, value.clone_retained());
         }
         Some(value)
     }
+}
+
+struct OrdinarySubstitutionInputs<'a> {
+    functions: Option<&'a PreparedCustomFunctions>,
+    media_environment: &'a crate::css::parser::query_parser::FfiMediaEnvironment,
+    style_query_length: Option<&'a crate::css::style_compute::FfiLengthResolutionContext>,
 }
 
 /// What a written value with `var()` references substitutes to for a property against a resolved
@@ -1390,6 +1442,8 @@ pub(crate) fn substitute_written_value_against_store(
 ) -> Option<RetainedStyleValueData> {
     if !custom_property_value_is_engine_resolvable(written.data()) {
         counters.bump(Counter::EngineComputedRecordBailSubstitution);
+        counters.bump(Counter::EngineComputedRecordBailSubstitutionSource);
+        counters.bump(Counter::EngineComputedRecordBailSubstitutionAnimationSource);
         return None;
     }
     substitute_written_value_against_store_with_attributes(
@@ -1399,12 +1453,16 @@ pub(crate) fn substitute_written_value_against_store(
         written,
         &super::inputs::SubstitutionAttributeSnapshot::default(),
         std::ptr::null(),
+        None,
         counters,
     )
 }
 
-/// The same substitution with the element's attributes, which an `attr()` reads. The other
-/// substitutions a callback resolves (custom functions, `if()`, `inherit()`) stay C++'s.
+/// The same substitution with the element's attributes and published resolution inputs.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the ordinary and animation callers provide distinct resolution inputs"
+)]
 fn substitute_written_value_against_store_with_attributes(
     store: *const c_void,
     inputs: bridge::FfiDocumentStyleComputationInputs,
@@ -1412,24 +1470,28 @@ fn substitute_written_value_against_store_with_attributes(
     written: &RetainedStyleValueData,
     attributes: &super::inputs::SubstitutionAttributeSnapshot<'_>,
     inheritance_store: *const c_void,
+    resolution_inputs: Option<&OrdinarySubstitutionInputs<'_>>,
     counters: &mut Counters,
 ) -> Option<RetainedStyleValueData> {
-    if matches!(
-        written.data(),
-        StyleValueData::Unresolved {
-            presence_dashed_function: true,
-            ..
-        } | StyleValueData::Unresolved { presence_if: true, .. }
-    ) || (inheritance_store.is_null()
+    if (resolution_inputs.is_none()
         && matches!(
             written.data(),
             StyleValueData::Unresolved {
-                presence_inherit: true,
+                presence_dashed_function: true,
                 ..
-            }
+            } | StyleValueData::Unresolved { presence_if: true, .. }
         ))
+        || (inheritance_store.is_null()
+            && matches!(
+                written.data(),
+                StyleValueData::Unresolved {
+                    presence_inherit: true,
+                    ..
+                }
+            ))
     {
         counters.bump(Counter::EngineComputedRecordBailSubstitution);
+        counters.bump(Counter::EngineComputedRecordBailSubstitutionInheritance);
         return None;
     }
     let substitution_attributes = attributes
@@ -1453,24 +1515,27 @@ fn substitute_written_value_against_store_with_attributes(
     let registry = inputs.custom_property_registry;
     if registry.is_none() {
         counters.bump(Counter::EngineComputedRecordBailSubstitution);
+        counters.bump(Counter::EngineComputedRecordBailSubstitutionInputs);
         return None;
     }
     let registry_ref = unsafe { &*registry.as_pointer().cast::<CustomPropertyRegistry>() };
     let mut random_function_index = 0_usize;
     let mut parse_context = registry_ref.parse_context(&mut random_function_index);
     parse_context.in_quirks_mode = inputs.in_quirks_mode;
+    let functions = resolution_inputs.and_then(|inputs| inputs.functions);
     let Some(mut resolution_environment) = (unsafe {
         prepare_var_resolution_environment(
             substitution_attributes.as_ptr(),
             substitution_attributes.len(),
-            std::ptr::null(),
-            0,
-            0,
-            std::ptr::null(),
-            0,
+            functions.map_or(std::ptr::null(), |functions| functions.definitions.as_ptr()),
+            functions.map_or(0, |functions| functions.definitions.len()),
+            functions.map_or(0, |functions| functions.caller_scope),
+            functions.map_or(std::ptr::null(), |functions| functions.visibilities.as_ptr()),
+            functions.map_or(0, |functions| functions.visibilities.len()),
         )
     }) else {
         counters.bump(Counter::EngineComputedRecordBailSubstitution);
+        counters.bump(Counter::EngineComputedRecordBailSubstitutionResolver);
         return None;
     };
     // SAFETY: The store is live while a record names its environment, and the written value
@@ -1481,7 +1546,7 @@ fn substitute_written_value_against_store_with_attributes(
             inheritance_store,
             registry.as_pointer(),
             Some(&parse_context),
-            None,
+            resolution_inputs.map(|inputs| inputs.media_environment),
             None,
             property,
             FfiUtf16View {
@@ -1493,7 +1558,9 @@ fn substitute_written_value_against_store_with_attributes(
             &mut resolution_environment,
             attributes.names_are_ascii_case_insensitive,
             std::ptr::null_mut(),
-            std::ptr::null(),
+            resolution_inputs
+                .and_then(|inputs| inputs.style_query_length)
+                .map_or(std::ptr::null(), std::ptr::from_ref),
             std::ptr::null_mut(),
             None,
         )
@@ -1521,6 +1588,7 @@ fn substitute_written_value_against_store_with_attributes(
                 ParseOutcome::Invalid => RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid),
                 ParseOutcome::NotHandled => {
                     counters.bump(Counter::EngineComputedRecordBailSubstitution);
+                    counters.bump(Counter::EngineComputedRecordBailSubstitutionParse);
                     return None;
                 }
             }
@@ -1528,6 +1596,7 @@ fn substitute_written_value_against_store_with_attributes(
         NativeVarResolution::Invalid => RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid),
         NativeVarResolution::NotHandled => {
             counters.bump(Counter::EngineComputedRecordBailSubstitution);
+            counters.bump(Counter::EngineComputedRecordBailSubstitutionResolver);
             return None;
         }
     };

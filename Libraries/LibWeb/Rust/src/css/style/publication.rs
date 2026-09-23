@@ -746,6 +746,10 @@ impl RetainedState {
         // reads the custom-property registry. Neither change appears in a winner delta.
         if self.state_reads_attributes(node, state)
             || (self.custom_property_registrations_changed && self.node_style_reads_custom_properties(node))
+            // A function body or an if() condition can change without moving the declaration
+            // that calls it. The record has no version for those external inputs, so a requested
+            // row must resolve its ordinary winners again even when their cascade delta is empty.
+            || self.state_custom_condition_usage(node, state) & ((1 << 0) | (1 << 2)) != 0
         {
             scratch.recompute_in_full = true;
         }
@@ -1148,6 +1152,7 @@ impl RetainedState {
             tree_counting_key,
         );
         if let Some(&(new_style_record, cohort_explicitly_inherited_groups)) = (container_unit_mask == 0
+            && self.state_custom_condition_usage(node, state) == 0
             && !self.computed_group_sets.node_has_animation_overlay(node)
             && (!has_registered_declarations || !full_drive))
             .then(|| scratch.cohorts.get(&cohort))
@@ -1310,13 +1315,14 @@ impl RetainedState {
             return None;
         }
 
-        // A store whose values substitute `attr()` holds this element's attributes, and is the
-        // element's alone.
-        let reads_attributes = self.state_reads_attributes(node, state);
+        // Attributes, inherited custom values, conditions, and function definitions can differ
+        // between nodes sharing the same own environment and winner state.
+        let reads_external_substitution =
+            self.state_reads_attributes(node, state) || self.state_custom_condition_usage(node, state) != 0;
         let mut store = match scratch
             .stores
             .get(&(state, current_environment))
-            .filter(|_| !reads_attributes)
+            .filter(|_| !reads_external_substitution)
         {
             Some(store) => store.clone(),
             None => {
@@ -1330,7 +1336,7 @@ impl RetainedState {
                     counters,
                 )?);
                 scratch.store_capacity_bytes += store.capacity_bytes();
-                if !reads_attributes {
+                if !reads_external_substitution {
                     scratch.stores.insert((state, current_environment), store.clone());
                 }
                 if substituted {
@@ -1926,8 +1932,13 @@ impl RetainedState {
         // it: a record C++ computed for a per-element value, such as a `random()` draw, is that
         // element's alone. A store with substituted values is the environment's as well as the
         // state's, and admits nothing for the state alone.
-        let reads_attributes = self.state_reads_attributes(node, state);
-        let mut store = match scratch.stores.get(&(state, environment)).filter(|_| !reads_attributes) {
+        let reads_external_substitution =
+            self.state_reads_attributes(node, state) || self.state_custom_condition_usage(node, state) != 0;
+        let mut store = match scratch
+            .stores
+            .get(&(state, environment))
+            .filter(|_| !reads_external_substitution)
+        {
             Some(store) => store.clone(),
             None => {
                 let mut substituted = false;
@@ -1944,7 +1955,7 @@ impl RetainedState {
                 );
                 let store = std::sync::Arc::new(store?);
                 scratch.store_capacity_bytes += store.capacity_bytes();
-                if !reads_attributes {
+                if !reads_external_substitution {
                     scratch.stores.insert((state, environment), store.clone());
                 }
                 if substituted {
@@ -1960,7 +1971,9 @@ impl RetainedState {
             return None;
         }
         self.note_node_substitution(node, scratch, state, environment);
-        let cache_key = (!has_registered_declarations && self.state_container_unit_mask(node, state) == 0)
+        let cache_key = (!has_registered_declarations
+            && !reads_external_substitution
+            && self.state_container_unit_mask(node, state) == 0)
             .then_some(())
             .and(parent)
             .zip(parent_record)
@@ -3694,9 +3707,20 @@ impl RetainedState {
         })
     }
 
-    /// The outermost shorthand declared in a winner's block for the written value a pending
-    /// longhand names, and that shorthand's written value. A shorthand nested in another, such as
-    /// `border-width` in `border`, is itself declared pending the outer one.
+    /// The shorthand declared in a winner's block with the written value a pending longhand
+    /// names: which shorthand it is, and that written value.
+    fn underlying_shorthand_substitution(
+        mut value: crate::css::style_value::RetainedStyleValueData,
+    ) -> crate::css::style_value::RetainedStyleValueData {
+        while let crate::css::style_value::StyleValueData::PendingSubstitution {
+            original_shorthand_value,
+        } = value.data()
+        {
+            value = original_shorthand_value.clone_retained();
+        }
+        value
+    }
+
     fn shorthand_declaration_written_as(
         &self,
         node: StyleNodeID,
@@ -3726,12 +3750,7 @@ impl RetainedState {
                     && std::ptr::eq(written.pointer(), written_value)
             })
             .map(|(declared, written)| {
-                let value = match written.data() {
-                    crate::css::style_value::StyleValueData::PendingSubstitution {
-                        original_shorthand_value,
-                    } => original_shorthand_value.clone_retained(),
-                    _ => written.clone_retained(),
-                };
+                let value = Self::underlying_shorthand_substitution(written.clone_retained());
                 (declared.property, value)
             });
         if shorthand.is_some() {
@@ -3765,13 +3784,42 @@ impl RetainedState {
                 expansion.len() == pending_longhands.len()
                     && expansion.iter().all(|longhand| pending_longhands.contains(longhand))
             })?;
-        Some((shorthand, original?))
+        Some((shorthand, Self::underlying_shorthand_substitution(original?)))
     }
 
     /// Whether any winner of a state was written with a substitution, so the record computed
     /// from it reads the node's custom-property environment.
     pub(super) fn state_has_substitutions(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
         self.state_substitution_values(node, state).next().is_some()
+    }
+
+    /// The condition and function dependencies of ordinary winners, including longhands that
+    /// carry a pending shorthand substitution. The host uses these bits to schedule reactions
+    /// when a function definition or one of the condition inputs changes.
+    pub(super) fn state_custom_condition_usage(&self, node: StyleNodeID, state: CascadeStateID) -> u8 {
+        self.state_substitution_values(node, state).fold(0, |usage, value| {
+            let mut value = value.data();
+            while let crate::css::style_value::StyleValueData::PendingSubstitution {
+                original_shorthand_value,
+            } = value
+            {
+                value = original_shorthand_value.data();
+            }
+            usage
+                | match value {
+                    crate::css::style_value::StyleValueData::Unresolved {
+                        presence_if,
+                        presence_inherit,
+                        presence_dashed_function,
+                        ..
+                    } => {
+                        u8::from(*presence_if)
+                            | (u8::from(*presence_inherit) << 1)
+                            | (u8::from(*presence_dashed_function) << 2)
+                    }
+                    _ => 0,
+                }
+        })
     }
 
     pub(super) fn state_container_unit_mask(&self, node: StyleNodeID, state: CascadeStateID) -> u8 {
@@ -3870,14 +3918,14 @@ impl RetainedState {
                 .flat_tree_parent(node)
                 .and_then(|parent| self.computed_group_sets.custom_property_environment_identity(parent))
         };
-        // Records share by their own environment. When a non-inheriting registration makes the
-        // parent's environment differ, inherit() must stay with the host until that parent is
-        // also part of the record's sharing key.
+        // When a non-inheriting registration makes the parent's environment differ from the
+        // subject's, the inherited value remains with the host until that parent is proven
+        // authoritative for this record's substitution.
         let inheritance_store = inheritance_environment
             .filter(|&identity| identity == environment)
             .and_then(|identity| self.custom_property_environments.store(identity))
             .unwrap_or(std::ptr::null());
-        for winner in self.winner_groups.winners_in_state(state) {
+        for winner in self.winner_groups.winners_in_state(state).collect::<Vec<_>>() {
             // A revert whose continuation resumes at nothing leaves the property undeclared.
             let Some(winner) = self.winner_groups.resolved_winner(winner) else {
                 continue;
@@ -3933,19 +3981,12 @@ impl RetainedState {
                 crate::css::style_value::StyleValueData::Unresolved { .. } => {
                     *substituted = true;
                     let value = value.clone_retained();
-                    let attribute_element = self.substitution_attribute_element(node, pseudo_kind);
-                    let attributes = super::inputs::SubstitutionAttributeSnapshot {
-                        text: self.facts.substitution_attributes(attribute_element),
-                        names_are_ascii_case_insensitive: !self.html_element_namespace.is_none()
-                            && self.facts.namespace_of(attribute_element) == self.html_element_namespace,
-                    };
-                    let value = Self::substitute_written_value(
-                        &mut self.custom_property_environments,
-                        self.document_style_computation_inputs,
+                    let value = self.substitute_written_value(
+                        node,
+                        pseudo_kind,
                         environment,
                         winner.property,
                         value,
-                        Some(&attributes),
                         inheritance_store,
                         counters,
                     )?;
@@ -3969,13 +4010,12 @@ impl RetainedState {
                         counters.bump(Counter::EngineComputedRecordBailWinnerSpelling);
                         return None;
                     };
-                    let resolved = Self::substitute_written_value(
-                        &mut self.custom_property_environments,
-                        self.document_style_computation_inputs,
+                    let resolved = self.substitute_written_value(
+                        node,
+                        pseudo_kind,
                         environment,
                         shorthand,
                         written,
-                        None,
                         inheritance_store,
                         counters,
                     )?;

@@ -3489,8 +3489,8 @@ pub unsafe extern "C" fn style_engine_node_record_uses_tree_counting(engine: *co
         })
 }
 
-/// Which `if()`, `inherit()`, and custom-function substitutions the node's custom declarations read, including
-/// pseudo-elements that were resolved with the originating element's environment.
+/// Which `if()`, `inherit()`, and custom-function substitutions the node's custom and ordinary
+/// declarations read, including pseudo-elements resolved with the originating element's environment.
 ///
 /// # Safety
 /// `engine` must be live.
@@ -3502,7 +3502,13 @@ pub unsafe extern "C" fn style_engine_node_record_custom_condition_usage(engine:
     };
     let groups = engine.current_winner_groups();
     let mut usage = engine.retained.custom_declarations_condition_usage(node, None);
-    for (pseudo, _, _, _) in groups.pseudo_states(node) {
+    if let super::partial_view::Lookup::Known((_, state)) =
+        groups.token_for(super::cascade::WinnerGroupKey::current(node, engine.program.version()))
+    {
+        usage |= engine.retained.state_custom_condition_usage(node, state);
+    }
+    for (pseudo, _, state, _) in groups.pseudo_states(node) {
+        usage |= engine.retained.state_custom_condition_usage(node, state);
         if let Ok(kind) = u8::try_from(pseudo.kind.0) {
             usage |= engine.retained.custom_declarations_condition_usage(node, Some(kind));
         }
