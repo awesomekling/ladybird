@@ -1152,9 +1152,9 @@ impl RetainedState {
             && !self.record_declares_transitions(old_style_record)
             && !has_registered_declarations
             && is_leaf;
-        // A leaf whose record declares transitions can take a newly driven base beneath its
-        // composition in the same way. The transition decision itself is made below against the
-        // record the row moves away from.
+        // A record that declares transitions can take a newly driven base beneath its composition
+        // in the same way; a child derived in the same batch waits for that composition. The
+        // transition decision itself is made below against the record the row moves away from.
         let transitions_beneath_a_composition = animations_bind_the_record
             && self.record_declares_transitions(old_style_record)
             && !self.css_defined_animations.node_runs_a_css_animation(node)
@@ -1170,8 +1170,7 @@ impl RetainedState {
                         })
                     })
                 })
-            && !has_registered_declarations
-            && is_leaf;
+            && !has_registered_declarations;
         let derived_beneath_a_composition = css_animation_plan_without_an_overlay
             || transitions_beneath_a_composition
             || css_base_without_an_overlay
