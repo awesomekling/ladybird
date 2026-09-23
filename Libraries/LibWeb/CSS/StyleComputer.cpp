@@ -928,34 +928,6 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
     auto element_declares_own_custom_properties = base_custom_property_data
         && !(inheritance_parent.has_value() && inheritable_custom_property_data(*inheritance_parent).ptr() == base_custom_property_data.ptr());
 
-    // The document and the page cannot move inside a style update, so these come from the
-    // snapshot the update's begin boundary took rather than from the document itself.
-    auto const& document_environment = ensure_document_environment_for_style_update();
-    auto document_base_url_bytes = document_environment.serialized_base_url.bytes();
-    ComputedValuesFFI::FfiStyleComputationEnvironment const environment {
-        .box_type_input = {},
-        .color_scheme_input = {
-            .preferred_color_scheme = document_environment.preferred_color_scheme,
-            .has_document_supported_schemes = document_environment.has_supported_color_schemes,
-            .document_supported_scheme_codes = document_environment.supported_color_scheme_codes.data(),
-            .document_supported_scheme_count = document_environment.supported_color_scheme_codes.size(),
-        },
-        .is_th_element = false,
-        .has_new_font_size = false,
-        .has_tree_counting_context = false,
-        .sibling_count = 0,
-        .sibling_index = 0,
-        .random_base_values = nullptr,
-        .random_base_value_count = 0,
-        .document_base_url = document_base_url_bytes.data(),
-        .document_base_url_length = document_base_url_bytes.size(),
-        .style_sheet_resource_contexts = nullptr,
-        .style_sheet_resource_context_count = 0,
-        .device_pixels_per_css_pixel = document_environment.device_pixels_per_css_pixel,
-        .initial_font_size_raw = InitialValues::font_size().raw_value(),
-        .default_font_size_raw = default_user_font_size().raw_value(),
-    };
-
     struct SampleContext {
         StyleComputer const& style_computer;
         DOM::AbstractElement abstract_element;
@@ -977,7 +949,6 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
         .element_declares_own_custom_properties = element_declares_own_custom_properties,
         .base_custom_property_environment_is_engine = base_custom_property_data && StyleEngine::is_engine_custom_property_environment(base_custom_property_data->identity()),
         .inheritance_parent_style_record = inheritance_parent.has_value() ? inheritance_parent->style_record_identity().value() : 0,
-        .environment = &environment,
         .kept_length_contexts = stage_length_contexts,
         .callback_context = &sample_context,
         .prepare_overlay_for_mutation = [](void* context) -> void* {

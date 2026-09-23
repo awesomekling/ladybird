@@ -3938,9 +3938,6 @@ pub struct FfiHostAnimationSample {
     /// own cascade answers.
     pub base_custom_property_environment_is_engine: bool,
     pub inheritance_parent_style_record: u64,
-    /// The document's side of the environment keyframes compute in. The engine fills in the
-    /// element's own side: its place among its siblings and its random bases.
-    pub environment: *const FfiStyleComputationEnvironment,
     /// The contexts the longhand drive kept, or null where there was no drive.
     pub kept_length_contexts: *const FfiAnimationLengthContexts,
     pub callback_context: *mut c_void,
@@ -4229,12 +4226,35 @@ unsafe fn sample_described_animation_effects(
             }
         })
         .collect::<Vec<_>>();
-    let mut environment = unsafe { std::ptr::read(input.environment) };
-    environment.has_tree_counting_context = tree_counting_inputs != 0;
-    environment.sibling_count = tree_counting_inputs >> 32;
-    environment.sibling_index = tree_counting_inputs & 0xffff_ffff;
-    environment.random_base_values = random_base_values.as_ptr();
-    environment.random_base_value_count = random_base_values.len();
+    // The document's side of the environment is the one the host published with the style update.
+    let Some(document) = engine.document_style_computation_inputs() else {
+        unsafe { anim::release_resolved_animation_declarations(resolved.storage) };
+        return result;
+    };
+    let document_base_url = engine.document_base_url();
+    let environment = FfiStyleComputationEnvironment {
+        box_type_input: unsafe { std::mem::zeroed() },
+        color_scheme_input: FfiEffectiveColorSchemeInput {
+            preferred_color_scheme: document.preferred_color_scheme,
+            has_document_supported_schemes: document.has_document_supported_schemes,
+            document_supported_scheme_codes: document.document_supported_scheme_codes.as_ptr(),
+            document_supported_scheme_count: usize::from(document.document_supported_scheme_count),
+        },
+        is_th_element: false,
+        has_new_font_size: false,
+        has_tree_counting_context: tree_counting_inputs != 0,
+        sibling_count: tree_counting_inputs >> 32,
+        sibling_index: tree_counting_inputs & 0xffff_ffff,
+        random_base_values: random_base_values.as_ptr(),
+        random_base_value_count: random_base_values.len(),
+        document_base_url: document_base_url.as_ptr(),
+        document_base_url_length: document_base_url.len(),
+        style_sheet_resource_contexts: std::ptr::null(),
+        style_sheet_resource_context_count: 0,
+        device_pixels_per_css_pixel: document.device_pixels_per_css_pixel,
+        initial_font_size_raw: document.initial_font_size_raw,
+        default_font_size_raw: document.default_font_size_raw,
+    };
 
     let mut custom_value_storage = Vec::new();
     let mut custom_keyframe_values = Vec::new();
