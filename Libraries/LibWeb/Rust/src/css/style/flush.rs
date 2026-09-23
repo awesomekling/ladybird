@@ -2389,6 +2389,12 @@ impl StyleEngineState {
                                 .first_changed_record_bail(&bail_marks)
                                 .unwrap_or("ComputationBailUnnamed");
                         }
+                        // A verdict can become unsettled during the record drive, after the
+                        // earlier ancestor check. Retry this row once its preceding ancestors
+                        // have installed their records and container inputs.
+                        if decline_cause == "engineComputedRecordBailContainerVerdict" {
+                            retry_after_ancestor = true;
+                        }
                         self.retained
                             .host_entry_causes
                             .insert(node, (decline_cause, old_style_record == 0));
