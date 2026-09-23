@@ -1582,9 +1582,9 @@ static void marshal_animation_definitions(ReadonlySpan<ComputedValuesFFI::FfiCom
 
 // Takes the animation plan a record the engine settled left for the host, out of the engine's own
 // storage and into the batch, which applies it once every record is installed.
-Optional<StyleComputer::SettledAnimationPlan> StyleComputer::take_settled_animation_plan(StyleNodeID style_node) const
+Optional<StyleComputer::SettledAnimationPlan> StyleComputer::take_settled_animation_plan(StyleNodeID style_node, u8 pseudo_kind) const
 {
-    auto taken = const_cast<StyleComputer&>(*this).style_engine().take_settled_animation_definitions(style_node);
+    auto taken = const_cast<StyleComputer&>(*this).style_engine().take_settled_animation_definitions(style_node, pseudo_kind);
     if (!taken.owed)
         return {};
     SettledAnimationPlan plan;

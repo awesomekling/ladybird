@@ -132,7 +132,7 @@ public:
         bool owed { false };
         bool element_display_is_none { false };
     };
-    [[nodiscard]] SettledAnimationDefinitions take_settled_animation_definitions(StyleNodeID node);
+    [[nodiscard]] SettledAnimationDefinitions take_settled_animation_definitions(StyleNodeID node, u8 pseudo_kind);
     [[nodiscard]] StyleRecordView style_record_view(StyleRecordID style_record) const;
     void decide_transitions(StyleRecordID before_style_record, void const* after_longhand_table, void const* after_animated_overlay, StyleValueFFI::FfiTransitionInput&, StyleValueFFI::FfiTransitionAction*) const;
     // Remove the retained input identities for one pseudo-element kind and return its removal.
