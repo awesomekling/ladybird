@@ -2400,6 +2400,8 @@ impl StyleEngineState {
                                 || (container_input_nodes.contains(&node)
                                     && self.container_input_requires_full_drive(node))
                                 || tree_counting_input_nodes.contains(&node);
+                            engine_computed_record_scratch.ancestor_became_visible =
+                                reaction & transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE != 0;
                             let delta = self.engine_computed_record_delta(
                                 node,
                                 answer_winners_are_complete,
@@ -2409,6 +2411,7 @@ impl StyleEngineState {
                                 counters,
                             );
                             engine_computed_record_scratch.recompute_in_full = false;
+                            engine_computed_record_scratch.ancestor_became_visible = false;
                             delta
                         })
                         .flatten();

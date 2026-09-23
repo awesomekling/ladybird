@@ -1295,6 +1295,8 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
 
     // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
     (void)record_transition_stabilization_baseline(abstract_element, before_change_style_record);
+    if (auto baseline = m_style_engine.transition_baseline(abstract_element.element().style_node_id(), pseudo_element_to_ffi(abstract_element.pseudo_element())); baseline != 0)
+        before_change_style_record = StyleRecordID { baseline };
 
     // A transition starts from the before-change style. The newly installed record may itself
     // have display: none; checking it would skip the discrete transition into that state.
@@ -1391,9 +1393,6 @@ void StyleComputer::start_needed_transitions(ComputedStyleWorkingSet& new_style,
     Optional<u64> transition_target_key;
     if (style_node_id != 0)
         transition_target_key = (static_cast<u64>(style_node_id.value()) << 8) | pseudo_element_to_ffi(pseudo_element);
-    auto transition_baseline_style_record = before_change_style_record;
-    if (auto baseline = m_style_engine.transition_baseline(style_node_id, pseudo_element_to_ffi(pseudo_element)); baseline != 0)
-        transition_baseline_style_record = StyleRecordID { baseline };
     Vector<size_t> existing_stabilization_state_indices;
     if (transition_target_key.has_value()) {
         if (auto indices = m_provisional_transition_state_indices_by_target.get(*transition_target_key); indices.has_value())
@@ -1600,7 +1599,7 @@ void StyleComputer::start_needed_transitions(ComputedStyleWorkingSet& new_style,
     Vector<StyleValueFFI::FfiTransitionAction> actions;
     actions.resize(prepared_transitions.size());
     m_style_engine.decide_transitions(
-        transition_baseline_style_record,
+        before_change_style_record,
         new_style.computed_longhand_table(),
         new_style.animated_overlay(Badge<StyleComputer> {}),
         input,
