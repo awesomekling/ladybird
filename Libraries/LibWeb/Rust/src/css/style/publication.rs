@@ -767,7 +767,7 @@ impl RetainedState {
         // declaring none keeps its record's, which is the parent's; a moved environment
         // republishes the record under the new one.
         let mut environment = {
-            let parent_environment = match self.tree.flat_tree_parent(node) {
+            let parent_environment = match self.tree.inheritance_parent(node) {
                 Some(parent) => {
                     let Some(parent_environment) =
                         self.computed_group_sets.custom_property_environment_identity(parent)
@@ -1010,7 +1010,7 @@ impl RetainedState {
         // Partial drives can share across parents whose inherited inputs agree. Keep the full
         // parent record in the key when a non-inherited property explicitly inherits, including
         // through substitution, or when a full drive may read more of the parent's style.
-        let parent = self.tree.flat_tree_parent(node);
+        let parent = self.tree.inheritance_parent(node);
         let parent_record = parent.and_then(|parent| self.computed_group_sets.assigned_style_record(parent));
         let mut cohort_parent = RecordDeltaParent::Exact(parent_record.map_or(0, |record| record.raw()));
         if !full_drive
@@ -1700,8 +1700,8 @@ impl RetainedState {
         }
         let facts = self.computed_group_sets.adjustment_facts(node);
         let mut explicitly_inherited_groups = 0;
-        let parent = self.tree.flat_tree_parent(node);
-        // Only the document element is styled without a flat-tree parent: it inherits from the
+        let parent = self.tree.inheritance_parent(node);
+        // Only the document element is styled without an inheritance parent: it inherits from the
         // initial values.
         if parent.is_none() && facts & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT == 0 {
             counters.bump(Counter::EngineComputedRecordBailRecordParent);
@@ -3068,8 +3068,8 @@ impl RetainedState {
 
     fn element_drive_subject(&mut self, node: StyleNodeID, counters: &mut Counters) -> Option<DriveSubject> {
         let facts = self.computed_group_sets.adjustment_facts(node);
-        let parent = self.tree.flat_tree_parent(node);
-        // Only the document element is styled without a flat-tree parent.
+        let parent = self.tree.inheritance_parent(node);
+        // Only the document element is styled without an inheritance parent.
         if parent.is_none() && facts & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT == 0 {
             counters.bump(Counter::EngineComputedRecordBailRecordParent);
             return None;
