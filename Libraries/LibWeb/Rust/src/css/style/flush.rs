@@ -2448,6 +2448,11 @@ impl StyleEngineState {
                             decline_cause = counters
                                 .first_changed_record_bail(&bail_marks)
                                 .unwrap_or("ComputationBailUnnamed");
+                            if let Some((site, _)) = self.retained.host_entry_causes.get(&node)
+                                && site.contains("@pseudo.rs:")
+                            {
+                                decline_cause = site;
+                            }
                         }
                         // A verdict can become unsettled during the record drive, after the
                         // earlier ancestor check. Retry this row once its preceding ancestors
