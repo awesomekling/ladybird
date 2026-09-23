@@ -1557,6 +1557,10 @@ pub struct FfiPublishedAnimationKeyframe {
     ///     element's own environment rather than against a longhand table, so the two never mix.
     pub first_custom_declaration: u32,
     pub custom_declaration_count: u32,
+    /// The keyframe's own `animation-timing-function` where it was written as a value the element
+    /// has to substitute, or null. The easing above is then the one the keyframe runs if the value
+    /// resolves to no easing.
+    pub easing_value: *const c_void,
 }
 
 /// One published custom-property declaration of a keyframe.
