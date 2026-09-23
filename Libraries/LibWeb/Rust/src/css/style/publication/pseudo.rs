@@ -826,13 +826,26 @@ impl RetainedState {
                 self.batch_matching_traversal.as_deref(),
                 host,
             )
-            .and_then(|(published, answer)| published.matches_for(answer))
-            {
-                Some(matches) => matches
+            .and_then(|(published, answer)| {
+                if let Some(matches) = published.matches_for(answer) {
+                    return Some(
+                        matches
+                            .iter()
+                            .filter(|entry| entry.pseudo_element == Some(target))
+                            .copied()
+                            .collect(),
+                    );
+                }
+                self.match_answers
+                    .answer(answer.cascade_input?)?
                     .iter()
-                    .filter(|entry| entry.pseudo_element == Some(target))
-                    .copied()
-                    .collect(),
+                    .filter(|entry| {
+                        self.programs.get(entry.program).entries()[entry.entry as usize].pseudo_element == Some(target)
+                    })
+                    .map(|entry| entry.materialize(host, &self.programs, 0))
+                    .collect::<Option<Vec<_>>>()
+            }) {
+                Some(matches) => matches,
                 None => match self.retained_match_answer(host) {
                     Lookup::Known(answer) => answer
                         .iter()

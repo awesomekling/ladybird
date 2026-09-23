@@ -1098,10 +1098,23 @@ impl StyleEngineState {
         };
         let compile_union_timer = PassTimer::start();
         let compiled_regions = regions.compile_union(regions.regions(), &self.retained.tree, Some(root));
+        // A derived reaction after this flush may still need an unchanged shadow host's rule
+        // matches. Invalidate only hosts this batch can change; keep other hosts' answers for
+        // backing elements whose own row is reached during application.
+        self.retained
+            .batch_custom_property_matches
+            .retain(|node, _| !regions.batch_contains_node(&compiled_regions, *node));
+        self.retained
+            .batch_backing_pseudo_matches
+            .retain(|node, _| !regions.batch_contains_node(&compiled_regions, *node));
         compile_union_timer.stop(Counter::BatchCompilationMicroseconds, counters);
         let winner_version_timer = PassTimer::start();
         if let Some(base_version) = program_base_version {
             let current_version = self.retained.program.version();
+            // Backing-element matches name rules in the old program. A derived reaction can
+            // reuse them across ordinary flushes, but a program change invalidates them all.
+            self.retained.batch_backing_pseudo_matches.clear();
+            self.retained.batch_custom_property_matches.clear();
             if regions.covers_document() {
                 self.retained.winner_groups.begin_program_version(current_version);
             } else {
@@ -1976,10 +1989,8 @@ impl StyleEngineState {
             // publishes for it before that answer is installed, and kept with the node's record
             // columns for as long as that answer stands.
             self.retained.batch_answers_complete_but_for_custom_properties.clear();
-            self.retained.batch_custom_property_matches.clear();
             // The host took the effects of the rows it installed from the last transaction.
             self.retained.container_effects_for_host.clear();
-            self.retained.batch_backing_pseudo_matches.clear();
             for &node in &published_nodes {
                 let Some(answer) = published_match_answers.lookup(node) else {
                     continue;
@@ -2011,6 +2022,8 @@ impl StyleEngineState {
                         .batch_backing_pseudo_matches_of(node, &published_match_answers, answer)
                 {
                     self.retained.batch_backing_pseudo_matches.insert(node, matches);
+                } else {
+                    self.retained.batch_backing_pseudo_matches.remove(&node);
                 }
                 if let Some(complete) =
                     self.retained
@@ -2608,8 +2621,11 @@ impl StyleEngineState {
             counters.get(Counter::MatchElementCallsDuringPublishedStyleTransaction);
         published_match_answers.discard_unobserved_retained_answers = publish_document_root_arrival || plan_is_broad;
         self.retained.batch_answers_complete_but_for_custom_properties.clear();
-        self.retained.batch_custom_property_matches.clear();
-        self.retained.batch_backing_pseudo_matches.clear();
+        self.retained
+            .batch_custom_property_matches
+            .retain(|node, _| self.retained.batch_backing_pseudo_matches.contains_key(node));
+        // A backing element can receive a derived reaction after this flush's answer has been
+        // applied. Keep its host's matches until that host publishes a replacement answer.
         self.retained.published_match_answers = published_match_answers;
         if initial_tree_was_bulk_loaded {
             counters.bump(Counter::InitialBulkMatchLoads);
