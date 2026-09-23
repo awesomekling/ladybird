@@ -1402,7 +1402,7 @@ impl RetainedState {
         environment: u64,
         property: u16,
         written: RetainedStyleValueData,
-        inheritance_store: *const c_void,
+        inheritance_store: Option<*const c_void>,
         counters: &mut Counters,
     ) -> Option<RetainedStyleValueData> {
         let reads_inheritance = matches!(
@@ -1412,6 +1412,15 @@ impl RetainedState {
                 ..
             }
         );
+        let inheritance_store = match inheritance_store {
+            Some(store) => store,
+            None if reads_inheritance => {
+                counters.bump(Counter::EngineComputedRecordBailSubstitution);
+                counters.bump(Counter::EngineComputedRecordBailSubstitutionInheritance);
+                return None;
+            }
+            None => std::ptr::null(),
+        };
         let reads_functions = matches!(
             written.data(),
             StyleValueData::Unresolved {
@@ -1648,22 +1657,18 @@ fn substitute_written_value_against_store_with_attributes(
     resolution_inputs: Option<&OrdinarySubstitutionInputs<'_>>,
     counters: &mut Counters,
 ) -> Option<RetainedStyleValueData> {
-    if (resolution_inputs.is_none()
+    if resolution_inputs.is_none()
         && matches!(
             written.data(),
             StyleValueData::Unresolved {
                 presence_dashed_function: true,
                 ..
             } | StyleValueData::Unresolved { presence_if: true, .. }
-        ))
-        || (inheritance_store.is_null()
-            && matches!(
-                written.data(),
-                StyleValueData::Unresolved {
+                | StyleValueData::Unresolved {
                     presence_inherit: true,
                     ..
                 }
-            ))
+        )
     {
         counters.bump(Counter::EngineComputedRecordBailSubstitution);
         counters.bump(Counter::EngineComputedRecordBailSubstitutionInheritance);
