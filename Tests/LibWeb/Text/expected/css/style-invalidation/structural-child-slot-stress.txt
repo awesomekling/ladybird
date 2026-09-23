@@ -474,14 +474,14 @@ PASS: stress warm child mutation: slotted-shadow-host-default: :has(:checked) be
 PASS: stress cold child mutation: slotted-shadow-host-default: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-default: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: stress cold child mutation: slotted-shadow-host-default: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: slotted-shadow-host-default: :has(:enabled) after enabled input append | elementStyleRecomputations=5, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: slotted-shadow-host-default: :has(:enabled) after enabled input append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: slotted-shadow-host-default: :has(:disabled) after disabled input append | elementStyleRecomputations=5, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: slotted-shadow-host-default: :has(:disabled) after disabled input append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: slotted-shadow-host-default: :has(:required) after required input append | elementStyleRecomputations=5, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: slotted-shadow-host-default: :has(:required) after required input append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: slotted-shadow-host-default: :has(:optional) after optional input append | elementStyleRecomputations=5, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: slotted-shadow-host-default: :has(:optional) after optional input append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: slotted-shadow-host-default: :has(:enabled) after enabled input append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: slotted-shadow-host-default: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: slotted-shadow-host-default: :has(:disabled) after disabled input append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: slotted-shadow-host-default: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: slotted-shadow-host-default: :has(:required) after required input append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: slotted-shadow-host-default: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: slotted-shadow-host-default: :has(:optional) after optional input append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: slotted-shadow-host-default: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-default: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: slotted-shadow-host-default: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-default: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
@@ -504,8 +504,8 @@ PASS: stress warm child mutation: slotted-shadow-host-default: :has(:nth-last-ch
 PASS: stress cold child mutation: slotted-shadow-host-default: :has(:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-default: :has(:first-of-type) after typed child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: stress cold child mutation: slotted-shadow-host-default: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: slotted-shadow-host-default: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=5, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: slotted-shadow-host-default: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: slotted-shadow-host-default: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: slotted-shadow-host-default: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-default: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: stress cold child mutation: slotted-shadow-host-default: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-default: :has(rect.hit) after SVG child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
@@ -666,14 +666,14 @@ PASS: stress warm child mutation: slotted-shadow-host-named: :has(:checked) beco
 PASS: stress cold child mutation: slotted-shadow-host-named: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-named: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: stress cold child mutation: slotted-shadow-host-named: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: slotted-shadow-host-named: :has(:enabled) after enabled input append | elementStyleRecomputations=5, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: slotted-shadow-host-named: :has(:enabled) after enabled input append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: slotted-shadow-host-named: :has(:disabled) after disabled input append | elementStyleRecomputations=5, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: slotted-shadow-host-named: :has(:disabled) after disabled input append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: slotted-shadow-host-named: :has(:required) after required input append | elementStyleRecomputations=5, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: slotted-shadow-host-named: :has(:required) after required input append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: slotted-shadow-host-named: :has(:optional) after optional input append | elementStyleRecomputations=5, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: slotted-shadow-host-named: :has(:optional) after optional input append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: slotted-shadow-host-named: :has(:enabled) after enabled input append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: slotted-shadow-host-named: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: slotted-shadow-host-named: :has(:disabled) after disabled input append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: slotted-shadow-host-named: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: slotted-shadow-host-named: :has(:required) after required input append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: slotted-shadow-host-named: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: slotted-shadow-host-named: :has(:optional) after optional input append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: slotted-shadow-host-named: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-named: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: slotted-shadow-host-named: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-named: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
@@ -696,8 +696,8 @@ PASS: stress warm child mutation: slotted-shadow-host-named: :has(:nth-last-chil
 PASS: stress cold child mutation: slotted-shadow-host-named: :has(:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-named: :has(:first-of-type) after typed child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: stress cold child mutation: slotted-shadow-host-named: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: slotted-shadow-host-named: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=5, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: slotted-shadow-host-named: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=4, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: slotted-shadow-host-named: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: slotted-shadow-host-named: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-named: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: stress cold child mutation: slotted-shadow-host-named: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-named: :has(rect.hit) after SVG child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
