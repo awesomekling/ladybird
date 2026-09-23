@@ -1321,6 +1321,15 @@ impl RetainedState {
     /// its assignment chain, then the element's own shadow tree, for `:host`. `None` when the scope
     /// is none of them.
     pub(super) fn author_context_index(&self, node: StyleNodeID, scope: TreeScopeID) -> Option<u32> {
+        self.author_contexts(node)?
+            .iter()
+            .position(|&context| context == scope)
+            .map(|index| index as u32)
+    }
+
+    /// The encapsulation contexts that decide for an element, in the order `author_context_index`
+    /// numbers them.
+    pub(super) fn author_contexts(&self, node: StyleNodeID) -> Option<Vec<TreeScopeID>> {
         let mut contexts: Vec<TreeScopeID> = Vec::with_capacity(4);
         let mut append = |scope: TreeScopeID| {
             if !contexts.contains(&scope) {
@@ -1353,10 +1362,7 @@ impl RetainedState {
         {
             append(own_scope);
         }
-        contexts
-            .iter()
-            .position(|&context| context == scope)
-            .map(|index| index as u32)
+        Some(contexts)
     }
 
     pub(super) fn cascade_winner_inventory_is_complete(
