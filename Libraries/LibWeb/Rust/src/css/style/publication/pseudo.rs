@@ -411,10 +411,10 @@ impl RetainedState {
                 };
                 let table = unsafe { view.longhand_table.as_ref() };
                 let transitioning = table.is_some_and(crate::css::style_compute::has_active_transition_properties);
-                // A WAAPI composition needs no CSS plan. Text children consume no style row, so
-                // the host can resample this pseudo after its newly driven base is installed.
-                let waapi_leaf_composition = !view.animated_overlay.is_null()
-                    && self.tree.flat_tree_children(node).all(|child| child.is_text())
+                // A WAAPI effect needs no CSS plan, whether or not it has composed into the old
+                // record yet. Text children consume no style row, so the host can sample this
+                // pseudo after its newly driven base is installed.
+                let waapi_leaf_composition = self.tree.flat_tree_children(node).all(|child| child.is_text())
                     && table.is_some_and(|table| !drive::table_names_animations(table));
                 // An idle effect composes nothing. A pseudo whose other effects are all CSS
                 // animations is replanned from its driven table below, and the host samples those
