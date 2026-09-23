@@ -167,7 +167,7 @@ impl RetainedState {
         for node in moved {
             // The old exact answer can name a rule this transaction removes or replaces. Let
             // routing under the new program publish its winners instead of reviving that rule.
-            if rule_program_is_changing || self.republish_winners_from_retained_answer(node, counters).is_none() {
+            if rule_program_is_changing || self.republish_winners_from_answer(node, counters).is_none() {
                 self.published_container_verdicts.remove(&node);
                 self.winner_groups.remove(node);
             }
@@ -183,19 +183,22 @@ impl RetainedState {
         })
     }
 
-    /// Publish new winners from the exact selector answer without matching selectors again.
-    pub(super) fn republish_winners_from_retained_answer(
-        &mut self,
-        node: StyleNodeID,
-        counters: &mut Counters,
-    ) -> Option<bool> {
-        let identity = self.current_answer_identity(node)?;
-        let answer = self.match_answers.answer(identity).cloned()?;
-        for entry in answer.iter() {
-            self.prepare_scope_program(entry.tree_scope);
-        }
-        let mut matches = Vec::new();
-        self.append_catalog_answer(identity, node, None, &mut matches)?;
+    /// Publish new winners from the retained selector answer, matching from published facts when
+    /// that answer has been evicted or its rule dispatch can no longer materialize it.
+    pub(super) fn republish_winners_from_answer(&mut self, node: StyleNodeID, counters: &mut Counters) -> Option<bool> {
+        let retained_matches = self.current_answer_identity(node).and_then(|identity| {
+            let answer = self.match_answers.answer(identity).cloned()?;
+            for entry in answer.iter() {
+                self.prepare_scope_program(entry.tree_scope);
+            }
+            let mut matches = Vec::new();
+            self.append_catalog_answer(identity, node, None, &mut matches)?;
+            Some(matches)
+        });
+        let matches = match retained_matches {
+            Some(matches) => matches,
+            None => self.match_element_for_cascade(node, counters).ok()?,
+        };
         self.container_gates_unheld.remove(&node);
         let complete = self.cascade_winner_inventory_is_complete(&matches, Some(node));
         let complete_but_for_custom_properties = self.element_declarations_are_complete_but_for_custom_properties(node)

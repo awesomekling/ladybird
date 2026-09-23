@@ -560,7 +560,7 @@ impl RetainedState {
         // A pseudo-element asks about its originating element too. The element's new record may
         // have changed that container's type, name or style after the first verdict check.
         if self.container_verdicts_moved(node) {
-            if self.republish_winners_from_retained_answer(node, counters).is_none() {
+            if self.republish_winners_from_answer(node, counters).is_none() {
                 self.abandon_engine_computed_record(node, scratch, counters);
                 return None;
             }
@@ -647,7 +647,7 @@ impl RetainedState {
             && !self.container_gates_unheld.contains(&node)
             && self.current_winner_groups().row_stamp(node) != Some(self.flush_stamp);
         if self.container_gates_unheld.contains(&node) || self.container_verdicts_moved(node) || stale_element_winners {
-            let Some(complete) = self.republish_winners_from_retained_answer(node, counters) else {
+            let Some(complete) = self.republish_winners_from_answer(node, counters) else {
                 counters.bump(if stale_element_winners {
                     Counter::EngineComputedRecordBailWinner
                 } else {
@@ -2797,7 +2797,7 @@ impl RetainedState {
             || self.container_gates_unheld.contains(&node)
             || self.container_verdicts_moved(node)
         {
-            let Some(complete) = self.republish_winners_from_retained_answer(node, counters) else {
+            let Some(complete) = self.republish_winners_from_answer(node, counters) else {
                 return 0;
             };
             Some(complete)
