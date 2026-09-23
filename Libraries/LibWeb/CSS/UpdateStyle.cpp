@@ -868,6 +868,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         auto const& engine_record = pseudo_element_records[kind];
                         if (!engine_record.has_value())
                             continue;
+                        // Outside the top layer the host does not recompute its installed
+                        // backdrop. That old paint record is not a reference for the engine's
+                        // current CSSOM backdrop row.
+                        if (kind == to_underlying(PseudoElement::Backdrop) && !element->rendered_in_top_layer())
+                            continue;
                         auto installed = element->style_record_identity(static_cast<PseudoElement>(kind));
                         if (!*engine_record) {
                             VERIFY(!installed);
