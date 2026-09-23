@@ -4878,7 +4878,7 @@ impl<'a> ParentSnapshot<'a> {
         self.table.is_important(property_id)
     }
 
-    fn value(&self, property_id: u16) -> Option<&StyleValueData> {
+    pub(crate) fn value(&self, property_id: u16) -> Option<&StyleValueData> {
         if let Some(entry) = self
             .inherited_value_overlay
             .and_then(|overlay| overlay.get(property_id))

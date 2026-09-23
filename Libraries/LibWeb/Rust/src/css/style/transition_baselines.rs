@@ -8,6 +8,17 @@
 
 use super::RetainedState;
 use super::tree::StyleNodeID;
+use crate::css::animated_overlay::FfiAnimatedOverlayEntry;
+use crate::css::computed_longhand_table::ComputedLonghandTable;
+use crate::css::style_value::StyleValueData;
+
+/// An animated value a record inherited, as the nearest ancestor that animates the property holds
+/// it: the overlay entry and the base value beneath it.
+#[derive(Clone, Copy)]
+pub(crate) struct InheritedAnimatedValue<'a> {
+    pub(crate) entry: &'a FfiAnimatedOverlayEntry,
+    pub(crate) base_value: *const StyleValueData,
+}
 
 impl RetainedState {
     /// https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
@@ -50,5 +61,36 @@ impl RetainedState {
             computed_group_sets.unpin_style_record(*style_record);
             false
         });
+    }
+
+    /// Where an inherited value of `property` in `table`, a record for `node`, comes from when an
+    /// ancestor animates it: the nearest ancestor along the chain of records that inherited the
+    /// property and holds an overlay entry for it. None when no such ancestor exists.
+    pub(crate) fn inherited_animated_value(
+        &self,
+        node: StyleNodeID,
+        table: &ComputedLonghandTable,
+        property: u16,
+    ) -> Option<InheritedAnimatedValue<'_>> {
+        if !table.is_inherited(property) {
+            return None;
+        }
+        let mut ancestor = self.tree.inheritance_parent(node);
+        while let Some(current) = ancestor {
+            let record = self.computed_group_sets.assigned_style_record(current)?;
+            let view = self.computed_group_sets.style_record_view(record.raw())?;
+            let ancestor_table = unsafe { view.longhand_table.as_ref() }?;
+            if let Some(entry) = unsafe { view.animated_overlay.as_ref() }.and_then(|overlay| overlay.get(property)) {
+                let base_value = crate::css::style_compute::ParentSnapshot::new(ancestor_table, None, false, false)
+                    .value(property)
+                    .map_or(std::ptr::null(), std::ptr::from_ref);
+                return (!base_value.is_null()).then_some(InheritedAnimatedValue { entry, base_value });
+            }
+            if !ancestor_table.is_inherited(property) {
+                return None;
+            }
+            ancestor = self.tree.inheritance_parent(current);
+        }
+        None
     }
 }

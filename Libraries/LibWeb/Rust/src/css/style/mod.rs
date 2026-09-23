@@ -101,6 +101,7 @@ pub(crate) mod seal;
 mod sorted_merge;
 mod style_invalidation;
 mod transition_baselines;
+pub(crate) use transition_baselines::InheritedAnimatedValue;
 #[cfg(not(feature = "style-recording"))]
 pub mod record_replay {
     include!(concat!(env!("OUT_DIR"), "/style_engine_event_kind_stub_generated.rs"));

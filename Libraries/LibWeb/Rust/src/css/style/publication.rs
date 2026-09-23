@@ -1237,8 +1237,10 @@ impl RetainedState {
         // starts a transition, and a started transition samples its own start value into the style
         // this very update - a value the row's record does not hold - so that one stays in C++.
         // A leaf can drive its base in full and leave the whole transition decision to
-        // installation. An existing transition must also keep its inherited and display-none
-        // inputs in the host computation; display changes need host teardown beside the decision.
+        // installation, including when its parent's inherited style moved: the decision reads an
+        // inherited animated value's after-change value from the ancestor that animates it. An
+        // existing transition keeps its display and display-none inputs in the host computation;
+        // display changes need host teardown beside the decision.
         let (record_declares_transitions, transitionable_property_moved) =
             self.record_transition_facts(old_style_record, delta.properties());
         let old_record_is_hidden = self
@@ -1255,7 +1257,7 @@ impl RetainedState {
                     .properties()
                     .contains(&crate::css::property_metadata::property_id::DISPLAY)
                 && (!record_declares_transitions
-                    || (!parent_inputs_moved.any() && !scratch.recompute_in_full && !old_record_is_hidden))))
+                    || (!parent_inputs_moved.display && !scratch.recompute_in_full && !old_record_is_hidden))))
             && (record_declares_transitions
                 || delta
                     .properties()
