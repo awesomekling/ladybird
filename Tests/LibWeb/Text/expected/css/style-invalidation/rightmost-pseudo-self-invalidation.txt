@@ -17,10 +17,10 @@ PASS: rightmost :is(:checked) self selector with missing attribute does not chan
 PASS: rightmost :where(:checked) self selector with missing attribute does not change style | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: rightmost :disabled self selector with missing attribute does not change style | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: rightmost :required self selector with missing class does not change style | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: rightmost :placeholder-shown self selector with missing attribute does not change style | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: rightmost :placeholder-shown self selector with missing attribute does not change style | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: rightmost :placeholder-shown self selector with matching class changes style | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: rightmost :placeholder-shown self selector with :is() attribute alternative changes style | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: rightmost :placeholder-shown self selector with unmatched :where() alternatives does not change style | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: rightmost :placeholder-shown self selector with unmatched :where() alternatives does not change style | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: rightmost :link:any-link self selector loses style after href remove | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: rightmost :link:any-link self selector changes style after href add | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: rightmost :any-link:local-link self selector loses style after href remove | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
