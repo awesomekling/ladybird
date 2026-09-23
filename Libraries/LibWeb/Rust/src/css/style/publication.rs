@@ -2049,10 +2049,10 @@ impl RetainedState {
     }
 
     /// Check the names a later record runs. Its descendants already hold records of their own and
-    /// take an animated value through the overlay's invalidation, so only a container unit binds it,
-    /// whose basis a sample outside the computation cannot read.
+    /// take an animated value through the overlay's invalidation, so every rule its names find is
+    /// one the engine can run.
     fn warm_record_names_engine_computable_animations(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
-        self.state_names_only_keyframes(node, state, |set| !description_reads_container_units(&set.description))
+        self.state_names_only_keyframes(node, state, |_| true)
     }
 
     /// Whether every name the state runs resolves to the same `@keyframes` rule whatever scope the
@@ -2905,16 +2905,13 @@ impl RetainedState {
 
     /// Whether the host can sample every effect the element holds over a newly driven base. Each
     /// must be one the stage can describe. A sample composes the font and the groups it writes, and
-    /// makes the box-type, overflow and text-alignment adjustments, the same way over any base, but
-    /// a container unit reads a basis a sample outside the computation cannot.
+    /// makes the box-type, overflow and text-alignment adjustments, the same way over any base.
     fn effects_sample_over_a_new_base(&self, node: StyleNodeID, transitions: TransitionEffects) -> bool {
         self.animation_effect_descriptions
             .effects(node, animations::ELEMENT_ANIMATION_SLOT)
             .iter()
             .all(|effect| {
-                !description_reads_container_units(effect)
-                    && (transitions == TransitionEffects::Allowed
-                        || effect.flags & animations::effect_flag::IS_TRANSITION == 0)
+                transitions == TransitionEffects::Allowed || effect.flags & animations::effect_flag::IS_TRANSITION == 0
             })
     }
 
@@ -6939,15 +6936,6 @@ enum AnimationNameScope {
 enum TransitionEffects {
     Refused,
     Allowed,
-}
-
-fn description_reads_container_units(description: &animations::PublishedEffect) -> bool {
-    description.declarations.iter().any(|declaration| {
-        declaration.value.optional_data().is_some_and(|data| {
-            crate::css::style_compute::collect_external_value_dependencies(data).container_relative_length_unit_mask
-                != 0
-        })
-    })
 }
 
 fn property_computes_in_remaining_phase(property: u16) -> bool {

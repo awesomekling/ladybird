@@ -3627,13 +3627,32 @@ Optional<RequiredInvalidationAfterStyleChange> StyleComputer::answer_record_dema
             pseudo_element_records[kind] = StyleRecordID { answer.record.pseudo_records[kind] };
     }
     auto old_style_record = element.style_record_identity();
-    auto invalidation = element.apply_engine_computed_style_record(StyleRecordID { answer.record.style_record }, pseudo_element_records, answer.record.uses_substitution, did_change_custom_properties);
+    // A targeted record that drops the composition the element held is one its animations are
+    // sampled over again. Compare it once, after that sample, or each step sees every animated
+    // value move and asks for layout even when the composed style is unchanged.
+    auto const old_style = element.computed_style();
+    bool const samples_over_the_record = targeted
+        && old_style
+        && engine.style_record_view(old_style_record).animation_overlay_identity != 0
+        && engine.style_record_view(StyleRecordID { answer.record.style_record }).animation_overlay_identity == 0;
+    auto invalidation = element.apply_engine_computed_style_record(StyleRecordID { answer.record.style_record }, pseudo_element_records, answer.record.uses_substitution, did_change_custom_properties,
+        samples_over_the_record ? DOM::Element::EngineRecordComparison::AfterSample : DOM::Element::EngineRecordComparison::AtInstallation);
     if (!!old_style_record && element.associated_shadow_host_pseudo_element().has_value())
         invalidation |= run_transition_step_for_installed_record({ element }, old_style_record);
     auto container_effects = StyleEngineFFI::style_engine_take_container_effects(engine.rust_handle(), element.style_node_id().value());
     ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
     record_container_query_effects(DOM::AbstractElement { element }, container_effects);
     engine.acknowledge_engine_computed_record(element.style_node_id());
+    if (samples_over_the_record) {
+        {
+            auto const installed_style_record = element.style_record_identity();
+            Animations::AnimationUpdateContext context;
+            Animations::AnimationUpdateContext::ElementData data { installed_style_record, reconstruct_computed_properties_for_animation(installed_style_record) };
+            data.caller_applies_invalidation = true;
+            context.elements.set(DOM::AbstractElement { element }, move(data));
+        }
+        invalidation = element.compare_engine_computed_style_record_after_sample(old_style_record, *old_style, invalidation);
+    }
     return invalidation;
 }
 
