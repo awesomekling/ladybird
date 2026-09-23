@@ -570,6 +570,12 @@ impl RetainedState {
             }
             return None;
         }
+        if let Lookup::Known((_, state)) = self
+            .current_winner_groups()
+            .token_for(WinnerGroupKey::current(node, self.program.version()))
+        {
+            self.note_container_unit_effects_for_host(node, delta.1, self.state_container_unit_mask(node, state));
+        }
         // What this element's record was computed from decides the fact when the computation
         // noted it; a record that stands unchanged keeps the fact the node already carries.
         let uses_substitution = scratch
@@ -668,6 +674,19 @@ impl RetainedState {
                 return None;
             }
         };
+        let container_unit_mask = self.state_container_unit_mask(node, state);
+        if container_unit_mask != 0
+            && self.document_style_computation_inputs.is_some_and(|inputs| {
+                self.container_unit_basis(node, true, inputs.viewport_width)
+                    .container_has_no_box
+                    || self
+                        .container_unit_basis(node, false, inputs.viewport_height)
+                        .container_has_no_box
+            })
+        {
+            counters.bump(Counter::EngineComputedRecordBailContainerVerdict);
+            return None;
+        }
         // An element's animations compose into its style in the C++ computation.
         let facts = self.computed_group_sets.adjustment_facts(node);
         // Either the root's font inputs moved under this element, or the element's own font
@@ -1013,8 +1032,8 @@ impl RetainedState {
             self.monospace_cohort_key(node, state),
             self.substitution_attributes_key(node, None, state),
         );
-        if let Some(&(new_style_record, cohort_explicitly_inherited_groups)) = (!has_registered_declarations
-            || !full_drive)
+        if let Some(&(new_style_record, cohort_explicitly_inherited_groups)) = (container_unit_mask == 0
+            && (!has_registered_declarations || !full_drive))
             .then(|| scratch.cohorts.get(&cohort))
             .flatten()
         {
@@ -1336,7 +1355,7 @@ impl RetainedState {
         );
         // A record driven in full stands for a cohort keyed by the parent's inherited inputs only
         // when the drive was partial.
-        if !driver_input_moved && (!has_registered_declarations || !full_drive) {
+        if container_unit_mask == 0 && !driver_input_moved && (!has_registered_declarations || !full_drive) {
             scratch.cohorts.insert(cohort, (delta.1, explicitly_inherited_groups));
         }
         if explicitly_inherited_groups != 0 {
@@ -1703,7 +1722,9 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailWinner);
             return None;
         };
-        let cache_key = parent
+        let cache_key = (self.state_container_unit_mask(node, state) == 0)
+            .then_some(())
+            .and(parent)
             .zip(parent_record)
             .filter(|_| {
                 !(scratch.targeted_record_demand && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0)
@@ -1799,7 +1820,7 @@ impl RetainedState {
             }
         };
         self.note_node_substitution(node, scratch, state, environment);
-        let cache_key = (!has_registered_declarations)
+        let cache_key = (!has_registered_declarations && self.state_container_unit_mask(node, state) == 0)
             .then_some(())
             .and(parent)
             .zip(parent_record)
@@ -2634,6 +2655,7 @@ impl RetainedState {
         }
         if !scratch.font_drive.is_pending()
             && !self.node_declares_custom_properties(node)
+            && self.state_container_unit_mask(node, cascade_state.1) == 0
             && let Some(old_style_record) = self.computed_group_sets.assigned_style_record(node)
             && let Some(inputs) = self.document_style_computation_inputs
             && let Some(parent) = self.tree.flat_tree_parent(node)
@@ -3312,6 +3334,9 @@ impl RetainedState {
         if self.node_declares_custom_properties(node) {
             return;
         }
+        if self.state_container_unit_mask(node, cascade_state.1) != 0 {
+            return;
+        }
         // A record C++ computed for an element with animations is not what its winner state alone
         // describes.
         if facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0 {
@@ -3542,6 +3567,17 @@ impl RetainedState {
         self.state_substitution_values(node, state).next().is_some()
     }
 
+    fn state_container_unit_mask(&self, node: StyleNodeID, state: CascadeStateID) -> u8 {
+        self.winner_groups
+            .winners_in_state(state)
+            .filter_map(|winner| self.winner_groups.resolved_winner(winner))
+            .filter_map(|winner| self.written_winner_value(node, &winner).ok().flatten())
+            .fold(0, |mask, (_, value, _)| {
+                mask | crate::css::style_compute::collect_external_value_dependencies(value.data())
+                    .container_relative_length_unit_mask
+            })
+    }
+
     /// The written values of a state's longhand winners that substitute: `var()`, `attr()` and
     /// the like, or a longhand pending its shorthand's substitution.
     fn state_substitution_values(
@@ -3595,6 +3631,7 @@ impl RetainedState {
         counters: &mut Counters,
     ) -> Option<WinnerStore> {
         use crate::css::property_metadata::property_id as prop;
+        use crate::css::style_value::StyleValueData;
         crate::css::ffi_stats::bump(crate::css::ffi_stats::FfiOp::WinnerStoreBuilds);
         // Seeded in cascade order, and within one rule in declaration order, since a logical
         // property and its physical associate resolve by order of appearance.
@@ -3745,7 +3782,13 @@ impl RetainedState {
                 .longhand_context_free
                 .unwrap_or_else(|| value_computes_without_document_context(data))
                 || (resources_are_known && value_computes_without_document_context_but_for_resources(data).is_some())
-                || value_computes_with_random_inputs(data, resources_are_known);
+                || value_computes_with_random_inputs(data, resources_are_known)
+                || (pseudo_kind.is_none()
+                    && matches!(&value, WinnerValue::Written { .. })
+                    && matches!(data, StyleValueData::Length { .. })
+                    && crate::css::style_compute::collect_external_value_dependencies(data)
+                        .container_relative_length_unit_mask
+                        != 0);
             if !context_free
                 || (pseudo_kind.is_some()
                     && winner.property == prop::CONTENT

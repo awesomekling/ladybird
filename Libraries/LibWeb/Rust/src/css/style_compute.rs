@@ -3024,7 +3024,7 @@ impl FfiAnimationLengthContexts {
 /// Which physical axes a batch using these container-relative units asks a basis for, for a subject
 /// whose inline axis is or is not the horizontal one. The axis logic of
 /// `to_ffi_length_resolution_context_with_container_bases`.
-fn container_relative_axes_needed(unit_mask: u8, subject_inline_axis_is_horizontal: bool) -> (bool, bool) {
+pub(crate) fn container_relative_axes_needed(unit_mask: u8, subject_inline_axis_is_horizontal: bool) -> (bool, bool) {
     const CQW: u8 = 1 << 0;
     const CQH: u8 = 1 << 1;
     const CQI: u8 = 1 << 2;
