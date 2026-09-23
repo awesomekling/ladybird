@@ -1008,6 +1008,7 @@ pub struct RetainedState {
     /// Nodes whose style input the C++ computation has to settle: C++ recorded one, or their
     /// parent's display moved, which their box-type transformation reads.
     style_input_nodes_for_cpp: HashSet<StyleNodeID>,
+    tree_counting_input_nodes: HashSet<StyleNodeID>,
     /// Elements whose parent's display moved under their record this transaction: their
     /// box-type transformation reads it, so their record is driven again in full.
     parent_inputs_moved_nodes: HashSet<StyleNodeID>,

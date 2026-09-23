@@ -227,6 +227,7 @@ impl StyleEngineState {
         self.host.externally_recorded_style_input_nodes.clear();
         // The nodes whose style input the C++ computation has to settle this transaction.
         let style_input_nodes_for_cpp = std::mem::take(&mut self.retained.style_input_nodes_for_cpp);
+        let tree_counting_input_nodes = std::mem::take(&mut self.retained.tree_counting_input_nodes);
         let container_input_nodes = std::mem::take(&mut self.retained.container_input_nodes);
         let parent_inputs_moved_nodes = std::mem::take(&mut self.retained.parent_inputs_moved_nodes);
         self.host
@@ -2353,7 +2354,8 @@ impl StyleEngineState {
                                 != 0
                                 || (counter_styles_moved && self.node_reads_counter_styles(node))
                                 || (container_input_nodes.contains(&node)
-                                    && self.container_input_requires_full_drive(node));
+                                    && self.container_input_requires_full_drive(node))
+                                || tree_counting_input_nodes.contains(&node);
                             let delta = self.engine_computed_record_delta(
                                 node,
                                 answer_winners_are_complete,

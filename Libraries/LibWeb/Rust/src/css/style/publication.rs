@@ -5472,6 +5472,7 @@ impl StyleEngineState {
                     self.host.journal.acknowledge_node(node, &mut self.retained.memory);
                     self.consume_element_style_input(node);
                     self.style_input_nodes_for_cpp.remove(&node);
+                    self.tree_counting_input_nodes.remove(&node);
                 }
                 Ok(Some(result))
             }

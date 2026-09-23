@@ -159,7 +159,8 @@
     [163, "SetElementTableSpans"],
     [164, "RecordContainerQueryInput"],
     [165, "SetSampledCompositionIdentity"],
-    [170, "SettlePseudoRecordsAfterHostRecord"]
+    [170, "SettlePseudoRecordsAfterHostRecord"],
+    [171, "RecordTreeCountingStyleInput"]
   ],
   "operations": [
     { "event": "RecordContainerQueryInput", "ffi": "style_engine_record_container_query_input", "cpp": "record_container_query_input", "return": "void", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.record_container_query_input(node);" },
@@ -238,6 +239,7 @@
     { "event": "SetElementIsSlot", "ffi": "style_engine_set_element_is_slot", "cpp": "set_element_is_slot", "return": "void", "args": [["node", "style_node"], ["is_slot", "bool"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_element_is_slot(node, is_slot);" },
     { "event": "RecordElementStyleInput", "ffi": "style_engine_record_element_style_input", "cpp": "record_element_style_input", "return": "void", "args": [["node", "style_node"], ["reaction", "u8"], ["inherited_style_groups", "u8"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.record_element_style_input(node, reaction, inherited_style_groups);" },
     { "event": "RecordDerivedElementStyleInput", "ffi": "style_engine_record_derived_element_style_input", "cpp": "record_derived_element_style_input", "return": "void", "args": [["node", "style_node"], ["reaction", "u8"], ["inherited_style_groups", "u8"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.record_derived_element_style_input(node, reaction, inherited_style_groups);" },
+    { "event": "RecordTreeCountingStyleInput", "ffi": "style_engine_record_tree_counting_style_input", "cpp": "record_tree_counting_style_input", "return": "void", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.record_tree_counting_style_input(node);" },
     { "event": "RecordFlatTreeDescendantStyleInputs", "ffi": "style_engine_record_flat_tree_descendant_style_inputs", "cpp": "record_flat_tree_descendant_style_inputs", "return": "void", "args": [["root", "style_node"], ["reaction", "u8"], ["inherited_style_groups", "u8"]], "body": "let Some(root) = StyleNodeID::from_raw(root) else { return; }; engine.record_flat_tree_descendant_style_inputs(root, reaction, inherited_style_groups);" },
     { "event": "ConsumeElementStyleInput", "ffi": "style_engine_consume_element_style_input", "cpp": "consume_recorded_element_style_input_change", "return": "void", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.consume_element_style_input(node);" },
     { "event": "PublishedPseudoStyleMask", "ffi": "style_engine_published_pseudo_style_mask", "cpp": "published_pseudo_style_mask", "return": "u64", "receiver": "const", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return 0; }; let result = engine.published_pseudo_style_mask(node);" },

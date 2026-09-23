@@ -1876,6 +1876,7 @@ impl StyleEngineState {
                 demand_pseudo_records: HashMap::default(),
                 flush_stamp: 0,
                 style_input_nodes_for_cpp: HashSet::default(),
+                tree_counting_input_nodes: HashSet::default(),
                 parent_inputs_moved_nodes: HashSet::default(),
                 engine_pseudo_record_cache: HashMap::default(),
                 batch_answers_complete_but_for_custom_properties: HashMap::default(),
@@ -2246,6 +2247,15 @@ impl StyleEngineState {
         self.defer_element_style_input(node, reaction, inherited_style_groups);
         self.host.deferred_element_style_inputs_are_pending = true;
         self.host.externally_recorded_style_input_nodes.remove(&node);
+    }
+
+    pub fn record_tree_counting_style_input(&mut self, node: StyleNodeID) {
+        self.record_derived_element_style_input(
+            node,
+            transaction::STYLE_REACTION_PUBLISHED_STYLE | transaction::STYLE_REACTION_RECOMPUTE_STYLE,
+            0,
+        );
+        self.retained.tree_counting_input_nodes.insert(node);
     }
 
     /// Fold the style input an element owes into the reaction C++ is about to apply to it, when

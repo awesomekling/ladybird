@@ -220,6 +220,7 @@ impl RetainedState {
         // No element fact reaches the remaining phase through this environment: the moved
         // properties were checked not to need one, and the required driver inputs are compared
         // against the record below.
+        let tree_counting_inputs = self.element_tree_counting_inputs(node);
         let environment = FfiStyleComputationEnvironment {
             box_type_input: crate::css::style_compute::rust_box_type_transformation_input(
                 0,
@@ -235,9 +236,9 @@ impl RetainedState {
             },
             is_th_element: false,
             has_new_font_size: false,
-            has_tree_counting_context: false,
-            sibling_count: 0,
-            sibling_index: 0,
+            has_tree_counting_context: tree_counting_inputs != 0,
+            sibling_count: tree_counting_inputs >> 32,
+            sibling_index: tree_counting_inputs & 0xffff_ffff,
             random_base_values: random_base_values.as_ptr(),
             random_base_value_count: random_base_values.len(),
             document_base_url: document_base_url.as_ptr(),
@@ -280,7 +281,7 @@ impl RetainedState {
             Counter::EnginePartialLonghandEvaluations,
             u64::from(results.longhand_evaluations),
         );
-        if results.uses_tree_counting_function {
+        if results.uses_tree_counting_function && tree_counting_inputs == 0 {
             counters.bump(Counter::EngineComputedRecordBailDriveTreeCounting);
             return None;
         }
@@ -590,6 +591,7 @@ impl RetainedState {
             zero_advance: inputs.root_font_zero_advance,
             line_height: inputs.root_line_height,
         };
+        let tree_counting_inputs = self.element_tree_counting_inputs(subject.target.node());
         let environment = FfiStyleComputationEnvironment {
             box_type_input: crate::css::style_compute::rust_box_type_transformation_input(
                 facts,
@@ -605,9 +607,9 @@ impl RetainedState {
             },
             is_th_element: has(fact::IS_TH),
             has_new_font_size: recascaded_font_size.is_some(),
-            has_tree_counting_context: false,
-            sibling_count: 0,
-            sibling_index: 0,
+            has_tree_counting_context: tree_counting_inputs != 0,
+            sibling_count: tree_counting_inputs >> 32,
+            sibling_index: tree_counting_inputs & 0xffff_ffff,
             random_base_values: random_base_values.as_ptr(),
             random_base_value_count: random_base_values.len(),
             document_base_url: document_base_url.as_ptr(),
@@ -999,7 +1001,7 @@ impl RetainedState {
             &raw const input_line_height_metrics,
             line_height_value,
         );
-        if results.uses_tree_counting_function {
+        if results.uses_tree_counting_function && tree_counting_inputs == 0 {
             counters.bump(Counter::EngineComputedRecordBailDriveTreeCounting);
             return None;
         }
