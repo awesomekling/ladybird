@@ -2201,9 +2201,32 @@ impl StyleEngineState {
                     // engine leaves to C++. That makes every reaction kind the engine's; what is
                     // left to C++ is decided by what the reaction rides with.
                     // A document environment change still leaves a concurrent pseudo input to C++.
+                    // Clearing styles below display:none records an SVG resource for the host so
+                    // it remains usable while hidden. Once the parent record is installed in
+                    // that hidden subtree, drive it from the retained answer instead.
+                    let hidden_svg_recompute = style_input_nodes_for_cpp.contains(&node)
+                        && reaction
+                            == (transaction::STYLE_REACTION_PUBLISHED_STYLE
+                                | transaction::STYLE_REACTION_RECOMPUTE_STYLE)
+                        && self.retained.computed_group_sets.adjustment_facts(node)
+                            & bridge::element_adjustment_fact::IS_SVG_ELEMENT
+                            != 0
+                        && self.tree.inheritance_parent(node).is_some_and(|parent| {
+                            self.retained
+                                .computed_group_sets
+                                .assigned_style_record(parent)
+                                .and_then(|record| {
+                                    self.retained
+                                        .computed_group_sets
+                                        .style_record_dependency_flags(record.raw())
+                                })
+                                .is_some_and(|flags| flags & (1 << 2) != 0)
+                        });
                     let reaction_is_settleable = !(environment_changed
                         && reaction & transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED != 0)
-                        && !(reaction & DERIVABLE_REACTIONS != 0 && style_input_nodes_for_cpp.contains(&node));
+                        && !(reaction & DERIVABLE_REACTIONS != 0
+                            && style_input_nodes_for_cpp.contains(&node)
+                            && !hidden_svg_recompute);
                     let mut parent_inputs_moved =
                         parked_parent_inputs
                             .or(prepared_parent_inputs)
@@ -2214,6 +2237,8 @@ impl StyleEngineState {
                                 display: parent_inputs_moved_nodes.contains(&node)
                                     || self.retained.tree.assigned_slot_of(node).is_some(),
                             });
+                    parent_inputs_moved.inherited_style |= hidden_svg_recompute;
+                    parent_inputs_moved.display |= hidden_svg_recompute;
                     let mut retry_after_ancestor = (self.retained.published_container_verdicts.contains_key(&node)
                         || self.retained.container_gates_unheld.contains(&node))
                         && self
