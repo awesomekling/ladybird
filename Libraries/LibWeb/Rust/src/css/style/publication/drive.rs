@@ -153,6 +153,7 @@ impl RetainedState {
         };
         // A record under display:none may no longer be the style C++ holds.
         if view.dependency_flags & (1 << 2) != 0 {
+            counters.bump(Counter::EngineComputedRecordBailRecordOverlayDrive156);
             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
             return None;
         }
@@ -438,6 +439,7 @@ impl RetainedState {
                     || (transition_goal == TransitionDriveGoal::RefuseDeclarations
                         && crate::css::style_compute::has_active_transition_properties(old_table))
                 {
+                    counters.bump(Counter::EngineComputedRecordBailRecordOverlayDrive441);
                     counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
                     return None;
                 }
