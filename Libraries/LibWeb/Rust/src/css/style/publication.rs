@@ -1082,10 +1082,7 @@ impl RetainedState {
                 || self.warm_record_names_engine_computable_animations(node, state);
         let full_css_drive_beneath_a_composition = full_drive_beneath_a_composition
             && self.css_defined_animations.node_runs_a_css_animation(node)
-            && css_keyframes_are_engine_computable
-            && !delta
-                .properties()
-                .contains(&crate::css::property_metadata::property_id::ANIMATION_FILL_MODE);
+            && css_keyframes_are_engine_computable;
         // An associated CSS animation with no sampled overlay can still retime or cancel. The
         // new longhands decide its complete plan, and the host samples after installing the base.
         let css_animation_plan_without_an_overlay = animations_bind_the_record
@@ -1096,10 +1093,7 @@ impl RetainedState {
             && delta
                 .properties()
                 .iter()
-                .all(|&property| longhand_declares_a_css_animation(property))
-            && !delta
-                .properties()
-                .contains(&crate::css::property_metadata::property_id::ANIMATION_FILL_MODE);
+                .all(|&property| longhand_declares_a_css_animation(property));
         // With no sampled overlay, the old record is already the animation's base. The row can
         // install a newly driven base and apply its complete CSS plan before sampling; a child
         // derived in the same batch waits for that composition. An animated custom property that
@@ -1188,10 +1182,7 @@ impl RetainedState {
                     || self.animation_base_inherits_from_current_parent(node, state, old_style_record))
                 && self.computed_group_sets.node_has_animation_overlay(node)
                 && (!self.css_defined_animations.node_runs_a_css_animation(node)
-                    || (self.state_names_resolve_without_the_declaration_scope(node, state)
-                        && !delta
-                            .properties()
-                            .contains(&crate::css::property_metadata::property_id::ANIMATION_FILL_MODE)));
+                    || self.state_names_resolve_without_the_declaration_scope(node, state));
         let animations_bind_the_record = animations_bind_the_record && !derived_beneath_a_composition;
         if animations_bind_the_record {
             counters.bump(Counter::EngineComputedRecordBailWinnerElementPublication1072);
