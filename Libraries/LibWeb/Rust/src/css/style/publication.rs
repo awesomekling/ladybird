@@ -2090,25 +2090,14 @@ impl RetainedState {
             self.computed_group_sets.adjustment_facts(node) & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
                 || self.computed_group_sets.node_has_animation_overlay(node);
         let current = match self.tree.inheritance_parent(node) {
-            Some(parent) if !animates => match self.current_custom_property_environment(parent, inputs, scratch) {
-                // A node declaring custom properties was resolved over the parent's environment
-                // as the parent holds it; only a node declaring none can be stale beneath it.
-                Some(parent_environment)
-                    if !self.node_declares_custom_properties(node)
-                        || self.computed_group_sets.custom_property_environment_identity(parent)
-                            != Some(parent_environment) =>
-                {
-                    self.engine_custom_property_environment(
-                        node,
-                        parent_environment,
-                        inputs,
-                        None,
-                        &mut Counters::default(),
-                    )
-                    .unwrap_or(held)
-                }
-                _ => held,
-            },
+            Some(parent) if !animates => self
+                .current_custom_property_environment(parent, inputs, scratch)
+                .and_then(|parent_environment| {
+                    let parent_moved = self.computed_group_sets.custom_property_environment_identity(parent)
+                        != Some(parent_environment);
+                    self.environment_over_current_parent(node, parent_environment, parent_moved, inputs)
+                })
+                .unwrap_or(held),
             _ => held,
         };
         scratch.current_custom_property_environments.insert(node, current);
