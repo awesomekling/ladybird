@@ -2407,7 +2407,10 @@ impl StyleEngineState {
                         // A verdict can become unsettled during the record drive, after the
                         // earlier ancestor check. Retry this row once its preceding ancestors
                         // have installed their records and container inputs.
-                        if decline_cause == "engineComputedRecordBailContainerVerdict" {
+                        if decline_cause == "engineComputedRecordBailContainerVerdict"
+                            || (decline_cause == "engineComputedRecordBailRecordParent"
+                                && self.retained.tree.inheritance_parent(node).is_some())
+                        {
                             retry_after_ancestor = true;
                         }
                         self.retained
