@@ -1,0 +1,3 @@
+dependent color: rgb(1, 2, 3)
+C++ recomputations: 0
+container verdict bails: 0
