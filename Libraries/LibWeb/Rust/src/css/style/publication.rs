@@ -1181,14 +1181,14 @@ impl RetainedState {
             && self
                 .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
                 .is_empty();
-        // An existing overlay may carry a transition to retarget or cancel. Its before-change
-        // composition and lifecycle decision still belong to the host's full computation.
-        let transition_goal =
-            if full_drive && owes_a_transition_step && !self.record_holds_an_animation_overlay(old_style_record) {
-                TransitionDriveGoal::DeferStep
-            } else {
-                TransitionDriveGoal::RefuseDeclarations
-            };
+        // An existing overlay may carry a transition to retarget or cancel. The host samples the
+        // installed record before the step, so the step reads each running transition's current
+        // value from that composition and decides against the record the row moved away from.
+        let transition_goal = if full_drive && owes_a_transition_step {
+            TransitionDriveGoal::DeferStep
+        } else {
+            TransitionDriveGoal::RefuseDeclarations
+        };
         // Partial drives can share across parents whose inherited inputs agree. Keep the full
         // parent record in the key when a non-inherited property explicitly inherits, including
         // through substitution, or when a full drive may read more of the parent's style.

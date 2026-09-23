@@ -1126,6 +1126,12 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     }
                     apply_pseudo_animation_plan(to_underlying(PseudoElement::After));
                     bool const has_animation_effects = element->has_relevant_animations() || element->has_associated_animations();
+                    // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
+                    // Sampling the installed record can pin the epoch's baseline, and the record the
+                    // element holds by then is the after-change one. A row that owes the whole step
+                    // pins the record it moved away from first.
+                    if (transition_debt == 2 && document.is_in_style_stabilization_epoch() && settled.has_style())
+                        (void)document.style_computer().record_transition_stabilization_baseline(settled, StyleRecordID { reaction.old_style_record });
                     if (settled.has_style() && (has_animation_effects || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
                         sample_animations_for_installed_record(settled);
                     // Under verification the reference computation ran the step too, and then
