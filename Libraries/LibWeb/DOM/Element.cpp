@@ -1840,27 +1840,9 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
     recompute_pseudo_element_style(CSS::PseudoElement::Selection);
     if (m_rendered_in_top_layer)
         recompute_pseudo_element_style(CSS::PseudoElement::Backdrop);
-    auto pseudo_element_is_list_item = [&](CSS::PseudoElement pseudo_element) {
-        auto style_record = style_record_identity(pseudo_element);
-        if (!style_record)
-            return false;
-        auto values = style_computer.computed_style_record_view(style_record);
-        return values && values->display().is_list_item();
-    };
     if (had_list_marker || originating_style->display().is_list_item()
         || (engine_pseudo_element_records && engine_pseudo_element_records->at(to_underlying(CSS::PseudoElement::Marker)).has_value()))
         recompute_pseudo_element_style(CSS::PseudoElement::Marker, true);
-    // NB: A pseudo-element that is itself a list item nests a marker built from this element's
-    //     ::marker style, even where the element itself is no list item and nothing settles a
-    //     record for its ::marker. Publish one here, so that the build that nests the marker reads
-    //     a record rather than asking for one to be computed while it runs. It stays the
-    //     pseudo-element's own affair: the element holds no ::marker of its own, so the record
-    //     says nothing about this element's box and changes no invalidation.
-    if (!style_record_identity(CSS::PseudoElement::Marker)
-        && (pseudo_element_is_list_item(CSS::PseudoElement::Before)
-            || pseudo_element_is_list_item(CSS::PseudoElement::After)
-            || pseudo_element_is_list_item(CSS::PseudoElement::Backdrop)))
-        (void)style_computer.materialize_style_record({ *this, CSS::PseudoElement::Marker });
     if (settled_after_host_record)
         style_computer.style_engine().acknowledge_engine_computed_record(style_node_id());
 
