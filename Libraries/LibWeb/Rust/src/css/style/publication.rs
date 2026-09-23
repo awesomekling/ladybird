@@ -1101,9 +1101,24 @@ impl RetainedState {
                 .properties()
                 .iter()
                 .any(|&property| property_starts_animation(property));
+        // An element whose effects hold no sampled overlay, run no CSS animation, and whose record
+        // declares no transitions has its base as its record. A leaf installs a newly driven base,
+        // and the host samples those effects over it, as for a CSS animation above. A name the new
+        // base declares starts an animation, so its plan must be one the engine can decide.
+        let names_an_animation = !self.state_has_no_animation_name(state);
+        let base_without_a_composition = animations_bind_the_record
+            && !self.computed_group_sets.node_has_animation_overlay(node)
+            && !self.record_holds_an_animation_overlay(old_style_record)
+            && !self.css_defined_animations.node_runs_a_css_animation(node)
+            && (!names_an_animation || self.animation_keyframes().a_first_record_may_start_an_animation())
+            && self.effects_sample_over_a_new_base(node)
+            && !self.record_transition_facts(old_style_record, &[]).0
+            && !has_registered_declarations
+            && self.tree.flat_tree_children(node).next().is_none();
         let derived_beneath_a_composition = css_animation_plan_without_an_overlay
             || css_base_without_an_overlay
             || effect_base_without_an_overlay
+            || base_without_a_composition
             || full_drive_beneath_a_composition
                 && (!self.css_defined_animations.node_runs_a_css_animation(node)
                     || full_css_drive_beneath_a_composition)
@@ -1239,6 +1254,7 @@ impl RetainedState {
         if let Some(&(new_style_record, cohort_explicitly_inherited_groups)) = (container_unit_mask == 0
             && self.state_custom_condition_usage(node, state) == 0
             && !self.computed_group_sets.node_has_animation_overlay(node)
+            && !derived_beneath_a_composition
             && (!has_registered_declarations || !full_drive))
             .then(|| scratch.cohorts.get(&cohort))
             .flatten()
@@ -1522,6 +1538,7 @@ impl RetainedState {
         let animation_plan = (owes_an_animation_plan
             || full_css_drive_beneath_a_composition
             || css_base_without_an_overlay
+            || (base_without_a_composition && names_an_animation)
             || (old_record_is_hidden
                 && table_names_animations(&table)
                 && self.tree.tree_scope(node) == tree::TreeScopeID::DOCUMENT
@@ -2708,6 +2725,27 @@ impl RetainedState {
                         !entry.result_of_transition && !property_feeds_post_compute_adjustment(entry.property)
                     })
                 })
+    }
+
+    /// Whether the host can sample every effect the element holds over a newly driven base. Each
+    /// must be one the stage can describe, declaring longhands the remaining phase computes and no
+    /// value a later phase or a post-compute adjustment finalizes: those need a composed drive.
+    fn effects_sample_over_a_new_base(&self, node: StyleNodeID) -> bool {
+        self.animation_effect_descriptions
+            .effects(node, animations::ELEMENT_ANIMATION_SLOT)
+            .iter()
+            .all(|effect| {
+                effect.is_covered()
+                    && effect.flags & animations::effect_flag::IS_TRANSITION == 0
+                    && !effect.declares_custom_properties()
+                    && effect.keyframes.iter().all(|keyframe| {
+                        effect.declarations_of(keyframe).iter().all(|declaration| {
+                            property_computes_in_remaining_phase(declaration.property_id)
+                                && !property_feeds_box_type_transformation(declaration.property_id)
+                                && !property_feeds_post_compute_adjustment(declaration.property_id)
+                        })
+                    })
+            })
     }
 
     /// A partial drive reuses the base groups beneath an element's own composition. They must
