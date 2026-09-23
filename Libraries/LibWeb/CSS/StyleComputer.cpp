@@ -1870,7 +1870,10 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_sett
             || document().is_in_style_stabilization_feedback_epoch()))
         (void)record_transition_stabilization_baseline(abstract_element, before_change_style_record);
 
-    if (installed_style->in_display_none_subtree())
+    // A transition starts from the before-change style. The newly installed record may itself
+    // have display: none; checking it would skip the discrete transition into that state.
+    auto before_change_style = computed_style_record_view(before_change_style_record);
+    if (!before_change_style || before_change_style->in_display_none_subtree())
         return {};
     if (auto parent = abstract_element.element_to_inherit_style_from(); parent.has_value()) {
         if (auto parent_style = parent->computed_style(); parent_style && parent_style->in_display_none_subtree())

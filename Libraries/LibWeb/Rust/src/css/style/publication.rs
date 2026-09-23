@@ -938,7 +938,11 @@ impl RetainedState {
         // this very update - a value the row's record does not hold - so that one stays in C++.
         let (record_declares_transitions, transitionable_property_moved) =
             self.record_transition_facts(old_style_record, delta.properties());
-        let owes_a_transition_step = !full_drive
+        let owes_a_transition_step = (!full_drive
+            || delta
+                .properties()
+                .iter()
+                .any(|&property| longhand_only_declares_a_css_transition(property)))
             && (record_declares_transitions
                 || delta
                     .properties()
@@ -946,7 +950,8 @@ impl RetainedState {
                     .any(|&property| longhand_only_declares_a_css_transition(property)))
             && !self.record_holds_an_animation_overlay(old_style_record);
         let owes_a_transition_registration = owes_a_transition_step.then(|| {
-            !record_declares_transitions
+            !full_drive
+                && !record_declares_transitions
                 && delta
                     .properties()
                     .iter()
