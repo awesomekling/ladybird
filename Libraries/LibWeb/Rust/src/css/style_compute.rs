@@ -4045,6 +4045,7 @@ pub struct FfiComputePropertiesInput {
     pub has_relevant_animations_other_than_transitions: bool,
     pub has_css_defined_animations: bool,
     pub stop_after_longhand_drive: bool,
+    pub reference_style_without_effects: bool,
     pub transaction_input: *const FfiLonghandTransactionInput,
     pub callback_context: *mut c_void,
 }
@@ -7635,8 +7636,8 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
             )
         }),
     };
-    let element_has_animation_state =
-        plan_has_work || element_has_relevant_effects.unwrap_or(element_has_associated_animations);
+    let element_has_animation_state = !input.reference_style_without_effects
+        && (plan_has_work || element_has_relevant_effects.unwrap_or(element_has_associated_animations));
     // The values an animation composes over are the ones the drive computed before its post-compute
     // adjustments, so the adjustments are undone here and redone by the finalization below.
     if animation_values_applied || element_has_animation_state {

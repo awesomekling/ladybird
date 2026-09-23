@@ -848,6 +848,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         && !style_engine.style_records_match_for_verification(reaction.style_node, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, previous_style_record);
                     // A child reaction derived earlier in this batch can still be owed after the
                     // engine's record installs. The reference computation must leave it pending.
+                    auto const engine_reference_record = verify_base_without_effects
+                        ? StyleRecordID { StyleEngineFFI::style_engine_base_style_record_of(style_engine.rust_handle(), reaction.new_style_record) }
+                        : StyleRecordID { reaction.new_style_record };
                     bool verification_did_change_custom_properties = false;
                     // The dependency marks the row leaves on the element. They are what the
                     // invalidators read afterwards, and they are cleared and rewritten by a C++
@@ -876,7 +879,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         StyleEngine::StyleRecordDelta reference_delta {};
                         auto reference_values = document.style_computer().materialize_style_record(DOM::AbstractElement { *element }, {}, nullptr, reference_delta, StyleComputer::StyleSharingMode::Disabled);
                         reference_record = reference_delta.new_style_record;
-                        if (auto const* font = static_cast<ComputedValues::FontValues const*>(reference_values->base_values().style_group_payload(StyleGroupIndex::FontValues)))
+                        if (auto const* font = static_cast<ComputedValues::FontValues const*>(reference_values->style_group_payload(StyleGroupIndex::FontValues)))
                             reference_font = describe_resolved_font(font->font_list_value());
                         for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
                             if (!pseudo_element_records[kind].has_value() || !*pseudo_element_records[kind])
@@ -905,10 +908,10 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         document.style_computer().pin_style_record(reference_record);
                         deferred_record_verifications.append({ StyleNodeID { reaction.style_node }, reference_record, move(reference_font) });
                     } else {
-                        auto packed = style_engine.compare_style_records(StyleRecordID { reaction.new_style_record }, reference_record, true, false, false);
+                        auto packed = style_engine.compare_style_records(engine_reference_record, reference_record, true, false, false);
                         if (packed & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged)
-                            && !style_engine.style_records_match_for_verification(reaction.style_node, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, reference_record)) {
-                            report_engine_computed_record_difference(style_engine, *element, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, reference_record);
+                            && !style_engine.style_records_match_for_verification(reaction.style_node, NumericLimits<u8>::max(), engine_reference_record, reference_record)) {
+                            report_engine_computed_record_difference(style_engine, *element, NumericLimits<u8>::max(), engine_reference_record, reference_record);
                             VERIFY_NOT_REACHED();
                         }
                     }
@@ -921,7 +924,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     if (legacy_environment_is_complete)
                         verify_engine_computed_record_environment(*element, StyleRecordID { reaction.new_style_record });
                     if (verify_base_without_effects && reference_font.has_value()) {
-                        auto engine_view = style_engine.style_record_view(StyleRecordID { reaction.new_style_record });
+                        auto engine_view = style_engine.style_record_view(engine_reference_record);
                         auto const* engine_font = static_cast<ComputedValues::FontValues const*>(engine_view.payloads[ComputedValues::FontValues::style_group_index]);
                         if (describe_resolved_font(engine_font->font_list_value()) != *reference_font)
                             dbgln("Engine base font {} differs from reference base font {} for {}", describe_resolved_font(engine_font->font_list_value()), *reference_font, element->debug_description());

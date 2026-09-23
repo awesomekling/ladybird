@@ -3272,6 +3272,41 @@ pub unsafe extern "C" fn style_engine_reaffirm_style_record(
     }
 }
 
+/// Return the completed composition a reference computation inherits from. Its parent's C++
+/// installation may still be pending while the engine has already sampled that composition.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_reference_parent_style_record(engine: *const c_void, node: u32) -> u64 {
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return 0;
+    };
+    engine
+        .retained
+        .computed_group_sets
+        .sampled_composition_identity(node)
+        .or_else(|| {
+            engine
+                .retained
+                .computed_group_sets
+                .assigned_style_record(node)
+                .map(|record| record.raw())
+        })
+        .unwrap_or(0)
+}
+
+/// Return the underlying base of a final record for reference verification.
+///
+/// # Safety
+/// `engine` must be live and `style_record` must identify a live record.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_base_style_record_of(engine: *const c_void, style_record: u64) -> u64 {
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    engine.retained.computed_group_sets.base_style_record_of(style_record)
+}
+
 /// Assigns an already-interned base style record to one element or pseudo-element.
 /// Returns an empty delta when recording is active so the caller can use the fully recorded
 /// publication path instead.

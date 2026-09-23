@@ -719,9 +719,12 @@ impl RetainedState {
             .document_style_computation_inputs
             .is_some_and(|inputs| self.declares_registered_custom_property(node, None, &inputs));
         let Some(old_style_record) = self.computed_group_sets.assigned_style_record(node) else {
-            // A batch first record cannot settle the host's existing animation composition.
-            // A scoped demand instead installs its base and samples the effects over it.
-            if animations_bind_the_record && !scratch.targeted_record_demand {
+            // A WAAPI target can install its first base and sample its existing effects over it.
+            // CSS animations still need a complete definition plan for the batch.
+            if animations_bind_the_record
+                && !scratch.targeted_record_demand
+                && self.css_defined_animations.node_runs_a_css_animation(node)
+            {
                 counters.bump(Counter::EngineComputedRecordBailWinnerElement);
                 return None;
             }
@@ -1691,6 +1694,9 @@ impl RetainedState {
                 return None;
             };
             self.nodes_owing_animation_definitions.insert((node, u8::MAX), plan);
+        }
+        if self.computed_group_sets.adjustment_facts(node) & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0 {
+            self.nodes_owing_an_animation_sample.insert(node);
         }
         Some(delta)
     }

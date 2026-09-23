@@ -6504,16 +6504,26 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
         .style_node = abstract_element.element().style_node_id().value(),
         .pseudo_kind = pseudo_element_to_ffi(abstract_element.pseudo_element()),
         .previous_style_record = previous_style_record.value(),
-        .inheritance_parent_style_record = inheritance_parent.has_value() ? inheritance_parent->style_record_identity().value() : 0,
+        .inheritance_parent_style_record = [&] {
+            if (!inheritance_parent.has_value())
+                return u64 { 0 };
+            if (g_reference_style_without_effects) {
+                auto parent_record = StyleEngineFFI::style_engine_reference_parent_style_record(m_style_engine.rust_handle(), inheritance_parent->element().style_node_id().value());
+                if (parent_record != 0)
+                    return parent_record;
+            }
+            return inheritance_parent->style_record_identity().value();
+        }(),
         .highlight_parent_style_record = effective_highlight_parent_style_record.value(),
-        .initial_computed_group_mask = initial_computed_group_mask,
+        .initial_computed_group_mask = g_reference_style_without_effects ? ComputedValues::all_style_groups : initial_computed_group_mask,
         .all_computed_groups = ComputedValues::all_style_groups,
-        .use_retained_style_computation_selection = use_retained_style_computation_selection,
+        .use_retained_style_computation_selection = !g_reference_style_without_effects && use_retained_style_computation_selection,
         .selected_transition_properties = selected_transition_properties.data(),
         .selected_transition_property_count = selected_transition_properties.size(),
         .has_relevant_animations_other_than_transitions = abstract_element.element().has_relevant_animations_other_than_transitions(),
         .has_css_defined_animations = abstract_element.element().has_css_defined_animations(),
         .stop_after_longhand_drive = stop_after_longhand_drive,
+        .reference_style_without_effects = g_reference_style_without_effects,
         .transaction_input = nullptr,
         .callback_context = &native_context,
     };
