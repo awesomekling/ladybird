@@ -116,8 +116,6 @@ extern "C" void rust_style_seal_flush_census_for_update();
 
 namespace Web::CSS {
 
-bool deferring_engine_pseudo_installation();
-
 static thread_local bool g_reference_style_without_effects = false;
 
 void set_reference_style_without_effects(bool);
@@ -1946,11 +1944,8 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_sett
         const_cast<StyleComputer&>(*this).style_engine().record_derived_element_style_input_change(
             element.style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle);
     auto invalidation = decode_style_invalidation(animated_property_invalidation.invalidation);
-    // The published values reach the element's pseudo-elements and its flat-tree descendants the
-    // way an animation refresh's do: the descendants as one feedback batch the ordinary transaction
-    // materializes, the pseudo-elements here.
-    if (!abstract_element.pseudo_element().has_value() && invalidation.inherited_style_changed() && !deferring_engine_pseudo_installation())
-        invalidation |= element.recompute_pseudo_element_styles();
+    // The published values reach the element's pseudo-elements after sampling, when the style
+    // transaction settles them from this composition. Descendants follow as one feedback batch.
     auto inherited_style_groups = invalidation.inherited_style_groups_changed();
     if (!invalidation.inherited_style_changed()) {
         auto child_explicit_inheritance_groups = element.children_explicitly_inherited_non_inherited_style_groups();
