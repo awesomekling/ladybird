@@ -656,7 +656,8 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
     auto compute = [&](DOM::AbstractElement target) -> RefPtr<ComputedValues const> {
         // A read-only answer is independent of the element's installed style. Copy its record
         // before the demand slot is reused by another style read.
-        if (first_is_one_of(*target.pseudo_element(), PseudoElement::Before, PseudoElement::After, PseudoElement::FirstLetter, PseudoElement::Marker, PseudoElement::Backdrop)) {
+        if (first_is_one_of(*target.pseudo_element(), PseudoElement::Before, PseudoElement::After, PseudoElement::FirstLetter, PseudoElement::Marker, PseudoElement::Backdrop)
+            || (*target.pseudo_element() == PseudoElement::Selection && document.selection_styles_are_observable())) {
             auto kind = *target.pseudo_element();
             auto demand = style_computer.style_engine().answer_record_demand(target.element().style_node_id(), to_underlying(kind), false, false, true);
             if (demand.is_absent && first_is_one_of(kind, PseudoElement::Before, PseudoElement::After)

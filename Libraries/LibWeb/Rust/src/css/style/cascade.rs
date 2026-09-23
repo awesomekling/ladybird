@@ -1153,6 +1153,18 @@ pub(super) struct WinnerView<'a> {
 }
 
 impl<'a> WinnerView<'a> {
+    pub(super) fn row_stamp(&self, node: StyleNodeID) -> Option<u64> {
+        if let Some(entry) = self.effects.and_then(|effects| effects.entry(node)) {
+            if entry.element.is_some() {
+                return Some(self.groups.stamp);
+            }
+            if entry.replace_rows {
+                return None;
+            }
+        }
+        self.groups.row_stamp(node)
+    }
+
     pub(super) fn node_rows_are_semantically_equal(
         &self,
         other: &WinnerGroups,
@@ -1334,6 +1346,7 @@ pub struct WinnerGroups {
     winner_rule_references: WinnerRuleReferences,
     column: Column<Option<(CascadeStateID, ProgramVersion)>>,
     stamp: u64,
+    element_row_stamps: Column<u64>,
     pseudo_rows_by_node: Column<Vec<PseudoWinnerRow>>,
     pseudo_row_capacity_bytes: u64,
     priority_current: BitColumn,
@@ -1395,6 +1408,7 @@ impl Default for WinnerGroups {
             winner_rule_references: WinnerRuleReferences::default(),
             column: Column::default(),
             stamp: 0,
+            element_row_stamps: Column::default(),
             pseudo_rows_by_node: Column::default(),
             pseudo_row_capacity_bytes: 0,
             priority_current: BitColumn::default(),
@@ -1440,6 +1454,7 @@ impl WinnerGroups {
             winner_rule_references: self.winner_rule_references.clone(),
             column: self.column.clone(),
             stamp: self.stamp,
+            element_row_stamps: self.element_row_stamps.clone(),
             pseudo_rows_by_node,
             pseudo_row_capacity_bytes,
             priority_current: self.priority_current.clone(),
@@ -1853,6 +1868,13 @@ impl WinnerGroups {
         self.stamp = stamp;
     }
 
+    #[must_use]
+    pub fn row_stamp(&self, node: StyleNodeID) -> Option<u64> {
+        let index = node.element_index()? as usize;
+        self.column.get(index).and_then(Option::as_ref)?;
+        self.element_row_stamps.get(index).copied()
+    }
+
     /// The flush that published the node's row for a pseudo-element, when it has one.
     #[must_use]
     pub fn pseudo_row_stamp(&self, node: StyleNodeID, pseudo: PseudoElementTarget) -> Option<u64> {
@@ -2055,6 +2077,7 @@ impl WinnerGroups {
             return false;
         }
         self.column.ensure(index);
+        self.element_row_stamps.insert(index, self.stamp);
         if self.column[index] == Some((state, program_version)) {
             self.set_priority_current(index, true);
             self.release_unused_reference(state, reference);
@@ -2429,6 +2452,7 @@ impl WinnerGroups {
         self.winner_entry_count = 0;
         self.winner_rule_references = WinnerRuleReferences::default();
         self.column = Column::default();
+        self.element_row_stamps = Column::default();
         self.pseudo_rows_by_node = Column::default();
         self.pseudo_row_capacity_bytes = 0;
         self.priority_current = BitColumn::default();
@@ -2448,6 +2472,7 @@ impl WinnerGroups {
                 self.priorities,
                 self.continuations,
                 self.column,
+                self.element_row_stamps,
                 self.pseudo_rows_by_node,
                 self.priority_current,
                 self.state_reference_counts,

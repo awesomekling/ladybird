@@ -5010,6 +5010,7 @@ impl StyleEngineState {
                 pseudo_kind::FIRST_LETTER,
                 pseudo_kind::MARKER,
                 pseudo_kind::BACKDROP,
+                pseudo_kind::SELECTION,
             ]
             .contains(&kind)
         }) {
@@ -5724,6 +5725,7 @@ pub(super) struct PseudoRecordDelta {
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct PseudoCohortKey {
     parent_record: u64,
+    highlight_parent_record: u64,
     inherited_groups: u32,
     parent_display: u32,
     dependency_flags: u8,
