@@ -3404,7 +3404,7 @@ pub unsafe extern "C" fn style_engine_node_record_reads_attributes(engine: *cons
         })
 }
 
-/// Which `if()` and `inherit()` substitutions the node's custom declarations read, including
+/// Which `if()`, `inherit()`, and custom-function substitutions the node's custom declarations read, including
 /// pseudo-elements that were resolved with the originating element's environment.
 ///
 /// # Safety

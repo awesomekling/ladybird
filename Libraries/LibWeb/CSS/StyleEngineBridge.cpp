@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/HashTable.h>
 #include <AK/StdLibExtras.h>
 #include <AK/Time.h>
 #include <LibGfx/Font/SharedFontProvider.h>
@@ -28,6 +29,8 @@ extern "C" void style_engine_prepare_root_font_resolution(void*, u64);
 extern "C" void rust_style_seal_note_font_match_reached_document_thread();
 extern "C" void style_engine_publish_font_face_snapshot(void*, void const*, uintptr_t);
 extern "C" void rust_font_face_snapshot_view(void const*, FontFaceSnapshotView*);
+extern "C" void style_engine_reset_custom_functions(void*);
+extern "C" void style_engine_publish_custom_function(void*, void const*, FlatPtr, FlatPtr, u32);
 
 // The style stage's between-pass font batch. It is a function of the document's published
 // `@font-face` table and the request, and of the process-wide font services behind them: no
@@ -826,6 +829,7 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
     auto submission_started_at = MonotonicTime::now();
     submit_recorded_input();
     publish_font_faces();
+    style_engine_reset_custom_functions(m_impl);
     StyleEngineFFI::FfiDocumentStyleComputationInputs computation_inputs {};
     // Lent to the engine for the call below, which copies them.
     String document_base_url;
@@ -834,6 +838,33 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
     if (m_style_computer) {
         auto const viewport_rect = m_style_computer->viewport_rect_for_style_environment();
         auto const* media_environment = m_style_computer->ensure_media_environment_for_style_update();
+        // The media snapshot may update the active @function definitions. Publish the resulting
+        // CSSOM registry only after that update, before any custom-property row resolves it.
+        HashTable<StyleScope const*> visited;
+        struct FunctionScope {
+            StyleScope const* scope;
+            u32 tree_scope;
+        };
+        Vector<FunctionScope> scopes;
+        auto append_scope = [&](StyleScope const& scope, u32 tree_scope) {
+            if (visited.set(&scope) == AK::HashSetResult::InsertedNewEntry)
+                scopes.append({ &scope, tree_scope });
+        };
+        auto& document = m_style_computer->document();
+        append_scope(document.style_scope(), document.style_scope().style_engine_tree_scope().value());
+        document.for_each_shadow_root([&](DOM::ShadowRoot& shadow_root) {
+            auto& scope = shadow_root.style_scope();
+            append_scope(scope, scope.style_engine_tree_scope().value());
+        });
+        for (size_t index = 0; index < scopes.size(); ++index) {
+            auto const& scope = *scopes[index].scope;
+            auto tree_scope = scopes[index].tree_scope;
+            scope.for_each_visible_function_definition([&](StyleScope::FunctionDefinitionAndScope const& definition) {
+                style_engine_publish_custom_function(m_impl, definition.function.handle(),
+                    bit_cast<FlatPtr>(&scope), bit_cast<FlatPtr>(&definition.scope), tree_scope);
+                append_scope(definition.scope, NumericLimits<u32>::max());
+            });
+        }
         auto const& root_font_metrics = m_style_computer->root_element_font_metrics();
         auto const& initial_font = m_style_computer->document().font_computer().initial_font();
         Length::FontMetrics const initial_font_metrics { CSSPixels { initial_font.pixel_size() }, initial_font.pixel_metrics(), InitialValues::line_height() };

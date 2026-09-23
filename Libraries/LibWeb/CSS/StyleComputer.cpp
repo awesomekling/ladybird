@@ -112,6 +112,8 @@
 #include <math.h>
 #include <stdio.h>
 
+extern "C" void rust_style_seal_flush_census_for_update();
+
 namespace Web::CSS {
 
 static ComputedValuesFFI::FfiUtf16View ffi_utf16_view(Utf16View view)
@@ -384,6 +386,7 @@ void StyleComputer::end_style_update() const
     ScopeGuard drain_deferred_web_face_loads = [] { end_deferred_web_face_loads(); };
     if (--m_style_update_depth != 0)
         return;
+    rust_style_seal_flush_census_for_update();
     m_style_update_ffi_media_environment.clear();
     m_style_update_media_environment.clear();
     m_style_update_document_environment.clear();

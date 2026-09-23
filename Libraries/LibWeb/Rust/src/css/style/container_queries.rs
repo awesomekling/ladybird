@@ -389,6 +389,49 @@ impl RetainedState {
         })
     }
 
+    /// Evaluate a compiled @function declaration's container gates over the same retained
+    /// container inputs used by style rules. Missing inputs leave the row with the host.
+    pub(super) fn function_container_verdict(
+        &self,
+        node: StyleNodeID,
+        pseudo: bool,
+        containers: &[std::sync::Arc<crate::css::container_conditions::ContainerConditionsData>],
+    ) -> Option<ContainerVerdict> {
+        use crate::css::parser::query_parser::CONTAINER_QUERY_REQUIRES_STYLE;
+        let depends_on_size = containers.iter().any(|conditions| conditions.contains_size_feature());
+        let depends_on_style = containers.iter().any(|conditions| {
+            conditions.conditions.iter().any(|condition| {
+                condition
+                    .query
+                    .as_ref()
+                    .is_some_and(|query| query.container_requirements() & CONTAINER_QUERY_REQUIRES_STYLE != 0)
+            })
+        });
+        let mut effects = Vec::new();
+        let mut matches = true;
+        for conditions in containers {
+            let mut group_matches = false;
+            for condition in &conditions.conditions {
+                let name = condition.name.as_ref().map_or(&[][..], |name| name.units());
+                let query = condition
+                    .query
+                    .as_ref()
+                    .map_or(std::ptr::null(), |query| std::sync::Arc::as_ptr(query).cast());
+                if self.container_condition_matches(node.raw(), pseudo, query, name, &mut effects)? {
+                    group_matches = true;
+                    break;
+                }
+            }
+            matches &= group_matches;
+        }
+        Some(ContainerVerdict {
+            matches,
+            depends_on_size,
+            depends_on_style,
+            effects,
+        })
+    }
+
     fn container_condition_matches(
         &self,
         subject_raw: u32,

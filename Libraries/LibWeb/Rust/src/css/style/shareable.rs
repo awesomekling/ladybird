@@ -68,6 +68,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         next_style_transaction_version,
         document_style_computation_inputs,
         document_media_snapshot,
+        document_function_snapshot,
         driven_viewport,
         document_resource_contexts,
         custom_property_registry,
@@ -199,6 +200,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(next_style_transaction_version);
     assert_member_is_sync(document_style_computation_inputs);
     assert_member_is_sync(document_media_snapshot);
+    assert_member_is_sync(document_function_snapshot);
     assert_member_is_sync(driven_viewport);
     assert_member_is_sync(document_resource_contexts);
     assert_member_is_sync(custom_property_registry);
