@@ -1124,7 +1124,7 @@ impl RetainedState {
                 .properties()
                 .iter()
                 .any(|&property| longhand_only_declares_a_css_transition(property))
-            || (self.tree.flat_tree_children(node).next().is_none()
+            || (self.tree.flat_tree_children(node).all(|child| child.is_text())
                 && !delta
                     .properties()
                     .contains(&crate::css::property_metadata::property_id::DISPLAY)
