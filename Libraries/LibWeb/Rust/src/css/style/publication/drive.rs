@@ -112,7 +112,21 @@ impl RetainedState {
         let Some(table) = (unsafe { view.longhand_table.as_ref() }) else {
             return false;
         };
-        crate::css::style_compute::active_transition_longhands(table).is_empty()
+        let transitioned = crate::css::style_compute::active_transition_longhands(table);
+        if transitioned.is_empty() {
+            return true;
+        }
+        // A parent that declares transitions starts them only in its own transition step. The
+        // record stands when no step is left for it in this update and no transition runs in it.
+        // A post-compute adjustment also marks its overlay entry as a transition's, so that it
+        // wins over an important declaration; only a property the parent transitions runs one.
+        self.nodes_owing_a_transition_registration.get(&parent) != Some(&false)
+            && unsafe { view.animated_overlay.as_ref() }.is_none_or(|overlay| {
+                !overlay
+                    .entries()
+                    .iter()
+                    .any(|entry| entry.result_of_transition && transitioned.contains(&entry.property))
+            })
     }
 
     #[allow(clippy::too_many_arguments)]
