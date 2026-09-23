@@ -2757,11 +2757,6 @@ impl RetainedState {
         counters: &mut Counters,
     ) -> u64 {
         let facts = self.computed_group_sets.adjustment_facts(node);
-        if facts & bridge::element_adjustment_fact::DISALLOW_DISPLAY_CONTENTS != 0
-            && facts & bridge::element_adjustment_fact::IS_SVG_ELEMENT != 0
-        {
-            return 0;
-        }
         // An element standing for its host's pseudo-element is its host's to cascade.
         if self.backs_host_pseudo_element(node) {
             let parent_inputs_moved = ParentInputsMoved {

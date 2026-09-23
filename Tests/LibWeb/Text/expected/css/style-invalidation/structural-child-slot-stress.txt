@@ -508,10 +508,10 @@ PASS: stress warm child mutation: slotted-shadow-host-default: :has(:is(:checked
 PASS: stress cold child mutation: slotted-shadow-host-default: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-default: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: slotted-shadow-host-default: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: slotted-shadow-host-default: :has(rect.hit) after SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: slotted-shadow-host-default: :has(rect.hit) after SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: slotted-shadow-host-default: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: slotted-shadow-host-default: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: slotted-shadow-host-default: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: slotted-shadow-host-default: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: slotted-shadow-host-default: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: slotted-shadow-host-default: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-default: :has(.outer .middle .hit) after deep descendant append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: slotted-shadow-host-default: :has(.outer .middle .hit) after deep descendant append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-default: :has(> .outer .hit) after child subtree append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -700,10 +700,10 @@ PASS: stress warm child mutation: slotted-shadow-host-named: :has(:is(:checked, 
 PASS: stress cold child mutation: slotted-shadow-host-named: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-named: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: slotted-shadow-host-named: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: slotted-shadow-host-named: :has(rect.hit) after SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: slotted-shadow-host-named: :has(rect.hit) after SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: slotted-shadow-host-named: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: stress cold child mutation: slotted-shadow-host-named: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: slotted-shadow-host-named: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: slotted-shadow-host-named: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: slotted-shadow-host-named: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold child mutation: slotted-shadow-host-named: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-named: :has(.outer .middle .hit) after deep descendant append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: slotted-shadow-host-named: :has(.outer .middle .hit) after deep descendant append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: slotted-shadow-host-named: :has(> .outer .hit) after child subtree append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
