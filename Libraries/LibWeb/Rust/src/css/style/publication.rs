@@ -985,16 +985,21 @@ impl RetainedState {
             || delta.properties().iter().any(|&property| {
                 !property_computes_in_remaining_phase(property) || property_feeds_box_type_transformation(property)
             });
-        // A moved animation declaration leaves a plan for the host to apply before descendants
-        // continue. A leaf without an old overlay can also defer a transition decision beside it.
+        // A moved animation declaration or a changed keyframes table leaves a plan for the host
+        // to apply before descendants continue. A leaf without an old overlay can also defer a
+        // transition decision beside it.
         let moves_transition_declaration = delta
             .properties()
             .iter()
             .any(|&property| longhand_only_declares_a_css_transition(property));
-        let owes_an_animation_plan = delta
+        let owes_an_animation_plan = (delta
             .properties()
             .iter()
             .any(|&property| longhand_declares_a_css_animation(property))
+            || (!record_may_stand_while_animating
+                && !self
+                    .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
+                    .is_empty()))
             && (!moves_transition_declaration
                 || (self.tree.flat_tree_children(node).next().is_none()
                     && !self.computed_group_sets.node_has_animation_overlay(node)))
