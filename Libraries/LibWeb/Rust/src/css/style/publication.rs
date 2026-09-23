@@ -7809,13 +7809,12 @@ impl StyleEngineState {
         if let Some(index) = armed {
             self.host.armed_retry_nodes.remove(index);
         }
-        // A row declined for its uninstalled parent retries with that parent installed. Whatever
-        // refuses it then is why it reaches the host.
-        let declined_for_parent = self
-            .retained
-            .host_entry_causes
-            .get(&node)
-            .is_some_and(|(cause, _)| *cause == "engineComputedRecordBailRecordParent");
+        // A row declined for its uninstalled or unsampled parent retries with that parent
+        // installed and sampled. Whatever refuses it then is why it reaches the host.
+        let declined_for_parent =
+            self.retained.host_entry_causes.get(&node).is_some_and(|(cause, _)| {
+                matches!(*cause, "engineComputedRecordBailRecordParent" | "AwaitSampledParent")
+            });
         let bail_marks =
             ((armed.is_none() || declined_for_parent) && seal::is_reporting()).then(|| counters.record_bail_marks());
         let retried = self.retry_engine_record_after_ancestor(node, armed.is_some(), counters);
