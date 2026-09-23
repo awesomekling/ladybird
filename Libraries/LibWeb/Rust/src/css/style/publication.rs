@@ -1190,7 +1190,8 @@ impl RetainedState {
             || animations_bind_the_record
                 && !requires_full_drive
                 && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
-                && self.animation_base_inherits_from_current_parent(node, state, old_style_record)
+                && (self.parent_holds_no_composition(node)
+                    || self.animation_base_inherits_from_current_parent(node, state, old_style_record))
                 && self.computed_group_sets.node_has_animation_overlay(node)
                 && (!self.css_defined_animations.node_runs_a_css_animation(node)
                     || (self.state_names_resolve_without_the_declaration_scope(node, state)
@@ -2950,6 +2951,19 @@ impl RetainedState {
                         || effect.flags & animations::effect_flag::IS_TRANSITION == 0)
                     && (!reads_custom_properties || !effect.declares_custom_properties())
             })
+    }
+
+    /// Whether the element's parent holds no sampled values for its base to miss: its inherited
+    /// groups are the parent's record as it stands. A parent derived beneath a composition in this
+    /// batch is sampled again once the host installs it, so it still holds one.
+    fn parent_holds_no_composition(&self, node: StyleNodeID) -> bool {
+        self.tree.flat_tree_parent(node).is_some_and(|parent| {
+            !self.computed_group_sets.node_has_animation_overlay(parent)
+                && !self
+                    .batch_pinned_compositions
+                    .iter()
+                    .any(|&(pinned, _)| pinned == parent)
+        })
     }
 
     /// A partial drive reuses the base groups beneath an element's own composition. They must
