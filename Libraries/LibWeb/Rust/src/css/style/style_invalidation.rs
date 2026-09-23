@@ -618,6 +618,21 @@ fn inheritance_dependent_values_equal(
         })
 }
 
+/// Box-type, overflow, and text-alignment adjustments read these longhands from the unadjusted
+/// base, which sampling an overlay over a record does not reconstruct.
+pub(super) fn property_feeds_post_compute_adjustment(property: u16) -> bool {
+    matches!(
+        property,
+        property_id::DIRECTION
+            | property_id::DISPLAY
+            | property_id::FLOAT
+            | property_id::OVERFLOW_X
+            | property_id::OVERFLOW_Y
+            | property_id::POSITION
+            | property_id::TEXT_ALIGN
+    )
+}
+
 impl RetainedState {
     pub(crate) fn animation_overlay_changed(
         &self,
@@ -658,16 +673,8 @@ impl RetainedState {
             if !animation_value_changed(&old_record, old_overlay, new_overlay, property) {
                 continue;
             }
-            if matches!(
-                property,
-                property_id::DIRECTION
-                    | property_id::DISPLAY
-                    | property_id::FLOAT
-                    | property_id::OVERFLOW_X
-                    | property_id::OVERFLOW_Y
-                    | property_id::POSITION
-                    | property_id::TEXT_ALIGN
-            ) && !self.animation_base_was_just_driven(old_style_record)
+            if property_feeds_post_compute_adjustment(property)
+                && !self.animation_base_was_just_driven(old_style_record)
             {
                 ffi_result.requires_base_style_recomputation = true;
             }
