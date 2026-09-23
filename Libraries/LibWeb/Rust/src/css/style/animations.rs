@@ -2003,9 +2003,9 @@ pub(crate) struct PublishedKeyframesSet {
     pub(crate) pointer: usize,
     pub(crate) description: PublishedEffect,
     /// Whether starting this animation is more than creating it: a `url()` resolves against the
-    /// sheet the rule was written in, and a custom property travels as the tokens it was written
-    /// as, so nothing here can see what it asks for. A row the engine settles never runs one: it
-    /// leaves a plan naming such a rule to C++ whole.
+    /// sheet the rule was written in, which only the computation that resolves the keyframes
+    /// does. A row the engine settles never runs one: it leaves a plan naming such a rule to C++
+    /// whole.
     pub(crate) needs_the_host: bool,
     /// Whether the rule animates a value the element's descendants inherit. A C++ computation
     /// samples an animation it starts into the very record it publishes, so a descendant computed
@@ -2036,7 +2036,7 @@ pub(crate) struct AnimationKeyframes {
 #[must_use]
 fn description_declares_an_inherited_property(description: &PublishedEffect) -> bool {
     use crate::css::property_metadata::{property_is_inherited, property_is_shorthand};
-    // A custom property inherits, and every one of them is already refused by `needs_the_host`.
+    // A custom property inherits.
     !description.custom_declarations.is_empty()
         || description.declarations.iter().any(|declaration| {
             property_is_inherited(declaration.property_id) || property_is_shorthand(declaration.property_id)
@@ -2049,19 +2049,13 @@ fn description_needs_the_host(description: &PublishedEffect) -> bool {
     // Having a resource context is ordinary - every sheet with a base URL records one. Needing it
     // is not: a `url()` in a keyframe resolves against the sheet the rule was written in, which
     // only the computation that resolves the keyframes does.
-    if description.flags & effect_flag::HAS_RESOURCE_CONTEXT != 0
+    description.flags & effect_flag::HAS_RESOURCE_CONTEXT != 0
         && description.declarations.iter().any(|declaration| {
             declaration
                 .value
                 .optional_data()
                 .is_some_and(crate::css::style_compute::value_may_need_style_sheet_resource_context)
         })
-    {
-        return true;
-    }
-    // A custom property's keyframe value travels as the token stream it was written as, so nothing
-    // here can see what it asks for: a rule declaring one is refused outright.
-    !description.custom_declarations.is_empty()
 }
 
 impl AnimationKeyframes {
