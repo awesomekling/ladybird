@@ -737,31 +737,6 @@ static u8 evaluate_container_style_feature(void* context, Parser::ValueParserFFI
     return to_underlying(evaluate_style_feature(*style_feature, *evaluation_context.document, evaluation_context.element, evaluation_context.depends_on_viewport_metrics));
 }
 
-MatchResult evaluate_style_query(RustQueryHandle const& handle, AbstractOrHypotheticalElement element)
-{
-    ContainerStyleEvaluationContext style_context { element.document(), element, element.abstract_element() };
-    Parser::ValueParserFFI::FfiContainerFacts facts {
-        .container_available = true,
-        .size_available = false,
-        .width = 0,
-        .height = 0,
-        .inline_axis_horizontal = false,
-        .length_resolution_context = nullptr,
-        .style_context = &style_context,
-        .evaluate_style_feature = evaluate_container_style_feature,
-        .scroll_state_available = false,
-        .stuck = 0,
-        .snapped = 0,
-        .scrollable = 0,
-        .scrolled = 0,
-        .block_start_side = 0,
-        .inline_start_side = 0,
-    };
-    auto result = Parser::ValueParserFFI::css_query_evaluate_container(handle.data(), facts);
-    VERIFY(result <= to_underlying(MatchResult::Unknown));
-    return static_cast<MatchResult>(result);
-}
-
 struct ScrollStateLogicalStartSides {
     u8 block { 0 };
     u8 inline_ { 0 };
@@ -899,22 +874,6 @@ static MatchResult evaluate_container_query(Parser::ValueParserFFI::FfiQueryHand
 MatchResult ContainerQuery::evaluate(DOM::AbstractElement const& element, Optional<Utf16FlyString> const& container_name) const
 {
     return evaluate_container_query(m_rust_query_handle.data(), m_feature_requirements, element, container_name);
-}
-
-bool evaluate_native_container_condition(Parser::ValueParserFFI::FfiQueryHandle const* query, Utf16View name, DOM::AbstractElement const& element)
-{
-    Optional<Utf16FlyString> container_name;
-    if (!name.is_empty())
-        container_name = Utf16FlyString::from_utf16(name);
-    if (query)
-        return evaluate_container_query(query, container_query_requirements(query), element, container_name) == MatchResult::True;
-    if (container_name.has_value()) {
-        for (auto const* container = element.flat_tree_parent_element(); container; container = container->flat_tree_parent_element()) {
-            if (container_name_matches(*container, container_name))
-                return true;
-        }
-    }
-    return false;
 }
 
 Utf16String ContainerQuery::to_string() const
