@@ -251,7 +251,14 @@ pub(crate) fn end_update() {
     if mode() == Mode::Off {
         return;
     }
-    UPDATE_DEPTH.with(|depth| depth.set(depth.get().checked_sub(1).expect("unbalanced style update scope")));
+    let finished = UPDATE_DEPTH.with(|depth| {
+        let next = depth.get().checked_sub(1).expect("unbalanced style update scope");
+        depth.set(next);
+        next == 0
+    });
+    if finished && mode() == Mode::Report {
+        flush_census();
+    }
 }
 
 /// Record a return to main-thread work before the complete style stage has finished.
