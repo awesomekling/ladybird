@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    #container { container-type: inline-size; width: 200px; }
+    #child { width: 10cqw; }
+</style>
+<div id="container"><div id="child"></div></div>
+<script>
+    test(() => {
+        println(`initial width: ${child.getBoundingClientRect().width}`);
+        const before = internals.getStyleInvalidationCounters();
+        const beforeEngine = internals.styleEngineCounters();
+        container.style.width = "300px";
+        child.style.color = "red";
+        internals.updateStyle();
+        const after = internals.getStyleInvalidationCounters();
+        println(`C++ recomputations before layout: ${after.elementStyleRecomputations - before.elementStyleRecomputations}`);
+        println(`computed width after layout: ${getComputedStyle(child).width}`);
+        println(`width after box commit: ${child.getBoundingClientRect().width}`);
+        const afterLayout = internals.getStyleInvalidationCounters();
+        const afterEngine = internals.styleEngineCounters();
+        println(`C++ recomputations after layout: ${afterLayout.elementStyleRecomputations - after.elementStyleRecomputations}`);
+        println(`container verdict bails: ${afterEngine.engineComputedRecordBailContainerVerdict - beforeEngine.engineComputedRecordBailContainerVerdict}`);
+    });
+</script>
