@@ -461,6 +461,26 @@ impl RetainedState {
         while let Some(candidate) = container {
             container = engine.tree.flat_tree_parent(candidate);
             let Some(inputs) = engine.container_query_inputs(candidate) else {
+                // A pseudo-element can ask about its originating element while that element's
+                // first style record is still being installed. Keep the scroll dependency even
+                // though the container verdict cannot yet be decided: otherwise no scroll-state
+                // snapshot is collected to make a later verdict change observable.
+                if subject_is_pseudo_element
+                    && candidate == subject
+                    && requirements & CONTAINER_QUERY_REQUIRES_SCROLL_STATE != 0
+                {
+                    effects.push((candidate.raw(), FfiContainerEffectKind::SizeContainerUsage, Vec::new()));
+                    effects.push((
+                        candidate.raw(),
+                        FfiContainerEffectKind::ScrollStateContainerUsage,
+                        Vec::new(),
+                    ));
+                    effects.push((
+                        candidate.raw(),
+                        FfiContainerEffectKind::NeedsEvaluationAfterLayout,
+                        Vec::new(),
+                    ));
+                }
                 continue;
             };
             if !name.is_empty() && !inputs.names.iter().any(|candidate| candidate == name) {

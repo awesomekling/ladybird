@@ -879,6 +879,15 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                             VERIFY(!installed);
                             continue;
                         }
+                        // A list-item ::before/::after can require a nested marker even though
+                        // the originating element has no marker of its own. The C++ reference
+                        // publishes that marker for the layout builder without installing it on
+                        // the element; read its published assignment for this comparison.
+                        if (!installed && kind == to_underlying(PseudoElement::Marker)
+                            && !element->computed_style()->display().is_list_item()) {
+                            if (auto marker = style_engine.reaffirm_style_record(StyleNodeID { reaction.style_node }, static_cast<u8>(kind)); marker.has_value())
+                                installed = marker->new_style_record;
+                        }
                         VERIFY(!!installed);
                         auto pseudo_packed = style_engine.compare_style_records(*engine_record, installed, true, false, false);
                         if (pseudo_packed & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged)
