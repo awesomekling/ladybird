@@ -1814,6 +1814,10 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
                 }
                 set_custom_property_data(pseudo_element, move(data));
             }
+            if (engine_record.has_value() && (!!old_style_record || !new_pseudo_element_style->transition_delay_and_duration_are_single_zero())) {
+                auto transition_invalidation = style_computer.run_transition_step_for_settled_record({ *this, pseudo_element }, old_style_record);
+                invalidation |= transition_invalidation;
+            }
         } else if (auto existing_pseudo_element = get_synthetic_pseudo_element(pseudo_element); existing_pseudo_element.has_value())
             existing_pseudo_element->clear_computed_style(move(style_to_preserve_for_detachment));
 

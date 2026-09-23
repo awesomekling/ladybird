@@ -1853,7 +1853,6 @@ void StyleComputer::register_transitions_for_settled_record(DOM::AbstractElement
 // overlay publication an animation sampling performs, on the same element, against the same base.
 RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_settled_record(DOM::AbstractElement abstract_element, StyleRecordID before_change_style_record) const
 {
-    VERIFY(!abstract_element.pseudo_element().has_value());
     auto installed_style = abstract_element.computed_style();
     if (!installed_style)
         return {};
@@ -1913,7 +1912,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_sett
         !abstract_element.pseudo_element().has_value() && abstract_element.element().is_document_element());
     auto publication = publish_animation_overlay(abstract_element, *computed_values);
     auto& element = abstract_element.element();
-    element.refresh_computed_style({}, publication.new_style_record);
+    element.refresh_computed_style(abstract_element.pseudo_element(), publication.new_style_record);
     if (auto* svg_element = as_if<SVG::SVGElement>(element))
         svg_element->note_svg_paint_resource_description_may_have_changed();
     // Box-type, overflow and text-alignment adjustments consume the unadjusted base values, which
@@ -1925,7 +1924,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_sett
     // The published values reach the element's pseudo-elements and its flat-tree descendants the
     // way an animation refresh's do: the descendants as one feedback batch the ordinary transaction
     // materializes, the pseudo-elements here.
-    if (invalidation.inherited_style_changed())
+    if (!abstract_element.pseudo_element().has_value() && invalidation.inherited_style_changed())
         invalidation |= element.recompute_pseudo_element_styles();
     auto inherited_style_groups = invalidation.inherited_style_groups_changed();
     if (!invalidation.inherited_style_changed()) {
@@ -1939,13 +1938,13 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_sett
         if (descendants_may_observe_non_inherited_properties)
             inherited_style_groups = RequiredInvalidationAfterStyleChange::all_inherited_style_groups;
     }
-    if (inherited_style_groups != 0)
+    if (!abstract_element.pseudo_element().has_value() && inherited_style_groups != 0)
         const_cast<StyleComputer&>(*this).style_engine().record_flat_tree_descendant_style_input_changes(element.style_node_id(), StyleEngine::InheritedStyle, inherited_style_groups);
     // Refreshing the computed style published the record to the layout node; inherited values and
     // image resources need the C++ side effects on top.
-    if (auto* layout_node = element.unsafe_layout_node()) {
+    if (auto* layout_node = abstract_element.unsafe_layout_node()) {
         if (animated_property_invalidation.requires_layout_node_style_application)
-            layout_node->apply_style(element.style_record_identity());
+            layout_node->apply_style(abstract_element.style_record_identity());
         else if (animated_property_invalidation.requires_style_resource_update)
             layout_node->attach_style_resources();
     }
