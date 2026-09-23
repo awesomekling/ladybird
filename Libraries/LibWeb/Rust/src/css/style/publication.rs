@@ -1143,7 +1143,10 @@ impl RetainedState {
         let base_without_a_composition = animations_bind_the_record
             && !self.computed_group_sets.node_has_animation_overlay(node)
             && !self.record_holds_an_animation_overlay(old_style_record)
-            && !self.css_defined_animations.node_runs_a_css_animation(node)
+            && self
+                .css_defined_animations
+                .applied_definitions(node, animations::ELEMENT_ANIMATION_SLOT)
+                .is_empty()
             && (!names_an_animation || css_keyframes_are_engine_computable)
             && self.effects_sample_over_a_new_base(node, TransitionEffects::Refused)
             && !self.record_declares_transitions(old_style_record)
