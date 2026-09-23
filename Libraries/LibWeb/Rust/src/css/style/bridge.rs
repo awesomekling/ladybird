@@ -4110,7 +4110,19 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
                 decline_cause: std::ptr::null(),
                 decline_cause_length: 0,
             },
-            Err(cause) => FfiRecordDemandAnswer::declined(cause),
+            Err(cause) => {
+                // The host recomputes a declined element demand itself. Name that entry by the
+                // decline, not as a row the engine was never offered.
+                if super::seal::is_reporting() && !read_only && pseudo_kind == u8::MAX {
+                    let cold = engine
+                        .retained
+                        .computed_group_sets
+                        .assigned_style_record(node)
+                        .is_none();
+                    engine.retained.host_entry_causes.insert(node, (cause, cold));
+                }
+                FfiRecordDemandAnswer::declined(cause)
+            }
         };
         if result.is_provisional && engine.host.computed_record_verification_counters.is_some() {
             engine.host.computed_record_verification_saw_provisional_demand = true;
