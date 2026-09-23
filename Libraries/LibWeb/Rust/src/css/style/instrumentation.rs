@@ -223,7 +223,6 @@ define_counters! {
     EngineComputedRecordBailRecordOverlayDrive441 => "engineComputedRecordBailRecordOverlayDrive441",
     EngineComputedRecordBailRecordOverlay => "engineComputedRecordBailRecordOverlay",
     EngineComputedRecordBailRecordOverlayPublication937 => "engineComputedRecordBailRecordOverlayPublication937",
-    EngineComputedRecordBailRecordOverlayPublication951 => "engineComputedRecordBailRecordOverlayPublication951",
     EngineComputedRecordBailRecordOverlayPublication1147 => "engineComputedRecordBailRecordOverlayPublication1147",
     EngineComputedRecordBailRecordOverlayPublication2328 => "engineComputedRecordBailRecordOverlayPublication2328",
     EngineComputedRecordBailRecordTable => "engineComputedRecordBailRecordTable",
@@ -451,10 +450,6 @@ impl Counters {
             (
                 Counter::EngineComputedRecordBailRecordOverlayPublication937,
                 "BailRecordOverlay@publication.rs:937",
-            ),
-            (
-                Counter::EngineComputedRecordBailRecordOverlayPublication951,
-                "BailRecordOverlay@publication.rs:951",
             ),
             (
                 Counter::EngineComputedRecordBailRecordOverlayPublication1147,

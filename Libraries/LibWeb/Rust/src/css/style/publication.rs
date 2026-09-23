@@ -855,6 +855,7 @@ impl RetainedState {
         // A moved environment reaches every winner written with a substitution: such a record
         // is driven again in full under the new one.
         let environment_moved_under_substitutions = environment.is_some() && self.state_has_substitutions(node, state);
+        let mut redrives_a_standing_composition = false;
         if delta.is_empty() {
             // A moved environment beneath transitions, beneath a composition the host cannot
             // sample again over the new base, or beneath a CSS animation whose keyframes a shadow
@@ -867,6 +868,15 @@ impl RetainedState {
                     || (self.css_defined_animations.node_runs_a_css_animation(node)
                         && !self.animation_keyframes().only_the_document_scope_defines_keyframes()))
             {
+                scratch.recompute_in_full = true;
+            }
+            // A sample over the standing base cannot adjust the base values an animated box-type,
+            // overflow, or text-alignment input feeds, or its sample would ask for this row again.
+            // Such a composition is driven again beneath its overlay and sampled over the new base.
+            if computed::ComputedGroupSets::record_is_animation_overlay(old_style_record.raw())
+                && self.composition_feeds_a_post_compute_adjustment(old_style_record)
+            {
+                redrives_a_standing_composition = true;
                 scratch.recompute_in_full = true;
             }
             // A flipped rule that lost the cascade may leave this row's stamp old, but an exact
@@ -979,16 +989,6 @@ impl RetainedState {
                         return None;
                     }
                     if computed::ComputedGroupSets::record_is_animation_overlay(old_style_record.raw()) {
-                        // A sample over the standing base cannot adjust the base values an animated
-                        // box-type, overflow, or text-alignment input feeds; that composition is driven
-                        // again rather than resampled, or its sample would ask for this row again.
-                        let resampleable_composition =
-                            self.composition_resamples_over_a_new_base(old_style_record, facts);
-                        if !resampleable_composition {
-                            counters.bump(Counter::EngineComputedRecordBailRecordOverlayPublication951);
-                            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-                            return None;
-                        }
                         self.computed_group_sets.pin_style_record(old_style_record.raw());
                         self.batch_pinned_compositions.push((node, old_style_record.raw()));
                         self.nodes_owing_an_animation_sample.insert(node);
@@ -1045,13 +1045,16 @@ impl RetainedState {
         // A remaining-phase delta can derive the new base beneath an existing composition. The
         // host samples the effect again after installing this base, including when the moved
         // property is animated. A full drive still needs dependent-value closure.
-        // Font-phase and box-type effects change how later values are finalized. Their sampled
-        // values need a composed drive rather than a base drive followed by a simple resample.
+        // Font-phase effects change how later values are computed. Their sampled values need a
+        // composed drive rather than a base drive followed by a simple resample. The sample over a
+        // freshly driven base makes the box-type, overflow, and text-alignment adjustments itself.
+        // A transition decides against the before-change style a moved base leaves, which
+        // standing winners do not move.
         let full_drive_beneath_a_composition = animations_bind_the_record
             && requires_full_drive
             && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
             && self.computed_group_sets.node_has_animation_overlay(node)
-            && !self.record_transition_facts(old_style_record, &[]).0
+            && (!self.record_transition_facts(old_style_record, &[]).0 || redrives_a_standing_composition)
             && !has_registered_declarations
             && self
                 .computed_group_sets
@@ -1059,9 +1062,8 @@ impl RetainedState {
                 .and_then(|view| unsafe { view.animated_overlay.as_ref() })
                 .is_some_and(|overlay| {
                     overlay.entries().iter().all(|entry| {
-                        !entry.result_of_transition
+                        (!entry.result_of_transition || redrives_a_standing_composition)
                             && property_computes_in_remaining_phase(entry.property)
-                            && !property_feeds_box_type_transformation(entry.property)
                     })
                 });
         // The first-record gate excludes keyframes that need host resolution. For a leaf, only
@@ -1166,7 +1168,10 @@ impl RetainedState {
             || base_without_a_composition
             || full_drive_beneath_a_composition
                 && (!self.css_defined_animations.node_runs_a_css_animation(node)
-                    || full_css_drive_beneath_a_composition)
+                    || full_css_drive_beneath_a_composition
+                    // Standing winners leave the running CSS animations as they are, so the drive
+                    // owes them no new plan.
+                    || redrives_a_standing_composition)
             || animations_bind_the_record
                 && !requires_full_drive
                 && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
@@ -2840,6 +2845,20 @@ impl RetainedState {
         self.computed_group_sets
             .style_record_view(record.raw())
             .is_none_or(|view| !view.animated_overlay.is_null())
+    }
+
+    /// Whether an element's composition animates an input of the box-type, overflow, or
+    /// text-alignment adjustments, which a sample over the record's standing base cannot make again.
+    fn composition_feeds_a_post_compute_adjustment(&self, record: computed::FinalStyleRecordID) -> bool {
+        self.computed_group_sets
+            .style_record_view(record.raw())
+            .and_then(|view| unsafe { view.animated_overlay.as_ref() })
+            .is_some_and(|overlay| {
+                overlay
+                    .entries()
+                    .iter()
+                    .any(|entry| property_feeds_post_compute_adjustment(entry.property))
+            })
     }
 
     /// Whether sampling an element's composition again over a new base answers it. A transition's
