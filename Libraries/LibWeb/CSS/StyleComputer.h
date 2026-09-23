@@ -97,7 +97,6 @@ public:
     // The document element's style installed: the metrics `rem` resolves against are its font's.
     void update_root_element_font_metrics(ComputedValues const&);
     [[nodiscard]] NonnullRefPtr<ComputedValues const> materialize_style_record(DOM::AbstractElement, Optional<bool&> did_change_custom_properties = {}, StyleEngineMatchResult* = nullptr, Optional<StyleEngine::StyleRecordDelta&> = {}, StyleSharingMode = StyleSharingMode::Enabled) const;
-    [[nodiscard]] Optional<RequiredInvalidationAfterStyleChange> answer_record_demand(DOM::Element&, bool& did_change_custom_properties, StringView& decline_cause, Optional<PseudoElement> pseudo = {}, bool exclude_inline_style = false, bool targeted = false) const;
     [[nodiscard]] StyleRecordID try_share_computed_style_record(DOM::Element&) const;
     void remember_shared_computed_style_record(DOM::Element&, StyleRecordID) const;
     [[nodiscard]] RefPtr<ComputedValues const> compute_pseudo_element_style_if_needed(DOM::AbstractElement, Optional<bool&> did_change_custom_properties, StyleEngineMatchResult* = nullptr, Optional<StyleEngine::StyleRecordDelta&> = {}, Optional<StyleRecordID> highlight_parent_style_record = {}) const;
