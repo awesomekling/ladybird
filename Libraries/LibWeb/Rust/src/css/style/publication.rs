@@ -1028,7 +1028,7 @@ impl RetainedState {
             && (!moves_transition_declaration
                 || (self.tree.flat_tree_children(node).next().is_none()
                     && !self.computed_group_sets.node_has_animation_overlay(node)))
-            && self.animation_keyframes().only_the_document_scope_defines_keyframes();
+            && self.state_names_resolve_without_the_declaration_scope(node, state);
         // A remaining-phase delta can derive the new base beneath an existing composition. The
         // host samples the effect again after installing this base, including when the moved
         // property is animated. A full drive still needs dependent-value closure.
@@ -1055,7 +1055,7 @@ impl RetainedState {
         // the rules its own names run matter.
         let is_leaf = self.tree.flat_tree_children(node).next().is_none();
         let css_keyframes_are_engine_computable = self.animation_keyframes().a_first_record_may_start_an_animation()
-            || (is_leaf && self.warm_record_names_engine_computable_animations(state));
+            || (is_leaf && self.warm_record_names_engine_computable_animations(node, state));
         let full_css_drive_beneath_a_composition = full_drive_beneath_a_composition
             && self.css_defined_animations.node_runs_a_css_animation(node)
             && css_keyframes_are_engine_computable
@@ -1154,7 +1154,7 @@ impl RetainedState {
                 && self.animation_base_inherits_from_current_parent(node, state, old_style_record)
                 && self.computed_group_sets.node_has_animation_overlay(node)
                 && (!self.css_defined_animations.node_runs_a_css_animation(node)
-                    || (self.animation_keyframes().only_the_document_scope_defines_keyframes()
+                    || (self.state_names_resolve_without_the_declaration_scope(node, state)
                         && !delta
                             .properties()
                             .contains(&crate::css::property_metadata::property_id::ANIMATION_FILL_MODE)));
@@ -1965,26 +1965,42 @@ impl RetainedState {
     /// Check the names this first record actually starts when another keyframes rule in the
     /// document prevents the document-wide first-record shortcut.
     fn cold_record_names_engine_computable_animations(&self, state: CascadeStateID) -> bool {
-        self.state_names_only_keyframes(state, |set| !set.needs_the_host && !set.declares_an_inherited_property)
+        self.state_names_only_keyframes(state, KeyframesScope::DocumentOnly, |set| {
+            !set.needs_the_host && !set.declares_an_inherited_property
+        })
     }
 
     /// Check the names a later record runs. Its descendants already hold records of their own and
     /// take an animated value through the overlay's invalidation, so only host resolution binds it,
     /// and a container unit, whose basis a sample outside the computation cannot read.
-    fn warm_record_names_engine_computable_animations(&self, state: CascadeStateID) -> bool {
-        self.state_names_only_keyframes(state, |set| {
+    fn warm_record_names_engine_computable_animations(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
+        self.state_names_only_keyframes(state, KeyframesScope::Element(self.tree.tree_scope(node)), |set| {
             !set.needs_the_host && !description_reads_container_units(&set.description)
         })
+    }
+
+    /// Whether every name the state runs resolves to the same `@keyframes` rule whatever scope the
+    /// winning `animation-name` declaration was written in, which the winner store does not record.
+    fn state_names_resolve_without_the_declaration_scope(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
+        self.animation_keyframes().only_the_document_scope_defines_keyframes()
+            || self.state_names_only_keyframes(state, KeyframesScope::Element(self.tree.tree_scope(node)), |_| true)
     }
 
     fn state_names_only_keyframes(
         &self,
         state: CascadeStateID,
+        scope: KeyframesScope,
         accepts: impl Fn(&animations::PublishedKeyframesSet) -> bool,
     ) -> bool {
-        if !self.animation_keyframes().only_the_document_scope_defines_keyframes() {
-            return false;
-        }
+        let element_tree_scope = match scope {
+            KeyframesScope::DocumentOnly => {
+                if !self.animation_keyframes().only_the_document_scope_defines_keyframes() {
+                    return false;
+                }
+                tree::TreeScopeID::DOCUMENT
+            }
+            KeyframesScope::Element(element_tree_scope) => element_tree_scope,
+        };
         let Some(winner) = self
             .winner_groups
             .winner_in_state(state, crate::css::property_metadata::property_id::ANIMATION_NAME)
@@ -2006,9 +2022,13 @@ impl RetainedState {
                     StyleValueData::String { string, .. } => string,
                     _ => return false,
                 };
+                // Another scope defining the name can answer for a declaration written in it.
                 self.animation_keyframes()
-                    .resolve(0, tree::TreeScopeID::DOCUMENT, name)
-                    .is_none_or(&accepts)
+                    .name_resolves_without_the_declaration_scope(element_tree_scope, name)
+                    && self
+                        .animation_keyframes()
+                        .resolve(0, element_tree_scope, name)
+                        .is_none_or(&accepts)
             })
     }
 
@@ -6640,6 +6660,12 @@ fn shorthand_longhand_value(
 
 /// Whether a longhand computes in the drive's remaining phase: after the font, line-height and
 /// color-scheme stages, whose outputs the engine does not derive itself yet.
+#[derive(Clone, Copy)]
+enum KeyframesScope {
+    DocumentOnly,
+    Element(tree::TreeScopeID),
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TransitionEffects {
     Refused,
