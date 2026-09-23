@@ -71,7 +71,7 @@ fn engine_resolution_context(
     }
 }
 
-fn value_is_engine_resolvable_with_attributes(value: &StyleValueData) -> bool {
+fn value_is_engine_resolvable_in_custom_environment(value: &StyleValueData) -> bool {
     custom_property_value_is_engine_resolvable(value)
         || matches!(
             value,
@@ -80,7 +80,13 @@ fn value_is_engine_resolvable_with_attributes(value: &StyleValueData) -> bool {
                 presence_dashed_function: false,
                 presence_env: false,
                 presence_if: false,
-                presence_inherit: false,
+                ..
+            } | StyleValueData::Unresolved {
+                presence_attr: false,
+                presence_dashed_function: false,
+                presence_env: false,
+                presence_if: false,
+                presence_inherit: true,
                 ..
             }
         )
@@ -812,7 +818,7 @@ impl RetainedState {
                 counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
                 return None;
             }
-            if !value_is_engine_resolvable_with_attributes(value.data()) {
+            if !value_is_engine_resolvable_in_custom_environment(value.data()) {
                 counters.bump(Counter::EngineComputedRecordBailCustomPropertyUnsupportedSubstitution);
                 counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
                 return None;
