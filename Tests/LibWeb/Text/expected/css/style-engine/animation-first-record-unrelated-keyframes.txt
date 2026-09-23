@@ -1,0 +1,4 @@
+engine answered: true
+property refusals: 0
+animation names: safe
+opacity: 0.5
