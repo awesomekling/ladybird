@@ -1069,7 +1069,15 @@ impl RetainedState {
         let full_drive = requires_full_drive
             || derived_beneath_a_composition
             || (scratch.viewport_moved && self.record_reads_the_viewport(old_style_record))
-            || (has_registered_declarations && environment.is_some());
+            || environment_moved_under_substitutions
+            || scratch.document_environment_moved
+            || scratch.recompute_in_full
+            || (has_registered_declarations && environment.is_some())
+            || delta.properties().iter().any(|&property| {
+                !property_computes_in_remaining_phase(property)
+                    || font_group_carries_longhand(property)
+                    || property_feeds_box_type_transformation(property)
+            });
         let delta_property_count = delta.properties().len() as u64;
         // A delta that moves a longhand declaring the element's CSS transitions is a row whose only
         // remaining obligation is the transition step, and the host can run that step after the
