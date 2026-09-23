@@ -7438,7 +7438,8 @@ fn gated_prefix_answers_publish_complete_node_specific_winners() {
     let guard = StyleAtomID(200);
     let target = StyleAtomID(201);
     let rule = add_guard_target_rule(&mut engine, guard, target);
-    engine.set_rule_declared_properties(rule, &[(1, false)], false);
+    engine.set_rule_declared_properties(rule, &[(1, false)], true);
+    engine.set_rule_gated_by_container_query(rule);
     for (node, class) in [(nodes[1], guard), (nodes[2], target), (nodes[3], target)] {
         add_feature(&mut engine, node, LocalFeatureKey::Class(class));
     }
