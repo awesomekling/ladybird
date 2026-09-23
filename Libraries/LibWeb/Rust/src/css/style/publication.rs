@@ -973,7 +973,7 @@ impl RetainedState {
                     // stale CSS animation plan is decided from the unchanged longhand table.
                     let css_animation_plan = if self.css_defined_animations.node_runs_a_css_animation(node)
                         && !record_may_stand_while_animating
-                        && self.animation_keyframes().only_the_document_scope_defines_keyframes()
+                        && self.state_names_resolve_without_the_declaration_scope(node, state)
                     {
                         self.settled_animation_plan_from_record(
                             node,
@@ -1516,6 +1516,21 @@ impl RetainedState {
             }
         };
         self.note_node_substitution(node, scratch, state, current_environment);
+        // A hidden record can name animations. Its driven base leaves a complete plan for the host
+        // to apply before sampling the installed record, which only names that resolve can make.
+        if full_drive
+            && old_record_is_hidden
+            && self
+                .computed_group_sets
+                .style_record_view(old_style_record.raw())
+                .and_then(|view| unsafe { view.longhand_table.as_ref() })
+                .is_some_and(table_names_animations)
+            && !self.state_names_resolve_without_the_declaration_scope(node, state)
+        {
+            counters.bump(Counter::EngineComputedRecordBailRecordOverlayDrive441);
+            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
+            return None;
+        }
         let mut driver_input_moved = false;
         let mut explicitly_inherited_groups = 0;
         let partial = if full_drive {
@@ -1614,8 +1629,7 @@ impl RetainedState {
             || (base_without_a_composition && names_an_animation)
             || (old_record_is_hidden
                 && table_names_animations(&table)
-                && self.tree.tree_scope(node) == tree::TreeScopeID::DOCUMENT
-                && self.animation_keyframes().only_the_document_scope_defines_keyframes()))
+                && self.state_names_resolve_without_the_declaration_scope(node, state)))
         .then(|| {
             self.settled_animation_plan(
                 node,

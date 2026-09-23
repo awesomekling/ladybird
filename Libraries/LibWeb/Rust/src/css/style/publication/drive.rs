@@ -457,15 +457,9 @@ impl RetainedState {
                         .is_some_and(|(cause, _)| *cause == "AwaitSampledParent")
                     && parent
                         .is_some_and(|parent| self.computed_group_sets.sampled_composition_identity(parent).is_some());
-                // A hidden record can name a document-scope animation. Its driven base leaves a
-                // complete plan for the host to apply before sampling the installed record.
-                if (view.dependency_flags & (1 << 2) != 0
-                    && table_names_animations(old_table)
-                    && (self.tree.tree_scope(subject.target.node()) != tree::TreeScopeID::DOCUMENT
-                        || !self.animation_keyframes().only_the_document_scope_defines_keyframes()))
-                    || (transition_goal == TransitionDriveGoal::RefuseDeclarations
-                        && crate::css::style_compute::has_active_transition_properties(old_table)
-                        && !defers_transition_after_sampled_parent)
+                if transition_goal == TransitionDriveGoal::RefuseDeclarations
+                    && crate::css::style_compute::has_active_transition_properties(old_table)
+                    && !defers_transition_after_sampled_parent
                 {
                     counters.bump(Counter::EngineComputedRecordBailRecordOverlayDrive441);
                     counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
