@@ -1672,6 +1672,24 @@ impl RetainedState {
         }
     }
 
+    /// The host is sampling an overlay after installing a base this batch drove from winners.
+    /// The old composition remains pinned until acknowledgement, so a post-compute adjustment
+    /// has already received the fresh base it would otherwise request through another reaction.
+    pub(super) fn animation_base_was_just_driven(&self, style_record: u64) -> bool {
+        self.batch_pinned_compositions.iter().any(|(node, _)| {
+            self.computed_group_sets
+                .assigned_style_record(*node)
+                .is_some_and(|record| record.raw() == style_record)
+                && self.engine_computed_records_pending.get(node).is_some_and(|pending| {
+                    pending.iter().any(|record| {
+                        record.pseudo_kind == u8::MAX
+                            && record.new_style_record.raw() == style_record
+                            && record.longhand_evaluations != 0
+                    })
+                })
+        })
+    }
+
     pub(crate) fn acknowledge_engine_computed_record(&mut self, node: StyleNodeID, counters: &mut Counters) {
         if let Some(pending_records) = self.engine_computed_records_pending.remove(&node) {
             for pending in pending_records {

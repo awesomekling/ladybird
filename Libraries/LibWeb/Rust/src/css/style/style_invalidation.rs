@@ -674,7 +674,8 @@ impl RetainedState {
                     | property_id::OVERFLOW_Y
                     | property_id::POSITION
                     | property_id::TEXT_ALIGN
-            ) {
+            ) && !self.animation_base_was_just_driven(old_style_record)
+            {
                 ffi_result.requires_base_style_recomputation = true;
             }
             if property_metadata::property_is_inherited(property) {
