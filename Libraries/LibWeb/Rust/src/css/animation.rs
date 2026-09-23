@@ -7119,6 +7119,36 @@ pub unsafe extern "C" fn rust_animation_timing_rows_composite_order(
     unsafe { std::slice::from_raw_parts_mut(order_out, row_count) }.copy_from_slice(&order);
 }
 
+/// Substitute one keyframe value written as a token stream against an element's custom-property
+/// store, for the compositor, which offloads only what the main thread would sample the same way.
+/// Returns a retained value, or null where the engine declines the substitution.
+///
+/// # Safety
+/// `style_engine` must point to a live style engine, `custom_property_store` must be null or a live
+/// store, and `value` must be a live style value.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_substitute_compositor_keyframe_value(
+    style_engine: *const std::ffi::c_void,
+    custom_property_store: *const std::ffi::c_void,
+    property_id: u16,
+    value: *const crate::css::style_value::StyleValueData,
+) -> *const crate::css::style_value::StyleValueData {
+    let engine = unsafe { &*style_engine.cast::<crate::css::style::StyleEngine>() };
+    let written = unsafe {
+        crate::css::style_value::RetainedStyleValueData::from_retained_pointer(
+            crate::css::style_value::retain_style_value(value),
+        )
+    };
+    let mut substitution =
+        KeyframeSubstitutionContext::new(custom_property_store, engine.document_style_computation_inputs());
+    let Some(substituted) = substitution.substitute(property_id, &written) else {
+        return std::ptr::null();
+    };
+    let pointer = substituted.pointer();
+    std::mem::forget(substituted);
+    pointer
+}
+
 /// Resolve the animation declarations of an element's effects from the description the host
 /// published for them, instead of from a batch the stage assembled by walking the host's keyframe
 /// sets.
