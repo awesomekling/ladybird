@@ -2953,9 +2953,9 @@ impl RetainedState {
     }
 
     /// Whether the host can sample every effect the element holds over a newly driven base. Each
-    /// must be one the stage can describe, animating no input of the box-type transformation or a
-    /// post-compute adjustment: those rewrite base values a sample does not rebuild. A sample
-    /// composes the font and the groups it writes the same way over any base. An animated custom
+    /// must be one the stage can describe. A sample composes the font and the groups it writes, and
+    /// makes the box-type, overflow and text-alignment adjustments, the same way over any base, but
+    /// a container unit reads a basis a sample outside the computation cannot. An animated custom
     /// property is only sampled into the element's environment, so the element's own values must
     /// not substitute one.
     fn effects_sample_over_a_new_base(
@@ -2972,12 +2972,6 @@ impl RetainedState {
                     && (transitions == TransitionEffects::Allowed
                         || effect.flags & animations::effect_flag::IS_TRANSITION == 0)
                     && (!reads_custom_properties || !effect.declares_custom_properties())
-                    && effect.keyframes.iter().all(|keyframe| {
-                        effect.declarations_of(keyframe).iter().all(|declaration| {
-                            !property_feeds_box_type_transformation(declaration.property_id)
-                                && !property_feeds_post_compute_adjustment(declaration.property_id)
-                        })
-                    })
             })
     }
 
