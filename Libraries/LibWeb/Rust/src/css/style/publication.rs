@@ -1954,6 +1954,12 @@ impl RetainedState {
                 store
             }
         };
+        // The written content may contain attr() or var(). Check its substituted spelling,
+        // which is now in the store, before deciding whether the content group can be built.
+        if !store.content_is_engine_computable(self) {
+            counters.bump(Counter::EngineComputedRecordBailProperty);
+            return None;
+        }
         self.note_node_substitution(node, scratch, state, environment);
         let cache_key = (!has_registered_declarations && self.state_container_unit_mask(node, state) == 0)
             .then_some(())
@@ -2270,7 +2276,9 @@ impl RetainedState {
                 .winner_in_state(state, prop::CONTENT)
                 .and_then(|winner| self.winner_groups.resolved_winner(winner))
                 .is_some_and(|winner| match self.specified_values.value(winner.key.value) {
-                    Lookup::Known(value) => content_value_is_engine_computable(value),
+                    Lookup::Known(value) => {
+                        content_value_is_engine_computable(value) || matches!(value, StyleValueData::Unresolved { .. })
+                    }
                     _ => false,
                 });
         }
