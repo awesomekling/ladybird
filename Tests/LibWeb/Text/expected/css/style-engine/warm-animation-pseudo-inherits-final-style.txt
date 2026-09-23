@@ -1,0 +1,3 @@
+warm host stayed in the engine: true
+animated host color: rgb(0, 128, 0)
+pseudo inherits final color: rgb(0, 128, 0)
