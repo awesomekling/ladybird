@@ -983,6 +983,11 @@ impl RetainedState {
                 .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
                 .is_empty()
             && self.animation_keyframes().only_the_document_scope_defines_keyframes();
+        let no_css_animation_to_plan = self.computed_group_sets.associated_pseudo_kind(node).is_none()
+            && self.state_has_no_animation_name(state)
+            && self
+                .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
+                .is_empty();
         // Partial drives can share across parents whose inherited inputs agree. Keep the full
         // parent record in the key when a non-inherited property explicitly inherits, including
         // through substitution, or when a full drive may read more of the parent's style.
@@ -1078,6 +1083,7 @@ impl RetainedState {
             if property_starts_animation(property)
                 && !(owes_a_transition_step && longhand_only_declares_a_css_transition(property))
                 && !(owes_an_animation_plan && longhand_declares_a_css_animation(property))
+                && !(no_css_animation_to_plan && longhand_declares_a_css_animation(property))
             {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
@@ -1630,6 +1636,15 @@ impl RetainedState {
             && self.animation_keyframes().a_first_record_may_start_an_animation()
     }
 
+    /// With no winning `animation-name`, timing and keyword longhands describe no CSS animation
+    /// to create or retime. The drive still computes their values into the record.
+    fn state_has_no_animation_name(&self, state: CascadeStateID) -> bool {
+        self.winner_groups
+            .winner_in_state(state, crate::css::property_metadata::property_id::ANIMATION_NAME)
+            .and_then(|winner| self.winner_groups.resolved_winner(winner))
+            .is_none()
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn engine_cold_record_impl(
         &mut self,
@@ -1731,7 +1746,10 @@ impl RetainedState {
         // them and rebuilds every group, rejecting values the font resolution does not pass on yet.
         for property in self.winner_groups.semantic_delta_properties(None, state) {
             if self.first_record_winner_needs_cpp(state, property)
-                || (longhand_declares_a_css_animation(property) && !owes_an_animation_plan)
+                || (longhand_declares_a_css_animation(property)
+                    && !owes_an_animation_plan
+                    && (self.computed_group_sets.associated_pseudo_kind(node).is_some()
+                        || !self.state_has_no_animation_name(state)))
             {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
