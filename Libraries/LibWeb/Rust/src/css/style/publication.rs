@@ -2629,7 +2629,25 @@ impl RetainedState {
                 .engine_computed_record_delta(node, true, None, parent_inputs_moved, scratch, counters)
                 .map_or(0, |(_, record)| record.raw());
         }
-        let republished_complete = if self.container_gates_unheld.contains(&node) || self.container_verdicts_moved(node)
+        // A style-only query reads the ancestor's settled custom-property environment. A size
+        // or scroll-state query still needs the next layout snapshot before its verdict can move.
+        let style_only_container_winners_are_stale =
+            self.published_container_verdicts.get(&node).is_some_and(|verdicts| {
+                !verdicts.is_empty()
+                    && verdicts.iter().all(|&(rule, pseudo, _)| {
+                        self.rule_container_verdict(rule, node.raw(), pseudo)
+                            .is_some_and(|verdict| {
+                                verdict.depends_on_style
+                                    && !verdict.depends_on_size
+                                    && !verdict.effects.iter().any(|(_, effect, _)| {
+                                        matches!(effect, bridge::FfiContainerEffectKind::ScrollStateContainerUsage)
+                                    })
+                            })
+                    })
+            }) && self.current_winner_groups().row_stamp(node) != Some(self.flush_stamp);
+        let republished_complete = if style_only_container_winners_are_stale
+            || self.container_gates_unheld.contains(&node)
+            || self.container_verdicts_moved(node)
         {
             let Some(complete) = self.republish_winners_from_retained_answer(node, counters) else {
                 return 0;
