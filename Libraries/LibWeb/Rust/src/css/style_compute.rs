@@ -9282,7 +9282,7 @@ pub struct FfiEffectiveOverflow {
 /// https://www.w3.org/TR/css-overflow-3/#overflow-control
 /// The visible/clip values of overflow compute to auto/hidden (respectively) if one of overflow-x or
 /// overflow-y is neither visible nor clip.
-fn resolve_effective_overflow_keywords(overflow_x: u16, overflow_y: u16) -> FfiEffectiveOverflow {
+pub(crate) fn resolve_effective_overflow_keywords(overflow_x: u16, overflow_y: u16) -> FfiEffectiveOverflow {
     let is_visible_or_clip = |keyword: u16| keyword == keyword::VISIBLE || keyword == keyword::CLIP;
     let mut result = FfiEffectiveOverflow {
         changed_x: false,

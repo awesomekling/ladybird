@@ -23,6 +23,7 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/Layout/Node.h>
+#include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/SVG/SVGElement.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
@@ -880,15 +881,38 @@ AnimationUpdateContext::~AnimationUpdateContext()
         if (!style_computer.style_engine().animation_overlay_changed(it.value.style_record_before_update, style->animated_overlay()))
             continue;
 
-        auto computed_values = [&] {
-            auto previous_values = element.computed_style();
-            if (previous_values)
-                return style_computer.build_animated_computed_values(*style, element, element.style_scope(), *previous_values);
-            return style_computer.build_computed_values(*style, element, element.style_scope());
-        }();
-        Array<void const*, to_underlying(CSS::StyleGroupIndex::Count)> payloads;
-        for (size_t index = 0; index < payloads.size(); ++index)
-            payloads[index] = computed_values->style_group_payload(static_cast<CSS::StyleGroupIndex>(index));
+        // The engine composes the overlay over the element's current record, rebuilding only the
+        // groups the overlay writes. The animated platform font is the one thing it asks for.
+        struct OverlayFont {
+            CSS::ComputedStyleWorkingSet const& style;
+            DOM::Document const& document;
+            u32 tree_scope;
+        } overlay_font { *style, target->document(), element.style_scope().style_engine_tree_scope().value() };
+        auto animated_properties = style->animated_properties_snapshot();
+        CSS::StyleEngineFFI::FfiAnimationOverlayPayloadInput const payload_input {
+            .style_node = target->style_node_id().value(),
+            .pseudo_kind = CSS::pseudo_element_to_ffi(element.pseudo_element()),
+            .style_record = it.value.style_record_before_update.value(),
+            .longhand_table = style->computed_longhand_table(),
+            .animated_overlay = style->animated_overlay(),
+            .used_color_scheme = static_cast<u8>(to_underlying(style->color_scheme(target->document().page().preferred_color_scheme(), target->document().supported_color_schemes()))),
+            .display_before_box_type_transformation_raw = bit_cast<u32>(style->display_before_box_type_transformation()),
+            .callback_context = &overlay_font,
+            .font_group_inputs = [](void* context, void* inputs) {
+                auto const& font = *static_cast<OverlayFont const*>(context);
+                *static_cast<CSS::ComputedValuesFFI::FfiFontGroupBuildInputs*>(inputs) = font.style.font_group_build_inputs(font.document, font.tree_scope);
+            },
+        };
+        auto overlay_payloads = CSS::StyleEngineFFI::style_engine_build_animation_overlay_payloads(style_computer.style_engine().rust_handle(), &payload_input);
+        VERIFY(overlay_payloads.payloads);
+        ScopeGuard release_overlay_payloads = [&] {
+            CSS::StyleEngineFFI::style_engine_release_animation_overlay_payloads(overlay_payloads.storage);
+        };
+        if (overlay_payloads.rebuilt_every_group)
+            target->document().style_invalidation_counters().animated_style_full_builds++;
+        else
+            target->document().style_invalidation_counters().animated_style_overlay_builds++;
+        ReadonlySpan<void const*> payloads { overlay_payloads.payloads, overlay_payloads.payload_count };
         auto animated_property_invalidation = style_computer.style_engine().compare_animation_overlay(
             it.value.style_record_before_update,
             style->animated_overlay(),
@@ -900,8 +924,18 @@ AnimationUpdateContext::~AnimationUpdateContext()
             && (target->document().style_stabilization_has_style_reactions() || animated_property_invalidation.requires_base_style_recomputation)) {
             target->document().style_computer().record_transition_stabilization_baseline(element);
         }
-        auto publication = target->document().style_computer().publish_animation_overlay(element, *computed_values);
-        target->refresh_computed_style(element.pseudo_element(), publication.new_style_record);
+        bool const publishes_overlay = animated_properties && !animated_properties->is_empty();
+        auto publication = style_computer.style_engine().publish_animation_overlay(
+            target->style_node_id(),
+            CSS::pseudo_element_to_ffi(element.pseudo_element()),
+            publishes_overlay ? animated_properties->identity() : 0,
+            publishes_overlay ? animated_properties->overlay() : nullptr,
+            publishes_overlay ? payloads : ReadonlySpan<void const*> {});
+        // FIXME: A pseudo-element whose style the engine holds no assignment for still publishes its
+        //        whole style from the host.
+        if (!publication.has_value())
+            publication = style_computer.publish_animation_overlay(element, style_computer.build_animated_computed_values(*style, element, element.style_scope(), *element.computed_style()));
+        target->refresh_computed_style(element.pseudo_element(), publication->new_style_record);
         if (auto* svg_element = as_if<SVG::SVGElement>(*target); svg_element && !element.pseudo_element().has_value())
             svg_element->note_svg_paint_resource_description_may_have_changed();
 

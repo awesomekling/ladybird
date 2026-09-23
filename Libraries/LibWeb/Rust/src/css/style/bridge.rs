@@ -3626,6 +3626,113 @@ pub unsafe extern "C" fn style_engine_current_color_dependent_group_mask(
         .unwrap_or(u32::MAX)
 }
 
+/// What the host hands over to have an element's sampled animation overlay composed into the
+/// payloads of its overlay record.
+#[repr(C)]
+pub struct FfiAnimationOverlayPayloadInput {
+    pub style_node: u32,
+    pub pseudo_kind: u8,
+    /// The element's current style record, whose base the overlay composes over.
+    pub style_record: u64,
+    /// The longhand table the overlay was sampled over.
+    pub longhand_table: *const c_void,
+    pub animated_overlay: *const c_void,
+    pub used_color_scheme: u8,
+    pub display_before_box_type_transformation_raw: u32,
+    pub callback_context: *mut c_void,
+    /// The animated style's platform font, as a `ComputedValuesFFI::FfiFontGroupBuildInputs`, asked
+    /// for only where the font group is rebuilt.
+    pub font_group_inputs: Option<unsafe extern "C" fn(*mut c_void, *mut c_void)>,
+}
+
+/// The payloads of an element's overlay record, borrowed from `storage` until it is released with
+/// `style_engine_release_animation_overlay_payloads`. `payloads` is null where the engine holds no
+/// record to compose over.
+#[repr(C)]
+pub struct FfiAnimationOverlayPayloads {
+    pub payloads: *const *const c_void,
+    pub payload_count: usize,
+    pub rebuilt_every_group: bool,
+    pub storage: *mut c_void,
+}
+
+/// Compose an element's sampled animation overlay into the payloads of its overlay record; see
+/// `StyleEngine::build_animation_overlay_payloads`.
+///
+/// # Safety
+/// `engine`, `input` and everything it points to must be live for the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_build_animation_overlay_payloads(
+    engine: *const c_void,
+    input: *const FfiAnimationOverlayPayloadInput,
+) -> FfiAnimationOverlayPayloads {
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    let input = unsafe { &*input };
+    let missing = FfiAnimationOverlayPayloads {
+        payloads: std::ptr::null(),
+        payload_count: 0,
+        rebuilt_every_group: false,
+        storage: std::ptr::null_mut(),
+    };
+    let Some(node) = StyleNodeID::from_raw(input.style_node) else {
+        return missing;
+    };
+    let table = unsafe {
+        &*input
+            .longhand_table
+            .cast::<crate::css::computed_longhand_table::ComputedLonghandTable>()
+    };
+    let overlay = unsafe {
+        input
+            .animated_overlay
+            .cast::<crate::css::animated_overlay::AnimatedOverlay>()
+            .as_ref()
+    };
+    let mut font = || {
+        let mut inputs = std::mem::MaybeUninit::<crate::css::table_group_builder::FfiFontGroupBuildInputs>::uninit();
+        unsafe {
+            (input.font_group_inputs.expect("the host resolves the animated font"))(
+                input.callback_context,
+                inputs.as_mut_ptr().cast(),
+            );
+            inputs.assume_init()
+        }
+    };
+    let Some(payloads) = (unsafe {
+        engine.build_animation_overlay_payloads(
+            node,
+            input.pseudo_kind,
+            input.style_record,
+            table,
+            overlay,
+            input.used_color_scheme,
+            input.display_before_box_type_transformation_raw,
+            &mut font,
+        )
+    }) else {
+        return missing;
+    };
+    let payloads = Box::new(payloads);
+    FfiAnimationOverlayPayloads {
+        payloads: payloads.payloads.as_ptr(),
+        payload_count: payloads.payloads.len(),
+        rebuilt_every_group: payloads.rebuilt_every_group,
+        storage: Box::into_raw(payloads).cast(),
+    }
+}
+
+/// Give back the payloads `style_engine_build_animation_overlay_payloads` built.
+///
+/// # Safety
+/// `storage` must be the storage of an unreleased build, or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_release_animation_overlay_payloads(storage: *mut c_void) {
+    if storage.is_null() {
+        return;
+    }
+    drop(unsafe { Box::from_raw(storage.cast::<super::animations::AnimationOverlayPayloads>()) });
+}
+
 /// Computes property-dependent damage for the sparse changed values in an animation overlay.
 ///
 /// # Safety
