@@ -1151,7 +1151,7 @@ impl RetainedState {
         // transition decision itself is made below against the record the row moves away from.
         // Its CSS animations take the plan the new base settles, as for a record with none.
         let transitions_beneath_a_composition = animations_bind_the_record
-            && self.record_declares_transitions(old_style_record)
+            && self.record_owes_a_transition_decision(old_style_record)
             && (!self.css_defined_animations.node_runs_a_css_animation(node)
                 || (css_keyframes_are_engine_computable
                     && self.state_names_resolve_without_the_declaration_scope(node, state)))
@@ -1234,7 +1234,7 @@ impl RetainedState {
         // inherited animated value's after-change value from the ancestor that animates it, or
         // its parent's or its own display moved: the host applies a display change after the step,
         // as a C++ computation does. The step decides nothing for a hidden record.
-        let record_declares_transitions = self.record_declares_transitions(old_style_record);
+        let record_declares_transitions = self.record_owes_a_transition_decision(old_style_record);
         let old_record_is_hidden = self
             .computed_group_sets
             .style_record_view(old_style_record.raw())
@@ -2991,6 +2991,17 @@ impl RetainedState {
     /// Whether the table a record was computed into declares transitions at all, and whether any
     /// of the moved properties is a longhand one of them runs on. A record the engine cannot look
     /// into answers both, so the row that asks is refused.
+    /// Whether a transition step decides anything for a record: it declares transitions, or its
+    /// composition still runs one that a transition-property of `all` with no duration left keeps.
+    fn record_owes_a_transition_decision(&self, record: computed::FinalStyleRecordID) -> bool {
+        self.record_declares_transitions(record)
+            || self
+                .computed_group_sets
+                .style_record_view(record.raw())
+                .and_then(|view| unsafe { view.animated_overlay.as_ref() })
+                .is_some_and(|overlay| overlay.entries().iter().any(|entry| entry.result_of_transition))
+    }
+
     pub(super) fn record_declares_transitions(&self, record: computed::FinalStyleRecordID) -> bool {
         self.computed_group_sets
             .style_record_view(record.raw())
