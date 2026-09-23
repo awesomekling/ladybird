@@ -2357,8 +2357,13 @@ RefPtr<CSS::CustomPropertyData const> Element::custom_property_environment_of_en
     }
     RefPtr<CSS::CustomPropertyData const> inherited_data;
     if (auto parent = DOM::AbstractElement { const_cast<Element&>(*this) }.element_to_inherit_style_from(); parent.has_value()) {
-        if (auto parent_data = parent->custom_property_data())
+        if (auto parent_data = parent->custom_property_data()) {
             inherited_data = parent_data->inheritable(document());
+            // The engine inherits a parent's sampled animation overlay by the overlay's own
+            // identity; what the element holds of it is the overlay's inheritable part.
+            if (identity == parent_data->identity() && parent_data->is_animation_overlay_for(*parent))
+                return inherited_data;
+        }
     }
     installable = inherited_data && identity == inherited_data->identity();
     return installable ? inherited_data : nullptr;
