@@ -2392,7 +2392,7 @@ void Element::republish_animation_name_registry()
     CSS::record_element_animation_names(*this, indexable_animation_names(*style));
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, bool& did_change_custom_properties)
+CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison comparison)
 {
     VERIFY(parent());
     auto old_style_record = style_record_identity();
@@ -2480,9 +2480,13 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
             .old_style_record = old_style_record,
             .new_style_record = new_style_record,
         };
-        result = compute_required_invalidation_with_cache(style_computer, *old_computed_values, *new_computed_values, old_state, abstract_element, style_record_delta);
-        if (result.any_computed_value_changed)
-            counters.element_computed_style_changes++;
+        // A record installed beneath a composition is a base the sample composes again. Comparing
+        // it here would report every animated value as moved twice, once away and once back.
+        if (comparison == EngineRecordComparison::AtInstallation) {
+            result = compute_required_invalidation_with_cache(style_computer, *old_computed_values, *new_computed_values, old_state, abstract_element, style_record_delta);
+            if (result.any_computed_value_changed)
+                counters.element_computed_style_changes++;
+        }
         // The input record's declaration half described the cascade that produced the old record, so
         // the next computation on this element derives a fresh one.
         set_style_input_record(nullptr);
@@ -2515,8 +2519,35 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     publish_custom_property_names();
     if (new_style_record != old_style_record || did_change_custom_properties)
         invalidate_descendant_styles_depending_on_style_container_query();
-    apply_computed_style_to_layout_node_if_needed(result.invalidation);
+    if (comparison == EngineRecordComparison::AtInstallation)
+        apply_computed_style_to_layout_node_if_needed(result.invalidation);
     return result.invalidation;
+}
+
+CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::ComputedValues const& style_before_installation, CSS::RequiredInvalidationAfterStyleChange invalidation)
+{
+    auto& style_computer = document().style_computer();
+    auto const style_record = style_record_identity();
+    if (style_record != style_record_before_installation) {
+        auto new_computed_values = style_computer.computed_style_record_view(style_record);
+        VERIFY(new_computed_values);
+        ElementDependentInvalidationState old_state {
+            .layout_node = unsafe_layout_node(),
+            .list_counter_style = {},
+            .has_snapshot = false,
+        };
+        DOM::AbstractElement abstract_element { *this };
+        CSS::StyleEngine::StyleRecordDelta style_record_delta {
+            .old_style_record = style_record_before_installation,
+            .new_style_record = style_record,
+        };
+        auto result = compute_required_invalidation_with_cache(style_computer, style_before_installation, *new_computed_values, old_state, abstract_element, style_record_delta);
+        if (result.any_computed_value_changed)
+            document().style_invalidation_counters().element_computed_style_changes++;
+        invalidation |= result.invalidation;
+    }
+    apply_computed_style_to_layout_node_if_needed(invalidation);
+    return invalidation;
 }
 
 CSS::RequiredInvalidationAfterStyleChange Element::apply_style_engine_reaction(bool& did_change_custom_properties, StyleRecomputeMode mode, PseudoElementInputs pseudo_element_inputs)

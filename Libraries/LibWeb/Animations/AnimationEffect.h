@@ -48,6 +48,9 @@ struct AnimationUpdateContext {
         CSS::StyleRecordID style_record_before_update;
         RefPtr<CSS::ComputedStyleWorkingSet> target_style;
         GC::ConservativeVector<GC::Ref<KeyframeEffect>> effects;
+        // The caller compares the element's style before and after this update itself, and marks
+        // what layout and paint need from that one comparison.
+        bool caller_applies_invalidation { false };
     };
 
     AnimationUpdateContext();

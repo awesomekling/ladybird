@@ -186,14 +186,21 @@ static StyleEngine::PublishedStyleDelta make_materialize_gap_delta(StyleNodeID s
     };
 }
 
-static void sample_animations_for_installed_record(DOM::AbstractElement abstract_element)
+enum class SampleInvalidation {
+    Applied,
+    AppliedByCaller,
+};
+
+static void sample_animations_for_installed_record(DOM::AbstractElement abstract_element, SampleInvalidation sample_invalidation = SampleInvalidation::Applied)
 {
     auto record = abstract_element.style_record_identity();
     if (!record)
         return;
     auto& style_computer = abstract_element.document().style_computer();
     Animations::AnimationUpdateContext context;
-    context.elements.set(abstract_element, Animations::AnimationUpdateContext::ElementData { record, style_computer.reconstruct_computed_properties_for_animation(record) });
+    Animations::AnimationUpdateContext::ElementData data { record, style_computer.reconstruct_computed_properties_for_animation(record) };
+    data.caller_applies_invalidation = sample_invalidation == SampleInvalidation::AppliedByCaller;
+    context.elements.set(abstract_element, move(data));
 }
 
 static void sample_animations_for_installed_pseudos(DOM::Element& element)
@@ -788,6 +795,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             // The engine settled the element's record, and the pseudo-element records beside it:
             // C++ installs them. Under verification the ordinary computation runs instead and its
             // records must equal the engine's by value.
+            auto engine_record_comparison = DOM::Element::EngineRecordComparison::AtInstallation;
             auto apply_engine_computed_records = [&](DOM::Element::EnginePseudoElementRecords const& pseudo_element_records, bool acknowledge, bool defer_final_comparison) {
                 auto& style_engine = document.style_computer().style_engine();
                 document.style_computer().pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(DOM::AbstractElement { *element });
@@ -800,6 +808,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 bool const pseudo_only_record_stands = reaction.reaction == (StyleEngine::PublishedStyle | StyleEngine::PseudoInputsMayHaveChanged)
                     && reaction.new_style_record == reaction.old_style_record && !has_engine_pseudo_records;
                 if (verify_engine_computed_records && !pseudo_only_record_stands) {
+                    engine_record_comparison = DOM::Element::EngineRecordComparison::AtInstallation;
                     auto authoritative_custom_property_data = element->custom_property_data({});
                     if (authoritative_custom_property_data && authoritative_custom_property_data->is_animation_overlay_for({ *element }))
                         authoritative_custom_property_data = authoritative_custom_property_data->parent();
@@ -1001,7 +1010,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     // computation it stands for would have.
                     if (!element->has_style() || retried_after_installed_ancestors)
                         style_engine.consume_recorded_element_style_input_change(reaction.style_node);
-                    invalidation = element->apply_engine_computed_style_record(StyleRecordID { reaction.new_style_record }, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties);
+                    invalidation = element->apply_engine_computed_style_record(StyleRecordID { reaction.new_style_record }, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties, engine_record_comparison);
                 }
                 // What the row's container conditions read of its containers, recorded as the host
                 // records it for a row it computes.
@@ -1083,10 +1092,18 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     bool const defer_pseudos = verify_base_without_effects
                         || row_effect_debt & (StyleEngine::SettledRowTransitionDebt | StyleEngine::SettledRowOwesAnAnimationSample);
                     auto old_originating_style = element->computed_style();
+                    auto const old_style_record = element->style_record_identity();
                     bool const old_is_list_item = old_originating_style && old_originating_style->display().is_list_item();
                     auto const previous_pseudo_deferral = g_deferring_engine_pseudo_installation;
                     g_deferring_engine_pseudo_installation = defer_pseudos;
                     ScopeGuard restore_pseudo_deferral = [&] { g_deferring_engine_pseudo_installation = previous_pseudo_deferral; };
+                    // The host samples the element's animations over the record the row installs. A
+                    // composition the element held before is one the sample composes again, so the
+                    // row is compared once, after the sample.
+                    if (old_originating_style
+                        && (animation_plan.has_value() || element->has_relevant_animations() || element->has_associated_animations()
+                            || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
+                        engine_record_comparison = DOM::Element::EngineRecordComparison::AfterSample;
                     apply_engine_computed_records(pseudo_element_records, false, defer_final_comparison);
                     DOM::AbstractElement settled { *element };
                     if (animation_plan.has_value())
@@ -1123,8 +1140,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     // pins the record it moved away from first.
                     if (transition_debt == 2 && document.is_in_style_stabilization_epoch() && settled.has_style())
                         (void)document.style_computer().record_transition_stabilization_baseline(settled, StyleRecordID { reaction.old_style_record });
+                    bool const compares_after_sample = engine_record_comparison == DOM::Element::EngineRecordComparison::AfterSample;
                     if (settled.has_style() && (has_animation_effects || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
-                        sample_animations_for_installed_record(settled);
+                        sample_animations_for_installed_record(settled, compares_after_sample ? SampleInvalidation::AppliedByCaller : SampleInvalidation::Applied);
+                    if (compares_after_sample)
+                        invalidation = element->compare_engine_computed_style_record_after_sample(old_style_record, *old_originating_style, invalidation);
                     // Under verification the reference computation ran the step too, and then
                     // the engine record replaced what it published: the drain decides again,
                     // which the stabilization epoch is built to take, and publishes what it starts.
