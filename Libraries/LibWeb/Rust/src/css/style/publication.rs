@@ -1082,8 +1082,28 @@ impl RetainedState {
             && !self.record_transition_facts(old_style_record, &[]).0
             && !has_registered_declarations
             && self.tree.flat_tree_children(node).next().is_none();
+        // An element whose Web Animations hold no sampled overlay has the old record as its base.
+        // A leaf's new base is driven like any other record, and the host samples the effects
+        // over it. An element with children stays in C++: an effect on an inherited custom
+        // property holds no overlay, and its children would derive before the sample.
+        let effect_base_without_an_overlay = animations_bind_the_record
+            && !self.computed_group_sets.node_has_animation_overlay(node)
+            && !self.css_defined_animations.node_runs_a_css_animation(node)
+            && self.state_has_no_animation_name(state)
+            && self
+                .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
+                .is_empty()
+            && !self.record_transition_facts(old_style_record, &[]).0
+            && !has_registered_declarations
+            && !self.node_style_reads_custom_properties(node)
+            && self.tree.flat_tree_children(node).all(|child| child.is_text())
+            && !delta
+                .properties()
+                .iter()
+                .any(|&property| property_starts_animation(property));
         let derived_beneath_a_composition = css_animation_plan_without_an_overlay
             || css_base_without_an_overlay
+            || effect_base_without_an_overlay
             || full_drive_beneath_a_composition
                 && (!self.css_defined_animations.node_runs_a_css_animation(node)
                     || full_css_drive_beneath_a_composition)
