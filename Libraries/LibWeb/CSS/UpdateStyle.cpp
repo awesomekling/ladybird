@@ -1204,14 +1204,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 element->invalidate_descendant_styles_depending_on_style_container_query();
             }
 
-            // NB: Making deferred pseudo-element styles observable changes only their inputs.
-            //     The originating element's cascade and computed style remain valid.
-            if (!needs_regular_style_recompute && !needs_inherited_style_recompute && !needs_full_custom_property_recompute
-                && (reaction.reaction & StyleEngine::PseudoInputsMayHaveChanged) && element->has_style()) {
-                invalidation |= element->recompute_pseudo_element_styles();
-                sample_animations_for_installed_pseudos(*element);
-            }
-
             auto const* current_inherited_box_values = element->style_group<ComputedValues::InheritedBoxValues>();
             if (previous_visibility.has_value() && current_inherited_box_values
                 && *previous_visibility != static_cast<Visibility>(current_inherited_box_values->visibility)) {
