@@ -866,13 +866,22 @@ impl RetainedState {
                         return None;
                     }
                     // Only the environment moved: keep the old composition alive while the host
-                    // samples its WAAPI effects over a candidate with the new base environment.
+                    // samples its effects over a candidate with the new base environment. A CSS
+                    // animation also needs its plan applied before that sample.
                     if let Some(environment) = environment
                         && animations_bind_the_record
                     {
-                        let waapi_composition = self.computed_group_sets.node_has_animation_overlay(node)
+                        let css_animation_plan = if self.css_defined_animations.node_runs_a_css_animation(node)
+                            && self.animation_keyframes().a_first_record_may_start_an_animation()
+                        {
+                            self.settled_animation_plan_from_record(node, old_style_record)
+                        } else {
+                            None
+                        };
+                        let resampleable_composition = self.computed_group_sets.node_has_animation_overlay(node)
                             && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
-                            && !self.css_defined_animations.node_runs_a_css_animation(node)
+                            && (!self.css_defined_animations.node_runs_a_css_animation(node)
+                                || css_animation_plan.is_some())
                             && !self.record_transition_facts(old_style_record, &[]).0
                             && self
                                 .computed_group_sets
@@ -881,7 +890,7 @@ impl RetainedState {
                                 .is_some_and(|overlay| {
                                     overlay.entries().iter().all(|entry| !entry.result_of_transition)
                                 });
-                        if !waapi_composition {
+                        if !resampleable_composition {
                             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
                             return None;
                         }
@@ -898,6 +907,9 @@ impl RetainedState {
                         ));
                         let delta = assembly.delta;
                         self.note_engine_computed_record(node, delta, (generation, state), 0, 0, counters);
+                        if let Some(plan) = css_animation_plan {
+                            self.nodes_owing_animation_definitions.insert(node, plan);
+                        }
                         self.nodes_owing_an_animation_sample.insert(node);
                         return Some(delta);
                     }
