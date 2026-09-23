@@ -1613,8 +1613,7 @@ impl RetainedState {
                 declares_an_animation = true;
                 continue;
             }
-            // Anything else the first-record gate refuses is still the C++ computation's, and a
-            // transition declaration beside an animation one is decided with it.
+            // An unavailable input still leaves the record and its effects to C++.
             if self.first_record_winner_needs_cpp(state, property) {
                 return false;
             }
@@ -1721,13 +1720,13 @@ impl RetainedState {
         {
             return Some(delta);
         }
-        // A winner that starts an animation or reads the counter-style environment keeps the
-        // record in C++. The font-phase longhands feed no group of their own: the full drive
-        // resolves the font from them and rebuilds every group, rejecting the values the font
-        // resolution does not pass on yet.
+        // A winner that reads an unavailable environment keeps the record in C++. An animation
+        // declaration also does unless the engine can supply its install-time animation plan.
+        // Font-phase longhands feed no group of their own: the full drive resolves the font from
+        // them and rebuilds every group, rejecting values the font resolution does not pass on yet.
         for property in self.winner_groups.semantic_delta_properties(None, state) {
             if self.first_record_winner_needs_cpp(state, property)
-                && !(owes_an_animation_plan && longhand_declares_a_css_animation(property))
+                || (longhand_declares_a_css_animation(property) && !owes_an_animation_plan)
             {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
@@ -2075,8 +2074,9 @@ impl RetainedState {
         Some(delta)
     }
 
-    /// Whether a first record's winner keeps the record's computation in C++: a property that
-    /// starts an animation or transition, or reads the counter-style environment. The font-phase
+    /// Whether a first record's winner needs an input that the record drive cannot resolve.
+    /// Transition longhands are computed into the record and applied from it by the host.
+    /// Animation longhands also are when the engine can provide an animation plan. Font-phase
     /// longhands without a group of their own are inputs of the font group the full drive builds.
     fn first_record_winner_needs_cpp(&self, state: CascadeStateID, property: u16) -> bool {
         use crate::css::property_metadata::property_id as prop;
@@ -2096,8 +2096,7 @@ impl RetainedState {
         }
         // An anchor name is one the host registers from whichever record it installs, a first
         // record included: `Element::update_anchor_name_registry` runs on that install too.
-        property_starts_animation(property)
-            || (computed_group_dependency_mask(property).is_none() && !font_group_carries_longhand(property))
+        computed_group_dependency_mask(property).is_none() && !font_group_carries_longhand(property)
     }
 
     /// What a record this node publishes must name, when what it computed reads the registry.

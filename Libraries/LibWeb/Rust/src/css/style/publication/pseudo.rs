@@ -957,7 +957,7 @@ impl RetainedState {
         }
         let state = self.with_cascade_interning_counters(|groups| groups.intern_sorted(&winners, None), counters);
         for property in self.winner_groups.semantic_delta_properties(None, state) {
-            if self.first_record_winner_needs_cpp(state, property) {
+            if self.first_record_winner_needs_cpp(state, property) || property_starts_animation(property) {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
             }
