@@ -816,7 +816,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         previous_pseudo_element_records[kind] = element->style_record_identity(static_cast<PseudoElement>(kind));
                     bool const production_computed_value_changed = production_packed & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged)
                         && !style_engine.style_records_match_for_verification(reaction.style_node, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, previous_style_record);
-                    style_engine.consume_recorded_element_style_input_change(reaction.style_node);
+                    // A child reaction derived earlier in this batch can still be owed after the
+                    // engine's record installs. The reference computation must leave it pending.
                     bool verification_did_change_custom_properties = false;
                     // The dependency marks the row leaves on the element. They are what the
                     // invalidators read afterwards, and they are cleared and rewritten by a C++
