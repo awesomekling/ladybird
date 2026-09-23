@@ -1,0 +1,6 @@
+composed color: rgb(0, 128, 0)
+cancellation stayed in the engine: true
+canceled target color: rgb(255, 0, 0)
+canceled inherited color: rgb(255, 0, 0)
+changed target color: rgb(0, 0, 255)
+changed inherited color: rgb(0, 0, 255)
