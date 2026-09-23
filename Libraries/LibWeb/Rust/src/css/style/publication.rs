@@ -1067,7 +1067,6 @@ impl RetainedState {
             && (!self.record_declares_transitions(old_style_record)
                 || redrives_a_standing_composition
                 || self.css_defined_animations.node_runs_a_css_animation(node))
-            && !has_registered_declarations
             && self
                 .computed_group_sets
                 .style_record_view(old_style_record.raw())
@@ -1121,7 +1120,6 @@ impl RetainedState {
                 .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
                 .is_empty()
             && !self.record_declares_transitions(old_style_record)
-            && !has_registered_declarations
             && (self.tree.flat_tree_children(node).all(|child| child.is_text())
                 || !self
                     .animation_effect_descriptions
@@ -1147,7 +1145,6 @@ impl RetainedState {
             && (!names_an_animation || css_keyframes_are_engine_computable)
             && self.effects_sample_over_a_new_base(node, TransitionEffects::Refused)
             && !self.record_declares_transitions(old_style_record)
-            && !has_registered_declarations
             && is_leaf;
         // A record that declares transitions can take a newly driven base beneath its composition
         // in the same way; a child derived in the same batch waits for that composition. The
@@ -1169,8 +1166,7 @@ impl RetainedState {
                                 && !property_feeds_post_compute_adjustment(entry.property)
                         })
                     })
-                })
-            && !has_registered_declarations;
+                });
         let derived_beneath_a_composition = css_animation_plan_without_an_overlay
             || transitions_beneath_a_composition
             || css_base_without_an_overlay
