@@ -406,29 +406,41 @@ impl RetainedState {
                 let waapi_leaf_composition = !view.animated_overlay.is_null()
                     && self.tree.flat_tree_children(node).all(|child| child.is_text())
                     && table.is_some_and(|table| !drive::table_names_animations(table));
-                // A pseudo whose effects are all CSS animations it still names is replanned from
-                // its driven table below, and the host samples those animations after installation.
-                let planned_css_composition = kind != BACKDROP
+                // An idle effect composes nothing. A pseudo whose other effects are all CSS
+                // animations it still names is replanned from its driven table below, and the host
+                // samples those animations after installation.
+                let effects = self
+                    .element_animation_timing_rows(node, kind + 1)
+                    .iter()
+                    .filter(|row| !row.is_idle());
+                let replans_css_animations = kind != BACKDROP
                     && states[usize::from(kind)].is_some_and(|state| !self.state_has_no_animation_name(state))
-                    && self.animation_keyframes().only_the_document_scope_defines_keyframes()
-                    && self
-                        .element_animation_timing_rows(node, kind + 1)
-                        .iter()
+                    && self.animation_keyframes().only_the_document_scope_defines_keyframes();
+                let planned_css_composition = replans_css_animations
+                    && effects
+                        .clone()
                         .all(|row| row.owned_css_animation_index(node, kind + 1).is_some());
+                // With no composition in the old record, the host runs the pseudo's transition step
+                // against that record when it installs the driven one.
+                let transition_step_on_install = view.animated_overlay.is_null()
+                    && kind != BACKDROP
+                    && effects.clone().all(|row| {
+                        row.is_css_transition()
+                            || (replans_css_animations && row.owned_css_animation_index(node, kind + 1).is_some())
+                    });
                 // A pseudo with its own effect or transition needs the host's composition step.
                 // An overlay inherited from its element can be replaced by a full drive from
                 // the element's final style, and the host samples the pseudo after installation.
-                let needs_host_animation_step = (!waapi_leaf_composition
-                    && !planned_css_composition
-                    && !self.element_animation_timing_rows(node, kind + 1).is_empty())
-                    || transitioning
-                    || (unsafe { view.animated_overlay.as_ref() })
-                        .is_some_and(|overlay| overlay.entries().iter().any(|entry| entry.result_of_transition))
-                    || states[usize::from(kind)].is_some_and(|state| {
-                        self.winner_groups
-                            .winner_in_state(state, crate::css::property_metadata::property_id::TRANSITION_PROPERTY)
-                            .is_some()
-                    });
+                let needs_host_animation_step = !transition_step_on_install
+                    && ((!waapi_leaf_composition && !planned_css_composition && effects.clone().next().is_some())
+                        || transitioning
+                        || (unsafe { view.animated_overlay.as_ref() })
+                            .is_some_and(|overlay| overlay.entries().iter().any(|entry| entry.result_of_transition))
+                        || states[usize::from(kind)].is_some_and(|state| {
+                            self.winner_groups
+                                .winner_in_state(state, crate::css::property_metadata::property_id::TRANSITION_PROPERTY)
+                                .is_some()
+                        }));
                 if needs_host_animation_step {
                     self.note_pseudo_bail_site(node, "engineComputedRecordBailRecordOverlay@pseudo.rs:398");
                     counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
