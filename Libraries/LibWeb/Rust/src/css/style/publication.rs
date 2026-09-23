@@ -87,6 +87,19 @@ impl RootFontInputs {
 }
 
 impl RetainedState {
+    /// The inheritance parent a node's record is computed from. C++ styles an element whose
+    /// inheritance parent has no style, such as a slot inside a `display: none` subtree, from the
+    /// initial values, the way it styles the document element. Only a retry can tell such a
+    /// parent from one whose record the host has yet to install: it runs after the host installed
+    /// every preceding row.
+    pub(super) fn record_inheritance_parent(&self, node: StyleNodeID) -> Option<StyleNodeID> {
+        self.tree.inheritance_parent(node).filter(|&parent| {
+            !self.inheritance_parents_are_installed
+                || self.computed_group_sets.assigned_style_record(parent).is_some()
+                || self.computed_group_sets.sampled_composition_identity(parent).is_some()
+        })
+    }
+
     pub(crate) fn retained_highlight_inheritance_parent_style_record(
         &self,
         node: StyleNodeID,
@@ -789,7 +802,7 @@ impl RetainedState {
         // declaring none keeps its record's, which is the parent's; a moved environment
         // republishes the record under the new one.
         let mut environment = {
-            let parent_environment = match self.tree.inheritance_parent(node) {
+            let parent_environment = match self.record_inheritance_parent(node) {
                 Some(parent) => {
                     let Some(parent_environment) =
                         self.computed_group_sets.custom_property_environment_identity(parent)
@@ -1262,7 +1275,7 @@ impl RetainedState {
         // Partial drives can share across parents whose inherited inputs agree. Keep the full
         // parent record in the key when a non-inherited property explicitly inherits, including
         // through substitution, or when a full drive may read more of the parent's style.
-        let parent = self.tree.inheritance_parent(node);
+        let parent = self.record_inheritance_parent(node);
         let parent_record = parent.and_then(|parent| self.computed_group_sets.assigned_style_record(parent));
         let mut cohort_parent = RecordDeltaParent::Exact(parent_record.map_or(0, |record| record.raw()));
         if !full_drive
@@ -1509,7 +1522,7 @@ impl RetainedState {
                 if driver_input_moved {
                     groups_to_rebuild = (1 << crate::css::table_group_builder::group_index::COUNT) - 1;
                 }
-                let subject = self.element_drive_subject(node, counters)?;
+                let subject = self.element_drive_subject(node);
                 let driven = self.engine_full_drive(
                     subject,
                     Some(old_style_record),
@@ -2091,7 +2104,7 @@ impl RetainedState {
         let animates =
             self.computed_group_sets.adjustment_facts(node) & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
                 || self.computed_group_sets.node_has_animation_overlay(node);
-        let current = match self.tree.inheritance_parent(node) {
+        let current = match self.record_inheritance_parent(node) {
             Some(parent) if !animates => self
                 .current_custom_property_environment(parent, inputs, scratch)
                 .and_then(|parent_environment| {
@@ -2129,13 +2142,9 @@ impl RetainedState {
         }
         let facts = self.computed_group_sets.adjustment_facts(node);
         let mut explicitly_inherited_groups = 0;
-        let parent = self.tree.inheritance_parent(node);
-        // Only the document element is styled without an inheritance parent: it inherits from the
-        // initial values.
-        if parent.is_none() && facts & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT == 0 {
-            counters.bump(Counter::EngineComputedRecordBailRecordParent);
-            return None;
-        }
+        // An element without a styled inheritance parent, the document element among them,
+        // inherits from the initial values.
+        let parent = self.record_inheritance_parent(node);
         let parent_record = match parent {
             Some(parent) => match self
                 .computed_group_sets
@@ -3582,21 +3591,14 @@ impl RetainedState {
         .apply_to(inputs);
     }
 
-    fn element_drive_subject(&mut self, node: StyleNodeID, counters: &mut Counters) -> Option<DriveSubject> {
-        let facts = self.computed_group_sets.adjustment_facts(node);
-        let parent = self.tree.inheritance_parent(node);
-        // Only the document element is styled without an inheritance parent.
-        if parent.is_none() && facts & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT == 0 {
-            counters.bump(Counter::EngineComputedRecordBailRecordParent);
-            return None;
-        }
-        Some(DriveSubject {
+    fn element_drive_subject(&self, node: StyleNodeID) -> DriveSubject {
+        DriveSubject {
             target: computed::ComputedStyleTarget::new(node, u8::MAX),
             recascade_node: Some(node),
-            parent,
-            facts,
+            parent: self.record_inheritance_parent(node),
+            facts: self.computed_group_sets.adjustment_facts(node),
             highlight_parent: None,
-        })
+        }
     }
 
     /// A later element alike in what a first record is computed from takes this record, the way a
@@ -4292,7 +4294,7 @@ impl RetainedState {
         if pseudo_kind.is_some() {
             return self.computed_group_sets.custom_property_environment_identity(node);
         }
-        match self.tree.inheritance_parent(node) {
+        match self.record_inheritance_parent(node) {
             Some(parent) => self.computed_group_sets.custom_property_environment_identity(parent),
             None => Some(0),
         }
@@ -7608,7 +7610,15 @@ impl StyleEngineState {
         if let Some(index) = armed {
             self.host.armed_retry_nodes.remove(index);
         }
-        let bail_marks = (armed.is_none() && seal::is_reporting()).then(|| counters.record_bail_marks());
+        // A row declined for its uninstalled parent retries with that parent installed. Whatever
+        // refuses it then is why it reaches the host.
+        let declined_for_parent = self
+            .retained
+            .host_entry_causes
+            .get(&node)
+            .is_some_and(|(cause, _)| *cause == "engineComputedRecordBailRecordParent");
+        let bail_marks =
+            ((armed.is_none() || declined_for_parent) && seal::is_reporting()).then(|| counters.record_bail_marks());
         let retried = self.retry_engine_record_after_ancestor(node, armed.is_some(), counters);
         if retried.style_record == 0 {
             if let Some(bail_marks) = bail_marks {
@@ -7655,8 +7665,10 @@ impl StyleEngineState {
             ..EngineComputedRecordScratch::default()
         };
         let mut suspended_memory = MemoryLease::new(MemoryCategory::BatchScratch);
+        self.retained.inheritance_parents_are_installed = true;
         let style_record =
             self.retry_engine_record_after_ancestor_loop(node, armed, &mut scratch, &mut suspended_memory, counters);
+        self.retained.inheritance_parents_are_installed = false;
         counters.add(
             Counter::RetryAfterAncestorMicroseconds,
             u64::try_from(started_at.elapsed().as_micros()).unwrap_or(u64::MAX),
