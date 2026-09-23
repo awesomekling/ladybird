@@ -2363,6 +2363,248 @@ impl super::StyleEngine {
     }
 }
 
+/// The groups an animation overlay record rebuilds over its base, and the storage their payloads
+/// travel back to the host in.
+pub(crate) struct AnimationOverlayPayloads {
+    /// Every group's payload: the rebuilt ones, which this owns a reference to, and the base's,
+    /// which the record it came from keeps alive.
+    pub(crate) payloads: Vec<*const std::ffi::c_void>,
+    pub(crate) rebuilt_groups: u32,
+    /// Whether the overlay named a value the groups could not be told from, so every group was
+    /// rebuilt.
+    pub(crate) rebuilt_every_group: bool,
+}
+
+impl Drop for AnimationOverlayPayloads {
+    fn drop(&mut self) {
+        for (group, payload) in self.payloads.iter().enumerate() {
+            if self.rebuilt_groups & (1 << group) != 0 && !payload.is_null() {
+                crate::css::computed_values::release_group_payload(group, *payload);
+            }
+        }
+    }
+}
+
+impl super::StyleEngine {
+    /// The payloads of the record an element's sampled animation overlay composes over its current
+    /// record: the groups a value of the overlay lives in, and the groups that read an animated
+    /// `color`, rebuilt from the longhand table with the overlay applied, and every other group the
+    /// base's. `None` where the engine holds no such record.
+    ///
+    /// `font` supplies the platform font of the animated style, which only the host can resolve,
+    /// where the font group has to be rebuilt.
+    ///
+    /// # Safety
+    /// `table` must be the longhand table the overlay was sampled over, and both must be live for
+    /// the call.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the overlay, its table and the host's per-element answers travel together"
+    )]
+    pub(crate) unsafe fn build_animation_overlay_payloads(
+        &self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+        style_record: u64,
+        table: &crate::css::computed_longhand_table::ComputedLonghandTable,
+        overlay: Option<&crate::css::animated_overlay::AnimatedOverlay>,
+        used_color_scheme: u8,
+        display_before_box_type_transformation_raw: u32,
+        font: &mut dyn FnMut() -> crate::css::table_group_builder::FfiFontGroupBuildInputs,
+    ) -> Option<AnimationOverlayPayloads> {
+        use crate::css::computed_value_types::{
+            STYLE_GROUP_INDEX_ANCHOR, STYLE_GROUP_INDEX_FONT, STYLE_GROUP_INDEX_SURROUND,
+        };
+        use crate::css::table_group_builder::group_index;
+
+        let view = self.style_record_view(style_record)?;
+        let base_payloads = match view.base_payloads.is_empty() {
+            true => view.payloads,
+            false => view.base_payloads,
+        };
+        let mut result = AnimationOverlayPayloads {
+            payloads: SharedPayload::as_pointer_slice(base_payloads).to_vec(),
+            rebuilt_groups: 0,
+            rebuilt_every_group: false,
+        };
+        let all_groups = (1u32 << group_index::COUNT) - 1;
+        // An overlay that animates nothing leaves the base as it is: publishing it releases the
+        // element's overlay record.
+        let Some(overlay) = overlay.filter(|overlay| !overlay.is_empty()) else {
+            result.rebuilt_every_group = true;
+            return Some(result);
+        };
+        let mut groups = 0u32;
+        for entry in overlay.entries() {
+            let Some(group) = crate::css::property_metadata::property_style_group_index(entry.property) else {
+                groups = all_groups;
+                result.rebuilt_every_group = true;
+                break;
+            };
+            groups |= 1 << group;
+            if entry.property == crate::css::property_metadata::property_id::COLOR {
+                match self.current_color_dependent_group_mask(node, pseudo_kind) {
+                    Some(dependent) => groups |= dependent,
+                    None => {
+                        groups = all_groups;
+                        result.rebuilt_every_group = true;
+                        break;
+                    }
+                }
+            }
+        }
+        // The surround group duplicates `position-anchor` for layout, so rebuilding the anchor
+        // group refreshes it too.
+        if groups & (1 << STYLE_GROUP_INDEX_ANCHOR) != 0 {
+            groups |= 1 << STYLE_GROUP_INDEX_SURROUND;
+        }
+
+        // Colors resolve against the element's font metrics as they stood when the overlay was last
+        // published, or against the animated font where the overlay rebuilds the font group.
+        let inputs = self.document_style_computation_inputs()?;
+        let font_inputs = (groups & (1 << STYLE_GROUP_INDEX_FONT) != 0).then(&mut *font);
+        let values = ComputedValuesView::new(SharedPayload::as_pointer_slice(view.payloads));
+        let font_metrics = match &font_inputs {
+            Some(font) => crate::css::style_compute::FfiFontMetrics {
+                font_size: crate::css::css_pixels::CssPixels::from_raw(font.font_size_raw).to_double(),
+                x_height: super::publication::drive_font_metric(font.font_x_height),
+                cap_height: super::publication::drive_font_metric(font.font_ascent),
+                zero_advance: super::publication::drive_font_metric(font.font_zero_advance),
+                line_height: crate::css::css_pixels::CssPixels::from_raw(font.line_height_used_raw).to_double(),
+            },
+            None => crate::css::style_compute::FfiFontMetrics {
+                font_size: values.font_size().to_double(),
+                x_height: super::publication::drive_font_metric(values.font_x_height()),
+                cap_height: super::publication::drive_font_metric(values.font_ascent()),
+                zero_advance: super::publication::drive_font_metric(values.font_zero_advance()),
+                line_height: values.line_height().to_double(),
+            },
+        };
+        let length = crate::css::style_compute::FfiLengthResolutionContext {
+            viewport_width: inputs.viewport_width,
+            viewport_height: inputs.viewport_height,
+            font_metrics,
+            root_font_metrics: crate::css::style_compute::FfiFontMetrics {
+                font_size: inputs.root_font_size,
+                x_height: inputs.root_font_x_height,
+                cap_height: inputs.root_font_cap_height,
+                zero_advance: inputs.root_font_zero_advance,
+                line_height: inputs.root_line_height,
+            },
+            font_metrics_depend_on_viewport_metrics: view.dependency_flags & (1 << 1) != 0,
+            root_font_metrics_depend_on_viewport_metrics: inputs.root_font_metrics_depend_on_viewport_metrics,
+            has_container_width_basis: false,
+            has_container_height_basis: false,
+            container_width_basis: 0.0,
+            container_height_basis: 0.0,
+            container_width_basis_depends_on_viewport_metrics: false,
+            container_height_basis_depends_on_viewport_metrics: false,
+            subject_inline_axis_is_horizontal: values.writing_mode()
+                == crate::css::css_enums::writing_mode::HORIZONTAL_TB,
+            resolved_viewport_relative_length: std::ptr::null_mut(),
+        };
+        // The element's own color resolves first, since every other group resolves `currentcolor`
+        // against it.
+        let color_value = table
+            .effective_value(Some(overlay), crate::css::property_metadata::property_id::COLOR, true)
+            .value;
+        let mut color_input = crate::css::color_resolution::FfiColorResolutionInput {
+            has_scheme: true,
+            scheme: used_color_scheme,
+            has_current_color: true,
+            current_color_rgba: [0, 0, 0, 255],
+            current_color_value: color_value,
+            length: (&raw const length).cast(),
+            channels_present: [false; 13],
+            channels: [0.0; 13],
+            has_channels: false,
+        };
+        let color =
+            unsafe { crate::css::color_resolution::rust_style_value_to_color(color_value, &raw const color_input) };
+        if color.resolved {
+            color_input.current_color_rgba = color.rgba;
+        }
+
+        // An animated `overflow` is adjusted the way a computed one is: a `visible` or `clip`
+        // beside a scrolling axis computes to `auto` or `hidden`.
+        let overflow_keyword = |property: u16| match table.effective_value(Some(overlay), property, true).value {
+            value if value.is_null() => None,
+            value => match unsafe { &*value.cast::<crate::css::style_value::StyleValueData>() } {
+                crate::css::style_value::StyleValueData::Keyword { keyword } => Some(*keyword),
+                _ => None,
+            },
+        };
+        let mut adjusted_overlay = None;
+        if let (Some(x), Some(y)) = (
+            overflow_keyword(crate::css::property_metadata::property_id::OVERFLOW_X),
+            overflow_keyword(crate::css::property_metadata::property_id::OVERFLOW_Y),
+        ) {
+            let effective = crate::css::style_compute::resolve_effective_overflow_keywords(x, y);
+            if effective.changed_x || effective.changed_y {
+                let mut adjusted = overlay.clone();
+                for (changed, property, keyword) in [
+                    (
+                        effective.changed_x,
+                        crate::css::property_metadata::property_id::OVERFLOW_X,
+                        effective.x_keyword,
+                    ),
+                    (
+                        effective.changed_y,
+                        crate::css::property_metadata::property_id::OVERFLOW_Y,
+                        effective.y_keyword,
+                    ),
+                ] {
+                    if !changed {
+                        continue;
+                    }
+                    // An axis the overlay does not animate is adjusted over the base value, which
+                    // must win over an important declaration the way the adjusted value would.
+                    let (inherited, result_of_transition) = overlay
+                        .get(property)
+                        .map_or((false, true), |entry| (entry.inherited, entry.result_of_transition));
+                    adjusted.set_owned(
+                        property,
+                        crate::css::style_value::RetainedStyleValueData::from_owned(
+                            crate::css::style_value::StyleValueData::Keyword { keyword },
+                        ),
+                        inherited,
+                        result_of_transition,
+                    );
+                }
+                adjusted_overlay = Some(adjusted);
+            }
+        }
+
+        let build_inputs = crate::css::table_group_builder::FfiTableGroupBuildInputs {
+            color_input: (&raw const color_input).cast(),
+            used_color_scheme,
+            animated_overlay: adjusted_overlay.as_ref().unwrap_or(overlay),
+            box_display_before_transformation_raw: display_before_box_type_transformation_raw,
+            font: font_inputs.as_ref().map_or(std::ptr::null(), std::ptr::from_ref),
+        };
+        let parents = [std::ptr::null::<std::ffi::c_void>(); group_index::COUNT];
+        let mut rebuilt = [std::ptr::null::<std::ffi::c_void>(); group_index::COUNT];
+        unsafe {
+            crate::css::table_group_builder::rust_build_group_payloads_from_table(
+                table,
+                groups,
+                parents.as_ptr(),
+                &raw const build_inputs,
+                rebuilt.as_mut_ptr(),
+                group_index::COUNT,
+            );
+        }
+        for (group, payload) in rebuilt.into_iter().enumerate() {
+            if groups & (1 << group) == 0 || payload.is_null() {
+                continue;
+            }
+            result.payloads[group] = payload;
+            result.rebuilt_groups |= 1 << group;
+        }
+        Some(result)
+    }
+}
+
 impl super::RetainedState {
     pub(crate) fn committed_container_box_applies(&self, committed_record: u64, current_record: u64) -> bool {
         if committed_record == current_record {

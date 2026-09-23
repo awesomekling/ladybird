@@ -166,6 +166,8 @@ public:
     float flood_opacity() const;
 
     ValueComparingNonnullRefPtr<Gfx::FontCascadeList const> computed_font_list(FontComputer const&, u32 tree_scope) const;
+    // The platform font the font group is built from. The font list it names stays cached here.
+    ComputedValuesFFI::FfiFontGroupBuildInputs font_group_build_inputs(DOM::Document const&, u32 tree_scope) const;
     ValueComparingNonnullRefPtr<Gfx::Font const> first_available_computed_font(FontComputer const&, u32 tree_scope) const;
 
     int math_depth() const;
