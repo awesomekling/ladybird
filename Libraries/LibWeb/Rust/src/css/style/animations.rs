@@ -2195,15 +2195,36 @@ impl AnimationKeyframes {
         element_tree_scope: TreeScopeID,
         name: &CssString,
     ) -> Option<&PublishedKeyframesSet> {
+        self.resolve_in_declaration_scope(
+            self.scope_of_shadow_root(declaration_shadow_root_identity),
+            element_tree_scope,
+            name,
+        )
+    }
+
+    /// The tree scope a shadow root's host-side pointer identity names, or `None` for the
+    /// document's identity 0 and for a shadow root that defines no keyframes.
+    #[must_use]
+    pub(crate) fn scope_of_shadow_root(&self, shadow_root_identity: usize) -> Option<TreeScopeID> {
+        match shadow_root_identity {
+            0 => None,
+            identity => self.scope_by_shadow_root.get(&identity).copied(),
+        }
+    }
+
+    /// The same lookup, for a declaration whose tree scope is already known. `None` is the scope of
+    /// a declaration the document or the element itself holds, which has none of its own.
+    pub(crate) fn resolve_in_declaration_scope(
+        &self,
+        declaration_scope: Option<TreeScopeID>,
+        element_tree_scope: TreeScopeID,
+        name: &CssString,
+    ) -> Option<&PublishedKeyframesSet> {
         if self.scopes.is_empty() {
             return None;
         }
         let name = KeyframesName(name.clone());
-        if declaration_shadow_root_identity != 0
-            && let Some(scope) = self
-                .scope_by_shadow_root
-                .get(&declaration_shadow_root_identity)
-                .copied()
+        if let Some(scope) = declaration_scope
             && let Some(set) = self.in_scope(scope, &name)
         {
             return Some(set);
