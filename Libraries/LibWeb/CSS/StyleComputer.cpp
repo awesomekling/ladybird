@@ -125,6 +125,19 @@ void set_reference_style_without_effects(bool enabled)
     g_reference_style_without_effects = enabled;
 }
 
+// A host computation runs the transition step right after installing its record, and hands the
+// step's invalidation to its own caller, which reacts to it like to any other style change. The
+// step then asks for no further style work of its own: the host computation layers no provisional
+// transition, so a base recomputation it asked for would only undo what the step published.
+static thread_local bool g_transition_step_follow_up_left_to_caller = false;
+
+void set_transition_step_follow_up_left_to_caller(bool);
+
+void set_transition_step_follow_up_left_to_caller(bool left_to_caller)
+{
+    g_transition_step_follow_up_left_to_caller = left_to_caller;
+}
+
 static ComputedValuesFFI::FfiUtf16View ffi_utf16_view(Utf16View view)
 {
     return {
@@ -1761,15 +1774,16 @@ static void collect_dimension_attribute(Vector<StyleProperty>& properties, DOM::
     properties.append({ .property_id = property_id, .value = parsed_value.release_nonnull() });
 }
 
-// The whole transition step for a record the engine settled, run once the record is installed.
+// The whole transition step for an element's record, run once the record is installed, whether
+// the engine settled it or the host computed it.
 //
-// The step needs two styles: the one the element moved away from, which the row names, and the one
-// it moved to, which is the record the host has just installed. Both are records, and the step
-// reads the before-change half only through `decide_transitions`' baseline, so naming the row's old
-// record is the whole of what a deferred row needs. A transition the step starts layers its current
+// The step needs two styles: the one the element moved away from, which the caller names, and the
+// one it moved to, which is the record just installed. Both are records, and the step reads the
+// before-change half only through `decide_transitions`' baseline, so naming the old record is the
+// whole of what the step needs. A transition the step starts layers its current
 // values into the working set to keep the frame from jumping; publishing that is the same animation
 // overlay publication an animation sampling performs, on the same element, against the same base.
-RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_settled_record(DOM::AbstractElement abstract_element, StyleRecordID before_change_style_record) const
+RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_installed_record(DOM::AbstractElement abstract_element, StyleRecordID before_change_style_record) const
 {
     auto installed_style = abstract_element.computed_style();
     if (!installed_style)
@@ -1809,7 +1823,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_sett
     auto const* installed_overlay = static_cast<ComputedValuesFFI::AnimatedOverlay const*>(m_style_engine.style_record_view(installed_style_record).animated_overlay);
     if (installed_overlay)
         new_style->install_animated_overlay_from_rust(Badge<StyleComputer> {}, ComputedValuesFFI::rust_animated_overlay_clone(installed_overlay));
-    start_needed_transitions(*new_style, abstract_element, nullptr, before_change_style_record);
+    start_needed_transitions(*new_style, abstract_element, before_change_style_record);
     // Starting a transition associates a new animation with the element.
     abstract_element.element().publish_animation_timing_rows();
     clear_computation_context_caches();
@@ -1819,14 +1833,20 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_sett
     // element holds a transition. A record the row installed without an overlay holds none, so this
     // does the same. An installed overlay is published when the step changed it, including when it
     // cancelled the last running transition.
+    auto animated_properties = new_style->animated_properties_snapshot();
+    bool const has_animated_properties = animated_properties && !animated_properties->is_empty();
     if (installed_overlay) {
         if (!m_style_engine.animation_overlay_changed(installed_style_record, new_style->animated_overlay()))
             return {};
-    } else if (auto animated_properties = new_style->animated_properties_snapshot(); !animated_properties || animated_properties->is_empty()) {
+    } else if (!has_animated_properties) {
         return {};
     }
 
-    auto computed_values = build_animated_computed_values(*new_style, abstract_element, abstract_element.style_scope(), *installed_style);
+    // A step that cancelled the last running transition leaves the unanimated base the installed
+    // style already carries, so that is the style to publish rather than one rebuilt in full.
+    auto computed_values = has_animated_properties
+        ? build_animated_computed_values(*new_style, abstract_element, abstract_element.style_scope(), *installed_style)
+        : ComputedValues::Builder { installed_style->base_values() }.build();
     Array<void const*, to_underlying(StyleGroupIndex::Count)> payloads;
     for (size_t index = 0; index < payloads.size(); ++index)
         payloads[index] = computed_values->style_group_payload(static_cast<StyleGroupIndex>(index));
@@ -1842,7 +1862,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_sett
         svg_element->note_svg_paint_resource_description_may_have_changed();
     // Box-type, overflow and text-alignment adjustments consume the unadjusted base values, which
     // an animation-only overlay update deliberately does not reconstruct.
-    if (animated_property_invalidation.requires_base_style_recomputation)
+    if (animated_property_invalidation.requires_base_style_recomputation && !g_transition_step_follow_up_left_to_caller)
         const_cast<StyleComputer&>(*this).style_engine().record_derived_element_style_input_change(
             element.style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle);
     auto invalidation = decode_style_invalidation(animated_property_invalidation.invalidation);
@@ -1860,7 +1880,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_sett
         if (descendants_may_observe_non_inherited_properties)
             inherited_style_groups = RequiredInvalidationAfterStyleChange::all_inherited_style_groups;
     }
-    if (!abstract_element.pseudo_element().has_value() && inherited_style_groups != 0)
+    if (!abstract_element.pseudo_element().has_value() && inherited_style_groups != 0 && !g_transition_step_follow_up_left_to_caller)
         const_cast<StyleComputer&>(*this).style_engine().record_flat_tree_descendant_style_input_changes(element.style_node_id(), StyleEngine::InheritedStyle, inherited_style_groups);
     // Refreshing the computed style published the record to the layout node; inherited values and
     // image resources need the C++ side effects on top.
@@ -1874,7 +1894,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_sett
 }
 
 // https://drafts.csswg.org/css-transitions/#starting
-Vector<GC::Ref<Animations::KeyframeEffect>> StyleComputer::start_needed_transitions(ComputedStyleWorkingSet& new_style, DOM::AbstractElement abstract_element, bool* did_write_main_side_state, Optional<StyleRecordID> before_change_style_record) const
+void StyleComputer::start_needed_transitions(ComputedStyleWorkingSet& new_style, DOM::AbstractElement abstract_element, StyleRecordID before_change_style_record) const
 {
     auto had_pending_animated_style_update = m_document->needs_animated_style_update();
 
@@ -1885,14 +1905,7 @@ Vector<GC::Ref<Animations::KeyframeEffect>> StyleComputer::start_needed_transiti
     Optional<u64> transition_target_key;
     if (style_node_id != 0)
         transition_target_key = (static_cast<u64>(style_node_id.value()) << 8) | pseudo_element_to_ffi(pseudo_element);
-    auto transition_baseline_style_record = before_change_style_record.value_or_lazy_evaluated([&] { return abstract_element.style_record_identity(); });
-    VERIFY(transition_baseline_style_record);
-    if (transition_target_key.has_value()
-        && (abstract_element.style_scope().rule_cache().has_size_container_queries
-            || document().is_in_style_stabilization_feedback_epoch())) {
-        if (record_transition_stabilization_baseline(abstract_element, before_change_style_record) && did_write_main_side_state)
-            *did_write_main_side_state = true;
-    }
+    auto transition_baseline_style_record = before_change_style_record;
     if (transition_target_key.has_value()) {
         if (auto existing_baseline = m_transition_stabilization_baselines.get(*transition_target_key); existing_baseline.has_value())
             transition_baseline_style_record = *existing_baseline;
@@ -1912,7 +1925,7 @@ Vector<GC::Ref<Animations::KeyframeEffect>> StyleComputer::start_needed_transiti
     // NB: We know that a DocumentTimeline's current time is always in milliseconds
     auto current_time = m_document->timeline()->current_time();
     if (!current_time.has_value())
-        return {};
+        return;
     VERIFY(current_time->type == Animations::TimeValue::Type::Milliseconds);
     auto style_change_event_time = current_time->value;
 
@@ -1937,12 +1950,7 @@ Vector<GC::Ref<Animations::KeyframeEffect>> StyleComputer::start_needed_transiti
     if (matching_entries.is_empty()
         && existing_transition_property_ids.is_empty()
         && existing_stabilization_state_indices.is_empty())
-        return {};
-
-    // Past the early-out this element has transition state to decide over, and deciding it keeps
-    // provisional states, starts animations and queues events on the main side.
-    if (did_write_main_side_state)
-        *did_write_main_side_state = true;
+        return;
 
     auto transition_font_metrics = [](Length::FontMetrics const& metrics) {
         return StyleValueFFI::FfiAnimationFontMetrics {
@@ -2251,8 +2259,6 @@ Vector<GC::Ref<Animations::KeyframeEffect>> StyleComputer::start_needed_transiti
         if (!had_pending_animated_style_update)
             m_document->clear_needs_animated_style_update();
     }
-
-    return newly_started_transition_effects;
 }
 
 bool StyleComputer::has_provisional_transition_states(DOM::AbstractElement abstract_element) const
@@ -2266,32 +2272,6 @@ bool StyleComputer::has_provisional_transition_states(DOM::AbstractElement abstr
     return any_of(m_provisional_transition_states, [&](auto const& state) {
         return state.element == GC::Ptr { element } && state.pseudo_element == pseudo_element;
     });
-}
-
-RefPtr<ComputedStyleWorkingSet> StyleComputer::start_needed_transitions_on_shared_style(DOM::AbstractElement abstract_element, ComputedValues const& shared_values) const
-{
-    auto& element = abstract_element.element();
-    auto pseudo_element = abstract_element.pseudo_element();
-    if (shared_values.transition_delay_and_duration_are_single_zero()
-        && element.property_ids_with_existing_transitions(pseudo_element).is_empty()
-        && !has_provisional_transition_states(abstract_element))
-        return {};
-    auto previous_style = abstract_element.computed_style();
-    if (!previous_style || previous_style->in_display_none_subtree())
-        return {};
-    if (auto parent = abstract_element.element_to_inherit_style_from(); parent.has_value()) {
-        if (auto parent_style = parent->computed_style(); parent_style && parent_style->in_display_none_subtree())
-            return {};
-    }
-    begin_style_update();
-    ScopeGuard end_style_update = [&] { this->end_style_update(); };
-    auto style = reconstruct_computed_properties(shared_values);
-    start_needed_transitions(*style, abstract_element);
-    clear_computation_context_caches();
-    auto animated_properties = style->animated_properties_snapshot();
-    if (!animated_properties || animated_properties->is_empty())
-        return {};
-    return style;
 }
 
 // The encapsulation contexts that decide for an element, outermost first.
@@ -4132,7 +4112,7 @@ Optional<RequiredInvalidationAfterStyleChange> StyleComputer::answer_record_dema
     auto old_style_record = element.style_record_identity();
     auto invalidation = element.apply_engine_computed_style_record(StyleRecordID { answer.record.style_record }, pseudo_element_records, answer.record.uses_substitution, did_change_custom_properties);
     if (!!old_style_record && element.associated_shadow_host_pseudo_element().has_value())
-        invalidation |= run_transition_step_for_settled_record({ element }, old_style_record);
+        invalidation |= run_transition_step_for_installed_record({ element }, old_style_record);
     auto container_effects = StyleEngineFFI::style_engine_take_container_effects(engine.rust_handle(), element.style_node_id().value());
     ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
     record_container_query_effects(DOM::AbstractElement { element }, container_effects);
@@ -5418,17 +5398,6 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
         return false;
     };
 
-    auto take_shared_style = [&]() -> RefPtr<ComputedStyleWorkingSet> {
-        auto transitioned_style = start_needed_transitions_on_shared_style(abstract_element, *sharing->shared_values);
-        if (!transitioned_style)
-            return {};
-        sharing->shared_values = nullptr;
-        sharing->shared_style_record_identity = {};
-        sharing->computed_groups_to_rebuild = {};
-        sharing->donor_values = nullptr;
-        return transitioned_style;
-    };
-
     record_style_input();
     if (new_style_input_record) {
         new_style_input_record->style_depends_on_size_container_query |= cascade_input.depends_on_size_container_query;
@@ -5541,7 +5510,7 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
                 new_style_input_record->bind_next_published_style = true;
             }
             document().style_invalidation_counters().element_style_shared_computations++;
-            return take_shared_style();
+            return {};
         }
     }
 
@@ -5699,7 +5668,7 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
                     pseudo_element_to_ffi(abstract_element.pseudo_element()));
             }
             document().style_invalidation_counters().element_style_shared_computations++;
-            return take_shared_style();
+            return {};
         }
     }
 
@@ -6505,21 +6474,8 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             *line_height_metrics = input_line_height_metrics(computed_style, context.abstract_element, should_measure_line_height);
             return computed_style.prepare_animated_overlay_for_rust_finalization(
                 Badge<StyleComputer> {}, ComputedStyleWorkingSet::CreateAnimatedOverlay::No); };
-    // Whether the element has any transition or animation state for the row's results to act on.
-    auto row_transition_or_animation_state_of = [](NativeComputePropertiesContext const& context, bool row_registers_transitions) {
-        auto& element = context.abstract_element.element();
-        auto pseudo_element = context.abstract_element.pseudo_element();
-        return row_registers_transitions
-            || !element.property_ids_with_existing_transitions(pseudo_element).is_empty()
-            || !element.property_ids_with_matching_transition_property_entry(pseudo_element).is_empty()
-            || element.has_associated_animations()
-            // A provisionally started transition is not associated with its element yet, so only
-            // this element's own pending states say that publishing its timing has anything to
-            // say. Asking whether any exist at all answers for the wrong element.
-            || context.style_computer->has_provisional_transition_states(context.abstract_element);
-    };
     // Says whether finishing this row reached past its own working set to the main side.
-    auto finish_properties = [&row_transition_or_animation_state_of](void* context_pointer, bool parent_style_in_display_none_subtree) -> bool {
+    auto finish_properties = [](void* context_pointer) -> bool {
         if (g_reference_style_without_effects)
             return false;
         auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
@@ -6530,33 +6486,6 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             return false;
 
         bool did_write_main_side_state = false;
-
-        // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
-        // A later pass of this stabilization epoch can give this element a transition it does not
-        // declare yet, and that transition's before-change style is the one this row holds, so it
-        // is pinned here. The precondition is the pin's own - the scope can feed back at all, or a
-        // later pass has already happened - and not whether some other row in this update has
-        // already started a transition, which says nothing about this element.
-        if (style_computer.pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(context.abstract_element))
-            did_write_main_side_state = true;
-
-        // Transition declarations [css-transitions-1]
-        // Theoretically this should be part of the cascade, but it works with computed values.
-        // OPTIMIZATION: An element that declares no transition, holds none, and has no animation
-        //               of its own has nothing to register, nothing to clear, nothing that can
-        //               start, and no timing to publish, so the whole step is skipped. Every one
-        //               of those reads or writes the element, so skipping it is also what keeps
-        //               the row's result application from reaching the host at all.
-        if (row_transition_or_animation_state_of(context, !StyleValueFFI::rust_transition_delay_and_duration_are_single_zero(computed_style.computed_longhand_table()))) {
-            if (auto previous_style = context.abstract_element.computed_style()) {
-                // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
-                if (!previous_style->in_display_none_subtree() && !parent_style_in_display_none_subtree) {
-                    style_computer.start_needed_transitions(computed_style, context.abstract_element, &did_write_main_side_state);
-                    // Starting a transition associates a new animation with the element.
-                    context.abstract_element.element().publish_animation_timing_rows();
-                }
-            }
-        }
 
         if (style_computer.m_keyframes_inherited_non_inherited_style_groups != 0) {
             auto style_groups = style_computer.m_keyframes_inherited_non_inherited_style_groups;
@@ -6758,7 +6687,7 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     // interleave is the step's own answer rather than a test made before it.
     if (animation_application_wrote_main_side_state)
         application_reaches_the_host = true;
-    if (finish_properties(&native_context, finalization_result.parent_style_in_display_none_subtree))
+    if (finish_properties(&native_context))
         application_reaches_the_host = true;
     if (application_reaches_the_host)
         StyleValueFFI::rust_style_ffi_note_longhand_result_apply();

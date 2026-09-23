@@ -96,9 +96,14 @@ impl RetainedState {
             return true;
         };
         // A sampled identity only survives when it still equals the assigned record. A base
-        // record published after the transition step is authoritative just like an overlay.
-        if self.computed_group_sets.sampled_composition_identity(parent).is_some() {
-            return true;
+        // record published after the transition step is authoritative just like an overlay,
+        // except where a running transition supplies the value: the child's after-change style
+        // inherits the parent's after-change value, and a table can hold only one of the two.
+        if let Some(record) = self.computed_group_sets.sampled_composition_identity(parent) {
+            return self.computed_group_sets.style_record_view(record).is_none_or(|view| {
+                unsafe { view.animated_overlay.as_ref() }
+                    .is_none_or(|overlay| !overlay.entries().iter().any(|entry| entry.result_of_transition))
+            });
         }
         let Some(record) = self.computed_group_sets.assigned_style_record(parent) else {
             return false;
