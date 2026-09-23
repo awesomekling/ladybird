@@ -403,6 +403,7 @@ impl RetainedState {
         //       `StyleComputer::recascade_font_size_if_needed`. The stage keeps the record when
         //       that walk reaches the same answer this drive does, and hands the element to C++
         //       when it does not.
+        let mut recascaded_font_size_reads_viewport = false;
         let recascaded_font_size = if let Some(pending) = font_scratch
             .pending
             .as_ref()
@@ -413,10 +414,13 @@ impl RetainedState {
             .winning_declaration(prop::FONT_FAMILY)
             .is_some_and(|(value, ..)| font_family_is_monospace(unsafe { &*value.cast::<StyleValueData>() }))
         {
-            let Some(recascaded) = recascade_node.and_then(|node| self.monospace_recascaded_font_size(node)) else {
+            let Some((recascaded, reads_viewport)) =
+                recascade_node.and_then(|node| self.monospace_recascaded_font_size(node))
+            else {
                 counters.bump(Counter::EngineComputedRecordBailMonospaceQuirk);
                 return None;
             };
+            recascaded_font_size_reads_viewport = reads_viewport;
             Some(recascaded)
         } else {
             None
@@ -759,6 +763,12 @@ impl RetainedState {
                 std::ptr::null(),
                 std::ptr::null(),
             );
+            // A recascaded size that read the viewport makes the element's style and font
+            // metrics read it, as C++ marks them beside the size it writes.
+            if recascaded_font_size_reads_viewport {
+                results.depends_on_viewport_metrics = true;
+                results.font_metrics_depend_on_viewport_metrics = true;
+            }
         }
 
         // The element's own font, resolved as the C++ font computer would for these values.
