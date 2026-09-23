@@ -11,6 +11,7 @@
 #include <LibGC/WeakInlines.h>
 #include <LibWeb/CSS/ComputedStyleWorkingSet.h>
 #include <LibWeb/CSS/FontComputer.h>
+#include <LibWeb/CSS/FontResolution.h>
 #include <LibWeb/CSS/StyleSheetState.h>
 #include <LibWeb/CSS/StyleValues/ColorSchemeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ColorStyleValue.h>
@@ -602,7 +603,7 @@ CSSPixels normal_line_height(Gfx::FontPixelMetrics const& font_metrics)
     return CSSPixels { round_to<i32>(font_metrics.ascent) + round_to<i32>(font_metrics.descent) };
 }
 
-CSSPixels ComputedStyleWorkingSet::line_height(FontComputer const& font_computer) const
+CSSPixels ComputedStyleWorkingSet::line_height(FontComputer const& font_computer, u32 tree_scope) const
 {
     // https://drafts.csswg.org/css-inline-3/#line-height-property
     auto const& line_height = property(PropertyID::LineHeight);
@@ -610,7 +611,7 @@ CSSPixels ComputedStyleWorkingSet::line_height(FontComputer const& font_computer
     // normal
     // Determine the preferred line height automatically based on font metrics.
     if (line_height.is_keyword() && line_height.to_keyword() == Keyword::Normal)
-        return normal_line_height(first_available_computed_font(font_computer)->pixel_metrics());
+        return normal_line_height(first_available_computed_font(font_computer, tree_scope)->pixel_metrics());
 
     // <length [0,∞]>
     // The specified length is used as the preferred line height. Negative values are illegal.
@@ -1080,20 +1081,36 @@ ScrollbarColorData ComputedStyleWorkingSet::scrollbar_color(ColorResolutionConte
     return {};
 }
 
-ValueComparingNonnullRefPtr<Gfx::FontCascadeList const> ComputedStyleWorkingSet::computed_font_list(FontComputer const& font_computer) const
+ValueComparingNonnullRefPtr<Gfx::FontCascadeList const> ComputedStyleWorkingSet::computed_font_list(FontComputer const& font_computer, u32 tree_scope) const
 {
+    if (m_cached_computed_font_list && m_cached_font_tree_scope != tree_scope) {
+        m_cached_computed_font_list = nullptr;
+        m_cached_first_available_computed_font = nullptr;
+    }
     if (!m_cached_computed_font_list) {
-        m_cached_computed_font_list = font_computer.compute_font_for_style_values(computed_font_families(), font_size(), font_slope(), font_weight(), font_width(), font_optical_sizing(), font_variation_settings(), font_feature_data());
+        m_cached_font_tree_scope = tree_scope;
+        ComputedFontCacheKey key {
+            .tree_scope = tree_scope,
+            .font_families = computed_font_families(),
+            .font_optical_sizing = font_optical_sizing(),
+            .font_size = font_size(),
+            .font_slope = font_slope(),
+            .font_weight = font_weight(),
+            .font_width = font_width(),
+            .font_variation_settings = font_variation_settings(),
+            .font_feature_data = font_feature_data(),
+        };
+        m_cached_computed_font_list = resolve_font_for_style_values(font_computer, move(key));
         VERIFY(!m_cached_computed_font_list->is_empty());
     }
 
     return *m_cached_computed_font_list;
 }
 
-ValueComparingNonnullRefPtr<Gfx::Font const> ComputedStyleWorkingSet::first_available_computed_font(FontComputer const& font_computer) const
+ValueComparingNonnullRefPtr<Gfx::Font const> ComputedStyleWorkingSet::first_available_computed_font(FontComputer const& font_computer, u32 tree_scope) const
 {
-    if (!m_cached_first_available_computed_font)
-        m_cached_first_available_computed_font = computed_font_list(font_computer)->first_available_font();
+    if (!m_cached_first_available_computed_font || m_cached_font_tree_scope != tree_scope)
+        m_cached_first_available_computed_font = computed_font_list(font_computer, tree_scope)->first_available_font();
     return *m_cached_first_available_computed_font;
 }
 

@@ -165,11 +165,11 @@ public:
     float stop_opacity() const;
     float flood_opacity() const;
 
-    ValueComparingNonnullRefPtr<Gfx::FontCascadeList const> computed_font_list(FontComputer const&) const;
-    ValueComparingNonnullRefPtr<Gfx::Font const> first_available_computed_font(FontComputer const&) const;
+    ValueComparingNonnullRefPtr<Gfx::FontCascadeList const> computed_font_list(FontComputer const&, u32 tree_scope) const;
+    ValueComparingNonnullRefPtr<Gfx::Font const> first_available_computed_font(FontComputer const&, u32 tree_scope) const;
 
     int math_depth() const;
-    [[nodiscard]] CSSPixels line_height(FontComputer const&) const;
+    [[nodiscard]] CSSPixels line_height(FontComputer const&, u32 tree_scope) const;
     [[nodiscard]] CSSPixels font_size() const;
     Vector<ComputedFontFamily> computed_font_families() const;
     double font_weight() const;
@@ -237,6 +237,7 @@ private:
 
     mutable RefPtr<Gfx::FontCascadeList const> m_cached_computed_font_list;
     mutable RefPtr<Gfx::Font const> m_cached_first_available_computed_font;
+    mutable u32 m_cached_font_tree_scope { 0 };
 };
 
 class AnimatedProperties final : public RefCounted<AnimatedProperties> {

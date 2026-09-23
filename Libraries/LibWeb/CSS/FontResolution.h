@@ -110,6 +110,9 @@ private:
     ScopedFontFeatureValuesTables m_font_feature_values;
 };
 
+// Resolve an out-of-batch demand through the same published inputs and memo as the style stage.
+[[nodiscard]] NonnullRefPtr<Gfx::FontCascadeList const> resolve_font_for_style_values(FontComputer const&, ComputedFontCacheKey);
+
 // Resolve a font cascade from the published table and the process-wide font services alone. This
 // is the whole of what the style stage's between-pass font batch does.
 [[nodiscard]] NonnullRefPtr<Gfx::FontCascadeList const> resolve_font_cascade(
