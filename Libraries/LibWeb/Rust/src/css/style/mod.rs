@@ -873,6 +873,7 @@ pub struct RetainedState {
     /// Latest document-wide scalar computation facts, copied at the transaction boundary.
     document_style_computation_inputs: Option<bridge::FfiDocumentStyleComputationInputs>,
     document_media_snapshot: custom_property_cascade::DocumentMediaSnapshot,
+    document_function_snapshot: custom_property_cascade::DocumentFunctionSnapshot,
     /// The viewport the last flush drove records against. A record that reads the viewport cannot
     /// stand when it moved, and the viewport is a published input: comparing it here is what tells
     /// the engine so, without the host naming every reader.

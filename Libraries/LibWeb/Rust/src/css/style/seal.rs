@@ -449,3 +449,10 @@ pub(crate) fn flush_census() {
         ));
     }
 }
+
+// The host's style-update boundary is reached even when a test exits before its document's
+// engine is destroyed. Flush the per-thread census there so focused tests are measurable.
+#[unsafe(no_mangle)]
+extern "C" fn rust_style_seal_flush_census_for_update() {
+    flush_census();
+}

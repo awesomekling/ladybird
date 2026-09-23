@@ -2194,6 +2194,14 @@ void Element::set_style_uses_if_css_function()
     document().add_element_with_viewport_dependent_style(*this);
 }
 
+void Element::set_style_uses_custom_function()
+{
+    if (m_style_uses_custom_function)
+        return;
+    m_style_uses_custom_function = true;
+    document().add_element_with_viewport_dependent_style(*this);
+}
+
 void Element::set_style_depends_on_viewport_metrics()
 {
     if (m_style_depends_on_viewport_metrics)
@@ -2430,9 +2438,11 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     }
     auto const custom_condition_usage = style_computer.style_engine().node_record_custom_condition_usage(style_node_id());
     if (custom_condition_usage & 1)
-        m_style_uses_if_css_function = true;
+        set_style_uses_if_css_function();
     if (custom_condition_usage & 2)
         m_style_uses_inherit_css_function = true;
+    if (custom_condition_usage & 4)
+        set_style_uses_custom_function();
 
     // The environment the record was published with: what the element inherits, or what the
     // engine resolved its own custom declarations to over that.

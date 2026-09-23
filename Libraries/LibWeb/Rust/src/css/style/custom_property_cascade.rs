@@ -25,10 +25,12 @@ use crate::css::cascaded_properties::{
     parse_substituted_without_callbacks,
 };
 use crate::css::custom_properties::{
-    CustomPropertyRegistry, CustomPropertyStore, NativeVarResolution, prepare_var_resolution_environment,
+    CustomPropertyRegistry, CustomPropertyStore, FfiSubstitutionFunctionDeclaration, FfiSubstitutionFunctionDefinition,
+    FfiSubstitutionFunctionVisibility, NativeVarResolution, prepare_var_resolution_environment,
 };
 use crate::css::ffi_support::FfiUtf16View;
 use crate::css::parser::value_parser::ParseOutcome;
+use crate::css::rule::CompiledFunction;
 use crate::css::style_value::{RetainedStyleValueData, StyleValueData, release_style_value};
 use custom_property_environments::CascadedCustomProperty;
 
@@ -43,6 +45,178 @@ pub(super) struct DocumentMediaSnapshot {
 // The copied length context contains no writable pointer after `take_from` clears it.
 unsafe impl Send for DocumentMediaSnapshot {}
 unsafe impl Sync for DocumentMediaSnapshot {}
+
+/// The host's parsed @function table, frozen before a transaction. Compiled functions own their
+/// declarations; the engine decides which conditional declarations apply to each subject.
+#[derive(Default)]
+pub(super) struct DocumentFunctionSnapshot {
+    definitions: HashMap<u64, (Arc<CompiledFunction>, usize)>,
+    visibilities: Vec<FfiSubstitutionFunctionVisibility>,
+    caller_scopes: HashMap<u32, usize>,
+}
+
+impl DocumentFunctionSnapshot {
+    unsafe fn publish(
+        &mut self,
+        function: *const CompiledFunction,
+        caller_scope: usize,
+        definition_scope: usize,
+        tree_scope: u32,
+    ) {
+        let Some(function_ref) = (unsafe { function.as_ref() }) else {
+            return;
+        };
+        self.definitions.entry(function_ref.identity).or_insert_with(|| {
+            unsafe { Arc::increment_strong_count(function) };
+            (unsafe { Arc::from_raw(function) }, definition_scope)
+        });
+        self.visibilities.push(FfiSubstitutionFunctionVisibility {
+            caller_scope_identity: caller_scope,
+            function_identity: function_ref.identity,
+        });
+        if tree_scope != u32::MAX {
+            self.caller_scopes.insert(tree_scope, caller_scope);
+        }
+    }
+}
+
+pub(super) struct PreparedCustomFunctions {
+    _declarations: Vec<Vec<FfiSubstitutionFunctionDeclaration>>,
+    definitions: Vec<FfiSubstitutionFunctionDefinition>,
+    visibilities: Vec<FfiSubstitutionFunctionVisibility>,
+    caller_scope: usize,
+    reads_attributes: bool,
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn style_engine_reset_custom_functions(engine: *mut c_void) {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    engine.document_function_snapshot = DocumentFunctionSnapshot::default();
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn style_engine_publish_custom_function(
+    engine: *mut c_void,
+    function: *const CompiledFunction,
+    caller_scope: usize,
+    definition_scope: usize,
+    tree_scope: u32,
+) {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    unsafe {
+        engine
+            .document_function_snapshot
+            .publish(function, caller_scope, definition_scope, tree_scope);
+    }
+}
+
+impl RetainedState {
+    fn prepare_custom_functions(&mut self, node: StyleNodeID, pseudo: Option<u8>) -> Option<PreparedCustomFunctions> {
+        let snapshot = &self.document_function_snapshot;
+        let caller_scope = *snapshot.caller_scopes.get(&self.tree.tree_scope(node).0)?;
+        let mut scopes = vec![caller_scope];
+        let mut identities = Vec::new();
+        let mut seen = HashSet::default();
+        let mut index = 0;
+        while index < scopes.len() {
+            let scope = scopes[index];
+            for visibility in &snapshot.visibilities {
+                if visibility.caller_scope_identity != scope || !seen.insert(visibility.function_identity) {
+                    continue;
+                }
+                let (_, definition_scope) = snapshot.definitions.get(&visibility.function_identity)?;
+                identities.push(visibility.function_identity);
+                if !scopes.contains(definition_scope) {
+                    scopes.push(*definition_scope);
+                }
+            }
+            index += 1;
+        }
+        let compiled = identities
+            .iter()
+            .map(|identity| {
+                let (function, scope) = snapshot.definitions.get(identity)?;
+                Some((function.clone(), *scope))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let media_environment = self.document_media_snapshot.as_ffi();
+        let media_environment = unsafe { media_environment.borrow() };
+        let visibilities = snapshot
+            .visibilities
+            .iter()
+            .filter(|visibility| scopes.contains(&visibility.caller_scope_identity))
+            .map(|visibility| FfiSubstitutionFunctionVisibility {
+                caller_scope_identity: visibility.caller_scope_identity,
+                function_identity: visibility.function_identity,
+            })
+            .collect();
+        let mut declarations = Vec::with_capacity(compiled.len());
+        let mut container_effects = super::container_queries::ContainerVerdict::default();
+        let mut reads_attributes = false;
+        for (function, _) in &compiled {
+            let mut function_declarations = Vec::new();
+            for input in &function.inputs {
+                if input.media.iter().any(|list| {
+                    !list.queries.is_empty() && !list.queries.iter().any(|query| query.matches_media(media_environment))
+                }) {
+                    continue;
+                }
+                if !input.containers.is_empty() {
+                    let verdict = self.function_container_verdict(node, pseudo.is_some(), &input.containers)?;
+                    container_effects.depends_on_size |= verdict.depends_on_size;
+                    container_effects.depends_on_style |= verdict.depends_on_style;
+                    container_effects.effects.extend(verdict.effects);
+                    if !verdict.matches {
+                        continue;
+                    }
+                }
+                for descriptor in &input.declarations.descriptors {
+                    reads_attributes |= matches!(
+                        descriptor.value.as_ref(),
+                        StyleValueData::Unresolved {
+                            presence_attr: true,
+                            ..
+                        }
+                    );
+                    let name = descriptor.name.units();
+                    function_declarations.push(FfiSubstitutionFunctionDeclaration {
+                        name: FfiUtf16View {
+                            ascii: std::ptr::null(),
+                            utf16: name.as_ptr(),
+                            length: name.len(),
+                        },
+                        data: Arc::as_ptr(&descriptor.value).cast(),
+                    });
+                }
+            }
+            declarations.push(function_declarations);
+        }
+        if container_effects.depends_on_size
+            || container_effects.depends_on_style
+            || !container_effects.effects.is_empty()
+        {
+            self.note_container_effects_for_host(node, &container_effects);
+        }
+        let definitions = compiled
+            .iter()
+            .zip(&declarations)
+            .map(|((function, scope), declarations)| FfiSubstitutionFunctionDefinition {
+                identity: function.identity,
+                scope_identity: *scope,
+                signature: Arc::as_ptr(&function.signature).cast(),
+                declarations: declarations.as_ptr(),
+                declaration_count: declarations.len(),
+            })
+            .collect();
+        Some(PreparedCustomFunctions {
+            _declarations: declarations,
+            definitions,
+            visibilities,
+            caller_scope,
+            reads_attributes,
+        })
+    }
+}
 
 impl DocumentMediaSnapshot {
     pub(super) unsafe fn take_from(inputs: &mut bridge::FfiDocumentStyleComputationInputs) -> Self {
@@ -129,19 +303,6 @@ fn engine_resolution_context(
         style_query_dependencies: std::ptr::null_mut(),
         callback_context: std::ptr::null_mut(),
     }
-}
-
-fn value_is_engine_resolvable_in_custom_environment(value: &StyleValueData) -> bool {
-    // Attributes, media conditions, and the inheritance store are all frozen in this row's
-    // resolution context. A dashed function still needs its tree-scoped definition and local
-    // container conditions, which the custom-property environment does not carry.
-    !matches!(
-        value,
-        StyleValueData::Unresolved {
-            presence_dashed_function: true,
-            ..
-        }
-    )
 }
 
 /// What a registered custom property's value is computed against: the element's own font metrics
@@ -506,8 +667,13 @@ impl RetainedState {
                             StyleValueData::Unresolved {
                                 presence_if,
                                 presence_inherit,
+                                presence_dashed_function,
                                 ..
-                            } => u8::from(*presence_if) | (u8::from(*presence_inherit) << 1),
+                            } => {
+                                u8::from(*presence_if)
+                                    | (u8::from(*presence_inherit) << 1)
+                                    | (u8::from(*presence_dashed_function) << 2)
+                            }
                             _ => 0,
                         }
                 })
@@ -834,6 +1000,27 @@ impl RetainedState {
         if cascaded.is_empty() {
             return Some(parent_environment);
         }
+        let reads_functions = cascaded.iter().any(|(_, value)| {
+            matches!(
+                value.data(),
+                StyleValueData::Unresolved {
+                    presence_dashed_function: true,
+                    ..
+                }
+            )
+        });
+        let custom_functions = if reads_functions {
+            match self.prepare_custom_functions(node, pseudo) {
+                Some(functions) => Some(functions),
+                None => {
+                    counters.bump(Counter::EngineComputedRecordBailCustomPropertyUnsupportedSubstitution);
+                    counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
+                    return None;
+                }
+            }
+        } else {
+            None
+        };
         let registry = inputs.custom_property_registry;
         if registry.is_none() {
             counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
@@ -877,18 +1064,15 @@ impl RetainedState {
         };
         let parent = unsafe { parent_store.cast::<CustomPropertyStore>().as_ref() };
         let mut values = Vec::with_capacity(cascaded.len());
-        let mut reads_attributes = false;
+        let mut reads_attributes = custom_functions
+            .as_ref()
+            .is_some_and(|functions| functions.reads_attributes);
         for (declared, value) in &cascaded {
             let Some(name) = self.custom_property_environments.name(declared.name) else {
                 counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
                 return None;
             };
             if name.raw.raw() == 0 {
-                counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-                return None;
-            }
-            if !value_is_engine_resolvable_in_custom_environment(value.data()) {
-                counters.bump(Counter::EngineComputedRecordBailCustomPropertyUnsupportedSubstitution);
                 counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
                 return None;
             }
@@ -937,8 +1121,11 @@ impl RetainedState {
         let reads_conditions = cascaded
             .iter()
             .any(|(_, value)| matches!(value.data(), StyleValueData::Unresolved { presence_if: true, .. }));
-        let can_memoize =
-            random_sources.is_empty() && !has_registered_declaration && !reads_attributes && !reads_conditions;
+        let can_memoize = random_sources.is_empty()
+            && !has_registered_declaration
+            && !reads_attributes
+            && !reads_conditions
+            && !reads_functions;
         let memoized = can_memoize
             .then(|| self.custom_property_environments.memoized(&key))
             .flatten();
@@ -1009,7 +1196,7 @@ impl RetainedState {
             Vec::new()
         };
         let media_environment = self.document_media_snapshot.as_ffi();
-        let resolution_context = engine_resolution_context(
+        let mut resolution_context = engine_resolution_context(
             &parse_context,
             cascaded_store,
             self.custom_property_environments
@@ -1022,6 +1209,13 @@ impl RetainedState {
                 && self.facts.namespace_of(attribute_element) == self.html_element_namespace,
             &raw const media_environment,
         );
+        if let Some(functions) = &custom_functions {
+            resolution_context.custom_functions = functions.definitions.as_ptr();
+            resolution_context.custom_function_count = functions.definitions.len();
+            resolution_context.custom_function_scope_identity = functions.caller_scope;
+            resolution_context.custom_function_visibilities = functions.visibilities.as_ptr();
+            resolution_context.custom_function_visibility_count = functions.visibilities.len();
+        }
         let drive = FfiCustomPropertyDriveInput {
             store: cascaded_store,
             resolved_parent_store: parent_store,

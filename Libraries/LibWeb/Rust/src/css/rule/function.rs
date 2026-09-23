@@ -10,21 +10,24 @@ use crate::css::container_conditions::ContainerConditionsData;
 use crate::css::descriptor_block::DescriptorBlockData;
 use crate::css::ffi_support::FfiUtf16View;
 use crate::css::function_signature::FunctionSignature;
+use crate::css::media_list::MediaListData;
 use std::ffi::c_void;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-struct FunctionDeclarationInput {
-    declarations: Arc<DescriptorBlockData>,
-    containers: Vec<Arc<ContainerConditionsData>>,
+pub(crate) struct FunctionDeclarationInput {
+    pub(crate) declarations: Arc<DescriptorBlockData>,
+    pub(crate) containers: Vec<Arc<ContainerConditionsData>>,
+    pub(crate) media: Vec<Arc<MediaListData>>,
+    cached_media_matches: bool,
 }
 
-// Immutable compilation output. Media changes invalidate the definition cache; container
-// conditions remain element-dependent. No live rule, sheet, or descriptor owner is retained.
+// Immutable compilation output. Media and container conditions remain inputs evaluated for the
+// current style transaction. No live rule, sheet, or descriptor owner is retained.
 pub struct CompiledFunction {
-    identity: u64,
-    signature: Arc<FunctionSignature>,
-    inputs: Vec<FunctionDeclarationInput>,
+    pub(crate) identity: u64,
+    pub(crate) signature: Arc<FunctionSignature>,
+    pub(crate) inputs: Vec<FunctionDeclarationInput>,
 }
 
 impl CompiledFunction {
@@ -33,6 +36,8 @@ impl CompiledFunction {
             rule: RuleRef<'_>,
             outer_containers: &[Arc<ContainerConditionsData>],
             containers: &mut Vec<Arc<ContainerConditionsData>>,
+            media: &mut Vec<Arc<MediaListData>>,
+            cached_media_matches: bool,
             inputs: &mut Vec<FunctionDeclarationInput>,
         ) {
             match rule.rule_type() {
@@ -52,19 +57,34 @@ impl CompiledFunction {
                     inputs.push(FunctionDeclarationInput {
                         declarations: rule.descriptors().unwrap(),
                         containers: conditions,
+                        media: media.clone(),
+                        cached_media_matches,
                     });
                     return;
                 }
                 NativeRuleType::Container => containers.push(rule.container().unwrap().clone()),
-                NativeRuleType::Media | NativeRuleType::Supports if rule.cached_condition_holds() => {}
+                NativeRuleType::Media => media.push(rule.media_data()),
+                NativeRuleType::Supports if rule.cached_condition_holds() => {}
                 _ => return,
             }
+            let child_cached_media_matches =
+                cached_media_matches && (rule.rule_type() != NativeRuleType::Media || rule.media_matches());
             let _ = rule.visit_children(&mut |child| {
-                walk(child, outer_containers, containers, inputs);
+                walk(
+                    child,
+                    outer_containers,
+                    containers,
+                    media,
+                    child_cached_media_matches,
+                    inputs,
+                );
                 ControlFlow::Continue(())
             });
             if rule.rule_type() == NativeRuleType::Container {
                 containers.pop();
+            }
+            if rule.rule_type() == NativeRuleType::Media {
+                media.pop();
             }
         }
         let mut result = Self {
@@ -73,7 +93,14 @@ impl CompiledFunction {
             inputs: Vec::new(),
         };
         let _ = view.rule.visit_children(&mut |child| {
-            walk(child, view.containers, &mut Vec::new(), &mut result.inputs);
+            walk(
+                child,
+                view.containers,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                true,
+                &mut result.inputs,
+            );
             ControlFlow::Continue(())
         });
         result
@@ -124,6 +151,9 @@ pub unsafe extern "C" fn rust_compiled_function_visit_declarations(
     visit: unsafe extern "C" fn(*mut c_void, FfiUtf16View, *const c_void),
 ) {
     for input in &function.inputs {
+        if !input.cached_media_matches {
+            continue;
+        }
         if !input.containers.is_empty() {
             let pointers: Vec<_> = input.containers.iter().map(Arc::as_ptr).collect();
             if !unsafe { matches_container(context, pointers.as_ptr(), pointers.len()) } {

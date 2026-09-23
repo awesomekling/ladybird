@@ -1833,6 +1833,7 @@ impl StyleEngineState {
                 next_style_transaction_version: StyleTransactionVersion(1),
                 document_style_computation_inputs: None,
                 document_media_snapshot: custom_property_cascade::DocumentMediaSnapshot::default(),
+                document_function_snapshot: custom_property_cascade::DocumentFunctionSnapshot::default(),
                 driven_viewport: (0.0, 0.0),
                 document_resource_contexts: Default::default(),
                 custom_property_registry: None,
