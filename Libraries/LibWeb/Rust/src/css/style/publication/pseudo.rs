@@ -9,16 +9,31 @@ use super::*;
 impl RetainedState {
     /// A pseudo row can predate the current answer even when the element row is current. Rebuild
     /// its winners from that answer before deciding whether the engine can settle its record.
-    fn refresh_stale_pseudo_winners(&mut self, node: StyleNodeID, counters: &mut Counters) {
-        // A publication in this flush already refreshed the element and its pseudo rows.
-        // Republishing again after the element record was compared changes its winner
-        // identity after that comparison, and counts a second retained-answer use.
-        if self.current_winner_groups().row_stamp(node) == Some(self.flush_stamp) {
-            return;
-        }
+    fn refresh_stale_pseudo_winners(
+        &mut self,
+        node: StyleNodeID,
+        new_element_record: computed::FinalStyleRecordID,
+        counters: &mut Counters,
+    ) {
         let Some(mask) = self.pseudo_style_mask(node) else {
             return;
         };
+        let new_is_list_item = self
+            .computed_group_sets
+            .style_record_view(new_element_record.raw())
+            .and_then(|view| unsafe { view.longhand_table.as_ref() })
+            .is_some_and(|table| table.display_is_list_item());
+        let marker_is_live = new_is_list_item
+            || self
+                .computed_group_sets
+                .pseudo_style_record(node, pseudo_kind::MARKER)
+                .is_some()
+            || [pseudo_kind::BEFORE, pseudo_kind::AFTER, pseudo_kind::BACKDROP]
+                .into_iter()
+                .filter_map(|kind| self.computed_group_sets.pseudo_style_record(node, kind))
+                .filter_map(|record| self.computed_group_sets.style_record_view(record.raw()))
+                .filter_map(|view| unsafe { view.longhand_table.as_ref() })
+                .any(|table| table.display_is_list_item());
         let stale = self
             .current_winner_groups()
             .pseudo_states(node)
@@ -26,10 +41,16 @@ impl RetainedState {
                 let kind = usize::from(pseudo.kind.0);
                 kind < pseudo_kind::SYNTHETIC_COUNT
                     && mask & (1_u64 << kind) != 0
+                    && (kind != usize::from(pseudo_kind::BACKDROP) || self.top_layer_elements.contains(&node))
+                    && (kind != usize::from(pseudo_kind::MARKER) || marker_is_live)
                     && (version != self.program.version() || !priority_current)
             });
         if stale {
-            self.republish_winners_from_answer(node, counters);
+            if self.current_winner_groups().row_stamp(node) == Some(self.flush_stamp) {
+                self.republish_pseudo_winners_from_retained_answer(node, counters);
+            } else {
+                self.republish_winners_from_answer(node, counters);
+            }
         }
     }
 
@@ -187,7 +208,7 @@ impl RetainedState {
     ) -> Option<()> {
         use pseudo_kind::{AFTER, BACKDROP, BEFORE, FIRST_LETTER, MARKER, SELECTION};
 
-        self.refresh_stale_pseudo_winners(node, counters);
+        self.refresh_stale_pseudo_winners(node, new_element_record, counters);
 
         let Some(mut inputs) = self.document_style_computation_inputs else {
             counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
@@ -221,6 +242,12 @@ impl RetainedState {
                 continue;
             }
             if version != program_version || !priority_current {
+                // The backdrop of a node outside the top layer cannot generate a box. Its
+                // retained winner may be stale without changing this transaction's answer.
+                if kind == BACKDROP && selected_kind.is_none() && !in_top_layer {
+                    states[usize::from(kind)] = Some(state);
+                    continue;
+                }
                 // A row the node's current answer has no rules for is one left from rules that
                 // no longer match: the pseudo-element it styled is not generated.
                 if self.pseudo_style_mask(node).is_some_and(|mask| mask & (1 << kind) == 0) {
