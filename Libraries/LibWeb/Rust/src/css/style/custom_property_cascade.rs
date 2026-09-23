@@ -628,6 +628,37 @@ impl RetainedState {
         )
     }
 
+    /// The environment a node holds over its parent's as the parent holds it now: the parent's,
+    /// inheritable, for a node declaring no custom property, and its own declarations resolved
+    /// over it where the parent's moved. `None` where the node's may stand as it is, or where
+    /// the engine cannot tell what it declares.
+    pub(super) fn environment_over_current_parent(
+        &mut self,
+        node: StyleNodeID,
+        parent_environment: u64,
+        parent_moved: bool,
+        inputs: &bridge::FfiDocumentStyleComputationInputs,
+    ) -> Option<u64> {
+        if !self.any_custom_property_is_declared() {
+            return Some(parent_environment);
+        }
+        let declares = !self.facts.element_custom_declarations(node).is_empty()
+            || self.try_for_each_element_match(node, |rule, _, _, _| {
+                if self.program.custom_declarations_of(rule).is_empty() {
+                    ControlFlow::Continue(())
+                } else {
+                    ControlFlow::Break(())
+                }
+            }) != Some(ControlFlow::Continue(()));
+        if !declares {
+            return self.inheritable_custom_property_environment(parent_environment, inputs);
+        }
+        if !parent_moved {
+            return None;
+        }
+        self.engine_custom_property_environment(node, parent_environment, inputs, None, &mut Counters::default())
+    }
+
     /// Whether a reaction on the node may move its custom-property environment, which its
     /// descendants inherit: it holds an environment of its own, or its cascade declares custom
     /// properties now. A node whose environment is its parent's and whose cascade declares none
