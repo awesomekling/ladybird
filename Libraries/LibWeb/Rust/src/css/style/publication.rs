@@ -6139,7 +6139,9 @@ impl StyleEngineState {
         if !read_only {
             self.forget_node_match_answer_for_demand(node);
         }
-        let published_answers = read_only.then(|| std::mem::take(&mut self.published_match_answers));
+        // The batch's answers for its other rows stay theirs: a row the host still applies, or
+        // retries after its ancestors installed, reads its answer after this demand.
+        let mut published_answers = Some(std::mem::take(&mut self.published_match_answers));
         if read_only || !self.begin_cold_matching_batch(node, counters) {
             self.begin_adaptive_cold_matching_batch(node, counters);
         }
@@ -6173,6 +6175,7 @@ impl StyleEngineState {
             }
         } else {
             self.end_cold_matching_batch(counters);
+            self.published_match_answers = published_answers.take().expect("a demand saved the batch's answers");
         }
         let result = (|| {
             let answer = answer.map_err(|_| "GateIncompleteAnswer")?;
