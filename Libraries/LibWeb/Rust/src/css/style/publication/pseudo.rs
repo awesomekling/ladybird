@@ -375,7 +375,9 @@ impl RetainedState {
             }
             let has_rules = kinds_with_rules & (1 << kind) != 0;
             let highlight_parent_record = (kind == SELECTION)
-                .then(|| highlight_parent.or_else(|| self.retained_highlight_inheritance_parent_style_record(node, kind)))
+                .then(|| {
+                    highlight_parent.or_else(|| self.retained_highlight_inheritance_parent_style_record(node, kind))
+                })
                 .flatten();
             let state = states[usize::from(kind)].filter(|_| has_rules);
             if has_rules && state.is_none() {

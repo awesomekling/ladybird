@@ -384,7 +384,7 @@ impl RetainedState {
         use bridge::element_adjustment_fact as fact;
 
         let DriveSubject {
-            target,
+            target: _,
             recascade_node,
             parent,
             facts,
@@ -541,8 +541,11 @@ impl RetainedState {
         };
         let highlight_parent_record = (subject.target.pseudo_kind() == pseudo_kind::SELECTION)
             .then(|| {
-                subject.highlight_parent.or_else(|| {
-                    self.retained_highlight_inheritance_parent_style_record(subject.target.node(), pseudo_kind::SELECTION)
+                highlight_parent.or_else(|| {
+                    self.retained_highlight_inheritance_parent_style_record(
+                        subject.target.node(),
+                        pseudo_kind::SELECTION,
+                    )
                 })
             })
             .flatten();
@@ -557,12 +560,8 @@ impl RetainedState {
                     view.dependency_flags & (1 << 2) != 0,
                 ))
             });
-        let highlight = (subject.target.pseudo_kind() == pseudo_kind::SELECTION).then_some(
-            crate::css::style_compute::HighlightInheritance {
-                pseudo_kind: pseudo_kind::SELECTION,
-                snapshot: highlight_snapshot,
-            },
-        );
+        let highlight = (subject.target.pseudo_kind() == pseudo_kind::SELECTION)
+            .then(|| crate::css::style_compute::HighlightInheritance::new(pseudo_kind::SELECTION, highlight_snapshot));
         // The subject axis is the element's own writing mode when it has one, else its parent's;
         // the initial writing mode is horizontal.
         let inherited_box_payload = match old_style_record {
