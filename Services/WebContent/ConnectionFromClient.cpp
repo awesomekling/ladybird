@@ -1115,8 +1115,8 @@ void ConnectionFromClient::debug_request(Compositing::PageId page_id, ByteString
                 for (auto& child : node->children_as_vector())
                     nodes_to_visit.enqueue(child.ptr());
                 if (auto* element = as_if<Web::DOM::Element>(node)) {
-                    auto styles = doc->style_computer().materialize_style_record({ *element });
-                    dump_style(MUST(String::formatted("Element {}", node->debug_description())), *styles, element->custom_property_data({}));
+                    doc->update_style_for_element(Web::DOM::AbstractElement { *element });
+                    dump_style(MUST(String::formatted("Element {}", node->debug_description())), *element->computed_style(), element->custom_property_data({}));
 
                     element->for_each_synthetic_pseudo_element([&](Web::CSS::PseudoElement pseudo_element_type, Web::DOM::PseudoElement const& pseudo_element) {
                         auto computed_values = element->computed_style(pseudo_element_type);
