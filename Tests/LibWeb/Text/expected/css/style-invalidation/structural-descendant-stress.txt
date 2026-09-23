@@ -514,9 +514,9 @@ PASS: descendant attribute stress warm: shadow-host: :has([data-hit='yes']) beco
 PASS: descendant attribute stress cold: shadow-host: :has([data-hit='yes']) becomes false after descendant value change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress pseudo-warm: shadow-host: :has([data-hit='yes']) becomes false after descendant value change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress pseudo-cold: shadow-host: :has([data-hit='yes']) becomes false after descendant value change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant attribute stress warm: shadow-host: :has([hidden]) after descendant hidden property change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: descendant attribute stress warm: shadow-host: :has([hidden]) after descendant hidden property change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress cold: shadow-host: :has([hidden]) after descendant hidden property change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant attribute stress pseudo-warm: shadow-host: :has([hidden]) after descendant hidden property change | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: descendant attribute stress pseudo-warm: shadow-host: :has([hidden]) after descendant hidden property change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress pseudo-cold: shadow-host: :has([hidden]) after descendant hidden property change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress warm: shadow-host: :has(:is(.hit, [data-hit])) after descendant attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant attribute stress cold: shadow-host: :has(:is(.hit, [data-hit])) after descendant attribute change | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
