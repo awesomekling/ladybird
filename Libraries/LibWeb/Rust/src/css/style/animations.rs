@@ -2002,12 +2002,10 @@ impl std::hash::Hash for KeyframesName {
 pub(crate) struct PublishedKeyframesSet {
     pub(crate) pointer: usize,
     pub(crate) description: PublishedEffect,
-    /// Whether starting this animation is more than creating it: a value that counts the tree -
-    /// `sibling-index()` and its kin - makes the element recompute when its siblings move, a
-    /// `url()` resolves against the sheet the rule was written in, and a custom property or an
-    /// unresolved value travels as the tokens it was written as, so nothing here can see what it
-    /// asks for. All of them are noted by the computation that resolves the keyframes, and a row
-    /// the engine settles never runs one: it leaves a plan naming such a rule to C++ whole.
+    /// Whether starting this animation is more than creating it: a `url()` resolves against the
+    /// sheet the rule was written in, and a custom property travels as the tokens it was written
+    /// as, so nothing here can see what it asks for. A row the engine settles never runs one: it
+    /// leaves a plan naming such a rule to C++ whole.
     pub(crate) needs_the_host: bool,
     /// Whether the rule animates a value the element's descendants inherit. A C++ computation
     /// samples an animation it starts into the very record it publishes, so a descendant computed
@@ -2048,21 +2046,6 @@ fn description_declares_an_inherited_property(description: &PublishedEffect) -> 
 /// Whether starting an animation from this rule is more than creating it; see `needs_the_host`.
 #[must_use]
 fn description_needs_the_host(description: &PublishedEffect) -> bool {
-    // A keyframe easing that substitutes against the element, and a value asking for one of the
-    // substitutions only the host's sampling resolves, are sampled by the host.
-    if description
-        .keyframes
-        .iter()
-        .any(|keyframe| keyframe.easing_value.optional_data().is_some())
-        || description.declarations.iter().any(|declaration| {
-            declaration
-                .value
-                .optional_data()
-                .is_some_and(|data| !crate::css::cascaded_properties::custom_property_value_is_callback_free(data))
-        })
-    {
-        return true;
-    }
     // Having a resource context is ordinary - every sheet with a base URL records one. Needing it
     // is not: a `url()` in a keyframe resolves against the sheet the rule was written in, which
     // only the computation that resolves the keyframes does.
@@ -2078,14 +2061,7 @@ fn description_needs_the_host(description: &PublishedEffect) -> bool {
     }
     // A custom property's keyframe value travels as the token stream it was written as, so nothing
     // here can see what it asks for: a rule declaring one is refused outright.
-    if !description.custom_declarations.is_empty() {
-        return true;
-    }
-    description.declarations.iter().any(|declaration| {
-        declaration.value.optional_data().is_some_and(|data| {
-            crate::css::style_compute::collect_external_value_dependencies(data).uses_tree_counting_function
-        })
-    })
+    !description.custom_declarations.is_empty()
 }
 
 impl AnimationKeyframes {
