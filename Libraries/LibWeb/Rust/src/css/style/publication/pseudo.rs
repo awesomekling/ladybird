@@ -330,7 +330,7 @@ impl RetainedState {
         // A marker's named counter style can move without changing any inherited group or
         // winner. Both retained and shared pseudo records must name the current registry.
         let mut pseudo_uses_substitution = scratch.pseudo_uses_substitution;
-        for (pseudo_index, kind) in [BEFORE, AFTER, FIRST_LETTER, SELECTION, MARKER, BACKDROP]
+        for (pseudo_index, kind) in [BEFORE, AFTER, FIRST_LETTER, SELECTION, BACKDROP, MARKER]
             .into_iter()
             .enumerate()
             .skip(scratch.next_pseudo)
@@ -1022,18 +1022,16 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailWinnerElement);
             return None;
         }
-        // A record it already holds is replaced by a full drive; one composing animations or
-        // running transitions starts them from itself, which C++ does.
+        // A record it already holds is replaced by a full drive. An existing animation overlay
+        // still owns its composition; transition declarations alone do not prevent driving the
+        // next base record, whose delta lets the host start a transition.
         let old_record = self.computed_group_sets.assigned_style_record(node);
         if let Some(old) = old_record {
             let Some(view) = self.computed_group_sets.style_record_view(old.raw()) else {
                 counters.bump(Counter::EngineComputedRecordBailRecord);
                 return None;
             };
-            if !view.animated_overlay.is_null()
-                || (unsafe { view.longhand_table.as_ref() })
-                    .is_none_or(crate::css::style_compute::has_active_transition_properties)
-            {
+            if !view.animated_overlay.is_null() {
                 counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
                 return None;
             }
