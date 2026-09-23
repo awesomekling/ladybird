@@ -697,7 +697,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
 
             // The pseudo-element records a retry settled beside the element's record.
             Optional<DOM::Element::EnginePseudoElementRecords> retried_pseudo_element_records;
-            if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetryAfterAncestor) {
+            if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetryAfterAncestor
+                || (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize
+                    && reaction.reaction & (StyleEngine::RecomputeStyle | StyleEngine::RecomputeDescendantStyles | StyleEngine::AncestorBecameVisible | StyleEngine::InheritedStyle | StyleEngine::InheritedCustomProperties)
+                    && !element_style_depends_on_more_than_the_inherited_groups(*element)
+                    && !element->has_associated_animations())) {
                 // The preceding row has installed and published this element's parent. Ask now,
                 // before applying this row, rather than deriving its descendants ahead of their
                 // own install boundaries.
@@ -734,7 +738,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         StyleComputer::record_container_query_effects(DOM::AbstractElement { *element }, container_effects);
                         continue;
                     }
-                    reaction.gap = StyleEngineFFI::FfiStyleDeltaGap::Materialize;
+                    if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetryAfterAncestor)
+                        reaction.gap = StyleEngineFFI::FfiStyleDeltaGap::Materialize;
                 }
             }
 

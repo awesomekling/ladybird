@@ -6979,15 +6979,24 @@ impl StyleEngineState {
     /// its children in the same call would read facts the host has not yet published.
     pub(crate) fn retry_engine_records_after_ancestor(&mut self, node: StyleNodeID, counters: &mut Counters) {
         self.host.retried_record_rows.clear();
-        let Some(index) = self
+        let armed = self
             .host
             .armed_retry_nodes
             .iter()
-            .position(|&candidate| candidate == node)
-        else {
+            .position(|&candidate| candidate == node);
+        // A row introduced while the host applies a batch was never part of the flush's
+        // record loop. Its retained answer can be offered now, after its parent was installed.
+        // A row the engine already declined keeps the original host path.
+        if armed.is_none()
+            && (self.retained.host_entry_causes.contains_key(&node)
+                || self.backs_host_pseudo_element(node)
+                || self.retained.current_published_answer(node).is_none())
+        {
             return;
-        };
-        self.host.armed_retry_nodes.remove(index);
+        }
+        if let Some(index) = armed {
+            self.host.armed_retry_nodes.remove(index);
+        }
         let retried = self.retry_engine_record_after_ancestor(node, counters);
         if retried.style_record == 0 {
             return;
