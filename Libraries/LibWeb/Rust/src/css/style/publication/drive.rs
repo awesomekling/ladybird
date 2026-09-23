@@ -90,11 +90,9 @@ impl RetainedState {
         let Some(parent) = parent else {
             return true;
         };
-        if self
-            .computed_group_sets
-            .sampled_composition_identity(parent)
-            .is_some_and(computed::ComputedGroupSets::record_is_animation_overlay)
-        {
+        // A sampled identity only survives when it still equals the assigned record. A base
+        // record published after the transition step is authoritative just like an overlay.
+        if self.computed_group_sets.sampled_composition_identity(parent).is_some() {
             return true;
         }
         let Some(record) = self.computed_group_sets.assigned_style_record(parent) else {
