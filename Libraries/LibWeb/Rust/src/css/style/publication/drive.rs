@@ -22,7 +22,6 @@ pub(super) enum TransitionDriveGoal {
 #[derive(Default)]
 pub(in crate::css::style) struct FontDriveScratch {
     pub(super) root_inputs: Option<RootFontInputs>,
-    pub(super) root_inputs_unproven: bool,
     pub(in crate::css::style) request: Option<font_resolution::FontRequest>,
     pending: Option<PendingFontDrive>,
     pub(super) registered_context: Option<custom_property_cascade::RegisteredValueContext>,
