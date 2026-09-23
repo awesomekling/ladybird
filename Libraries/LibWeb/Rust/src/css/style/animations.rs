@@ -2002,13 +2002,11 @@ impl std::hash::Hash for KeyframesName {
 pub(crate) struct PublishedKeyframesSet {
     pub(crate) pointer: usize,
     pub(crate) description: PublishedEffect,
-    /// Whether the rule animates a value the element's descendants inherit. A C++ computation
-    /// samples an animation it starts into the very record it publishes, so a descendant computed
-    /// after it in the same batch inherits the animated value; a first record the engine settles
-    /// publishes the style beneath the animation and applies its plan once the whole batch is
-    /// installed, which is after those descendants were computed. Such a rule therefore keeps a
-    /// first record in C++. A later record's descendants already hold records of their own and
-    /// take the animated values through the overlay's invalidation, so it does not bind them.
+    /// Whether the rule animates a value the element's descendants inherit. A record the engine
+    /// settles publishes the style beneath the animation and applies its plan once the whole batch
+    /// is installed; the descendants take the animated values through the overlay's invalidation.
+    /// The document-wide shortcut for a record driven beneath a standing composition excludes such
+    /// a rule; the names that record runs are then checked one by one.
     pub(crate) declares_an_inherited_property: bool,
 }
 
@@ -2103,17 +2101,11 @@ impl AnimationKeyframes {
         self.scopes.get(&tree_scope)?.get(name)
     }
 
-    /// Whether a first record may start the animations this document defines at all.
-    ///
-    /// A record the engine settles publishes the style beneath its animations and applies its plan
-    /// once the whole batch is installed. For a *first* record that is too late to sample the
-    /// animation into the record its descendants inherit from in this same batch. So a first
-    /// record starts an animation only where every rule in the document is one it can account for -
-    /// asked of the document rather than of the plan, because the question has to be answered
-    /// before the record is driven, and a plan refused after that would leave a record assigned
-    /// that nothing installs.
+    /// Whether every `@keyframes` rule in the document is one a record driven beneath a standing
+    /// composition can account for: defined in the document's own scope, resolved without the
+    /// host, and animating nothing the element's descendants inherit.
     #[must_use]
-    pub(crate) fn a_first_record_may_start_an_animation(&self) -> bool {
+    pub(crate) fn every_keyframes_rule_is_engine_computable(&self) -> bool {
         self.only_the_document_scope_defines_keyframes()
             && self
                 .scopes

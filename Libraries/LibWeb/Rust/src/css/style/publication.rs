@@ -1073,12 +1073,12 @@ impl RetainedState {
                         .iter()
                         .all(|entry| !entry.result_of_transition || redrives_a_standing_composition)
                 });
-        // The first-record gate excludes keyframes on inherited properties. For a record, only
-        // the rules its own names run matter: its descendants hold records of their own, and a
-        // child derived in the same batch waits for the composition.
+        // A full drive beneath a standing composition excludes keyframes on inherited properties.
+        // For a record, only the rules its own names run matter: its descendants hold records of
+        // their own, and a child derived in the same batch waits for the composition.
         let is_leaf = self.tree.flat_tree_children(node).next().is_none();
-        let css_keyframes_are_engine_computable = self.animation_keyframes().a_first_record_may_start_an_animation()
-            || {
+        let css_keyframes_are_engine_computable =
+            self.animation_keyframes().every_keyframes_rule_is_engine_computable() || {
                 let reads_custom_properties = self.node_style_reads_custom_properties(node);
                 self.warm_record_names_engine_computable_animations(node, state, reads_custom_properties)
             };
@@ -2000,14 +2000,18 @@ impl RetainedState {
         counters: &mut Counters,
     ) -> Option<(computed::FinalStyleRecordID, computed::FinalStyleRecordID)> {
         // A first record whose winners declare CSS animations owes the host the plan that starts
-        // them, the way a warm row does: the element holds none yet, so every definition starts one.
-        let owes_an_animation_plan = self.cold_record_owes_an_animation_plan(node, cascade_state.1);
-        let delta =
-            self.engine_cold_record_impl(node, cascade_state, scratch, goal, counters, owes_an_animation_plan)?;
+        // them, the way a warm row does: which animations to create or keep, their timing and the
+        // keyframe sets they run are decided here, and the host only creates the objects.
+        let owes_an_animation_plan = self
+            .winner_groups
+            .semantic_delta_properties(None, cascade_state.1)
+            .any(longhand_declares_a_css_animation);
+        let delta = self.engine_cold_record_impl(node, cascade_state, scratch, goal, counters)?;
         if owes_an_animation_plan {
             // The plan is decided from the record the row installs, which carries the longhands the
             // drive computed. A record without one is no record to settle a plan against.
-            let Some(plan) = self.settled_animation_plan_from_record(node, delta.1, AnimationNameScope::Unknown) else {
+            let declaration_scope = self.animation_name_declaration_scope(cascade_state.1);
+            let Some(plan) = self.settled_animation_plan_from_record(node, delta.1, declaration_scope) else {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
             };
@@ -2017,37 +2021,6 @@ impl RetainedState {
             self.nodes_owing_an_animation_sample.insert(node);
         }
         Some(delta)
-    }
-
-    /// Whether a first record for this node would owe the host an animation plan: its winners
-    /// declare a CSS animation and nothing else the C++ computation has to decide, the element
-    /// holds no animation yet, and the document's own scope is the only one defining `@keyframes`.
-    fn cold_record_owes_an_animation_plan(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
-        let mut declares_an_animation = false;
-        for property in self.winner_groups.semantic_delta_properties(None, state) {
-            if longhand_declares_a_css_animation(property) {
-                declares_an_animation = true;
-                continue;
-            }
-            // An unavailable input still leaves the record and its effects to C++.
-            if self.first_record_winner_needs_cpp(state, property) {
-                return false;
-            }
-        }
-        declares_an_animation
-            && self
-                .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
-                .is_empty()
-            && (self.animation_keyframes().a_first_record_may_start_an_animation()
-                || (self.tree.flat_tree_children(node).next().is_none()
-                    && self.cold_record_names_engine_computable_animations(state)))
-    }
-
-    /// Check the names a leaf's first record actually starts when another keyframes rule in the
-    /// document prevents the document-wide first-record shortcut. A leaf has no children to derive
-    /// before the sample, so its keyframes may animate an inherited property.
-    fn cold_record_names_engine_computable_animations(&self, state: CascadeStateID) -> bool {
-        self.state_names_only_keyframes(state, KeyframesScope::DocumentOnly, |_| true)
     }
 
     /// Check the names a later record runs. Its descendants already hold records of their own and
@@ -2061,7 +2034,7 @@ impl RetainedState {
         state: CascadeStateID,
         reads_custom_properties: bool,
     ) -> bool {
-        self.state_names_only_keyframes(state, KeyframesScope::Element(self.tree.tree_scope(node)), |set| {
+        self.state_names_only_keyframes(state, self.tree.tree_scope(node), |set| {
             !description_reads_container_units(&set.description)
                 && (!reads_custom_properties || !set.description.declares_custom_properties())
         })
@@ -2071,24 +2044,15 @@ impl RetainedState {
     /// winning `animation-name` declaration was written in, which the winner store does not record.
     fn state_names_resolve_without_the_declaration_scope(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
         self.animation_keyframes().only_the_document_scope_defines_keyframes()
-            || self.state_names_only_keyframes(state, KeyframesScope::Element(self.tree.tree_scope(node)), |_| true)
+            || self.state_names_only_keyframes(state, self.tree.tree_scope(node), |_| true)
     }
 
     fn state_names_only_keyframes(
         &self,
         state: CascadeStateID,
-        scope: KeyframesScope,
+        element_tree_scope: tree::TreeScopeID,
         accepts: impl Fn(&animations::PublishedKeyframesSet) -> bool,
     ) -> bool {
-        let element_tree_scope = match scope {
-            KeyframesScope::DocumentOnly => {
-                if !self.animation_keyframes().only_the_document_scope_defines_keyframes() {
-                    return false;
-                }
-                tree::TreeScopeID::DOCUMENT
-            }
-            KeyframesScope::Element(element_tree_scope) => element_tree_scope,
-        };
         let Some(winner) = self
             .winner_groups
             .winner_in_state(state, crate::css::property_metadata::property_id::ANIMATION_NAME)
@@ -2139,27 +2103,6 @@ impl RetainedState {
             .is_none()
     }
 
-    /// A first record with only `none` names has no CSS animation to start, even if unrelated
-    /// keyframes in the document make a new animation plan unavailable.
-    fn cold_state_names_no_animation(&self, state: CascadeStateID) -> bool {
-        self.winner_groups
-            .winner_in_state(state, crate::css::property_metadata::property_id::ANIMATION_NAME)
-            .and_then(|winner| self.winner_groups.resolved_winner(winner))
-            .is_none_or(|winner| {
-                let is_none = |value: &StyleValueData| {
-                    matches!(value, StyleValueData::Keyword { keyword }
-                        if *keyword == crate::css::style_compute::keyword::NONE)
-                };
-                match self.specified_values.value(winner.key.value) {
-                    Lookup::Known(value) if is_none(value) => true,
-                    Lookup::Known(StyleValueData::ValueList { values, .. }) => {
-                        !values.as_slice().is_empty() && values.as_slice().iter().all(|value| is_none(value.data()))
-                    }
-                    _ => false,
-                }
-            })
-    }
-
     /// A node's custom-property environment as this flush leaves it. A row this flush settles
     /// holds its new environment already, but an ancestor between it and a first record may be one
     /// the host refreshes only once the batch applies, so the first record would resolve over the
@@ -2202,7 +2145,6 @@ impl RetainedState {
         scratch: &mut EngineComputedRecordScratch,
         goal: FontDriveGoal,
         counters: &mut Counters,
-        owes_an_animation_plan: bool,
     ) -> Option<(computed::FinalStyleRecordID, computed::FinalStyleRecordID)> {
         let target = computed::ComputedStyleTarget::new(node, u8::MAX);
         let (_, state) = cascade_state;
@@ -2288,17 +2230,11 @@ impl RetainedState {
         {
             return Some(delta);
         }
-        // A winner that reads an unavailable environment keeps the record in C++. An animation
-        // declaration also does unless the engine can supply its install-time animation plan.
-        // Font-phase longhands feed no group of their own: the full drive resolves the font from
-        // them and rebuilds every group, rejecting values the font resolution does not pass on yet.
+        // A winner that reads an unavailable environment keeps the record in C++. Font-phase
+        // longhands feed no group of their own: the full drive resolves the font from them and
+        // rebuilds every group, rejecting values the font resolution does not pass on yet.
         for property in self.winner_groups.semantic_delta_properties(None, state) {
-            if self.first_record_winner_needs_cpp(state, property)
-                || (longhand_declares_a_css_animation(property)
-                    && !owes_an_animation_plan
-                    && (self.computed_group_sets.associated_pseudo_kind(node).is_some()
-                        || !self.cold_state_names_no_animation(state)))
-            {
+            if self.first_record_winner_needs_cpp(state, property) {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
             }
@@ -6950,12 +6886,6 @@ fn shorthand_longhand_value(
 enum AnimationNameScope {
     Known(Option<tree::TreeScopeID>),
     Unknown,
-}
-
-#[derive(Clone, Copy)]
-enum KeyframesScope {
-    DocumentOnly,
-    Element(tree::TreeScopeID),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
