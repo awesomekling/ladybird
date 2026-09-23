@@ -1097,12 +1097,13 @@ impl RetainedState {
         // With no sampled overlay, the old record is already the animation's base. The row can
         // install a newly driven base and apply its complete CSS plan before sampling; a child
         // derived in the same batch waits for that composition, and substitutes under the custom
-        // properties the sample publishes into the element's environment.
+        // properties the sample publishes into the element's environment. A transition the record
+        // declares is decided at installation against the record the row moves away from, as
+        // beneath any other composition.
         let css_base_without_an_overlay = animations_bind_the_record
             && !self.computed_group_sets.node_has_animation_overlay(node)
             && self.css_defined_animations.node_runs_a_css_animation(node)
-            && css_keyframes_are_engine_computable
-            && !self.record_declares_transitions(old_style_record);
+            && css_keyframes_are_engine_computable;
         // An element whose Web Animations hold no sampled overlay has the old record as its base.
         // Its new base is driven like any other record, and the host samples the effects over it.
         // An effect on a custom property holds no overlay even while it runs, and children would
