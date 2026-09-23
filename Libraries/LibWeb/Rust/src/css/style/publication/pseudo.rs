@@ -10,6 +10,12 @@ impl RetainedState {
     /// A pseudo row can predate the current answer even when the element row is current. Rebuild
     /// its winners from that answer before deciding whether the engine can settle its record.
     fn refresh_stale_pseudo_winners(&mut self, node: StyleNodeID, counters: &mut Counters) {
+        // A publication in this flush already refreshed the element and its pseudo rows.
+        // Republishing again after the element record was compared changes its winner
+        // identity after that comparison, and counts a second retained-answer use.
+        if self.current_winner_groups().row_stamp(node) == Some(self.flush_stamp) {
+            return;
+        }
         let Some(mask) = self.pseudo_style_mask(node) else {
             return;
         };

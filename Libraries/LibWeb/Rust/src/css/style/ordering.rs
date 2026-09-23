@@ -660,9 +660,14 @@ impl RetainedState {
             if self.program.rule_is_gated_by_container_query(entry.rule)
                 && let Some(node) = publish_winners_for
             {
-                let holds = self
-                    .rule_container_verdict(entry.rule, node.raw(), entry.pseudo_element.is_some())
-                    .is_some_and(|verdict| verdict.matches);
+                let verdict = self.rule_container_verdict(entry.rule, node.raw(), entry.pseudo_element.is_some());
+                // A false pseudo gate still makes the originating element depend on the
+                // container. Cold record publication can bypass the later verdict check, so
+                // retain this read for the host to register scroll-state invalidation.
+                if let Some(verdict) = &verdict {
+                    self.note_container_effects_for_host(node, verdict);
+                }
+                let holds = verdict.is_some_and(|verdict| verdict.matches);
                 container_verdicts.push((entry.rule, entry.pseudo_element.is_some(), holds));
                 if !holds {
                     continue;
