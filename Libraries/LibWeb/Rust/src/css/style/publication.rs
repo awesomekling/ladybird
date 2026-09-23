@@ -2866,8 +2866,7 @@ impl RetainedState {
             .effects(node, animations::ELEMENT_ANIMATION_SLOT)
             .iter()
             .all(|effect| {
-                effect.is_covered()
-                    && !description_reads_container_units(effect)
+                !description_reads_container_units(effect)
                     && (transitions == TransitionEffects::Allowed
                         || effect.flags & animations::effect_flag::IS_TRANSITION == 0)
                     && (!reads_custom_properties || !effect.declares_custom_properties())

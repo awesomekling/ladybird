@@ -7684,10 +7684,7 @@ pub(crate) fn resolve_selected_animation_declarations(
     substitution: &mut KeyframeSubstitutionContext,
     custom: Option<&mut AnimatedCustomProperties<'_>>,
 ) -> Option<FfiResolvedAnimationProperties> {
-    if selected
-        .iter()
-        .any(|selection| !selection.effect.is_covered() || selection.effect.keyframes.len() < 2)
-    {
+    if selected.iter().any(|selection| selection.effect.keyframes.len() < 2) {
         return None;
     }
     let (ffi_effects, ffi_keyframes, ffi_declarations, _substituted_values, _substituted_easings) =

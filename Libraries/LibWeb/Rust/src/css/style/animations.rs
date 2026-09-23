@@ -1495,7 +1495,6 @@ pub(crate) mod effect_flag {
     /// The host could not describe this effect for the stage - a keyframe value that still needs
     /// substitution, a custom property, an easing that is itself a style value - so the stage has to
     /// collect it the way it always has.
-    pub(crate) const NOT_COVERED: u32 = 1 << 1;
     pub(crate) const HAS_RESOURCE_CONTEXT: u32 = 1 << 2;
     pub(crate) const RESOURCE_CONTEXT_IS_ORIGIN_CLEAN: u32 = 1 << 3;
 }
@@ -1743,11 +1742,6 @@ pub(crate) struct PublishedEffect {
 }
 
 impl PublishedEffect {
-    #[must_use]
-    pub(crate) fn is_covered(&self) -> bool {
-        self.flags & effect_flag::NOT_COVERED == 0
-    }
-
     #[must_use]
     pub(crate) fn declarations_of(&self, keyframe: &PublishedKeyframe) -> &[PublishedDeclaration] {
         &self.declarations[keyframe.declaration_range.clone()]
@@ -2054,9 +2048,6 @@ fn description_declares_an_inherited_property(description: &PublishedEffect) -> 
 /// Whether starting an animation from this rule is more than creating it; see `needs_the_host`.
 #[must_use]
 fn description_needs_the_host(description: &PublishedEffect) -> bool {
-    if !description.is_covered() {
-        return true;
-    }
     // A keyframe easing that substitutes against the element, and a value asking for one of the
     // substitutions only the host's sampling resolves, are sampled by the host.
     if description
