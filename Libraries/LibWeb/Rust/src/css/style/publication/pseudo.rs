@@ -601,10 +601,14 @@ impl RetainedState {
                 remove(self, scratch, counters);
                 continue;
             }
+            // Container units resolve against the originating element's query containers, which
+            // no other element shares.
+            let container_unit_mask = store.container_relative_length_unit_mask(self);
             // What the record is derived from: the element's inherited style, display and
             // environment, and the element's record itself only when the state inherits a
             // non-inherited property from it.
             let key = (!has_registered_declarations
+                && container_unit_mask == 0
                 && !computed::ComputedGroupSets::record_is_animation_overlay(new_element_record.raw()))
             .then_some(())
             .and(
@@ -774,6 +778,8 @@ impl RetainedState {
                     (record, longhand_evaluations)
                 }
             };
+            // The host records what the pseudo-element's container units read as the element's own.
+            self.note_container_unit_effects_for_host(node, new_style_record, container_unit_mask);
             if kind != BACKDROP
                 && state.is_some_and(|state| !self.state_has_no_animation_name(state))
                 && self.animation_keyframes().only_the_document_scope_defines_keyframes()
