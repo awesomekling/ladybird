@@ -4767,7 +4767,7 @@ void LocalNavigable::set_viewport_size(CSSPixelSize size, InvalidateDisplayList 
 
     if (auto document = active_document()) {
         if (invalidate_display_list == InvalidateDisplayList::PaintCommandsAndHitTestList)
-            document->record_style_environment_change(DOM::Node::EnvironmentActionDrive::Engine);
+            document->record_style_environment_change();
         else
             document->invalidate_style_for_viewport_change();
         document->set_needs_media_query_evaluation();

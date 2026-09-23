@@ -228,8 +228,6 @@ impl StyleEngineState {
         // The nodes whose style input the C++ computation has to settle this transaction.
         let style_input_nodes_for_cpp = std::mem::take(&mut self.retained.style_input_nodes_for_cpp);
         let container_input_nodes = std::mem::take(&mut self.retained.container_input_nodes);
-        let environment_action_needs_host_computation =
-            std::mem::take(&mut self.retained.environment_action_needs_host_computation);
         let parent_inputs_moved_nodes = std::mem::take(&mut self.retained.parent_inputs_moved_nodes);
         self.host
             .deferred_element_style_input_memory
@@ -1812,10 +1810,8 @@ impl StyleEngineState {
             style_delta_memory.resize_required_to(&mut self.retained.memory, style_delta_bytes);
             let mut record_deltas = None::<Vec<Option<Vec<PublishedStyleDeltaRecord>>>>;
             let mut engine_computed_record_scratch = publication::EngineComputedRecordScratch::default();
-            engine_computed_record_scratch.document_environment_moved =
-                environment_changed && !environment_action_needs_host_computation;
-            engine_computed_record_scratch.environment_requires_host_computation =
-                environment_changed && environment_action_needs_host_computation;
+            engine_computed_record_scratch.document_environment_moved = environment_changed;
+            self.host.document_environment_moved_for_retries = environment_changed;
             // The viewport the records were driven against, against the one they are driven against
             // now. A record that reads it cannot stand across the difference.
             if let Some(inputs) = self.retained.document_style_computation_inputs {
@@ -1914,6 +1910,8 @@ impl StyleEngineState {
                     engine_computed_record_scratch.capacity_bytes(),
                 );
             }
+            self.host.root_font_inputs_changed_for_retries = engine_computed_record_scratch.root_font_inputs_changed;
+            self.host.viewport_moved_for_retries = engine_computed_record_scratch.viewport_moved;
             // What the chain above a node proves, read by its children in the same pass. A
             // published ancestor's change is exact for a descendant only when none of the
             // ancestors can move anything the descendant inherits, so the fold below is the
@@ -2315,8 +2313,7 @@ impl StyleEngineState {
                             // state it holds is its cascade, unless the environment moved, which
                             // reaches values the winners do not name.
                             let nothing_flipped = flipped_rules.is_empty() && !environment_changed;
-                            let winners_are_exact = !(environment_changed && environment_action_needs_host_computation)
-                                && !rule_declarations_edited
+                            let winners_are_exact = !rule_declarations_edited
                                 && selector_truth_changes.refreshes_for(node).is_empty()
                                 && (answer_is_unchanged
                                     || nothing_flipped

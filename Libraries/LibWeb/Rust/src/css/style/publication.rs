@@ -802,24 +802,10 @@ impl RetainedState {
         // is driven again in full under the new one.
         let environment_moved_under_substitutions = environment.is_some() && self.state_has_substitutions(node, state);
         if delta.is_empty() {
-            // A current row, including one republished from its retained selector answer, holds
-            // this flush's rule flips. An unsupported environment action may still change values
-            // that the winners do not name.
-            let row_is_current = self.current_winner_groups().row_stamp(node) == Some(self.flush_stamp);
-            let flips_are_reflected = match exact_flipped_rules {
-                Some(flipped) => !flipped.element || row_is_current,
-                None => row_is_current && !scratch.environment_requires_host_computation,
-            };
-            if !flips_are_reflected {
-                counters.bump(Counter::EngineComputedRecordBailUnchangedWinners);
-                // The document element's own record stays with C++, but nothing here says its
-                // font inputs moved: keep the host's root-metric route rather than declaring the
-                // root's computation unsupported, which takes every descendant with it.
-                if goal == FontDriveGoal::RootInputs {
-                    scratch.font_drive.root_inputs_unproven = true;
-                }
-                return None;
-            }
+            // A flipped rule that lost the cascade may leave this row's stamp old, but an exact
+            // retained-answer publication has already established the same semantic winners.
+            // A document environment action keeps those winners and drives their values again
+            // below against the document inputs published for this transaction.
             // The winners stand while the parent's inherited style or display moved under the
             // record: it is driven again in full against the parent as it is now. The record
             // does not say which parent display it was transformed under, and a winner's own
@@ -5494,7 +5480,7 @@ pub(super) struct EngineComputedRecordContinuation {
     root_element_inputs: Option<(StyleNodeID, RootFontInputs)>,
     // NB: A failed preparation already performed the root's unsupported computation.
     root_computation_unsupported: Option<StyleNodeID>,
-    root_font_inputs_changed: bool,
+    pub(super) root_font_inputs_changed: bool,
     pending_element: Option<(computed::FinalStyleRecordID, computed::FinalStyleRecordID)>,
     next_pseudo: usize,
     pseudo_uses_substitution: bool,
@@ -5529,10 +5515,8 @@ impl EngineComputedRecordContinuation {
 pub(super) struct EngineComputedRecordScratch {
     /// A scoped read can request the base record of a cold animation target.
     pub(super) targeted_record_demand: bool,
-    /// Whether this transaction carries a document environment action requiring host computation.
-    pub(super) environment_requires_host_computation: bool,
     pub(super) continuation: EngineComputedRecordContinuation,
-    /// Whether this flush carries an engine-supported environment action. A record's winners can stand
+    /// Whether this flush carries a document environment action. A record's winners can stand
     /// through one while the values they computed to do not, so such a record is driven again in
     /// full rather than kept - and rather than handed back to C++.
     pub(super) document_environment_moved: bool,
@@ -6727,7 +6711,15 @@ impl StyleEngineState {
         }
         counters.bump(Counter::RetryAfterAncestorCalls);
         let started_at = std::time::Instant::now();
-        let mut scratch = EngineComputedRecordScratch::default();
+        let mut scratch = EngineComputedRecordScratch {
+            continuation: EngineComputedRecordContinuation {
+                root_font_inputs_changed: self.host.root_font_inputs_changed_for_retries,
+                ..EngineComputedRecordContinuation::default()
+            },
+            document_environment_moved: self.host.document_environment_moved_for_retries,
+            viewport_moved: self.host.viewport_moved_for_retries,
+            ..EngineComputedRecordScratch::default()
+        };
         let mut suspended_memory = MemoryLease::new(MemoryCategory::BatchScratch);
         let style_record =
             self.retry_engine_record_after_ancestor_loop(node, &mut scratch, &mut suspended_memory, counters);

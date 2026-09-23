@@ -986,9 +986,6 @@ pub struct RetainedState {
     /// previously substituted record must then be driven again even when its cascade winners
     /// did not move.
     custom_property_registrations_changed: bool,
-    /// Whether an environment action since the last flush changed a document fact the engine's own
-    /// record drive does not hold, so a record that stands on its winners still recomputes in C++.
-    environment_action_needs_host_computation: bool,
     /// Pending selections for elements, and separately for the few pseudo-elements that hold one.
     /// Both are keyed by the element so that retiring it releases every selection by key.
     pending_element_style_computation_selections: HashMap<StyleNodeID, StyleComputationSelection>,
@@ -1141,6 +1138,11 @@ pub struct RetainedState {
 /// Host-facing engine state: C++ ownership, journal intake and the record/replay adapters.
 /// Never reachable from an evaluation step.
 pub struct HostState {
+    /// A document action in the batch whose ancestor-dependent rows the host is installing.
+    /// Retried records must drive their values under that action too.
+    pub(super) document_environment_moved_for_retries: bool,
+    pub(super) root_font_inputs_changed_for_retries: bool,
+    pub(super) viewport_moved_for_retries: bool,
     /// The nodes the record loop armed for a retry, in the order it processed them, which is
     /// flat-tree order. A retry the host asks for settles the whole run of them that hangs off
     /// the ancestor it has just applied, so the crossing happens once for the run rather than
