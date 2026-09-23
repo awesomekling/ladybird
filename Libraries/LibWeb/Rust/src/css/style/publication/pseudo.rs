@@ -7,6 +7,26 @@
 use super::*;
 
 impl RetainedState {
+    /// A pseudo row can predate the current answer even when the element row is current. Rebuild
+    /// its winners from that answer before deciding whether the engine can settle its record.
+    fn refresh_stale_pseudo_winners(&mut self, node: StyleNodeID, counters: &mut Counters) {
+        let Some(mask) = self.pseudo_style_mask(node) else {
+            return;
+        };
+        let stale = self
+            .current_winner_groups()
+            .pseudo_states(node)
+            .any(|(pseudo, version, _, priority_current)| {
+                let kind = usize::from(pseudo.kind.0);
+                kind < pseudo_kind::SYNTHETIC_COUNT
+                    && mask & (1_u64 << kind) != 0
+                    && (version != self.program.version() || !priority_current)
+            });
+        if stale {
+            self.republish_winners_from_retained_answer(node, counters);
+        }
+    }
+
     pub(crate) fn drop_demand_pseudo_records(&mut self, node: StyleNodeID) {
         let records: Vec<_> = self
             .demand_pseudo_records
@@ -77,6 +97,17 @@ impl RetainedState {
                 if self.pseudo_style_mask(node).is_some_and(|mask| mask & (1 << kind) == 0) {
                     continue;
                 }
+                // Settlement refreshes this row from the node's retained match answer after
+                // its element record is decided. Refreshing now would also replace the element
+                // winner row before its normal computed-output comparison.
+                if self
+                    .current_answer_identity(node)
+                    .and_then(|identity| self.match_answers.answer(identity))
+                    .is_some()
+                {
+                    available |= 1 << kind;
+                    continue;
+                }
                 counters.bump(Counter::EngineComputedRecordBailPseudoStale);
                 return false;
             }
@@ -143,6 +174,8 @@ impl RetainedState {
         selected_kind: Option<u8>,
     ) -> Option<()> {
         use pseudo_kind::{AFTER, BACKDROP, BEFORE, FIRST_LETTER, MARKER, SELECTION};
+
+        self.refresh_stale_pseudo_winners(node, counters);
 
         let Some(mut inputs) = self.document_style_computation_inputs else {
             counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
