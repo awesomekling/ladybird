@@ -1255,7 +1255,7 @@ impl RetainedState {
                 .properties()
                 .contains(&crate::css::property_metadata::property_id::DISPLAY)
                 && match record_declares_transitions {
-                    true => !parent_inputs_moved.display && !scratch.recompute_in_full,
+                    true => !parent_inputs_moved.display && !scratch.ancestor_became_visible,
                     false => self.tree.flat_tree_children(node).all(|child| child.is_text()),
                 }))
             && (record_declares_transitions
@@ -1272,7 +1272,7 @@ impl RetainedState {
                     .iter()
                     .all(|&property| longhand_only_declares_a_css_transition(property))
         });
-        if record_declares_transitions && !owes_a_transition_step {
+        if record_declares_transitions && !owes_a_transition_step && !scratch.ancestor_became_visible {
             counters.bump(Counter::EngineComputedRecordBailRecordOverlayPublication1147);
             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
             return None;
@@ -1284,8 +1284,10 @@ impl RetainedState {
                 .is_empty();
         // An existing overlay may carry a transition to retarget or cancel. The host samples the
         // installed record before the step, so the step reads each running transition's current
-        // value from that composition and decides against the record the row moved away from.
-        let transition_goal = if full_drive && owes_a_transition_step {
+        // value from that composition and decides against the record the row moved away from. A
+        // record whose style was cleared on entry to display:none has no before-change style, so
+        // it owes no step at all.
+        let transition_goal = if full_drive && (owes_a_transition_step || scratch.ancestor_became_visible) {
             TransitionDriveGoal::DeferStep
         } else {
             TransitionDriveGoal::RefuseDeclarations
@@ -1353,10 +1355,12 @@ impl RetainedState {
                 self.nodes_owing_explicit_inheritance
                     .insert(node, cohort_explicitly_inherited_groups);
             }
-            if let Some(registration_only) = owes_a_transition_registration {
-                self.nodes_owing_a_transition_registration
-                    .insert(node, registration_only);
-            }
+            match owes_a_transition_registration {
+                Some(registration_only) => self
+                    .nodes_owing_a_transition_registration
+                    .insert(node, registration_only),
+                None => self.nodes_owing_a_transition_registration.remove(&node),
+            };
             if let Some(plan) = animation_plan {
                 self.nodes_owing_animation_definitions.insert((node, u8::MAX), plan);
             }
@@ -1672,11 +1676,14 @@ impl RetainedState {
                 .insert(node, explicitly_inherited_groups);
         }
         // A partial drive whose driver inputs moved was driven in full instead, so values the
-        // delta does not name may have moved too: the host runs the whole step for such a row.
-        if let Some(registration_only) = owes_a_transition_registration {
-            self.nodes_owing_a_transition_registration
-                .insert(node, registration_only && !driver_input_moved);
-        }
+        // delta does not name may have moved too: the host runs the whole step for such a row. A
+        // row that owes no step replaces what an earlier row the host never installed owed.
+        match owes_a_transition_registration {
+            Some(registration_only) => self
+                .nodes_owing_a_transition_registration
+                .insert(node, registration_only && !driver_input_moved),
+            None => self.nodes_owing_a_transition_registration.remove(&node),
+        };
         if let Some(plan) = animation_plan {
             self.nodes_owing_animation_definitions.insert((node, u8::MAX), plan);
         }
@@ -6594,6 +6601,9 @@ pub(super) struct EngineComputedRecordScratch {
     /// Set the same way: whether the reaction drives the element's record again in full whatever
     /// its winners did, for inputs the winners do not show.
     pub(super) recompute_in_full: bool,
+    /// Set the same way: whether an ancestor of the element left display:none, which cleared the
+    /// element's style on entry.
+    pub(super) ancestor_became_visible: bool,
     /// This row's selector answer or declaration values moved without publishing current winners.
     pub(super) answer_or_declarations_moved: bool,
     /// Whether the viewport moved since the last flush. A record that reads it holds values its
