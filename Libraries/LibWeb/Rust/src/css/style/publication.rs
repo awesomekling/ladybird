@@ -687,6 +687,10 @@ impl RetainedState {
             }
         };
         let container_unit_mask = self.state_container_unit_mask(node, state);
+        let tree_counting_key = self.state_tree_counting_key(node, state);
+        if self.state_has_written_tree_counting(node, state) || self.nodes_with_tree_counting_records.contains(&node) {
+            scratch.recompute_in_full = true;
+        }
         // An element's animations compose into its style in the C++ computation.
         let facts = self.computed_group_sets.adjustment_facts(node);
         // Either the root's font inputs moved under this element, or the element's own font
@@ -1140,6 +1144,7 @@ impl RetainedState {
             RootFontInputs::from_document(&inputs),
             self.monospace_cohort_key(node, state),
             self.substitution_attributes_key(node, None, state),
+            tree_counting_key,
         );
         if let Some(&(new_style_record, cohort_explicitly_inherited_groups)) = (container_unit_mask == 0
             && !self.computed_group_sets.node_has_animation_overlay(node)
@@ -1869,6 +1874,7 @@ impl RetainedState {
                 environment: parent_environment,
                 font_environment_generation: inputs.font_environment_generation,
                 root_font_inputs: RootFontInputs::from_document(&inputs),
+                tree_counting_key: self.state_tree_counting_key(node, state),
             });
         let delta_property_count = self.winner_groups.winner_count_in_state(state) as u64;
         if !(scratch.targeted_record_demand && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0)
@@ -1970,6 +1976,7 @@ impl RetainedState {
                 environment,
                 font_environment_generation: inputs.font_environment_generation,
                 root_font_inputs: RootFontInputs::from_document(&inputs),
+                tree_counting_key: self.state_tree_counting_key(node, state),
             });
         if let Some(delta) = self.assign_cached_cold_record(
             node,
@@ -1996,6 +2003,7 @@ impl RetainedState {
                 font_environment_generation: key.font_environment_generation,
                 root_font_inputs: key.root_font_inputs,
                 substitution_attributes: key.substitution_attributes,
+                tree_counting_key: key.tree_counting_key,
             };
             self.engine_cold_record_donors
                 .get(&donor_key)?
@@ -2834,6 +2842,7 @@ impl RetainedState {
                     environment,
                     font_environment_generation: inputs.font_environment_generation,
                     root_font_inputs: RootFontInputs::from_document(&inputs),
+                    tree_counting_key: self.state_tree_counting_key(node, cascade_state.1),
                 });
             if let Some((old_record, record)) = self.assign_cached_cold_record(
                 node,
@@ -3220,6 +3229,7 @@ impl RetainedState {
                 font_environment_generation: key.font_environment_generation,
                 root_font_inputs: key.root_font_inputs,
                 substitution_attributes: key.substitution_attributes,
+                tree_counting_key: key.tree_counting_key,
             };
             let donors = self.engine_cold_record_donors.entry(donor_key).or_default();
             if let Some(existing) = donors.iter_mut().find(|donor| donor.state == key.state) {
@@ -3536,6 +3546,7 @@ impl RetainedState {
             environment: custom_property_environment,
             font_environment_generation: inputs.font_environment_generation,
             root_font_inputs: RootFontInputs::from_document(&inputs),
+            tree_counting_key: self.state_tree_counting_key(node, cascade_state.1),
         };
         self.remember_cold_record(
             key,
@@ -3773,6 +3784,27 @@ impl RetainedState {
             })
     }
 
+    pub(crate) fn state_has_written_tree_counting(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
+        self.winner_groups
+            .winners_in_state(state)
+            .filter_map(|winner| self.winner_groups.resolved_winner(winner))
+            .filter_map(|winner| self.written_winner_value(node, &winner).ok().flatten())
+            .any(|(_, value, _)| {
+                crate::css::style_compute::collect_external_value_dependencies(value.data()).uses_tree_counting_function
+            })
+    }
+
+    /// A tree-counting value reads its tree scope and sibling position. A substitution may
+    /// produce one even when the written winner does not name it, so its cache key carries the
+    /// position as well.
+    pub(crate) fn state_tree_counting_key(&self, node: StyleNodeID, state: CascadeStateID) -> (u32, u64) {
+        if self.state_has_written_tree_counting(node, state) || self.state_has_substitutions(node, state) {
+            (self.tree.tree_scope(node).0, self.element_tree_counting_inputs(node))
+        } else {
+            (0, 0)
+        }
+    }
+
     /// The written values of a state's longhand winners that substitute: `var()`, `attr()` and
     /// the like, or a longhand pending its shorthand's substitution.
     fn state_substitution_values(
@@ -3979,7 +4011,9 @@ impl RetainedState {
                 || value_computes_with_random_inputs(data, resources_are_known)
                 || (pseudo_kind.is_none()
                     && matches!(&value, WinnerValue::Written { .. })
-                    && value_computes_with_container_inputs(data, resources_are_known));
+                    && value_computes_with_container_inputs(data, resources_are_known))
+                || (value_computes_with_tree_counting_inputs(data, resources_are_known)
+                    && self.element_tree_counting_inputs(node) != 0);
             if !context_free
                 || (pseudo_kind.is_some()
                     && winner.property == prop::CONTENT
@@ -3998,12 +4032,16 @@ impl RetainedState {
             ));
         }
         declarations.sort_by_key(|(priority, index, ..)| (*priority, *index));
-        Some(WinnerStore::new(
+        let store = WinnerStore::new(
             declarations
                 .into_iter()
                 .map(|(_, _, declaration)| declaration)
                 .collect(),
-        ))
+        );
+        if store.uses_tree_counting_function(self) {
+            self.nodes_with_tree_counting_records.insert(node);
+        }
+        Some(store)
     }
 
     /// Whether every cascade winner that moved on this node since its record was computed is a
@@ -5623,6 +5661,7 @@ pub(super) struct ColdRecordKey {
     /// What the node's attributes hold, when its winners substitute `attr()`: two elements alike
     /// in everything else do not share a record their attributes computed. Zero otherwise.
     substitution_attributes: u64,
+    tree_counting_key: (u32, u64),
 }
 
 /// What a first record reads of the parent's style: its inherited groups, its custom-property
@@ -5649,6 +5688,7 @@ type RecordCohortKey = (
     RootFontInputs,
     i32,
     u64,
+    (u32, u64),
 );
 type RecordCohortValue = (computed::FinalStyleRecordID, u32);
 
@@ -5675,6 +5715,7 @@ pub(super) struct ColdRecordDonorKey {
     font_environment_generation: u64,
     root_font_inputs: RootFontInputs,
     substitution_attributes: u64,
+    tree_counting_key: (u32, u64),
 }
 
 #[derive(Clone, Copy)]
@@ -6032,6 +6073,7 @@ pub(super) struct PseudoCohortKey {
     custom_property_registration_generation: u64,
     root_font_inputs: RootFontInputs,
     substitution_attributes: u64,
+    tree_counting_key: (u32, u64),
 }
 
 /// The synthetic pseudo-element kinds, as the C++ `PseudoElement` enumeration numbers them.
@@ -6362,6 +6404,20 @@ fn value_computes_with_container_inputs(value: &StyleValueData, resources_are_kn
     let dependencies = crate::css::style_compute::collect_external_value_dependencies(value);
     dependencies.container_relative_length_unit_mask != 0
         && !dependencies.uses_tree_counting_function
+        && !dependencies.has_unfixed_random_sharing
+        && !dependencies.uses_random_function
+        && (resources_are_known
+            || (!dependencies.needs_document_base_url && !dependencies.may_need_style_sheet_resource_context))
+}
+
+/// The retained tree supplies the sibling count and index to the longhand drive.
+fn value_computes_with_tree_counting_inputs(value: &StyleValueData, resources_are_known: bool) -> bool {
+    if crate::css::style_compute::value_is_computationally_independent(value).is_none() {
+        return false;
+    }
+    let dependencies = crate::css::style_compute::collect_external_value_dependencies(value);
+    dependencies.uses_tree_counting_function
+        && dependencies.container_relative_length_unit_mask == 0
         && !dependencies.has_unfixed_random_sharing
         && !dependencies.uses_random_function
         && (resources_are_known

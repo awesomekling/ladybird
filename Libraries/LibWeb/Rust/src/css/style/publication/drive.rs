@@ -129,6 +129,11 @@ impl RetainedState {
         let random_base_values = store.drive_random_base_values(self, node)?;
         let resource_contexts = store.drive_resource_contexts(self);
         let container_unit_mask = store.container_relative_length_unit_mask(self);
+        let tree_counting_inputs = if store.uses_tree_counting_function(self) {
+            self.element_tree_counting_inputs(node)
+        } else {
+            0
+        };
         let document_base_url = &self.document_resource_contexts.document_base_url;
         let store = store.view(self);
         use crate::css::computed_value_types::{STYLE_GROUP_INDEX_FONT, STYLE_GROUP_INDEX_INHERITED_BOX};
@@ -238,7 +243,7 @@ impl RetainedState {
             has_new_font_size: false,
             has_tree_counting_context: tree_counting_inputs != 0,
             sibling_count: tree_counting_inputs >> 32,
-            sibling_index: tree_counting_inputs & 0xffff_ffff,
+            sibling_index: tree_counting_inputs & u64::from(u32::MAX),
             random_base_values: random_base_values.as_ptr(),
             random_base_value_count: random_base_values.len(),
             document_base_url: document_base_url.as_ptr(),
@@ -281,10 +286,6 @@ impl RetainedState {
             Counter::EnginePartialLonghandEvaluations,
             u64::from(results.longhand_evaluations),
         );
-        if results.uses_tree_counting_function && tree_counting_inputs == 0 {
-            counters.bump(Counter::EngineComputedRecordBailDriveTreeCounting);
-            return None;
-        }
         // A value the drive could not absolutize with this context leaves the table half meant;
         // the row is whoever can supply what the context lacked.
         if results.unsupported_native_computation {
@@ -370,6 +371,11 @@ impl RetainedState {
         let random_base_values = store.drive_random_base_values(self, subject.target.node())?;
         let resource_contexts = store.drive_resource_contexts(self);
         let container_unit_mask = store.container_relative_length_unit_mask(self);
+        let tree_counting_inputs = if store.uses_tree_counting_function(self) {
+            self.element_tree_counting_inputs(subject.target.node())
+        } else {
+            0
+        };
         let document_base_url = &self.document_resource_contexts.document_base_url;
         let store = store.view(self);
         use crate::css::computed_value_types::{STYLE_GROUP_INDEX_FONT, STYLE_GROUP_INDEX_INHERITED_BOX};
@@ -609,7 +615,7 @@ impl RetainedState {
             has_new_font_size: recascaded_font_size.is_some(),
             has_tree_counting_context: tree_counting_inputs != 0,
             sibling_count: tree_counting_inputs >> 32,
-            sibling_index: tree_counting_inputs & 0xffff_ffff,
+            sibling_index: tree_counting_inputs & u64::from(u32::MAX),
             random_base_values: random_base_values.as_ptr(),
             random_base_value_count: random_base_values.len(),
             document_base_url: document_base_url.as_ptr(),
@@ -1001,10 +1007,6 @@ impl RetainedState {
             &raw const input_line_height_metrics,
             line_height_value,
         );
-        if results.uses_tree_counting_function && tree_counting_inputs == 0 {
-            counters.bump(Counter::EngineComputedRecordBailDriveTreeCounting);
-            return None;
-        }
         // A value the drive could not absolutize with this context leaves the table half meant;
         // the row is whoever can supply what the context lacked.
         if results.unsupported_native_computation {

@@ -931,6 +931,9 @@ pub struct RetainedState {
     /// The nodes whose engine-computed record substituted a custom property into a winner: what
     /// C++ notes as reading custom properties when it installs the record.
     nodes_with_substituted_records: HashSet<StyleNodeID>,
+    /// Nodes whose retained winner drive resolved a sibling-counting value, including one
+    /// produced by custom-property substitution.
+    nodes_with_tree_counting_records: HashSet<StyleNodeID>,
     /// The nodes whose engine-computed record moved the longhands that declare the element's CSS
     /// transitions, and whether the registration is the whole of the debt. It is an effect of the
     /// row rather than a part of the record: the host drains it after the batch, in the order it

@@ -90,6 +90,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         computed_group_sets,
         custom_property_environments,
         nodes_with_substituted_records,
+        nodes_with_tree_counting_records,
         nodes_owing_a_transition_registration,
         nodes_owing_explicit_inheritance,
         batch_pinned_compositions,
@@ -221,6 +222,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(specified_values);
     assert_member_is_sync(winner_groups);
     assert_member_is_sync(nodes_with_substituted_records);
+    assert_member_is_sync(nodes_with_tree_counting_records);
     assert_member_is_sync(nodes_owing_a_transition_registration);
     assert_member_is_sync(nodes_owing_explicit_inheritance);
     assert_member_is_sync(batch_pinned_compositions);

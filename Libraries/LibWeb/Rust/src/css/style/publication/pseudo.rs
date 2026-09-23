@@ -421,6 +421,7 @@ impl RetainedState {
             if kind != SELECTION
                 && old.is_some_and(|record| self.record_counter_environment_is_current(node, record))
                 && originating_inputs_unchanged
+                && !state.is_some_and(|state| self.state_tree_counting_key(node, state).1 != 0)
                 && (old_element_record == Some(new_element_record)
                     || !state.is_some_and(|state| self.state_explicitly_inherits_non_inherited_property(node, state)))
             {
@@ -535,6 +536,7 @@ impl RetainedState {
                         root_font_inputs: RootFontInputs::from_document(&inputs),
                         substitution_attributes: state
                             .map_or(0, |state| self.substitution_attributes_key(node, Some(kind), state)),
+                        tree_counting_key: state.map_or((0, 0), |state| self.state_tree_counting_key(node, state)),
                     }),
             );
             let cascade_state = state.map(|state| (generation, state));

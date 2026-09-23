@@ -3464,6 +3464,31 @@ pub unsafe extern "C" fn style_engine_node_record_uses_container_units(engine: *
     }
 }
 
+/// Whether an element or its pseudo-element reads its sibling position from a retained winner.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_node_record_uses_tree_counting(engine: *const c_void, node: u32) -> bool {
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return false;
+    };
+    let groups = engine.current_winner_groups();
+    let element_reads = match groups.token_for(super::cascade::WinnerGroupKey::current(node, engine.program.version()))
+    {
+        super::partial_view::Lookup::Known((_, state)) => engine.retained.state_has_written_tree_counting(node, state),
+        _ => false,
+    };
+    element_reads
+        || engine.retained.nodes_with_tree_counting_records.contains(&node)
+        || groups.pseudo_states(node).any(|(_, version, state, priority_current)| {
+            version == engine.program.version()
+                && priority_current
+                && engine.retained.state_has_written_tree_counting(node, state)
+        })
+}
+
 /// Which `if()`, `inherit()`, and custom-function substitutions the node's custom declarations read, including
 /// pseudo-elements that were resolved with the originating element's environment.
 ///
