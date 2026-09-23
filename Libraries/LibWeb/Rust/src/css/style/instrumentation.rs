@@ -184,6 +184,9 @@ define_counters! {
     EngineComputedRecordBailWinnerOperator => "engineComputedRecordBailWinnerOperator",
     EngineComputedRecordBailWinnerSpelling => "engineComputedRecordBailWinnerSpelling",
     EngineComputedRecordBailWinnerElement => "engineComputedRecordBailWinnerElement",
+    EngineComputedRecordBailWinnerElementPublication717 => "engineComputedRecordBailWinnerElementPublication717",
+    EngineComputedRecordBailWinnerElementPublication1072 => "engineComputedRecordBailWinnerElementPublication1072",
+    EngineComputedRecordBailWinnerElementPublication3731 => "engineComputedRecordBailWinnerElementPublication3731",
     EngineComputedRecordBailWinnerAnimated => "engineComputedRecordBailWinnerAnimated",
     EngineComputedRecordBailNoEnvironment => "engineComputedRecordBailNoEnvironment",
     EngineComputedRecordBailCustomPropertyUnsupportedSubstitution => "engineComputedRecordBailCustomPropertyUnsupportedSubstitution",
@@ -219,6 +222,11 @@ define_counters! {
     EngineComputedRecordBailAssemble => "engineComputedRecordBailAssemble",
     EngineComputedRecordBailRecordOverlayDrive441 => "engineComputedRecordBailRecordOverlayDrive441",
     EngineComputedRecordBailRecordOverlay => "engineComputedRecordBailRecordOverlay",
+    EngineComputedRecordBailRecordOverlayPublication891 => "engineComputedRecordBailRecordOverlayPublication891",
+    EngineComputedRecordBailRecordOverlayPublication937 => "engineComputedRecordBailRecordOverlayPublication937",
+    EngineComputedRecordBailRecordOverlayPublication951 => "engineComputedRecordBailRecordOverlayPublication951",
+    EngineComputedRecordBailRecordOverlayPublication1147 => "engineComputedRecordBailRecordOverlayPublication1147",
+    EngineComputedRecordBailRecordOverlayPublication2328 => "engineComputedRecordBailRecordOverlayPublication2328",
     EngineComputedRecordBailRecordTable => "engineComputedRecordBailRecordTable",
     PrefixDeadDeltaBailMatched => "prefixDeadDeltaBailMatched",
     PrefixDeadDeltaBailOwnAdditions => "prefixDeadDeltaBailOwnAdditions",
@@ -428,6 +436,44 @@ impl Counters {
     #[must_use]
     pub fn first_changed_record_bail(&self, before: &[u64; RECORD_BAIL_COUNT]) -> Option<&'static str> {
         let moved = |index: usize| self.values[index] != before[index - RECORD_BAIL_FIRST];
+        for (counter, cause) in [
+            (
+                Counter::EngineComputedRecordBailWinnerElementPublication717,
+                "BailWinnerElement@publication.rs:717",
+            ),
+            (
+                Counter::EngineComputedRecordBailWinnerElementPublication1072,
+                "BailWinnerElement@publication.rs:1072",
+            ),
+            (
+                Counter::EngineComputedRecordBailWinnerElementPublication3731,
+                "BailWinnerElement@publication.rs:3731",
+            ),
+            (
+                Counter::EngineComputedRecordBailRecordOverlayPublication891,
+                "BailRecordOverlay@publication.rs:891",
+            ),
+            (
+                Counter::EngineComputedRecordBailRecordOverlayPublication937,
+                "BailRecordOverlay@publication.rs:937",
+            ),
+            (
+                Counter::EngineComputedRecordBailRecordOverlayPublication951,
+                "BailRecordOverlay@publication.rs:951",
+            ),
+            (
+                Counter::EngineComputedRecordBailRecordOverlayPublication1147,
+                "BailRecordOverlay@publication.rs:1147",
+            ),
+            (
+                Counter::EngineComputedRecordBailRecordOverlayPublication2328,
+                "BailRecordOverlay@publication.rs:2328",
+            ),
+        ] {
+            if moved(counter as usize) {
+                return Some(cause);
+            }
+        }
         if moved(Counter::EngineComputedRecordBailRecordOverlayDrive441 as usize) {
             return Some("BailRecordOverlay@drive.rs:441");
         }
