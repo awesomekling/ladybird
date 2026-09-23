@@ -23,6 +23,19 @@ void ladybird_libweb_font_cascade_memo_unref(void const*);
 
 namespace Web::CSS {
 
+extern "C" void rust_font_face_snapshot_view(void const*, FontFaceSnapshotView*);
+
+NonnullRefPtr<Gfx::FontCascadeList const> resolve_font_for_style_values(FontComputer const& font_computer, ComputedFontCacheKey key)
+{
+    auto& memo = font_computer.font_cascade_memo();
+    memo.publish_font_feature_values(font_computer.published_font_feature_values());
+    FontFaceSnapshotView snapshot;
+    rust_font_face_snapshot_view(font_computer.published_font_faces(), &snapshot);
+    auto font_list = memo.resolve(snapshot, key);
+    (void)request_wanted_web_faces();
+    return font_list;
+}
+
 // The Rust side owns the storage these describe, so a layout difference would be silent.
 static_assert(sizeof(FontFaceSnapshotKey) == 32 && alignof(FontFaceSnapshotKey) == 4);
 static_assert(sizeof(FontFaceSnapshotRecord) == 32 && alignof(FontFaceSnapshotRecord) == 8);

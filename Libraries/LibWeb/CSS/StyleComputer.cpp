@@ -3602,10 +3602,11 @@ Length::FontMetrics StyleComputer::calculate_root_element_font_metrics(ComputedS
 {
     auto const& root_value = style.property(CSS::PropertyID::FontSize);
 
-    auto font_pixel_metrics = style.first_available_computed_font(document().font_computer())->pixel_metrics();
+    auto tree_scope = document().style_scope().style_engine_tree_scope().value();
+    auto font_pixel_metrics = style.first_available_computed_font(document().font_computer(), tree_scope)->pixel_metrics();
     Length::FontMetrics font_metrics { m_default_font_metrics.font_size, font_pixel_metrics, InitialValues::line_height() };
     font_metrics.font_size = root_value.as_length().length().to_px(viewport_rect(), font_metrics, font_metrics);
-    font_metrics.line_height = style.line_height(document().font_computer());
+    font_metrics.line_height = style.line_height(document().font_computer(), tree_scope);
 
     return font_metrics;
 }
@@ -3667,6 +3668,9 @@ CSSPixels StyleComputer::absolute_size_mapping(AbsoluteSize absolute_size, CSSPi
 
 ComputationContext StyleComputer::make_computation_context_for_property(PropertyID property_id, ComputedStyleWorkingSet const& style, Optional<DOM::AbstractElement> abstract_element) const
 {
+    auto tree_scope = abstract_element.has_value()
+        ? abstract_element->style_scope().style_engine_tree_scope().value()
+        : document().style_scope().style_engine_tree_scope().value();
     auto subject_inline_axis_is_horizontal = [&]() {
         auto writing_mode = [&](DOM::AbstractElement const& candidate) -> Optional<WritingMode> {
             auto record = m_style_engine.style_record_view(candidate.style_record_identity());
@@ -3728,7 +3732,7 @@ ComputationContext StyleComputer::make_computation_context_for_property(Property
 
         auto line_height_font_metrics = Length::FontMetrics {
             style.font_size(),
-            style.first_available_computed_font(document().font_computer())->pixel_metrics(),
+            style.first_available_computed_font(document().font_computer(), tree_scope)->pixel_metrics(),
             inheritance_parent.has_value() && inheritance_parent->has_style() ? inheritance_parent->computed_style()->line_height() : InitialValues::line_height()
         };
 
@@ -3752,8 +3756,8 @@ ComputationContext StyleComputer::make_computation_context_for_property(Property
     default: {
         auto font_metrics = Length::FontMetrics {
             style.font_size(),
-            style.first_available_computed_font(document().font_computer())->pixel_metrics(),
-            style.line_height(document().font_computer())
+            style.first_available_computed_font(document().font_computer(), tree_scope)->pixel_metrics(),
+            style.line_height(document().font_computer(), tree_scope)
         };
         return {
             .length_resolution_context = {
@@ -3884,8 +3888,9 @@ static ComputedValuesFFI::FfiInputLineHeightMetrics input_line_height_metrics(Co
 {
     ComputedValuesFFI::FfiInputLineHeightMetrics line_height_metrics {};
     if (should_measure) {
-        line_height_metrics.current_line_height = style.line_height(abstract_element.element().document().font_computer()).to_double();
-        line_height_metrics.minimum_line_height = normal_line_height(style.first_available_computed_font(abstract_element.element().document().font_computer())->pixel_metrics()).to_double();
+        auto tree_scope = abstract_element.style_scope().style_engine_tree_scope().value();
+        line_height_metrics.current_line_height = style.line_height(abstract_element.element().document().font_computer(), tree_scope).to_double();
+        line_height_metrics.minimum_line_height = normal_line_height(style.first_available_computed_font(abstract_element.element().document().font_computer(), tree_scope)->pixel_metrics()).to_double();
     }
     return line_height_metrics;
 }
