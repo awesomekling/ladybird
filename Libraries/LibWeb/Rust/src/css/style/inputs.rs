@@ -2659,7 +2659,9 @@ impl StyleEngineState {
             self.retained.nodes_owing_a_transition_registration.remove(&node);
             self.retained.nodes_owing_explicit_inheritance.remove(&node);
             self.retained.nodes_owing_an_animation_sample.remove(&node);
-            self.retained.nodes_owing_animation_definitions.remove(&node);
+            self.retained
+                .nodes_owing_animation_definitions
+                .retain(|(owner, _), _| *owner != node);
             self.retained.settled_computation_contexts.remove(&node);
             retired_nodes.push(node);
         }

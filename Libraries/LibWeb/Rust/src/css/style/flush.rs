@@ -2222,7 +2222,10 @@ impl StyleEngineState {
                                         .retained
                                         .nodes_owing_a_transition_registration
                                         .contains_key(&parent)
-                                    || self.retained.nodes_owing_animation_definitions.contains_key(&parent)
+                                    || self
+                                        .retained
+                                        .nodes_owing_animation_definitions
+                                        .contains_key(&(parent, u8::MAX))
                                     || self.retained.nodes_owing_an_animation_sample.contains(&parent)))
                     });
                     // Why this row would reach the host, for the seal's by-cause census. Naming

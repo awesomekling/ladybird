@@ -1067,7 +1067,7 @@ impl RetainedState {
                     .insert(node, registration_only);
             }
             if let Some(plan) = animation_plan {
-                self.nodes_owing_animation_definitions.insert(node, plan);
+                self.nodes_owing_animation_definitions.insert((node, u8::MAX), plan);
             }
             return Some(delta);
         }
@@ -1308,7 +1308,7 @@ impl RetainedState {
         };
         // The plan is decided from the longhands this drive computed, before the table goes into
         // the record.
-        let animation_plan = owes_an_animation_plan.then(|| self.settled_animation_plan(node, &table));
+        let animation_plan = owes_an_animation_plan.then(|| self.settled_animation_plan(node, u8::MAX, &table));
         let parent_in_display_none_subtree = self
             .tree
             .flat_tree_parent(node)
@@ -1367,7 +1367,7 @@ impl RetainedState {
                 .insert(node, registration_only && !driver_input_moved);
         }
         if let Some(plan) = animation_plan {
-            self.nodes_owing_animation_definitions.insert(node, plan);
+            self.nodes_owing_animation_definitions.insert((node, u8::MAX), plan);
         }
         if derived_beneath_a_composition {
             self.nodes_owing_an_animation_sample.insert(node);
@@ -1379,11 +1379,19 @@ impl RetainedState {
     fn settled_animation_plan(
         &self,
         node: StyleNodeID,
+        pseudo_kind: u8,
         table: &ComputedLonghandTable,
     ) -> animations::SettledAnimationPlan {
         crate::css::style_compute::build_settled_animation_plan(
             table,
-            self.element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT),
+            self.element_css_defined_animations(
+                node,
+                if pseudo_kind == u8::MAX {
+                    animations::ELEMENT_ANIMATION_SLOT
+                } else {
+                    pseudo_kind + 1
+                },
+            ),
             self.animation_keyframes(),
             self.tree.tree_scope(node),
         )
@@ -1399,7 +1407,7 @@ impl RetainedState {
         let view = self.computed_group_sets.style_record_view(style_record.raw())?;
         // SAFETY: A record's table outlives the view the assignment below takes it from.
         let table = unsafe { view.longhand_table.as_ref() }?;
-        Some(self.settled_animation_plan(node, table))
+        Some(self.settled_animation_plan(node, u8::MAX, table))
     }
 
     /// The animation definitions the engine-computed record the host is about to install for this
@@ -1409,8 +1417,9 @@ impl RetainedState {
     pub(crate) fn take_settled_animation_definitions(
         &mut self,
         node: StyleNodeID,
+        pseudo_kind: u8,
     ) -> Option<&animations::SettledAnimationPlan> {
-        self.animation_definitions_being_applied = self.nodes_owing_animation_definitions.remove(&node);
+        self.animation_definitions_being_applied = self.nodes_owing_animation_definitions.remove(&(node, pseudo_kind));
         self.animation_definitions_being_applied.as_ref()
     }
 
@@ -1439,7 +1448,11 @@ impl RetainedState {
             Some(false) => 2,
             None => 0,
         };
-        let plan = match self.nodes_owing_animation_definitions.contains_key(&node) {
+        let plan = match self
+            .nodes_owing_animation_definitions
+            .keys()
+            .any(|(owner, _)| *owner == node)
+        {
             true => OWES_AN_ANIMATION_PLAN,
             false => 0,
         };
@@ -1626,7 +1639,7 @@ impl RetainedState {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
             };
-            self.nodes_owing_animation_definitions.insert(node, plan);
+            self.nodes_owing_animation_definitions.insert((node, u8::MAX), plan);
         }
         Some(delta)
     }
@@ -2324,9 +2337,8 @@ impl RetainedState {
         self.monospace_recascaded_font_size(node).unwrap_or(i32::MIN)
     }
 
-    /// A pseudo-element's transition declarations compute into its record. The host applies
-    /// their transition step after installing it. Animation timing without a name or an existing
-    /// CSS animation has no definition to create, retime, or cancel.
+    /// A pseudo-element's transition declarations compute into its record. A named animation
+    /// whose pseudo holds no CSS animation leaves its start plan beside that record.
     fn pseudo_winner_needs_cpp(
         &self,
         node: StyleNodeID,
@@ -2339,8 +2351,10 @@ impl RetainedState {
             || (property_starts_animation(winner.property)
                 && !longhand_only_declares_a_css_transition(winner.property)
                 && !(longhand_declares_a_css_animation(winner.property)
-                    && self.state_has_no_animation_name(state)
-                    && self.element_css_defined_animations(node, kind + 1).is_empty()))
+                    && self.element_css_defined_animations(node, kind + 1).is_empty()
+                    && (self.state_has_no_animation_name(state)
+                        || (kind != pseudo_kind::BACKDROP
+                            && self.animation_keyframes().only_the_document_scope_defines_keyframes()))))
     }
 
     /// Whether a record holds a composition its animations made. The transitions its table
@@ -2909,6 +2923,8 @@ impl RetainedState {
         scratch: &mut EngineComputedRecordScratch,
         counters: &mut Counters,
     ) {
+        self.nodes_owing_animation_definitions
+            .retain(|(owner, _), _| *owner != node);
         for pending in self.engine_computed_records_pending.remove(&node).into_iter().flatten() {
             let derived = pending.new_style_record;
             if pending.pseudo_kind == u8::MAX {

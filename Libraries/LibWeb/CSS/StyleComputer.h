@@ -240,7 +240,7 @@ public:
         Vector<RefPtr<Animations::KeyframeEffect::KeyFrameSet const>> definition_keyframe_sets;
         bool element_display_is_none { false };
     };
-    [[nodiscard]] Optional<SettledAnimationPlan> take_settled_animation_plan(StyleNodeID) const;
+    [[nodiscard]] Optional<SettledAnimationPlan> take_settled_animation_plan(StyleNodeID, u8 pseudo_kind) const;
     void apply_settled_animation_plan(DOM::AbstractElement, SettledAnimationPlan const&) const;
 
     enum class DeclaredValueSource : u8 {

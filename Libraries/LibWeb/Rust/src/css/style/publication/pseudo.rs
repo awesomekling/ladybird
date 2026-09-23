@@ -615,6 +615,16 @@ impl RetainedState {
                 self.computed_group_sets.remove_pseudo(node, kind);
                 continue;
             }
+            if kind != BACKDROP
+                && state.is_some_and(|state| !self.state_has_no_animation_name(state))
+                && self.element_css_defined_animations(node, kind + 1).is_empty()
+                && self.animation_keyframes().only_the_document_scope_defines_keyframes()
+            {
+                let view = self.computed_group_sets.style_record_view(new_style_record.raw())?;
+                let table = unsafe { view.longhand_table.as_ref() }?;
+                let plan = self.settled_animation_plan(node, kind, table);
+                self.nodes_owing_animation_definitions.insert((node, kind), plan);
+            }
             self.note_engine_computed_pseudo_record(
                 node,
                 kind,

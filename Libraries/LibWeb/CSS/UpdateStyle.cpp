@@ -963,7 +963,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 auto const row_effect_debt = document.style_computer().style_engine().take_settled_row_effect_debt(StyleNodeID { reaction.style_node });
                 auto const transition_debt = row_effect_debt & StyleEngine::SettledRowTransitionDebt;
                 if (row_effect_debt & StyleEngine::SettledRowOwesAnAnimationPlan)
-                    animation_plan = document.style_computer().take_settled_animation_plan(StyleNodeID { reaction.style_node });
+                    animation_plan = document.style_computer().take_settled_animation_plan(StyleNodeID { reaction.style_node }, NumericLimits<u8>::max());
                 if (!engine_computed_record_environment_is_installable(*element, StyleRecordID { reaction.new_style_record })
                     || declarations_changed_during_apply(StyleNodeID { reaction.style_node })) {
                     // The engine resolved the record's environment over the parent's own; when the
@@ -971,6 +971,10 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     // when a host rewrote the element's declarations after the engine computed it.
                     document.style_computer().style_engine().consume_recorded_element_style_input_change(reaction.style_node);
                     StyleEngineFFI::style_engine_native_container_effects_release(StyleEngineFFI::style_engine_take_container_effects(document.style_computer().style_engine().rust_handle(), reaction.style_node).effects);
+                    for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
+                        if (pseudo_element_records[kind].has_value())
+                            (void)document.style_computer().take_settled_animation_plan(StyleNodeID { reaction.style_node }, static_cast<u8>(kind));
+                    }
                     invalidation = element->apply_style_engine_reaction(did_change_custom_properties);
                 } else {
                     bool const defer_final_comparison = element->has_relevant_animations() || element->has_associated_animations()
@@ -979,10 +983,35 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     DOM::AbstractElement settled { *element };
                     if (animation_plan.has_value())
                         document.style_computer().apply_settled_animation_plan(settled, *animation_plan);
+                    bool installed_pseudo_animation_plan = false;
+                    auto apply_pseudo_animation_plan = [&](size_t kind) {
+                        if (kind >= pseudo_element_records.size())
+                            return;
+                        if (!pseudo_element_records[kind].has_value() || !*pseudo_element_records[kind])
+                            return;
+                        auto pseudo_plan = document.style_computer().take_settled_animation_plan(StyleNodeID { reaction.style_node }, static_cast<u8>(kind));
+                        if (!pseudo_plan.has_value())
+                            return;
+                        DOM::AbstractElement pseudo { *element, static_cast<PseudoElement>(kind) };
+                        document.style_computer().apply_settled_animation_plan(pseudo, *pseudo_plan);
+                        installed_pseudo_animation_plan = true;
+                    };
+                    // CSS animation ordering follows the pseudo tree order, which differs from
+                    // the enum's order. Creation order breaks ties in the host's effect stack.
+                    apply_pseudo_animation_plan(to_underlying(PseudoElement::Marker));
+                    apply_pseudo_animation_plan(to_underlying(PseudoElement::Before));
+                    for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
+                        if (kind == to_underlying(PseudoElement::Marker)
+                            || kind == to_underlying(PseudoElement::Before)
+                            || kind == to_underlying(PseudoElement::After))
+                            continue;
+                        apply_pseudo_animation_plan(kind);
+                    }
+                    apply_pseudo_animation_plan(to_underlying(PseudoElement::After));
                     bool const has_animation_effects = element->has_relevant_animations() || element->has_associated_animations();
                     if (settled.has_style() && (has_animation_effects || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
                         sample_animations_for_installed_record(settled);
-                    if (has_animation_effects)
+                    if (has_animation_effects || installed_pseudo_animation_plan)
                         sample_animations_for_installed_pseudos(*element);
                     // Under verification the reference computation ran the step too, and then
                     // the engine record replaced what it published: the drain decides again,

@@ -3562,9 +3562,11 @@ pub struct FfiSettledAnimationDefinitions {
 pub unsafe extern "C" fn style_engine_take_settled_animation_definitions(
     engine: *mut c_void,
     node: u32,
+    pseudo_kind: u8,
 ) -> FfiSettledAnimationDefinitions {
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    let plan = StyleNodeID::from_raw(node).and_then(|node| engine.take_settled_animation_definitions(node));
+    let plan =
+        StyleNodeID::from_raw(node).and_then(|node| engine.take_settled_animation_definitions(node, pseudo_kind));
     match plan {
         None => FfiSettledAnimationDefinitions {
             definitions: std::ptr::null(),
