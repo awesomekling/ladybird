@@ -1056,12 +1056,16 @@ impl RetainedState {
         // The sample composes the animated font and the groups it writes, and makes the box-type,
         // overflow, and text-alignment adjustments, the same way over any freshly driven base.
         // A transition decides against the before-change style a moved base leaves, which
-        // standing winners do not move.
+        // standing winners do not move. A record that runs CSS animations settles its plan
+        // from the new base, and its transitions are decided at installation against the
+        // composed record the row moves away from.
         let full_drive_beneath_a_composition = animations_bind_the_record
             && requires_full_drive
             && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
             && self.computed_group_sets.node_has_animation_overlay(node)
-            && (!self.record_declares_transitions(old_style_record) || redrives_a_standing_composition)
+            && (!self.record_declares_transitions(old_style_record)
+                || redrives_a_standing_composition
+                || self.css_defined_animations.node_runs_a_css_animation(node))
             && !has_registered_declarations
             && self
                 .computed_group_sets
