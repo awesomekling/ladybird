@@ -243,7 +243,6 @@ public:
     [[nodiscard]] Optional<SettledAnimationPlan> take_settled_animation_plan(StyleNodeID, u8 pseudo_kind) const;
     void apply_settled_animation_plan(DOM::AbstractElement, SettledAnimationPlan const&) const;
 
-    NonnullRefPtr<StyleValue const> resolve_unresolved_style_value(AbstractOrHypotheticalElement, PropertyNameAndID const&, UnresolvedStyleValue const&) const;
     ComputationContext fallback_computation_context_for_custom_property(AbstractOrHypotheticalElement const&) const;
 
     static NonnullRefPtr<StyleValue const> compute_font_size(NonnullRefPtr<StyleValue const> const& absolutized_value, int computed_math_depth, Optional<DOM::AbstractElement> const& inheritance_parent, CSSPixels initial_font_size = InitialValues::font_size());
@@ -435,7 +434,6 @@ private:
     // against them, so the style stage reads the mirror's copy, and that copy is only right if
     // every write comes through here.
     void set_root_element_font_metrics(Length::FontMetrics const&, bool depends_on_viewport_metrics) const;
-    NonnullRefPtr<StyleValue const> finalize_custom_property_value(ComputedStyleWorkingSet const*, AbstractOrHypotheticalElement const&, Utf16FlyString const&, NonnullRefPtr<StyleValue const>) const;
 
     GC::Ref<DOM::Document> m_document;
 
