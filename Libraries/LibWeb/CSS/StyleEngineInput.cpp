@@ -1246,7 +1246,6 @@ void record_element_animation_timing_rows(DOM::Element& element, u8 slot, Readon
 
 // Mirrored by `effect_flag` in `Rust/src/css/style/animations.rs`; keep the two in step.
 static constexpr u32 published_effect_flag_is_transition = 1u << 0;
-static constexpr u32 published_effect_flag_not_covered = 1u << 1;
 static constexpr u32 published_effect_flag_has_resource_context = 1u << 2;
 static constexpr u32 published_effect_flag_resource_context_is_origin_clean = 1u << 3;
 
@@ -1476,14 +1475,10 @@ void record_element_animation_effect_descriptions(DOM::Element& element, u8 slot
         row.first_keyframe = static_cast<u32>(ffi_keyframes.size());
         if (animation && animation->is_css_transition())
             row.flags |= published_effect_flag_is_transition;
-        // An effect whose animation names no `@keyframes` rule has no keyframe set at all. That is
-        // not a description the stage is missing, it is the whole description: such an effect is
-        // published with no keyframes, which every consumer skips exactly the way the host's own
-        // `collect_animation_effects_into` skips it.
-        if (!animation)
-            row.flags |= published_effect_flag_not_covered;
-
-        if (auto const* key_frame_set = effect->key_frame_set()) {
+        // An effect with no animation, and one whose animation names no `@keyframes` rule, has no
+        // keyframes to sample. That is not a description the stage is missing, it is the whole
+        // description: such an effect is published with no keyframes, which every consumer skips.
+        if (auto const* key_frame_set = animation ? effect->key_frame_set() : nullptr) {
             auto default_easing = animation && animation->is_css_animation()
                 ? static_cast<CSSAnimation const&>(*animation).default_easing()
                 : EasingFunction::linear();

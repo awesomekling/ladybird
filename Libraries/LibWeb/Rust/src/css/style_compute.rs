@@ -3210,12 +3210,6 @@ fn tail_effects<'a>(
             let Some(keyframes) = starting?.keyframes.get(synthesized as usize)?.as_ref() else {
                 continue;
             };
-            // A rule the host could not describe is refused here, exactly as a published effect's
-            // description is below: the whole tail falls back, and does so before the effects are
-            // collected rather than once the declarations are asked for.
-            if !keyframes.keyframes.description.is_covered() {
-                return None;
-            }
             if keyframes.keyframes.description.keyframes.len() < 2 {
                 continue;
             }
@@ -3260,9 +3254,6 @@ fn tail_effects<'a>(
             let Some(keyframes) = &retime.keyframes else {
                 continue;
             };
-            if !keyframes.description.is_covered() {
-                return None;
-            }
             if keyframes.description.keyframes.len() < 2 {
                 continue;
             }
@@ -3281,9 +3272,6 @@ fn tail_effects<'a>(
         let identity = row.effect_identity();
         // An effect the host did not describe is one the stage cannot resolve declarations for.
         let description = descriptions.iter().find(|effect| effect.identity == identity)?;
-        if !description.is_covered() {
-            return None;
-        }
         if description.keyframes.len() < 2 {
             continue;
         }
@@ -4060,8 +4048,7 @@ unsafe fn sample_described_animation_effects(
         else {
             continue;
         };
-        if description.generation != generations[index] || !description.is_covered() || description.keyframes.len() < 2
-        {
+        if description.generation != generations[index] || description.keyframes.len() < 2 {
             continue;
         }
         selected.push(anim::SelectedEffect {
