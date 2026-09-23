@@ -1053,9 +1053,8 @@ impl RetainedState {
         // A remaining-phase delta can derive the new base beneath an existing composition. The
         // host samples the effect again after installing this base, including when the moved
         // property is animated. A full drive still needs dependent-value closure.
-        // Font-phase effects change how later values are computed. Their sampled values need a
-        // composed drive rather than a base drive followed by a simple resample. The sample over a
-        // freshly driven base makes the box-type, overflow, and text-alignment adjustments itself.
+        // The sample composes the animated font and the groups it writes, and makes the box-type,
+        // overflow, and text-alignment adjustments, the same way over any freshly driven base.
         // A transition decides against the before-change style a moved base leaves, which
         // standing winners do not move.
         let full_drive_beneath_a_composition = animations_bind_the_record
@@ -1069,10 +1068,10 @@ impl RetainedState {
                 .style_record_view(old_style_record.raw())
                 .and_then(|view| unsafe { view.animated_overlay.as_ref() })
                 .is_some_and(|overlay| {
-                    overlay.entries().iter().all(|entry| {
-                        (!entry.result_of_transition || redrives_a_standing_composition)
-                            && property_computes_in_remaining_phase(entry.property)
-                    })
+                    overlay
+                        .entries()
+                        .iter()
+                        .all(|entry| !entry.result_of_transition || redrives_a_standing_composition)
                 });
         // The first-record gate excludes keyframes on inherited properties. For a record, only
         // the rules its own names run matter: its descendants hold records of their own, and a
