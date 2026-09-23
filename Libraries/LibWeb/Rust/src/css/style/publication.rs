@@ -1110,12 +1110,19 @@ impl RetainedState {
         // and the host samples those effects over it, as for a CSS animation above. A name the new
         // base declares starts an animation, so its plan must be one the engine can decide.
         let names_an_animation = !self.state_has_no_animation_name(state);
+        let reads_custom_properties = animations_bind_the_record
+            && self
+                .animation_effect_descriptions
+                .effects(node, animations::ELEMENT_ANIMATION_SLOT)
+                .iter()
+                .any(animations::PublishedEffect::declares_custom_properties)
+            && self.node_style_reads_custom_properties(node);
         let base_without_a_composition = animations_bind_the_record
             && !self.computed_group_sets.node_has_animation_overlay(node)
             && !self.record_holds_an_animation_overlay(old_style_record)
             && !self.css_defined_animations.node_runs_a_css_animation(node)
             && (!names_an_animation || css_keyframes_are_engine_computable)
-            && self.effects_sample_over_a_new_base(node, TransitionEffects::Refused)
+            && self.effects_sample_over_a_new_base(node, TransitionEffects::Refused, reads_custom_properties)
             && !self.record_transition_facts(old_style_record, &[]).0
             && !has_registered_declarations
             && is_leaf;
@@ -1125,7 +1132,7 @@ impl RetainedState {
         let transitions_beneath_a_composition = animations_bind_the_record
             && self.record_transition_facts(old_style_record, &[]).0
             && !self.css_defined_animations.node_runs_a_css_animation(node)
-            && self.effects_sample_over_a_new_base(node, TransitionEffects::Allowed)
+            && self.effects_sample_over_a_new_base(node, TransitionEffects::Allowed, reads_custom_properties)
             && self
                 .computed_group_sets
                 .style_record_view(old_style_record.raw())
@@ -2792,8 +2799,15 @@ impl RetainedState {
 
     /// Whether the host can sample every effect the element holds over a newly driven base. Each
     /// must be one the stage can describe, declaring longhands the remaining phase computes and no
-    /// value a later phase or a post-compute adjustment finalizes: those need a composed drive.
-    fn effects_sample_over_a_new_base(&self, node: StyleNodeID, transitions: TransitionEffects) -> bool {
+    /// value a later phase or a post-compute adjustment finalizes: those need a composed drive. An
+    /// animated custom property is only sampled into the element's environment, so the element's
+    /// own values must not substitute one.
+    fn effects_sample_over_a_new_base(
+        &self,
+        node: StyleNodeID,
+        transitions: TransitionEffects,
+        reads_custom_properties: bool,
+    ) -> bool {
         self.animation_effect_descriptions
             .effects(node, animations::ELEMENT_ANIMATION_SLOT)
             .iter()
@@ -2802,7 +2816,7 @@ impl RetainedState {
                     && !description_reads_container_units(effect)
                     && (transitions == TransitionEffects::Allowed
                         || effect.flags & animations::effect_flag::IS_TRANSITION == 0)
-                    && !effect.declares_custom_properties()
+                    && (!reads_custom_properties || !effect.declares_custom_properties())
                     && effect.keyframes.iter().all(|keyframe| {
                         effect.declarations_of(keyframe).iter().all(|declaration| {
                             property_computes_in_remaining_phase(declaration.property_id)
