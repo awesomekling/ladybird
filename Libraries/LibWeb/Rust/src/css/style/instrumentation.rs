@@ -217,7 +217,6 @@ define_counters! {
     EngineComputedRecordBailDriveUnsupportedValue => "engineComputedRecordBailDriveUnsupportedValue",
     EngineComputedRecordBailValue => "engineComputedRecordBailValue",
     EngineComputedRecordBailAssemble => "engineComputedRecordBailAssemble",
-    EngineComputedRecordBailRecordOverlayDrive156 => "engineComputedRecordBailRecordOverlayDrive156",
     EngineComputedRecordBailRecordOverlayDrive441 => "engineComputedRecordBailRecordOverlayDrive441",
     EngineComputedRecordBailRecordOverlay => "engineComputedRecordBailRecordOverlay",
     EngineComputedRecordBailRecordTable => "engineComputedRecordBailRecordTable",
@@ -429,9 +428,6 @@ impl Counters {
     #[must_use]
     pub fn first_changed_record_bail(&self, before: &[u64; RECORD_BAIL_COUNT]) -> Option<&'static str> {
         let moved = |index: usize| self.values[index] != before[index - RECORD_BAIL_FIRST];
-        if moved(Counter::EngineComputedRecordBailRecordOverlayDrive156 as usize) {
-            return Some("BailRecordOverlay@drive.rs:156");
-        }
         if moved(Counter::EngineComputedRecordBailRecordOverlayDrive441 as usize) {
             return Some("BailRecordOverlay@drive.rs:441");
         }

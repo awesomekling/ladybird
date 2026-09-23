@@ -151,12 +151,6 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailRecordTable);
             return None;
         };
-        // A record under display:none may no longer be the style C++ holds.
-        if view.dependency_flags & (1 << 2) != 0 {
-            counters.bump(Counter::EngineComputedRecordBailRecordOverlayDrive156);
-            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-            return None;
-        }
         let snapshot = match self.tree.inheritance_parent(node) {
             None => None,
             Some(parent) => match self.computed_group_sets.assigned_style_record(parent) {
