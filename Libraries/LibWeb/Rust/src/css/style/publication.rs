@@ -5024,7 +5024,7 @@ impl StyleEngineState {
         if pseudo.is_some() && (!self.host.journal.is_empty() || !self.host.deferred_element_style_inputs.is_empty()) {
             return Err("GateReaction");
         }
-        if exclude_inline_style {
+        if exclude_inline_style && (!read_only || pseudo.is_some()) {
             return Err("GateDeclarations");
         }
         if !self.tree.is_live(node)
@@ -5087,6 +5087,9 @@ impl StyleEngineState {
             }
         }
 
+        let hidden_inline_declarations = exclude_inline_style
+            .then(|| self.facts.hide_inline_declarations_for_demand(node))
+            .flatten();
         if !read_only {
             self.forget_node_match_answer_for_demand(node);
         }
@@ -5198,6 +5201,9 @@ impl StyleEngineState {
                 Ok(Some(result))
             }
         })();
+        if let Some(hidden) = hidden_inline_declarations {
+            self.facts.restore_inline_declarations_after_demand(node, hidden);
+        }
         if read_only {
             if let Ok(Some(record)) = result
                 && pseudo.is_none()

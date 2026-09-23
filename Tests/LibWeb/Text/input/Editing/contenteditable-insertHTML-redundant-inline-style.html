@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    .matching { color: green; }
+</style>
+<div id="editor" contenteditable></div>
+<script>
+    test(() => {
+        const selection = getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+
+        document.execCommand('insertHTML', false, '<span class="matching" style="color: green; font-weight: bold">Hello</span>');
+        println(editor.innerHTML);
+        println(getComputedStyle(editor.firstElementChild).fontWeight);
+    });
+</script>

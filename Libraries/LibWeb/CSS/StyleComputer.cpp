@@ -3357,7 +3357,7 @@ void StyleComputer::sweep_custom_property_environments() const
     m_engine_custom_property_environments.remove_all_matching([](auto&, NonnullRefPtr<CustomPropertyData const> const& data) { return data->ref_count() == 1; });
 }
 
-NonnullRefPtr<CascadedProperties> StyleComputer::compute_cascaded_values(DOM::AbstractElement abstract_element, CascadeInput const& cascade_input, IncludeInlineStyle include_inline_style, StyleSharingCandidate* sharing, Vector<StyleProperty> const* precomputed_presentational_hints, u8* substitution_usage) const
+NonnullRefPtr<CascadedProperties> StyleComputer::compute_cascaded_values(DOM::AbstractElement abstract_element, CascadeInput const& cascade_input, StyleSharingCandidate* sharing, Vector<StyleProperty> const* precomputed_presentational_hints, u8* substitution_usage) const
 {
     begin_style_update();
     ScopeGuard end_style_update = [&] { this->end_style_update(); };
@@ -3441,7 +3441,7 @@ NonnullRefPtr<CascadedProperties> StyleComputer::compute_cascaded_values(DOM::Ab
     auto const& presentational_hint_properties = precomputed_presentational_hints
         ? *precomputed_presentational_hints
         : local_presentational_hint_properties;
-    auto const inline_style = include_inline_style == IncludeInlineStyle::Yes && cascade_input.inline_style_context_index.has_value()
+    auto const inline_style = cascade_input.inline_style_context_index.has_value()
         ? abstract_element.inline_style()
         : GC::Ptr<CSSStyleProperties const> {};
 
@@ -4232,7 +4232,7 @@ NonnullRefPtr<ComputedValues const> StyleComputer::materialize_style_record(DOM:
 
     auto& style_scope = abstract_element.style_scope();
     auto const custom_property_data_before = abstract_element.custom_property_data();
-    auto computed_properties = compute_style_impl(abstract_element, ComputeStyleMode::Normal, did_change_custom_properties, style_scope, IncludeInlineStyle::Yes, reusable_matches, &sharing);
+    auto computed_properties = compute_style_impl(abstract_element, ComputeStyleMode::Normal, did_change_custom_properties, style_scope, reusable_matches, &sharing);
     if (sharing.reused_values) {
         // Only a publication tells the engine that the custom property environment moved.
         VERIFY(!sharing.new_style_sharing_entry_hash.has_value());
@@ -4394,21 +4394,6 @@ NonnullRefPtr<ComputedValues const> StyleComputer::build_and_share_computed_valu
     return computed_values;
 }
 
-NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties_without_inline_style(DOM::AbstractElement abstract_element) const
-{
-    // Computing custom properties normally caches them on the element. Preserve the real cache while asking the
-    // cascade what this element would look like without its inline declaration.
-    auto custom_property_data = abstract_element.custom_property_data();
-    ScopeGuard restore_custom_property_data = [&] {
-        abstract_element.set_custom_property_data(move(custom_property_data));
-    };
-
-    auto& style_scope = abstract_element.style_scope();
-    auto computed_properties = compute_style_impl(abstract_element, ComputeStyleMode::Normal, {}, style_scope, IncludeInlineStyle::No);
-    VERIFY(computed_properties);
-    return computed_properties.release_nonnull();
-}
-
 RefPtr<ComputedValues const> StyleComputer::compute_pseudo_element_style_if_needed(DOM::AbstractElement abstract_element, Optional<bool&> did_change_custom_properties, StyleEngineMatchResult* reusable_matches, Optional<StyleEngine::StyleRecordDelta&> style_record_delta, Optional<StyleRecordID> highlight_parent_style_record) const
 {
     bool const compute_transient_style = highlight_parent_style_record.has_value();
@@ -4433,7 +4418,7 @@ RefPtr<ComputedValues const> StyleComputer::compute_pseudo_element_style_if_need
     };
 
     auto& style_scope = abstract_element.style_scope();
-    auto computed_properties = compute_style_impl(abstract_element, ComputeStyleMode::CreatePseudoElementStyleIfNeeded, did_change_custom_properties, style_scope, IncludeInlineStyle::Yes, reusable_matches, &sharing, highlight_parent_style_record);
+    auto computed_properties = compute_style_impl(abstract_element, ComputeStyleMode::CreatePseudoElementStyleIfNeeded, did_change_custom_properties, style_scope, reusable_matches, &sharing, highlight_parent_style_record);
     if (sharing.reused_values)
         return publish_computed_groups(sharing.reused_values.release_nonnull());
     if (!compute_transient_style && sharing.shared_values && sharing.shared_style_record_identity.has_value()) {
@@ -4737,7 +4722,7 @@ StyleRecordID StyleComputer::try_share_computed_style_record(DOM::Element& eleme
             auto counters = document().style_invalidation_counters();
             auto cascade_input = style_engine_cascade_input(abstract_element, nullptr);
             VERIFY(cascade_input);
-            auto cascaded = compute_cascaded_values(abstract_element, *cascade_input, IncludeInlineStyle::Yes);
+            auto cascaded = compute_cascaded_values(abstract_element, *cascade_input);
             auto properties = compute_properties(abstract_element, cascaded, cascade_input->matching_pseudo_element_styles, nullptr);
             auto derived = build_computed_values(*properties, abstract_element, element.style_scope());
             auto shared = computed_style_record_view(record);
@@ -4835,7 +4820,7 @@ bool custom_property_value_moved(Utf16FlyString const& name, CustomPropertyData 
     return !old_property->value->equals(*new_property->value);
 }
 
-RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractElement abstract_element, ComputeStyleMode mode, Optional<bool&> did_change_custom_properties, StyleScope const& style_scope, IncludeInlineStyle include_inline_style, StyleEngineMatchResult* reusable_matches, StyleSharingCandidate* sharing, Optional<StyleRecordID> highlight_parent_style_record) const
+RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractElement abstract_element, ComputeStyleMode mode, Optional<bool&> did_change_custom_properties, StyleScope const& style_scope, StyleEngineMatchResult* reusable_matches, StyleSharingCandidate* sharing, Optional<StyleRecordID> highlight_parent_style_record) const
 {
     // Special path for elements that represent a pseudo-element in some element's internal shadow tree.
     // FirstLetter is excluded so that ::first-letter rules can match against such elements normally.
@@ -4852,7 +4837,7 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
             abstract_element_for_pseudo_element.set_inheritance_override(host_element);
 
         auto& inherited_style_scope = abstract_element_for_pseudo_element.style_scope();
-        auto inherited_pseudo_element_style = compute_style_impl(abstract_element_for_pseudo_element, ComputeStyleMode::Normal, {}, inherited_style_scope, include_inline_style);
+        auto inherited_pseudo_element_style = compute_style_impl(abstract_element_for_pseudo_element, ComputeStyleMode::Normal, {}, inherited_style_scope);
         VERIFY(inherited_pseudo_element_style);
         auto style = ComputedStyleWorkingSet::create_with_base_values_from(*inherited_pseudo_element_style);
 
@@ -5094,7 +5079,7 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
                         contribution.declaration.data(), &record->custom_property_reads, visit))
                     record->custom_property_reads_are_complete = false;
             }
-            if (include_inline_style == IncludeInlineStyle::Yes && input.inline_style_context_index.has_value()) {
+            if (input.inline_style_context_index.has_value()) {
                 if (auto inline_style = abstract_element.inline_style())
                     add_block(*inline_style);
             }
@@ -5134,7 +5119,7 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
         record->custom_property_reads.shrink(unique_reads);
         VERIFY(record->words.size() == style_input_record_block_index);
 
-        auto const inline_style = include_inline_style == IncludeInlineStyle::Yes && cascade_input.inline_style_context_index.has_value()
+        auto const inline_style = cascade_input.inline_style_context_index.has_value()
             ? abstract_element.inline_style()
             : GC::Ptr<CSSStyleProperties const> {};
         auto const dependencies = append_cascade_blocks_to_key(record->words, record->pinned_values, cascade_input, presentational_hint_properties, inline_style, CascadeBlockKeyValueComparison::ByValue);
@@ -5344,7 +5329,7 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
         auto declares_custom_properties = any_of(cascade_input.contributions, [](auto const& contribution) {
             return contribution.cascade_origin == CascadeOrigin::Author && contribution.declaration.dependencies().has_custom_properties;
         });
-        if (include_inline_style == IncludeInlineStyle::Yes && cascade_input.inline_style_context_index.has_value()) {
+        if (cascade_input.inline_style_context_index.has_value()) {
             if (auto inline_style = abstract_element.inline_style(); inline_style && !inline_style->custom_properties().is_empty())
                 declares_custom_properties = true;
         }
@@ -5539,7 +5524,7 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
         auto& counters = document().style_invalidation_counters();
         counters.element_style_input_reused++;
         verify_reused_style([&] {
-            auto cascaded = compute_cascaded_values(abstract_element, cascade_input, include_inline_style, nullptr,
+            auto cascaded = compute_cascaded_values(abstract_element, cascade_input, nullptr,
                 collected_presentational_hints ? &presentational_hint_properties : nullptr);
             return compute_properties(abstract_element, cascaded, cascade_input.matching_pseudo_element_styles, nullptr, {}, ComputedValues::all_style_groups, false, false, nullptr, nullptr, nullptr, highlight_parent_style_record, nullptr, old_custom_property_data);
         });
@@ -5574,7 +5559,7 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
         // elements whose losing selectors differ still have the same cascade input. The only
         // remaining blocks belong to the element itself, so append their identities now and let
         // style sharing answer before their declarations are applied.
-        auto const inline_style = include_inline_style == IncludeInlineStyle::Yes && cascade_input.inline_style_context_index.has_value()
+        auto const inline_style = cascade_input.inline_style_context_index.has_value()
             ? abstract_element.inline_style()
             : GC::Ptr<CSSStyleProperties const> {};
         if (!collected_presentational_hints) {
@@ -5606,7 +5591,6 @@ RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractE
     auto cascaded_properties = compute_cascaded_values(
         abstract_element,
         cascade_input,
-        include_inline_style,
         sharing && sharing->is_candidate && !has_complete_sharing_key ? sharing : nullptr,
         collected_presentational_hints ? &presentational_hint_properties : nullptr,
         sharing ? &sharing->substitution_usage : nullptr);
