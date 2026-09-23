@@ -27,7 +27,7 @@
 use std::ffi::c_void;
 
 use crate::abort_on_panic as abort_on_boundary_panic;
-use crate::css::custom_properties::CustomPropertyRegistry;
+use crate::css::custom_properties::{CustomPropertyRegistry, CustomPropertyStore};
 use crate::css::host_shared::{HostShared, SharedPayload};
 use crate::css::selector::CompiledSelector;
 use crate::css::selector::RustSelector;
@@ -4754,6 +4754,51 @@ pub unsafe extern "C" fn style_engine_set_element_custom_property_data(
     };
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     unsafe { engine.set_element_custom_property_data(node, data, store, environment) };
+}
+
+/// Keep the sampled custom-property values of an animation as a published input. Its environment
+/// identity is already installed on the element. Return the reactions derived from the element's
+/// retained declarations and from which sampled names its descendants inherit.
+///
+/// # Safety
+/// `store` must be a live raw `Arc` pointer to a `CustomPropertyStore`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_publish_animated_custom_property_store(
+    engine: *mut c_void,
+    node: u32,
+    environment: u64,
+    store: *const c_void,
+    is_pseudo: bool,
+) -> u8 {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return 0;
+    };
+    unsafe { engine.custom_property_environments.retain(environment, store) };
+    let registry = engine.document_style_computation_inputs.as_ref().and_then(|inputs| {
+        // SAFETY: The document owns the published registry for the lifetime of this input call.
+        unsafe {
+            inputs
+                .custom_property_registry
+                .as_pointer()
+                .cast::<CustomPropertyRegistry>()
+                .as_ref()
+        }
+    });
+    let inheriting_name_was_sampled = if store.is_null() {
+        // Removing an overlay may expose any inherited value it covered.
+        true
+    } else {
+        let sample = unsafe { &*store.cast::<CustomPropertyStore>() };
+        sample.declared_names.iter().any(|name| {
+            let entry = sample.own_values.get(name).expect("sampled name has a value");
+            registry
+                .and_then(|registry| registry.registration_facts(&entry.name))
+                .is_none_or(|registration| registration.inherits)
+        })
+    };
+    u8::from(is_pseudo || engine.node_style_reads_custom_properties(node))
+        | (u8::from(inheriting_name_was_sampled) << 1)
 }
 
 /// What a row inherits custom properties from, taken from the engine's retained environments

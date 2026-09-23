@@ -393,7 +393,7 @@ private:
     // Says whether publishing moved the element's custom-property environment. An element whose
     // animations settle on the values it already holds is left alone.
     bool publish_animated_custom_properties(ComputedStyleWorkingSet&, DOM::AbstractElement) const;
-    void invalidate_animated_custom_property_readers(DOM::AbstractElement, OrderedHashMap<Utf16FlyString, NonnullRefPtr<StyleValue const>> const& animated_values) const;
+    void invalidate_animated_custom_property_readers(DOM::AbstractElement) const;
     // `did_write_main_side_state`, when given, is set where this reaches past the element's own
     // working set: a recorded stabilization baseline, a provisional state, a started transition.
     Vector<GC::Ref<Animations::KeyframeEffect>> start_needed_transitions(ComputedStyleWorkingSet&, DOM::AbstractElement, bool* did_write_main_side_state = nullptr, Optional<StyleRecordID> before_change_style_record = {}) const;
