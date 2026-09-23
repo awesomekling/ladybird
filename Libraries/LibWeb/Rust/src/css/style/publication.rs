@@ -2043,12 +2043,11 @@ impl RetainedState {
                     && self.cold_record_names_engine_computable_animations(state)))
     }
 
-    /// Check the names this first record actually starts when another keyframes rule in the
-    /// document prevents the document-wide first-record shortcut.
+    /// Check the names a leaf's first record actually starts when another keyframes rule in the
+    /// document prevents the document-wide first-record shortcut. A leaf has no children to derive
+    /// before the sample, so its keyframes may animate an inherited property.
     fn cold_record_names_engine_computable_animations(&self, state: CascadeStateID) -> bool {
-        self.state_names_only_keyframes(state, KeyframesScope::DocumentOnly, |set| {
-            !set.needs_the_host && !set.declares_an_inherited_property
-        })
+        self.state_names_only_keyframes(state, KeyframesScope::DocumentOnly, |set| !set.needs_the_host)
     }
 
     /// Check the names a later record runs. Its descendants already hold records of their own and
