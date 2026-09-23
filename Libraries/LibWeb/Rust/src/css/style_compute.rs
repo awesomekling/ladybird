@@ -2865,6 +2865,84 @@ struct AnimatedCustomPropertyResults {
     )>,
 }
 
+impl AnimatedCustomPropertyResults {
+    /// Lend the host the settled pairs: the rows, their count, and the storage it releases with
+    /// `rust_release_animated_custom_property_results`. Null and empty where nothing animated a name.
+    fn lend(
+        animated: Vec<(
+            crate::css::retained_fly_string::RetainedUtf16FlyString,
+            RetainedStyleValueData,
+        )>,
+    ) -> (*const FfiAnimatedCustomPropertyResult, usize, *mut c_void) {
+        if animated.is_empty() {
+            return (std::ptr::null(), 0, std::ptr::null_mut());
+        }
+        let rows = animated
+            .iter()
+            .map(|(name, value)| FfiAnimatedCustomPropertyResult {
+                name_raw: name.raw(),
+                value: value.pointer().cast(),
+            })
+            .collect::<Vec<_>>();
+        let count = rows.len();
+        let storage = Box::into_raw(Box::new(Self {
+            rows,
+            _retained: animated,
+        }));
+        // SAFETY: the box is live until the host releases it, and `rows` is never moved.
+        let pointer = unsafe { (*storage).rows.as_ptr() };
+        (pointer, count, storage.cast::<c_void>())
+    }
+}
+
+/// The style groups whose non-inherited values a batch's keyframes take from the parent through an
+/// explicit `inherit`, which the parent is marked with. A longhand with no single known group is
+/// treated conservatively; the host maps the all-ones sentinel onto its own `all_style_groups`.
+fn keyframes_inherited_non_inherited_style_groups(
+    properties: &[crate::css::animation::FfiResolvedAnimationProperty],
+) -> u32 {
+    use crate::css::animation::FfiAnimationSpecifiedValueSource;
+    properties
+        .iter()
+        // A custom property has no style group and no non-inherited longhand to mark.
+        .filter(|property| {
+            property.value_source == FfiAnimationSpecifiedValueSource::Inherited
+                && property.custom_name_id == 0
+                && !crate::css::property_metadata::property_is_inherited(property.source_longhand_id)
+        })
+        .fold(0, |groups, property| {
+            groups
+                | match crate::css::property_metadata::property_style_group_index(property.source_longhand_id) {
+                    Some(index) => 1u32 << index,
+                    None => u32::MAX,
+                }
+        })
+}
+
+/// What the animation core settled for each animated custom property, one retained value per
+/// result, paired with the name the host installs it under.
+fn settled_animated_custom_properties(
+    custom: Option<&crate::css::animation::AnimatedCustomProperties<'_>>,
+    results: &[crate::css::animation::FfiAnimatedCustomProperty],
+) -> Vec<(
+    crate::css::retained_fly_string::RetainedUtf16FlyString,
+    RetainedStyleValueData,
+)> {
+    let Some(custom) = custom else {
+        return Vec::new();
+    };
+    results
+        .iter()
+        .map(|result| {
+            (
+                custom.name(result.custom_name_id),
+                // SAFETY: the evaluation transfers one reference per written result.
+                unsafe { RetainedStyleValueData::from_retained_pointer(result.value) },
+            )
+        })
+        .collect()
+}
+
 /// Give back the storage a finalization's animated custom properties travelled in, once the host
 /// has taken its own reference to each name and value.
 ///
@@ -3707,27 +3785,7 @@ unsafe fn try_stage_animation_tail(
 
     // A keyframe that inherits a non-inherited property leaves an invalidation mark on the parent,
     // which the post-stage step installs.
-    let mut keyframes_inherited_non_inherited_style_groups = 0u32;
-    for property in properties {
-        if property.value_source != anim::FfiAnimationSpecifiedValueSource::Inherited {
-            continue;
-        }
-        // A custom property has no style group and no non-inherited longhand to mark; the host's
-        // `compute_animation_values` skips one here for the same reason.
-        if property.custom_name_id != 0 {
-            continue;
-        }
-        if crate::css::property_metadata::property_is_inherited(property.source_longhand_id) {
-            continue;
-        }
-        keyframes_inherited_non_inherited_style_groups |=
-            match crate::css::property_metadata::property_style_group_index(property.source_longhand_id) {
-                Some(index) => 1u32 << index,
-                // A longhand with no single known group is treated conservatively; the host maps
-                // this sentinel onto its own `all_style_groups`.
-                None => u32::MAX,
-            };
-    }
+    let keyframes_inherited_non_inherited_style_groups = keyframes_inherited_non_inherited_style_groups(properties);
 
     let drive_environment = unsafe { &*drive_input.environment };
     let environment = FfiStyleComputationEnvironment {
@@ -3844,21 +3902,8 @@ unsafe fn try_stage_animation_tail(
         custom_result_count: &raw mut custom_result_count,
     };
     unsafe { anim::rust_evaluate_animations(&raw const batch) };
-    // What the animation core settled for each name, one retained value per result, paired with
-    // the name the host installs it under.
-    let animated_custom_properties = match &custom {
-        None => Vec::new(),
-        Some(custom) => custom_results[..custom_result_count]
-            .iter()
-            .map(|result| {
-                (
-                    custom.name(result.custom_name_id),
-                    // SAFETY: the evaluation transfers one reference per written result.
-                    unsafe { RetainedStyleValueData::from_retained_pointer(result.value) },
-                )
-            })
-            .collect(),
-    };
+    let animated_custom_properties =
+        settled_animated_custom_properties(custom.as_ref(), &custom_results[..custom_result_count]);
     Some(StageAnimationTail {
         overlay,
         depends_on_viewport_metrics: computed_keyframes.depends_on_viewport_metrics,
@@ -4155,19 +4200,7 @@ unsafe fn sample_described_animation_effects(
     let properties = unsafe { std::slice::from_raw_parts(resolved.properties, resolved.count) };
 
     // A keyframe that inherits a non-inherited property leaves an invalidation mark on the parent.
-    for property in properties {
-        if property.value_source != anim::FfiAnimationSpecifiedValueSource::Inherited
-            || property.custom_name_id != 0
-            || property_is_inherited(property.source_longhand_id)
-        {
-            continue;
-        }
-        result.keyframes_inherited_non_inherited_style_groups |=
-            match crate::css::property_metadata::property_style_group_index(property.source_longhand_id) {
-                Some(index) => 1u32 << index,
-                None => u32::MAX,
-            };
-    }
+    result.keyframes_inherited_non_inherited_style_groups = keyframes_inherited_non_inherited_style_groups(properties);
 
     // The contexts the drive kept serve a batch that asks for no container base; otherwise the
     // host builds them with the bases the batch asks for.
@@ -4308,34 +4341,14 @@ unsafe fn sample_described_animation_effects(
     unsafe { anim::rust_evaluate_animations(&raw const batch) };
     drop(custom_value_storage);
     result.outcome = Evaluated;
-    if let Some(custom) = &custom
-        && custom_result_count != 0
-    {
-        let retained = custom_results[..custom_result_count]
-            .iter()
-            .map(|result| {
-                (
-                    custom.name(result.custom_name_id),
-                    // SAFETY: the evaluation transfers one reference per written result.
-                    unsafe { RetainedStyleValueData::from_retained_pointer(result.value) },
-                )
-            })
-            .collect::<Vec<_>>();
-        let rows = retained
-            .iter()
-            .map(|(name, value)| FfiAnimatedCustomPropertyResult {
-                name_raw: name.raw(),
-                value: value.pointer().cast(),
-            })
-            .collect::<Vec<_>>();
-        let storage = Box::new(AnimatedCustomPropertyResults {
-            rows,
-            _retained: retained,
-        });
-        result.animated_custom_properties = storage.rows.as_ptr();
-        result.animated_custom_property_count = storage.rows.len();
-        result.animated_custom_properties_storage = Box::into_raw(storage).cast();
-    }
+    (
+        result.animated_custom_properties,
+        result.animated_custom_property_count,
+        result.animated_custom_properties_storage,
+    ) = AnimatedCustomPropertyResults::lend(settled_animated_custom_properties(
+        custom.as_ref(),
+        &custom_results[..custom_result_count],
+    ));
     result
 }
 
@@ -7834,30 +7847,12 @@ unsafe fn finish_longhand_finalization(
     // The names and values the animation tail settled, boxed so the host can read them after this
     // returns and hand the storage back once it has taken its own reference to each.
     let (animated_custom_properties, animated_custom_property_count, animated_custom_properties_storage) =
-        match stage_animation_tail
-            .as_mut()
-            .map(|tail| std::mem::take(&mut tail.animated_custom_properties))
-            .filter(|animated| !animated.is_empty())
-        {
-            None => (std::ptr::null(), 0, std::ptr::null_mut()),
-            Some(animated) => {
-                let rows = animated
-                    .iter()
-                    .map(|(name, value)| FfiAnimatedCustomPropertyResult {
-                        name_raw: name.raw(),
-                        value: value.pointer().cast(),
-                    })
-                    .collect::<Vec<_>>();
-                let count = rows.len();
-                let storage = Box::into_raw(Box::new(AnimatedCustomPropertyResults {
-                    rows,
-                    _retained: animated,
-                }));
-                // SAFETY: the box is live until the host releases it, and `rows` is never moved.
-                let pointer = unsafe { (*storage).rows.as_ptr() };
-                (pointer, count, storage.cast::<c_void>())
-            }
-        };
+        AnimatedCustomPropertyResults::lend(
+            stage_animation_tail
+                .as_mut()
+                .map(|tail| std::mem::take(&mut tail.animated_custom_properties))
+                .unwrap_or_default(),
+        );
     FfiLonghandFinalizationResult {
         invalidated_longhands,
         animated_overlay: stage_animation_tail
