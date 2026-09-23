@@ -636,9 +636,12 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
         return {};
     if (!is_synthetic_pseudo_element(*pseudo_element))
         return {};
+    // A container's verdict can move after its pseudo record was installed. Read its current
+    // winners even when the originating element still has a computed pseudo style.
     if (*pseudo_element != PseudoElement::Backdrop
         && *pseudo_element != PseudoElement::Selection
-        && abstract_element.computed_style())
+        && abstract_element.computed_style()
+        && !abstract_element.element().style_depends_on_size_container_query())
         return {};
 
     auto& document = abstract_element.document();
