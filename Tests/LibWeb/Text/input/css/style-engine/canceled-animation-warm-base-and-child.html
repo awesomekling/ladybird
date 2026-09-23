@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    #target { color: red; }
+    #target.changed { color: blue; }
+</style>
+<div id="target"><span id="child"></span></div>
+<script>
+    test(() => {
+        internals.updateStyle();
+        const animation = target.animate(
+            { color: ["green", "green"] },
+            { duration: 1000, fill: "both" },
+        );
+        animation.pause();
+        animation.currentTime = 500;
+        internals.updateStyle();
+        println(`composed color: ${getComputedStyle(child).color}`);
+
+        const before = internals.getStyleInvalidationCounters();
+        animation.cancel();
+        internals.updateStyle();
+        const after = internals.getStyleInvalidationCounters();
+        println(`cancellation stayed in the engine: ${after.elementStyleRecomputations === before.elementStyleRecomputations}`);
+        println(`canceled target color: ${getComputedStyle(target).color}`);
+        println(`canceled inherited color: ${getComputedStyle(child).color}`);
+
+        target.className = "changed";
+        internals.updateStyle();
+        println(`changed target color: ${getComputedStyle(target).color}`);
+        println(`changed inherited color: ${getComputedStyle(child).color}`);
+    });
+</script>
