@@ -1391,6 +1391,12 @@ impl RetainedState {
         self.animation_effect_descriptions.restore(node, slot, effects);
     }
 
+    /// The document's base URL, as the host last published it.
+    #[must_use]
+    pub(crate) fn document_base_url(&self) -> &[u8] {
+        &self.document_resource_contexts.document_base_url
+    }
+
     /// The registry `custom_property_registry` answers from, shared, for a caller that also needs
     /// the engine mutably while it asks.
     #[must_use]
