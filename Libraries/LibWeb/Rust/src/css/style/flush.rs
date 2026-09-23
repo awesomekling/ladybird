@@ -1872,12 +1872,8 @@ impl StyleEngineState {
                     | transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES;
                 let reaction_is_settleable = reaction & !(transaction::STYLE_REACTION_PUBLISHED_STYLE | DERIVABLE) == 0
                     && !(reaction & DERIVABLE != 0 && style_input_nodes_for_cpp.contains(&root));
-                let can_prepare = !(named_rule_context_changed
-                    && old_record.is_some()
-                    && custom_functions_moved
-                    && self.retained.facts.uses_custom_functions(root))
-                    && (reaction_is_settleable
-                        || (old_record.is_none() && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
+                let can_prepare = (reaction_is_settleable
+                    || (old_record.is_none() && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
                     && !self.retained.computed_group_sets.node_answer_is_incomplete(root)
                     && !selector_truth_changes.deltas_for(root).iter().any(|delta| {
                         !self
@@ -2255,11 +2251,8 @@ impl StyleEngineState {
                         // is no element record to recompute or compare against the parent's groups.
                         decline_cause = "InheritedCustomPropertiesNonConsumer";
                         false
-                    } else if (old_style_record != 0
-                        && custom_functions_moved
-                        && self.retained.facts.uses_custom_functions(node))
-                        || !(reaction_is_settleable
-                            || (old_style_record == 0 && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
+                    } else if !(reaction_is_settleable
+                        || (old_style_record == 0 && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
                     {
                         counters.bump(Counter::EngineComputedRecordGateReaction);
                         decline_cause = "GateReaction";
