@@ -2782,7 +2782,6 @@ pub struct FfiLonghandTransactionResult {
 
 #[repr(C)]
 pub struct FfiLonghandFinalizationResult {
-    pub parent_style_in_display_none_subtree: bool,
     pub invalidated_longhands: u16,
     // NB: Additive, and the only thing below this line: what the stage's own animation tail
     //     produced, for the post-stage `finish_properties` to install. `animated_overlay` is null
@@ -7392,7 +7391,6 @@ unsafe fn finish_longhand_finalization(
             }
         };
     FfiLonghandFinalizationResult {
-        parent_style_in_display_none_subtree,
         invalidated_longhands,
         animated_overlay: stage_animation_tail
             .as_ref()
@@ -7503,7 +7501,6 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
     if input.stop_after_longhand_drive {
         unsafe { &mut *drive_input.longhand_table }.freeze();
         return FfiLonghandFinalizationResult {
-            parent_style_in_display_none_subtree: false,
             invalidated_longhands: 0,
             animated_overlay: std::ptr::null_mut(),
             depends_on_viewport_metrics: false,
@@ -7742,7 +7739,6 @@ pub unsafe extern "C" fn rust_finalize_longhand_transaction(
                 )
             };
             return FfiLonghandFinalizationResult {
-                parent_style_in_display_none_subtree: false,
                 invalidated_longhands: 0,
                 animated_overlay: std::ptr::null_mut(),
                 depends_on_viewport_metrics: false,

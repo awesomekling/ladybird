@@ -263,9 +263,9 @@ public:
     // Says whether a baseline was recorded, which is a main-side write.
     bool record_transition_stabilization_baseline(DOM::AbstractElement, Optional<StyleRecordID> before_change_style_record = {}) const;
     bool pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(DOM::AbstractElement) const;
-    // Runs the whole transition step for a record the engine settled, against the record the row
-    // moved away from. Returns what publishing a started transition's values invalidates.
-    [[nodiscard]] RequiredInvalidationAfterStyleChange run_transition_step_for_settled_record(DOM::AbstractElement, StyleRecordID before_change_style_record) const;
+    // Runs the whole transition step for an installed record, against the record the element moved
+    // away from. Returns what publishing a started transition's values invalidates.
+    [[nodiscard]] RequiredInvalidationAfterStyleChange run_transition_step_for_installed_record(DOM::AbstractElement, StyleRecordID before_change_style_record) const;
     void commit_transition_stabilization_epoch();
     void for_each_provisional_transition_effect(DOM::AbstractElement const&, Function<void(Animations::KeyframeEffect&)> const&) const;
     void for_each_provisional_transition_effect_on_element(DOM::Element const&, Function<void(Animations::KeyframeEffect&)> const&) const;
@@ -389,9 +389,8 @@ private:
     void invalidate_animated_custom_property_readers(DOM::AbstractElement) const;
     // `did_write_main_side_state`, when given, is set where this reaches past the element's own
     // working set: a recorded stabilization baseline, a provisional state, a started transition.
-    Vector<GC::Ref<Animations::KeyframeEffect>> start_needed_transitions(ComputedStyleWorkingSet&, DOM::AbstractElement, bool* did_write_main_side_state = nullptr, Optional<StyleRecordID> before_change_style_record = {}) const;
+    void start_needed_transitions(ComputedStyleWorkingSet&, DOM::AbstractElement, StyleRecordID before_change_style_record) const;
     [[nodiscard]] bool has_provisional_transition_states(DOM::AbstractElement) const;
-    [[nodiscard]] RefPtr<ComputedStyleWorkingSet> start_needed_transitions_on_shared_style(DOM::AbstractElement, ComputedValues const& shared_values) const;
     void finalize_style(ComputedStyleWorkingSet&, DOM::AbstractElement, ComputedValuesFFI::FfiStyleFinalizationMode) const;
 
     [[nodiscard]] CSSPixelRect viewport_rect() const { return m_viewport_rect; }

@@ -165,6 +165,7 @@
 namespace Web::CSS {
 
 bool deferring_engine_pseudo_installation();
+void set_transition_step_follow_up_left_to_caller(bool);
 
 }
 
@@ -1826,8 +1827,10 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
                 }
                 set_custom_property_data(pseudo_element, move(data));
             }
-            if (engine_record.has_value() && (!!old_style_record || !new_pseudo_element_style->transition_delay_and_duration_are_single_zero())) {
-                auto transition_invalidation = style_computer.run_transition_step_for_settled_record({ *this, pseudo_element }, old_style_record);
+            if (!!old_style_record || !new_pseudo_element_style->transition_delay_and_duration_are_single_zero()) {
+                CSS::set_transition_step_follow_up_left_to_caller(!engine_record.has_value());
+                auto transition_invalidation = style_computer.run_transition_step_for_installed_record({ *this, pseudo_element }, old_style_record);
+                CSS::set_transition_step_follow_up_left_to_caller(false);
                 invalidation |= transition_invalidation;
             }
         } else if (auto existing_pseudo_element = get_synthetic_pseudo_element(pseudo_element); existing_pseudo_element.has_value())
@@ -2756,7 +2759,18 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_style_engine_reaction(b
         }
     });
 
+    // https://drafts.csswg.org/css-transitions-1/#starting
+    // The transition step compares the style the element moved away from with the one it now
+    // holds, so the old record has to outlive its replacement until the step has read it.
+    if (!!old_style_record)
+        style_computer.pin_style_record(old_style_record);
     set_computed_style({}, style_record_delta.new_style_record);
+    if (!!old_style_record) {
+        CSS::set_transition_step_follow_up_left_to_caller(true);
+        invalidation |= style_computer.run_transition_step_for_installed_record({ *this }, old_style_record);
+        CSS::set_transition_step_follow_up_left_to_caller(false);
+        style_computer.unpin_style_record(old_style_record);
+    }
 
     if (old_non_animated_display_is_none != new_non_animated_display_is_none) {
         for_each_shadow_including_inclusive_descendant([&](auto& node) {

@@ -1088,9 +1088,12 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     }
                     invalidation = element->apply_style_engine_reaction(did_change_custom_properties);
                 } else {
+                    // The drain runs the transition step for an element standing in for its host's
+                    // pseudo-element whatever the row owes, and so does the reference computation.
                     bool const defer_final_comparison = !verify_base_without_effects
                         && (element->has_relevant_animations() || element->has_associated_animations()
-                            || row_effect_debt & (StyleEngine::SettledRowTransitionDebt | StyleEngine::SettledRowOwesAnAnimationSample));
+                            || row_effect_debt & (StyleEngine::SettledRowTransitionDebt | StyleEngine::SettledRowOwesAnAnimationSample)
+                            || (reaction.old_style_record != 0 && element->associated_shadow_host_pseudo_element().has_value()));
                     bool const defer_pseudos = verify_base_without_effects
                         || row_effect_debt & (StyleEngine::SettledRowTransitionDebt | StyleEngine::SettledRowOwesAnAnimationSample);
                     auto old_originating_style = element->computed_style();
@@ -1148,7 +1151,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         || (transition_debt == 0 && reaction.old_style_record != 0 && element->associated_shadow_host_pseudo_element().has_value())) {
                         DOM::AbstractElement settled { *element };
                         if (settled.has_style()) {
-                            auto step_invalidation = document.style_computer().run_transition_step_for_settled_record(
+                            auto step_invalidation = document.style_computer().run_transition_step_for_installed_record(
                                 settled, StyleRecordID { reaction.old_style_record });
                             if (!step_invalidation.is_none()) {
                                 apply_element_style_invalidation_after_style_change(*element, step_invalidation);
