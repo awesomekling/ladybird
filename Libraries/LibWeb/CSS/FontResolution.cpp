@@ -401,6 +401,27 @@ void FontCascadeMemo::take_matching(Function<bool(ComputedFontCacheKey const&, G
     });
 }
 
+void FontCascadeMemo::take_changed(FontFaceSnapshotView const& snapshot, Function<bool(ComputedFontCacheKey const&)> const& might_change, Function<void(Gfx::FontCascadeList const&)> const& did_change)
+{
+    MutexLocker locker { m_mutex };
+    m_cascades.remove_all_matching([&](auto const& key, auto const& entry) {
+        if (!might_change(key))
+            return false;
+        FontFeatureValuesProvider published_provider = [this, &key](Utf16FlyString const& family) -> HashMap<FontFeatureValueKey, Vector<u32>> const& {
+            auto scope = m_font_feature_values.find(key.tree_scope);
+            if (scope == m_font_feature_values.end())
+                return *s_no_font_feature_values;
+            auto it = scope->value.find(family);
+            return it == scope->value.end() ? *s_no_font_feature_values : it->value;
+        };
+        auto updated_font_list = resolve_font_cascade(snapshot, key.font_families.span(), key.font_size, key.font_slope, key.font_weight, key.font_width, key.font_optical_sizing, key.font_variation_settings, key.font_feature_data, &published_provider);
+        if (!entry.font_list->has_pending_faces() && entry.font_list->equals(*updated_font_list))
+            return false;
+        did_change(*entry.font_list);
+        return true;
+    });
+}
+
 Vector<ComputedFontFamily> computed_font_families_from_style_value(StyleValue const& font_family)
 {
     Vector<ComputedFontFamily> font_families;
