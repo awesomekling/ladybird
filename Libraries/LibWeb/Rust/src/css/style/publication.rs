@@ -5284,7 +5284,7 @@ impl StyleEngineState {
             }
 
             if let Some(kind) = pseudo {
-                let record = self.demand_pseudo_record(node, kind, counters)?;
+                let record = self.demand_pseudo_record(node, kind, read_only, counters)?;
                 Ok(record.map(|record| RetriedEngineRecord {
                     style_record: record.raw(),
                     ..RetriedEngineRecord::default()

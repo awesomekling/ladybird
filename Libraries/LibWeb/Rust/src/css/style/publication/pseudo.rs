@@ -162,6 +162,7 @@ impl RetainedState {
             scratch,
             counters,
             None,
+            false,
         )
     }
 
@@ -178,6 +179,7 @@ impl RetainedState {
         scratch: &mut EngineComputedRecordScratch,
         counters: &mut Counters,
         selected_kind: Option<u8>,
+        cssom_read: bool,
     ) -> Option<()> {
         use pseudo_kind::{AFTER, BACKDROP, BEFORE, FIRST_LETTER, MARKER, SELECTION};
 
@@ -278,7 +280,8 @@ impl RetainedState {
         let facts = self.computed_group_sets.adjustment_facts(node) & PSEUDO_ELEMENT_ADJUSTMENT_FACTS;
         // A pseudo-element resolves a font cascade of its own, so its originating inputs moved
         // when the element's font environment did, exactly as when the root's font inputs did.
-        let originating_inputs_unchanged = inherited_inputs_unchanged
+        let originating_inputs_unchanged = !cssom_read
+            && inherited_inputs_unchanged
             && !scratch.root_font_inputs_changed
             && !scratch.viewport_moved
             && !scratch.font_environment_moved
@@ -362,7 +365,7 @@ impl RetainedState {
                         == Some(true)
                 });
             let implicit = kind == MARKER && (new_is_list_item || old_is_list_item || pseudo_is_list_item);
-            if kind == MARKER && !implicit {
+            if kind == MARKER && !implicit && !cssom_read {
                 continue;
             }
             let has_rules = kinds_with_rules & (1 << kind) != 0;
@@ -398,10 +401,11 @@ impl RetainedState {
                         0,
                         scratch,
                         counters,
+                        !cssom_read,
                     );
                 }
             };
-            if !has_rules && !implicit && highlight_parent_record.is_none() {
+            if !has_rules && !implicit && highlight_parent_record.is_none() && !cssom_read {
                 remove(self, scratch, counters);
                 continue;
             }
@@ -682,6 +686,7 @@ impl RetainedState {
                 longhand_evaluations,
                 scratch,
                 counters,
+                !cssom_read,
             );
         }
         scratch.pseudo_uses_substitution = pseudo_uses_substitution;
@@ -707,8 +712,11 @@ impl RetainedState {
         longhand_evaluations: u32,
         scratch: &mut EngineComputedRecordScratch,
         counters: &mut Counters,
+        count_record: bool,
     ) {
-        counters.bump(Counter::EngineComputedPseudoRecords);
+        if count_record {
+            counters.bump(Counter::EngineComputedPseudoRecords);
+        }
         self.engine_computed_records_pending
             .entry(node)
             .or_default()
@@ -840,6 +848,7 @@ impl RetainedState {
                 scratch,
                 counters,
                 None,
+                false,
             )
             .is_none()
         {
@@ -1203,6 +1212,7 @@ impl StyleEngineState {
         &mut self,
         node: StyleNodeID,
         kind: u8,
+        read_only: bool,
         counters: &mut Counters,
     ) -> Result<Option<computed::FinalStyleRecordID>, &'static str> {
         if ![
@@ -1229,7 +1239,11 @@ impl StyleEngineState {
             .style_record_view(element.raw())
             .and_then(|view| unsafe { view.longhand_table.as_ref() })
             .is_some_and(|table| table.display_is_list_item());
-        if mask & (1 << kind) == 0
+        // CSSOM reads still need computed values for an ungenerated pseudo-element. Derive a
+        // private record from the originating element without publishing a generated box.
+        let cssom_absent = read_only && mask & (1 << kind) == 0 && self.document_style_computation_inputs.is_some();
+        if !cssom_absent
+            && mask & (1 << kind) == 0
             && !(kind == pseudo_kind::MARKER && is_list_item)
             && !(kind == pseudo_kind::SELECTION
                 && self
@@ -1249,13 +1263,14 @@ impl StyleEngineState {
             if self
                 .settle_engine_pseudo_records(
                     node,
-                    Some(element),
+                    (!cssom_absent).then_some(element),
                     None,
                     element,
                     generation,
                     &mut scratch,
                     counters,
                     Some(kind),
+                    cssom_absent,
                 )
                 .is_some()
             {

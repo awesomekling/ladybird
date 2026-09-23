@@ -677,12 +677,17 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
                 auto record = StyleRecordID { demand.record.style_record };
                 auto view = style_computer.computed_style_record_view(record);
                 if (view) {
-                    highlight_parent_style_record = record;
-                    return ComputedValues::Builder { *view }.build();
+                    bool environment_is_installable = false;
+                    auto custom_property_data = target.element().custom_property_environment_of_engine_record(record, environment_is_installable);
+                    if (environment_is_installable) {
+                        target.set_custom_property_data(move(custom_property_data));
+                        highlight_parent_style_record = record;
+                        return ComputedValues::Builder { *view }.build();
+                    }
                 }
             }
         }
-        // A declined demand, or one whose container verdict may change after layout, stays with C++.
+        // Highlight inheritance and declined demands still need the C++ computation.
         bool did_change_custom_properties = false;
         StyleEngine::StyleRecordDelta style_record_delta {};
         auto style = style_computer.compute_pseudo_element_style_if_needed(target, did_change_custom_properties, nullptr, style_record_delta, highlight_parent_style_record);
@@ -781,7 +786,9 @@ static Optional<PreparedComputedStyle> prepare_computed_style_and_layout_for_pro
         auto pseudo_style = abstract_element.element().computed_style(*pseudo_element);
         auto const* computed_values = transient_style ? transient_style.ptr() : pseudo_style ? &*pseudo_style
                                                                                              : nullptr;
-        if (!computed_values || computed_values->display().is_contents())
+        if (!computed_values || computed_values->display().is_contents()
+            || (transient_style && first_is_one_of(*pseudo_element, PseudoElement::Before, PseudoElement::After)
+                && transient_style->content_is_normal()))
             layout_node = nullptr;
     }
 
