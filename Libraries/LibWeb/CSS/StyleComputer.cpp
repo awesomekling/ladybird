@@ -1327,7 +1327,6 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     start_needed_transitions(*new_style, abstract_element, before_change_style_record);
     // Starting a transition associates a new animation with the element.
     abstract_element.element().publish_animation_timing_rows();
-    clear_computation_context_caches();
 
     // A C++ computation publishes the working set with whatever the started transitions layered
     // into it, whether or not a layered value differs from the base: the overlay is what says the
@@ -1435,35 +1434,19 @@ void StyleComputer::start_needed_transitions(ComputedStyleWorkingSet& new_style,
         && existing_stabilization_state_indices.is_empty())
         return;
 
-    auto transition_font_metrics = [](Length::FontMetrics const& metrics) {
-        return StyleValueFFI::FfiAnimationFontMetrics {
-            .font_size = metrics.font_size.to_double(),
-            .x_height = metrics.x_height.to_double(),
-            .cap_height = metrics.cap_height.to_double(),
-            .zero_advance = metrics.zero_advance.to_double(),
-            .line_height = metrics.line_height.to_double(),
-        };
-    };
-    auto const& transition_computation_context = get_computation_context_for_property(PropertyID::Color, new_style, abstract_element);
-    auto const& transition_length_context = transition_computation_context.length_resolution_context;
     StyleValueFFI::FfiAnimationContext transition_animation_context {
         .allow_discrete = false,
         .current_color = new_style.property(PropertyID::Color).rust_style_value_data(),
-        .has_length_resolution_context = true,
-        .length_resolution_context = {
-            .viewport_width = transition_length_context.viewport_rect.width().to_double(),
-            .viewport_height = transition_length_context.viewport_rect.height().to_double(),
-            .font_metrics = transition_font_metrics(transition_length_context.font_metrics),
-            .root_font_metrics = transition_font_metrics(transition_length_context.root_font_metrics),
-            .font_metrics_depend_on_viewport_metrics = transition_length_context.font_metrics_depend_on_viewport_metrics,
-            .root_font_metrics_depend_on_viewport_metrics = transition_length_context.root_font_metrics_depend_on_viewport_metrics,
-        },
+        .has_length_resolution_context = false,
+        .length_resolution_context = {},
         .has_transform_reference_box = false,
         .transform_reference_box_width = 0,
         .transform_reference_box_height = 0,
     };
+    // The lengths the transitions resolve against are those of the record the element installed.
+    transition_animation_context.has_length_resolution_context = StyleValueFFI::rust_transition_length_resolution_context(
+        m_style_engine.rust_handle(), abstract_element.style_record_identity().value(), &transition_animation_context.length_resolution_context);
     apply_committed_transform_reference_box(m_style_engine, abstract_element, transition_animation_context);
-    clear_computation_context_caches();
 
     struct PreparedTransition {
         size_t stabilization_state_index;
