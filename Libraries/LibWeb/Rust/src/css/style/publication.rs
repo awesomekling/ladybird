@@ -987,16 +987,15 @@ impl RetainedState {
                 .iter()
                 .any(|&property| longhand_only_declares_a_css_transition(property))
             && self.animation_keyframes().only_the_document_scope_defines_keyframes();
-        // A remaining-phase delta can derive the new base beneath an existing WAAPI
-        // composition. The host samples the effect again after installing this base, including
-        // when the moved property is animated. A full drive still needs dependent-value closure.
+        // A remaining-phase delta can derive the new base beneath an existing composition. The
+        // host samples the effect again after installing this base, including when the moved
+        // property is animated. A full drive still needs dependent-value closure.
         // Font-phase and box-type effects change how later values are finalized. Their sampled
         // values need a composed drive rather than a base drive followed by a simple resample.
-        let full_waapi_drive_beneath_a_composition = animations_bind_the_record
+        let full_drive_beneath_a_composition = animations_bind_the_record
             && requires_full_drive
             && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
             && self.computed_group_sets.node_has_animation_overlay(node)
-            && !self.css_defined_animations.node_runs_a_css_animation(node)
             && !self.record_transition_facts(old_style_record, &[]).0
             && !has_registered_declarations
             && self
@@ -1010,6 +1009,13 @@ impl RetainedState {
                             && !property_feeds_box_type_transformation(entry.property)
                     })
                 });
+        let full_css_drive_beneath_a_composition = full_drive_beneath_a_composition
+            && self.css_defined_animations.node_runs_a_css_animation(node)
+            // The existing first-record gate also excludes keyframes that need host resolution.
+            && self.animation_keyframes().a_first_record_may_start_an_animation()
+            && !delta
+                .properties()
+                .contains(&crate::css::property_metadata::property_id::ANIMATION_FILL_MODE);
         // An associated CSS animation with no sampled overlay can still retime or cancel. The
         // new longhands decide its complete plan, and the host samples after installing the base.
         let css_animation_plan_without_an_overlay = animations_bind_the_record
@@ -1025,7 +1031,9 @@ impl RetainedState {
                 .properties()
                 .contains(&crate::css::property_metadata::property_id::ANIMATION_FILL_MODE);
         let derived_beneath_a_composition = css_animation_plan_without_an_overlay
-            || full_waapi_drive_beneath_a_composition
+            || full_drive_beneath_a_composition
+                && (!self.css_defined_animations.node_runs_a_css_animation(node)
+                    || full_css_drive_beneath_a_composition)
             || animations_bind_the_record
                 && !requires_full_drive
                 && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
@@ -1402,7 +1410,8 @@ impl RetainedState {
         };
         // The plan is decided from the longhands this drive computed, before the table goes into
         // the record.
-        let animation_plan = owes_an_animation_plan.then(|| self.settled_animation_plan(node, u8::MAX, &table));
+        let animation_plan = (owes_an_animation_plan || full_css_drive_beneath_a_composition)
+            .then(|| self.settled_animation_plan(node, u8::MAX, &table));
         let parent_in_display_none_subtree = self
             .tree
             .flat_tree_parent(node)
