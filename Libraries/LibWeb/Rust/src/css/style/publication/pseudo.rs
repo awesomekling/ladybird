@@ -803,14 +803,14 @@ impl RetainedState {
     }
 
     /// The host's matches for the pseudo-element an element stands for, when the element's record
-    /// can be cascaded from them: every rule one the host's winners hold, ungated and declaring only what the
-    /// winner columns hold and custom properties, and the element's own declarations complete
-    /// and declaring no custom property.
+    /// can be cascaded from them. The backing element's published answer proves the inventory
+    /// used to compute its style, including the host's pseudo-element rules.
     fn backing_element_rule_matches(
-        &self,
-        node: StyleNodeID,
+        &mut self,
         host: StyleNodeID,
         target: tree::PseudoElementTarget,
+        backing_answer_is_complete: bool,
+        counters: &mut Counters,
     ) -> Option<Vec<RuleMatch>> {
         let batch_matches = self.batch_backing_pseudo_matches.get(&host).map(|matches| {
             matches
@@ -843,21 +843,16 @@ impl RetainedState {
                         })
                         .map(|entry| entry.materialize(host, &self.programs, 0))
                         .collect::<Option<_>>()?,
-                    _ => return None,
+                    _ => self
+                        .exact_match_answer(host, counters)
+                        .ok()?
+                        .into_iter()
+                        .filter(|entry| entry.pseudo_element == Some(target))
+                        .collect(),
                 },
             }
         };
-        let complete = !matches.iter().any(|entry| {
-            !self.match_scope_is_complete_for(Some(host), entry.rule, entry.tree_scope)
-                || !self.container_gate_is_held(Some(host), entry.rule, true)
-                || !self
-                    .program
-                    .declarations_are_complete_but_for_custom_properties(entry.rule)
-        }) && ElementDeclarationKind::ALL.iter().all(|&declaration_kind| {
-            self.facts
-                .element_declarations_are_complete_but_for_custom_properties(node, declaration_kind)
-        }) && self.facts.element_custom_declarations(node).is_empty();
-        complete.then_some(matches)
+        backing_answer_is_complete.then_some(matches)
     }
 
     /// The matches for element-backed pseudo-elements in the answer a transaction publishes for a
@@ -902,6 +897,7 @@ impl RetainedState {
     pub(super) fn engine_backing_element_record(
         &mut self,
         node: StyleNodeID,
+        backing_answer_is_complete: bool,
         scratch: &mut EngineComputedRecordScratch,
         counters: &mut Counters,
     ) -> Option<(computed::FinalStyleRecordID, computed::FinalStyleRecordID)> {
@@ -932,7 +928,8 @@ impl RetainedState {
         let target = tree::PseudoElementTarget::new(tree::PseudoElementKind(u16::from(kind)));
         // The host's rules for the pseudo-element, cascaded as the element's own with its own
         // declarations, as C++ cascades them for it.
-        let Some(mut matches) = self.backing_element_rule_matches(node, host, target) else {
+        let Some(mut matches) = self.backing_element_rule_matches(host, target, backing_answer_is_complete, counters)
+        else {
             counters.bump(Counter::EngineComputedRecordBailIncompleteWinners);
             return None;
         };

@@ -609,7 +609,7 @@ impl RetainedState {
 
         let target = computed::ComputedStyleTarget::new(node, u8::MAX);
         if self.backs_host_pseudo_element(node) {
-            return self.engine_backing_element_record(node, scratch, counters);
+            return self.engine_backing_element_record(node, cascade_winners_are_complete, scratch, counters);
         }
         // The winners hold a gated rule where its container conditions held when they were
         // published; they answer for the node while every one decides as it did, over containers
