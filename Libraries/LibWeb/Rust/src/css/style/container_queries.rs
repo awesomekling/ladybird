@@ -222,6 +222,31 @@ impl RetainedState {
         Some(complete)
     }
 
+    /// Re-evaluate pseudo winners after the element winner was compared in this flush. The
+    /// retained answer already has the selector result; keep the element row and cascade-input
+    /// identity while publishing only the pseudo rows derived from it.
+    pub(super) fn republish_pseudo_winners_from_retained_answer(
+        &mut self,
+        node: StyleNodeID,
+        counters: &mut Counters,
+    ) -> Option<()> {
+        let identity = self.current_answer_identity(node)?;
+        let answer = self.match_answers.answer(identity).cloned()?;
+        for entry in answer.iter() {
+            self.prepare_scope_program(entry.tree_scope);
+        }
+        let mut matches = Vec::new();
+        self.append_catalog_answer(identity, node, None, &mut matches)?;
+        let mut effects = AnswerEffects::default();
+        self.matches_for_cascade(&mut effects, matches, true, Some(node), counters);
+        effects.winners.discard_element_row(&mut self.winner_groups, node);
+        effects
+            .winners
+            .preserve_equal_pseudo_states(&mut self.winner_groups, node);
+        self.install_answer_effects(effects);
+        Some(())
+    }
+
     /// Whether a rule decides for the node as far as its container conditions go: an ungated rule
     /// always does, a gated one where they held when the node's winners were published.
     pub(crate) fn published_container_verdict_holds(&self, node: StyleNodeID, rule: RuleID, pseudo: bool) -> bool {
