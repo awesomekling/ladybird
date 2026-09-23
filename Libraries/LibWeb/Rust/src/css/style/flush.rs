@@ -2224,16 +2224,31 @@ impl StyleEngineState {
                                 && (self.retained.computed_group_sets.adjustment_facts(parent)
                                     & bridge::element_adjustment_fact::HAS_ANIMATIONS
                                     != 0
+                                    // Registering a transition baseline does not sample or overlay
+                                    // the parent's record, so its child can derive immediately.
                                     || self
                                         .retained
                                         .nodes_owing_a_transition_registration
-                                        .contains_key(&parent)
+                                        .get(&parent)
+                                        .is_some_and(|registration_only| !registration_only)
                                     || self
                                         .retained
                                         .nodes_owing_animation_definitions
                                         .contains_key(&(parent, u8::MAX))
                                     || self.retained.nodes_owing_an_animation_sample.contains(&parent)))
                     });
+                    // A registration-only transition does not change the parent's composition.
+                    // A child can attempt its record now, but an explicit inherit may still need
+                    // the parent's installed record. Retry that declined drive at its apply point.
+                    if !awaits_sampled_parent
+                        && self.tree.flat_tree_parent(node).is_some_and(|parent| {
+                            self.retained.engine_computed_records_pending.contains_key(&parent)
+                                && self.retained.nodes_owing_a_transition_registration.get(&parent) == Some(&true)
+                        })
+                    {
+                        retry_after_ancestor |= answer_winners_are_complete
+                            || self.cascade_winners_are_complete_but_for_custom_properties(node);
+                    }
                     // Why this row would reach the host, for the seal's by-cause census. Naming
                     // it here is what lets the census rank entries instead of attempts.
                     let mut decline_cause: &'static str = "";
