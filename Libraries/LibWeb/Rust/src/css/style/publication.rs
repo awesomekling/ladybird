@@ -2285,11 +2285,12 @@ impl RetainedState {
         self.monospace_recascaded_font_size(node).unwrap_or(i32::MIN)
     }
 
-    /// Whether a pseudo-element's winner keeps its record in C++: the same rule as a first
-    /// record's, since a pseudo-element record the engine settles is computed in full.
+    /// A pseudo-element's transition declarations compute into its record. The host applies
+    /// their transition step after installing it; animation definitions still need a plan.
     fn pseudo_winner_needs_cpp(&self, winner: &PropertyWinner) -> bool {
         use crate::css::property_metadata::property_id as prop;
-        winner.property == prop::ANCHOR_NAME || property_starts_animation(winner.property)
+        winner.property == prop::ANCHOR_NAME
+            || (property_starts_animation(winner.property) && !longhand_only_declares_a_css_transition(winner.property))
     }
 
     /// Whether a record holds a composition its animations made. The transitions its table
