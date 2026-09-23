@@ -132,29 +132,16 @@ fn engine_resolution_context(
 }
 
 fn value_is_engine_resolvable_in_custom_environment(value: &StyleValueData) -> bool {
-    custom_property_value_is_engine_resolvable(value)
-        || matches!(
-            value,
-            StyleValueData::Unresolved {
-                presence_attr: true,
-                presence_dashed_function: false,
-                presence_env: false,
-                presence_if: false,
-                ..
-            } | StyleValueData::Unresolved {
-                presence_attr: false,
-                presence_dashed_function: false,
-                presence_env: false,
-                presence_if: false,
-                presence_inherit: true,
-                ..
-            } | StyleValueData::Unresolved {
-                presence_attr: false,
-                presence_dashed_function: false,
-                presence_if: true,
-                ..
-            }
-        )
+    // Attributes, media conditions, and the inheritance store are all frozen in this row's
+    // resolution context. A dashed function still needs its tree-scoped definition and local
+    // container conditions, which the custom-property environment does not carry.
+    !matches!(
+        value,
+        StyleValueData::Unresolved {
+            presence_dashed_function: true,
+            ..
+        }
+    )
 }
 
 /// What a registered custom property's value is computed against: the element's own font metrics
