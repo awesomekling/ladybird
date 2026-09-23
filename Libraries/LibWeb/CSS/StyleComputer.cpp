@@ -1344,20 +1344,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
         return {};
     }
 
-    // A step that cancelled the last running transition leaves the unanimated base the installed
-    // style already carries, so that is the style to publish rather than one rebuilt in full.
-    auto computed_values = has_animated_properties
-        ? build_animated_computed_values(*new_style, abstract_element, abstract_element.style_scope(), *installed_style)
-        : ComputedValues::Builder { installed_style->base_values() }.build();
-    Array<void const*, to_underlying(StyleGroupIndex::Count)> payloads;
-    for (size_t index = 0; index < payloads.size(); ++index)
-        payloads[index] = computed_values->style_group_payload(static_cast<StyleGroupIndex>(index));
-    auto animated_property_invalidation = const_cast<StyleComputer&>(*this).style_engine().compare_animation_overlay(
-        installed_style_record,
-        new_style->animated_overlay(),
-        payloads,
-        !abstract_element.pseudo_element().has_value() && abstract_element.element().is_document_element());
-    auto publication = publish_animation_overlay(abstract_element, *computed_values);
+    auto [animated_property_invalidation, publication] = publish_sampled_animation_overlay(abstract_element, *new_style, installed_style_record);
     auto& element = abstract_element.element();
     element.refresh_computed_style(abstract_element.pseudo_element(), publication.new_style_record);
     if (auto* svg_element = as_if<SVG::SVGElement>(element))
@@ -3535,6 +3522,75 @@ StyleEngine::StyleRecordDelta StyleComputer::publish_animation_overlay(DOM::Abst
     if (publication.has_value())
         return publication.release_value();
     return publish_computed_style_inputs(abstract_element, values);
+}
+
+StyleComputer::SampledAnimationOverlayPublication StyleComputer::publish_sampled_animation_overlay(DOM::AbstractElement abstract_element, ComputedStyleWorkingSet& style, StyleRecordID style_record, Function<void(StyleEngineFFI::FfiAnimationInvalidation const&)> const& before_publication) const
+{
+    // The engine composes the overlay over the record, rebuilding only the groups the overlay
+    // writes. The animated platform font is the one thing it asks for.
+    auto& element = abstract_element.element();
+    struct OverlayFont {
+        ComputedStyleWorkingSet const& style;
+        DOM::Document const& document;
+        u32 tree_scope;
+    } overlay_font { style, element.document(), abstract_element.style_scope().style_engine_tree_scope().value() };
+    StyleEngineFFI::FfiAnimationOverlayPayloadInput const payload_input {
+        .style_node = element.style_node_id().value(),
+        .pseudo_kind = pseudo_element_to_ffi(abstract_element.pseudo_element()),
+        .style_record = style_record.value(),
+        .longhand_table = style.computed_longhand_table(),
+        .animated_overlay = style.animated_overlay(),
+        .used_color_scheme = static_cast<u8>(to_underlying(style.color_scheme(element.document().page().preferred_color_scheme(), element.document().supported_color_schemes()))),
+        .display_before_box_type_transformation_raw = bit_cast<u32>(style.display_before_box_type_transformation()),
+        .callback_context = &overlay_font,
+        .font_group_inputs = [](void* context, void* inputs) {
+            auto const& font = *static_cast<OverlayFont const*>(context);
+            *static_cast<ComputedValuesFFI::FfiFontGroupBuildInputs*>(inputs) = font.style.font_group_build_inputs(font.document, font.tree_scope);
+        },
+    };
+    auto overlay_payloads = StyleEngineFFI::style_engine_build_animation_overlay_payloads(m_style_engine.rust_handle(), &payload_input);
+    VERIFY(overlay_payloads.payloads);
+    ScopeGuard release_overlay_payloads = [&] {
+        StyleEngineFFI::style_engine_release_animation_overlay_payloads(overlay_payloads.storage);
+    };
+    if (overlay_payloads.rebuilt_every_group)
+        document().style_invalidation_counters().animated_style_full_builds++;
+    else
+        document().style_invalidation_counters().animated_style_overlay_builds++;
+    ReadonlySpan<void const*> payloads { overlay_payloads.payloads, overlay_payloads.payload_count };
+    auto invalidation = m_style_engine.compare_animation_overlay(style_record, style.animated_overlay(), payloads,
+        !abstract_element.pseudo_element().has_value() && element.is_document_element());
+    if (before_publication)
+        before_publication(invalidation);
+    auto animated_properties = style.animated_properties_snapshot();
+    bool const publishes_overlay = animated_properties && !animated_properties->is_empty();
+    auto publication = const_cast<StyleComputer&>(*this).style_engine().publish_animation_overlay(
+        element.style_node_id(),
+        pseudo_element_to_ffi(abstract_element.pseudo_element()),
+        publishes_overlay ? animated_properties->identity() : 0,
+        publishes_overlay ? animated_properties->overlay() : nullptr,
+        publishes_overlay ? payloads : ReadonlySpan<void const*> {});
+    // A pseudo-element the engine holds no assignment for owns no overlay slot, so its record is
+    // published again whole, with the overlay over the same base.
+    if (!publication.has_value()) {
+        auto base = m_style_engine.style_record_view(style_record);
+        VERIFY(base.present);
+        auto custom_property_data = abstract_element.custom_property_data();
+        publication = const_cast<StyleComputer&>(*this).style_engine().publish_computed_groups(
+            element.style_node_id(),
+            pseudo_element_to_ffi(abstract_element.pseudo_element()),
+            { base.base_payloads, base.payload_count },
+            ComputedValues::inherited_style_group_count,
+            custom_property_data ? custom_property_data->identity() : 0,
+            false,
+            base.counter_style_environment_identity,
+            publishes_overlay ? animated_properties->identity() : 0,
+            publishes_overlay ? animated_properties->overlay() : nullptr,
+            publishes_overlay ? payloads : ReadonlySpan<void const*> {},
+            base.longhand_table,
+            custom_property_data ? custom_property_data->rust_store() : nullptr);
+    }
+    return { invalidation, *publication };
 }
 
 StyleRecordID StyleComputer::intern_computed_style_inputs(DOM::AbstractElement abstract_element, ComputedValues const& values) const
