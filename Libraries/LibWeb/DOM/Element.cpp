@@ -149,6 +149,7 @@
 #include <LibWeb/SVG/SVGForeignObjectElement.h>
 #include <LibWeb/SVG/SVGGraphicsElement.h>
 #include <LibWeb/Selection/Selection.h>
+#include <LibWeb/StyleEngineRustFFI.h>
 #include <LibWeb/StyleValueRustFFI.h>
 #include <LibWeb/TrustedTypes/RequireTrustedTypesForDirective.h>
 #include <LibWeb/TrustedTypes/TrustedTypePolicy.h>
@@ -2431,6 +2432,8 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
                 host->set_style_uses_attr_css_function();
         }
     }
+    if (CSS::StyleEngineFFI::style_engine_node_record_uses_tree_counting(style_computer.style_engine().rust_handle(), style_node_id().value()))
+        set_style_uses_tree_counting_function();
     auto const custom_condition_usage = style_computer.style_engine().node_record_custom_condition_usage(style_node_id());
     if (custom_condition_usage & 1)
         set_style_uses_if_css_function();

@@ -121,6 +121,13 @@ impl WinnerStore {
         })
     }
 
+    pub(super) fn uses_tree_counting_function(&self, engine: &RetainedState) -> bool {
+        let view = self.view(engine);
+        self.declarations
+            .iter()
+            .any(|declaration| view.dependencies(declaration).uses_tree_counting_function)
+    }
+
     pub(super) fn view<'a>(&'a self, engine: &'a RetainedState) -> WinnerView<'a> {
         WinnerView { store: self, engine }
     }
