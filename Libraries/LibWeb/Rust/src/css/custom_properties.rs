@@ -582,6 +582,18 @@ impl CustomPropertyStore {
         let entries: Vec<_> = names
             .into_iter()
             .filter(|name| !excluded.contains(name))
+            .filter(|name| {
+                // A child store may absorb entries from its parent for lookup speed. Filtering
+                // the child's own non-inheriting declarations must not redeclare those entries
+                // in a new layer: they already belong to the filtered parent.
+                store.declared_names.contains(name)
+                    || unsafe { parent.cast::<Self>().as_ref() }.is_none_or(|parent| {
+                        parent.get(*name).is_none_or(|inherited| {
+                            let entry = &store.own_values[name];
+                            inherited.value.pointer() != entry.value.pointer() || inherited.important != entry.important
+                        })
+                    })
+            })
             .map(|name| (name, store.own_values[&name].clone()))
             .collect();
         if entries.is_empty() {
