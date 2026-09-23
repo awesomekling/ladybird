@@ -10,6 +10,7 @@
 #include <AK/ScopeGuard.h>
 #include <LibWeb/CSS/CalculationResolutionContext.h>
 #include <LibWeb/CSS/ComputedValues.h>
+#include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/CustomPropertyRegistration.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/Parser/SyntaxParsing.h>
@@ -328,6 +329,29 @@ static RefPtr<StyleValue const> parse_style_range_literal_value(DOM::Document co
     return {};
 }
 
+static NonnullRefPtr<StyleValue const> computed_style_query_custom_property_value(AbstractOrHypotheticalElement const& element, Utf16FlyString const& name)
+{
+    if (element.has<DOM::AbstractElement>()) {
+        auto const& abstract_element = element.get<DOM::AbstractElement>();
+        if (!abstract_element.pseudo_element().has_value()) {
+            auto& style_computer = const_cast<DOM::Document&>(element.document()).style_computer();
+            auto answer = style_computer.style_engine().answer_record_demand(abstract_element.element().style_node_id(), {}, false, false, true);
+            if (answer.record.style_record) {
+                bool installable = false;
+                auto environment = abstract_element.element().custom_property_environment_of_engine_record(StyleRecordID { answer.record.style_record }, installable);
+                if (installable) {
+                    if (environment) {
+                        if (auto const* property = environment->get(name))
+                            return property->value;
+                    }
+                    return initial_custom_property_value(element.get_registered_custom_property(name), element.document());
+                }
+            }
+        }
+    }
+    return element.document().style_computer().compute_value_of_custom_property(nullptr, element, name);
+}
+
 static Optional<StyleRangeComparableValue> evaluate_style_range_value(StyleRangeValue const& range_value, AbstractOrHypotheticalElement const& element, DOM::Document const& document, ComputationContext const& computation_context)
 {
     return range_value.visit(
@@ -341,7 +365,7 @@ static Optional<StyleRangeComparableValue> evaluate_style_range_value(StyleRange
             }
             ScopeGuard end_resolution = end_style_query_resolution;
 
-            auto computed_value = document.style_computer().compute_value_of_custom_property(nullptr, element, property.name());
+            auto computed_value = computed_style_query_custom_property_value(element, property.name());
 
             if (computed_value->is_guaranteed_invalid())
                 return {};
@@ -431,7 +455,7 @@ static MatchResult evaluate_style_feature(EvaluatedStyleFeature const& style_fea
         }
     }
 
-    auto computed_value = document.style_computer().compute_value_of_custom_property(nullptr, element, property_name);
+    auto computed_value = computed_style_query_custom_property_value(element, property_name);
 
     auto registration = element.get_registered_custom_property(property_name);
 
