@@ -386,6 +386,11 @@ impl RetainedState {
             {
                 continue;
             }
+            // The backdrop of a node outside the top layer generates no box, whatever its rules.
+            if selected_kind.is_none() && kind == BACKDROP && !in_top_layer {
+                self.computed_group_sets.remove_pseudo(node, kind);
+                continue;
+            }
             let target = computed::ComputedStyleTarget::new(node, kind);
             let old = self.computed_group_sets.pseudo_style_record(node, kind);
             let mut pin_old_composition = false;
@@ -757,10 +762,6 @@ impl RetainedState {
                     (record, longhand_evaluations)
                 }
             };
-            if selected_kind.is_none() && kind == BACKDROP && !in_top_layer {
-                self.computed_group_sets.remove_pseudo(node, kind);
-                continue;
-            }
             if kind != BACKDROP
                 && state.is_some_and(|state| !self.state_has_no_animation_name(state))
                 && self.animation_keyframes().only_the_document_scope_defines_keyframes()
