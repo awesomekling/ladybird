@@ -191,28 +191,6 @@ static StyleEngine::PublishedStyleDelta make_materialize_gap_delta(StyleNodeID s
     };
 }
 
-// The static inherited-group swap answers a pure inherited-style reaction without recomputing the element. That
-// is only sound while the element's computed style is a pure function of its cascade inputs and the swapped
-// groups: an element with animations may resolve keyframe values (`inherit`, neutral keyframes) against the
-// parent's style, and an element with transitions or transition-property entries must compare before-change and
-// after-change styles at every style change event. These are the conditions under which
-// Element::apply_style_engine_reaction declines its own inherited-style group swap.
-static bool element_style_depends_on_more_than_the_inherited_groups(DOM::Element& element)
-{
-    if (element.has_relevant_animations()
-        || element.has_css_defined_animations()
-        || !element.property_ids_with_existing_transitions({}).is_empty()
-        || !element.property_ids_with_matching_transition_property_entry({}).is_empty())
-        return true;
-    // The swapped groups are the parent's base values; a child of an animating parent inherits
-    // the animated ones, which the engine never sees.
-    if (auto parent = DOM::AbstractElement { element }.element_to_inherit_style_from(); parent.has_value()) {
-        if (auto parent_style = parent->computed_style(); parent_style && parent_style->has_animated_values())
-            return true;
-    }
-    return false;
-}
-
 static void sample_animations_for_installed_record(DOM::AbstractElement abstract_element)
 {
     auto record = abstract_element.style_record_identity();
@@ -702,7 +680,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetryAfterAncestor
                 || (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize
                     && reaction.reaction & (StyleEngine::RecomputeStyle | StyleEngine::RecomputeDescendantStyles | StyleEngine::AncestorBecameVisible | StyleEngine::InheritedStyle | StyleEngine::InheritedCustomProperties)
-                    && !element_style_depends_on_more_than_the_inherited_groups(*element)
                     && !element->has_associated_animations())) {
                 // The preceding row has installed and published this element's parent. Ask now,
                 // before applying this row, rather than deriving its descendants ahead of their
