@@ -1631,6 +1631,10 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
                     || AbstractElement { *this, CSS::PseudoElement::Selection }.highlight_inheritance_parent().has_value())))
             return false;
         auto settled = style_computer.style_engine().settle_pseudo_records_after_host_record(style_node_id(), had_list_marker);
+        // What the settled pseudo-elements' container units read of the element's containers.
+        auto container_effects = CSS::StyleEngineFFI::style_engine_take_container_effects(style_computer.style_engine().rust_handle(), style_node_id().value());
+        ScopeGuard release_container_effects = [&] { CSS::StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
+        CSS::StyleComputer::record_container_query_effects(AbstractElement { *this }, container_effects);
         if (settled.style_record == 0)
             return false;
         for (size_t kind = 0; kind < array_size(settled.pseudo_records); ++kind) {

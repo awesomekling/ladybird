@@ -4275,8 +4275,7 @@ impl RetainedState {
                 .unwrap_or_else(|| value_computes_without_document_context(data))
                 || (resources_are_known && value_computes_without_document_context_but_for_resources(data).is_some())
                 || value_computes_with_random_inputs(data, resources_are_known)
-                || (pseudo_kind.is_none()
-                    && matches!(&value, WinnerValue::Written { .. })
+                || (matches!(&value, WinnerValue::Written { .. })
                     && value_computes_with_container_inputs(data, resources_are_known))
                 || (value_computes_with_tree_counting_inputs(data, resources_are_known)
                     && self.element_tree_counting_inputs(node) != 0);
