@@ -1839,6 +1839,7 @@ impl StyleEngineState {
                 top_layer_elements: Vec::new(),
                 next_style_transaction_version: StyleTransactionVersion(1),
                 document_style_computation_inputs: None,
+                document_media_snapshot: custom_property_cascade::DocumentMediaSnapshot::default(),
                 driven_viewport: (0.0, 0.0),
                 document_resource_contexts: Default::default(),
                 custom_property_registry: None,

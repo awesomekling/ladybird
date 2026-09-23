@@ -32,8 +32,67 @@ use crate::css::parser::value_parser::ParseOutcome;
 use crate::css::style_value::{RetainedStyleValueData, StyleValueData, release_style_value};
 use custom_property_environments::CascadedCustomProperty;
 
+/// A transaction's media features copied from the host. The length context's only output pointer
+/// is cleared before retaining it, so neither part borrows the style update's stack.
+#[derive(Default)]
+pub(super) struct DocumentMediaSnapshot {
+    values: Vec<crate::css::parser::query_parser::FfiMediaFeatureValue>,
+    length: Option<crate::css::style_compute::FfiLengthResolutionContext>,
+}
+
+// The copied length context contains no writable pointer after `take_from` clears it.
+unsafe impl Send for DocumentMediaSnapshot {}
+unsafe impl Sync for DocumentMediaSnapshot {}
+
+impl DocumentMediaSnapshot {
+    pub(super) unsafe fn take_from(inputs: &mut bridge::FfiDocumentStyleComputationInputs) -> Self {
+        let values = if inputs.media_feature_value_count == 0 {
+            Vec::new()
+        } else {
+            unsafe {
+                std::slice::from_raw_parts(
+                    inputs.media_feature_values.as_pointer().cast(),
+                    inputs.media_feature_value_count,
+                )
+                .to_vec()
+            }
+        };
+        let length = unsafe {
+            inputs
+                .media_length_resolution_context
+                .as_pointer()
+                .cast::<crate::css::style_compute::FfiLengthResolutionContext>()
+                .as_ref()
+                .copied()
+        }
+        .map(|mut context| {
+            context.resolved_viewport_relative_length = std::ptr::null_mut();
+            context
+        });
+        inputs.media_feature_values = bridge::FfiHostHandle { address: 0 };
+        inputs.media_feature_value_count = 0;
+        inputs.media_length_resolution_context = bridge::FfiHostHandle { address: 0 };
+        Self { values, length }
+    }
+
+    fn as_ffi(&self) -> crate::css::parser::query_parser::FfiMediaEnvironment {
+        crate::css::parser::query_parser::FfiMediaEnvironment {
+            values: self.values.as_ptr(),
+            value_count: self.values.len(),
+            length_resolution_context: self
+                .length
+                .as_ref()
+                .map_or(std::ptr::null(), |length| std::ptr::from_ref(length).cast()),
+        }
+    }
+}
+
 /// The resolution context the engine substitutes under: the stores alone, with no callback into
 /// C++ - what the engine cannot resolve without one is left to C++ before this is built.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the FFI context borrows independent resolution inputs"
+)]
 fn engine_resolution_context(
     parse_context: &crate::css::parser::value_parser::ParseContext,
     store: *const c_void,
@@ -42,10 +101,11 @@ fn engine_resolution_context(
     length: *const crate::css::style_compute::FfiLengthResolutionContext,
     attributes: &[crate::css::custom_properties::FfiSubstitutionAttribute],
     attribute_names_are_ascii_case_insensitive: bool,
+    media_environment: *const crate::css::parser::query_parser::FfiMediaEnvironment,
 ) -> FfiCascadeResolutionContext {
     FfiCascadeResolutionContext {
         parse_context: std::ptr::from_ref(parse_context).cast(),
-        media_environment: std::ptr::null(),
+        media_environment: media_environment.cast(),
         load_media_environment: None,
         custom_property_store: store,
         animated_custom_property_store: std::ptr::null(),
@@ -87,6 +147,11 @@ fn value_is_engine_resolvable_in_custom_environment(value: &StyleValueData) -> b
                 presence_env: false,
                 presence_if: false,
                 presence_inherit: true,
+                ..
+            } | StyleValueData::Unresolved {
+                presence_attr: false,
+                presence_dashed_function: false,
+                presence_if: true,
                 ..
             }
         )
@@ -441,6 +506,23 @@ impl RetainedState {
                             ..
                         }
                     )
+                })
+            })
+    }
+
+    pub(super) fn custom_declarations_condition_usage(&self, node: StyleNodeID, pseudo: Option<u8>) -> u8 {
+        self.cascaded_custom_declarations_of(node, pseudo)
+            .map_or(0, |declarations| {
+                declarations.iter().fold(0, |usage, (_, value)| {
+                    usage
+                        | match value.data() {
+                            StyleValueData::Unresolved {
+                                presence_if,
+                                presence_inherit,
+                                ..
+                            } => u8::from(*presence_if) | (u8::from(*presence_inherit) << 1),
+                            _ => 0,
+                        }
                 })
             })
     }
@@ -865,7 +947,11 @@ impl RetainedState {
         // engine's: handing it back settles a row the host then computes again. The memo is worth
         // only what it saves, so where it holds such an identity this resolves one of its own.
         // Random inputs can be element-scoped, so declarations alone cannot share their result.
-        let can_memoize = random_sources.is_empty() && !has_registered_declaration && !reads_attributes;
+        let reads_conditions = cascaded
+            .iter()
+            .any(|(_, value)| matches!(value.data(), StyleValueData::Unresolved { presence_if: true, .. }));
+        let can_memoize =
+            random_sources.is_empty() && !has_registered_declaration && !reads_attributes && !reads_conditions;
         let memoized = can_memoize
             .then(|| self.custom_property_environments.memoized(&key))
             .flatten();
@@ -907,7 +993,8 @@ impl RetainedState {
             default_font_size_raw: inputs.default_font_size_raw,
         };
         let mut random_function_index = 0_usize;
-        let parse_context = registry_ref.parse_context(&mut random_function_index);
+        let mut parse_context = registry_ref.parse_context(&mut random_function_index);
+        parse_context.in_quirks_mode = inputs.in_quirks_mode;
         let length = registered
             .as_ref()
             .map_or(std::ptr::null(), |registered| &raw const registered.length);
@@ -934,6 +1021,7 @@ impl RetainedState {
         } else {
             Vec::new()
         };
+        let media_environment = self.document_media_snapshot.as_ffi();
         let resolution_context = engine_resolution_context(
             &parse_context,
             cascaded_store,
@@ -945,6 +1033,7 @@ impl RetainedState {
             &substitution_attributes,
             !self.html_element_namespace.is_none()
                 && self.facts.namespace_of(attribute_element) == self.html_element_namespace,
+            &raw const media_environment,
         );
         let drive = FfiCustomPropertyDriveInput {
             store: cascaded_store,

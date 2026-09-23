@@ -2424,6 +2424,11 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
                 host->set_style_uses_attr_css_function();
         }
     }
+    auto const custom_condition_usage = style_computer.style_engine().node_record_custom_condition_usage(style_node_id());
+    if (custom_condition_usage & 1)
+        m_style_uses_if_css_function = true;
+    if (custom_condition_usage & 2)
+        m_style_uses_inherit_css_function = true;
 
     // The environment the record was published with: what the element inherits, or what the
     // engine resolved its own custom declarations to over that.
