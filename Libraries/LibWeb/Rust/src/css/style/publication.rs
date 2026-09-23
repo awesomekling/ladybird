@@ -2405,24 +2405,19 @@ impl RetainedState {
         let Some(parent_record) = self.computed_group_sets.assigned_style_record(parent) else {
             return false;
         };
-        let Some(view) = self.computed_group_sets.style_record_view(record.raw()) else {
+        let Some(view) = self.computed_group_sets.base_style_record_view(record) else {
             return false;
         };
         let Some(parent_view) = self.computed_group_sets.style_record_view(parent_record.raw()) else {
             return false;
         };
-        let base_payloads = if view.base_payloads.is_empty() {
-            view.payloads
-        } else {
-            view.base_payloads
-        };
         let own_groups = self.state_owned_inherited_groups(state);
         (0..computed::ENGINE_INHERITED_GROUP_COUNT).all(|group| {
             own_groups & (1 << group) != 0
-                || base_payloads[group] == parent_view.payloads[group]
+                || view.payloads[group] == parent_view.payloads[group]
                 || crate::css::computed_values::style_group_payloads_equal(
                     group,
-                    base_payloads[group].as_ptr(),
+                    view.payloads[group].as_ptr(),
                     parent_view.payloads[group].as_ptr(),
                 )
         })
@@ -2454,11 +2449,8 @@ impl RetainedState {
         use crate::css::computed_value_types::{STYLE_GROUP_INDEX_FONT, STYLE_GROUP_INDEX_INHERITED_BOX};
         use crate::css::style_compute::{FfiFontMetrics, FfiLengthResolutionContext};
 
-        let view = self.computed_group_sets.style_record_view(record.raw())?;
-        let payloads = match view.base_payloads.is_empty() {
-            true => view.payloads,
-            false => view.base_payloads,
-        };
+        let view = self.computed_group_sets.base_style_record_view(record)?;
+        let payloads = view.payloads;
         let table = unsafe { view.longhand_table.as_ref() }?;
         let font = unsafe {
             payloads[STYLE_GROUP_INDEX_FONT]
