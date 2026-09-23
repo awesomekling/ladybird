@@ -273,9 +273,8 @@ impl StyleEngine {
     /// Record a change to style inputs which are properties of the document environment rather
     /// than of an element or stylesheet rule.
     #[inline]
-    pub fn record_environment_change(&mut self, needs_host_computation: bool) {
-        self.state
-            .record_environment_change(needs_host_computation, &mut self.counters);
+    pub fn record_environment_change(&mut self) {
+        self.state.record_environment_change(&mut self.counters);
     }
 
     /// Record a registration made through `CSS.registerProperty()`. Stylesheet registrations are

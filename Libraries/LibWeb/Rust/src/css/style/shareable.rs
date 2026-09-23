@@ -103,7 +103,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         root_element_font_metrics,
         animation_keyframes,
         custom_property_registrations_changed,
-        environment_action_needs_host_computation,
         pending_element_style_computation_selections,
         pending_pseudo_style_computation_selections,
         engine_computed_records_pending,
@@ -232,7 +231,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(root_element_font_metrics);
     assert_member_is_sync(animation_keyframes);
     assert_member_is_sync(custom_property_registrations_changed);
-    assert_member_is_sync(environment_action_needs_host_computation);
     assert_member_is_sync(pending_element_style_computation_selections);
     assert_member_is_sync(pending_pseudo_style_computation_selections);
     assert_member_is_sync(engine_computed_records_pending);

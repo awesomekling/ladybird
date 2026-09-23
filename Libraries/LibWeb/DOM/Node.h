@@ -471,14 +471,7 @@ public:
     [[nodiscard]] u32 children_explicitly_inherited_non_inherited_style_groups() const { return m_children_explicitly_inherited_non_inherited_style_groups; }
     void add_children_explicitly_inherited_non_inherited_style_groups(u32 style_groups) { m_children_explicitly_inherited_non_inherited_style_groups |= style_groups; }
 
-    // Whether the engine's own record drive can compute what this environment action changed. A
-    // viewport metric it can; the document's supported colour schemes, the user style sheets and
-    // the quirks mode it cannot, and a record that stands on its winners still recomputes in C++.
-    enum class EnvironmentActionDrive : u8 {
-        Engine,
-        Host,
-    };
-    void record_style_environment_change(EnvironmentActionDrive = EnvironmentActionDrive::Host);
+    void record_style_environment_change();
     CSS::StyleScope& style_scope();
     CSS::StyleScope const& style_scope() const { return const_cast<Node*>(this)->style_scope(); }
 
