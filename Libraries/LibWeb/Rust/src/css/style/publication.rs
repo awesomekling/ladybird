@@ -1074,14 +1074,15 @@ impl RetainedState {
                             && property_computes_in_remaining_phase(entry.property)
                     })
                 });
-        // The first-record gate excludes keyframes that need host resolution. For a leaf, only
-        // the rules its own names run matter.
+        // The first-record gate excludes keyframes that need host resolution. For a record, only
+        // the rules its own names run matter: its descendants hold records of their own, and a
+        // child derived in the same batch waits for the composition.
         let is_leaf = self.tree.flat_tree_children(node).next().is_none();
         let css_keyframes_are_engine_computable = self.animation_keyframes().a_first_record_may_start_an_animation()
-            || (is_leaf && {
+            || {
                 let reads_custom_properties = self.node_style_reads_custom_properties(node);
                 self.warm_record_names_engine_computable_animations(node, state, reads_custom_properties)
-            });
+            };
         let full_css_drive_beneath_a_composition = full_drive_beneath_a_composition
             && self.css_defined_animations.node_runs_a_css_animation(node)
             && css_keyframes_are_engine_computable
