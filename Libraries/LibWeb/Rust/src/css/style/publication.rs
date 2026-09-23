@@ -1139,8 +1139,7 @@ impl RetainedState {
                 .is_some_and(|view| {
                     unsafe { view.animated_overlay.as_ref() }.is_none_or(|overlay| {
                         overlay.entries().iter().all(|entry| {
-                            property_computes_in_remaining_phase(entry.property)
-                                && !property_feeds_box_type_transformation(entry.property)
+                            !property_feeds_box_type_transformation(entry.property)
                                 && !property_feeds_post_compute_adjustment(entry.property)
                         })
                     })
@@ -2800,10 +2799,11 @@ impl RetainedState {
     }
 
     /// Whether the host can sample every effect the element holds over a newly driven base. Each
-    /// must be one the stage can describe, declaring longhands the remaining phase computes and no
-    /// value a later phase or a post-compute adjustment finalizes: those need a composed drive. An
-    /// animated custom property is only sampled into the element's environment, so the element's
-    /// own values must not substitute one.
+    /// must be one the stage can describe, animating no input of the box-type transformation or a
+    /// post-compute adjustment: those rewrite base values a sample does not rebuild. A sample
+    /// composes the font and the groups it writes the same way over any base. An animated custom
+    /// property is only sampled into the element's environment, so the element's own values must
+    /// not substitute one.
     fn effects_sample_over_a_new_base(
         &self,
         node: StyleNodeID,
@@ -2821,8 +2821,7 @@ impl RetainedState {
                     && (!reads_custom_properties || !effect.declares_custom_properties())
                     && effect.keyframes.iter().all(|keyframe| {
                         effect.declarations_of(keyframe).iter().all(|declaration| {
-                            property_computes_in_remaining_phase(declaration.property_id)
-                                && !property_feeds_box_type_transformation(declaration.property_id)
+                            !property_feeds_box_type_transformation(declaration.property_id)
                                 && !property_feeds_post_compute_adjustment(declaration.property_id)
                         })
                     })
