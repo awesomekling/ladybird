@@ -1496,7 +1496,7 @@ bool StyleComputer::publish_animated_custom_properties(ComputedStyleWorkingSet& 
         if (base.ptr() == data.ptr())
             return false;
         abstract_element.replace_custom_property_data(Badge<StyleComputer> {}, base);
-        invalidate_animated_custom_property_readers(abstract_element, animated_values);
+        invalidate_animated_custom_property_readers(abstract_element);
         return true;
     }
 
@@ -1523,29 +1523,25 @@ bool StyleComputer::publish_animated_custom_properties(ComputedStyleWorkingSet& 
             });
     }
     abstract_element.replace_custom_property_data(Badge<StyleComputer> {}, CustomPropertyData::create_animation_overlay(move(overlay_values), move(base), abstract_element));
-    invalidate_animated_custom_property_readers(abstract_element, animated_values);
+    invalidate_animated_custom_property_readers(abstract_element);
     return true;
 }
 
-void StyleComputer::invalidate_animated_custom_property_readers(DOM::AbstractElement abstract_element, OrderedHashMap<Utf16FlyString, NonnullRefPtr<StyleValue const>> const& animated_values) const
+void StyleComputer::invalidate_animated_custom_property_readers(DOM::AbstractElement abstract_element) const
 {
     auto& element = abstract_element.element();
-    // Which custom properties the element's own declarations read is not recorded: an element
-    // whose custom properties animate recomputes.
+    // The replacement above published the sampled custom-property environment to the engine.
+    // The sampled store identifies exactly which names animate and what they currently hold.
     auto& style_engine = element.document().style_computer().style_engine();
-    style_engine.record_element_style_input_change(element.style_node_id());
-
-    auto any_animated_custom_property_inherits = [&] {
-        if (animated_values.is_empty())
-            return true;
-        for (auto const& [name, value] : animated_values) {
-            auto registration = m_document->get_registered_custom_property(name);
-            if (!registration.has_value() || registration->inherit)
-                return true;
-        }
-        return false;
-    };
-    if (!abstract_element.pseudo_element().has_value() && any_animated_custom_property_inherits()) {
+    auto sampled_data = abstract_element.custom_property_data();
+    bool is_pseudo = abstract_element.pseudo_element().has_value();
+    bool has_sampled_overlay = sampled_data && sampled_data->is_animation_overlay_for(abstract_element);
+    auto reactions = StyleEngineFFI::style_engine_publish_animated_custom_property_store(
+        style_engine.rust_handle(), element.style_node_id().value(), has_sampled_overlay ? sampled_data->identity() : 0,
+        has_sampled_overlay ? sampled_data->rust_store() : nullptr, is_pseudo);
+    if (reactions & 1)
+        style_engine.record_derived_element_style_input_change(element.style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle);
+    if (!is_pseudo && (reactions & 2)) {
         style_engine.record_flat_tree_descendant_style_input_changes(
             element.style_node_id(),
             StyleEngine::InheritedStyle,
