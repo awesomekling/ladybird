@@ -923,8 +923,15 @@ impl RetainedState {
             .is_none()
         {
             if scratch.font_drive.request.is_none() {
-                // The element's record is C++'s and stays; only what was settled beside it goes.
+                // The originating element's record stays; only its failed pseudo settlement goes.
                 for pending in self.engine_computed_records_pending.remove(&node).into_iter().flatten() {
+                    if pending.pseudo_kind == u8::MAX {
+                        self.engine_computed_records_pending
+                            .entry(node)
+                            .or_default()
+                            .push(pending);
+                        continue;
+                    }
                     let derived = pending.new_style_record;
                     self.revert_engine_computed_pseudo_record(&pending, counters);
                     scratch.pseudo_cohorts.retain(|_, record| *record != derived);
