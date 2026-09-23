@@ -348,8 +348,8 @@ PASS: child mutation: shadow-host: :has(:nth-last-child(2)) after trailing child
 PASS: child mutation: shadow-host: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: shadow-host: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: shadow-host: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: child mutation: shadow-host: :has(rect.hit) after SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: shadow-host: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: child mutation: shadow-host: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: shadow-host: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: shadow-host: :has(.outer .middle .hit) after deep descendant append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: shadow-host: :has(> .outer .hit) after child subtree append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: shadow-host: :has(> .outer > .middle > .hit) after exact deep append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -642,8 +642,8 @@ PASS: child mutation: slotted-shadow-host-default: :has(:nth-last-child(2)) afte
 PASS: child mutation: slotted-shadow-host-default: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-shadow-host-default: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-shadow-host-default: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: child mutation: slotted-shadow-host-default: :has(rect.hit) after SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: slotted-shadow-host-default: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: child mutation: slotted-shadow-host-default: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: slotted-shadow-host-default: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-shadow-host-default: :has(.outer .middle .hit) after deep descendant append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-shadow-host-default: :has(> .outer .hit) after child subtree append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-shadow-host-default: :has(> .outer > .middle > .hit) after exact deep append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -738,8 +738,8 @@ PASS: child mutation: slotted-shadow-host-named: :has(:nth-last-child(2)) after 
 PASS: child mutation: slotted-shadow-host-named: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-shadow-host-named: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-shadow-host-named: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: child mutation: slotted-shadow-host-named: :has(rect.hit) after SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
-PASS: child mutation: slotted-shadow-host-named: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: child mutation: slotted-shadow-host-named: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: child mutation: slotted-shadow-host-named: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-shadow-host-named: :has(.outer .middle .hit) after deep descendant append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-shadow-host-named: :has(> .outer .hit) after child subtree append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: child mutation: slotted-shadow-host-named: :has(> .outer > .middle > .hit) after exact deep append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
