@@ -990,15 +990,18 @@ impl RetainedState {
                 !property_computes_in_remaining_phase(property) || property_feeds_box_type_transformation(property)
             });
         // A moved animation declaration leaves a plan for the host to apply before descendants
-        // continue. A transition declaration beside it still needs a combined C++ decision.
+        // continue. A leaf without an old overlay can also defer a transition decision beside it.
+        let moves_transition_declaration = delta
+            .properties()
+            .iter()
+            .any(|&property| longhand_only_declares_a_css_transition(property));
         let owes_an_animation_plan = delta
             .properties()
             .iter()
             .any(|&property| longhand_declares_a_css_animation(property))
-            && !delta
-                .properties()
-                .iter()
-                .any(|&property| longhand_only_declares_a_css_transition(property))
+            && (!moves_transition_declaration
+                || (self.tree.flat_tree_children(node).next().is_none()
+                    && !self.computed_group_sets.node_has_animation_overlay(node)))
             && self.animation_keyframes().only_the_document_scope_defines_keyframes();
         // A remaining-phase delta can derive the new base beneath an existing composition. The
         // host samples the effect again after installing this base, including when the moved
