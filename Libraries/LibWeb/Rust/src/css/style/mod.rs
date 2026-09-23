@@ -100,6 +100,7 @@ mod routing;
 pub(crate) mod seal;
 mod sorted_merge;
 mod style_invalidation;
+mod transition_baselines;
 #[cfg(not(feature = "style-recording"))]
 pub mod record_replay {
     include!(concat!(env!("OUT_DIR"), "/style_engine_event_kind_stub_generated.rs"));
@@ -953,6 +954,10 @@ pub struct RetainedState {
     /// The nodes whose record the engine derived beneath a composition their animations made: the
     /// host samples those animations again over the new record once the batch is applied.
     nodes_owing_an_animation_sample: HashSet<StyleNodeID>,
+    /// https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
+    /// Per transition target, the before-change style its transitions are decided against for the
+    /// rest of the style stabilization epoch, pinned until the epoch commits.
+    transition_baselines: HashMap<(StyleNodeID, u8), u64>,
     /// What each tree scope's registered counter styles are, as one identity per scope. A record
     /// whose `content` or `list-style-type` names an overridable counter style is only the answer
     /// while the registry it named is the one in place, so the record carries the identity and a

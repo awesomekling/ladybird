@@ -653,7 +653,6 @@ void StyleComputer::begin_transition_stabilization_epoch()
     VERIFY(m_provisional_transition_states.is_empty());
     VERIFY(m_provisional_transition_state_indices.is_empty());
     VERIFY(m_provisional_transition_state_indices_by_target.is_empty());
-    VERIFY(m_transition_stabilization_baselines.is_empty());
 }
 
 // Whether a later pass of the stabilization epoch can still give this element a transition whose
@@ -674,19 +673,10 @@ bool StyleComputer::record_transition_stabilization_baseline(DOM::AbstractElemen
     auto style_node_id = abstract_element.element().style_node_id();
     if (style_node_id == 0)
         return false;
-
-    auto transition_target_key = (static_cast<u64>(style_node_id.value()) << 8) | pseudo_element_to_ffi(abstract_element.pseudo_element());
-    if (m_transition_stabilization_baselines.contains(transition_target_key))
-        return false;
-
     // A row the engine settled is drained once its record is installed, so the style the element
     // holds is already the after-change one. The row names the style it moved away from.
     auto style_record_identity = before_change_style_record.value_or_lazy_evaluated([&] { return abstract_element.style_record_identity(); });
-    if (!style_record_identity)
-        return false;
-    pin_style_record(style_record_identity);
-    m_transition_stabilization_baselines.set(transition_target_key, style_record_identity);
-    return true;
+    return const_cast<StyleEngine&>(m_style_engine).record_transition_baseline(style_node_id, pseudo_element_to_ffi(abstract_element.pseudo_element()), style_record_identity);
 }
 
 // A provisionally started transition already contributed to the style published by the pass that
@@ -776,9 +766,7 @@ void StyleComputer::commit_transition_stabilization_epoch()
     m_provisional_transition_state_indices_by_target.clear();
     for (auto& element : elements_with_provisional_rows)
         element->publish_animation_timing_rows();
-    for (auto const& baseline : m_transition_stabilization_baselines)
-        unpin_style_record(baseline.value);
-    m_transition_stabilization_baselines.clear();
+    style_engine().release_transition_baselines();
 }
 
 template<size_t length>
@@ -1449,10 +1437,8 @@ void StyleComputer::start_needed_transitions(ComputedStyleWorkingSet& new_style,
     if (style_node_id != 0)
         transition_target_key = (static_cast<u64>(style_node_id.value()) << 8) | pseudo_element_to_ffi(pseudo_element);
     auto transition_baseline_style_record = before_change_style_record;
-    if (transition_target_key.has_value()) {
-        if (auto existing_baseline = m_transition_stabilization_baselines.get(*transition_target_key); existing_baseline.has_value())
-            transition_baseline_style_record = *existing_baseline;
-    }
+    if (auto baseline = m_style_engine.transition_baseline(style_node_id, pseudo_element_to_ffi(pseudo_element)); baseline != 0)
+        transition_baseline_style_record = StyleRecordID { baseline };
     Vector<size_t> existing_stabilization_state_indices;
     if (transition_target_key.has_value()) {
         if (auto indices = m_provisional_transition_state_indices_by_target.get(*transition_target_key); indices.has_value())

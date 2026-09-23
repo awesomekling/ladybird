@@ -95,6 +95,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         nodes_owing_explicit_inheritance,
         batch_pinned_compositions,
         nodes_owing_an_animation_sample,
+        transition_baselines,
         counter_style_environment_identities,
         nodes_owing_animation_definitions,
         animation_definitions_being_applied,
@@ -227,6 +228,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(nodes_owing_explicit_inheritance);
     assert_member_is_sync(batch_pinned_compositions);
     assert_member_is_sync(nodes_owing_an_animation_sample);
+    assert_member_is_sync(transition_baselines);
     assert_member_is_sync(counter_style_environment_identities);
     assert_member_is_sync(nodes_owing_animation_definitions);
     assert_member_is_sync(animation_definitions_being_applied);
