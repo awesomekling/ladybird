@@ -6873,33 +6873,6 @@ NonnullRefPtr<StyleValue const> StyleComputer::resolve_unresolved_style_value(Ab
     return StyleValue::adopt_rust_style_value_data(static_cast<StyleValueFFI::StyleValueData const*>(output.data));
 }
 
-NonnullRefPtr<StyleValue const> StyleComputer::compute_value_of_custom_property(ComputedStyleWorkingSet const* computed_style_for_custom_property_resolution, AbstractOrHypotheticalElement const& element, Utf16FlyString const& name, DeclaredValueSource declared_value_source) const
-{
-    // https://drafts.csswg.org/css-variables/#propdef-
-    // The computed value of a custom property is its specified value with any arbitrary-substitution functions replaced.
-    // FIXME: These should probably be part of the computed style itself.
-    auto& document = element.document();
-
-    document.style_invalidation_counters().custom_property_value_computations++;
-    auto registration = element.get_registered_custom_property(name);
-
-    auto value = [&]() -> RefPtr<StyleValue const> {
-        if (declared_value_source == DeclaredValueSource::PublishedEnvironment)
-            return element.get_custom_property(name);
-        auto data = element.custom_property_data();
-        if (data && data->is_animation_overlay_for(element.abstract_element()))
-            data = data->parent();
-        if (!data)
-            return nullptr;
-        if (auto const* property = data->get(name))
-            return property->value;
-        return nullptr;
-    }();
-    auto resolved_value = value ? value.release_nonnull() : initial_custom_property_value(registration, document);
-
-    return finalize_custom_property_value(computed_style_for_custom_property_resolution, element, name, move(resolved_value));
-}
-
 NonnullRefPtr<StyleValue const> StyleComputer::finalize_custom_property_value(ComputedStyleWorkingSet const* computed_style_for_custom_property_resolution, AbstractOrHypotheticalElement const& element, Utf16FlyString const& name, NonnullRefPtr<StyleValue const> resolved_value) const
 {
     auto& document = element.document();
