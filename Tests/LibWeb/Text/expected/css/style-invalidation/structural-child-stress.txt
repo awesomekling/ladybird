@@ -381,10 +381,10 @@ PASS: detached child mutation: document: :has(> .outer > .middle > .hit) after e
 PASS: detached pseudo-element child mutation: document: :has(> .outer > .middle > .hit) after exact deep append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: document: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: document: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: document: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: stress cold pseudo-element child mutation: document: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress warm pseudo-element child mutation: document: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: document: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: document: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: document: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: detached pseudo-element child mutation: document: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: document: :has(.before + .hit) after adjacent pair append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: document: :has(.before + .hit) after adjacent pair append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: document: :has(.before + .hit) after adjacent pair append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -1542,10 +1542,10 @@ PASS: detached child mutation: shadow-host: :has(> .outer > .middle > .hit) afte
 PASS: detached pseudo-element child mutation: shadow-host: :has(> .outer > .middle > .hit) after exact deep append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: shadow-host: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: shadow-host: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: shadow-host: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: stress cold pseudo-element child mutation: shadow-host: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress warm pseudo-element child mutation: shadow-host: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: shadow-host: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: shadow-host: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: detached pseudo-element child mutation: shadow-host: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: detached pseudo-element child mutation: shadow-host: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: shadow-host: :has(.before + .hit) after adjacent pair append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold child mutation: shadow-host: :has(.before + .hit) after adjacent pair append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: shadow-host: :has(.before + .hit) after adjacent pair append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0

@@ -400,8 +400,8 @@ PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(> .h
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(> .hit:first-child) after prepend | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(> .hit:first-child) after insertBefore | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(> .hit:first-child) after insertBefore | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(> .hit) ignores nested child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(> .hit) ignores nested child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(> .hit) ignores nested child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(> .hit) ignores nested child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(span.hit) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(span.hit) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has([data-hit]) after attribute-bearing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -427,7 +427,7 @@ PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(> .wrapper > .hit) after nested structure append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(> .wrapper > .hit) after nested structure append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :not(:has(.hit)) becomes false after child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :not(:has(.hit)) becomes false after child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :not(:has(.hit)) becomes false after child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit, .fallback) after first-list child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit, .fallback) after first-list child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(:empty) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -437,11 +437,11 @@ PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit) after replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit) after replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit) becomes false after child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit) becomes false after child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit) becomes false after child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit) becomes false after removeChild | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit) becomes false after removeChild | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit) becomes false after removeChild | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit) becomes false after child moves out | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit) becomes false after child moves out | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit) becomes false after child moves out | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :empty becomes true after replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :empty becomes true after replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :empty becomes true after textContent clear | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -459,7 +459,7 @@ PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(> *)
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(:checked) after checked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(:checked) after checked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -471,7 +471,7 @@ PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(:req
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(:dir(rtl)) after dir=auto child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -485,7 +485,7 @@ PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(:any
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(:only-child) after only child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(:only-child) after only child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(:only-child) becomes false after sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(:only-child) becomes false after sibling append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(:only-child) becomes false after sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(:nth-child(2)) after second child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(:nth-child(2)) after second child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -506,8 +506,8 @@ PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(> .o
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(> .outer .hit) after child subtree append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(> .outer > .middle > .hit) after exact deep append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(> .outer > .middle > .hit) after exact deep append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.before + .hit) after adjacent pair append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.before + .hit) after adjacent pair append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.before ~ .hit) after separated sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -519,7 +519,7 @@ PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit:only-child) after only child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit:only-child) after only child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit:only-child) becomes false after sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit:only-child) becomes false after sibling append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit:only-child) becomes false after sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit:nth-last-child(1)) after last child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit:nth-last-child(1)) after last child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -529,7 +529,7 @@ PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit:only-of-type) after only typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit:only-of-type) after only typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit:only-of-type) becomes false after same type sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit:only-of-type) becomes false after same type sibling append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit:only-of-type) becomes false after same type sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(:is(.hit, .fallback)) after second-list child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(:is(.hit, .fallback)) after second-list child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(:where(.hit, .fallback)) after second-list child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -545,23 +545,23 @@ PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :not(:has
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit:empty) becomes false after nested text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit:empty) becomes false after nested text append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit:empty) becomes false after nested text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit) after append with multiple arguments | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit) after append with multiple arguments | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit:first-child + .after) after prepend before existing child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit:first-child + .after) after prepend before existing child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit:last-child) becomes false after trailing sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit:last-child) becomes false after trailing sibling append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit:last-child) becomes false after trailing sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit + .after) becomes false after middle child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit + .after) becomes false after middle child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit + .after) becomes false after middle child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit ~ .after) becomes false after following child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit ~ .after) becomes false after following child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit ~ .after) becomes false after following child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(> .wrapper > .hit) becomes false after nested child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(> .wrapper > .hit) becomes false after nested child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(> .wrapper > .hit) becomes false after nested child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit) after replaceWith matching child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit) after replaceWith matching child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit) becomes false after replaceWith nonmatching child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit) becomes false after replaceWith nonmatching child | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit) becomes false after replaceWith nonmatching child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit) after cloned child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-ancestor: :has(.hit) after cloned child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-ancestor: :has(.hit) after fragment replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -592,8 +592,8 @@ PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(> .hit:first-child) after prepend | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(> .hit:first-child) after insertBefore | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(> .hit:first-child) after insertBefore | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(> .hit) ignores nested child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(> .hit) ignores nested child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(> .hit) ignores nested child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(> .hit) ignores nested child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(span.hit) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(span.hit) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has([data-hit]) after attribute-bearing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -619,7 +619,7 @@ PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(> .wrapper > .hit) after nested structure append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(> .wrapper > .hit) after nested structure append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :not(:has(.hit)) becomes false after child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :not(:has(.hit)) becomes false after child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :not(:has(.hit)) becomes false after child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit, .fallback) after first-list child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit, .fallback) after first-list child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(:empty) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -629,11 +629,11 @@ PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) after replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) after replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) becomes false after child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) becomes false after child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) becomes false after child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) becomes false after removeChild | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) becomes false after removeChild | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) becomes false after removeChild | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) becomes false after child moves out | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) becomes false after child moves out | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) becomes false after child moves out | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :empty becomes true after replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :empty becomes true after replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :empty becomes true after textContent clear | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -651,7 +651,7 @@ PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(:checked) after checked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(:checked) after checked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(:checked) becomes false after checked checkbox removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -663,7 +663,7 @@ PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(:dir(rtl)) after dir=auto child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -677,7 +677,7 @@ PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(:only-child) after only child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(:only-child) after only child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(:only-child) becomes false after sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(:only-child) becomes false after sibling append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(:only-child) becomes false after sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(:nth-child(2)) after second child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(:nth-child(2)) after second child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -698,8 +698,8 @@ PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(> .outer .hit) after child subtree append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(> .outer > .middle > .hit) after exact deep append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(> .outer > .middle > .hit) after exact deep append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.miss .hit) ignores hit without required ancestor | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.before + .hit) after adjacent pair append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.before + .hit) after adjacent pair append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.before ~ .hit) after separated sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -711,7 +711,7 @@ PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:only-child) after only child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:only-child) after only child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:only-child) becomes false after sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:only-child) becomes false after sibling append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:only-child) becomes false after sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:nth-last-child(1)) after last child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:nth-last-child(1)) after last child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:nth-last-child(2)) after trailing child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -721,7 +721,7 @@ PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:only-of-type) after only typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:only-of-type) after only typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:only-of-type) becomes false after same type sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:only-of-type) becomes false after same type sibling append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:only-of-type) becomes false after same type sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(:is(.hit, .fallback)) after second-list child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(:is(.hit, .fallback)) after second-list child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(:where(.hit, .fallback)) after second-list child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -737,23 +737,23 @@ PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :not
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:not(:empty)) after non-empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:empty) becomes false after nested text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:empty) becomes false after nested text append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:empty) becomes false after nested text append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) after append with multiple arguments | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) after append with multiple arguments | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:first-child + .after) after prepend before existing child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:first-child + .after) after prepend before existing child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:last-child) becomes false after trailing sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:last-child) becomes false after trailing sibling append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit:last-child) becomes false after trailing sibling append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit + .after) becomes false after middle child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit + .after) becomes false after middle child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit + .after) becomes false after middle child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit ~ .after) becomes false after following child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit ~ .after) becomes false after following child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit ~ .after) becomes false after following child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(> .wrapper > .hit) becomes false after nested child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(> .wrapper > .hit) becomes false after nested child removal | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(> .wrapper > .hit) becomes false after nested child removal | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) after replaceWith matching child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) after replaceWith matching child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) becomes false after replaceWith nonmatching child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) becomes false after replaceWith nonmatching child | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) becomes false after replaceWith nonmatching child | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) after cloned child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress cold pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) after cloned child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-ancestor: :has(.hit) after fragment replaceChildren | elementStyleRecomputations=0, elementStyleNoopRecomputations=0

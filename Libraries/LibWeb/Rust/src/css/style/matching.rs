@@ -5551,7 +5551,11 @@ impl RetainedState {
                 }
             }
             drop(non_prefix_matches_charge);
-            return all;
+            // A selector can read a row the prepared batch did not cover. The adaptive path
+            // below widens its own facts until the answer is exact.
+            if all.is_ok() {
+                return all;
+            }
         }
 
         // Which other nodes a selector reads is a property of the selectors, not of the element:
