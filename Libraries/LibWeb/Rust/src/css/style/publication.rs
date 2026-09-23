@@ -914,15 +914,22 @@ impl RetainedState {
                         return Some(delta);
                     }
                     // An animation overlay's record lives in a slot the next sample releases.
-                    // Keep a WAAPI composition alive through installation and sample it again
-                    // afterwards, so the row can answer with the current composition.
-                    if !record_may_stand_while_animating {
+                    // Keep the composition alive through installation and sample it again. A
+                    // stale CSS animation plan is decided from the unchanged longhand table.
+                    let css_animation_plan = if self.css_defined_animations.node_runs_a_css_animation(node)
+                        && !record_may_stand_while_animating
+                        && self.animation_keyframes().only_the_document_scope_defines_keyframes()
+                    {
+                        self.settled_animation_plan_from_record(node, old_style_record)
+                    } else {
+                        None
+                    };
+                    if !record_may_stand_while_animating && css_animation_plan.is_none() {
                         counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
                         return None;
                     }
                     if computed::ComputedGroupSets::record_is_animation_overlay(old_style_record.raw()) {
-                        let waapi_composition = facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
-                            && !self.css_defined_animations.node_runs_a_css_animation(node)
+                        let resampleable_composition = facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
                             && !self.record_transition_facts(old_style_record, &[]).0
                             && self
                                 .computed_group_sets
@@ -931,13 +938,16 @@ impl RetainedState {
                                 .is_some_and(|overlay| {
                                     overlay.entries().iter().all(|entry| !entry.result_of_transition)
                                 });
-                        if !waapi_composition {
+                        if !resampleable_composition {
                             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
                             return None;
                         }
                         self.computed_group_sets.pin_style_record(old_style_record.raw());
                         self.batch_pinned_compositions.push((node, old_style_record.raw()));
                         self.nodes_owing_an_animation_sample.insert(node);
+                    }
+                    if let Some(plan) = css_animation_plan {
+                        self.nodes_owing_animation_definitions.insert(node, plan);
                     }
                     counters.bump(Counter::EngineComputedRecordUnchangedWinners);
                     counters.bump(Counter::CascadeWinnerDeltaStops);
