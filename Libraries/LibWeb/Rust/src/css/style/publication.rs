@@ -1077,8 +1077,9 @@ impl RetainedState {
         // For a record, only the rules its own names run matter: its descendants hold records of
         // their own, and a child derived in the same batch waits for the composition.
         let is_leaf = self.tree.flat_tree_children(node).next().is_none();
-        let css_keyframes_are_engine_computable = self.animation_keyframes().every_keyframes_rule_is_engine_computable()
-            || self.warm_record_names_engine_computable_animations(node, state);
+        let css_keyframes_are_engine_computable =
+            self.animation_keyframes().every_keyframes_rule_is_engine_computable()
+                || self.warm_record_names_engine_computable_animations(node, state);
         let full_css_drive_beneath_a_composition = full_drive_beneath_a_composition
             && self.css_defined_animations.node_runs_a_css_animation(node)
             && css_keyframes_are_engine_computable
@@ -2060,9 +2061,7 @@ impl RetainedState {
     /// take an animated value through the overlay's invalidation, so only a container unit binds it,
     /// whose basis a sample outside the computation cannot read.
     fn warm_record_names_engine_computable_animations(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
-        self.state_names_only_keyframes(node, state, |set| {
-            !description_reads_container_units(&set.description)
-        })
+        self.state_names_only_keyframes(node, state, |set| !description_reads_container_units(&set.description))
     }
 
     /// Whether every name the state runs resolves to the same `@keyframes` rule whatever scope the
