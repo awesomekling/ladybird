@@ -392,12 +392,6 @@ impl RetainedState {
         } = subject;
         let has = |bit: u32| facts & bit != 0;
         let is_document_element = has(fact::IS_DOCUMENT_ELEMENT);
-        // A first record is a base for the host to compose at installation. A warm record
-        // still needs its old composition separated from the base before this drive.
-        if old_style_record.is_some() && facts & fact::HAS_ANIMATIONS != 0 {
-            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-            return None;
-        }
         if self.font_resolution.is_none() {
             counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
             return None;
@@ -428,14 +422,10 @@ impl RetainedState {
         };
         let old_table = match old_style_record {
             Some(old_style_record) => {
-                let Some(view) = self.computed_group_sets.style_record_view(old_style_record.raw()) else {
+                let Some(view) = self.computed_group_sets.base_style_record_view(old_style_record) else {
                     counters.bump(Counter::EngineComputedRecordBailRecord);
                     return None;
                 };
-                if !view.animated_overlay.is_null() {
-                    counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-                    return None;
-                }
                 let Some(old_table) = (unsafe { view.longhand_table.as_ref() }) else {
                     counters.bump(Counter::EngineComputedRecordBailRecordTable);
                     return None;

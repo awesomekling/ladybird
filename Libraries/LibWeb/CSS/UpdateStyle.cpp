@@ -35,6 +35,8 @@
 
 namespace Web::CSS {
 
+void set_reference_style_without_effects(bool);
+
 using StyleUpdateMode = DOM::Document::StyleUpdateMode;
 
 extern "C" void ladybird_utf16_fly_string_unref(size_t);
@@ -786,6 +788,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             // The animation plan the row leaves for the host, taken in the branch that installs an
             // engine-computed record below.
             Optional<StyleComputer::SettledAnimationPlan> animation_plan;
+            bool verify_base_without_effects = false;
 
             // An element declaring custom properties of its own layers them over the environment it
             // inherits, which its cascade decides.
@@ -856,23 +859,48 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     };
                     auto const marks_the_engine_row_left = dependency_marks();
                     auto const counters_were_suspended = StyleValueFFI::rust_style_ffi_counters_suspend_for_verification(true);
-                    invalidation = element->apply_style_engine_reaction(verification_did_change_custom_properties, DOM::Element::StyleRecomputeMode::Verification);
+                    StyleRecordID reference_record;
+                    Optional<String> reference_font;
+                    DOM::Element::EnginePseudoElementRecords reference_pseudo_element_records {};
+                    if (verify_base_without_effects)
+                        set_reference_style_without_effects(true);
+                    if (verify_base_without_effects) {
+                        StyleEngine::StyleRecordDelta reference_delta {};
+                        auto reference_values = document.style_computer().materialize_style_record(DOM::AbstractElement { *element }, {}, nullptr, reference_delta, StyleComputer::StyleSharingMode::Disabled);
+                        reference_record = reference_delta.new_style_record;
+                        if (auto const* font = static_cast<ComputedValues::FontValues const*>(reference_values->base_values().style_group_payload(StyleGroupIndex::FontValues)))
+                            reference_font = describe_resolved_font(font->font_list_value());
+                        for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
+                            if (!pseudo_element_records[kind].has_value() || !*pseudo_element_records[kind])
+                                continue;
+                            StyleEngine::StyleRecordDelta pseudo_delta {};
+                            auto pseudo = DOM::AbstractElement { *element, static_cast<PseudoElement>(kind) };
+                            auto reference_pseudo = document.style_computer().compute_pseudo_element_style_if_needed(pseudo, {}, nullptr, pseudo_delta);
+                            VERIFY(reference_pseudo);
+                            reference_pseudo_element_records[kind] = pseudo_delta.new_style_record;
+                        }
+                    } else {
+                        invalidation = element->apply_style_engine_reaction(verification_did_change_custom_properties, DOM::Element::StyleRecomputeMode::Verification);
+                        reference_record = element->style_record_identity();
+                    }
+                    if (verify_base_without_effects)
+                        set_reference_style_without_effects(false);
                     StyleValueFFI::rust_style_ffi_counters_suspend_for_verification(counters_were_suspended);
                     if (auto const missing = dependency_marks() & ~marks_the_engine_row_left; missing != 0) {
                         dbgln("Engine record for {} leaves dependency marks {:#x} unset that the computation sets", element->debug_description(), missing);
                     }
                     if (defer_final_comparison) {
-                        auto reference_record = element->style_record_identity();
-                        Optional<String> reference_font;
-                        if (auto const* font = element->style_group<ComputedValues::FontValues>())
-                            reference_font = describe_resolved_font(font->font_list_value());
+                        if (!reference_font.has_value()) {
+                            if (auto const* font = element->style_group<ComputedValues::FontValues>())
+                                reference_font = describe_resolved_font(font->font_list_value());
+                        }
                         document.style_computer().pin_style_record(reference_record);
                         deferred_record_verifications.append({ StyleNodeID { reaction.style_node }, reference_record, move(reference_font) });
                     } else {
-                        auto packed = style_engine.compare_style_records(StyleRecordID { reaction.new_style_record }, element->style_record_identity(), true, false, false);
+                        auto packed = style_engine.compare_style_records(StyleRecordID { reaction.new_style_record }, reference_record, true, false, false);
                         if (packed & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged)
-                            && !style_engine.style_records_match_for_verification(reaction.style_node, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, element->style_record_identity())) {
-                            report_engine_computed_record_difference(style_engine, *element, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, element->style_record_identity());
+                            && !style_engine.style_records_match_for_verification(reaction.style_node, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, reference_record)) {
+                            report_engine_computed_record_difference(style_engine, *element, NumericLimits<u8>::max(), StyleRecordID { reaction.new_style_record }, reference_record);
                             VERIFY_NOT_REACHED();
                         }
                     }
@@ -884,13 +912,15 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     bool const legacy_environment_is_complete = !needs_custom_property_recompute;
                     if (legacy_environment_is_complete)
                         verify_engine_computed_record_environment(*element, StyleRecordID { reaction.new_style_record });
-                    // A row that owes an animation plan is one the reference computation applied
-                    // itself, sampling what it started into the very style it resolved its font
-                    // from; an engine-settled record holds the font of the style beneath the
-                    // animation, which reaches the element as an overlay published on top of it.
-                    // The two fonts are then answers to different questions.
-                    if (!animation_plan.has_value() && !defer_final_comparison)
+                    if (verify_base_without_effects && reference_font.has_value()) {
+                        auto engine_view = style_engine.style_record_view(StyleRecordID { reaction.new_style_record });
+                        auto const* engine_font = static_cast<ComputedValues::FontValues const*>(engine_view.payloads[ComputedValues::FontValues::style_group_index]);
+                        if (describe_resolved_font(engine_font->font_list_value()) != *reference_font)
+                            dbgln("Engine base font {} differs from reference base font {} for {}", describe_resolved_font(engine_font->font_list_value()), *reference_font, element->debug_description());
+                        VERIFY(describe_resolved_font(engine_font->font_list_value()) == *reference_font);
+                    } else if (!animation_plan.has_value() && !defer_final_comparison) {
                         verify_engine_computed_record_font(*element, StyleRecordID { reaction.new_style_record });
+                    }
                     for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
                         auto const& engine_record = pseudo_element_records[kind];
                         if (!engine_record.has_value())
@@ -900,7 +930,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         // current CSSOM backdrop row.
                         if (kind == to_underlying(PseudoElement::Backdrop) && !element->rendered_in_top_layer())
                             continue;
-                        auto installed = element->style_record_identity(static_cast<PseudoElement>(kind));
+                        if (verify_base_without_effects && !*engine_record)
+                            continue;
+                        auto installed = verify_base_without_effects ? *reference_pseudo_element_records[kind] : element->style_record_identity(static_cast<PseudoElement>(kind));
                         if (!*engine_record) {
                             VERIFY(!installed);
                             continue;
@@ -1000,6 +1032,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 auto const transition_debt = row_effect_debt & StyleEngine::SettledRowTransitionDebt;
                 if (row_effect_debt & StyleEngine::SettledRowOwesAnAnimationPlan)
                     animation_plan = document.style_computer().take_settled_animation_plan(StyleNodeID { reaction.style_node }, NumericLimits<u8>::max());
+                verify_base_without_effects = animation_plan.has_value() || element->has_relevant_animations()
+                    || element->has_associated_animations();
                 if (!engine_computed_record_environment_is_installable(*element, StyleRecordID { reaction.new_style_record })
                     || declarations_changed_during_apply(StyleNodeID { reaction.style_node })) {
                     // The engine resolved the record's environment over the parent's own; when the
@@ -1013,8 +1047,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     }
                     invalidation = element->apply_style_engine_reaction(did_change_custom_properties);
                 } else {
-                    bool const defer_final_comparison = element->has_relevant_animations() || element->has_associated_animations()
-                        || row_effect_debt & (StyleEngine::SettledRowTransitionDebt | StyleEngine::SettledRowOwesAnAnimationSample);
+                    bool const defer_final_comparison = !verify_base_without_effects
+                        && (element->has_relevant_animations() || element->has_associated_animations()
+                            || row_effect_debt & (StyleEngine::SettledRowTransitionDebt | StyleEngine::SettledRowOwesAnAnimationSample));
                     apply_engine_computed_records(pseudo_element_records, false, defer_final_comparison);
                     DOM::AbstractElement settled { *element };
                     if (animation_plan.has_value())

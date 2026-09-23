@@ -1,0 +1,3 @@
+initial color: rgb(0, 128, 0)
+warm plan stayed in the engine: true
+updated color: rgb(0, 0, 255)

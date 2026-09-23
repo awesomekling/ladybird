@@ -116,6 +116,15 @@ extern "C" void rust_style_seal_flush_census_for_update();
 
 namespace Web::CSS {
 
+static thread_local bool g_reference_style_without_effects = false;
+
+void set_reference_style_without_effects(bool);
+
+void set_reference_style_without_effects(bool enabled)
+{
+    g_reference_style_without_effects = enabled;
+}
+
 static ComputedValuesFFI::FfiUtf16View ffi_utf16_view(Utf16View view)
 {
     return {
@@ -1599,33 +1608,44 @@ Optional<StyleComputer::SettledAnimationPlan> StyleComputer::take_settled_animat
 // The animation plan a record the engine settled left for the host, applied once the record is
 // installed.
 //
-// The engine settles such a record only where the element holds no CSS animation of its own, so
-// every definition asks for a new animation: there is nothing for the plan to match, to retime or
-// to cancel, and applying it is creating what its definitions name. The animations it creates are
-// sampled by the sampling pass that follows the batch, which is what publishes their first values.
+// The plan names both existing animations to keep or retime and definitions to start. The
+// sampling pass after installation publishes their values.
 void StyleComputer::apply_settled_animation_plan(DOM::AbstractElement abstract_element, SettledAnimationPlan const& plan) const
 {
     // Which animations the element references is an index a `@keyframes` rule finds its elements
     // by, and the row exists because the declarations naming them moved.
     if (!abstract_element.pseudo_element().has_value())
         abstract_element.element().republish_animation_name_registry();
-    if (plan.definitions.is_empty())
+    auto const* existing_animations = abstract_element.css_defined_animations();
+    if (!existing_animations)
         return;
-    // The plan was decided for an element holding no CSS animation. Under verification the
-    // reference computation of this very row applied it already, which is the one thing that can
-    // have given the element one since.
-    if (auto const* existing = abstract_element.css_defined_animations(); !existing || !existing->is_empty())
-        return;
+    Vector<i32> matches;
+    matches.ensure_capacity(plan.definitions.size());
+    for (size_t i = 0; i < plan.definitions.size(); ++i)
+        matches.unchecked_append(-1);
+    Vector<bool> claimed;
+    claimed.resize(existing_animations->size());
+    for (size_t i = plan.definitions.size(); i-- > 0;) {
+        for (size_t candidate = existing_animations->size(); candidate-- > 0;) {
+            if (claimed[candidate] || (*existing_animations)[candidate]->animation_name() != plan.definitions[i].name)
+                continue;
+            claimed[candidate] = true;
+            matches[i] = candidate;
+            break;
+        }
+    }
     // An element that is not rendered starts no animation. The record says whether the element's
     // own display is `none`; the walk for its ancestors is the host's, as it is for a C++ row.
     Optional<bool> computed_in_display_none_subtree;
     if (plan.element_display_is_none)
         computed_in_display_none_subtree = true;
-    apply_animation_definitions(abstract_element, plan.definitions, plan.definition_matches, plan.definition_keyframe_sets, computed_in_display_none_subtree);
+    apply_animation_definitions(abstract_element, plan.definitions, matches, plan.definition_keyframe_sets, computed_in_display_none_subtree);
 }
 
 void StyleComputer::apply_animation_definitions(DOM::AbstractElement& abstract_element, ReadonlySpan<AnimationProperties> animation_definitions, ReadonlySpan<i32> definition_matches, ReadonlySpan<RefPtr<Animations::KeyframeEffect::KeyFrameSet const>> definition_keyframe_sets, Optional<bool> computed_in_display_none_subtree) const
 {
+    if (g_reference_style_without_effects)
+        return;
     auto& document = abstract_element.document();
 
     auto const* element_animations = abstract_element.css_defined_animations();
@@ -6502,6 +6522,8 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     auto sample_animations_after_the_stage = [&native_context](i8 in_display_none_subtree, bool should_measure_line_height, ComputedValuesFFI::FfiInputLineHeightMetrics* line_height_metrics, ComputedValuesFFI::FfiAnimationLengthContexts const* stage_length_contexts, bool* did_sample) -> ComputedValuesFFI::AnimatedOverlay* {
             auto& context = native_context;
             *did_sample = false;
+            if (g_reference_style_without_effects)
+                return nullptr;
             // Applying the plan the style computation decided has to happen before the effects are
             // collected, since an animation it starts composes into this very computation.
             Optional<bool> computed_in_display_none_subtree;
@@ -6576,6 +6598,8 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     };
     // Says whether finishing this row reached past its own working set to the main side.
     auto finish_properties = [&row_transition_or_animation_state_of](void* context_pointer, bool parent_style_in_display_none_subtree) -> bool {
+        if (g_reference_style_without_effects)
+            return false;
         auto& context = *static_cast<NativeComputePropertiesContext*>(context_pointer);
         auto& style_computer = *context.style_computer;
         auto& computed_style = *context.state->working_set;
