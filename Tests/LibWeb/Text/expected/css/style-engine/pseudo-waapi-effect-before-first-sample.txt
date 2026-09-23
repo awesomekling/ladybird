@@ -1,0 +1,4 @@
+shown recomputed before the first sample: 0.5
+shown recomputed after sampling: 0.25
+hidden recomputed before the first sample: 0.5
+hidden recomputed after sampling: 0.25

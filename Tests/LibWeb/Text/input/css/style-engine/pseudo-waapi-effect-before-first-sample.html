@@ -1,0 +1,28 @@
+<!doctype html>
+<style>
+    .subject::before {
+        content: "";
+        display: block;
+    }
+    #hidden::before {
+        display: none;
+    }
+</style>
+<div class="subject" id="shown"></div>
+<div class="subject" id="hidden"></div>
+<script src="../../include.js"></script>
+<script>
+    test(() => {
+        for (const target of [shown, hidden]) {
+            getComputedStyle(target, "::before").opacity;
+            const animation = target.animate({ opacity: [0, 1] }, { duration: 1000, fill: "both", pseudoElement: "::before" });
+            animation.pause();
+            animation.currentTime = 500;
+            target.style.paddingLeft = "1px";
+            println(`${target.id} recomputed before the first sample: ${getComputedStyle(target, "::before").opacity}`);
+            animation.currentTime = 250;
+            target.style.paddingLeft = "2px";
+            println(`${target.id} recomputed after sampling: ${getComputedStyle(target, "::before").opacity}`);
+        }
+    });
+</script>
