@@ -947,7 +947,7 @@ impl RetainedState {
                         self.nodes_owing_an_animation_sample.insert(node);
                     }
                     if let Some(plan) = css_animation_plan {
-                        self.nodes_owing_animation_definitions.insert(node, plan);
+                        self.nodes_owing_animation_definitions.insert((node, u8::MAX), plan);
                     }
                     counters.bump(Counter::EngineComputedRecordUnchangedWinners);
                     counters.bump(Counter::CascadeWinnerDeltaStops);
@@ -976,6 +976,17 @@ impl RetainedState {
             || delta.properties().iter().any(|&property| {
                 !property_computes_in_remaining_phase(property) || property_feeds_box_type_transformation(property)
             });
+        // A moved animation declaration leaves a plan for the host to apply before descendants
+        // continue. A transition declaration beside it still needs a combined C++ decision.
+        let owes_an_animation_plan = delta
+            .properties()
+            .iter()
+            .any(|&property| longhand_declares_a_css_animation(property))
+            && !delta
+                .properties()
+                .iter()
+                .any(|&property| longhand_only_declares_a_css_transition(property))
+            && self.animation_keyframes().only_the_document_scope_defines_keyframes();
         // A remaining-phase delta can derive the new base beneath an existing WAAPI
         // composition. The host samples the effect again after installing this base, including
         // when the moved property is animated. A full drive still needs dependent-value closure.
@@ -999,7 +1010,22 @@ impl RetainedState {
                             && !property_feeds_box_type_transformation(entry.property)
                     })
                 });
-        let derived_beneath_a_composition = full_waapi_drive_beneath_a_composition
+        // An associated CSS animation with no sampled overlay can still retime or cancel. The
+        // new longhands decide its complete plan, and the host samples after installing the base.
+        let css_animation_plan_without_an_overlay = animations_bind_the_record
+            && !requires_full_drive
+            && owes_an_animation_plan
+            && !self.computed_group_sets.node_has_animation_overlay(node)
+            && !self.record_transition_facts(old_style_record, &[]).0
+            && delta
+                .properties()
+                .iter()
+                .all(|&property| longhand_declares_a_css_animation(property))
+            && !delta
+                .properties()
+                .contains(&crate::css::property_metadata::property_id::ANIMATION_FILL_MODE);
+        let derived_beneath_a_composition = css_animation_plan_without_an_overlay
+            || full_waapi_drive_beneath_a_composition
             || animations_bind_the_record
                 && !requires_full_drive
                 && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
@@ -1067,23 +1093,6 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
             return None;
         }
-        // A delta that moves a longhand declaring the element's CSS animations is a row whose only
-        // remaining obligation is the animation plan, and the host can apply that after the batch:
-        // the plan is a function of the longhands this drive computes, the `@keyframes` the host
-        // published before the stage began, and the animations the element already holds.
-        //
-        // The plan also names existing animations, so the host can keep, retime or cancel them.
-        // A delta that also moves a transition declaration is left to C++, which decides both in
-        // one computation.
-        let owes_an_animation_plan = delta
-            .properties()
-            .iter()
-            .any(|&property| longhand_declares_a_css_animation(property))
-            && !delta
-                .properties()
-                .iter()
-                .any(|&property| longhand_only_declares_a_css_transition(property))
-            && self.animation_keyframes().only_the_document_scope_defines_keyframes();
         let no_css_animation_to_plan = self.computed_group_sets.associated_pseudo_kind(node).is_none()
             && self.state_has_no_animation_name(state)
             && self
