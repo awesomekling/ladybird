@@ -1648,6 +1648,11 @@ impl RetainedState {
         self.animation_definitions_being_applied.as_ref()
     }
 
+    /// The plan `take_settled_animation_definitions` last took.
+    pub(crate) fn settled_animation_definitions_being_applied(&self) -> Option<&animations::SettledAnimationPlan> {
+        self.animation_definitions_being_applied.as_ref()
+    }
+
     /// Account for a record the engine derived and leave its commitment to C++'s acknowledgement.
     /// Move a node's record to the environment C++ refreshed its inherited custom-property data
     /// to, without recomputing anything: what an inherited-custom-properties reaction C++ settled

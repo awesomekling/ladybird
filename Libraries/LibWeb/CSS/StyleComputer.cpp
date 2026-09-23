@@ -1170,7 +1170,7 @@ Optional<StyleComputer::SettledAnimationPlan> StyleComputer::take_settled_animat
     if (!taken.owed)
         return {};
     SettledAnimationPlan plan;
-    plan.element_display_is_none = taken.element_display_is_none;
+    plan.in_display_none_subtree = taken.in_display_none_subtree;
     marshal_animation_definitions(taken.definitions, plan.definitions, plan.definition_matches, plan.definition_keyframe_sets);
     return plan;
 }
@@ -1189,6 +1189,8 @@ void StyleComputer::apply_settled_animation_plan(DOM::AbstractElement abstract_e
     auto const* existing_animations = abstract_element.css_defined_animations();
     if (!existing_animations)
         return;
+    // Installing the record can have cancelled animations the plan was decided against, so which
+    // animation each definition claims is decided against the ones the element holds now.
     Vector<i32> matches;
     matches.ensure_capacity(plan.definitions.size());
     for (size_t i = 0; i < plan.definitions.size(); ++i)
@@ -1204,15 +1206,10 @@ void StyleComputer::apply_settled_animation_plan(DOM::AbstractElement abstract_e
             break;
         }
     }
-    // An element that is not rendered starts no animation. The record says whether the element's
-    // own display is `none`; the walk for its ancestors is the host's, as it is for a C++ row.
-    Optional<bool> computed_in_display_none_subtree;
-    if (plan.element_display_is_none)
-        computed_in_display_none_subtree = true;
-    apply_animation_definitions(abstract_element, plan.definitions, matches, plan.definition_keyframe_sets, computed_in_display_none_subtree);
+    apply_animation_definitions(abstract_element, plan.definitions, matches, plan.definition_keyframe_sets, plan.in_display_none_subtree);
 }
 
-void StyleComputer::apply_animation_definitions(DOM::AbstractElement& abstract_element, ReadonlySpan<AnimationProperties> animation_definitions, ReadonlySpan<i32> definition_matches, ReadonlySpan<RefPtr<Animations::KeyframeEffect::KeyFrameSet const>> definition_keyframe_sets, Optional<bool> computed_in_display_none_subtree) const
+void StyleComputer::apply_animation_definitions(DOM::AbstractElement& abstract_element, ReadonlySpan<AnimationProperties> animation_definitions, ReadonlySpan<i32> definition_matches, ReadonlySpan<RefPtr<Animations::KeyframeEffect::KeyFrameSet const>> definition_keyframe_sets, bool in_display_none_subtree) const
 {
     if (g_reference_style_without_effects)
         return;
@@ -1232,23 +1229,8 @@ void StyleComputer::apply_animation_definitions(DOM::AbstractElement& abstract_e
     // NB: We must not start animations on elements that are not rendered due to display:none. Once display becomes
     //     something other than none, the resulting style recomputation re-enters this function and starts them.
     //     Termination of running animations when display becomes none is handled by
-    //     Element::play_or_cancel_animations_after_display_property_change().
-    // NB: The style computation answers this from the published records where it can, since the walk it
-    //     otherwise takes reads the live tree. Where it has not, only the ancestor walk is left to do: the
-    //     computation decides the element's own display before it can decide that a definition would start
-    //     an animation, which is the only path that asks this question at all.
-    Optional<bool> in_display_none_subtree = computed_in_display_none_subtree;
-    auto is_in_display_none_subtree = [&] {
-        if (!in_display_none_subtree.has_value()) {
-            bool result = false;
-            if (abstract_element.pseudo_element().has_value())
-                result = abstract_element.element().has_inclusive_ancestor_with_display_none_ignoring_animations();
-            else if (auto* parent = abstract_element.element().parent_or_shadow_host())
-                result = parent->has_inclusive_ancestor_with_display_none_ignoring_animations();
-            in_display_none_subtree = result;
-        }
-        return in_display_none_subtree.value();
-    };
+    //     Element::play_or_cancel_animations_after_display_property_change(). The style engine answers whether
+    //     the element is in such a subtree.
 
     // Which animation each definition claims is decided by the style computation, from the names of
     // the animations this element owns, which it publishes. What it decides is what
@@ -1284,7 +1266,7 @@ void StyleComputer::apply_animation_definitions(DOM::AbstractElement& abstract_e
             continue;
         }
 
-        if (is_in_display_none_subtree())
+        if (in_display_none_subtree)
             continue;
 
         // An animation applies to an element if its name appears as one of the identifiers in the computed value of the
@@ -5977,11 +5959,10 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
             if (g_reference_style_without_effects)
                 return nullptr;
             // Applying the plan the style computation decided has to happen before the effects are
-            // collected, since an animation it starts composes into this very computation.
-            Optional<bool> computed_in_display_none_subtree;
-            if (in_display_none_subtree >= 0)
-                computed_in_display_none_subtree = in_display_none_subtree != 0;
-            context.style_computer->apply_animation_definitions(context.abstract_element, context.state->animation_definitions.span(), context.state->animation_definition_matches.span(), context.state->animation_definition_keyframe_sets.span(), computed_in_display_none_subtree);
+            // collected, since an animation it starts composes into this very computation. The
+            // stage answers whether the element is in a `display: none` subtree wherever a
+            // definition would start an animation.
+            context.style_computer->apply_animation_definitions(context.abstract_element, context.state->animation_definitions.span(), context.state->animation_definition_matches.span(), context.state->animation_definition_keyframe_sets.span(), in_display_none_subtree > 0);
             auto animations = context.abstract_element.element().get_animations_internal(
                 Animations::Animatable::GetAnimationsSorted::No,
                 Animations::Animatable::GetAnimationsOptions { .subtree = false, .pseudo_element = {} });

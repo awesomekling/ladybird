@@ -3660,8 +3660,8 @@ pub struct FfiSettledAnimationDefinitions {
     pub count: usize,
     /// Whether the row owed a plan at all.
     pub owed: bool,
-    /// Whether the record the row installed computes `display: none` for the element itself.
-    pub element_display_is_none: bool,
+    /// Whether the element is in a `display: none` subtree, which starts no animation.
+    pub in_display_none_subtree: bool,
 }
 
 /// Takes the animation plan an engine-settled row left for the host, so that exactly one
@@ -3676,21 +3676,47 @@ pub unsafe extern "C" fn style_engine_take_settled_animation_definitions(
     pseudo_kind: u8,
 ) -> FfiSettledAnimationDefinitions {
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    let plan =
-        StyleNodeID::from_raw(node).and_then(|node| engine.take_settled_animation_definitions(node, pseudo_kind));
-    match plan {
-        None => FfiSettledAnimationDefinitions {
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return FfiSettledAnimationDefinitions {
             definitions: std::ptr::null(),
             count: 0,
             owed: false,
-            element_display_is_none: false,
-        },
-        Some(plan) => FfiSettledAnimationDefinitions {
-            definitions: plan.definitions().as_ptr().cast(),
-            count: plan.definitions().len(),
-            owed: true,
-            element_display_is_none: plan.element_display_is_none(),
-        },
+            in_display_none_subtree: false,
+        };
+    };
+    let Some(element_display_is_none) = engine
+        .take_settled_animation_definitions(node, pseudo_kind)
+        .map(|plan| plan.element_display_is_none())
+    else {
+        return FfiSettledAnimationDefinitions {
+            definitions: std::ptr::null(),
+            count: 0,
+            owed: false,
+            in_display_none_subtree: false,
+        };
+    };
+    // https://drafts.csswg.org/css-animations-1/#animations
+    // An element that is not rendered starts no animation. The record says whether the element's
+    // own display is `none`; a pseudo-element's originating element and any other element's parent
+    // and its ancestors say the rest. Which definitions start an animation is decided as the plan
+    // is applied, against the animations the element holds then, so this is answered either way.
+    let in_display_none_subtree = element_display_is_none || {
+        let start = match pseudo_kind {
+            u8::MAX => engine.tree().parent(node).or_else(|| engine.tree().host_of(node)),
+            _ => Some(node),
+        };
+        start.is_some_and(|start| {
+            super::animations::has_inclusive_ancestor_with_display_none_ignoring_animations(engine, start)
+        })
+    };
+    let plan = engine
+        .settled_animation_definitions_being_applied()
+        .expect("the plan was just taken");
+    FfiSettledAnimationDefinitions {
+        definitions: plan.definitions().as_ptr().cast(),
+        count: plan.definitions().len(),
+        owed: true,
+        in_display_none_subtree,
     }
 }
 

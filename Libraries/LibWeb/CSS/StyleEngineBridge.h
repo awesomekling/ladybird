@@ -130,7 +130,7 @@ public:
     struct SettledAnimationDefinitions {
         ReadonlySpan<ComputedValuesFFI::FfiComputedAnimation> definitions;
         bool owed { false };
-        bool element_display_is_none { false };
+        bool in_display_none_subtree { false };
     };
     [[nodiscard]] SettledAnimationDefinitions take_settled_animation_definitions(StyleNodeID node, u8 pseudo_kind);
     [[nodiscard]] StyleRecordView style_record_view(StyleRecordID style_record) const;
