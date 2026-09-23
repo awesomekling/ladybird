@@ -1110,13 +1110,21 @@ impl RetainedState {
         // Which longhands those transitions run on is in the table: a delta that moves one of them
         // starts a transition, and a started transition samples its own start value into the style
         // this very update - a value the row's record does not hold - so that one stays in C++.
+        // A leaf introducing transition declarations can instead drive its base in full and leave
+        // the whole transition decision to installation. Display changes still need the host's
+        // display teardown and transition decision in the same computation.
         let (record_declares_transitions, transitionable_property_moved) =
             self.record_transition_facts(old_style_record, delta.properties());
         let owes_a_transition_step = (!full_drive
             || delta
                 .properties()
                 .iter()
-                .any(|&property| longhand_only_declares_a_css_transition(property)))
+                .any(|&property| longhand_only_declares_a_css_transition(property))
+            || (!record_declares_transitions
+                && self.tree.flat_tree_children(node).next().is_none()
+                && !delta
+                    .properties()
+                    .contains(&crate::css::property_metadata::property_id::DISPLAY)))
             && (record_declares_transitions
                 || delta
                     .properties()
@@ -1454,6 +1462,11 @@ impl RetainedState {
             .and_then(|record| self.computed_group_sets.style_record_view(record.raw()))
             .is_some_and(|view| view.dependency_flags & (1 << 2) != 0);
         let counter_environment = self.table_counter_style_environment_identity(node, &table);
+        if full_drive && owes_a_transition_registration == Some(false) {
+            // The deferred transition step reads the before-change record after this replacement.
+            self.computed_group_sets.pin_style_record(old_style_record.raw());
+            self.batch_pinned_compositions.push((node, old_style_record.raw()));
+        }
         let Some(assembly) = self.computed_group_sets.replace_engine_computed_table(
             node,
             old_style_record,
