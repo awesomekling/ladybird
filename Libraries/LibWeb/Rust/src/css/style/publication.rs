@@ -11,6 +11,7 @@ mod winner_store;
 
 use winner_store::{WinnerDeclaration, WinnerStore, WinnerValue, shorthand_longhand_data};
 
+use super::style_invalidation::property_feeds_post_compute_adjustment;
 use super::*;
 use crate::css::computed_longhand_table::ComputedLonghandTable;
 pub(crate) use drive::drive_font_metric;
@@ -885,7 +886,10 @@ impl RetainedState {
                                 .style_record_view(old_style_record.raw())
                                 .and_then(|view| unsafe { view.animated_overlay.as_ref() })
                                 .is_some_and(|overlay| {
-                                    overlay.entries().iter().all(|entry| !entry.result_of_transition)
+                                    overlay.entries().iter().all(|entry| {
+                                        !entry.result_of_transition
+                                            && !property_feeds_post_compute_adjustment(entry.property)
+                                    })
                                 });
                         if !resampleable_composition {
                             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
@@ -938,6 +942,9 @@ impl RetainedState {
                         return None;
                     }
                     if computed::ComputedGroupSets::record_is_animation_overlay(old_style_record.raw()) {
+                        // A sample over the standing base cannot adjust the base values an animated
+                        // box-type, overflow, or text-alignment input feeds; that composition is driven
+                        // again rather than resampled, or its sample would ask for this row again.
                         let resampleable_composition = facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
                             && !self.record_transition_facts(old_style_record, &[]).0
                             && self
@@ -945,7 +952,10 @@ impl RetainedState {
                                 .style_record_view(old_style_record.raw())
                                 .and_then(|view| unsafe { view.animated_overlay.as_ref() })
                                 .is_some_and(|overlay| {
-                                    overlay.entries().iter().all(|entry| !entry.result_of_transition)
+                                    overlay.entries().iter().all(|entry| {
+                                        !entry.result_of_transition
+                                            && !property_feeds_post_compute_adjustment(entry.property)
+                                    })
                                 });
                         if !resampleable_composition {
                             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
