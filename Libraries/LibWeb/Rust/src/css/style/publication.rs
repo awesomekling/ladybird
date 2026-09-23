@@ -767,6 +767,14 @@ impl RetainedState {
                 self.winner_groups.semantic_delta(Some(state), state)
             }
         };
+        // A changed ordinary winner can be driven beneath an animation overlay, but an
+        // independently edited @keyframes rule also requires a new CSS animation definition.
+        // That definition is absent from the winner delta, so let the host resolve the current
+        // keyframes and composition together instead of sampling the old effect over a new base.
+        if !delta.is_empty() && !record_may_stand_while_animating {
+            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
+            return None;
+        }
         let Some(mut inputs) = self.document_style_computation_inputs else {
             counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
             return None;
