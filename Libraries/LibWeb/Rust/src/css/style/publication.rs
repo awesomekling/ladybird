@@ -3584,7 +3584,7 @@ impl RetainedState {
         if written.len() != declared.len() {
             return None;
         }
-        declared
+        let shorthand = declared
             .iter()
             .zip(written)
             .find(|(declared, written)| {
@@ -3599,7 +3599,39 @@ impl RetainedState {
                     _ => written.clone_retained(),
                 };
                 (declared.property, value)
-            })
+            });
+        if shorthand.is_some() {
+            return shorthand;
+        }
+
+        // Inline declarations retain the expanded pending longhands without a separate
+        // shorthand declaration. Their shared original value and exact expansion identify the
+        // shorthand whose grammar must parse the substituted source.
+        let mut pending_longhands = Vec::new();
+        let mut original = None;
+        for (declared, written) in declared.iter().zip(written) {
+            if let crate::css::style_value::StyleValueData::PendingSubstitution {
+                original_shorthand_value,
+            } = written.data()
+                && std::ptr::eq(original_shorthand_value.pointer(), written_value)
+            {
+                pending_longhands.push(declared.property);
+                original = Some(original_shorthand_value.clone_retained());
+            }
+        }
+        pending_longhands.sort_unstable();
+        pending_longhands.dedup();
+        if pending_longhands.is_empty() {
+            return None;
+        }
+        let shorthand = (crate::css::property_metadata::FIRST_SHORTHAND_PROPERTY_ID
+            ..=crate::css::property_metadata::LAST_SHORTHAND_PROPERTY_ID)
+            .find(|&candidate| {
+                let expansion = crate::css::property_metadata::longhands_for_shorthand(candidate);
+                expansion.len() == pending_longhands.len()
+                    && expansion.iter().all(|longhand| pending_longhands.contains(longhand))
+            })?;
+        Some((shorthand, original?))
     }
 
     /// Whether any winner of a state was written with a substitution, so the record computed
