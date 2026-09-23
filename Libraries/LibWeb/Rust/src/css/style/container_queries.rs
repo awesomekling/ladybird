@@ -52,40 +52,6 @@ unsafe extern "C" fn retained_container_style_feature(
 }
 
 impl RetainedState {
-    /// Transition baselines are committed after container stabilization. A row that already has
-    /// transitions, or may gain them from a gated rule, must keep the host's provisional decision
-    /// until the transition overlay is a retained input too.
-    pub(super) fn container_reaction_needs_host_transition(&self, node: StyleNodeID) -> bool {
-        use crate::css::property_metadata::property_id as prop;
-        if self.computed_group_sets.node_has_animation_overlay(node)
-            || self.computed_group_sets.adjustment_facts(node) & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
-            || self
-                .computed_group_sets
-                .assigned_style_record(node)
-                .is_some_and(|record| self.record_transition_facts(record, &[]).0)
-        {
-            return true;
-        }
-        self.retained_match_answer(node).sparse().map_or_else(
-            |_| self.program.has_container_gated_transition_declarations(),
-            |answer| {
-                answer.iter().any(|entry| {
-                    self.program.rule_is_gated_by_container_query(entry.rule)
-                        && self.program.declared_properties_of(entry.rule).iter().any(|declared| {
-                            matches!(
-                                declared.property,
-                                prop::TRANSITION_BEHAVIOR
-                                    | prop::TRANSITION_DELAY
-                                    | prop::TRANSITION_DURATION
-                                    | prop::TRANSITION_PROPERTY
-                                    | prop::TRANSITION_TIMING_FUNCTION
-                            )
-                        })
-                })
-            },
-        )
-    }
-
     /// Keep what a row the engine answers read of its containers for the host, which records it
     /// when it installs the element's record, as it does for a row it computes itself.
     pub(crate) fn note_container_effects_for_host(&mut self, node: StyleNodeID, verdict: &ContainerVerdict) {

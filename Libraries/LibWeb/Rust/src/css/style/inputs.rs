@@ -2222,14 +2222,6 @@ impl StyleEngineState {
 
     /// A container's measurements or style moved under this dependent's retained answer.
     pub fn record_container_query_input(&mut self, node: StyleNodeID) {
-        if self.retained.container_reaction_needs_host_transition(node) {
-            self.record_element_style_input(
-                node,
-                transaction::STYLE_REACTION_PUBLISHED_STYLE | transaction::STYLE_REACTION_RECOMPUTE_STYLE,
-                0,
-            );
-            return;
-        }
         self.retained.container_input_nodes.insert(node);
         self.record_derived_element_style_input(
             node,

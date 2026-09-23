@@ -809,6 +809,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             // records must equal the engine's by value.
             auto apply_engine_computed_records = [&](DOM::Element::EnginePseudoElementRecords const& pseudo_element_records, bool acknowledge, bool defer_final_comparison) {
                 auto& style_engine = document.style_computer().style_engine();
+                document.style_computer().pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(DOM::AbstractElement { *element });
                 bool has_engine_pseudo_records = false;
                 for (auto const& record : pseudo_element_records)
                     has_engine_pseudo_records |= record.has_value();
