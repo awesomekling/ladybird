@@ -1039,11 +1039,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 VERIFY(!needs_custom_property_recompute);
                 VERIFY(reaction.pseudo_kind == NumericLimits<u8>::max());
                 // The engine swapped the element's inherited groups for its parent's: the record
-                // installs as an engine record.
-                if (element_style_depends_on_more_than_the_inherited_groups(*element))
-                    invalidation = element->apply_style_engine_reaction(did_change_custom_properties);
-                else
-                    apply_engine_computed_records({}, false, false);
+                // installs as an engine record. The engine refuses the swap to an element that
+                // animates, declares transitions, or inherits from an animating parent.
+                apply_engine_computed_records({}, false, false);
             } else if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Computed) {
                 // The engine computed the new record from this element's moved cascade winners,
                 // from its parent's moved inherited style or display, or from its moved
