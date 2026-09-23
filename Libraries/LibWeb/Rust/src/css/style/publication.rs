@@ -2937,6 +2937,7 @@ impl RetainedState {
     fn retry_engine_record_after_ancestor_step(
         &mut self,
         node: StyleNodeID,
+        armed: bool,
         scratch: &mut EngineComputedRecordScratch,
         counters: &mut Counters,
     ) -> u64 {
@@ -3006,7 +3007,10 @@ impl RetainedState {
         {
             return 0;
         }
+        // An armed row's answer may declare past its winners: a record computed from it is no
+        // function of the winner state the cold record cache is keyed by.
         if !scratch.font_drive.is_pending()
+            && !(armed && self.computed_group_sets.node_answer_is_incomplete(node))
             && !self.node_declares_custom_properties(node)
             && self.state_container_unit_mask(node, cascade_state.1) == 0
             && let Some(old_style_record) = self.computed_group_sets.assigned_style_record(node)
@@ -3066,7 +3070,10 @@ impl RetainedState {
                 return record.raw();
             }
         }
-        if !scratch.font_drive.is_pending() && self.computed_group_sets.node_answer_is_incomplete(node) {
+        // A row the flush armed drives its incomplete answer as the flush would have, over the
+        // installed ancestor's final groups. A row introduced while the host applied the batch
+        // was never offered an incomplete answer.
+        if !armed && !scratch.font_drive.is_pending() && self.computed_group_sets.node_answer_is_incomplete(node) {
             return 0;
         }
         let cascade_winners_are_complete = republished_complete.unwrap_or_else(|| {
@@ -7368,7 +7375,7 @@ impl StyleEngineState {
             self.host.armed_retry_nodes.remove(index);
         }
         let bail_marks = (armed.is_none() && seal::is_reporting()).then(|| counters.record_bail_marks());
-        let retried = self.retry_engine_record_after_ancestor(node, counters);
+        let retried = self.retry_engine_record_after_ancestor(node, armed.is_some(), counters);
         if retried.style_record == 0 {
             if let Some(bail_marks) = bail_marks {
                 let cause = counters
@@ -7394,6 +7401,7 @@ impl StyleEngineState {
     pub(crate) fn retry_engine_record_after_ancestor(
         &mut self,
         node: StyleNodeID,
+        armed: bool,
         counters: &mut Counters,
     ) -> RetriedEngineRecord {
         if let Some(inputs) = self.retained.document_style_computation_inputs
@@ -7414,7 +7422,7 @@ impl StyleEngineState {
         };
         let mut suspended_memory = MemoryLease::new(MemoryCategory::BatchScratch);
         let style_record =
-            self.retry_engine_record_after_ancestor_loop(node, &mut scratch, &mut suspended_memory, counters);
+            self.retry_engine_record_after_ancestor_loop(node, armed, &mut scratch, &mut suspended_memory, counters);
         counters.add(
             Counter::RetryAfterAncestorMicroseconds,
             u64::try_from(started_at.elapsed().as_micros()).unwrap_or(u64::MAX),
@@ -7438,12 +7446,13 @@ impl StyleEngineState {
     fn retry_engine_record_after_ancestor_loop(
         &mut self,
         node: StyleNodeID,
+        armed: bool,
         scratch: &mut EngineComputedRecordScratch,
         suspended_memory: &mut MemoryLease,
         counters: &mut Counters,
     ) -> u64 {
         loop {
-            let record = self.retry_engine_record_after_ancestor_step(node, scratch, counters);
+            let record = self.retry_engine_record_after_ancestor_step(node, armed, scratch, counters);
             if !self.random_base_requests.is_empty() {
                 self.refill_random_base_requests();
                 continue;

@@ -698,6 +698,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             // The pseudo-element records a retry settled beside the element's record.
             Optional<DOM::Element::EnginePseudoElementRecords> retried_pseudo_element_records;
             bool retried_unstyled_materialization = false;
+            bool retried_after_installed_ancestors = false;
             if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetryAfterAncestor
                 || (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize
                     && reaction.reaction & (StyleEngine::RecomputeStyle | StyleEngine::RecomputeDescendantStyles | StyleEngine::AncestorBecameVisible | StyleEngine::InheritedStyle | StyleEngine::InheritedCustomProperties)
@@ -709,6 +710,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 auto retried_rows = document.style_computer().style_engine().retry_engine_records_after_ancestor(reaction.style_node);
                 if (!retried_rows.is_empty() && retried_rows[0].style_node == reaction.style_node && retried_rows[0].record.style_record != 0) {
                     retried_unstyled_materialization = reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize && !element->has_style();
+                    retried_after_installed_ancestors = reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetryAfterAncestor;
                     auto const& retried = retried_rows[0].record;
                     reaction.new_style_record = retried.style_record;
                     reaction.uses_substitution = retried.uses_substitution;
@@ -1016,8 +1018,10 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     }
                 } else {
                     // A first record answers the element's recorded arrival; nothing is left for a
-                    // later transaction to plan.
-                    if (!element->has_style())
+                    // later transaction to plan. Neither is anything for a record retried after the
+                    // ancestors applied before it installed: it reads them as they now stand, as the
+                    // computation it stands for would have.
+                    if (!element->has_style() || retried_after_installed_ancestors)
                         style_engine.consume_recorded_element_style_input_change(reaction.style_node);
                     invalidation = element->apply_engine_computed_style_record(StyleRecordID { reaction.new_style_record }, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties);
                 }
