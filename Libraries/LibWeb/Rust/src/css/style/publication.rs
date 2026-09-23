@@ -3657,7 +3657,7 @@ impl RetainedState {
     }
 
     /// Whether a winner's declaration was written with a substitution the engine resolves itself:
-    /// var() references of its own, or a longhand pending a shorthand written with them. A value
+    /// var() or inherit() references of its own, or a longhand pending a shorthand written with them. A value
     /// reading anything else - a custom function, an attribute, a style query - is C++'s, and what
     /// it computes to can move without any winner moving.
     fn winner_is_written_with_substitution(&self, node: StyleNodeID, winner: &PropertyWinner) -> bool {
@@ -3863,6 +3863,20 @@ impl RetainedState {
         // Seeded in cascade order, and within one rule in declaration order, since a logical
         // property and its physical associate resolve by order of appearance.
         let mut declarations = Vec::with_capacity(self.winner_groups.winner_count_in_state(state));
+        let inheritance_environment = if pseudo_kind.is_some() {
+            self.computed_group_sets.custom_property_environment_identity(node)
+        } else {
+            self.tree
+                .flat_tree_parent(node)
+                .and_then(|parent| self.computed_group_sets.custom_property_environment_identity(parent))
+        };
+        // Records share by their own environment. When a non-inheriting registration makes the
+        // parent's environment differ, inherit() must stay with the host until that parent is
+        // also part of the record's sharing key.
+        let inheritance_store = inheritance_environment
+            .filter(|&identity| identity == environment)
+            .and_then(|identity| self.custom_property_environments.store(identity))
+            .unwrap_or(std::ptr::null());
         for winner in self.winner_groups.winners_in_state(state) {
             // A revert whose continuation resumes at nothing leaves the property undeclared.
             let Some(winner) = self.winner_groups.resolved_winner(winner) else {
@@ -3932,6 +3946,7 @@ impl RetainedState {
                         winner.property,
                         value,
                         Some(&attributes),
+                        inheritance_store,
                         counters,
                     )?;
                     (
@@ -3961,6 +3976,7 @@ impl RetainedState {
                         shorthand,
                         written,
                         None,
+                        inheritance_store,
                         counters,
                     )?;
                     let value = match resolved.data() {
