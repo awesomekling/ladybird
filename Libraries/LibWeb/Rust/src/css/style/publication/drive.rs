@@ -129,11 +129,6 @@ impl RetainedState {
         let random_base_values = store.drive_random_base_values(self, node)?;
         let resource_contexts = store.drive_resource_contexts(self);
         let container_unit_mask = store.container_relative_length_unit_mask(self);
-        let tree_counting_inputs = if store.uses_tree_counting_function(self) {
-            self.element_tree_counting_inputs(node)
-        } else {
-            0
-        };
         let document_base_url = &self.document_resource_contexts.document_base_url;
         let store = store.view(self);
         use crate::css::computed_value_types::{STYLE_GROUP_INDEX_FONT, STYLE_GROUP_INDEX_INHERITED_BOX};
@@ -371,11 +366,6 @@ impl RetainedState {
         let random_base_values = store.drive_random_base_values(self, subject.target.node())?;
         let resource_contexts = store.drive_resource_contexts(self);
         let container_unit_mask = store.container_relative_length_unit_mask(self);
-        let tree_counting_inputs = if store.uses_tree_counting_function(self) {
-            self.element_tree_counting_inputs(subject.target.node())
-        } else {
-            0
-        };
         let document_base_url = &self.document_resource_contexts.document_base_url;
         let store = store.view(self);
         use crate::css::computed_value_types::{STYLE_GROUP_INDEX_FONT, STYLE_GROUP_INDEX_INHERITED_BOX};
