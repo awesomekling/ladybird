@@ -1235,12 +1235,12 @@ impl RetainedState {
         // moved, since the step is where the element's before-change style is kept up to date.
         // A delta that moves a longhand one of them runs on starts a transition, and the started
         // transition samples its start value into an overlay the host step publishes over the
-        // installed record; a child derived in the same batch waits for that composition. A leaf
-        // can drive its base in full and leave the whole transition decision to installation,
-        // including when its parent's inherited style moved: the decision reads an inherited
-        // animated value's after-change value from the ancestor that animates it. An existing
-        // transition keeps its display and display-none inputs in the host computation; display
-        // changes need host teardown beside the decision.
+        // installed record; a child derived in the same batch waits for that composition. Such a
+        // record can drive its base in full and leave the whole transition decision to
+        // installation, including when its parent's inherited style moved: the decision reads an
+        // inherited animated value's after-change value from the ancestor that animates it. The
+        // step decides nothing for a hidden record. An existing transition keeps its display
+        // inputs in the host computation; display changes need host teardown beside the decision.
         let record_declares_transitions = self.record_declares_transitions(old_style_record);
         let old_record_is_hidden = self
             .computed_group_sets
@@ -1251,12 +1251,13 @@ impl RetainedState {
                 .properties()
                 .iter()
                 .any(|&property| longhand_only_declares_a_css_transition(property))
-            || (self.tree.flat_tree_children(node).all(|child| child.is_text())
-                && !delta
-                    .properties()
-                    .contains(&crate::css::property_metadata::property_id::DISPLAY)
-                && (!record_declares_transitions
-                    || (!parent_inputs_moved.display && !scratch.recompute_in_full && !old_record_is_hidden))))
+            || (!delta
+                .properties()
+                .contains(&crate::css::property_metadata::property_id::DISPLAY)
+                && match record_declares_transitions {
+                    true => !parent_inputs_moved.display && !scratch.recompute_in_full,
+                    false => self.tree.flat_tree_children(node).all(|child| child.is_text()),
+                }))
             && (record_declares_transitions
                 || delta
                     .properties()
