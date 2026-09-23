@@ -3790,6 +3790,17 @@ pub unsafe extern "C" fn style_engine_remove_computed_pseudo(
         return FfiStyleRecordDelta::default();
     };
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    if record_target_is_under_verification(engine, node.raw(), pseudo_kind) {
+        // The reference pass clears the host's temporary pseudo style. The engine's published
+        // assignment still belongs to the authoritative row applied after comparison.
+        return FfiStyleRecordDelta {
+            old_style_record: engine
+                .computed_group_sets
+                .pseudo_style_record(node, pseudo_kind)
+                .map_or(0, super::computed::FinalStyleRecordID::raw),
+            new_style_record: 0,
+        };
+    }
     let result = FfiStyleRecordDelta {
         old_style_record: engine
             .remove_computed_pseudo(node, pseudo_kind)
