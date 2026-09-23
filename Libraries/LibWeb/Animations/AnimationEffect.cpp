@@ -26,6 +26,7 @@
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/SVG/SVGElement.h>
+#include <LibWeb/StyleEngineRustFFI.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 
 namespace Web::CSS {
@@ -875,10 +876,20 @@ AnimationUpdateContext::~AnimationUpdateContext()
             if (!effects_to_collect.contains_slow(dirty_effect))
                 effects_to_collect.append(dirty_effect);
         }
-        if (!effects_to_collect.is_empty())
-            target->document().style_computer().collect_animations_into(element, effects_to_collect.span(), *style, CSS::StyleComputer::AnimationRefresh::Yes);
+        // With no effect left, collecting still clears the composition the style was reconstructed with.
+        target->document().style_computer().collect_animations_into(element, effects_to_collect.span(), *style, CSS::StyleComputer::AnimationRefresh::Yes);
         auto& style_computer = target->document().style_computer();
-        if (!style_computer.style_engine().animation_overlay_changed(it.value.style_record_before_update, style->animated_overlay()))
+        // A sample published between a row's derivation and its installation composed an overlay
+        // over the base the row installs. The installed record names none, but the engine still
+        // holds that composition, so it is published again even when the values have not moved.
+        auto const engine_handle = style_computer.style_engine().rust_handle();
+        auto const engine_style_record = CSS::StyleEngineFFI::style_engine_assigned_style_record(
+            engine_handle, target->style_node_id().value(), CSS::pseudo_element_to_ffi(element.pseudo_element()));
+        auto const engine_holds_a_stale_composition = engine_style_record != it.value.style_record_before_update.value()
+            && engine_style_record != 0
+            && CSS::StyleEngineFFI::style_engine_base_style_record_of(engine_handle, engine_style_record) == it.value.style_record_before_update.value();
+        if (!style_computer.style_engine().animation_overlay_changed(it.value.style_record_before_update, style->animated_overlay())
+            && !engine_holds_a_stale_composition)
             continue;
 
         auto [animated_property_invalidation, publication] = style_computer.publish_sampled_animation_overlay(element, *style, it.value.style_record_before_update, [&](auto const& overlay_invalidation) {

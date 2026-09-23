@@ -3317,6 +3317,24 @@ pub unsafe extern "C" fn style_engine_reference_parent_style_record(engine: *con
         .unwrap_or(0)
 }
 
+/// Return the record the engine holds assigned to an element or one of its pseudo-elements,
+/// composed with the animation overlay it holds, or 0 while it holds none.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_assigned_style_record(engine: *const c_void, node: u32, pseudo_kind: u8) -> u64 {
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return 0;
+    };
+    engine
+        .retained
+        .computed_group_sets
+        .assigned_final_style_record(super::computed::ComputedStyleTarget::new(node, pseudo_kind))
+        .map_or(0, |record| record.raw())
+}
+
 /// Return the underlying base of a final record for reference verification.
 ///
 /// # Safety
