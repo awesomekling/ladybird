@@ -1114,7 +1114,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     // The step runs here rather than after the batch: a descendant applied later
                     // reads this element's after-change style, which is what the step decides
                     // against, and the C++ computation this row replaces runs it inside itself.
-                    if (transition_debt != 0) {
+                    if (transition_debt != 0
+                        || (reaction.old_style_record != 0 && element->associated_shadow_host_pseudo_element().has_value())) {
                         DOM::AbstractElement settled { *element };
                         if (settled.has_style()) {
                             if (transition_debt == 1) {

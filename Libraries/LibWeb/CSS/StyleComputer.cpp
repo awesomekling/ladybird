@@ -4218,7 +4218,10 @@ Optional<RequiredInvalidationAfterStyleChange> StyleComputer::answer_record_dema
         if (answer.record.pseudo_records_present & (1 << kind))
             pseudo_element_records[kind] = StyleRecordID { answer.record.pseudo_records[kind] };
     }
+    auto old_style_record = element.style_record_identity();
     auto invalidation = element.apply_engine_computed_style_record(StyleRecordID { answer.record.style_record }, pseudo_element_records, answer.record.uses_substitution, did_change_custom_properties);
+    if (!!old_style_record && element.associated_shadow_host_pseudo_element().has_value())
+        invalidation |= run_transition_step_for_settled_record({ element }, old_style_record);
     auto container_effects = StyleEngineFFI::style_engine_take_container_effects(engine.rust_handle(), element.style_node_id().value());
     ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
     record_container_query_effects(DOM::AbstractElement { element }, container_effects);
@@ -4226,9 +4229,30 @@ Optional<RequiredInvalidationAfterStyleChange> StyleComputer::answer_record_dema
     return invalidation;
 }
 
+static RefPtr<ComputedValues const> engine_backing_pseudo_values(StyleComputer const& style_computer, DOM::AbstractElement abstract_element, Optional<StyleEngine::StyleRecordDelta&> style_record_delta)
+{
+    if (abstract_element.pseudo_element().has_value()
+        || !abstract_element.element().associated_shadow_host_pseudo_element().has_value()
+        || abstract_element.element().associated_shadow_host_pseudo_element() == CSS::PseudoElement::Placeholder)
+        return {};
+    auto old_record = abstract_element.style_record_identity();
+    auto answer = const_cast<StyleComputer&>(style_computer).style_engine().answer_record_demand(abstract_element.element().style_node_id(), {}, false, false);
+    if (!answer.record.style_record)
+        return {};
+    auto record = StyleRecordID { answer.record.style_record };
+    auto view = style_computer.computed_style_record_view(record);
+    if (!view)
+        return {};
+    if (style_record_delta.has_value())
+        *style_record_delta = { old_record, record };
+    return ComputedValues::Builder { *view }.build();
+}
+
 NonnullRefPtr<ComputedValues const> StyleComputer::materialize_style_record(DOM::AbstractElement abstract_element, Optional<bool&> did_change_custom_properties, StyleEngineMatchResult* reusable_matches, Optional<StyleEngine::StyleRecordDelta&> style_record_delta, StyleSharingMode style_sharing_mode) const
 {
     m_last_materialization_kept_pseudo_element_styles = false;
+    if (auto values = engine_backing_pseudo_values(*this, abstract_element, style_record_delta))
+        return values.release_nonnull();
     StyleSharingCandidate sharing;
     sharing.may_reuse_or_publish_shared_style = style_sharing_mode == StyleSharingMode::Enabled;
     if (auto node = abstract_element.element().style_node_id(); node != 0 && !abstract_element.pseudo_element().has_value()
