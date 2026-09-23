@@ -437,7 +437,12 @@ impl RetainedState {
             };
             pseudo_uses_substitution |=
                 state.is_some_and(|state| scratch.substituted_states.contains(&(state, environment)));
-            if !has_registered_declarations && pseudo_content_generates_nothing(&store.view(self), kind) {
+            // A CSSOM demand still needs the pseudo's custom-property environment when
+            // `content` generates no box. Only a batch install can discard that record.
+            if selected_kind.is_none()
+                && !has_registered_declarations
+                && pseudo_content_generates_nothing(&store.view(self), kind)
+            {
                 remove(self, scratch, counters);
                 continue;
             }
@@ -569,7 +574,10 @@ impl RetainedState {
                         scratch.pseudo_uses_substitution = pseudo_uses_substitution;
                     }
                     let (table, length, longhand_evaluations, font) = driven?;
-                    if has_registered_declarations && pseudo_content_generates_nothing(&store.view(self), kind) {
+                    if selected_kind.is_none()
+                        && has_registered_declarations
+                        && pseudo_content_generates_nothing(&store.view(self), kind)
+                    {
                         remove(self, scratch, counters);
                         continue;
                     }

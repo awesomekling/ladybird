@@ -840,6 +840,28 @@ Optional<StyleProperty> CSSStyleProperties::get_direct_property(PropertyNameAndI
 
         // FIXME: Somehow get custom properties if there's no layout node.
         if (property_name_and_id.is_custom_property()) {
+            // CSSOM can read a pseudo with no generated box. Its private record still
+            // carries the custom-property environment cascaded from its own rules.
+            if (auto pseudo = abstract_element.pseudo_element(); pseudo.has_value()
+                && first_is_one_of(*pseudo, PseudoElement::Before, PseudoElement::After, PseudoElement::FirstLetter, PseudoElement::Marker, PseudoElement::Backdrop)) {
+                auto& style_computer = abstract_element.document().style_computer();
+                auto& engine = style_computer.style_engine();
+                auto demand = engine.answer_record_demand(abstract_element.element().style_node_id(), to_underlying(*pseudo), false, false, true);
+                if (demand.record.style_record) {
+                    auto identity = engine.style_record_custom_property_environment(StyleRecordID { demand.record.style_record });
+                    RefPtr<CustomPropertyData const> data;
+                    if (StyleEngine::is_engine_custom_property_environment(identity)) {
+                        data = style_computer.engine_custom_property_environment(identity);
+                    } else if (identity != 0) {
+                        if (auto inherited = abstract_element.element().custom_property_data({}))
+                            data = inherited->inheritable(abstract_element.document());
+                    }
+                    if (data && data->identity() == identity) {
+                        if (auto const* property = data->get(property_name_and_id.name()))
+                            return *property;
+                    }
+                }
+            }
             if (auto maybe_value = abstract_element.get_custom_property(property_name_and_id.name())) {
                 return StyleProperty {
                     .property_id = property_id,
