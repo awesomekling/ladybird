@@ -43,7 +43,7 @@
         const transition = target.getAnimations().find(animation => animation instanceof CSSTransition);
         animation.cancel();
         transition.currentTime = 500000;
-        println(`feedback used provisional passes: ${counters.provisionalStylePasses > 1}`);
+        println(`feedback settled in one pass: ${counters.provisionalStylePasses <= 1}`);
         println(`one transition started: ${transition !== undefined}`);
         println(`transition midpoint width: ${getComputedStyle(target).width}`);
     });
