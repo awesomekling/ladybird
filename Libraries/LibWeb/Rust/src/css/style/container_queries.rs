@@ -66,21 +66,24 @@ impl RetainedState {
         {
             return true;
         }
-        self.retained_match_answer(node).sparse().map_or(true, |answer| {
-            answer.iter().any(|entry| {
-                self.program.rule_is_gated_by_container_query(entry.rule)
-                    && self.program.declared_properties_of(entry.rule).iter().any(|declared| {
-                        matches!(
-                            declared.property,
-                            prop::TRANSITION_BEHAVIOR
-                                | prop::TRANSITION_DELAY
-                                | prop::TRANSITION_DURATION
-                                | prop::TRANSITION_PROPERTY
-                                | prop::TRANSITION_TIMING_FUNCTION
-                        )
-                    })
-            })
-        })
+        self.retained_match_answer(node).sparse().map_or_else(
+            |_| self.program.has_container_gated_transition_declarations(),
+            |answer| {
+                answer.iter().any(|entry| {
+                    self.program.rule_is_gated_by_container_query(entry.rule)
+                        && self.program.declared_properties_of(entry.rule).iter().any(|declared| {
+                            matches!(
+                                declared.property,
+                                prop::TRANSITION_BEHAVIOR
+                                    | prop::TRANSITION_DELAY
+                                    | prop::TRANSITION_DURATION
+                                    | prop::TRANSITION_PROPERTY
+                                    | prop::TRANSITION_TIMING_FUNCTION
+                            )
+                        })
+                })
+            },
+        )
     }
 
     /// Keep what a row the engine answers read of its containers for the host, which records it

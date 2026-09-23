@@ -1292,6 +1292,26 @@ impl StyleSheetProgram {
         self.rules[rule.0 as usize].gated_by_container_query
     }
 
+    /// A missing retained match answer cannot rule out a container-gated transition. In that
+    /// case the program still proves that no such declaration exists in any live rule.
+    pub(crate) fn has_container_gated_transition_declarations(&self) -> bool {
+        use crate::css::property_metadata::property_id as prop;
+        self.rules.iter().any(|rule| {
+            rule.live
+                && rule.gated_by_container_query
+                && rule.declared_properties.iter().any(|declared| {
+                    matches!(
+                        declared.property,
+                        prop::TRANSITION_BEHAVIOR
+                            | prop::TRANSITION_DELAY
+                            | prop::TRANSITION_DURATION
+                            | prop::TRANSITION_PROPERTY
+                            | prop::TRANSITION_TIMING_FUNCTION
+                    )
+                })
+        })
+    }
+
     /// Record which longhand properties a rule declares, and which of them it marks important.
     ///
     /// The cascade needs this to know which properties a rule can win: only a property some added,
