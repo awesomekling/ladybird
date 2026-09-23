@@ -1095,21 +1095,25 @@ impl RetainedState {
     ) -> Option<(computed::FinalStyleRecordID, computed::FinalStyleRecordID)> {
         use bridge::element_adjustment_fact as fact;
         let facts = self.computed_group_sets.adjustment_facts(node);
-        if facts & fact::HAS_ANIMATIONS != 0 {
+        // The host samples the element's animations over the new base and runs its transition
+        // step against the record it held. A CSS animation needs a plan, which only C++ settles.
+        let animates = facts & fact::HAS_ANIMATIONS != 0;
+        if animates && self.css_defined_animations.node_runs_a_css_animation(node) {
             self.note_pseudo_bail_site(node, "engineComputedRecordBailWinnerElement@pseudo.rs:1078");
             counters.bump(Counter::EngineComputedRecordBailWinnerElement);
             return None;
         }
-        // A record it already holds is replaced by a full drive. An existing animation overlay
-        // still owns its composition; transition declarations alone do not prevent driving the
-        // next base record, whose delta lets the host start a transition.
+        // A record it already holds is replaced by a full drive. An animation overlay is the
+        // composition of the element's own effects, which the host samples again over the new
+        // base; transition declarations alone do not prevent driving the next base record, whose
+        // delta lets the host start a transition.
         let old_record = self.computed_group_sets.assigned_style_record(node);
         if let Some(old) = old_record {
             let Some(view) = self.computed_group_sets.style_record_view(old.raw()) else {
                 counters.bump(Counter::EngineComputedRecordBailRecord);
                 return None;
             };
-            if !view.animated_overlay.is_null() {
+            if !view.animated_overlay.is_null() && !animates {
                 self.note_pseudo_bail_site(node, "engineComputedRecordBailRecordOverlay@pseudo.rs:1091");
                 counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
                 return None;
@@ -1280,7 +1284,14 @@ impl RetainedState {
         };
         let (table, length, longhand_evaluations, font) = driven?;
         let font = font.expect("a full drive resolves the font");
-        let (record, _) = self.assemble_and_publish_engine_record(
+        // The transition step reads the composition the element held as its before-change style,
+        // after the new base replaced it.
+        let old_composition =
+            old_record.filter(|old| animates && computed::ComputedGroupSets::record_is_animation_overlay(old.raw()));
+        if let Some(old) = old_composition {
+            self.computed_group_sets.pin_style_record(old.raw());
+        }
+        let Some((record, _)) = self.assemble_and_publish_engine_record(
             target,
             true,
             Some(parent_record),
@@ -1293,11 +1304,22 @@ impl RetainedState {
             None,
             &mut scratch.computability,
             counters,
-        )?;
+        ) else {
+            if let Some(old) = old_composition {
+                self.computed_group_sets.unpin_style_record(old.raw());
+            }
+            return None;
+        };
+        if let Some(old) = old_composition {
+            self.batch_pinned_compositions.push((node, old.raw()));
+        }
         let _ = longhand_evaluations;
         if explicitly_inherited_groups != 0 {
             self.nodes_owing_explicit_inheritance
                 .insert(node, explicitly_inherited_groups);
+        }
+        if animates {
+            self.nodes_owing_an_animation_sample.insert(node);
         }
         counters.bump(Counter::EngineComputedRecordHostPseudoBackings);
         scratch.noted_substitution = Some(substituted);
