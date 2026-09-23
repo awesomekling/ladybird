@@ -1046,6 +1046,27 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 // inherited custom-property environment.
                 VERIFY(needs_regular_style_recompute || needs_inherited_style_recompute || needs_custom_property_recompute);
                 VERIFY(reaction.pseudo_kind == NumericLimits<u8>::max());
+                // Installing an earlier row can update this element's declaration block. The
+                // batch record names the old block, so answer a new demand from the current
+                // declarations before deciding whether this row needs the host computation.
+                bool refreshed_declarations = false;
+                if (declarations_changed_during_apply(StyleNodeID { reaction.style_node })
+                    && !element->has_associated_animations()) {
+                    auto demand = document.style_computer().style_engine().answer_record_demand(
+                        StyleNodeID { reaction.style_node }, {}, false, true);
+                    if (demand.record.style_record) {
+                        reaction.new_style_record = demand.record.style_record;
+                        reaction.uses_substitution = demand.record.uses_substitution;
+                        reaction.damage = StyleEngineFFI::FfiStyleDeltaDamage::Full;
+                        DOM::Element::EnginePseudoElementRecords pseudo_element_records {};
+                        for (size_t kind = 0; kind < array_size(demand.record.pseudo_records); ++kind) {
+                            if ((demand.record.pseudo_records_present >> kind) & 1)
+                                pseudo_element_records[kind] = StyleRecordID { demand.record.pseudo_records[kind] };
+                        }
+                        retried_pseudo_element_records = pseudo_element_records;
+                        refreshed_declarations = true;
+                    }
+                }
                 auto pseudo_element_records = retried_pseudo_element_records.value_or({});
                 for (auto next = reaction_index + 1; next < reactions.size() && reactions[next].style_node == published_reaction.style_node && reactions[next].pseudo_kind != NumericLimits<u8>::max(); ++next)
                     pseudo_element_records[reactions[next].pseudo_kind] = StyleRecordID { reactions[next].new_style_record };
@@ -1060,10 +1081,10 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 verify_base_without_effects = animation_plan.has_value() || element->has_relevant_animations()
                     || element->has_associated_animations();
                 if (!engine_computed_record_environment_is_installable(*element, StyleRecordID { reaction.new_style_record })
-                    || declarations_changed_during_apply(StyleNodeID { reaction.style_node })) {
+                    || (declarations_changed_during_apply(StyleNodeID { reaction.style_node }) && !refreshed_declarations)) {
                     // The engine resolved the record's environment over the parent's own; when the
-                    // parent's inheritable environment differs, C++ computes the style. So it does
-                    // when a host rewrote the element's declarations after the engine computed it.
+                    // parent's inheritable environment differs, C++ computes the style. It also
+                    // does so when the fresh demand for changed declarations was declined.
                     document.style_computer().style_engine().consume_recorded_element_style_input_change(reaction.style_node);
                     StyleEngineFFI::style_engine_native_container_effects_release(StyleEngineFFI::style_engine_take_container_effects(document.style_computer().style_engine().rust_handle(), reaction.style_node).effects);
                     for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
