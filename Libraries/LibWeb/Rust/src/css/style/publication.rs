@@ -2290,11 +2290,18 @@ impl RetainedState {
                 .winner_in_state(state, prop::CONTENT)
                 .and_then(|winner| self.winner_groups.resolved_winner(winner))
                 .is_some_and(|winner| match self.specified_values.value(winner.key.value) {
+                    // The final content value is checked after substitution in the winner
+                    // store. Its unresolved spelling cannot decide computability yet.
                     Lookup::Known(value) => {
                         content_value_is_engine_computable(value) || matches!(value, StyleValueData::Unresolved { .. })
                     }
                     _ => false,
                 });
+        }
+        // A first style has no before-change style, so transition declarations start no step.
+        // Their computed values still enter the record's animation group for later changes.
+        if longhand_only_declares_a_css_transition(property) {
+            return false;
         }
         // An anchor name is one the host registers from whichever record it installs, a first
         // record included: `Element::update_anchor_name_registry` runs on that install too.
