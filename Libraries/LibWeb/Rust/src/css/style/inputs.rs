@@ -1878,6 +1878,7 @@ impl StyleEngineState {
                 custom_property_registry: None,
                 frozen_longhand_inputs: HashMap::default(),
                 element_custom_property_data: HashMap::default(),
+                sampled_custom_property_environments: HashMap::default(),
                 legacy_finalized_longhand_rows: HashMap::default(),
                 font_resolution: None,
                 font_face_snapshot: None,
@@ -2721,6 +2722,7 @@ impl StyleEngineState {
                 // An identity can be minted again for another element, so a retained environment
                 // must not outlive the element that installed it.
                 self.retained.element_custom_property_data.remove(&node);
+                self.retained.sampled_custom_property_environments.remove(&node);
             }
             self.retained
                 .tree
