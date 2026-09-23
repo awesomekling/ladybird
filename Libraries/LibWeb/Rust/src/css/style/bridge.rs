@@ -327,6 +327,10 @@ pub struct FfiDocumentStyleComputationInputs {
     pub document_base_url_length: usize,
     pub style_sheet_resource_contexts: FfiHostHandle,
     pub style_sheet_resource_context_count: usize,
+    /// The style update's media snapshot, copied at the transaction boundary.
+    pub media_feature_values: FfiHostHandle,
+    pub media_feature_value_count: usize,
+    pub media_length_resolution_context: FfiHostHandle,
 }
 
 /// One style sheet's resource context, keyed by the identity of its native sheet: the base URL a
@@ -371,6 +375,9 @@ impl Default for FfiDocumentStyleComputationInputs {
             document_base_url_length: 0,
             style_sheet_resource_contexts: FfiHostHandle { address: 0 },
             style_sheet_resource_context_count: 0,
+            media_feature_values: FfiHostHandle { address: 0 },
+            media_feature_value_count: 0,
+            media_length_resolution_context: FfiHostHandle { address: 0 },
         }
     }
 }
@@ -3402,6 +3409,27 @@ pub unsafe extern "C" fn style_engine_node_record_reads_attributes(engine: *cons
         })
 }
 
+/// Which `if()` and `inherit()` substitutions the node's custom declarations read, including
+/// pseudo-elements that were resolved with the originating element's environment.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_node_record_custom_condition_usage(engine: *const c_void, node: u32) -> u8 {
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return 0;
+    };
+    let groups = engine.current_winner_groups();
+    let mut usage = engine.retained.custom_declarations_condition_usage(node, None);
+    for (pseudo, _, _, _) in groups.pseudo_states(node) {
+        if let Ok(kind) = u8::try_from(pseudo.kind.0) {
+            usage |= engine.retained.custom_declarations_condition_usage(node, Some(kind));
+        }
+    }
+    usage
+}
+
 /// The raw custom-property environment identity a style record was published with.
 ///
 /// # Safety
@@ -4362,6 +4390,8 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     let resource_contexts =
         unsafe { super::resource_contexts::DocumentResourceContexts::take_from(&mut computation_inputs) };
+    engine.document_media_snapshot =
+        unsafe { super::custom_property_cascade::DocumentMediaSnapshot::take_from(&mut computation_inputs) };
     let resource_contexts_moved = engine.document_resource_contexts.moved_for_records(&resource_contexts);
     engine.document_resource_contexts = resource_contexts;
     engine.custom_property_registrations_changed = engine.document_style_computation_inputs.is_some_and(|previous| {
