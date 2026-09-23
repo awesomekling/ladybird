@@ -12,7 +12,9 @@
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
+#include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Element.h>
 
 namespace Web::CSS {
 
@@ -75,7 +77,28 @@ NonnullRefPtr<StyleValue const> inherited_custom_property_value(Optional<CustomP
             //     contains a value which inherits a different, not yet computed, custom property's value.
 
             // FIXME: We probably need to compute this against the declaring element rather than the parent element.
-            auto computed_parent_value = element.document().style_computer().compute_value_of_custom_property(computed_style_for_custom_property_resolution, element_to_inherit_style_from.value(), name);
+            RefPtr<StyleValue const> computed_parent_value;
+            if (element_to_inherit_style_from->has<DOM::AbstractElement>()) {
+                auto const& parent = element_to_inherit_style_from->get<DOM::AbstractElement>();
+                if (!parent.pseudo_element().has_value()) {
+                    auto& style_computer = const_cast<DOM::Document&>(element.document()).style_computer();
+                    auto answer = style_computer.style_engine().answer_record_demand(parent.element().style_node_id(), {}, false, false, true);
+                    if (answer.record.style_record) {
+                        bool installable = false;
+                        auto environment = parent.element().custom_property_environment_of_engine_record(StyleRecordID { answer.record.style_record }, installable);
+                        if (installable) {
+                            if (environment) {
+                                if (auto const* property = environment->get(name))
+                                    computed_parent_value = property->value;
+                            }
+                            if (!computed_parent_value)
+                                computed_parent_value = initial_custom_property_value(parent.document().get_registered_custom_property(name), parent.document());
+                        }
+                    }
+                }
+            }
+            if (!computed_parent_value)
+                computed_parent_value = element.document().style_computer().compute_value_of_custom_property(computed_style_for_custom_property_resolution, element_to_inherit_style_from.value(), name);
 
             // https://drafts.csswg.org/css-mixins/#resolve-function-styles
             // inherit
