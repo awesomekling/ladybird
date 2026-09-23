@@ -420,10 +420,10 @@ impl RetainedState {
                     && effects
                         .clone()
                         .all(|row| row.owned_css_animation_index(node, kind + 1).is_some());
-                // With no composition in the old record, the host runs the pseudo's transition step
-                // against that record when it installs the driven one.
-                let transition_step_on_install = view.animated_overlay.is_null()
-                    && kind != BACKDROP
+                // The host runs the pseudo's transition step when it installs the driven record,
+                // against the old record as the before-change style, including any composition it
+                // holds: running transitions are retargeted or cancelled from there.
+                let transition_step_on_install = kind != BACKDROP
                     && effects.clone().all(|row| {
                         row.is_css_transition()
                             || (replans_css_animations && row.owned_css_animation_index(node, kind + 1).is_some())
