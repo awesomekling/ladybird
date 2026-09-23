@@ -979,16 +979,37 @@ impl RetainedState {
         // A remaining-phase delta can derive the new base beneath an existing WAAPI
         // composition. The host samples the effect again after installing this base, including
         // when the moved property is animated. A full drive still needs dependent-value closure.
-        let derived_beneath_a_composition = animations_bind_the_record
-            && !requires_full_drive
+        // Font-phase and box-type effects change how later values are finalized. Their sampled
+        // values need a composed drive rather than a base drive followed by a simple resample.
+        let full_waapi_drive_beneath_a_composition = animations_bind_the_record
+            && requires_full_drive
             && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
-            && self.animation_base_inherits_from_current_parent(node, state, old_style_record)
             && self.computed_group_sets.node_has_animation_overlay(node)
-            && (!self.css_defined_animations.node_runs_a_css_animation(node)
-                || (self.animation_keyframes().only_the_document_scope_defines_keyframes()
-                    && !delta
-                        .properties()
-                        .contains(&crate::css::property_metadata::property_id::ANIMATION_FILL_MODE)));
+            && !self.css_defined_animations.node_runs_a_css_animation(node)
+            && !self.record_transition_facts(old_style_record, &[]).0
+            && !has_registered_declarations
+            && self
+                .computed_group_sets
+                .style_record_view(old_style_record.raw())
+                .and_then(|view| unsafe { view.animated_overlay.as_ref() })
+                .is_some_and(|overlay| {
+                    overlay.entries().iter().all(|entry| {
+                        !entry.result_of_transition
+                            && property_computes_in_remaining_phase(entry.property)
+                            && !property_feeds_box_type_transformation(entry.property)
+                    })
+                });
+        let derived_beneath_a_composition = full_waapi_drive_beneath_a_composition
+            || animations_bind_the_record
+                && !requires_full_drive
+                && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
+                && self.animation_base_inherits_from_current_parent(node, state, old_style_record)
+                && self.computed_group_sets.node_has_animation_overlay(node)
+                && (!self.css_defined_animations.node_runs_a_css_animation(node)
+                    || (self.animation_keyframes().only_the_document_scope_defines_keyframes()
+                        && !delta
+                            .properties()
+                            .contains(&crate::css::property_metadata::property_id::ANIMATION_FILL_MODE)));
         let animations_bind_the_record = animations_bind_the_record && !derived_beneath_a_composition;
         if animations_bind_the_record {
             counters.bump(Counter::EngineComputedRecordBailWinnerElement);
