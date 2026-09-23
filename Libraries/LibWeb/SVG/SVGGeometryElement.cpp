@@ -5,9 +5,13 @@
  */
 
 #include <LibGC/Heap.h>
+#include <LibWeb/CSS/CSSStyleProperties.h>
+#include <LibWeb/CSS/RustDeclarationBlock.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Window.h>
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/SVG/SVGGeometryElement.h>
 
@@ -29,6 +33,32 @@ CSS::ElementBoxKind SVGGeometryElement::box_kind() const
     return CSS::ElementBoxKind::SvgGeometry;
 }
 
+// The style of an element outside the document, where no rule reaches it: the style engine cascades its own
+// presentation attributes and inline style over the initial values. The record comes back pinned for the caller.
+static CSS::StyleRecordID declared_only_style_record(CSS::StyleComputer& style_computer, DOM::Document const& document, SVGGeometryElement& element)
+{
+    auto hints = CSS::StyleComputer::collect_presentational_hint_properties({ element });
+    Vector<CSS::Parser::ValueParserFFI::FfiDeclaredProperty> declarations;
+    declarations.ensure_capacity(hints.size());
+    for (auto const& hint : hints) {
+        declarations.unchecked_append({
+            .property_id = to_underlying(hint.property_id),
+            .important = hint.important == CSS::Important::Yes,
+            .value = hint.value->rust_style_value_data(),
+            .name = {},
+        });
+    }
+    auto inline_style = element.inline_style();
+    return CSS::StyleRecordID { CSS::StyleEngineFFI::style_engine_declared_only_record(
+        style_computer.style_engine().rust_handle(),
+        document.style_node_id().value(),
+        CSS::element_box_type_adjustment_facts(element),
+        CSS::StyleEngineFFI::FfiElementDeclarationKind::SvgPresentationAttribute,
+        declarations.data(),
+        declarations.size(),
+        inline_style ? inline_style->declaration_block().handle() : nullptr) };
+}
+
 // https://w3c.github.io/svgwg/svg2-draft/types.html#__svg__SVGGeometryElement__getTotalLength
 WebIDL::ExceptionOr<float> SVGGeometryElement::get_total_length()
 {
@@ -47,8 +77,23 @@ WebIDL::ExceptionOr<float> SVGGeometryElement::get_total_length()
     if (auto computed_values = computed_style())
         return get_path({ viewport_size.width(), viewport_size.height() }, *computed_values).length();
 
-    auto transient_values = document().style_computer().materialize_style_record({ *this });
-    return get_path({ viewport_size.width(), viewport_size.height() }, *transient_values).length();
+    // NB: An element with no style is either in a subtree that is not rendered, which the style engine answers
+    //     without installing anything, or outside the document, where no rule reaches it. The engine of the window's
+    //     document computes the latter, as an element's own document may never have been styled, like the one
+    //     holding a template's contents.
+    auto is_detached = style_node_id() == CSS::StyleNodeID {};
+    auto& style_document = is_detached ? HTML::relevant_window(*this).associated_document() : document();
+    auto& style_computer = style_document.style_computer();
+    auto record = is_detached
+        ? declared_only_style_record(style_computer, style_document, *this)
+        : CSS::StyleRecordID { style_computer.style_engine().answer_record_demand(style_node_id(), {}, false, false, true).record.style_record };
+    auto view = style_computer.computed_style_record_view(record);
+    // NB: The view holds its own pin on the record the engine pinned for us.
+    if (is_detached && !!record)
+        style_computer.unpin_style_record(record);
+    if (!view)
+        return 0;
+    return get_path({ viewport_size.width(), viewport_size.height() }, *view).length();
 }
 
 GC::Ref<Geometry::DOMPoint> SVGGeometryElement::get_point_at_length(float distance)

@@ -1139,6 +1139,19 @@ impl StyleEngine {
         )
     }
 
+    pub(crate) fn declared_only_record(
+        &mut self,
+        subject: StyleNodeID,
+        facts: u32,
+        declarations: &[(
+            super::transaction::ElementDeclarationKind,
+            &crate::css::declaration_block::DeclaredProperty,
+        )],
+    ) -> Option<super::computed::FinalStyleRecordID> {
+        self.state
+            .declared_only_record(subject, facts, declarations, &mut self.counters)
+    }
+
     /// Settle the pseudo-element records of an element whose record C++ just installed.
     #[inline]
     pub(crate) fn settle_pseudo_records_after_host_record(
