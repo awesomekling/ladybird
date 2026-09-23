@@ -1051,10 +1051,14 @@ impl RetainedState {
                             && !property_feeds_box_type_transformation(entry.property)
                     })
                 });
+        // The first-record gate excludes keyframes that need host resolution. For a leaf, only
+        // the rules its own names run matter.
+        let is_leaf = self.tree.flat_tree_children(node).next().is_none();
+        let css_keyframes_are_engine_computable = self.animation_keyframes().a_first_record_may_start_an_animation()
+            || (is_leaf && self.warm_record_names_engine_computable_animations(state));
         let full_css_drive_beneath_a_composition = full_drive_beneath_a_composition
             && self.css_defined_animations.node_runs_a_css_animation(node)
-            // The existing first-record gate also excludes keyframes that need host resolution.
-            && self.animation_keyframes().a_first_record_may_start_an_animation()
+            && css_keyframes_are_engine_computable
             && !delta
                 .properties()
                 .contains(&crate::css::property_metadata::property_id::ANIMATION_FILL_MODE);
@@ -1078,10 +1082,10 @@ impl RetainedState {
         let css_base_without_an_overlay = animations_bind_the_record
             && !self.computed_group_sets.node_has_animation_overlay(node)
             && self.css_defined_animations.node_runs_a_css_animation(node)
-            && self.animation_keyframes().a_first_record_may_start_an_animation()
+            && css_keyframes_are_engine_computable
             && !self.record_transition_facts(old_style_record, &[]).0
             && !has_registered_declarations
-            && self.tree.flat_tree_children(node).next().is_none();
+            && is_leaf;
         // An element whose Web Animations hold no sampled overlay has the old record as its base.
         // A leaf's new base is driven like any other record, and the host samples the effects
         // over it. An element with children stays in C++: an effect on an inherited custom
@@ -1110,11 +1114,11 @@ impl RetainedState {
             && !self.computed_group_sets.node_has_animation_overlay(node)
             && !self.record_holds_an_animation_overlay(old_style_record)
             && !self.css_defined_animations.node_runs_a_css_animation(node)
-            && (!names_an_animation || self.animation_keyframes().a_first_record_may_start_an_animation())
+            && (!names_an_animation || css_keyframes_are_engine_computable)
             && self.effects_sample_over_a_new_base(node)
             && !self.record_transition_facts(old_style_record, &[]).0
             && !has_registered_declarations
-            && self.tree.flat_tree_children(node).next().is_none();
+            && is_leaf;
         let derived_beneath_a_composition = css_animation_plan_without_an_overlay
             || css_base_without_an_overlay
             || effect_base_without_an_overlay
@@ -1939,6 +1943,23 @@ impl RetainedState {
     /// Check the names this first record actually starts when another keyframes rule in the
     /// document prevents the document-wide first-record shortcut.
     fn cold_record_names_engine_computable_animations(&self, state: CascadeStateID) -> bool {
+        self.state_names_only_keyframes(state, |set| !set.needs_the_host && !set.declares_an_inherited_property)
+    }
+
+    /// Check the names a later record runs. Its descendants already hold records of their own and
+    /// take an animated value through the overlay's invalidation, so only host resolution binds it,
+    /// and a container unit, whose basis a sample outside the computation cannot read.
+    fn warm_record_names_engine_computable_animations(&self, state: CascadeStateID) -> bool {
+        self.state_names_only_keyframes(state, |set| {
+            !set.needs_the_host && !description_reads_container_units(&set.description)
+        })
+    }
+
+    fn state_names_only_keyframes(
+        &self,
+        state: CascadeStateID,
+        accepts: impl Fn(&animations::PublishedKeyframesSet) -> bool,
+    ) -> bool {
         if !self.animation_keyframes().only_the_document_scope_defines_keyframes() {
             return false;
         }
@@ -1965,7 +1986,7 @@ impl RetainedState {
                 };
                 self.animation_keyframes()
                     .resolve(0, tree::TreeScopeID::DOCUMENT, name)
-                    .is_none_or(|set| !set.needs_the_host && !set.declares_an_inherited_property)
+                    .is_none_or(&accepts)
             })
     }
 
@@ -2738,6 +2759,7 @@ impl RetainedState {
             .iter()
             .all(|effect| {
                 effect.is_covered()
+                    && !description_reads_container_units(effect)
                     && effect.flags & animations::effect_flag::IS_TRANSITION == 0
                     && !effect.declares_custom_properties()
                     && effect.keyframes.iter().all(|keyframe| {
@@ -6595,6 +6617,15 @@ fn shorthand_longhand_value(
 
 /// Whether a longhand computes in the drive's remaining phase: after the font, line-height and
 /// color-scheme stages, whose outputs the engine does not derive itself yet.
+fn description_reads_container_units(description: &animations::PublishedEffect) -> bool {
+    description.declarations.iter().any(|declaration| {
+        declaration.value.optional_data().is_some_and(|data| {
+            crate::css::style_compute::collect_external_value_dependencies(data).container_relative_length_unit_mask
+                != 0
+        })
+    })
+}
+
 fn property_computes_in_remaining_phase(property: u16) -> bool {
     use crate::css::property_metadata::{FIRST_LONGHAND_PROPERTY_ID, LONGHAND_WORD_COUNT};
     use crate::css::style_compute::{LONGHAND_DRIVE_PHASE_REMAINING, property_computation_order_for_phase};
