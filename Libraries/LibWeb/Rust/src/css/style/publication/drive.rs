@@ -59,6 +59,24 @@ struct PendingFontDrive {
 }
 
 impl RetainedState {
+    fn container_unit_bases(
+        &self,
+        node: StyleNodeID,
+        mask: u8,
+        inline_axis_is_horizontal: bool,
+        inputs: &bridge::FfiDocumentStyleComputationInputs,
+    ) -> (
+        Option<animations::ContainerUnitBasis>,
+        Option<animations::ContainerUnitBasis>,
+    ) {
+        let (needs_width, needs_height) =
+            crate::css::style_compute::container_relative_axes_needed(mask, inline_axis_is_horizontal);
+        (
+            needs_width.then(|| self.container_unit_basis(node, true, inputs.viewport_width)),
+            needs_height.then(|| self.container_unit_basis(node, false, inputs.viewport_height)),
+        )
+    }
+
     /// Run the drive's remaining phase for the selected longhands over a copy of the node's
     /// current table, against the record's own font metrics, the document's computation inputs
     /// and the parent's record. The required driver inputs recompute on every drive and their
@@ -110,6 +128,7 @@ impl RetainedState {
     )> {
         let random_base_values = store.drive_random_base_values(self, node)?;
         let resource_contexts = store.drive_resource_contexts(self);
+        let container_unit_mask = store.container_relative_length_unit_mask(self);
         let document_base_url = &self.document_resource_contexts.document_base_url;
         let store = store.view(self);
         use crate::css::computed_value_types::{STYLE_GROUP_INDEX_FONT, STYLE_GROUP_INDEX_INHERITED_BOX};
@@ -159,6 +178,12 @@ impl RetainedState {
                 .cast::<crate::css::computed_values::InheritedBoxValues>()
                 .deref()
         };
+        let (width_basis, height_basis) = self.container_unit_bases(
+            node,
+            container_unit_mask,
+            inherited_box.writing_mode == crate::css::css_enums::writing_mode::HORIZONTAL_TB,
+            inputs,
+        );
         let mut resolved_viewport_relative_length = false;
         let length = FfiLengthResolutionContext {
             viewport_width: inputs.viewport_width,
@@ -180,12 +205,14 @@ impl RetainedState {
             },
             font_metrics_depend_on_viewport_metrics: view.dependency_flags & (1 << 1) != 0,
             root_font_metrics_depend_on_viewport_metrics: inputs.root_font_metrics_depend_on_viewport_metrics,
-            has_container_width_basis: false,
-            has_container_height_basis: false,
-            container_width_basis: 0.0,
-            container_height_basis: 0.0,
-            container_width_basis_depends_on_viewport_metrics: false,
-            container_height_basis_depends_on_viewport_metrics: false,
+            has_container_width_basis: width_basis.is_some(),
+            has_container_height_basis: height_basis.is_some(),
+            container_width_basis: width_basis.map_or(0.0, |basis| basis.basis),
+            container_height_basis: height_basis.map_or(0.0, |basis| basis.basis),
+            container_width_basis_depends_on_viewport_metrics: width_basis
+                .is_some_and(|basis| basis.depends_on_viewport_metrics),
+            container_height_basis_depends_on_viewport_metrics: height_basis
+                .is_some_and(|basis| basis.depends_on_viewport_metrics),
             subject_inline_axis_is_horizontal: inherited_box.writing_mode
                 == crate::css::css_enums::writing_mode::HORIZONTAL_TB,
             resolved_viewport_relative_length: &raw mut resolved_viewport_relative_length,
@@ -341,6 +368,7 @@ impl RetainedState {
     )> {
         let random_base_values = store.drive_random_base_values(self, subject.target.node())?;
         let resource_contexts = store.drive_resource_contexts(self);
+        let container_unit_mask = store.container_relative_length_unit_mask(self);
         let document_base_url = &self.document_resource_contexts.document_base_url;
         let store = store.view(self);
         use crate::css::computed_value_types::{STYLE_GROUP_INDEX_FONT, STYLE_GROUP_INDEX_INHERITED_BOX};
@@ -554,6 +582,12 @@ impl RetainedState {
             };
             inherited_box.writing_mode == crate::css::css_enums::writing_mode::HORIZONTAL_TB
         });
+        let (width_basis, height_basis) = self.container_unit_bases(
+            subject.target.node(),
+            container_unit_mask,
+            subject_inline_axis_is_horizontal,
+            inputs,
+        );
         let document_root_font_metrics = FfiFontMetrics {
             font_size: inputs.root_font_size,
             x_height: inputs.root_font_x_height,
@@ -606,12 +640,14 @@ impl RetainedState {
                 root_font_metrics,
                 font_metrics_depend_on_viewport_metrics,
                 root_font_metrics_depend_on_viewport_metrics,
-                has_container_width_basis: false,
-                has_container_height_basis: false,
-                container_width_basis: 0.0,
-                container_height_basis: 0.0,
-                container_width_basis_depends_on_viewport_metrics: false,
-                container_height_basis_depends_on_viewport_metrics: false,
+                has_container_width_basis: width_basis.is_some(),
+                has_container_height_basis: height_basis.is_some(),
+                container_width_basis: width_basis.map_or(0.0, |basis| basis.basis),
+                container_height_basis: height_basis.map_or(0.0, |basis| basis.basis),
+                container_width_basis_depends_on_viewport_metrics: width_basis
+                    .is_some_and(|basis| basis.depends_on_viewport_metrics),
+                container_height_basis_depends_on_viewport_metrics: height_basis
+                    .is_some_and(|basis| basis.depends_on_viewport_metrics),
                 subject_inline_axis_is_horizontal,
                 resolved_viewport_relative_length: resolved_viewport_relative_length_pointer,
             };

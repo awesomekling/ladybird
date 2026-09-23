@@ -92,6 +92,64 @@ impl RetainedState {
         noted.effects.extend(verdict.effects.iter().cloned());
     }
 
+    pub(crate) fn note_container_unit_effects_for_host(
+        &mut self,
+        node: StyleNodeID,
+        record: computed::FinalStyleRecordID,
+        mask: u8,
+    ) {
+        if mask == 0 {
+            return;
+        }
+        let Some(inputs) = self.document_style_computation_inputs else {
+            return;
+        };
+        let Some(payloads) = self.computed_group_sets.style_record_payloads(record.raw()) else {
+            return;
+        };
+        let inherited_box = unsafe {
+            payloads[crate::css::computed_value_types::STYLE_GROUP_INDEX_INHERITED_BOX]
+                .cast::<crate::css::computed_values::InheritedBoxValues>()
+                .deref()
+        };
+        let inline_axis_is_horizontal =
+            inherited_box.writing_mode == crate::css::css_enums::writing_mode::HORIZONTAL_TB;
+        let (needs_width, needs_height) =
+            crate::css::style_compute::container_relative_axes_needed(mask, inline_axis_is_horizontal);
+        let mut verdict = ContainerVerdict {
+            depends_on_size: true,
+            ..Default::default()
+        };
+        for basis in [
+            needs_width.then(|| self.container_unit_basis(node, true, inputs.viewport_width)),
+            needs_height.then(|| self.container_unit_basis(node, false, inputs.viewport_height)),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if let Some(container) = basis.container {
+                verdict
+                    .effects
+                    .push((container.raw(), FfiContainerEffectKind::SizeContainerUsage, Vec::new()));
+                if basis.container_has_no_box {
+                    verdict.effects.push((
+                        container.raw(),
+                        FfiContainerEffectKind::NeedsEvaluationAfterLayout,
+                        Vec::new(),
+                    ));
+                }
+            }
+            if basis.depends_on_viewport_metrics {
+                verdict.effects.push((
+                    node.raw(),
+                    FfiContainerEffectKind::SubjectViewportDependency,
+                    Vec::new(),
+                ));
+            }
+        }
+        self.note_container_effects_for_host(node, &verdict);
+    }
+
     /// Whether the winners published for a node hold a rule's container conditions: an element's
     /// winners hold a gated rule where its conditions held when they were published, and the record
     /// loop checks that they still do, including the originating element's pseudo-elements.

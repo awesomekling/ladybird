@@ -114,6 +114,13 @@ impl WinnerStore {
             + self.by_property.capacity() * size_of::<u16>()) as u64
     }
 
+    pub(super) fn container_relative_length_unit_mask(&self, engine: &RetainedState) -> u8 {
+        let view = self.view(engine);
+        self.declarations.iter().fold(0, |mask, declaration| {
+            mask | view.dependencies(declaration).container_relative_length_unit_mask
+        })
+    }
+
     pub(super) fn view<'a>(&'a self, engine: &'a RetainedState) -> WinnerView<'a> {
         WinnerView { store: self, engine }
     }

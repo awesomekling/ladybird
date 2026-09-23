@@ -2276,6 +2276,18 @@ impl super::StyleEngine {
         axis_is_horizontal: bool,
         viewport: f64,
     ) -> ContainerUnitBasis {
+        self.retained
+            .container_unit_basis(subject, axis_is_horizontal, viewport)
+    }
+}
+
+impl super::RetainedState {
+    pub(crate) fn container_unit_basis(
+        &self,
+        subject: StyleNodeID,
+        axis_is_horizontal: bool,
+        viewport: f64,
+    ) -> ContainerUnitBasis {
         let mut ancestor = self.tree().flat_tree_parent(subject);
         while let Some(node) = ancestor {
             ancestor = self.tree().flat_tree_parent(node);
@@ -2294,7 +2306,7 @@ impl super::StyleEngine {
             if !eligible {
                 continue;
             }
-            let snapshot = self.layout_style_snapshot(node).unwrap_or_default();
+            let snapshot = self.layout_style_snapshots.row(node).unwrap_or_default();
             if !snapshot.has_committed_box {
                 return ContainerUnitBasis {
                     basis: 0.0,
