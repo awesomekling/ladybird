@@ -910,17 +910,31 @@ impl RetainedState {
                         self.note_engine_computed_record(node, delta, (generation, state), 0, 0, counters);
                         return Some(delta);
                     }
-                    // The record the row answers with has to be one the host can still read when
-                    // the batch installs it. An animation overlay's record lives in a slot the next
-                    // sampling of that animation releases, and a sampling runs between the flush
-                    // that settles this row and the batch that applies it: answering with one hands
-                    // the element a record that has stopped existing. The style beneath it is not an
-                    // answer either - installing it would drop the animation for a frame.
-                    if !record_may_stand_while_animating
-                        || computed::ComputedGroupSets::record_is_animation_overlay(old_style_record.raw())
-                    {
+                    // An animation overlay's record lives in a slot the next sample releases.
+                    // Keep a WAAPI composition alive through installation and sample it again
+                    // afterwards, so the row can answer with the current composition.
+                    if !record_may_stand_while_animating {
                         counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
                         return None;
+                    }
+                    if computed::ComputedGroupSets::record_is_animation_overlay(old_style_record.raw()) {
+                        let waapi_composition = facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
+                            && !self.css_defined_animations.node_runs_a_css_animation(node)
+                            && !self.record_transition_facts(old_style_record, &[]).0
+                            && self
+                                .computed_group_sets
+                                .style_record_view(old_style_record.raw())
+                                .and_then(|view| unsafe { view.animated_overlay.as_ref() })
+                                .is_some_and(|overlay| {
+                                    overlay.entries().iter().all(|entry| !entry.result_of_transition)
+                                });
+                        if !waapi_composition {
+                            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
+                            return None;
+                        }
+                        self.computed_group_sets.pin_style_record(old_style_record.raw());
+                        self.batch_pinned_compositions.push((node, old_style_record.raw()));
+                        self.nodes_owing_an_animation_sample.insert(node);
                     }
                     counters.bump(Counter::EngineComputedRecordUnchangedWinners);
                     counters.bump(Counter::CascadeWinnerDeltaStops);

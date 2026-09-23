@@ -116,6 +116,8 @@ extern "C" void rust_style_seal_flush_census_for_update();
 
 namespace Web::CSS {
 
+bool deferring_engine_pseudo_installation();
+
 static thread_local bool g_reference_style_without_effects = false;
 
 void set_reference_style_without_effects(bool);
@@ -1947,7 +1949,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_sett
     // The published values reach the element's pseudo-elements and its flat-tree descendants the
     // way an animation refresh's do: the descendants as one feedback batch the ordinary transaction
     // materializes, the pseudo-elements here.
-    if (!abstract_element.pseudo_element().has_value() && invalidation.inherited_style_changed())
+    if (!abstract_element.pseudo_element().has_value() && invalidation.inherited_style_changed() && !deferring_engine_pseudo_installation())
         invalidation |= element.recompute_pseudo_element_styles();
     auto inherited_style_groups = invalidation.inherited_style_groups_changed();
     if (!invalidation.inherited_style_changed()) {

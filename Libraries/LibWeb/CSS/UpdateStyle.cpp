@@ -36,6 +36,14 @@
 namespace Web::CSS {
 
 void set_reference_style_without_effects(bool);
+bool deferring_engine_pseudo_installation();
+
+static thread_local bool g_deferring_engine_pseudo_installation = false;
+
+bool deferring_engine_pseudo_installation()
+{
+    return g_deferring_engine_pseudo_installation;
+}
 
 using StyleUpdateMode = DOM::Document::StyleUpdateMode;
 
@@ -1043,6 +1051,13 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     bool const defer_final_comparison = !verify_base_without_effects
                         && (element->has_relevant_animations() || element->has_associated_animations()
                             || row_effect_debt & (StyleEngine::SettledRowTransitionDebt | StyleEngine::SettledRowOwesAnAnimationSample));
+                    bool const defer_pseudos = verify_base_without_effects
+                        || row_effect_debt & (StyleEngine::SettledRowTransitionDebt | StyleEngine::SettledRowOwesAnAnimationSample);
+                    auto old_originating_style = element->computed_style();
+                    bool const old_is_list_item = old_originating_style && old_originating_style->display().is_list_item();
+                    auto const previous_pseudo_deferral = g_deferring_engine_pseudo_installation;
+                    g_deferring_engine_pseudo_installation = defer_pseudos;
+                    ScopeGuard restore_pseudo_deferral = [&] { g_deferring_engine_pseudo_installation = previous_pseudo_deferral; };
                     apply_engine_computed_records(pseudo_element_records, false, defer_final_comparison);
                     DOM::AbstractElement settled { *element };
                     if (animation_plan.has_value())
@@ -1075,8 +1090,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     bool const has_animation_effects = element->has_relevant_animations() || element->has_associated_animations();
                     if (settled.has_style() && (has_animation_effects || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
                         sample_animations_for_installed_record(settled);
-                    if (has_animation_effects || installed_pseudo_animation_plan)
-                        sample_animations_for_installed_pseudos(*element);
                     // Under verification the reference computation ran the step too, and then
                     // the engine record replaced what it published: the drain decides again,
                     // which the stabilization epoch is built to take, and publishes what it starts.
@@ -1103,6 +1116,22 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     // that point so transition selection can still read its before-change style.
                     document.style_computer().style_engine().set_sampled_composition_identity(
                         StyleNodeID { reaction.style_node }, element->style_record_identity());
+                    if (defer_pseudos) {
+                        auto settled_pseudos = document.style_computer().style_engine().settle_pseudo_records_after_host_record(StyleNodeID { reaction.style_node }, old_is_list_item);
+                        DOM::Element::EnginePseudoElementRecords final_pseudo_records {};
+                        for (size_t kind = 0; kind < array_size(settled_pseudos.pseudo_records); ++kind) {
+                            if ((settled_pseudos.pseudo_records_present >> kind) & 1)
+                                final_pseudo_records[kind] = StyleRecordID { settled_pseudos.pseudo_records[kind] };
+                        }
+                        g_deferring_engine_pseudo_installation = previous_pseudo_deferral;
+                        auto pseudo_invalidation = element->install_engine_pseudo_element_records_after_sample(
+                            did_change_custom_properties, old_is_list_item,
+                            old_originating_style ? &*old_originating_style : nullptr,
+                            settled_pseudos.style_record ? &final_pseudo_records : nullptr);
+                        invalidation |= pseudo_invalidation;
+                    }
+                    if (element->has_associated_animations() || installed_pseudo_animation_plan)
+                        sample_animations_for_installed_pseudos(*element);
                     document.style_computer().style_engine().acknowledge_engine_computed_record(StyleNodeID { reaction.style_node });
                     if (explicit_inheritance_debt != 0)
                         explicit_inheritance_effect_rows.append({ StyleNodeID { reaction.style_node }, explicit_inheritance_debt });
