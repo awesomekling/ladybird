@@ -1620,62 +1620,54 @@ static void apply_targeted_style_invalidation(DOM::Element& element, RequiredInv
 
 static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_update(DOM::Element& element, bool& did_change_custom_properties)
 {
+    // A targeted update only reaches connected elements, and every one of them has a parent.
     auto& style_computer = element.document().style_computer();
-    if (element.parent()) {
-        bool const was_unstyled = !element.has_style();
-        auto old_style_record = element.style_record_identity();
-        bool const had_animation_overlay = !!old_style_record
-            && style_computer.style_engine().style_record_view(old_style_record).animation_overlay_identity != 0;
-        StringView decline_cause;
-        auto invalidation = style_computer.answer_record_demand(element, did_change_custom_properties, decline_cause, {}, false, true);
-        if (invalidation.has_value()) {
-            if (had_animation_overlay
-                && style_computer.style_engine().style_record_view(element.style_record_identity()).animation_overlay_identity == 0)
-                sample_animations_for_installed_record(DOM::AbstractElement { element });
-            // A scoped read of an unstyled hidden animation target installs its
-            // base record first. Sample its effects over that record now: the
-            // document's ordinary animation tick skips hidden descendants.
-            if (was_unstyled && element.has_relevant_animations()) {
-                Animations::AnimationUpdateContext context;
-                for (auto& animation : element.associated_animations_in_composite_order()) {
-                    if (animation->is_idle() || !animation->effect() || !is<Animations::KeyframeEffect>(*animation->effect()))
-                        continue;
-                    auto& effect = static_cast<Animations::KeyframeEffect&>(*animation->effect());
-                    if (effect.target().ptr() != &element || effect.pseudo_element_type().has_value())
-                        continue;
-                    effect.update_computed_properties_for_style(context, DOM::AbstractElement { element });
-                }
+    bool const was_unstyled = !element.has_style();
+    auto old_style_record = element.style_record_identity();
+    bool const had_animation_overlay = !!old_style_record
+        && style_computer.style_engine().style_record_view(old_style_record).animation_overlay_identity != 0;
+    StringView decline_cause;
+    auto invalidation = style_computer.answer_record_demand(element, did_change_custom_properties, decline_cause, {}, false, true);
+    if (invalidation.has_value()) {
+        if (had_animation_overlay
+            && style_computer.style_engine().style_record_view(element.style_record_identity()).animation_overlay_identity == 0)
+            sample_animations_for_installed_record(DOM::AbstractElement { element });
+        // A scoped read of an unstyled hidden animation target installs its
+        // base record first. Sample its effects over that record now: the
+        // document's ordinary animation tick skips hidden descendants.
+        if (was_unstyled && element.has_relevant_animations()) {
+            Animations::AnimationUpdateContext context;
+            for (auto& animation : element.associated_animations_in_composite_order()) {
+                if (animation->is_idle() || !animation->effect() || !is<Animations::KeyframeEffect>(*animation->effect()))
+                    continue;
+                auto& effect = static_cast<Animations::KeyframeEffect&>(*animation->effect());
+                if (effect.target().ptr() != &element || effect.pseudo_element_type().has_value())
+                    continue;
+                effect.update_computed_properties_for_style(context, DOM::AbstractElement { element });
             }
-            auto const* box_values = element.style_group<ComputedValues::BoxValues>();
-            if (box_values && box_values->is_scroll_state_container && element.style_depends_on_size_container_query()) {
-                DOM::Element::EnginePseudoElementRecords pseudo_records {};
-                bool settled_pseudo = false;
-                for (auto kind : { PseudoElement::Before, PseudoElement::After, PseudoElement::FirstLetter, PseudoElement::Marker }) {
-                    auto answer = style_computer.style_engine().answer_record_demand(element.style_node_id(), to_underlying(kind), false, true, true);
-                    if (answer.decline_cause_length)
-                        continue;
-                    pseudo_records[to_underlying(kind)] = StyleRecordID { answer.record.style_record };
-                    settled_pseudo = true;
-                }
-                if (settled_pseudo)
-                    *invalidation |= element.apply_engine_computed_style_record(element.style_record_identity(), pseudo_records, false, did_change_custom_properties);
-                // The container's pseudo rules can change after its descendants finish style and
-                // layout and the scroll-state snapshot is published.
-                invalidation->recompute_descendant_styles = true;
-            }
-            return *invalidation;
         }
+        auto const* box_values = element.style_group<ComputedValues::BoxValues>();
+        if (box_values && box_values->is_scroll_state_container && element.style_depends_on_size_container_query()) {
+            DOM::Element::EnginePseudoElementRecords pseudo_records {};
+            bool settled_pseudo = false;
+            for (auto kind : { PseudoElement::Before, PseudoElement::After, PseudoElement::FirstLetter, PseudoElement::Marker }) {
+                auto answer = style_computer.style_engine().answer_record_demand(element.style_node_id(), to_underlying(kind), false, true, true);
+                if (answer.decline_cause_length)
+                    continue;
+                pseudo_records[to_underlying(kind)] = StyleRecordID { answer.record.style_record };
+                settled_pseudo = true;
+            }
+            if (settled_pseudo)
+                *invalidation |= element.apply_engine_computed_style_record(element.style_record_identity(), pseudo_records, false, did_change_custom_properties);
+            // The container's pseudo rules can change after its descendants finish style and
+            // layout and the scroll-state snapshot is published.
+            invalidation->recompute_descendant_styles = true;
+        }
+        return *invalidation;
     }
 
     style_computer.style_engine().consume_recorded_element_style_input_change(element.style_node_id());
-
-    if (element.parent())
-        return element.apply_style_engine_reaction(did_change_custom_properties);
-
-    StyleEngine::StyleRecordDelta style_record_delta {};
-    auto new_style = element.document().style_computer().materialize_style_record({ element }, did_change_custom_properties, nullptr, style_record_delta);
-    element.set_computed_style({}, style_record_delta.new_style_record);
-    return {};
+    return element.apply_style_engine_reaction(did_change_custom_properties);
 }
 
 // A targeted style update has nothing to do when every source of style work in the document is settled: A full style
