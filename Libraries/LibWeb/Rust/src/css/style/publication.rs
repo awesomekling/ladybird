@@ -908,7 +908,7 @@ impl RetainedState {
                         let delta = assembly.delta;
                         self.note_engine_computed_record(node, delta, (generation, state), 0, 0, counters);
                         if let Some(plan) = css_animation_plan {
-                            self.nodes_owing_animation_definitions.insert(node, plan);
+                            self.nodes_owing_animation_definitions.insert((node, u8::MAX), plan);
                         }
                         self.nodes_owing_an_animation_sample.insert(node);
                         return Some(delta);
