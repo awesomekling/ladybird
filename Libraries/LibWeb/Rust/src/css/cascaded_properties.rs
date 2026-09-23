@@ -1531,6 +1531,7 @@ unsafe extern "C" fn finalize_custom_property_component(
             length,
             environment,
             input.finalization_color_scheme,
+            None,
         );
         context
             .depends_on_viewport_metrics

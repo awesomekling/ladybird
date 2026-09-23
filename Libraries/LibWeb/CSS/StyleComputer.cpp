@@ -3281,9 +3281,6 @@ RefPtr<CustomPropertyData const> StyleComputer::engine_custom_property_environme
 // thing keeping it - and its parent chain - alive.
 void StyleComputer::sweep_custom_property_environments() const
 {
-    // The memo of what a declaration list resolves to holds environments too, so it goes first or
-    // nothing below it is ever the last reference.
-    m_registered_custom_property_parses.clear();
     m_custom_property_environments.remove_all_matching([](auto&, Vector<NonnullRefPtr<CustomPropertyData const>>& bucket) {
         bucket.remove_all_matching([](auto const& data) { return data->ref_count() == 1; });
         return bucket.is_empty();
@@ -6770,45 +6767,6 @@ NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::compute_properties(DOM::Ab
     return native_context.state->working_set;
 }
 
-static NonnullRefPtr<StyleValue const> resolve_css_wide_keyword_for_custom_property(Optional<CustomPropertyRegistration const&> registration, AbstractOrHypotheticalElement const& element, Utf16FlyString const& name, NonnullRefPtr<StyleValue const> keyword_value, ComputedStyleWorkingSet const* computed_style_for_custom_property_resolution)
-{
-    VERIFY(keyword_value->is_css_wide_keyword());
-
-    // https://drafts.csswg.org/css-mixins/#resolve-function-styles
-    // On result, all CSS-wide keywords are left unresolved.
-    if (name == "result"_utf16_fly_string)
-        return keyword_value;
-
-    if (keyword_value->is_initial())
-        return initial_custom_property_value(registration, element.document());
-
-    if (keyword_value->is_inherit())
-        return inherited_custom_property_value(registration, element, name, computed_style_for_custom_property_resolution);
-
-    // https://drafts.csswg.org/css-mixins/#resolve-function-styles
-    // NB: When resolving function styles (i.e. when we have a hypothetical element), all CSS-wide keywords other than
-    //     inherit and initial resolve to the guaranteed-invalid value.
-    if (element.has<HypotheticalElement*>())
-        return StyleValue::create_guaranteed_invalid();
-
-    // Unset is the same as inherit for inherited properties, and by default all unregistered custom properties inherit.
-    if (keyword_value->is_unset())
-        return registration.has_value() && !registration->inherit
-            ? initial_custom_property_value(registration, element.document())
-            : inherited_custom_property_value(registration, element, name, computed_style_for_custom_property_resolution);
-
-    if (keyword_value->is_revert()) {
-        // FIXME: Implement reverting custom properties.
-        return keyword_value;
-    }
-    if (keyword_value->is_revert_layer()) {
-        // FIXME: Implement reverting custom properties.
-        return keyword_value;
-    }
-
-    VERIFY_NOT_REACHED();
-}
-
 NonnullRefPtr<StyleValue const> StyleComputer::resolve_unresolved_style_value(AbstractOrHypotheticalElement element, PropertyNameAndID const& property, UnresolvedStyleValue const& unresolved) const
 {
     begin_style_update();
@@ -6877,98 +6835,51 @@ NonnullRefPtr<StyleValue const> StyleComputer::resolve_unresolved_style_value(Ab
 
 NonnullRefPtr<StyleValue const> StyleComputer::finalize_custom_property_value(ComputedStyleWorkingSet const* computed_style_for_custom_property_resolution, AbstractOrHypotheticalElement const& element, Utf16FlyString const& name, NonnullRefPtr<StyleValue const> resolved_value) const
 {
-    auto& document = element.document();
-    auto registration = element.get_registered_custom_property(name);
-
-    if (resolved_value->is_css_wide_keyword())
-        resolved_value = resolve_css_wide_keyword_for_custom_property(registration, element, name, move(resolved_value), computed_style_for_custom_property_resolution);
-
-    if (resolved_value->is_unresolved() && resolved_value->as_unresolved().contains_arbitrary_substitution_function()) {
-        auto& unresolved = resolved_value->as_unresolved();
-        resolved_value = resolve_unresolved_style_value(element, PropertyNameAndID { {}, PropertyID::Custom, name }, unresolved);
-
-        // A CSS-wide keyword produced by substitution takes on that keyword's meaning for the custom property,
-        // exactly as a literally-specified one would (handled above before substitution).
-        if (resolved_value->is_css_wide_keyword())
-            resolved_value = resolve_css_wide_keyword_for_custom_property(registration, element, name, move(resolved_value), computed_style_for_custom_property_resolution);
-    }
-
-    auto invalid_custom_property_fallback_value = [&](NonnullRefPtr<StyleValue const> invalid_value) -> NonnullRefPtr<StyleValue const> {
-        // https://drafts.csswg.org/css-values-5/#invalid-substitution
-        // When property replacement results in a property’s value containing the guaranteed-invalid value, this makes
-        // the declaration invalid at computed-value time. When this happens, the computed value is one of the
-        // following depending on the property’s type:
-
-        // -> The property is a non-registered custom property
-        // -> The property is a registered custom property with universal syntax
-        if (!registration.has_value() || registration->syntax.is_universal()) {
-            // The computed value is the guaranteed-invalid value.
-            return invalid_value;
-        }
-
-        // -> Otherwise
-        {
-            // Either the property’s inherited value or its initial value depending on whether the property is
-            // inherited or not, respectively, as if the property’s value had been specified as the unset keyword.
-
-            // https://drafts.csswg.org/css-mixins/#resolve-function-styles
-            // NB: When resolving function styles (i.e. when we have a hypothetical element), all CSS-wide keywords other than
-            //     inherit and initial (including unset) resolve to the guaranteed-invalid value.
-            if (element.has<HypotheticalElement*>())
-                return invalid_value;
-
-            if (registration->inherit)
-                return inherited_custom_property_value(registration, element, name, computed_style_for_custom_property_resolution);
-            return initial_custom_property_value(registration, element.document());
-        }
+    // The engine computes the value against the registration, exactly as it does for the custom
+    // properties its own cascade resolves.
+    VERIFY(computed_style_for_custom_property_resolution);
+    auto abstract_element = element.abstract_element();
+    auto const& computation_context = get_computation_context_for_property(PropertyID::Custom, *computed_style_for_custom_property_resolution, abstract_element);
+    auto length_resolution_context = to_ffi_length_resolution_context(computation_context.length_resolution_context);
+    auto tree_counting_context = abstract_element.tree_counting_function_resolution_context();
+    ComputedValuesFFI::FfiStyleComputationEnvironment const environment {
+        .box_type_input = {},
+        .color_scheme_input = {},
+        .is_th_element = false,
+        .has_new_font_size = false,
+        .has_tree_counting_context = true,
+        .sibling_count = static_cast<u64>(tree_counting_context.sibling_count),
+        .sibling_index = static_cast<u64>(tree_counting_context.sibling_index),
+        .random_base_values = nullptr,
+        .random_base_value_count = 0,
+        .document_base_url = nullptr,
+        .document_base_url_length = 0,
+        .style_sheet_resource_contexts = nullptr,
+        .style_sheet_resource_context_count = 0,
+        .device_pixels_per_css_pixel = 1,
+        .initial_font_size_raw = InitialValues::font_size().raw_value(),
+        .default_font_size_raw = default_user_font_size().raw_value(),
     };
-
-    if (resolved_value->is_guaranteed_invalid())
-        return invalid_custom_property_fallback_value(move(resolved_value));
-
-    if (!registration.has_value() || registration->syntax.is_universal())
-        return resolved_value;
-
-    auto resolved_value_contains_attr_tainted_values = resolved_value->is_unresolved() && resolved_value->as_unresolved().contains_attr_tainted_values();
-    auto parsed_value = [&]() -> NonnullRefPtr<StyleValue const> {
-        auto registration_generation = document.custom_property_registration_generation();
-        auto& parses = m_registered_custom_property_parses.ensure(resolved_value->rust_style_value_data());
-        for (auto const& parse : parses) {
-            if (parse.syntax_identity == registration->syntax.data() && parse.registration_generation == registration_generation)
-                return parse.parsed;
-        }
-        auto parsing_params = Parser::ParsingParams { document };
-        parsing_params.value_context.append(PropertyID::Custom);
-        auto source = resolved_value->is_unresolved()
-            ? resolved_value->as_unresolved().token_source()
-            : resolved_value->to_utf16_string(SerializationMode::ResolvedValueForReparse);
-        auto parsed = Parser::parse_with_a_syntax(parsing_params, source, registration->syntax);
-        parses.append({ resolved_value, registration->syntax.data(), registration_generation, parsed });
-        return parsed;
-    }();
-    if (parsed_value->is_guaranteed_invalid())
-        return invalid_custom_property_fallback_value(move(parsed_value));
-
-    auto computed_value = [&] {
-        // FIXME: At the moment we incorrectly apply ASF replacement at cascade time when we should instead be applying
-        //        it at computed-value time. This means we may not yet have a computed style for us to absolutize
-        //        against. For now we just return the parsed value as-is and rely on the consuming property to
-        //        absolutize it later.
-        if (!computed_style_for_custom_property_resolution)
-            return parsed_value;
-
-        return compute_registered_custom_property_value(registration.value(), move(parsed_value), get_computation_context_for_property(PropertyID::Custom, *computed_style_for_custom_property_resolution, element.abstract_element()));
-    }();
-
-    if (resolved_value_contains_attr_tainted_values) {
-        VERIFY(!computed_value->is_unresolved());
-        return UnresolvedStyleValue::create_attr_tainted_with_parsed_value(computed_value->is_unresolved()
-                ? computed_value->as_unresolved().token_source()
-                : computed_value->to_utf16_string(SerializationMode::ResolvedValueForReparse),
-            {}, {}, UnresolvedStyleValue::SourceTextMode::Trim, computed_value);
-    }
-
-    return computed_value;
+    auto inheritance_data = abstract_element.element_to_inherit_style_from().map([](auto const& parent) {
+                                                                                return parent.custom_property_data();
+                                                                            })
+                                .value_or(nullptr);
+    bool uses_tree_counting_function = false;
+    ComputedValuesFFI::FfiCustomPropertyFinalization input {
+        .registry = document().rust_custom_property_registry(),
+        .inheritance_store = inheritance_data ? inheritance_data->rust_store() : nullptr,
+        .name_raw = name.raw_identity(),
+        .name = ffi_utf16_view(name),
+        .value = resolved_value->rust_style_value_data(),
+        .length = &length_resolution_context,
+        .environment = &environment,
+        .color_scheme = static_cast<u8>(to_underlying(computation_context.color_scheme.value_or(PreferredColorScheme::Light))),
+        .uses_tree_counting_function = &uses_tree_counting_function,
+    };
+    auto finalized = StyleValue::adopt_rust_style_value_data(static_cast<StyleValueFFI::StyleValueData const*>(ComputedValuesFFI::rust_finalize_custom_property_value(&input)));
+    if (uses_tree_counting_function)
+        const_cast<DOM::Element&>(abstract_element.element()).set_style_uses_tree_counting_function();
+    return finalized;
 }
 
 ComputationContext StyleComputer::fallback_computation_context_for_custom_property(AbstractOrHypotheticalElement const& element) const

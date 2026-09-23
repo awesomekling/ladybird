@@ -501,17 +501,6 @@ private:
     // The environments the style engine resolved, by the identity it minted, materialized once.
     mutable HashMap<u64, NonnullRefPtr<CustomPropertyData const>> m_engine_custom_property_environments;
 
-    // What one final value parses to against one registration's syntax: a pure function of the
-    // value, the syntax, and the registration generation, unlike the computed-value step after it,
-    // which resolves font-relative units against the reading element and runs per read.
-    struct RegisteredCustomPropertyParse {
-        NonnullRefPtr<StyleValue const> value;
-        void const* syntax_identity { nullptr };
-        u64 registration_generation { 0 };
-        NonnullRefPtr<StyleValue const> parsed;
-    };
-    mutable HashMap<void const*, Vector<RegisteredCustomPropertyParse>> m_registered_custom_property_parses;
-
     // The cascade input a match signature names, expanded once and answered from for every other
     // element the traversal proves has the same one. Keyed by the signature and what is being
     // styled, and valid for exactly as long as the sharing cache above is.

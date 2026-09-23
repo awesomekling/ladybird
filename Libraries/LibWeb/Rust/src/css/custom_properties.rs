@@ -437,6 +437,7 @@ pub(crate) fn finalize_custom_property_value(
     length: Option<&crate::css::style_compute::FfiLengthResolutionContext>,
     environment: Option<&crate::css::style_compute::FfiStyleComputationEnvironment>,
     scheme: u8,
+    uses_tree_counting_function: Option<&mut bool>,
 ) -> (RetainedStyleValueData, bool) {
     let registration = registry.and_then(|registry| registry.registrations.get(name));
     let initial = || {
@@ -521,6 +522,10 @@ pub(crate) fn finalize_custom_property_value(
         random_sources.push(specified_value);
     }
     let random_base_values = random_base_values_for_reparsed_value(&parsed, &random_sources, environment);
+    if let Some(uses_tree_counting_function) = uses_tree_counting_function {
+        *uses_tree_counting_function =
+            crate::css::style_compute::collect_external_value_dependencies(&parsed).uses_tree_counting_function;
+    }
     let (computed, depends_on_viewport_metrics) = absolutize_registered_custom_property_value(
         registry.unwrap(),
         parsed,
@@ -550,6 +555,53 @@ pub(crate) fn finalize_custom_property_value(
     *contains_attr_tainted_values = true;
     *parsed_value = computed;
     (RetainedStyleValueData::from_owned(wrapped), depends_on_viewport_metrics)
+}
+
+/// What the host hands `rust_finalize_custom_property_value`: one custom property's substituted
+/// value and the inputs its registration computes against.
+#[repr(C)]
+pub struct FfiCustomPropertyFinalization {
+    pub registry: *const c_void,
+    pub inheritance_store: *const c_void,
+    pub name_raw: usize,
+    pub name: FfiUtf16View,
+    pub value: *const c_void,
+    pub length: *const crate::css::style_compute::FfiLengthResolutionContext,
+    pub environment: *const crate::css::style_compute::FfiStyleComputationEnvironment,
+    pub color_scheme: u8,
+    /// Set when the value's registration parsed it into a tree-counting function.
+    pub uses_tree_counting_function: *mut bool,
+}
+
+/// The computed value of one custom property whose `var()`-style substitutions are already done,
+/// through the same finalization the engine's own cascade uses. Returns one transferred reference.
+///
+/// # Safety
+/// Every pointer in `input` must be null or live for the call; `value` and `length` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_finalize_custom_property_value(
+    input: *const FfiCustomPropertyFinalization,
+) -> *const c_void {
+    let input = unsafe { &*input };
+    let name = unsafe { input.name.to_utf16() }.unwrap_or_default();
+    let value = unsafe {
+        RetainedStyleValueData::from_retained_pointer(crate::css::style_value::retain_style_value(input.value.cast()))
+    };
+    let (finalized, _) = finalize_custom_property_value(
+        unsafe { input.registry.cast::<CustomPropertyRegistry>().as_ref() },
+        unsafe { input.inheritance_store.cast::<CustomPropertyStore>().as_ref() },
+        input.name_raw,
+        &name,
+        value,
+        None,
+        unsafe { input.length.as_ref() },
+        unsafe { input.environment.as_ref() },
+        input.color_scheme,
+        unsafe { input.uses_tree_counting_function.as_mut() },
+    );
+    let pointer = finalized.pointer();
+    std::mem::forget(finalized);
+    pointer.cast()
 }
 
 impl CustomPropertyStore {
