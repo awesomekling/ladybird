@@ -1043,7 +1043,18 @@ impl RetainedState {
             && !delta
                 .properties()
                 .contains(&crate::css::property_metadata::property_id::ANIMATION_FILL_MODE);
+        // With no sampled overlay, the old record is already the animation's base. A leaf can
+        // install a newly driven base and apply its complete CSS plan before sampling, without
+        // making another row wait for the composition.
+        let css_base_without_an_overlay = animations_bind_the_record
+            && !self.computed_group_sets.node_has_animation_overlay(node)
+            && self.css_defined_animations.node_runs_a_css_animation(node)
+            && self.animation_keyframes().a_first_record_may_start_an_animation()
+            && !self.record_transition_facts(old_style_record, &[]).0
+            && !has_registered_declarations
+            && self.tree.flat_tree_children(node).next().is_none();
         let derived_beneath_a_composition = css_animation_plan_without_an_overlay
+            || css_base_without_an_overlay
             || full_drive_beneath_a_composition
                 && (!self.css_defined_animations.node_runs_a_css_animation(node)
                     || full_css_drive_beneath_a_composition)
@@ -1436,7 +1447,7 @@ impl RetainedState {
         };
         // The plan is decided from the longhands this drive computed, before the table goes into
         // the record.
-        let animation_plan = (owes_an_animation_plan || full_css_drive_beneath_a_composition)
+        let animation_plan = (owes_an_animation_plan || full_css_drive_beneath_a_composition || css_base_without_an_overlay)
             .then(|| self.settled_animation_plan(node, u8::MAX, &table));
         let parent_in_display_none_subtree = self
             .tree
