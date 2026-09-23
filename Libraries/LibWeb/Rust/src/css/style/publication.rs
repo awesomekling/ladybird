@@ -1460,11 +1460,13 @@ impl RetainedState {
             Some(store) => store.clone(),
             None => {
                 let mut substituted = false;
+                let inheritance_environment = self.held_inheritance_environment(node, None);
                 let store = std::sync::Arc::new(self.cascaded_store_for_state(
                     node,
                     state,
                     None,
                     current_environment,
+                    inheritance_environment,
                     &mut substituted,
                     counters,
                 )?);
@@ -1533,11 +1535,13 @@ impl RetainedState {
                     )?;
                     environment = Some(current_environment);
                     let mut substituted = false;
+                    let inheritance_environment = self.held_inheritance_environment(node, None);
                     let final_store = self.cascaded_store_for_state(
                         node,
                         state,
                         None,
                         current_environment,
+                        inheritance_environment,
                         &mut substituted,
                         counters,
                     )?;
@@ -2068,6 +2072,51 @@ impl RetainedState {
             })
     }
 
+    /// A node's custom-property environment as this flush leaves it. A row this flush settles
+    /// holds its new environment already, but an ancestor between it and a first record may be one
+    /// the host refreshes only once the batch applies, so the first record would resolve over the
+    /// environment that ancestor held before. Each ancestor's is resolved again over its parent's
+    /// as it is now, and kept for the rows after it. A node composing animated custom properties
+    /// keeps the environment its sample published.
+    fn current_custom_property_environment(
+        &mut self,
+        node: StyleNodeID,
+        inputs: &bridge::FfiDocumentStyleComputationInputs,
+        scratch: &mut EngineComputedRecordScratch,
+    ) -> Option<u64> {
+        if let Some(&current) = scratch.current_custom_property_environments.get(&node) {
+            return Some(current);
+        }
+        let held = self.computed_group_sets.custom_property_environment_identity(node)?;
+        let animates =
+            self.computed_group_sets.adjustment_facts(node) & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
+                || self.computed_group_sets.node_has_animation_overlay(node);
+        let current = match self.tree.inheritance_parent(node) {
+            Some(parent) if !animates => match self.current_custom_property_environment(parent, inputs, scratch) {
+                // A node declaring custom properties was resolved over the parent's environment
+                // as the parent holds it; only a node declaring none can be stale beneath it.
+                Some(parent_environment)
+                    if !self.node_declares_custom_properties(node)
+                        || self.computed_group_sets.custom_property_environment_identity(parent)
+                            != Some(parent_environment) =>
+                {
+                    self.engine_custom_property_environment(
+                        node,
+                        parent_environment,
+                        inputs,
+                        None,
+                        &mut Counters::default(),
+                    )
+                    .unwrap_or(held)
+                }
+                _ => held,
+            },
+            _ => held,
+        };
+        scratch.current_custom_property_environments.insert(node, current);
+        Some(current)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn engine_cold_record_impl(
         &mut self,
@@ -2116,7 +2165,7 @@ impl RetainedState {
         // The document element's environment is its own, which is nothing without declarations;
         // any other node's is its declarations resolved over the parent's.
         let Some(parent_environment) = parent.map_or(Some(0), |parent| {
-            self.computed_group_sets.custom_property_environment_identity(parent)
+            self.current_custom_property_environment(parent, &inputs, scratch)
         }) else {
             counters.bump(Counter::EngineComputedRecordBailRecordParent);
             return None;
@@ -2207,7 +2256,15 @@ impl RetainedState {
             Some(store) => store.clone(),
             None => {
                 let mut substituted = false;
-                let store = self.cascaded_store_for_state(node, state, None, environment, &mut substituted, counters);
+                let store = self.cascaded_store_for_state(
+                    node,
+                    state,
+                    None,
+                    environment,
+                    Some(parent_environment),
+                    &mut substituted,
+                    counters,
+                );
                 scratch.computability.remember(
                     (
                         node,
@@ -2395,8 +2452,15 @@ impl RetainedState {
             environment =
                 self.engine_custom_property_environment(node, parent_environment, &inputs, Some(registered), counters)?;
             let mut substituted = false;
-            let final_store =
-                self.cascaded_store_for_state(node, state, None, environment, &mut substituted, counters)?;
+            let final_store = self.cascaded_store_for_state(
+                node,
+                state,
+                None,
+                environment,
+                Some(parent_environment),
+                &mut substituted,
+                counters,
+            )?;
             scratch.store_capacity_bytes += final_store.capacity_bytes();
             store = std::sync::Arc::new(final_store);
             if substituted {
@@ -3610,8 +3674,17 @@ impl RetainedState {
             return admitted;
         }
         let mut substituted = false;
+        let inheritance_environment = self.held_inheritance_environment(node, None);
         let admitted = self
-            .cascaded_store_for_state(node, cascade_state.1, None, environment, &mut substituted, counters)
+            .cascaded_store_for_state(
+                node,
+                cascade_state.1,
+                None,
+                environment,
+                inheritance_environment,
+                &mut substituted,
+                counters,
+            )
             .is_some();
         scratch.remember(key, admitted);
         admitted
@@ -4222,12 +4295,28 @@ impl RetainedState {
     /// The cascade a winner state describes, as the drive consumes it: every winner's written
     /// value, seeded in cascade order so a logical property pair resolves the way it cascaded.
     /// `None` when a winner is not a plain rule declaration the engine can compute from.
+    /// The environment `inherit()` reads for a node, as the node's parent holds it: the parent's
+    /// computed custom properties, non-inheriting registrations included - the full environment
+    /// the subject's own was resolved over. A pseudo-element's parent is its originating element,
+    /// and the document element's is nothing.
+    fn held_inheritance_environment(&self, node: StyleNodeID, pseudo_kind: Option<u8>) -> Option<u64> {
+        if pseudo_kind.is_some() {
+            return self.computed_group_sets.custom_property_environment_identity(node);
+        }
+        match self.tree.inheritance_parent(node) {
+            Some(parent) => self.computed_group_sets.custom_property_environment_identity(parent),
+            None => Some(0),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn cascaded_store_for_state(
         &mut self,
         node: StyleNodeID,
         state: CascadeStateID,
         pseudo_kind: Option<u8>,
         environment: u64,
+        inheritance_environment: Option<u64>,
         substituted: &mut bool,
         counters: &mut Counters,
     ) -> Option<WinnerStore> {
@@ -4236,20 +4325,13 @@ impl RetainedState {
         // Seeded in cascade order, and within one rule in declaration order, since a logical
         // property and its physical associate resolve by order of appearance.
         let mut declarations = Vec::with_capacity(self.winner_groups.winner_count_in_state(state));
-        let inheritance_environment = if pseudo_kind.is_some() {
-            self.computed_group_sets.custom_property_environment_identity(node)
-        } else {
-            self.tree
-                .flat_tree_parent(node)
-                .and_then(|parent| self.computed_group_sets.custom_property_environment_identity(parent))
+        // A parent declaring none has no inherited value, and `inherit()` takes its fallback.
+        // `None` is a parent environment the engine holds no store for.
+        let inheritance_store = match inheritance_environment {
+            Some(0) => Some(std::ptr::null()),
+            Some(identity) => self.custom_property_environments.store(identity),
+            None => None,
         };
-        // When a non-inheriting registration makes the parent's environment differ from the
-        // subject's, the inherited value remains with the host until that parent is proven
-        // authoritative for this record's substitution.
-        let inheritance_store = inheritance_environment
-            .filter(|&identity| identity == environment)
-            .and_then(|identity| self.custom_property_environments.store(identity))
-            .unwrap_or(std::ptr::null());
         for winner in self.winner_groups.winners_in_state(state).collect::<Vec<_>>() {
             // A revert whose continuation resumes at nothing leaves the property undeclared.
             let Some(winner) = self.winner_groups.resolved_winner(winner) else {
@@ -6343,6 +6425,8 @@ pub(super) struct EngineComputedRecordScratch {
     /// Pseudo-element records derived this flush, by what they were derived from.
     pub(super) pseudo_cohorts: HashMap<PseudoCohortKey, computed::FinalStyleRecordID>,
     pub(super) pseudo_stores: HashMap<(u8, CascadeStateID, u64), std::sync::Arc<WinnerStore>>,
+    /// The nodes whose custom-property environment this flush has brought up to date.
+    current_custom_property_environments: HashMap<StyleNodeID, u64>,
 }
 
 impl std::ops::Deref for EngineComputedRecordScratch {
@@ -6461,7 +6545,7 @@ impl EngineComputedRecordScratch {
     pub(super) fn capacity_bytes(&self) -> u64 {
         capacity::capacity_bytes! {
             shallow [self.computability.states, self.cohorts, self.derived_child_inputs, self.cold_cohorts, self.stores,
-                self.substituted_states, self.pseudo_cohorts, self.pseudo_stores];
+                self.substituted_states, self.pseudo_cohorts, self.pseudo_stores, self.current_custom_property_environments];
             cached [self.store_capacity_bytes, self.continuation.capacity_bytes(),
                 self.prepared_root_font.as_ref().map_or(0, |(_, _, drive)| drive.capacity_bytes())];
             nested [];

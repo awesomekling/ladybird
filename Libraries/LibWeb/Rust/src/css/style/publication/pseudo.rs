@@ -542,11 +542,13 @@ impl RetainedState {
                     Some(store) => store.clone(),
                     None => {
                         let mut substituted = false;
+                        let inheritance_environment = self.held_inheritance_environment(node, Some(kind));
                         let store = std::sync::Arc::new(self.cascaded_store_for_state(
                             node,
                             state,
                             Some(kind),
                             environment,
+                            inheritance_environment,
                             &mut substituted,
                             counters,
                         )?);
@@ -677,11 +679,13 @@ impl RetainedState {
                             counters,
                         )?;
                         let mut substituted = false;
+                        let inheritance_environment = self.held_inheritance_environment(node, Some(kind));
                         let final_store = self.cascaded_store_for_state(
                             node,
                             state?,
                             Some(kind),
                             environment,
+                            inheritance_environment,
                             &mut substituted,
                             counters,
                         )?;
@@ -1194,7 +1198,16 @@ impl RetainedState {
             return None;
         };
         let mut substituted = false;
-        let mut store = self.cascaded_store_for_state(node, state, None, environment, &mut substituted, counters)?;
+        let inheritance_environment = Some(parent_environment);
+        let mut store = self.cascaded_store_for_state(
+            node,
+            state,
+            None,
+            environment,
+            inheritance_environment,
+            &mut substituted,
+            counters,
+        )?;
         let Some(pseudo_styles) = self.pseudo_style_mask(node) else {
             counters.bump(Counter::EngineComputedRecordBailPseudoMask);
             return None;
@@ -1230,7 +1243,15 @@ impl RetainedState {
                 counters,
             )?;
             substituted = false;
-            store = self.cascaded_store_for_state(node, state, None, environment, &mut substituted, counters)?;
+            store = self.cascaded_store_for_state(
+                node,
+                state,
+                None,
+                environment,
+                inheritance_environment,
+                &mut substituted,
+                counters,
+            )?;
             self.engine_full_drive(
                 subject,
                 None,
