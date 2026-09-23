@@ -384,10 +384,11 @@ impl RetainedState {
         use bridge::element_adjustment_fact as fact;
 
         let DriveSubject {
-            target: _,
+            target,
             recascade_node,
             parent,
             facts,
+            highlight_parent,
         } = subject;
         let has = |bit: u32| facts & bit != 0;
         let is_document_element = has(fact::IS_DOCUMENT_ELEMENT);
@@ -540,7 +541,9 @@ impl RetainedState {
         };
         let highlight_parent_record = (subject.target.pseudo_kind() == pseudo_kind::SELECTION)
             .then(|| {
-                self.retained_highlight_inheritance_parent_style_record(subject.target.node(), pseudo_kind::SELECTION)
+                subject.highlight_parent.or_else(|| {
+                    self.retained_highlight_inheritance_parent_style_record(subject.target.node(), pseudo_kind::SELECTION)
+                })
             })
             .flatten();
         let highlight_snapshot = highlight_parent_record

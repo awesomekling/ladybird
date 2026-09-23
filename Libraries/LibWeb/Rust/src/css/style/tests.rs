@@ -2375,7 +2375,7 @@ fn pseudo_record_demand_reports_absence_without_rules() {
             longhand_table: HostShared::null(),
         },
     );
-    let answer = engine.answer_record_demand(nodes[1], Some(2), false, false, false);
+    let answer = engine.answer_record_demand(nodes[1], Some(2), false, false, false, 0);
     assert!(matches!(answer, Ok(None)), "{answer:?}");
 }
 
@@ -2407,7 +2407,7 @@ fn read_only_pseudo_demand_does_not_publish_match_state() {
     let winner_rows: Vec<_> = engine.winner_groups.pseudo_states(nodes[1]).collect();
     let published_count = engine.published_match_answers.entries.len();
 
-    let answer = engine.answer_record_demand(nodes[1], Some(2), false, false, true);
+    let answer = engine.answer_record_demand(nodes[1], Some(2), false, false, true, 0);
     assert!(matches!(answer, Ok(None)), "{answer:?}");
     assert_eq!(engine.retained_match_answers.column, retained_answers);
     assert_eq!(

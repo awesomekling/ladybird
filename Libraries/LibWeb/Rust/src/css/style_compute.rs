@@ -4487,6 +4487,12 @@ pub(crate) struct HighlightInheritance<'a> {
     pub(crate) snapshot: Option<ParentSnapshot<'a>>,
 }
 
+impl<'a> HighlightInheritance<'a> {
+    pub(crate) fn new(pseudo_kind: u8, snapshot: Option<ParentSnapshot<'a>>) -> Self {
+        Self { pseudo_kind, snapshot }
+    }
+}
+
 fn keyframe_parent_snapshot_for_style_record(
     style_engine: &crate::css::style::StyleEngine,
     style_record: u64,

@@ -1098,6 +1098,7 @@ impl StyleEngine {
         exclude_inline_style: bool,
         targeted: bool,
         read_only: bool,
+        parent_highlight: u64,
     ) -> Result<Option<publication::RetriedEngineRecord>, &'static str> {
         self.state.answer_record_demand(
             node,
@@ -1105,6 +1106,7 @@ impl StyleEngine {
             exclude_inline_style,
             targeted,
             read_only,
+            parent_highlight,
             &mut self.counters,
         )
     }

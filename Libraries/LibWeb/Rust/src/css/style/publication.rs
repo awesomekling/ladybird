@@ -1968,6 +1968,7 @@ impl RetainedState {
             } else {
                 facts
             },
+            highlight_parent: None,
         };
         let driven = self.engine_full_drive(
             subject,
@@ -3077,6 +3078,7 @@ impl RetainedState {
             recascade_node: Some(node),
             parent,
             facts,
+            highlight_parent: None,
         })
     }
 
@@ -5148,6 +5150,7 @@ impl StyleEngineState {
     /// Answer an observation of one node without draining the document's transaction. A
     /// read-only observation uses a retained match answer or a private matching traversal and
     /// leaves the published winner rows and invalidation facts untouched.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn answer_record_demand(
         &mut self,
         node: StyleNodeID,
@@ -5155,6 +5158,7 @@ impl StyleEngineState {
         exclude_inline_style: bool,
         targeted: bool,
         read_only: bool,
+        parent_highlight: u64,
         counters: &mut Counters,
     ) -> Result<Option<RetriedEngineRecord>, &'static str> {
         if pseudo.is_some_and(|kind| {
@@ -5220,7 +5224,7 @@ impl StyleEngineState {
         let previous_container_effect = read_only.then(|| self.container_effects_for_host.get(&node).cloned());
         let mut private_origin_record = None;
         if pseudo.is_some() && self.computed_group_sets.assigned_style_record(node).is_none() {
-            let parent = self.answer_record_demand(node, None, false, targeted, read_only, counters)?;
+            let parent = self.answer_record_demand(node, None, false, targeted, read_only, 0, counters)?;
             if read_only {
                 let record = parent.ok_or("EngineComputedRecordBailRecord")?.style_record;
                 self.computed_group_sets
@@ -5290,7 +5294,13 @@ impl StyleEngineState {
             }
 
             if let Some(kind) = pseudo {
-                let record = self.demand_pseudo_record(node, kind, read_only, counters)?;
+                let record = self.demand_pseudo_record(
+                    node,
+                    kind,
+                    read_only,
+                    computed::FinalStyleRecordID::from_raw(parent_highlight),
+                    counters,
+                )?;
                 Ok(record.map(|record| RetriedEngineRecord {
                     style_record: record.raw(),
                     ..RetriedEngineRecord::default()
@@ -5855,6 +5865,7 @@ pub(super) struct DriveSubject {
     /// inherits from the initial values.
     parent: Option<StyleNodeID>,
     facts: u32,
+    highlight_parent: Option<computed::FinalStyleRecordID>,
 }
 
 /// What a retry after an ancestor settles: the element's record, and the pseudo-element records
