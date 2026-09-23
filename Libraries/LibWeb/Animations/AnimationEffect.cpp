@@ -931,10 +931,26 @@ AnimationUpdateContext::~AnimationUpdateContext()
             publishes_overlay ? animated_properties->identity() : 0,
             publishes_overlay ? animated_properties->overlay() : nullptr,
             publishes_overlay ? payloads : ReadonlySpan<void const*> {});
-        // FIXME: A pseudo-element whose style the engine holds no assignment for still publishes its
-        //        whole style from the host.
-        if (!publication.has_value())
-            publication = style_computer.publish_animation_overlay(element, style_computer.build_animated_computed_values(*style, element, element.style_scope(), *element.computed_style()));
+        // A pseudo-element the engine holds no assignment for owns no overlay slot, so its record
+        // is published again whole, with the overlay over the same base.
+        if (!publication.has_value()) {
+            auto base = style_computer.style_engine().style_record_view(it.value.style_record_before_update);
+            VERIFY(base.present);
+            auto custom_property_data = element.custom_property_data();
+            publication = style_computer.style_engine().publish_computed_groups(
+                target->style_node_id(),
+                CSS::pseudo_element_to_ffi(element.pseudo_element()),
+                { base.base_payloads, base.payload_count },
+                CSS::ComputedValues::inherited_style_group_count,
+                custom_property_data ? custom_property_data->identity() : 0,
+                false,
+                base.counter_style_environment_identity,
+                publishes_overlay ? animated_properties->identity() : 0,
+                publishes_overlay ? animated_properties->overlay() : nullptr,
+                publishes_overlay ? payloads : ReadonlySpan<void const*> {},
+                base.longhand_table,
+                custom_property_data ? custom_property_data->rust_store() : nullptr);
+        }
         target->refresh_computed_style(element.pseudo_element(), publication->new_style_record);
         if (auto* svg_element = as_if<SVG::SVGElement>(*target); svg_element && !element.pseudo_element().has_value())
             svg_element->note_svg_paint_resource_description_may_have_changed();
