@@ -3574,7 +3574,7 @@ void Element::children_changed(ChildrenChangedMetadata const& metadata)
             if (!element.style_uses_tree_counting_function())
                 return IterationDecision::Continue;
 
-            document().style_computer().style_engine().record_element_style_input_change(element.style_node_id());
+            document().style_computer().style_engine().record_tree_counting_style_input_change(element.style_node_id());
 
             return IterationDecision::Continue;
         });
