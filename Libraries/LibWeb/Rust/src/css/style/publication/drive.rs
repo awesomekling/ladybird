@@ -510,6 +510,28 @@ impl RetainedState {
             }
             None => None,
         };
+        let highlight_parent_record = (subject.target.pseudo_kind() == pseudo_kind::SELECTION)
+            .then(|| {
+                self.retained_highlight_inheritance_parent_style_record(subject.target.node(), pseudo_kind::SELECTION)
+            })
+            .flatten();
+        let highlight_snapshot = highlight_parent_record
+            .and_then(|record| self.computed_group_sets.style_record_view(record.raw()))
+            .and_then(|view| {
+                let table = unsafe { view.longhand_table.as_ref() }?;
+                Some(crate::css::style_compute::ParentSnapshot::new(
+                    table,
+                    unsafe { view.animated_overlay.as_ref() },
+                    view.dependency_flags & (1 << 1) != 0,
+                    view.dependency_flags & (1 << 2) != 0,
+                ))
+            });
+        let highlight = (subject.target.pseudo_kind() == pseudo_kind::SELECTION).then_some(
+            crate::css::style_compute::HighlightInheritance {
+                pseudo_kind: pseudo_kind::SELECTION,
+                snapshot: highlight_snapshot,
+            },
+        );
         // The subject axis is the element's own writing mode when it has one, else its parent's;
         // the initial writing mode is horizontal.
         let inherited_box_payload = match old_style_record {
@@ -637,7 +659,7 @@ impl RetainedState {
                 std::ptr::null_mut(),
                 &store,
                 snapshot.as_ref(),
-                None,
+                highlight.as_ref(),
                 &raw const environment,
                 u32::MAX,
                 std::ptr::null(),

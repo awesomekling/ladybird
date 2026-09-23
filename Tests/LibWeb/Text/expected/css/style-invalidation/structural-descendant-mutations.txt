@@ -470,7 +470,7 @@ PASS: descendant state mutation: document: :has(:disabled) after input disabled 
 PASS: descendant state pseudo-element mutation: document: :has(:disabled) after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state mutation: document: :has(:enabled) becomes false after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state pseudo-element mutation: document: :has(:enabled) becomes false after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant state mutation: document: :has(:placeholder-shown) after textarea placeholder added | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: descendant state mutation: document: :has(:placeholder-shown) after textarea placeholder added | elementStyleRecomputations=2, elementStyleNoopRecomputations=2
 PASS: descendant state pseudo-element mutation: document: :has(:placeholder-shown) after textarea placeholder added | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant state mutation: document: :has(:placeholder-shown) becomes false after textarea value append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant state pseudo-element mutation: document: :has(:placeholder-shown) becomes false after textarea value append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
@@ -500,7 +500,7 @@ PASS: descendant state mutation: shadow-internal: :has(:disabled) after input di
 PASS: descendant state pseudo-element mutation: shadow-internal: :has(:disabled) after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state mutation: shadow-internal: :has(:enabled) becomes false after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state pseudo-element mutation: shadow-internal: :has(:enabled) becomes false after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant state mutation: shadow-internal: :has(:placeholder-shown) after textarea placeholder added | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: descendant state mutation: shadow-internal: :has(:placeholder-shown) after textarea placeholder added | elementStyleRecomputations=2, elementStyleNoopRecomputations=2
 PASS: descendant state pseudo-element mutation: shadow-internal: :has(:placeholder-shown) after textarea placeholder added | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant state mutation: shadow-internal: :has(:placeholder-shown) becomes false after textarea value append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state pseudo-element mutation: shadow-internal: :has(:placeholder-shown) becomes false after textarea value append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -554,7 +554,7 @@ PASS: descendant state mutation: slotted-default: :has(:required) after input re
 PASS: descendant state mutation: slotted-default: :has(:optional) becomes false after input required | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state mutation: slotted-default: :has(:disabled) after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state mutation: slotted-default: :has(:enabled) becomes false after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant state mutation: slotted-default: :has(:placeholder-shown) after textarea placeholder added | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: descendant state mutation: slotted-default: :has(:placeholder-shown) after textarea placeholder added | elementStyleRecomputations=2, elementStyleNoopRecomputations=2
 PASS: descendant state mutation: slotted-default: :has(:placeholder-shown) becomes false after textarea value append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant state mutation: slotted-default: :has(:checked:first-child) after first checkbox checked | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state mutation: slotted-default: :has(:checked:nth-child(2)) after second checkbox checked | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
@@ -590,7 +590,7 @@ PASS: descendant state mutation: part-document: :has(:disabled) after input disa
 PASS: descendant state pseudo-element mutation: part-document: :has(:disabled) after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state mutation: part-document: :has(:enabled) becomes false after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state pseudo-element mutation: part-document: :has(:enabled) becomes false after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant state mutation: part-document: :has(:placeholder-shown) after textarea placeholder added | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: descendant state mutation: part-document: :has(:placeholder-shown) after textarea placeholder added | elementStyleRecomputations=2, elementStyleNoopRecomputations=2
 PASS: descendant state pseudo-element mutation: part-document: :has(:placeholder-shown) after textarea placeholder added | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant state mutation: part-document: :has(:placeholder-shown) becomes false after textarea value append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state pseudo-element mutation: part-document: :has(:placeholder-shown) becomes false after textarea value append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0

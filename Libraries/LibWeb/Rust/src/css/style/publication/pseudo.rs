@@ -63,7 +63,9 @@ impl RetainedState {
                 continue;
             }
             let kind = usize::from(pseudo.kind.0);
-            if kind >= pseudo_kind::SYNTHETIC_COUNT || kind == usize::from(BACKDROP) || pseudo_kind::is_highlight(kind)
+            if kind >= pseudo_kind::SYNTHETIC_COUNT
+                || kind == usize::from(BACKDROP)
+                || (pseudo_kind::is_highlight(kind) && kind != usize::from(SELECTION))
             {
                 continue;
             }
@@ -88,7 +90,7 @@ impl RetainedState {
         if let Some(deferred) = self.deferred_pseudo_element {
             required &= !(1_u64 << deferred.0);
         }
-        required &= !pseudo_kind::highlight_mask();
+        required &= !pseudo_kind::highlight_mask() | (1 << SELECTION);
         if required & !available == 0 {
             return true;
         }
@@ -169,10 +171,10 @@ impl RetainedState {
             if selected_kind.is_some_and(|selected| selected != kind) {
                 continue;
             }
-            // A ::backdrop is materialized for a top-layer element only, which C++ decides; the
-            // rules for it match every element. A stale row is no answer. A highlight
-            // pseudo-element inherits from its parent element's, which C++ settles as well.
-            if selected_kind.is_none() && (kind == BACKDROP || pseudo_kind::is_highlight(usize::from(kind))) {
+            // Other highlight kinds still use the host's inheritance path.
+            if selected_kind.is_none()
+                && (kind == BACKDROP || pseudo_kind::is_highlight(usize::from(kind)) && kind != SELECTION)
+            {
                 continue;
             }
             if version != program_version || !priority_current {
@@ -191,7 +193,6 @@ impl RetainedState {
             }
             states[usize::from(kind)] = Some(state);
         }
-        // An element holding a backdrop style is in the top layer: its backdrop is C++'s.
         if selected_kind.is_none()
             && self
                 .computed_group_sets
@@ -304,7 +305,7 @@ impl RetainedState {
                 continue;
             }
             if self.deferred_pseudo_element == Some(tree::PseudoElementKind(u16::from(kind)))
-                || (selected_kind.is_none() && pseudo_kind::is_highlight(usize::from(kind)))
+                || (selected_kind.is_none() && pseudo_kind::is_highlight(usize::from(kind)) && kind != SELECTION)
             {
                 continue;
             }
@@ -331,6 +332,9 @@ impl RetainedState {
                 continue;
             }
             let has_rules = kinds_with_rules & (1 << kind) != 0;
+            let highlight_parent_record = (kind == SELECTION)
+                .then(|| self.retained_highlight_inheritance_parent_style_record(node, kind))
+                .flatten();
             let state = states[usize::from(kind)].filter(|_| has_rules);
             if has_rules && state.is_none() {
                 counters.bump(Counter::EngineComputedRecordBailPseudoRow);
@@ -363,13 +367,14 @@ impl RetainedState {
                     );
                 }
             };
-            if !has_rules && !implicit {
+            if !has_rules && !implicit && highlight_parent_record.is_none() {
                 remove(self, scratch, counters);
                 continue;
             }
             // Reuse only when the originating element preserves every input the pseudo reads,
             // including display transformation and explicit inheritance of non-inherited values.
-            if old.is_some_and(|record| self.record_counter_environment_is_current(node, record))
+            if kind != SELECTION
+                && old.is_some_and(|record| self.record_counter_environment_is_current(node, record))
                 && originating_inputs_unchanged
                 && (old_element_record == Some(new_element_record)
                     || !state.is_some_and(|state| self.state_explicitly_inherits_non_inherited_property(node, state)))
@@ -458,13 +463,15 @@ impl RetainedState {
                     .node_inherited_groups_identity(node)
                     .zip(self.box_type_parent_display(node))
                     .map(|(inherited_groups, parent_display)| PseudoCohortKey {
-                        parent_record: if state
-                            .is_some_and(|state| self.state_explicitly_inherits_non_inherited_property(node, state))
+                        parent_record: if kind == SELECTION
+                            || state
+                                .is_some_and(|state| self.state_explicitly_inherits_non_inherited_property(node, state))
                         {
                             new_element_record.raw()
                         } else {
                             0
                         },
+                        highlight_parent_record: highlight_parent_record.map_or(0, |record| record.raw()),
                         inherited_groups,
                         parent_display,
                         dependency_flags: new_view_dependency_flags,
@@ -581,7 +588,7 @@ impl RetainedState {
                     }
                     // The mark a pseudo-element's explicit `inherit` leaves is the originating
                     // element's own, which this row does not answer for: it stays with C++.
-                    if explicitly_inherited_groups != 0 {
+                    if explicitly_inherited_groups != 0 && kind != SELECTION {
                         counters.bump(Counter::EngineComputedRecordBailDrive);
                         return None;
                     }
@@ -1132,6 +1139,7 @@ impl StyleEngineState {
             pseudo_kind::FIRST_LETTER,
             pseudo_kind::MARKER,
             pseudo_kind::BACKDROP,
+            pseudo_kind::SELECTION,
         ]
         .contains(&kind)
         {
@@ -1149,7 +1157,13 @@ impl StyleEngineState {
             .style_record_view(element.raw())
             .and_then(|view| unsafe { view.longhand_table.as_ref() })
             .is_some_and(|table| table.display_is_list_item());
-        if mask & (1 << kind) == 0 && !(kind == pseudo_kind::MARKER && is_list_item) {
+        if mask & (1 << kind) == 0
+            && !(kind == pseudo_kind::MARKER && is_list_item)
+            && !(kind == pseudo_kind::SELECTION
+                && self
+                    .retained_highlight_inheritance_parent_style_record(node, kind)
+                    .is_some())
+        {
             self.drop_demand_pseudo_record(node, kind);
             return Ok(None);
         }
