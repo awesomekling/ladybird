@@ -344,6 +344,10 @@ impl RetainedState {
         let Some(element_environment) = self
             .computed_group_sets
             .style_record_custom_property_environment(new_element_record.raw())
+            .or_else(|| {
+                self.computed_group_sets
+                    .animation_overlay_base_custom_property_environment(new_element_record.raw())
+            })
         else {
             counters.bump(Counter::EngineComputedRecordBailRecord);
             return None;
