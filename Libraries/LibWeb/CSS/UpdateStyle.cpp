@@ -705,6 +705,25 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     }
                     retried_pseudo_element_records = pseudo_element_records;
                 } else {
+                    // A size query can only be settled after layout publishes its first box.
+                    // Keep this element's previous record through
+                    // that layout pass; recording the pending effect schedules a new reaction.
+                    auto container_effects = StyleEngineFFI::style_engine_take_container_effects(document.style_computer().style_engine().rust_handle(), reaction.style_node);
+                    ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
+                    bool awaits_layout_basis = false;
+                    auto effect_count = StyleEngineFFI::style_engine_native_container_effect_count(container_effects.effects);
+                    for (size_t effect_index = 0; effect_index < effect_count; ++effect_index) {
+                        auto effect = StyleEngineFFI::style_engine_native_container_effect(container_effects.effects, effect_index);
+                        if (effect.kind == StyleEngineFFI::FfiContainerEffectKind::NeedsEvaluationAfterLayout) {
+                            awaits_layout_basis = true;
+                            break;
+                        }
+                    }
+                    if (document.is_running_update_layout() && container_effects.depends_on_size && reaction.old_style_record != 0
+                        && element->style_record_identity().value() == reaction.old_style_record && awaits_layout_basis) {
+                        StyleComputer::record_container_query_effects(DOM::AbstractElement { *element }, container_effects);
+                        continue;
+                    }
                     reaction.gap = StyleEngineFFI::FfiStyleDeltaGap::Materialize;
                 }
             }
