@@ -2290,8 +2290,7 @@ impl SettledAnimationPlan {
     }
 
     /// Whether the record the row installs computes `display: none` for the element itself, which
-    /// is the half of "is this element rendered" the plan can answer. The host walks the element's
-    /// ancestors for the other half, as it does for a plan a C++ computation decided.
+    /// is the half of "is this element rendered" the plan can answer.
     #[must_use]
     pub(crate) fn element_display_is_none(&self) -> bool {
         self.element_display_is_none

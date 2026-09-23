@@ -328,7 +328,7 @@ StyleEngine::SettledAnimationDefinitions StyleEngine::take_settled_animation_def
     return {
         .definitions = { static_cast<ComputedValuesFFI::FfiComputedAnimation const*>(taken.definitions), taken.count },
         .owed = taken.owed,
-        .element_display_is_none = taken.element_display_is_none,
+        .in_display_none_subtree = taken.in_display_none_subtree,
     };
 }
 
