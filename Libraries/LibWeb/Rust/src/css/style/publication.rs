@@ -1074,7 +1074,7 @@ impl RetainedState {
                             && property_computes_in_remaining_phase(entry.property)
                     })
                 });
-        // The first-record gate excludes keyframes that need host resolution. For a record, only
+        // The first-record gate excludes keyframes on inherited properties. For a record, only
         // the rules its own names run matter: its descendants hold records of their own, and a
         // child derived in the same batch waits for the composition.
         let is_leaf = self.tree.flat_tree_children(node).next().is_none();
@@ -2050,12 +2050,12 @@ impl RetainedState {
     /// document prevents the document-wide first-record shortcut. A leaf has no children to derive
     /// before the sample, so its keyframes may animate an inherited property.
     fn cold_record_names_engine_computable_animations(&self, state: CascadeStateID) -> bool {
-        self.state_names_only_keyframes(state, KeyframesScope::DocumentOnly, |set| !set.needs_the_host)
+        self.state_names_only_keyframes(state, KeyframesScope::DocumentOnly, |_| true)
     }
 
     /// Check the names a later record runs. Its descendants already hold records of their own and
-    /// take an animated value through the overlay's invalidation, so only host resolution binds it,
-    /// and a container unit, whose basis a sample outside the computation cannot read. An animated
+    /// take an animated value through the overlay's invalidation, so only a container unit binds it,
+    /// whose basis a sample outside the computation cannot read. An animated
     /// custom property is only sampled into the element's environment after the record installs,
     /// so a record whose own values substitute custom properties cannot run one.
     fn warm_record_names_engine_computable_animations(
@@ -2065,8 +2065,7 @@ impl RetainedState {
         reads_custom_properties: bool,
     ) -> bool {
         self.state_names_only_keyframes(state, KeyframesScope::Element(self.tree.tree_scope(node)), |set| {
-            !set.needs_the_host
-                && !description_reads_container_units(&set.description)
+            !description_reads_container_units(&set.description)
                 && (!reads_custom_properties || !set.description.declares_custom_properties())
         })
     }
