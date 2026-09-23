@@ -1292,7 +1292,7 @@ struct KeyframeSetDescription {
 };
 
 // Describe one resolved keyframe set into the flat buffers the style stage reads it from, and say
-// what the description could not cover.
+// where its resource context comes from.
 //
 // `default_easing` and `effect_composite` are what the animation running the set contributes: a
 // keyframe that declares no easing of its own runs the animation's, and one that says
@@ -1319,9 +1319,11 @@ static u32 describe_keyframe_set(Animations::KeyframeEffect::KeyFrameSet const& 
         auto easing = it->easing.visit(
             [&](Empty) -> Optional<EasingFunction> { return {}; },
             [](EasingFunction const& easing) -> Optional<EasingFunction> { return easing; },
-            [&](RustStyleValueHandle const&) -> Optional<EasingFunction> {
-                // Resolving one of these can need substitution against the element.
-                flags |= published_effect_flag_not_covered;
+            [&](RustStyleValueHandle const& value) -> Optional<EasingFunction> {
+                // Resolving one of these can need substitution against the element, which the
+                // stage does when it samples it. The easing below is the one it runs if the value
+                // resolves to none.
+                ffi_keyframe.easing_value = value.data();
                 return {};
             });
         if (!easing.has_value())
@@ -1349,10 +1351,8 @@ static u32 describe_keyframe_set(Animations::KeyframeEffect::KeyFrameSet const& 
             if (property.is_custom_property()) {
                 // A custom property a keyframe declares travels in a range of its own, named rather
                 // than numbered: the stage samples it against the element's own environment and
-                // hands the result back for the host to install once the computation returns. What
-                // the stage cannot sample stays refused, exactly as the whole class was before -
-                // a value that still needs a callback to substitute, and a shorthand's pending
-                // substitution, which neither path animates.
+                // hands the result back for the host to install once the computation returns. A
+                // shorthand's pending substitution animates nothing.
                 bool use_initial = false;
                 auto const* data = value.visit(
                     [&](Animations::KeyframeEffect::KeyFrameSet::UseInitial) -> StyleValueFFI::StyleValueData const* {
@@ -1362,23 +1362,8 @@ static u32 describe_keyframe_set(Animations::KeyframeEffect::KeyFrameSet const& 
                         return nullptr;
                     },
                     [](RustStyleValueHandle const& handle) -> StyleValueFFI::StyleValueData const* { return handle.data(); });
-                if (!use_initial) {
-                    if (!data || data->tag == StyleValueFFI::StyleValueData::Tag::PendingSubstitution)
-                        continue;
-                    // Unlike a longhand, a custom property's written value is substituted only when
-                    // it actually carries a substitution function: `StyleComputer.cpp`'s walk asks
-                    // `contains_arbitrary_substitution_function()` before resolving one, and where
-                    // it does not the token stream travels as it stands. One that does is still
-                    // refused - a custom property substitutes as a name rather than as a longhand,
-                    // which is not what `substitute_written_value_against_store` resolves.
-                    if (data->tag == StyleValueFFI::StyleValueData::Tag::Unresolved
-                        && (data->unresolved.presence_attr || data->unresolved.presence_dashed_function
-                            || data->unresolved.presence_env || data->unresolved.presence_if
-                            || data->unresolved.presence_inherit || data->unresolved.presence_var)) {
-                        flags |= published_effect_flag_not_covered;
-                        continue;
-                    }
-                }
+                if (!use_initial && (!data || data->tag == StyleValueFFI::StyleValueData::Tag::PendingSubstitution))
+                    continue;
                 description.custom_declarations.append({
                     .name_raw = property.name().raw_identity(),
                     .use_initial = use_initial,
@@ -1396,24 +1381,10 @@ static u32 describe_keyframe_set(Animations::KeyframeEffect::KeyFrameSet const& 
                 },
                 [](RustStyleValueHandle const& handle) -> StyleValueFFI::StyleValueData const* { return handle.data(); });
             if (!use_initial) {
+                // A token stream travels unchanged: substitution runs against the element being
+                // sampled.
                 if (!data || data->tag == StyleValueFFI::StyleValueData::Tag::PendingSubstitution)
                     continue;
-                if (data->tag == StyleValueFFI::StyleValueData::Tag::Unresolved) {
-                    // Substitution runs against the element being sampled. A token stream whose
-                    // only substitution functions are `var()` and `env()` is one the stage resolves
-                    // for itself, against the custom-property store the computation already holds,
-                    // so it travels unchanged; anything asking for a callback - `attr()`, `if()`,
-                    // `inherit()`, a dashed function - is still the host's to resolve.
-                    // Mirrored by `custom_property_value_is_callback_free` in
-                    // `Rust/src/css/cascaded_properties.rs`, which decides the same question again
-                    // on the stage side; disagreeing only costs a fallback.
-                    auto const& unresolved = data->unresolved;
-                    if (unresolved.presence_attr || unresolved.presence_dashed_function
-                        || unresolved.presence_if || unresolved.presence_inherit) {
-                        flags |= published_effect_flag_not_covered;
-                        continue;
-                    }
-                }
                 // https://drafts.csswg.org/css-values-5/#invalid-at-computed-value-time
                 if (data->tag == StyleValueFFI::StyleValueData::Tag::GuaranteedInvalid)
                     continue;
@@ -1480,9 +1451,8 @@ void record_tree_scope_animation_keyframes(DOM::Document& document, TreeScopeID 
 //
 // An input: the style stage builds the animation batch it interpolates from this rather than from
 // the host's keyframe sets. Everything a keyframe declares that does not depend on the element being
-// sampled is settled here; an effect that declares something that does - a custom property, a value
-// that still needs substitution, an easing that is itself a style value - is published as not
-// covered, and the stage collects it the way it always has.
+// sampled is settled here; what does - a value or an easing that still needs substitution - travels
+// as written, and the stage resolves it against the element it samples.
 void record_element_animation_effect_descriptions(DOM::Element& element, u8 slot, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>> effects)
 {
     auto* style_engine = style_engine_for(element);

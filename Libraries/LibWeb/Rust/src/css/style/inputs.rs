@@ -1372,6 +1372,34 @@ impl RetainedState {
         self.animation_effect_descriptions.effects(node, slot)
     }
 
+    /// Lend out the effects the host described for one of an element's animation lists; see
+    /// `AnimationEffectDescriptions::take`.
+    pub(crate) fn take_element_animation_effect_descriptions(
+        &mut self,
+        node: StyleNodeID,
+        slot: animations::AnimationSlot,
+    ) -> Option<Box<[animations::PublishedEffect]>> {
+        self.animation_effect_descriptions.take(node, slot)
+    }
+
+    pub(crate) fn restore_element_animation_effect_descriptions(
+        &mut self,
+        node: StyleNodeID,
+        slot: animations::AnimationSlot,
+        effects: Box<[animations::PublishedEffect]>,
+    ) {
+        self.animation_effect_descriptions.restore(node, slot, effects);
+    }
+
+    /// The registry `custom_property_registry` answers from, shared, for a caller that also needs
+    /// the engine mutably while it asks.
+    #[must_use]
+    pub(crate) fn shared_custom_property_registry(
+        &self,
+    ) -> Option<std::sync::Arc<crate::css::custom_properties::CustomPropertyRegistry>> {
+        self.custom_property_registry.clone()
+    }
+
     /// The document's custom-property registry as this transaction froze it, for a caller that
     /// needs to ask about one name rather than about the document. `None` where the engine holds
     /// no registry and so can answer nothing.

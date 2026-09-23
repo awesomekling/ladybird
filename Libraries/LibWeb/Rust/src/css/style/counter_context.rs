@@ -34,6 +34,34 @@ impl std::ops::DerefMut for StyleEngine {
 }
 
 impl StyleEngine {
+    /// What a keyframe's written value substitutes to on the element being sampled; see
+    /// `RetainedState::substitute_keyframe_value`.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the written value and its independent resolution inputs travel together"
+    )]
+    pub(crate) fn substitute_keyframe_value(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        store: *const std::ffi::c_void,
+        inheritance_store: *const std::ffi::c_void,
+        property: u16,
+        root_custom_property_name: &[u16],
+        written: &crate::css::style_value::RetainedStyleValueData,
+    ) -> crate::css::style_value::RetainedStyleValueData {
+        self.state.retained.substitute_keyframe_value(
+            node,
+            pseudo,
+            store,
+            inheritance_store,
+            property,
+            root_custom_property_name,
+            written,
+            &mut self.counters,
+        )
+    }
+
     pub(crate) unsafe fn retain_resolved_custom_property_environment(
         &mut self,
         store: *const std::ffi::c_void,

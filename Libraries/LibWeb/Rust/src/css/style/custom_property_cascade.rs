@@ -1463,6 +1463,7 @@ impl RetainedState {
                 },
                 inputs?,
                 property,
+                &[],
                 &written,
                 &attributes,
                 inheritance_store,
@@ -1518,6 +1519,7 @@ impl RetainedState {
             store,
             inputs,
             property,
+            &[],
             &written,
             &attributes,
             inheritance_store,
@@ -1529,6 +1531,67 @@ impl RetainedState {
             environments.remember_substitution(written, property, environment, value.clone_retained());
         }
         Some(value)
+    }
+
+    /// What a keyframe's written value substitutes to on the element being sampled, against the
+    /// custom-property store the element holds now and the one it inherits from: what the host's
+    /// `resolve_unresolved_style_value` makes of it. `root_custom_property_name` names the custom
+    /// property the value is written for, and is empty for a longhand.
+    ///
+    /// Like a cascaded declaration, a value that does not substitute or parse is guaranteed-invalid
+    /// rather than declined.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the written value and its independent resolution inputs travel together"
+    )]
+    pub(crate) fn substitute_keyframe_value(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        store: *const c_void,
+        inheritance_store: *const c_void,
+        property: u16,
+        root_custom_property_name: &[u16],
+        written: &RetainedStyleValueData,
+        counters: &mut Counters,
+    ) -> RetainedStyleValueData {
+        let guaranteed_invalid = || RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid);
+        let Some(inputs) = self.document_style_computation_inputs else {
+            return guaranteed_invalid();
+        };
+        // NB: A function whose container conditions the engine cannot decide is resolved as though
+        //     no definition were visible, which takes the function's fallback.
+        let functions = match written.data() {
+            StyleValueData::Unresolved {
+                presence_dashed_function: true,
+                ..
+            } => self.prepare_custom_functions(node, pseudo),
+            _ => None,
+        };
+        let media_environment = self.document_media_snapshot.as_ffi();
+        let resolution_inputs = OrdinarySubstitutionInputs {
+            functions: functions.as_ref(),
+            media_environment: &media_environment,
+            style_query_length: self.document_media_snapshot.length.as_ref(),
+        };
+        let attribute_element = self.substitution_attribute_element(node, pseudo);
+        let attributes = super::inputs::SubstitutionAttributeSnapshot {
+            text: self.facts.substitution_attributes(attribute_element),
+            names_are_ascii_case_insensitive: !self.html_element_namespace.is_none()
+                && self.facts.namespace_of(attribute_element) == self.html_element_namespace,
+        };
+        substitute_written_value_against_store_with_attributes(
+            store,
+            inputs,
+            property,
+            root_custom_property_name,
+            written,
+            &attributes,
+            inheritance_store,
+            Some(&resolution_inputs),
+            counters,
+        )
+        .unwrap_or_else(guaranteed_invalid)
     }
 }
 
@@ -1560,6 +1623,7 @@ pub(crate) fn substitute_written_value_against_store(
         store,
         inputs,
         property,
+        &[],
         written,
         &super::inputs::SubstitutionAttributeSnapshot::default(),
         std::ptr::null(),
@@ -1577,6 +1641,7 @@ fn substitute_written_value_against_store_with_attributes(
     store: *const c_void,
     inputs: bridge::FfiDocumentStyleComputationInputs,
     property: u16,
+    root_custom_property_name: &[u16],
     written: &RetainedStyleValueData,
     attributes: &super::inputs::SubstitutionAttributeSnapshot<'_>,
     inheritance_store: *const c_void,
@@ -1661,8 +1726,8 @@ fn substitute_written_value_against_store_with_attributes(
             property,
             FfiUtf16View {
                 ascii: std::ptr::null(),
-                utf16: std::ptr::null(),
-                length: 0,
+                utf16: root_custom_property_name.as_ptr(),
+                length: root_custom_property_name.len(),
             },
             written.pointer().cast(),
             &mut resolution_environment,

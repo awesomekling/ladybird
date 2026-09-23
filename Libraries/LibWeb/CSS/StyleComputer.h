@@ -382,7 +382,6 @@ private:
     [[nodiscard]] RefPtr<ComputedStyleWorkingSet> compute_style_impl(DOM::AbstractElement, ComputeStyleMode, Optional<bool&> did_change_custom_properties, StyleScope const&, StyleEngineMatchResult* = nullptr, StyleSharingCandidate* = nullptr, Optional<StyleRecordID> highlight_parent_style_record = {}) const;
     [[nodiscard]] NonnullRefPtr<CascadedProperties> compute_cascaded_values(DOM::AbstractElement, CascadeInput const&, StyleSharingCandidate* sharing = nullptr, Vector<StyleProperty> const* precomputed_presentational_hints = nullptr, u8* substitution_usage = nullptr) const;
     void collect_animation_effects_into(DOM::AbstractElement, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>, ComputedStyleWorkingSet&, ComputedValuesFFI::FfiAnimationLengthContexts const*) const;
-    NonnullRefPtr<StyleValue const> compute_animated_custom_property_value(Utf16FlyString const& name, NonnullRefPtr<StyleValue const> specified_value, ComputedStyleWorkingSet&, DOM::AbstractElement) const;
     // Says whether publishing moved the element's custom-property environment. An element whose
     // animations settle on the values it already holds is left alone.
     bool publish_animated_custom_properties(ComputedStyleWorkingSet&, DOM::AbstractElement) const;

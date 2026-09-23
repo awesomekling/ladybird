@@ -3871,6 +3871,474 @@ unsafe fn try_stage_animation_tail(
     })
 }
 
+/// The arbitrary-substitution functions a substituted keyframe value held, which the host records
+/// on the element the way `resolve_unresolved_style_value` records them.
+pub const SUBSTITUTION_MARK_VAR: u8 = 1 << 0;
+pub const SUBSTITUTION_MARK_ATTR: u8 = 1 << 1;
+pub const SUBSTITUTION_MARK_IF: u8 = 1 << 2;
+pub const SUBSTITUTION_MARK_INHERIT: u8 = 1 << 3;
+pub const SUBSTITUTION_MARK_DASHED_FUNCTION: u8 = 1 << 4;
+
+/// One element's animation effects the host samples over its working set: the effects, in composite
+/// order, with the key each samples at, and what the sampling reads of the element.
+#[repr(C)]
+pub struct FfiHostAnimationSample {
+    pub style_engine: *mut c_void,
+    pub style_node: u32,
+    pub pseudo_kind: u8,
+    pub identities: *const u64,
+    pub generations: *const u64,
+    pub current_keys: *const f64,
+    pub effect_count: usize,
+    /// The working set's longhand table, which holds every longhand.
+    pub longhand_table: *const c_void,
+    /// The working set's overlay before this sample, or null.
+    pub animated_overlay: *const c_void,
+    /// The custom-property store the element holds now, which keyframes substitute against.
+    pub custom_property_store: *const c_void,
+    /// The same with the overlay of the frame before peeled off, which animations compose over.
+    pub base_custom_property_store: *const c_void,
+    /// The store of the element the sampled one inherits from.
+    pub inheritance_custom_property_store: *const c_void,
+    pub element_declares_own_custom_properties: bool,
+    /// Whether the base store is an environment the engine resolved, whose importance the engine's
+    /// own cascade answers.
+    pub base_custom_property_environment_is_engine: bool,
+    pub inheritance_parent_style_record: u64,
+    /// The document's side of the environment keyframes compute in. The engine fills in the
+    /// element's own side: its place among its siblings and its random bases.
+    pub environment: *const FfiStyleComputationEnvironment,
+    /// The contexts the longhand drive kept, or null where there was no drive.
+    pub kept_length_contexts: *const FfiAnimationLengthContexts,
+    pub callback_context: *mut c_void,
+    /// Makes the working set's overlay writable and hands it over, the moment a value is written.
+    pub prepare_overlay_for_mutation: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>,
+    /// The element's three length-resolution contexts, with the container bases `unit_mask` asks
+    /// for.
+    pub length_contexts: Option<unsafe extern "C" fn(*mut c_void, u8, *mut FfiAnimationLengthContexts)>,
+}
+
+/// What sampling did to the working set's overlay.
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FfiHostAnimationSampleOutcome {
+    /// Nothing was written.
+    Unchanged,
+    /// No effect is active: the element's own animated properties are to be cleared.
+    Cleared,
+    /// The overlay was written through `prepare_overlay_for_mutation`.
+    Evaluated,
+}
+
+/// What sampling found out that the host records on the element and its working set.
+#[repr(C)]
+pub struct FfiHostAnimationSampleResult {
+    pub outcome: FfiHostAnimationSampleOutcome,
+    pub keyframes_inherited_non_inherited_style_groups: u32,
+    pub depends_on_viewport_metrics: bool,
+    pub font_metrics_depend_on_viewport_metrics: bool,
+    pub uses_tree_counting_function: bool,
+    /// The `SUBSTITUTION_MARK_*` bits of every value a keyframe substituted.
+    pub substitution_marks: u8,
+    pub animated_custom_properties: *const FfiAnimatedCustomPropertyResult,
+    pub animated_custom_property_count: usize,
+    /// Released with `rust_release_animated_custom_property_results`.
+    pub animated_custom_properties_storage: *mut c_void,
+}
+
+impl FfiHostAnimationSampleResult {
+    fn with_outcome(outcome: FfiHostAnimationSampleOutcome) -> Self {
+        Self {
+            outcome,
+            keyframes_inherited_non_inherited_style_groups: 0,
+            depends_on_viewport_metrics: false,
+            font_metrics_depend_on_viewport_metrics: false,
+            uses_tree_counting_function: false,
+            substitution_marks: 0,
+            animated_custom_properties: std::ptr::null(),
+            animated_custom_property_count: 0,
+            animated_custom_properties_storage: std::ptr::null_mut(),
+        }
+    }
+}
+
+/// Sample one element's animation effects onto its working set's overlay.
+///
+/// The effects are sampled from the descriptions the host published for them. An effect with no
+/// description, or with fewer than two keyframes to interpolate between, composes nothing.
+///
+/// # Safety
+/// Every pointer in `input` must be live for the call, the callbacks must be set, and nothing may
+/// hold a borrow of the style engine.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_sample_animation_effects(
+    input: *const FfiHostAnimationSample,
+) -> FfiHostAnimationSampleResult {
+    abort_on_panic(|| {
+        let input = unsafe { &*input };
+        let engine = unsafe { &mut *input.style_engine.cast::<crate::css::style::StyleEngine>() };
+        let node = crate::css::style::tree::StyleNodeID::from_raw(input.style_node)
+            .expect("a sampled element has a style node");
+        let slot = animation_slot(input.pseudo_kind);
+        let Some(descriptions) = engine.take_element_animation_effect_descriptions(node, slot) else {
+            return FfiHostAnimationSampleResult::with_outcome(FfiHostAnimationSampleOutcome::Cleared);
+        };
+        let result = unsafe { sample_described_animation_effects(input, engine, node, &descriptions) };
+        engine.restore_element_animation_effect_descriptions(node, slot, descriptions);
+        result
+    })
+}
+
+unsafe fn sample_described_animation_effects(
+    input: &FfiHostAnimationSample,
+    engine: &mut crate::css::style::StyleEngine,
+    node: crate::css::style::tree::StyleNodeID,
+    descriptions: &[crate::css::style::animations::PublishedEffect],
+) -> FfiHostAnimationSampleResult {
+    use crate::css::animation as anim;
+    use FfiHostAnimationSampleOutcome::{Cleared, Evaluated, Unchanged};
+
+    let (identities, generations, current_keys) = unsafe {
+        (
+            std::slice::from_raw_parts(input.identities, input.effect_count),
+            std::slice::from_raw_parts(input.generations, input.effect_count),
+            std::slice::from_raw_parts(input.current_keys, input.effect_count),
+        )
+    };
+    let mut selected = Vec::with_capacity(input.effect_count);
+    let mut preparation_effects = Vec::with_capacity(input.effect_count);
+    let mut selected_keys = Vec::with_capacity(input.effect_count);
+    for index in 0..input.effect_count {
+        let Some(description) = descriptions
+            .iter()
+            .find(|description| description.identity == identities[index])
+        else {
+            continue;
+        };
+        if description.generation != generations[index] || !description.is_covered() || description.keyframes.len() < 2
+        {
+            continue;
+        }
+        selected.push(anim::SelectedEffect {
+            effect: description,
+            current_key: current_keys[index],
+            easing_from_animation: None,
+            composite_from_animation: 0,
+        });
+        preparation_effects.push(anim::FfiAnimationPreparationEffect {
+            identity: identities[index],
+            generation: generations[index],
+        });
+        selected_keys.push(current_keys[index]);
+    }
+    if selected.is_empty() {
+        return FfiHostAnimationSampleResult::with_outcome(Cleared);
+    }
+
+    let table = unsafe { &*input.longhand_table.cast::<ComputedLonghandTable>() };
+    let overlay = unsafe { input.animated_overlay.cast::<AnimatedOverlay>().as_ref() };
+    let preparation_key = anim::FfiAnimationPreparationKey {
+        effects: preparation_effects.as_ptr(),
+        effect_count: preparation_effects.len(),
+    };
+    let prepare_overlay = || unsafe {
+        (input
+            .prepare_overlay_for_mutation
+            .expect("the host makes its overlay writable"))(input.callback_context)
+    };
+    let current_color = table
+        .effective_value(overlay, crate::css::property_metadata::property_id::COLOR, true)
+        .value;
+    let transform_reference_box = engine.committed_transform_reference_box(node);
+    let with_transform_reference_box = |mut context: anim::FfiAnimationContext| {
+        if let Some((width, height)) = transform_reference_box {
+            context.has_transform_reference_box = true;
+            context.transform_reference_box_width = width;
+            context.transform_reference_box_height = height;
+        }
+        context
+    };
+
+    // A preparation the overlay already holds for exactly these effects needs no declarations and
+    // no keyframe longhands at all.
+    if unsafe { anim::rust_animation_preparation_matches(input.animated_overlay, &raw const preparation_key) } {
+        let batch = anim::FfiComputedAnimationBatch {
+            context: with_transform_reference_box(anim::FfiAnimationContext {
+                allow_discrete: false,
+                current_color: current_color.cast(),
+                has_length_resolution_context: false,
+                length_resolution_context: unsafe { std::mem::zeroed() },
+                has_transform_reference_box: false,
+                transform_reference_box_width: 0.0,
+                transform_reference_box_height: 0.0,
+            }),
+            preparation_key: &raw const preparation_key,
+            current_keys: selected_keys.as_ptr(),
+            current_key_count: selected_keys.len(),
+            cache_preparation: true,
+            resolved_animation_storage: std::ptr::null_mut(),
+            computed_keyframe_storage: std::ptr::null_mut(),
+            underlying_longhand_table: input.longhand_table,
+            overlay: prepare_overlay(),
+            custom_underlying_values: std::ptr::null(),
+            custom_initial_values: std::ptr::null(),
+            custom_value_count: 0,
+            custom_results: std::ptr::null_mut(),
+            custom_result_count: std::ptr::null_mut(),
+        };
+        unsafe { anim::rust_evaluate_animations(&raw const batch) };
+        return FfiHostAnimationSampleResult::with_outcome(Evaluated);
+    }
+
+    let (writing_mode, direction) = computed_writing_mode_and_direction(table);
+    let registry = engine.shared_custom_property_registry();
+    // NB: A registration published without a computed initial value takes the guaranteed-invalid
+    //     value as its initial one here.
+    let pseudo = (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT).then_some(input.pseudo_kind);
+    let mut custom = selected
+        .iter()
+        .any(|selection| selection.effect.declares_custom_properties())
+        .then(|| {
+            let custom = anim::AnimatedCustomProperties::new(
+                input.base_custom_property_store,
+                input.inheritance_custom_property_store,
+                input.element_declares_own_custom_properties,
+                registry.as_deref(),
+            );
+            if !input.base_custom_property_environment_is_engine {
+                return custom;
+            }
+            // Only the element's own cascade can make an animation lose to `!important`; an
+            // ancestor's declaration cannot.
+            let own_importance = selected
+                .iter()
+                .flat_map(|selection| selection.effect.custom_declarations.iter())
+                .filter_map(|declaration| {
+                    let name_raw = declaration.name.raw();
+                    match engine.cascaded_custom_property_importance(node, pseudo, name_raw) {
+                        3 => None,
+                        answer => Some((name_raw, answer)),
+                    }
+                })
+                .collect();
+            custom.with_own_importance(own_importance)
+        });
+    let mut substitution = anim::KeyframeSubstitutionContext::for_host(
+        input.custom_property_store,
+        anim::HostKeyframeSubstitution {
+            engine: &mut *engine,
+            node,
+            pseudo,
+            inheritance_store: input.inheritance_custom_property_store,
+        },
+    );
+    let resolved = anim::resolve_selected_animation_declarations(
+        &selected,
+        table,
+        writing_mode,
+        direction,
+        table.importance_bits(),
+        &mut substitution,
+        custom.as_mut(),
+    )
+    .expect("the host's sampling declines no declaration");
+    let substitution_marks = substitution.substitution_marks;
+    drop(substitution);
+    let mut result = FfiHostAnimationSampleResult::with_outcome(Unchanged);
+    result.substitution_marks = substitution_marks;
+    // Effects whose keyframes declare nothing this element animates compose nothing at all, and
+    // leave the overlay exactly as it was.
+    if resolved.count == 0 {
+        unsafe { anim::release_resolved_animation_declarations(resolved.storage) };
+        return result;
+    }
+    let properties = unsafe { std::slice::from_raw_parts(resolved.properties, resolved.count) };
+
+    // A keyframe that inherits a non-inherited property leaves an invalidation mark on the parent.
+    for property in properties {
+        if property.value_source != anim::FfiAnimationSpecifiedValueSource::Inherited
+            || property.custom_name_id != 0
+            || property_is_inherited(property.source_longhand_id)
+        {
+            continue;
+        }
+        result.keyframes_inherited_non_inherited_style_groups |=
+            match crate::css::property_metadata::property_style_group_index(property.source_longhand_id) {
+                Some(index) => 1u32 << index,
+                None => u32::MAX,
+            };
+    }
+
+    // The contexts the drive kept serve a batch that asks for no container base; otherwise the
+    // host builds them with the bases the batch asks for.
+    let container_unit_mask =
+        resolved.container_relative_length_unit_mask | resolved.custom_dependencies.container_relative_length_unit_mask;
+    let length_contexts = match unsafe { input.kept_length_contexts.as_ref() } {
+        Some(kept) if container_unit_mask == 0 => *kept,
+        _ => {
+            let mut contexts = std::mem::MaybeUninit::<FfiAnimationLengthContexts>::uninit();
+            unsafe {
+                (input.length_contexts.expect("the host builds length contexts"))(
+                    input.callback_context,
+                    container_unit_mask,
+                    contexts.as_mut_ptr(),
+                );
+                contexts.assume_init()
+            }
+        }
+    };
+
+    let tree_counting_inputs = match resolved.uses_tree_counting_function || custom.is_some() {
+        true => engine.element_tree_counting_inputs(node),
+        false => 0,
+    };
+    let unfixed_random_sharings = match resolved.unfixed_random_sharing_count {
+        0 => &[][..],
+        count => unsafe { std::slice::from_raw_parts(resolved.unfixed_random_sharings, count) },
+    };
+    let random_base_values = unfixed_random_sharings
+        .iter()
+        .map(|sharing| {
+            let StyleValueData::RandomValueSharing { has_name, name, .. } = (unsafe { &*sharing.source }) else {
+                unreachable!("an unfixed random sharing names its sharing value");
+            };
+            let name = if *has_name { name.units() } else { &[] };
+            FfiRandomBaseValue {
+                source: sharing.source.cast(),
+                value: engine.ensure_random_base_value(node, name, sharing.element_shared),
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut environment = unsafe { std::ptr::read(input.environment) };
+    environment.has_tree_counting_context = tree_counting_inputs != 0;
+    environment.sibling_count = tree_counting_inputs >> 32;
+    environment.sibling_index = tree_counting_inputs & 0xffff_ffff;
+    environment.random_base_values = random_base_values.as_ptr();
+    environment.random_base_value_count = random_base_values.len();
+
+    let mut custom_value_storage = Vec::new();
+    let mut custom_keyframe_values = Vec::new();
+    let (mut custom_underlying_pointers, mut custom_initial_pointers) = (Vec::new(), Vec::new());
+    let mut custom_uses_tree_counting_function = resolved.custom_dependencies.uses_tree_counting_function;
+    if let Some(custom) = &custom {
+        let custom_computation_context = anim::CustomPropertyComputationContext {
+            length: &length_contexts.remaining,
+            environment: &environment,
+            scheme: table.effective_color_scheme() as u8,
+        };
+        custom_keyframe_values.resize(properties.len(), std::ptr::null::<c_void>());
+        for (index, property) in properties.iter().enumerate() {
+            if property.custom_name_id == 0 {
+                continue;
+            }
+            // A registered name's token stream is parsed against its syntax, and a tree-counting
+            // function in it resolves against the element the same way a longhand's does.
+            if property.value_source == anim::FfiAnimationSpecifiedValueSource::Value
+                && let StyleValueData::Unresolved { components, .. } = (unsafe { &*property.value })
+            {
+                custom_uses_tree_counting_function |=
+                    crate::css::parser::value_parser::contains_tree_counting_function(components.as_slice());
+            }
+            let value = custom.specified_value(property, &custom_computation_context);
+            custom_keyframe_values[index] = value.pointer().cast();
+            custom_value_storage.push(value);
+        }
+        let (underlying, initial) = custom.underlying_and_initial_values();
+        custom_underlying_pointers = underlying.iter().map(RetainedStyleValueData::pointer).collect();
+        custom_initial_pointers = initial.iter().map(RetainedStyleValueData::pointer).collect();
+        custom_value_storage.extend(underlying);
+        custom_value_storage.extend(initial);
+    }
+    let keyframe_input = FfiAnimationKeyframeLonghandInput {
+        underlying_longhand_table: input.longhand_table.cast(),
+        style_engine: std::ptr::from_ref(&*engine).cast(),
+        inheritance_parent_style_record: input.inheritance_parent_style_record,
+        resolved_properties: resolved.properties.cast(),
+        property_count: resolved.count,
+        environment: &raw const environment,
+        font_length_resolution_context: &raw const length_contexts.font,
+        line_height_length_resolution_context: &raw const length_contexts.line_height,
+        remaining_length_resolution_context: &raw const length_contexts.remaining,
+        custom_property_values: custom_keyframe_values.as_ptr(),
+    };
+    let computed_keyframes = unsafe { rust_compute_animation_keyframe_longhands(&raw const keyframe_input) };
+    result.depends_on_viewport_metrics = computed_keyframes.depends_on_viewport_metrics;
+    result.font_metrics_depend_on_viewport_metrics = computed_keyframes.font_metrics_depend_on_viewport_metrics;
+    // A custom property's keyframe that asks where the element sits among its siblings makes the
+    // element's style depend on it just as a longhand's does.
+    result.uses_tree_counting_function = resolved.uses_tree_counting_function || custom_uses_tree_counting_function;
+
+    let mut custom_results = Vec::new();
+    let mut custom_result_count = 0usize;
+    if let Some(custom) = &custom {
+        custom_results.resize_with(custom.len(), || anim::FfiAnimatedCustomProperty {
+            custom_name_id: 0,
+            value: std::ptr::null(),
+        });
+    }
+    let batch = anim::FfiComputedAnimationBatch {
+        context: with_transform_reference_box(anim::FfiAnimationContext {
+            allow_discrete: true,
+            current_color: current_color.cast(),
+            has_length_resolution_context: true,
+            length_resolution_context: animation_length_resolution_context(&length_contexts.remaining),
+            has_transform_reference_box: false,
+            transform_reference_box_width: 0.0,
+            transform_reference_box_height: 0.0,
+        }),
+        preparation_key: &raw const preparation_key,
+        current_keys: selected_keys.as_ptr(),
+        current_key_count: selected_keys.len(),
+        // A preparation cached under these effects must not depend on anything outside them.
+        cache_preparation: custom.is_none()
+            && !resolved.uses_tree_counting_function
+            && resolved.container_relative_length_unit_mask == 0
+            && !resolved.needs_document_base_url
+            && resolved.unfixed_random_sharing_count == 0,
+        resolved_animation_storage: resolved.storage,
+        computed_keyframe_storage: computed_keyframes.storage,
+        underlying_longhand_table: input.longhand_table,
+        overlay: prepare_overlay(),
+        custom_underlying_values: custom_underlying_pointers.as_ptr(),
+        custom_initial_values: custom_initial_pointers.as_ptr(),
+        custom_value_count: custom_underlying_pointers.len(),
+        custom_results: custom_results.as_mut_ptr(),
+        custom_result_count: &raw mut custom_result_count,
+    };
+    unsafe { anim::rust_evaluate_animations(&raw const batch) };
+    drop(custom_value_storage);
+    result.outcome = Evaluated;
+    if let Some(custom) = &custom
+        && custom_result_count != 0
+    {
+        let retained = custom_results[..custom_result_count]
+            .iter()
+            .map(|result| {
+                (
+                    custom.name(result.custom_name_id),
+                    // SAFETY: the evaluation transfers one reference per written result.
+                    unsafe { RetainedStyleValueData::from_retained_pointer(result.value) },
+                )
+            })
+            .collect::<Vec<_>>();
+        let rows = retained
+            .iter()
+            .map(|(name, value)| FfiAnimatedCustomPropertyResult {
+                name_raw: name.raw(),
+                value: value.pointer().cast(),
+            })
+            .collect::<Vec<_>>();
+        let storage = Box::new(AnimatedCustomPropertyResults {
+            rows,
+            _retained: retained,
+        });
+        result.animated_custom_properties = storage.rows.as_ptr();
+        result.animated_custom_property_count = storage.rows.len();
+        result.animated_custom_properties_storage = Box::into_raw(storage).cast();
+    }
+    result
+}
+
 struct LonghandTransactionContinuation {
     drive_result: FfiLonghandDriveResult,
     finalization_line_height_metrics: FfiInputLineHeightMetrics,

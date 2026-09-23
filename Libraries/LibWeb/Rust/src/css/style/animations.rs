@@ -1517,10 +1517,6 @@ pub(crate) struct PublishedEasing {
 impl PublishedEasing {
     /// The easing a computed `animation-timing-function` describes, which fills in the hole a
     /// keyframe with no easing of its own keeps. A mirror of `EasingFunction::from_style_value`.
-    ///
-    /// `None` for a `linear()` with stops of its own: the host canonicalizes those before reading
-    /// them, which resolves each stop's calculated values and interpolates the inputs it was not
-    /// given, and a definition that names one is left to the host.
     #[must_use]
     pub(crate) fn from_computed_timing_function(value: &crate::css::style_value::StyleValueData) -> Option<Self> {
         use crate::css::style_value::StyleValueData;
@@ -1576,15 +1572,63 @@ impl PublishedEasing {
                 number_of_intervals,
                 ..
             } => {
-                // The host reads each of these with its own `numeric()`, which resolves a
-                // calculation on the spot; a definition that needs one is left to it.
+                // Each argument reads the way the host's `numeric()` reads it, which resolves a
+                // calculation on the spot.
                 let numeric = |value: &crate::css::style_value::RetainedStyleValueData| match value.data() {
                     StyleValueData::Number { value } => Some(*value),
                     StyleValueData::Integer { value } => Some(*value as f64),
                     StyleValueData::Percentage { value } => Some(*value),
+                    calculated @ StyleValueData::Calculated { .. } => {
+                        crate::css::calc::resolve_calculated_number_without_context(calculated)
+                            .or_else(|| crate::css::calc::resolve_calculated_percentage_without_context(calculated))
+                    }
                     _ => None,
                 };
                 match kind {
+                    0 => {
+                        // The stops are canonicalized first, which resolves each one's calculated
+                        // values and interpolates the inputs it was not given.
+                        unsafe extern "C" fn retain_child(
+                            _: *const std::ffi::c_void,
+                            child: &StyleValueData,
+                        ) -> *const StyleValueData {
+                            unsafe { crate::css::style_value::retain_style_value(child) }
+                        }
+                        // SAFETY: the absolutization hands back one reference, which the retained
+                        //         value below owns.
+                        let canonical = unsafe {
+                            crate::css::style_value::RetainedStyleValueData::from_retained_pointer(
+                                crate::css::absolutize::rust_composite_style_value_absolutize(
+                                    value,
+                                    std::ptr::null(),
+                                    retain_child,
+                                ),
+                            )
+                        };
+                        let StyleValueData::Easing { linear_stops, .. } = canonical.data() else {
+                            return None;
+                        };
+                        let linear_points = linear_stops
+                            .as_slice()
+                            .iter()
+                            .map(|stop| {
+                                Some(crate::css::animation::FfiLinearEasingPoint {
+                                    input: numeric(stop.input())? / 100.0,
+                                    output: numeric(stop.output())?,
+                                })
+                            })
+                            .collect::<Option<Box<[_]>>>()?;
+                        Some(Self {
+                            kind: 0,
+                            linear_points,
+                            x1: 0.0,
+                            y1: 0.0,
+                            x2: 0.0,
+                            y2: 0.0,
+                            interval_count: 0,
+                            step_position: 0,
+                        })
+                    }
                     1 => Some(cubic_bezier(numeric(x1)?, numeric(y1)?, numeric(x2)?, numeric(y2)?)),
                     2 => Some(Self {
                         kind: 2,
@@ -1631,6 +1675,9 @@ impl PublishedEasing {
 pub(crate) struct PublishedKeyframe {
     pub(crate) key: i64,
     pub(crate) easing: PublishedEasing,
+    /// The keyframe's own easing where it still has to be substituted on the element being
+    /// sampled; `easing` is then what it runs if the value resolves to none.
+    pub(crate) easing_value: crate::css::style_value::RetainedStyleValueData,
     pub(crate) composite: u8,
     declaration_range: std::ops::Range<usize>,
     custom_declaration_range: std::ops::Range<usize>,
@@ -1789,6 +1836,16 @@ impl AnimationEffectDescriptions {
         self.rows.get(&(node, slot)).map_or(&[][..], |effects| &effects[..])
     }
 
+    /// Lend one list out, for a caller that samples the effects while it substitutes against the
+    /// engine the list lives in. `restore` puts it back.
+    pub(crate) fn take(&mut self, node: StyleNodeID, slot: AnimationSlot) -> Option<Box<[PublishedEffect]>> {
+        self.rows.remove(&(node, slot))
+    }
+
+    pub(crate) fn restore(&mut self, node: StyleNodeID, slot: AnimationSlot, effects: Box<[PublishedEffect]>) {
+        self.rows.insert((node, slot), effects);
+    }
+
     /// Give up the rows of identities that have been retired, which can be minted again.
     pub(crate) fn retire(&mut self, nodes: &[StyleNodeID]) {
         if self.rows.is_empty() {
@@ -1875,8 +1932,19 @@ unsafe fn build_published_effects(published_buffers: PublishedEffectBuffers<'_>)
                         value,
                     });
                 }
+                // SAFETY: the caller holds a reference to the value for the call, and
+                //         `rust_style_value_retain` takes one of its own for the engine.
+                let easing_value = match keyframe.easing_value.is_null() {
+                    true => crate::css::style_value::RetainedStyleValueData::none(),
+                    false => unsafe {
+                        crate::css::style_value::RetainedStyleValueData::from_retained_pointer(
+                            crate::css::style_value::rust_style_value_retain(keyframe.easing_value.cast()),
+                        )
+                    },
+                };
                 published_keyframes.push(PublishedKeyframe {
                     key: keyframe.key,
+                    easing_value,
                     easing: PublishedEasing {
                         kind: keyframe.easing_kind,
                         linear_points: points.into_boxed_slice(),
@@ -1987,6 +2055,21 @@ fn description_declares_an_inherited_property(description: &PublishedEffect) -> 
 #[must_use]
 fn description_needs_the_host(description: &PublishedEffect) -> bool {
     if !description.is_covered() {
+        return true;
+    }
+    // A keyframe easing that substitutes against the element, and a value asking for one of the
+    // substitutions only the host's sampling resolves, are sampled by the host.
+    if description
+        .keyframes
+        .iter()
+        .any(|keyframe| keyframe.easing_value.optional_data().is_some())
+        || description.declarations.iter().any(|declaration| {
+            declaration
+                .value
+                .optional_data()
+                .is_some_and(|data| !crate::css::cascaded_properties::custom_property_value_is_callback_free(data))
+        })
+    {
         return true;
     }
     // Having a resource context is ordinary - every sheet with a base URL records one. Needing it
