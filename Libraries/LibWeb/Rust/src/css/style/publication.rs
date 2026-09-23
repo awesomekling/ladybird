@@ -1110,7 +1110,6 @@ impl RetainedState {
             && self.css_defined_animations.node_runs_a_css_animation(node)
             && css_keyframes_are_engine_computable
             && !self.record_declares_transitions(old_style_record)
-            && !has_registered_declarations
             && (is_leaf || !self.effects_animate_an_inheriting_custom_property(node));
         // An element whose Web Animations hold no sampled overlay has the old record as its base.
         // Its new base is driven like any other record, and the host samples the effects over it.
