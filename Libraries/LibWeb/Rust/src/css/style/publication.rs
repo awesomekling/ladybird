@@ -1096,15 +1096,13 @@ impl RetainedState {
                 .all(|&property| longhand_declares_a_css_animation(property));
         // With no sampled overlay, the old record is already the animation's base. The row can
         // install a newly driven base and apply its complete CSS plan before sampling; a child
-        // derived in the same batch waits for that composition. An animated custom property that
-        // inherits is no part of the composition: it is sampled into the element's environment
-        // after the record installs, so only a leaf can run one.
+        // derived in the same batch waits for that composition, and substitutes under the custom
+        // properties the sample publishes into the element's environment.
         let css_base_without_an_overlay = animations_bind_the_record
             && !self.computed_group_sets.node_has_animation_overlay(node)
             && self.css_defined_animations.node_runs_a_css_animation(node)
             && css_keyframes_are_engine_computable
-            && !self.record_declares_transitions(old_style_record)
-            && (is_leaf || !self.effects_animate_an_inheriting_custom_property(node));
+            && !self.record_declares_transitions(old_style_record);
         // An element whose Web Animations hold no sampled overlay has the old record as its base.
         // Its new base is driven like any other record, and the host samples the effects over it.
         // An effect on a custom property holds no overlay even while it runs, and children would
@@ -2956,25 +2954,6 @@ impl RetainedState {
                     .iter()
                     .any(|&(pinned, _)| pinned == parent)
         })
-    }
-
-    /// Whether one of the element's effects animates a custom property its descendants inherit.
-    /// An unregistered name always inherits.
-    fn effects_animate_an_inheriting_custom_property(&self, node: StyleNodeID) -> bool {
-        let registry = self.custom_property_registry();
-        self.animation_effect_descriptions
-            .effects(node, animations::ELEMENT_ANIMATION_SLOT)
-            .iter()
-            .flat_map(|effect| effect.custom_declarations.iter())
-            .any(|declaration| {
-                let name: Vec<u16> = match unsafe { ak::utf16_string_units(declaration.name.raw_word()) } {
-                    ak::Utf16StringUnits::Ascii(units) => units.iter().copied().map(u16::from).collect(),
-                    ak::Utf16StringUnits::Utf16(units) => units.to_vec(),
-                };
-                registry
-                    .and_then(|registry| registry.registration_facts(&name))
-                    .is_none_or(|registration| registration.inherits)
-            })
     }
 
     /// A partial drive reuses the base groups beneath an element's own composition. They must
