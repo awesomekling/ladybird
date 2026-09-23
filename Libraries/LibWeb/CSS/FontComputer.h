@@ -159,8 +159,6 @@ public:
     void load_fonts_from_sheet(StyleSheetState&);
     void unload_fonts_from_sheet(StyleSheetState&);
 
-    NonnullRefPtr<Gfx::FontCascadeList const> compute_font_for_style_values(Vector<ComputedFontFamily> font_families, CSSPixels const& font_size, int font_slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<Utf16FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data) const;
-    NonnullRefPtr<Gfx::FontCascadeList const> compute_font_for_style_values(StyleValue const& font_family, CSSPixels const& font_size, int font_slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<Utf16FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data) const;
     u64 environment_generation() const { return m_environment_generation; }
 
     // The `@font-face` table as everything outside the document sees it: an immutable snapshot of
