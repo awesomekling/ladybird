@@ -2306,6 +2306,19 @@ impl super::RetainedState {
             if !eligible {
                 continue;
             }
+            // This published input names the container's currently installed style. The layout
+            // snapshot can still hold a box from before that style stopped generating one.
+            if self
+                .published_style_record_view(super::computed::FinalStyleRecordID::from_raw(inputs.style_record))
+                .is_some_and(|view| view.display().is_none() || view.display().is_contents())
+            {
+                return ContainerUnitBasis {
+                    basis: 0.0,
+                    depends_on_viewport_metrics: false,
+                    container: Some(node),
+                    container_has_no_box: true,
+                };
+            }
             let snapshot = self.layout_style_snapshots.row(node).unwrap_or_default();
             if !snapshot.has_committed_box {
                 return ContainerUnitBasis {

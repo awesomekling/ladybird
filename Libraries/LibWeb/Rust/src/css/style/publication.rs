@@ -3672,7 +3672,6 @@ impl RetainedState {
         counters: &mut Counters,
     ) -> Option<WinnerStore> {
         use crate::css::property_metadata::property_id as prop;
-        use crate::css::style_value::StyleValueData;
         crate::css::ffi_stats::bump(crate::css::ffi_stats::FfiOp::WinnerStoreBuilds);
         // Seeded in cascade order, and within one rule in declaration order, since a logical
         // property and its physical associate resolve by order of appearance.
@@ -3826,10 +3825,7 @@ impl RetainedState {
                 || value_computes_with_random_inputs(data, resources_are_known)
                 || (pseudo_kind.is_none()
                     && matches!(&value, WinnerValue::Written { .. })
-                    && matches!(data, StyleValueData::Length { .. })
-                    && crate::css::style_compute::collect_external_value_dependencies(data)
-                        .container_relative_length_unit_mask
-                        != 0);
+                    && value_computes_with_container_inputs(data, resources_are_known));
             if !context_free
                 || (pseudo_kind.is_some()
                     && winner.property == prop::CONTENT
@@ -6179,6 +6175,20 @@ fn value_computes_with_random_inputs(value: &StyleValueData, resources_are_known
     dependencies.uses_random_function
         && !dependencies.uses_tree_counting_function
         && dependencies.container_relative_length_unit_mask == 0
+        && (resources_are_known
+            || (!dependencies.needs_document_base_url && !dependencies.may_need_style_sheet_resource_context))
+}
+
+/// Container bases are published per subject, and the drive supplies them to nested values too.
+fn value_computes_with_container_inputs(value: &StyleValueData, resources_are_known: bool) -> bool {
+    if crate::css::style_compute::value_is_computationally_independent(value).is_none() {
+        return false;
+    }
+    let dependencies = crate::css::style_compute::collect_external_value_dependencies(value);
+    dependencies.container_relative_length_unit_mask != 0
+        && !dependencies.uses_tree_counting_function
+        && !dependencies.has_unfixed_random_sharing
+        && !dependencies.uses_random_function
         && (resources_are_known
             || (!dependencies.needs_document_base_url && !dependencies.may_need_style_sheet_resource_context))
 }
