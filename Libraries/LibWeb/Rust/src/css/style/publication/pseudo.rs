@@ -732,7 +732,6 @@ impl RetainedState {
             }
             if kind != BACKDROP
                 && state.is_some_and(|state| !self.state_has_no_animation_name(state))
-                && self.element_css_defined_animations(node, kind + 1).is_empty()
                 && self.animation_keyframes().only_the_document_scope_defines_keyframes()
             {
                 let view = self.computed_group_sets.style_record_view(new_style_record.raw())?;
