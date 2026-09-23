@@ -1058,10 +1058,11 @@ impl RetainedState {
         // A transition decides against the before-change style a moved base leaves, which
         // standing winners do not move. A record that runs CSS animations settles its plan
         // from the new base, and its transitions are decided at installation against the
-        // composed record the row moves away from.
+        // composed record the row moves away from. An element whose effects have all gone still
+        // holds its last composition; the sample over the new base, with nothing left to
+        // compose, clears it.
         let full_drive_beneath_a_composition = animations_bind_the_record
             && requires_full_drive
-            && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
             && self.computed_group_sets.node_has_animation_overlay(node)
             && (!self.record_declares_transitions(old_style_record)
                 || redrives_a_standing_composition
