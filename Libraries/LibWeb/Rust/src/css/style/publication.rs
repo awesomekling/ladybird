@@ -1078,7 +1078,10 @@ impl RetainedState {
         // the rules its own names run matter.
         let is_leaf = self.tree.flat_tree_children(node).next().is_none();
         let css_keyframes_are_engine_computable = self.animation_keyframes().a_first_record_may_start_an_animation()
-            || (is_leaf && self.warm_record_names_engine_computable_animations(node, state));
+            || (is_leaf && {
+                let reads_custom_properties = self.node_style_reads_custom_properties(node);
+                self.warm_record_names_engine_computable_animations(node, state, reads_custom_properties)
+            });
         let full_css_drive_beneath_a_composition = full_drive_beneath_a_composition
             && self.css_defined_animations.node_runs_a_css_animation(node)
             && css_keyframes_are_engine_computable
@@ -2047,10 +2050,19 @@ impl RetainedState {
 
     /// Check the names a later record runs. Its descendants already hold records of their own and
     /// take an animated value through the overlay's invalidation, so only host resolution binds it,
-    /// and a container unit, whose basis a sample outside the computation cannot read.
-    fn warm_record_names_engine_computable_animations(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
+    /// and a container unit, whose basis a sample outside the computation cannot read. An animated
+    /// custom property is only sampled into the element's environment after the record installs,
+    /// so a record whose own values substitute custom properties cannot run one.
+    fn warm_record_names_engine_computable_animations(
+        &self,
+        node: StyleNodeID,
+        state: CascadeStateID,
+        reads_custom_properties: bool,
+    ) -> bool {
         self.state_names_only_keyframes(state, KeyframesScope::Element(self.tree.tree_scope(node)), |set| {
-            !set.needs_the_host && !description_reads_container_units(&set.description)
+            !set.needs_the_host
+                && !description_reads_container_units(&set.description)
+                && (!reads_custom_properties || !set.description.declares_custom_properties())
         })
     }
 
