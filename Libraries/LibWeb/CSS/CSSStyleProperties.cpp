@@ -634,7 +634,7 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
     auto pseudo_element = abstract_element.pseudo_element();
     if (!pseudo_element.has_value())
         return {};
-    if (!is_synthetic_pseudo_element(*pseudo_element))
+    if (*pseudo_element >= PseudoElement::KnownPseudoElementCount)
         return {};
     // A container's verdict can move after its pseudo record was installed. Read its current
     // winners even when the originating element still has a computed pseudo style.
@@ -661,7 +661,7 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
         // A read-only answer is independent of the element's installed style. Copy its record
         // before the demand slot is reused by another style read.
         auto kind = *target.pseudo_element();
-        if (first_is_one_of(kind, PseudoElement::Before, PseudoElement::After, PseudoElement::FirstLetter, PseudoElement::Marker, PseudoElement::Backdrop, PseudoElement::Selection)) {
+        if (kind < PseudoElement::KnownPseudoElementCount) {
             auto demand = kind == PseudoElement::Selection
                 ? StyleEngineFFI::style_engine_answer_record_demand(style_computer.style_engine().rust_handle(), target.element().style_node_id().value(), to_underlying(kind), false, false, true, highlight_parent_style_record.value_or(StyleRecordID {}).value())
                 : style_computer.style_engine().answer_record_demand(target.element().style_node_id(), to_underlying(kind), false, false, true);
@@ -901,10 +901,8 @@ Optional<StyleProperty> CSSStyleProperties::get_direct_property(PropertyNameAndI
 
         if (!layout_node) {
             auto style_record = abstract_element.computed_style();
-            if (!transient_style && !style_record) {
-                // A synthetic pseudo-element without matching rules has no durable style.
-                transient_style = abstract_element.document().style_computer().materialize_style_record(abstract_element);
-            }
+            if (!transient_style && !style_record)
+                return {};
             auto const* computed_values = transient_style ? transient_style.ptr() : style_record ? &*style_record
                                                                                                  : nullptr;
             VERIFY(computed_values);
