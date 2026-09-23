@@ -2546,6 +2546,7 @@ impl RetainedState {
         let font = font.expect("a full drive resolves the font");
         let (new_style_record, swap_eligible) = self.assemble_and_publish_engine_record(
             target,
+            true,
             parent_record,
             table,
             &length,
@@ -3378,11 +3379,13 @@ impl RetainedState {
 
     /// Build a driven table's groups against the parent record's payloads and publish the record
     /// for `target` the way a C++ computation publishes one; the record's swap eligibility comes
-    /// back beside its identity.
+    /// back beside its identity. A record not `assign`ed to `target` is held by nothing but its
+    /// pins.
     #[allow(clippy::too_many_arguments)]
     fn assemble_and_publish_engine_record(
         &mut self,
         target: computed::ComputedStyleTarget,
+        assign: bool,
         parent_record: Option<computed::FinalStyleRecordID>,
         mut table: ComputedLonghandTable,
         length: &crate::css::style_compute::FfiLengthResolutionContext,
@@ -3494,7 +3497,7 @@ impl RetainedState {
             table: true,
         };
         let publication = self.publish_computed_groups_impl(
-            Some(target),
+            assign.then_some(target),
             &payloads,
             computed::ENGINE_INHERITED_GROUP_COUNT,
             environment,
@@ -5851,6 +5854,109 @@ impl StyleEngineState {
                 None => self.container_query_inputs.clear(node),
             }
         }
+    }
+
+    /// The record of an element no rule reaches, such as one outside the document: the cascade of
+    /// its own declarations alone, in cascade order, over the initial values. The element has no
+    /// style node, so the drive is keyed by `subject`, the document's, which names no parent and
+    /// no siblings. A value that would substitute has no environment to substitute from here, and
+    /// is unset. Returns the record pinned for the caller.
+    pub(crate) fn declared_only_record(
+        &mut self,
+        subject: StyleNodeID,
+        facts: u32,
+        declarations: &[(ElementDeclarationKind, &crate::css::declaration_block::DeclaredProperty)],
+        counters: &mut Counters,
+    ) -> Option<computed::FinalStyleRecordID> {
+        use crate::css::style_value::{RetainedStyleValueData, StyleValueData, retain_style_value};
+        let Some(inputs) = self.document_style_computation_inputs else {
+            counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
+            return None;
+        };
+        let retained = |value: *const StyleValueData| unsafe {
+            RetainedStyleValueData::from_retained_pointer(retain_style_value(value))
+        };
+        let mut winners: Vec<WinnerDeclaration> = Vec::with_capacity(declarations.len());
+        for important in [false, true] {
+            for &(kind, declaration) in declarations {
+                let property = declaration.property_id;
+                if declaration.important != important
+                    || property < crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID
+                {
+                    continue;
+                }
+                let value = match declaration.value.as_ref() {
+                    data @ StyleValueData::Shorthand { .. } => match shorthand_longhand_data(property, data) {
+                        Some(longhand) => retained(longhand),
+                        None => continue,
+                    },
+                    StyleValueData::Unresolved { .. } | StyleValueData::PendingSubstitution { .. } => unset_value(),
+                    data => retained(data),
+                };
+                winners.retain(|winner| winner.property != property);
+                winners.push(WinnerDeclaration::new(
+                    property,
+                    important,
+                    WinnerValue::Substituted {
+                        value: invalid_as_unset(value),
+                        source: WinnerSource::Element(kind),
+                    },
+                ));
+            }
+        }
+        let store = WinnerStore::new(winners);
+        let target = computed::ComputedStyleTarget::new(subject, u8::MAX);
+        let drive_subject = DriveSubject {
+            target,
+            recascade_node: None,
+            parent: None,
+            facts: facts & !bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT,
+            highlight_parent: None,
+        };
+        let mut scratch = EngineComputedRecordScratch::default();
+        let driven = loop {
+            let driven = self.engine_full_drive(
+                drive_subject,
+                None,
+                &store,
+                &inputs,
+                &mut scratch.font_drive,
+                FontDriveGoal::Complete,
+                TransitionDriveGoal::RefuseDeclarations,
+                false,
+                &mut 0,
+                counters,
+            );
+            if driven.is_none() && !self.random_base_requests.is_empty() {
+                self.refill_random_base_requests();
+                continue;
+            }
+            if driven.is_none()
+                && let Some(request) = scratch.font_drive.request.take()
+            {
+                self.refill_font_requests(vec![(None, request)], counters);
+                continue;
+            }
+            break driven;
+        };
+        let (table, length, _, font) = driven?;
+        let font = font.expect("a full drive resolves the font");
+        let (record, _) = self.assemble_and_publish_engine_record(
+            target,
+            false,
+            None,
+            table,
+            &length,
+            &font,
+            0,
+            0,
+            0,
+            None,
+            &mut scratch.computability,
+            counters,
+        )?;
+        self.computed_group_sets.pin_style_record(record.raw());
+        Some(record)
     }
 
     /// Answer an observation of one node without draining the document's transaction. A
