@@ -886,6 +886,21 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     StyleRecordID reference_record;
                     Optional<String> reference_font;
                     DOM::Element::EnginePseudoElementRecords reference_pseudo_element_records {};
+                    // The reference for each pseudo-element the engine settled, computed over the
+                    // reference element style. The element installs only the engine's records.
+                    auto compute_reference_pseudo_element_records = [&] {
+                        for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
+                            if (!pseudo_element_records[kind].has_value() || (verify_base_without_effects && !*pseudo_element_records[kind]))
+                                continue;
+                            if (kind == to_underlying(PseudoElement::Backdrop) && !element->rendered_in_top_layer())
+                                continue;
+                            StyleEngine::StyleRecordDelta pseudo_delta {};
+                            auto pseudo = DOM::AbstractElement { *element, static_cast<PseudoElement>(kind) };
+                            auto reference_pseudo = document.style_computer().compute_pseudo_element_style_if_needed(pseudo, {}, nullptr, pseudo_delta);
+                            VERIFY(reference_pseudo || !*pseudo_element_records[kind]);
+                            reference_pseudo_element_records[kind] = reference_pseudo ? pseudo_delta.new_style_record : StyleRecordID {};
+                        }
+                    };
                     if (verify_base_without_effects)
                         set_reference_style_without_effects(true);
                     if (verify_base_without_effects) {
@@ -894,21 +909,14 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         reference_record = reference_delta.new_style_record;
                         if (auto const* font = static_cast<ComputedValues::FontValues const*>(reference_values->style_group_payload(StyleGroupIndex::FontValues)))
                             reference_font = describe_resolved_font(font->font_list_value());
-                        for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
-                            if (!pseudo_element_records[kind].has_value() || !*pseudo_element_records[kind])
-                                continue;
-                            StyleEngine::StyleRecordDelta pseudo_delta {};
-                            auto pseudo = DOM::AbstractElement { *element, static_cast<PseudoElement>(kind) };
-                            auto reference_pseudo = document.style_computer().compute_pseudo_element_style_if_needed(pseudo, {}, nullptr, pseudo_delta);
-                            VERIFY(reference_pseudo);
-                            reference_pseudo_element_records[kind] = pseudo_delta.new_style_record;
-                        }
+                        compute_reference_pseudo_element_records();
                     } else {
                         invalidation = element->apply_style_engine_reaction(verification_did_change_custom_properties, DOM::Element::StyleRecomputeMode::Verification);
                         reference_record = element->style_record_identity();
+                        set_reference_style_without_effects(true);
+                        compute_reference_pseudo_element_records();
                     }
-                    if (verify_base_without_effects)
-                        set_reference_style_without_effects(false);
+                    set_reference_style_without_effects(false);
                     StyleValueFFI::rust_style_ffi_counters_suspend_for_verification(counters_were_suspended);
                     // A read-only demand in the reference pass may have built a private ancestor
                     // record from pending inputs. The published record is checked by the normal
@@ -962,7 +970,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                             continue;
                         if (verify_base_without_effects && !*engine_record)
                             continue;
-                        auto installed = verify_base_without_effects ? *reference_pseudo_element_records[kind] : element->style_record_identity(static_cast<PseudoElement>(kind));
+                        auto installed = *reference_pseudo_element_records[kind];
                         if (!*engine_record) {
                             VERIFY(!installed);
                             continue;
