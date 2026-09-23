@@ -153,6 +153,11 @@ impl RetainedState {
         if environment != 0 {
             self.computed_group_sets
                 .set_node_custom_property_environment(node, environment);
+            // A descendant substitutes under the environment it inherits from this element, such
+            // as the one an animation samples custom properties into.
+            if self.custom_property_environments.store(environment).is_none() {
+                unsafe { self.custom_property_environments.retain(environment, store) };
+            }
         }
         self.element_custom_property_data
             .insert(node, Some(unsafe { RetainedCustomPropertyData::retain(data, store) }));
