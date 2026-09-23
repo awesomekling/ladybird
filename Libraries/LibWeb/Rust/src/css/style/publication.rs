@@ -107,6 +107,11 @@ impl RetainedState {
         pseudo_kind: u8,
     ) -> Option<computed::FinalStyleRecordID> {
         let parent = self.retained_inheritance_parent_node(node, pseudo_kind)?;
+        if let Some(record) = self.computed_group_sets.assigned_style_record(parent)
+            && computed::ComputedGroupSets::record_is_animation_overlay(record.raw())
+        {
+            return Some(record);
+        }
         if let Some(record) = self
             .legacy_finalized_longhand_rows
             .get(&computed::ComputedStyleTarget::new(parent, u8::MAX))
@@ -128,6 +133,13 @@ impl RetainedState {
         u64,
     )> {
         let parent = self.retained_inheritance_parent_node(node, pseudo_kind)?;
+        if self
+            .computed_group_sets
+            .assigned_style_record(parent)
+            .is_some_and(|record| computed::ComputedGroupSets::record_is_animation_overlay(record.raw()))
+        {
+            return None;
+        }
         self.legacy_finalized_longhand_rows
             .get(&computed::ComputedStyleTarget::new(parent, u8::MAX))
             .map(|row| {
@@ -945,7 +957,11 @@ impl RetainedState {
             && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
             && self.animation_base_inherits_from_current_parent(node, state, old_style_record)
             && self.computed_group_sets.node_has_animation_overlay(node)
-            && !self.css_defined_animations.node_runs_a_css_animation(node);
+            && (!self.css_defined_animations.node_runs_a_css_animation(node)
+                || (self.animation_keyframes().only_the_document_scope_defines_keyframes()
+                    && !delta
+                        .properties()
+                        .contains(&crate::css::property_metadata::property_id::ANIMATION_FILL_MODE)));
         let animations_bind_the_record = animations_bind_the_record && !derived_beneath_a_composition;
         if animations_bind_the_record {
             counters.bump(Counter::EngineComputedRecordBailWinnerElement);
@@ -1008,11 +1024,9 @@ impl RetainedState {
         // the plan is a function of the longhands this drive computes, the `@keyframes` the host
         // published before the stage began, and the animations the element already holds.
         //
-        // It is taken only where the element holds none - which is where the batch let the row this
-        // far at all, since an element with an animation of its own is refused before its winners
-        // are compared - so the plan can do nothing but start what its definitions name: there is
-        // nothing to match, nothing to retime, nothing to cancel. A delta that also moves a
-        // transition declaration is left to C++, which decides both in one computation.
+        // The plan also names existing animations, so the host can keep, retime or cancel them.
+        // A delta that also moves a transition declaration is left to C++, which decides both in
+        // one computation.
         let owes_an_animation_plan = delta
             .properties()
             .iter()
@@ -1021,9 +1035,6 @@ impl RetainedState {
                 .properties()
                 .iter()
                 .any(|&property| longhand_only_declares_a_css_transition(property))
-            && self
-                .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
-                .is_empty()
             && self.animation_keyframes().only_the_document_scope_defines_keyframes();
         let no_css_animation_to_plan = self.computed_group_sets.associated_pseudo_kind(node).is_none()
             && self.state_has_no_animation_name(state)

@@ -3829,6 +3829,22 @@ impl ComputedGroupSets {
                     if first == second || style_group_payloads_equal(index, first.as_ptr(), second.as_ptr()) {
                         return true;
                     }
+                    if target.pseudo_kind == u8::MAX
+                        && index == crate::css::computed_value_types::STYLE_GROUP_INDEX_FONT
+                    {
+                        let first_font =
+                            unsafe { first.cast::<crate::css::computed_value_types::FontValues>().deref() };
+                        let second_font =
+                            unsafe { second.cast::<crate::css::computed_value_types::FontValues>().deref() };
+                        // Independent computations can resolve the same cascade into separate
+                        // host objects. The verifier compares their font snapshots separately.
+                        let mut comparable = first_font.clone();
+                        comparable.font_cascade_list = second_font.font_cascade_list.clone();
+                        comparable.frozen_font_list = second_font.frozen_font_list.clone();
+                        if comparable == *second_font {
+                            return true;
+                        }
+                    }
                     if index == crate::css::computed_value_types::STYLE_GROUP_INDEX_BACKGROUND {
                         let first_background = unsafe {
                             first
