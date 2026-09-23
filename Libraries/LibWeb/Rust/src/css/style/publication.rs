@@ -781,14 +781,6 @@ impl RetainedState {
                 self.winner_groups.semantic_delta(Some(state), state)
             }
         };
-        // A changed ordinary winner can be driven beneath an animation overlay, but an
-        // independently edited @keyframes rule also requires a new CSS animation definition.
-        // That definition is absent from the winner delta, so let the host resolve the current
-        // keyframes and composition together instead of sampling the old effect over a new base.
-        if !delta.is_empty() && !record_may_stand_while_animating {
-            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-            return None;
-        }
         let Some(mut inputs) = self.document_style_computation_inputs else {
             counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
             return None;
@@ -1050,6 +1042,14 @@ impl RetainedState {
                 || (self.tree.flat_tree_children(node).next().is_none()
                     && !self.computed_group_sets.node_has_animation_overlay(node)))
             && self.state_names_resolve_without_the_declaration_scope(node, state);
+        // A changed ordinary winner can be driven beneath an animation overlay, but an
+        // independently edited @keyframes rule also requires a new CSS animation definition.
+        // That definition is absent from the winner delta, so the row settles a plan from the new
+        // longhands, and without one the old effect would be sampled over the new base.
+        if !delta.is_empty() && !record_may_stand_while_animating && !owes_an_animation_plan {
+            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
+            return None;
+        }
         // A remaining-phase delta can derive the new base beneath an existing composition. The
         // host samples the effect again after installing this base, including when the moved
         // property is animated. A full drive still needs dependent-value closure.
