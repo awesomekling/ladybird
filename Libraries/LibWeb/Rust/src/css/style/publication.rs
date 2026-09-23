@@ -1113,9 +1113,9 @@ impl RetainedState {
             && !has_registered_declarations
             && is_leaf;
         // An element whose Web Animations hold no sampled overlay has the old record as its base.
-        // A leaf's new base is driven like any other record, and the host samples the effects
-        // over it. An element with children stays in C++: an effect on an inherited custom
-        // property holds no overlay, and its children would derive before the sample.
+        // Its new base is driven like any other record, and the host samples the effects over it.
+        // An effect on a custom property holds no overlay even while it runs, and children would
+        // derive before the sample, so an element with children cannot run one.
         let effect_base_without_an_overlay = animations_bind_the_record
             && !self.computed_group_sets.node_has_animation_overlay(node)
             && !self.css_defined_animations.node_runs_a_css_animation(node)
@@ -1126,7 +1126,12 @@ impl RetainedState {
             && !self.record_declares_transitions(old_style_record)
             && !has_registered_declarations
             && !self.node_style_reads_custom_properties(node)
-            && self.tree.flat_tree_children(node).all(|child| child.is_text())
+            && (self.tree.flat_tree_children(node).all(|child| child.is_text())
+                || !self
+                    .animation_effect_descriptions
+                    .effects(node, animations::ELEMENT_ANIMATION_SLOT)
+                    .iter()
+                    .any(animations::PublishedEffect::declares_custom_properties))
             && !delta
                 .properties()
                 .iter()
