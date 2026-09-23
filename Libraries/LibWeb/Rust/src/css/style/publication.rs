@@ -1115,11 +1115,33 @@ impl RetainedState {
             && !self.record_holds_an_animation_overlay(old_style_record)
             && !self.css_defined_animations.node_runs_a_css_animation(node)
             && (!names_an_animation || css_keyframes_are_engine_computable)
-            && self.effects_sample_over_a_new_base(node)
+            && self.effects_sample_over_a_new_base(node, TransitionEffects::Refused)
             && !self.record_transition_facts(old_style_record, &[]).0
             && !has_registered_declarations
             && is_leaf;
+        // A leaf whose record declares transitions can take a newly driven base beneath its
+        // composition in the same way. The transition decision itself is made below against the
+        // record the row moves away from.
+        let transitions_beneath_a_composition = animations_bind_the_record
+            && self.record_transition_facts(old_style_record, &[]).0
+            && !self.css_defined_animations.node_runs_a_css_animation(node)
+            && self.effects_sample_over_a_new_base(node, TransitionEffects::Allowed)
+            && self
+                .computed_group_sets
+                .style_record_view(old_style_record.raw())
+                .is_some_and(|view| {
+                    unsafe { view.animated_overlay.as_ref() }.is_none_or(|overlay| {
+                        overlay.entries().iter().all(|entry| {
+                            property_computes_in_remaining_phase(entry.property)
+                                && !property_feeds_box_type_transformation(entry.property)
+                                && !property_feeds_post_compute_adjustment(entry.property)
+                        })
+                    })
+                })
+            && !has_registered_declarations
+            && is_leaf;
         let derived_beneath_a_composition = css_animation_plan_without_an_overlay
+            || transitions_beneath_a_composition
             || css_base_without_an_overlay
             || effect_base_without_an_overlay
             || base_without_a_composition
@@ -2753,14 +2775,15 @@ impl RetainedState {
     /// Whether the host can sample every effect the element holds over a newly driven base. Each
     /// must be one the stage can describe, declaring longhands the remaining phase computes and no
     /// value a later phase or a post-compute adjustment finalizes: those need a composed drive.
-    fn effects_sample_over_a_new_base(&self, node: StyleNodeID) -> bool {
+    fn effects_sample_over_a_new_base(&self, node: StyleNodeID, transitions: TransitionEffects) -> bool {
         self.animation_effect_descriptions
             .effects(node, animations::ELEMENT_ANIMATION_SLOT)
             .iter()
             .all(|effect| {
                 effect.is_covered()
                     && !description_reads_container_units(effect)
-                    && effect.flags & animations::effect_flag::IS_TRANSITION == 0
+                    && (transitions == TransitionEffects::Allowed
+                        || effect.flags & animations::effect_flag::IS_TRANSITION == 0)
                     && !effect.declares_custom_properties()
                     && effect.keyframes.iter().all(|keyframe| {
                         effect.declarations_of(keyframe).iter().all(|declaration| {
@@ -6617,6 +6640,12 @@ fn shorthand_longhand_value(
 
 /// Whether a longhand computes in the drive's remaining phase: after the font, line-height and
 /// color-scheme stages, whose outputs the engine does not derive itself yet.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TransitionEffects {
+    Refused,
+    Allowed,
+}
+
 fn description_reads_container_units(description: &animations::PublishedEffect) -> bool {
     description.declarations.iter().any(|declaration| {
         declaration.value.optional_data().is_some_and(|data| {
