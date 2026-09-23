@@ -689,8 +689,8 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
                 }
             }
         }
-        // Active selection styles and declined demands still need the C++ computation.
-        if (kind == PseudoElement::Selection && !document.selection_styles_are_observable())
+        // Non-highlight declined demands still need the C++ computation.
+        if (kind == PseudoElement::Selection)
             return {};
         bool did_change_custom_properties = false;
         StyleEngine::StyleRecordDelta style_record_delta {};
