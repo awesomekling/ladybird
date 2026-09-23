@@ -736,23 +736,6 @@ impl AnimationTimingRow {
         self.synthesized_index
     }
 
-    /// Whether this row describes a CSS transition.
-    #[must_use]
-    pub(crate) fn is_css_transition(&self) -> bool {
-        self.composite_class == animation_class::CSS_TRANSITION
-    }
-
-    /// Whether the animation is idle: no current time and no pending task, so its effect composes
-    /// nothing. This is the idle case of `play_state()`.
-    #[must_use]
-    pub(crate) fn is_idle(&self) -> bool {
-        use timing_row_flag as flag;
-        !self.has(flag::HAS_START_TIME)
-            && !self.has(flag::HAS_HOLD_TIME)
-            && !self.has(flag::HAS_PENDING_PLAY_TASK)
-            && !self.has(flag::HAS_PENDING_PAUSE_TASK)
-    }
-
     /// The place in the element's `animation-name` list of the CSS animation this row describes,
     /// for a row that is one of the animations `(node, slot)`'s own plan works on. `None` for every
     /// other row: a transition, an animation script started, a CSS animation another element owns,
