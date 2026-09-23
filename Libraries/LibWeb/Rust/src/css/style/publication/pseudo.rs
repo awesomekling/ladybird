@@ -163,6 +163,7 @@ impl RetainedState {
             counters,
             None,
             false,
+            None,
         )
     }
 
@@ -180,6 +181,7 @@ impl RetainedState {
         counters: &mut Counters,
         selected_kind: Option<u8>,
         cssom_read: bool,
+        highlight_parent: Option<computed::FinalStyleRecordID>,
     ) -> Option<()> {
         use pseudo_kind::{AFTER, BACKDROP, BEFORE, FIRST_LETTER, MARKER, SELECTION};
 
@@ -200,7 +202,7 @@ impl RetainedState {
         let mut states: [Option<CascadeStateID>; pseudo_kind::SYNTHETIC_COUNT] = [None; pseudo_kind::SYNTHETIC_COUNT];
         let mut marker_row_is_stale = false;
         for (pseudo, version, state, priority_current) in self.current_winner_groups().pseudo_states(node) {
-            if self.deferred_pseudo_element == Some(pseudo.kind) {
+            if selected_kind.is_none() && self.deferred_pseudo_element == Some(pseudo.kind) {
                 continue;
             }
             let Ok(kind) = u8::try_from(pseudo.kind.0) else {
@@ -332,7 +334,8 @@ impl RetainedState {
             if selected_kind.is_some_and(|selected| selected != kind) {
                 continue;
             }
-            if self.deferred_pseudo_element == Some(tree::PseudoElementKind(u16::from(kind)))
+            if (selected_kind.is_none()
+                && self.deferred_pseudo_element == Some(tree::PseudoElementKind(u16::from(kind))))
                 || (selected_kind.is_none() && pseudo_kind::is_highlight(usize::from(kind)) && kind != SELECTION)
             {
                 continue;
@@ -370,7 +373,7 @@ impl RetainedState {
             }
             let has_rules = kinds_with_rules & (1 << kind) != 0;
             let highlight_parent_record = (kind == SELECTION)
-                .then(|| self.retained_highlight_inheritance_parent_style_record(node, kind))
+                .then(|| highlight_parent.or_else(|| self.retained_highlight_inheritance_parent_style_record(node, kind)))
                 .flatten();
             let state = states[usize::from(kind)].filter(|_| has_rules);
             if has_rules && state.is_none() {
@@ -573,6 +576,7 @@ impl RetainedState {
                         recascade_node: None,
                         parent: Some(node),
                         facts,
+                        highlight_parent: highlight_parent_record,
                     };
                     let mut explicitly_inherited_groups = 0;
                     let driven = self.engine_full_drive(
@@ -774,9 +778,6 @@ impl RetainedState {
     }
 
     pub(super) fn pseudo_style_mask(&self, node: StyleNodeID) -> Option<u64> {
-        if let Some(mask) = self.computed_group_sets.node_pseudo_style_mask(node) {
-            return Some(mask);
-        }
         let bit = |pseudo: Option<tree::PseudoElementTarget>| {
             pseudo
                 .map(|pseudo| pseudo.kind.0)
@@ -798,6 +799,9 @@ impl RetainedState {
                         .fold(0, |mask, rule_match| mask | bit(rule_match.pseudo_element)),
                 );
             }
+        }
+        if let Some(mask) = self.computed_group_sets.node_pseudo_style_mask(node) {
+            return Some(mask);
         }
         let identity = self.current_answer_identity(node)?;
         self.match_answers.answer(identity)?;
@@ -849,6 +853,7 @@ impl RetainedState {
                 counters,
                 None,
                 false,
+                None,
             )
             .is_none()
         {
@@ -1095,6 +1100,7 @@ impl RetainedState {
             recascade_node: Some(node),
             parent: Some(parent),
             facts,
+            highlight_parent: None,
         };
         let mut explicitly_inherited_groups = 0;
         let driven = self.engine_full_drive(
@@ -1213,6 +1219,7 @@ impl StyleEngineState {
         node: StyleNodeID,
         kind: u8,
         read_only: bool,
+        highlight_parent: Option<computed::FinalStyleRecordID>,
         counters: &mut Counters,
     ) -> Result<Option<computed::FinalStyleRecordID>, &'static str> {
         if ![
@@ -1271,6 +1278,7 @@ impl StyleEngineState {
                     counters,
                     Some(kind),
                     cssom_absent,
+                    highlight_parent,
                 )
                 .is_some()
             {

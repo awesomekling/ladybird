@@ -3826,6 +3826,7 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
     exclude_inline_style: bool,
     targeted: bool,
     read_only: bool,
+    parent_highlight: u64,
 ) -> FfiRecordDemandAnswer {
     abort_on_panic(|| {
         let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
@@ -3838,6 +3839,7 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
             exclude_inline_style,
             targeted,
             read_only,
+            parent_highlight,
         ) {
             Ok(Some(answer)) => FfiRecordDemandAnswer {
                 record: FfiEngineComputedRecord {
@@ -3864,6 +3866,7 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
             payload.write_bool(exclude_inline_style);
             payload.write_bool(targeted);
             payload.write_bool(read_only);
+            payload.write_u64(parent_highlight);
             payload.write_u64(result.record.style_record);
             payload.write_bool(result.is_absent);
             payload.write_bool(result.record.uses_substitution);
