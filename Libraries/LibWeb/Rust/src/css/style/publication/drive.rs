@@ -90,7 +90,8 @@ impl RetainedState {
     #[allow(clippy::too_many_arguments)]
     /// Whether what an explicit `inherit` of a non-inherited property would read from the parent
     /// is the record the engine holds. The installer's sampled composition is an authoritative
-    /// parent record, including its active animation or transition overlay.
+    /// parent record, including its active animation or transition overlay; so is an installed
+    /// record whose transitions cannot start in this update.
     fn parent_record_answers_explicit_inheritance(&self, parent: Option<StyleNodeID>) -> bool {
         let Some(parent) = parent else {
             return true;
@@ -99,22 +100,31 @@ impl RetainedState {
         // record published after the transition step is authoritative just like an overlay,
         // except where a running transition supplies the value: the child's after-change style
         // inherits the parent's after-change value, and a table can hold only one of the two.
-        if let Some(record) = self.computed_group_sets.sampled_composition_identity(parent) {
-            return self.computed_group_sets.style_record_view(record).is_none_or(|view| {
-                unsafe { view.animated_overlay.as_ref() }
-                    .is_none_or(|overlay| !overlay.entries().iter().any(|entry| entry.result_of_transition))
-            });
-        }
-        let Some(record) = self.computed_group_sets.assigned_style_record(parent) else {
-            return false;
+        let (record, sampled) = match self.computed_group_sets.sampled_composition_identity(parent) {
+            Some(record) => (record, true),
+            None => match self.computed_group_sets.assigned_style_record(parent) {
+                Some(record) => (record.raw(), false),
+                None => return false,
+            },
         };
-        self.computed_group_sets
-            .style_record_view(record.raw())
-            .is_some_and(|view| {
-                view.animated_overlay.is_null()
-                    && unsafe { view.longhand_table.as_ref() }
-                        .is_some_and(|table| !crate::css::style_compute::has_active_transition_properties(table))
-            })
+        let Some(view) = self.computed_group_sets.style_record_view(record) else {
+            return sampled;
+        };
+        let Some(table) = (unsafe { view.longhand_table.as_ref() }) else {
+            return sampled && view.animated_overlay.is_null();
+        };
+        let transitioned = crate::css::style_compute::active_transition_longhands(table);
+        if !sampled && !transitioned.is_empty() {
+            return false;
+        }
+        // A post-compute adjustment also marks its overlay entry as a transition's, so that it
+        // wins over an important declaration; only a property the parent transitions runs one.
+        unsafe { view.animated_overlay.as_ref() }.is_none_or(|overlay| {
+            !overlay
+                .entries()
+                .iter()
+                .any(|entry| entry.result_of_transition && transitioned.contains(&entry.property))
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
