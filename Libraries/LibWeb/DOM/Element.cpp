@@ -5524,6 +5524,8 @@ void Element::refresh_computed_style(Optional<CSS::PseudoElement> pseudo_element
     }
 
     replace_style_record(style_record_identity);
+    if (style_node_id() != 0 && document().style_computer().style_engine().style_record_view(style_record_identity).animation_overlay_identity != 0)
+        document().style_computer().style_engine().set_sampled_composition_identity(style_node_id(), style_record_identity);
     VERIFY(has_style());
 }
 
