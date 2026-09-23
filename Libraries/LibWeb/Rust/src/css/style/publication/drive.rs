@@ -97,34 +97,22 @@ impl RetainedState {
             return true;
         };
         // A sampled identity only survives when it still equals the assigned record. A base
-        // record published after the transition step is authoritative just like an overlay,
-        // except where a running transition supplies the value: the child's after-change style
-        // inherits the parent's after-change value, and a table can hold only one of the two.
-        let (record, sampled) = match self.computed_group_sets.sampled_composition_identity(parent) {
-            Some(record) => (record, true),
-            None => match self.computed_group_sets.assigned_style_record(parent) {
-                Some(record) => (record.raw(), false),
-                None => return false,
-            },
+        // record published after the transition step is authoritative just like an overlay. Where
+        // a running transition supplies the value, the child's after-change style inherits the
+        // parent's after-change value, which the transition decision reads from the parent.
+        if self.computed_group_sets.sampled_composition_identity(parent).is_some() {
+            return true;
+        }
+        let Some(record) = self.computed_group_sets.assigned_style_record(parent) else {
+            return false;
         };
-        let Some(view) = self.computed_group_sets.style_record_view(record) else {
-            return sampled;
+        let Some(view) = self.computed_group_sets.style_record_view(record.raw()) else {
+            return false;
         };
         let Some(table) = (unsafe { view.longhand_table.as_ref() }) else {
-            return sampled && view.animated_overlay.is_null();
-        };
-        let transitioned = crate::css::style_compute::active_transition_longhands(table);
-        if !sampled && !transitioned.is_empty() {
             return false;
-        }
-        // A post-compute adjustment also marks its overlay entry as a transition's, so that it
-        // wins over an important declaration; only a property the parent transitions runs one.
-        unsafe { view.animated_overlay.as_ref() }.is_none_or(|overlay| {
-            !overlay
-                .entries()
-                .iter()
-                .any(|entry| entry.result_of_transition && transitioned.contains(&entry.property))
-        })
+        };
+        crate::css::style_compute::active_transition_longhands(table).is_empty()
     }
 
     #[allow(clippy::too_many_arguments)]

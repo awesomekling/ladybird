@@ -1294,10 +1294,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     VERIFY(installed_style_record);
 
     // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
-    if (abstract_element.element().style_node_id() != 0
-        && (abstract_element.style_scope().rule_cache().has_size_container_queries
-            || document().is_in_style_stabilization_feedback_epoch()))
-        (void)record_transition_stabilization_baseline(abstract_element, before_change_style_record);
+    (void)record_transition_stabilization_baseline(abstract_element, before_change_style_record);
 
     // A transition starts from the before-change style. The newly installed record may itself
     // have display: none; checking it would skip the discrete transition into that state.
