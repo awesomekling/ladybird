@@ -53,7 +53,11 @@ GC_DEFINE_ALLOCATOR(FontLoader);
 
 namespace Web::CSS {
 
-FontComputer::FontComputer() = default;
+FontComputer::FontComputer()
+    : m_font_cascade_memo(FontCascadeMemo::create())
+{
+    publish_font_faces();
+}
 
 FontComputer::FontComputer(DOM::Document& document)
     : m_document(document)
@@ -413,6 +417,12 @@ ScopedFontFeatureValuesTables const& FontComputer::published_font_feature_values
     if (!m_font_feature_values_snapshot_dirty)
         return m_published_font_feature_values;
 
+    // NB: A font computer without a document (a worker's) has no @font-feature-values rules to publish.
+    if (!m_document) {
+        m_font_feature_values_snapshot_dirty = false;
+        return m_published_font_feature_values;
+    }
+
     HashTable<Utf16FlyString> families;
     m_document->style_scope().for_each_active_css_style_sheet([&](CSS::StyleSheetState const& sheet) {
         sheet.for_each_effective_rule_data(TraversalOrder::Preorder, [&](RustRuleView const& rule, Utf16View) {
@@ -460,39 +470,6 @@ ScopedFontFeatureValuesTables const& FontComputer::published_font_feature_values
     });
     m_font_feature_values_snapshot_dirty = false;
     return m_published_font_feature_values;
-}
-
-NonnullRefPtr<Gfx::FontCascadeList const> FontComputer::compute_font_for_style_values(Vector<ComputedFontFamily> font_families, CSSPixels const& font_size, int font_slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<Utf16FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data) const
-{
-    ComputedFontCacheKey cache_key {
-        .font_families = move(font_families),
-        .font_optical_sizing = font_optical_sizing,
-        .font_size = font_size,
-        .font_slope = font_slope,
-        .font_weight = font_weight,
-        .font_width = font_width,
-        .font_variation_settings = font_variation_settings,
-        .font_feature_data = font_feature_data,
-    };
-
-    FontFeatureValuesProvider font_feature_values = [this](Utf16FlyString const& family) -> HashMap<FontFeatureValueKey, Vector<u32>> const& {
-        return font_feature_values_for_family(family);
-    };
-    FontFaceSnapshotView view;
-    rust_font_face_snapshot_view(m_published_font_faces, &view);
-    auto font_list = m_font_cascade_memo->resolve(view, cache_key, &font_feature_values);
-
-    // A cascade this computed may have wanted a web face loaded. Inside a style update the loads
-    // wait for its end; everywhere else - canvas, getComputedStyle - they happen right here, which
-    // is where the cascade build used to perform them itself.
-    (void)request_wanted_web_faces();
-
-    return font_list;
-}
-
-NonnullRefPtr<Gfx::FontCascadeList const> FontComputer::compute_font_for_style_values(StyleValue const& font_family, CSSPixels const& font_size, int font_slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<Utf16FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data) const
-{
-    return compute_font_for_style_values(computed_font_families_from_style_value(font_family), font_size, font_slope, font_weight, font_width, font_optical_sizing, font_variation_settings, font_feature_data);
 }
 
 Gfx::Font const& FontComputer::initial_font() const
