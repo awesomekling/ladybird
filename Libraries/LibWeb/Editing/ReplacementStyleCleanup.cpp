@@ -7,6 +7,7 @@
 #include <LibGC/RootVector.h>
 #include <LibWeb/CSS/CSSStyleProperties.h>
 #include <LibWeb/CSS/ComputedStyleWorkingSet.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/SerializationMode.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/DOM/AbstractElement.h>
@@ -67,7 +68,13 @@ void remove_redundant_styles_from_inserted_content(InsertedContent& inserted_con
 
         auto& style_computer = element->document().style_computer();
         auto style_with_inline_declaration = style_computer.reconstruct_computed_properties(*computed_values);
-        auto style_without_inline_declaration = style_computer.compute_properties_without_inline_style(abstract_element);
+        auto answer = style_computer.style_engine().answer_record_demand(element->style_node_id(), {}, true, true, true);
+        if (!answer.record.style_record)
+            continue;
+        auto view = style_computer.computed_style_record_view(CSS::StyleRecordID { answer.record.style_record });
+        if (!view)
+            continue;
+        auto style_without_inline_declaration = style_computer.reconstruct_computed_properties(*CSS::ComputedValues::Builder { *view }.build());
 
         Vector<CSS::StyleProperty> retained_properties;
         retained_properties.ensure_capacity(inline_style->properties().size());

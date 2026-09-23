@@ -3361,6 +3361,15 @@ struct ElementDeclarationRow {
     custom_written_values: Option<Box<[RetainedStyleValueData]>>,
 }
 
+pub(super) struct HiddenInlineDeclarations {
+    declared: Option<ElementDeclaredProperties>,
+    written: Option<Box<[RetainedStyleValueData]>>,
+    checks: Box<[super::publication::WrittenValueChecks]>,
+    complete: bool,
+    custom: Option<Box<[CustomDeclaration]>>,
+    custom_written: Option<Box<[RetainedStyleValueData]>>,
+}
+
 impl Default for ElementDeclarationRow {
     fn default() -> Self {
         Self {
@@ -5152,6 +5161,58 @@ impl ElementFactStore {
         kind: ElementDeclarationKind,
     ) -> (&[DeclaredProperty], bool) {
         self.element_declared_properties.get(node, kind)
+    }
+
+    /// Temporarily remove the inline declaration while a private demand cascades the node.
+    /// The row is restored before the demand releases its matching batch.
+    pub(super) fn hide_inline_declarations_for_demand(
+        &mut self,
+        node: StyleNodeID,
+    ) -> Option<HiddenInlineDeclarations> {
+        let index = node.element_index()? as usize;
+        let row = self.element_declared_properties.rows.get_mut(index)?.as_mut()?;
+        let before = row.storage_bytes();
+        let kind = ElementDeclarationKind::InlineStyle.index();
+        let hidden = HiddenInlineDeclarations {
+            declared: row.by_kind[kind].take(),
+            written: row.written_by_kind[kind].take(),
+            checks: std::mem::take(&mut row.written_checks_by_kind[kind]),
+            complete: std::mem::replace(&mut row.complete[kind], true),
+            custom: row.custom_declarations.take(),
+            custom_written: row.custom_written_values.take(),
+        };
+        if hidden.custom.is_some() {
+            self.element_declared_properties.rows_with_custom_declarations -= 1;
+        }
+        self.element_declared_properties.payload_bytes =
+            self.element_declared_properties.payload_bytes - before + row.storage_bytes();
+        self.memory_dirty = true;
+        Some(hidden)
+    }
+
+    pub(super) fn restore_inline_declarations_after_demand(
+        &mut self,
+        node: StyleNodeID,
+        hidden: HiddenInlineDeclarations,
+    ) {
+        let index = node.element_index().expect("only elements carry inline declarations") as usize;
+        let row = self.element_declared_properties.rows[index]
+            .as_mut()
+            .expect("the private demand preserves its element declaration row");
+        let before = row.storage_bytes();
+        let kind = ElementDeclarationKind::InlineStyle.index();
+        row.by_kind[kind] = hidden.declared;
+        row.written_by_kind[kind] = hidden.written;
+        row.written_checks_by_kind[kind] = hidden.checks;
+        row.complete[kind] = hidden.complete;
+        row.custom_declarations = hidden.custom;
+        row.custom_written_values = hidden.custom_written;
+        if row.custom_declarations.is_some() {
+            self.element_declared_properties.rows_with_custom_declarations += 1;
+        }
+        self.element_declared_properties.payload_bytes =
+            self.element_declared_properties.payload_bytes - before + row.storage_bytes();
+        self.memory_dirty = true;
     }
 
     /// Record what one attribute-value atom spells, so a value operator can test it.

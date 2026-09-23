@@ -100,9 +100,6 @@ public:
     [[nodiscard]] Optional<RequiredInvalidationAfterStyleChange> answer_record_demand(DOM::Element&, bool& did_change_custom_properties, StringView& decline_cause, Optional<PseudoElement> pseudo = {}, bool exclude_inline_style = false, bool targeted = false) const;
     [[nodiscard]] StyleRecordID try_share_computed_style_record(DOM::Element&) const;
     void remember_shared_computed_style_record(DOM::Element&, StyleRecordID) const;
-    // Compute the cascade supplied by rules, presentational hints, and inheritance while excluding the element's
-    // inline declaration. Editing uses this to identify transport-only style without mutating the live element.
-    [[nodiscard]] NonnullRefPtr<ComputedStyleWorkingSet> compute_properties_without_inline_style(DOM::AbstractElement) const;
     [[nodiscard]] RefPtr<ComputedValues const> compute_pseudo_element_style_if_needed(DOM::AbstractElement, Optional<bool&> did_change_custom_properties, StyleEngineMatchResult* = nullptr, Optional<StyleEngine::StyleRecordDelta&> = {}, Optional<StyleRecordID> highlight_parent_style_record = {}) const;
     [[nodiscard]] JsonArray collect_devtools_applied_style_rules(DOM::AbstractElement, bool include_inherited, bool include_user_agent_styles);
 
@@ -293,11 +290,6 @@ private:
         CreatePseudoElementStyleIfNeeded,
     };
 
-    enum class IncludeInlineStyle : u8 {
-        No,
-        Yes,
-    };
-
 public:
     // One declaration block the cascade applies, and where it sits. This is what a match becomes
     // once the rule it names has been turned back into what that rule contributes: the cascade never
@@ -394,8 +386,8 @@ private:
     // this element, which is not the same as an element nothing decides for.
     [[nodiscard]] RefPtr<CascadeInput const> style_engine_cascade_input(DOM::AbstractElement, StyleEngineMatchResult* = nullptr) const;
 
-    [[nodiscard]] RefPtr<ComputedStyleWorkingSet> compute_style_impl(DOM::AbstractElement, ComputeStyleMode, Optional<bool&> did_change_custom_properties, StyleScope const&, IncludeInlineStyle, StyleEngineMatchResult* = nullptr, StyleSharingCandidate* = nullptr, Optional<StyleRecordID> highlight_parent_style_record = {}) const;
-    [[nodiscard]] NonnullRefPtr<CascadedProperties> compute_cascaded_values(DOM::AbstractElement, CascadeInput const&, IncludeInlineStyle, StyleSharingCandidate* sharing = nullptr, Vector<StyleProperty> const* precomputed_presentational_hints = nullptr, u8* substitution_usage = nullptr) const;
+    [[nodiscard]] RefPtr<ComputedStyleWorkingSet> compute_style_impl(DOM::AbstractElement, ComputeStyleMode, Optional<bool&> did_change_custom_properties, StyleScope const&, StyleEngineMatchResult* = nullptr, StyleSharingCandidate* = nullptr, Optional<StyleRecordID> highlight_parent_style_record = {}) const;
+    [[nodiscard]] NonnullRefPtr<CascadedProperties> compute_cascaded_values(DOM::AbstractElement, CascadeInput const&, StyleSharingCandidate* sharing = nullptr, Vector<StyleProperty> const* precomputed_presentational_hints = nullptr, u8* substitution_usage = nullptr) const;
     void collect_animation_effects_into(DOM::AbstractElement, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>, ComputedStyleWorkingSet&, ComputedValuesFFI::FfiAnimationLengthContexts const*) const;
     NonnullRefPtr<StyleValue const> compute_animated_custom_property_value(Utf16FlyString const& name, NonnullRefPtr<StyleValue const> specified_value, ComputedStyleWorkingSet&, DOM::AbstractElement) const;
     // Says whether publishing moved the element's custom-property environment. An element whose
