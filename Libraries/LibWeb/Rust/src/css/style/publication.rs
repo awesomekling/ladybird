@@ -1853,7 +1853,42 @@ impl RetainedState {
             && self
                 .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
                 .is_empty()
-            && self.animation_keyframes().a_first_record_may_start_an_animation()
+            && (self.animation_keyframes().a_first_record_may_start_an_animation()
+                || (self.tree.flat_tree_children(node).next().is_none()
+                    && self.cold_record_names_engine_computable_animations(state)))
+    }
+
+    /// Check the names this first record actually starts when another keyframes rule in the
+    /// document prevents the document-wide first-record shortcut.
+    fn cold_record_names_engine_computable_animations(&self, state: CascadeStateID) -> bool {
+        if !self.animation_keyframes().only_the_document_scope_defines_keyframes() {
+            return false;
+        }
+        let Some(winner) = self
+            .winner_groups
+            .winner_in_state(state, crate::css::property_metadata::property_id::ANIMATION_NAME)
+            .and_then(|winner| self.winner_groups.resolved_winner(winner))
+        else {
+            return false;
+        };
+        let Lookup::Known(StyleValueData::ValueList { values, .. }) = self.specified_values.value(winner.key.value)
+        else {
+            return false;
+        };
+        !values.as_slice().is_empty()
+            && values.as_slice().iter().all(|value| {
+                let name = match value.data() {
+                    StyleValueData::Keyword { keyword } if *keyword == crate::css::style_compute::keyword::NONE => {
+                        return true;
+                    }
+                    StyleValueData::CustomIdent { custom_ident } => custom_ident,
+                    StyleValueData::String { string, .. } => string,
+                    _ => return false,
+                };
+                self.animation_keyframes()
+                    .resolve(0, tree::TreeScopeID::DOCUMENT, name)
+                    .is_none_or(|set| !set.needs_the_host && !set.declares_an_inherited_property)
+            })
     }
 
     /// With no winning `animation-name`, timing and keyword longhands describe no CSS animation
