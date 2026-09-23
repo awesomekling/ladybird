@@ -522,10 +522,6 @@ impl RetainedState {
         scratch: &mut EngineComputedRecordScratch,
         counters: &mut Counters,
     ) -> Option<(computed::FinalStyleRecordID, computed::FinalStyleRecordID)> {
-        if scratch.root_computation_unsupported == Some(node) {
-            counters.bump(Counter::EngineComputedRecordBailRootFontInputs);
-            return None;
-        }
         let pending_element = scratch.pending_element.take();
         if pending_element.is_none() {
             scratch.pseudo_deltas.clear();
@@ -1346,8 +1342,6 @@ impl RetainedState {
             //     proof that only the named rule flips changed the computation's inputs.
             if exact_flipped_rules.is_some() {
                 scratch.font_drive.root_inputs = self.root_font_inputs_from_record(old_style_record);
-            } else {
-                scratch.font_drive.root_inputs_unproven = true;
             }
             return None;
         }
@@ -6040,8 +6034,6 @@ pub(super) struct EngineComputedRecordContinuation {
     pub(super) font_drive: drive::FontDriveScratch,
     // NB: Preserve the root's existing remaining-phase context after preparing consumer inputs.
     root_element_inputs: Option<(StyleNodeID, RootFontInputs)>,
-    // NB: A failed preparation already performed the root's unsupported computation.
-    root_computation_unsupported: Option<StyleNodeID>,
     pub(super) root_font_inputs_changed: bool,
     pending_element: Option<(computed::FinalStyleRecordID, computed::FinalStyleRecordID)>,
     next_pseudo: usize,
@@ -7168,9 +7160,6 @@ impl StyleEngineState {
             // NB: Preserve the current host root-metric route. Unproven font inputs do not
             //     turn every descendant into a host-boundary retry.
             counters.bump(Counter::RootFontInputsUnprovenFallbacks);
-        }
-        if prepared.is_none() && !scratch.font_drive.is_pending() && !scratch.font_drive.root_inputs_unproven {
-            scratch.root_computation_unsupported = Some(node);
         }
         if scratch.font_drive.is_pending() {
             scratch.prepared_root_font = Some((node, parent_inputs_moved, std::mem::take(&mut scratch.font_drive)));
