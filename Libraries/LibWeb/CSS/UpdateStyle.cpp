@@ -1626,13 +1626,54 @@ static void apply_targeted_style_invalidation(DOM::Element& element, RequiredInv
     apply_document_style_invalidation_after_style_change(element.document(), invalidation);
 }
 
+// Install the engine's answer for a targeted demand of one element, or return nothing when the engine declines it.
+static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_demand_answer(DOM::Element& element, bool& did_change_custom_properties)
+{
+    auto& style_computer = element.document().style_computer();
+    auto& engine = style_computer.style_engine();
+    auto answer = engine.answer_record_demand(element.style_node_id(), {}, false, true);
+    if (!answer.record.style_record)
+        return {};
+
+    bool environment_is_installable = false;
+    (void)element.custom_property_environment_of_engine_record(StyleRecordID { answer.record.style_record }, environment_is_installable);
+    if (!environment_is_installable)
+        return {};
+
+    DOM::Element::EnginePseudoElementRecords pseudo_element_records {};
+    for (size_t kind = 0; kind < array_size(answer.record.pseudo_records); ++kind) {
+        if (answer.record.pseudo_records_present & (1 << kind))
+            pseudo_element_records[kind] = StyleRecordID { answer.record.pseudo_records[kind] };
+    }
+    auto old_style_record = element.style_record_identity();
+    // A targeted record that drops the composition the element held is one its animations are
+    // sampled over again. Compare it once, after that sample, or each step sees every animated
+    // value move and asks for layout even when the composed style is unchanged.
+    auto const old_style = element.computed_style();
+    bool const samples_over_the_record = old_style
+        && engine.style_record_view(old_style_record).animation_overlay_identity != 0
+        && engine.style_record_view(StyleRecordID { answer.record.style_record }).animation_overlay_identity == 0;
+    auto invalidation = element.apply_engine_computed_style_record(StyleRecordID { answer.record.style_record }, pseudo_element_records, answer.record.uses_substitution, did_change_custom_properties,
+        samples_over_the_record ? DOM::Element::EngineRecordComparison::AfterSample : DOM::Element::EngineRecordComparison::AtInstallation);
+    if (!!old_style_record && element.associated_shadow_host_pseudo_element().has_value())
+        invalidation |= style_computer.run_transition_step_for_installed_record({ element }, old_style_record);
+    auto container_effects = StyleEngineFFI::style_engine_take_container_effects(engine.rust_handle(), element.style_node_id().value());
+    ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
+    StyleComputer::record_container_query_effects(DOM::AbstractElement { element }, container_effects);
+    engine.acknowledge_engine_computed_record(element.style_node_id());
+    if (samples_over_the_record) {
+        sample_animations_for_installed_record(DOM::AbstractElement { element }, SampleInvalidation::AppliedByCaller);
+        invalidation = element.compare_engine_computed_style_record_after_sample(old_style_record, *old_style, invalidation);
+    }
+    return invalidation;
+}
+
 static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_update(DOM::Element& element, bool& did_change_custom_properties)
 {
     // A targeted update only reaches connected elements, and every one of them has a parent.
     auto& style_computer = element.document().style_computer();
     bool const was_unstyled = !element.has_style();
-    StringView decline_cause;
-    auto invalidation = style_computer.answer_record_demand(element, did_change_custom_properties, decline_cause, {}, false, true);
+    auto invalidation = install_targeted_record_demand_answer(element, did_change_custom_properties);
     if (invalidation.has_value()) {
         // A scoped read of an unstyled hidden animation target installs its
         // base record first. Sample its effects over that record now: the
