@@ -1622,15 +1622,9 @@ static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_updat
     // A targeted update only reaches connected elements, and every one of them has a parent.
     auto& style_computer = element.document().style_computer();
     bool const was_unstyled = !element.has_style();
-    auto old_style_record = element.style_record_identity();
-    bool const had_animation_overlay = !!old_style_record
-        && style_computer.style_engine().style_record_view(old_style_record).animation_overlay_identity != 0;
     StringView decline_cause;
     auto invalidation = style_computer.answer_record_demand(element, did_change_custom_properties, decline_cause, {}, false, true);
     if (invalidation.has_value()) {
-        if (had_animation_overlay
-            && style_computer.style_engine().style_record_view(element.style_record_identity()).animation_overlay_identity == 0)
-            sample_animations_for_installed_record(DOM::AbstractElement { element });
         // A scoped read of an unstyled hidden animation target installs its
         // base record first. Sample its effects over that record now: the
         // document's ordinary animation tick skips hidden descendants.
