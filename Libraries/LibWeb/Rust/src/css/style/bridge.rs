@@ -4976,6 +4976,16 @@ pub unsafe extern "C" fn style_engine_publish_animated_custom_property_store(
         return 0;
     };
     unsafe { engine.custom_property_environments.retain(environment, store) };
+    if !is_pseudo {
+        if store.is_null() {
+            engine.retained.sampled_custom_property_environments.remove(&node);
+        } else {
+            engine
+                .retained
+                .sampled_custom_property_environments
+                .insert(node, environment);
+        }
+    }
     let registry = engine.document_style_computation_inputs.as_ref().and_then(|inputs| {
         // SAFETY: The document owns the published registry for the lifetime of this input call.
         unsafe {

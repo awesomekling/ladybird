@@ -893,6 +893,9 @@ pub struct RetainedState {
     /// an element holding none; a missing entry records an element the engine was never told
     /// about, which the host still answers for itself.
     element_custom_property_data: HashMap<StyleNodeID, Option<inputs::RetainedCustomPropertyData>>,
+    /// The environment each element's animations sampled custom properties into, over the one its
+    /// own declarations resolve to. Its own values substitute under it.
+    sampled_custom_property_environments: HashMap<StyleNodeID, u64>,
     /// Finalized legacy longhand rows produced earlier in the current direct-application batch.
     /// Descendants inherit from these stage results before the host projects them onto elements.
     legacy_finalized_longhand_rows: HashMap<computed::ComputedStyleTarget, LegacyFinalizedLonghandRow>,

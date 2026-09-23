@@ -1077,11 +1077,8 @@ impl RetainedState {
         // For a record, only the rules its own names run matter: its descendants hold records of
         // their own, and a child derived in the same batch waits for the composition.
         let is_leaf = self.tree.flat_tree_children(node).next().is_none();
-        let css_keyframes_are_engine_computable =
-            self.animation_keyframes().every_keyframes_rule_is_engine_computable() || {
-                let reads_custom_properties = self.node_style_reads_custom_properties(node);
-                self.warm_record_names_engine_computable_animations(node, state, reads_custom_properties)
-            };
+        let css_keyframes_are_engine_computable = self.animation_keyframes().every_keyframes_rule_is_engine_computable()
+            || self.warm_record_names_engine_computable_animations(node, state);
         let full_css_drive_beneath_a_composition = full_drive_beneath_a_composition
             && self.css_defined_animations.node_runs_a_css_animation(node)
             && css_keyframes_are_engine_computable
@@ -1125,7 +1122,6 @@ impl RetainedState {
                 .is_empty()
             && !self.record_declares_transitions(old_style_record)
             && !has_registered_declarations
-            && !self.node_style_reads_custom_properties(node)
             && (self.tree.flat_tree_children(node).all(|child| child.is_text())
                 || !self
                     .animation_effect_descriptions
@@ -1141,19 +1137,12 @@ impl RetainedState {
         // and the host samples those effects over it, as for a CSS animation above. A name the new
         // base declares starts an animation, so its plan must be one the engine can decide.
         let names_an_animation = !self.state_has_no_animation_name(state);
-        let reads_custom_properties = animations_bind_the_record
-            && self
-                .animation_effect_descriptions
-                .effects(node, animations::ELEMENT_ANIMATION_SLOT)
-                .iter()
-                .any(animations::PublishedEffect::declares_custom_properties)
-            && self.node_style_reads_custom_properties(node);
         let base_without_a_composition = animations_bind_the_record
             && !self.computed_group_sets.node_has_animation_overlay(node)
             && !self.record_holds_an_animation_overlay(old_style_record)
             && !self.css_defined_animations.node_runs_a_css_animation(node)
             && (!names_an_animation || css_keyframes_are_engine_computable)
-            && self.effects_sample_over_a_new_base(node, TransitionEffects::Refused, reads_custom_properties)
+            && self.effects_sample_over_a_new_base(node, TransitionEffects::Refused)
             && !self.record_declares_transitions(old_style_record)
             && !has_registered_declarations
             && is_leaf;
@@ -1163,7 +1152,7 @@ impl RetainedState {
         let transitions_beneath_a_composition = animations_bind_the_record
             && self.record_declares_transitions(old_style_record)
             && !self.css_defined_animations.node_runs_a_css_animation(node)
-            && self.effects_sample_over_a_new_base(node, TransitionEffects::Allowed, reads_custom_properties)
+            && self.effects_sample_over_a_new_base(node, TransitionEffects::Allowed)
             && self
                 .computed_group_sets
                 .style_record_view(old_style_record.raw())
@@ -1491,9 +1480,10 @@ impl RetainedState {
         // between nodes sharing the same own environment and winner state.
         let reads_external_substitution =
             self.state_reads_attributes(node, state) || self.state_custom_condition_usage(node, state) != 0;
+        let substitution_environment = self.substitution_environment(node, current_environment);
         let mut store = match scratch
             .stores
-            .get(&(state, current_environment))
+            .get(&(state, substitution_environment))
             .filter(|_| !reads_external_substitution)
         {
             Some(store) => store.clone(),
@@ -1504,22 +1494,22 @@ impl RetainedState {
                     node,
                     state,
                     None,
-                    current_environment,
+                    substitution_environment,
                     inheritance_environment,
                     &mut substituted,
                     counters,
                 )?);
                 scratch.store_capacity_bytes += store.capacity_bytes();
                 if !reads_external_substitution {
-                    scratch.stores.insert((state, current_environment), store.clone());
+                    scratch.stores.insert((state, substitution_environment), store.clone());
                 }
                 if substituted {
-                    scratch.substituted_states.insert((state, current_environment));
+                    scratch.substituted_states.insert((state, substitution_environment));
                 }
                 store
             }
         };
-        self.note_node_substitution(node, scratch, state, current_environment);
+        self.note_node_substitution(node, scratch, state, substitution_environment);
         // A hidden record can name animations. Its driven base leaves a complete plan for the host
         // to apply before sampling the installed record, which only names that resolve can make.
         if full_drive
@@ -1588,13 +1578,14 @@ impl RetainedState {
                         counters,
                     )?;
                     environment = Some(current_environment);
+                    let substitution_environment = self.substitution_environment(node, current_environment);
                     let mut substituted = false;
                     let inheritance_environment = self.held_inheritance_environment(node, None);
                     let final_store = self.cascaded_store_for_state(
                         node,
                         state,
                         None,
-                        current_environment,
+                        substitution_environment,
                         inheritance_environment,
                         &mut substituted,
                         counters,
@@ -1602,9 +1593,9 @@ impl RetainedState {
                     scratch.store_capacity_bytes += final_store.capacity_bytes();
                     store = std::sync::Arc::new(final_store);
                     if substituted {
-                        scratch.substituted_states.insert((state, current_environment));
+                        scratch.substituted_states.insert((state, substitution_environment));
                     }
-                    self.note_node_substitution(node, scratch, state, current_environment);
+                    self.note_node_substitution(node, scratch, state, substitution_environment);
                     self.engine_full_drive(
                         subject,
                         Some(old_style_record),
@@ -2065,18 +2056,10 @@ impl RetainedState {
 
     /// Check the names a later record runs. Its descendants already hold records of their own and
     /// take an animated value through the overlay's invalidation, so only a container unit binds it,
-    /// whose basis a sample outside the computation cannot read. An animated
-    /// custom property is only sampled into the element's environment after the record installs,
-    /// so a record whose own values substitute custom properties cannot run one.
-    fn warm_record_names_engine_computable_animations(
-        &self,
-        node: StyleNodeID,
-        state: CascadeStateID,
-        reads_custom_properties: bool,
-    ) -> bool {
+    /// whose basis a sample outside the computation cannot read.
+    fn warm_record_names_engine_computable_animations(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
         self.state_names_only_keyframes(node, state, |set| {
             !description_reads_container_units(&set.description)
-                && (!reads_custom_properties || !set.description.declares_custom_properties())
         })
     }
 
@@ -2931,15 +2914,8 @@ impl RetainedState {
     /// Whether the host can sample every effect the element holds over a newly driven base. Each
     /// must be one the stage can describe. A sample composes the font and the groups it writes, and
     /// makes the box-type, overflow and text-alignment adjustments, the same way over any base, but
-    /// a container unit reads a basis a sample outside the computation cannot. An animated custom
-    /// property is only sampled into the element's environment, so the element's own values must
-    /// not substitute one.
-    fn effects_sample_over_a_new_base(
-        &self,
-        node: StyleNodeID,
-        transitions: TransitionEffects,
-        reads_custom_properties: bool,
-    ) -> bool {
+    /// a container unit reads a basis a sample outside the computation cannot.
+    fn effects_sample_over_a_new_base(&self, node: StyleNodeID, transitions: TransitionEffects) -> bool {
         self.animation_effect_descriptions
             .effects(node, animations::ELEMENT_ANIMATION_SLOT)
             .iter()
@@ -2947,8 +2923,30 @@ impl RetainedState {
                 !description_reads_container_units(effect)
                     && (transitions == TransitionEffects::Allowed
                         || effect.flags & animations::effect_flag::IS_TRANSITION == 0)
-                    && (!reads_custom_properties || !effect.declares_custom_properties())
             })
+    }
+
+    /// The environment an element's own values substitute under: the one its animations sampled
+    /// custom properties into, where the host composed it over `environment`, or `environment`.
+    fn substitution_environment(&self, node: StyleNodeID, environment: u64) -> u64 {
+        let Some(&sampled) = self.sampled_custom_property_environments.get(&node) else {
+            return environment;
+        };
+        let Some(sampled_store) = self.custom_property_environments.store(sampled) else {
+            return environment;
+        };
+        let base_store = match environment {
+            0 => std::ptr::null(),
+            identity => match self.custom_property_environments.store(identity) {
+                Some(store) => store,
+                None => return environment,
+            },
+        };
+        if unsafe { crate::css::custom_properties::CustomPropertyStore::is_composed_over(sampled_store, base_store) } {
+            sampled
+        } else {
+            environment
+        }
     }
 
     /// Whether the element's parent holds no sampled values for its base to miss: its inherited

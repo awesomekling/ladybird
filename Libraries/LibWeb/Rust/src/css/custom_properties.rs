@@ -799,6 +799,19 @@ impl CustomPropertyStore {
         Self::child(unsafe { Self::retained_parent(parent) }, entries)
     }
 
+    /// Whether `store` holds values of its own over exactly `parent`, a null `parent` being none.
+    ///
+    /// # Safety
+    /// `store` must be a live store.
+    pub(crate) unsafe fn is_composed_over(store: *const c_void, parent: *const c_void) -> bool {
+        let store = unsafe { &*store.cast::<CustomPropertyStore>() };
+        store
+            .parent
+            .as_ref()
+            .map_or(std::ptr::null(), |store_parent| Arc::as_ptr(store_parent).cast())
+            == parent
+    }
+
     /// Copy the values declared by `source` over `parent`.
     ///
     /// # Safety
