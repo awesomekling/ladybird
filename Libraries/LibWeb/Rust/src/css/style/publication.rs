@@ -2306,11 +2306,22 @@ impl RetainedState {
     }
 
     /// A pseudo-element's transition declarations compute into its record. The host applies
-    /// their transition step after installing it; animation definitions still need a plan.
-    fn pseudo_winner_needs_cpp(&self, winner: &PropertyWinner) -> bool {
+    /// their transition step after installing it. Animation timing without a name or an existing
+    /// CSS animation has no definition to create, retime, or cancel.
+    fn pseudo_winner_needs_cpp(
+        &self,
+        node: StyleNodeID,
+        kind: u8,
+        state: CascadeStateID,
+        winner: &PropertyWinner,
+    ) -> bool {
         use crate::css::property_metadata::property_id as prop;
         winner.property == prop::ANCHOR_NAME
-            || (property_starts_animation(winner.property) && !longhand_only_declares_a_css_transition(winner.property))
+            || (property_starts_animation(winner.property)
+                && !longhand_only_declares_a_css_transition(winner.property)
+                && !(longhand_declares_a_css_animation(winner.property)
+                    && self.state_has_no_animation_name(state)
+                    && self.element_css_defined_animations(node, kind + 1).is_empty()))
     }
 
     /// Whether a record holds a composition its animations made. The transitions its table
@@ -3603,7 +3614,7 @@ impl RetainedState {
                 if !crate::css::property_metadata::pseudo_element_supports_property(kind, winner.property) {
                     continue;
                 }
-                if winner.property != prop::CONTENT && self.pseudo_winner_needs_cpp(&winner) {
+                if winner.property != prop::CONTENT && self.pseudo_winner_needs_cpp(node, kind, state, &winner) {
                     counters.bump(Counter::EngineComputedRecordBailProperty);
                     return None;
                 }
