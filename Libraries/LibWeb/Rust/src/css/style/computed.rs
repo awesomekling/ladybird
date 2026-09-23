@@ -3102,6 +3102,16 @@ impl ComputedGroupSets {
         .then_some(identity)
     }
 
+    pub(super) fn sampled_composition_identity_for_pseudo(&self, node: StyleNodeID) -> Option<u64> {
+        let index = node.element_index()? as usize;
+        let identity = *self.columns.sampled_composition_identities.get(index)?;
+        (identity != 0
+            && self
+                .assigned_style_record(node)
+                .is_some_and(|record| self.base_style_record_of(record.raw()) == self.base_style_record_of(identity)))
+        .then_some(identity)
+    }
+
     pub(super) fn node_inherited_group_swap_eligible(&self, node: StyleNodeID) -> bool {
         node.element_index()
             .is_some_and(|index| self.columns.inherited_group_swap_eligible(index as usize))

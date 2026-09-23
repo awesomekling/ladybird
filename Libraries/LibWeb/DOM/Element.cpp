@@ -161,6 +161,12 @@
 #include <LibWebCommon/Infra/Strings.h>
 #include <LibWebCommon/PixelUnits.h>
 
+namespace Web::CSS {
+
+bool deferring_engine_pseudo_installation();
+
+}
+
 namespace Web::DOM {
 
 Element::RareData::~RareData() = default;
@@ -1876,6 +1882,13 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
     return invalidation;
 }
 
+CSS::RequiredInvalidationAfterStyleChange Element::install_engine_pseudo_element_records_after_sample(bool& did_change_custom_properties, bool old_is_list_item, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const* records)
+{
+    auto invalidation = recompute_pseudo_element_styles(did_change_custom_properties, old_is_list_item, old_originating_style, nullptr, nullptr, records);
+    apply_computed_style_to_layout_node_if_needed(invalidation);
+    return invalidation;
+}
+
 void Element::set_needs_layout_tree_rebuild(SetNeedsLayoutTreeUpdateReason reason, CSS::LayoutTreeRebuildRoot rebuild_root)
 {
     // A self-scoped style invalidation can replace the element's principal box in place. Anonymous-parent escalation
@@ -2463,7 +2476,8 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
             style_computer.update_root_element_font_metrics(*computed_style());
         counters.element_computed_style_changes++;
         auto invalidation = CSS::RequiredInvalidationAfterStyleChange::full();
-        invalidation |= recompute_pseudo_element_styles(did_change_custom_properties, false, nullptr, nullptr, nullptr, &pseudo_element_records);
+        if (!CSS::deferring_engine_pseudo_installation())
+            invalidation |= recompute_pseudo_element_styles(did_change_custom_properties, false, nullptr, nullptr, nullptr, &pseudo_element_records);
         publish_custom_property_names();
         apply_computed_style_to_layout_node_if_needed(invalidation);
         return invalidation;
@@ -2534,7 +2548,8 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         }
     }
     // The pseudo-element records the engine settled beside this one install with it.
-    result.invalidation |= recompute_pseudo_element_styles(did_change_custom_properties, old_computed_values->display().is_list_item(), &*old_computed_values, nullptr, nullptr, &pseudo_element_records);
+    if (!CSS::deferring_engine_pseudo_installation())
+        result.invalidation |= recompute_pseudo_element_styles(did_change_custom_properties, old_computed_values->display().is_list_item(), &*old_computed_values, nullptr, nullptr, &pseudo_element_records);
     publish_custom_property_names();
     if (new_style_record != old_style_record || did_change_custom_properties)
         invalidate_descendant_styles_depending_on_style_container_query();

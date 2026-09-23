@@ -504,7 +504,10 @@ impl RetainedState {
             // What the record is derived from: the element's inherited style, display and
             // environment, and the element's record itself only when the state inherits a
             // non-inherited property from it.
-            let key = (!has_registered_declarations).then_some(()).and(
+            let key = (!has_registered_declarations
+                && !computed::ComputedGroupSets::record_is_animation_overlay(new_element_record.raw()))
+            .then_some(())
+            .and(
                 self.computed_group_sets
                     .node_inherited_groups_identity(node)
                     .zip(self.box_type_parent_display(node))
@@ -819,11 +822,19 @@ impl RetainedState {
         counters: &mut Counters,
     ) -> Option<computed::FinalStyleRecordID> {
         self.drop_demand_pseudo_records(node);
-        let record = self.computed_group_sets.assigned_style_record(node)?;
+        let record = self
+            .computed_group_sets
+            .sampled_composition_identity_for_pseudo(node)
+            .and_then(computed::FinalStyleRecordID::from_raw)
+            .or_else(|| self.computed_group_sets.assigned_style_record(node))?;
         if !scratch.font_drive.is_pending() {
             // A record the engine derived for the element itself carries its pseudo-elements,
             // and an element standing for its host's pseudo-element is that pseudo-element.
-            if self.engine_computed_records_pending.contains_key(&node)
+            if (self.engine_computed_records_pending.contains_key(&node)
+                && self
+                    .computed_group_sets
+                    .sampled_composition_identity_for_pseudo(node)
+                    .is_none())
                 || self.computed_group_sets.adjustment_facts(node)
                     & bridge::element_adjustment_fact::IS_SHADOW_HOST_PSEUDO_ELEMENT
                     != 0
@@ -1339,6 +1350,27 @@ impl StyleEngineState {
         old_is_list_item: bool,
         counters: &mut Counters,
     ) -> (RetriedEngineRecord, bool) {
+        if self
+            .retained
+            .computed_group_sets
+            .sampled_composition_identity_for_pseudo(node)
+            .is_some()
+            && let Some(pending) = self.retained.engine_computed_records_pending.remove(&node)
+        {
+            let mut element_pending = Vec::new();
+            for record in pending {
+                if record.pseudo_kind == u8::MAX {
+                    element_pending.push(record);
+                } else {
+                    self.retained.revert_engine_computed_pseudo_record(&record, counters);
+                }
+            }
+            if !element_pending.is_empty() {
+                self.retained
+                    .engine_computed_records_pending
+                    .insert(node, element_pending);
+            }
+        }
         if let Some(inputs) = self.retained.document_style_computation_inputs
             && let Some(resolver) = &mut self.retained.font_resolution
         {

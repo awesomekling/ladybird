@@ -27,6 +27,12 @@
 #include <LibWeb/SVG/SVGElement.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 
+namespace Web::CSS {
+
+bool deferring_engine_pseudo_installation();
+
+}
+
 namespace Web::Animations {
 
 GC_DEFINE_ALLOCATOR(AnimationEffect);
@@ -916,7 +922,10 @@ AnimationUpdateContext::~AnimationUpdateContext()
             ScopeGuard end_stabilization_epoch = [&] {
                 document.end_style_stabilization_epoch();
             };
-            invalidation |= target->recompute_pseudo_element_styles();
+            if (!CSS::deferring_engine_pseudo_installation()) {
+                target->document().style_computer().style_engine().set_sampled_composition_identity(target->style_node_id(), target->style_record_identity());
+                invalidation |= target->recompute_pseudo_element_styles();
+            }
         }
 
         // An animated value can be inherited through shadow and slot boundaries. Publish the exact

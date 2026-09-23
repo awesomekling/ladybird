@@ -352,6 +352,7 @@ public:
     // element inherits, or one the engine resolved over it. Nothing when it cannot be installed.
     [[nodiscard]] RefPtr<CSS::CustomPropertyData const> custom_property_environment_of_engine_record(CSS::StyleRecordID, bool& installable) const;
     CSS::RequiredInvalidationAfterStyleChange recompute_pseudo_element_styles();
+    CSS::RequiredInvalidationAfterStyleChange install_engine_pseudo_element_records_after_sample(bool& did_change_custom_properties, bool old_is_list_item, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const*);
 
     void set_needs_layout_tree_rebuild(SetNeedsLayoutTreeUpdateReason, CSS::LayoutTreeRebuildRoot);
     bool apply_box_presence_change_in_place(SetNeedsLayoutTreeUpdateReason);
