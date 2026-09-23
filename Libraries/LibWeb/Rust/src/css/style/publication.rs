@@ -843,6 +843,19 @@ impl RetainedState {
         // is driven again in full under the new one.
         let environment_moved_under_substitutions = environment.is_some() && self.state_has_substitutions(node, state);
         if delta.is_empty() {
+            // A moved environment beneath transitions, beneath a composition the host cannot
+            // sample again over the new base, or beneath a CSS animation whose keyframes a shadow
+            // scope may define, leaves them to a record driven again in full.
+            if environment.is_some()
+                && animations_bind_the_record
+                && (self.record_transition_facts(old_style_record, &[]).0
+                    || (self.computed_group_sets.node_has_animation_overlay(node)
+                        && !self.composition_resamples_over_a_new_base(old_style_record, facts))
+                    || (self.css_defined_animations.node_runs_a_css_animation(node)
+                        && !self.animation_keyframes().only_the_document_scope_defines_keyframes()))
+            {
+                scratch.recompute_in_full = true;
+            }
             // A flipped rule that lost the cascade may leave this row's stamp old, but an exact
             // retained-answer publication has already established the same semantic winners.
             // A document environment action keeps those winners and drives their values again
@@ -878,32 +891,32 @@ impl RetainedState {
                     if let Some(environment) = environment
                         && animations_bind_the_record
                     {
-                        let css_animation_plan = if self.css_defined_animations.node_runs_a_css_animation(node)
-                            && self.animation_keyframes().a_first_record_may_start_an_animation()
-                        {
-                            self.settled_animation_plan_from_record(node, old_style_record)
+                        let css_animation_plan = if self.css_defined_animations.node_runs_a_css_animation(node) {
+                            let Some(plan) = self.settled_animation_plan_from_record(node, old_style_record) else {
+                                counters.bump(Counter::EngineComputedRecordBailRecordTable);
+                                return None;
+                            };
+                            Some(plan)
                         } else {
                             None
                         };
-                        let resampleable_composition = self.computed_group_sets.node_has_animation_overlay(node)
-                            && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
-                            && (!self.css_defined_animations.node_runs_a_css_animation(node)
-                                || css_animation_plan.is_some())
-                            && !self.record_transition_facts(old_style_record, &[]).0
-                            && self
+                        // With no sampled overlay, the old record is already the animation's base. It
+                        // moves to the new environment like any record, and the host applies the plan
+                        // and samples the element's effects over it after installing it.
+                        if !self.computed_group_sets.node_has_animation_overlay(node) {
+                            let Some(delta) = self
                                 .computed_group_sets
-                                .style_record_view(old_style_record.raw())
-                                .and_then(|view| unsafe { view.animated_overlay.as_ref() })
-                                .is_some_and(|overlay| {
-                                    overlay.entries().iter().all(|entry| {
-                                        !entry.result_of_transition
-                                            && !property_feeds_post_compute_adjustment(entry.property)
-                                    })
-                                });
-                        if !resampleable_composition {
-                            counters.bump(Counter::EngineComputedRecordBailRecordOverlayPublication891);
-                            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-                            return None;
+                                .republish_engine_record_with_environment(node, environment)
+                            else {
+                                counters.bump(Counter::EngineComputedRecordBailAssemble);
+                                return None;
+                            };
+                            self.note_engine_computed_record(node, delta, (generation, state), 0, 0, counters);
+                            if let Some(plan) = css_animation_plan {
+                                self.nodes_owing_animation_definitions.insert((node, u8::MAX), plan);
+                            }
+                            self.nodes_owing_an_animation_sample.insert(node);
+                            return Some(delta);
                         }
                         let Some(assembly) = self
                             .computed_group_sets
@@ -956,18 +969,8 @@ impl RetainedState {
                         // A sample over the standing base cannot adjust the base values an animated
                         // box-type, overflow, or text-alignment input feeds; that composition is driven
                         // again rather than resampled, or its sample would ask for this row again.
-                        let resampleable_composition = facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
-                            && !self.record_transition_facts(old_style_record, &[]).0
-                            && self
-                                .computed_group_sets
-                                .style_record_view(old_style_record.raw())
-                                .and_then(|view| unsafe { view.animated_overlay.as_ref() })
-                                .is_some_and(|overlay| {
-                                    overlay.entries().iter().all(|entry| {
-                                        !entry.result_of_transition
-                                            && !property_feeds_post_compute_adjustment(entry.property)
-                                    })
-                                });
+                        let resampleable_composition =
+                            self.composition_resamples_over_a_new_base(old_style_record, facts);
                         if !resampleable_composition {
                             counters.bump(Counter::EngineComputedRecordBailRecordOverlayPublication951);
                             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
@@ -2663,6 +2666,23 @@ impl RetainedState {
         self.computed_group_sets
             .style_record_view(record.raw())
             .is_none_or(|view| !view.animated_overlay.is_null())
+    }
+
+    /// Whether sampling an element's composition again over a new base answers it. A transition's
+    /// entry decides against the before-change style the base moves, and a sample cannot adjust
+    /// the base values an animated box-type, overflow, or text-alignment input feeds.
+    fn composition_resamples_over_a_new_base(&self, record: computed::FinalStyleRecordID, facts: u32) -> bool {
+        facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
+            && !self.record_transition_facts(record, &[]).0
+            && self
+                .computed_group_sets
+                .style_record_view(record.raw())
+                .and_then(|view| unsafe { view.animated_overlay.as_ref() })
+                .is_some_and(|overlay| {
+                    overlay.entries().iter().all(|entry| {
+                        !entry.result_of_transition && !property_feeds_post_compute_adjustment(entry.property)
+                    })
+                })
     }
 
     /// A partial drive reuses the base groups beneath an element's own composition. They must
