@@ -65,29 +65,38 @@ impl RetainedState {
 
     /// Where an inherited value of `property` in `table`, a record for `node`, comes from when an
     /// ancestor animates it: the nearest ancestor along the chain of records that inherited the
-    /// property and holds an overlay entry for it. None when no such ancestor exists.
+    /// property and holds an overlay entry for it, and the base value of the ancestor the chain
+    /// starts at. None when no such ancestor exists.
     pub(crate) fn inherited_animated_value(
         &self,
         node: StyleNodeID,
         table: &ComputedLonghandTable,
         property: u16,
     ) -> Option<InheritedAnimatedValue<'_>> {
-        if !table.is_inherited(property) {
-            return None;
-        }
-        let mut ancestor = self.tree.inheritance_parent(node);
-        while let Some(current) = ancestor {
-            let record = self.computed_group_sets.assigned_style_record(current)?;
+        let record_parts = |node: StyleNodeID| {
+            let record = self.computed_group_sets.assigned_style_record(node)?;
             let view = self.computed_group_sets.style_record_view(record.raw())?;
-            let ancestor_table = unsafe { view.longhand_table.as_ref() }?;
-            if let Some(entry) = unsafe { view.animated_overlay.as_ref() }.and_then(|overlay| overlay.get(property)) {
+            Some((unsafe { view.longhand_table.as_ref() }?, unsafe {
+                view.animated_overlay.as_ref()
+            }))
+        };
+        let mut entry = None;
+        let mut inherits = table.is_inherited(property);
+        let mut ancestor = self.tree.inheritance_parent(node);
+        while inherits {
+            let current = ancestor?;
+            let (ancestor_table, overlay) = record_parts(current)?;
+            // NB: A record the engine derived holds an inherited animated value in its table, so
+            //     the base value is read where the chain of inheriting records starts.
+            entry = entry.or_else(|| overlay.and_then(|overlay| overlay.get(property)));
+            inherits = ancestor_table.is_inherited(property);
+            if !inherits {
                 let base_value = crate::css::style_compute::ParentSnapshot::new(ancestor_table, None, false, false)
                     .value(property)
                     .map_or(std::ptr::null(), std::ptr::from_ref);
-                return (!base_value.is_null()).then_some(InheritedAnimatedValue { entry, base_value });
-            }
-            if !ancestor_table.is_inherited(property) {
-                return None;
+                return entry
+                    .filter(|_| !base_value.is_null())
+                    .map(|entry| InheritedAnimatedValue { entry, base_value });
             }
             ancestor = self.tree.inheritance_parent(current);
         }

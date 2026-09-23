@@ -1181,6 +1181,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     document.style_computer().style_engine().set_sampled_composition_identity(
                         StyleNodeID { reaction.style_node }, element->style_record_identity());
                     if (defer_pseudos) {
+                        if (old_originating_style) {
+                            auto const new_style = element->computed_style();
+                            element->apply_display_none_change(old_originating_style->base_values().display().is_none() != new_style->base_values().display().is_none(),
+                                !old_originating_style->display().is_none() && new_style->display().is_none());
+                        }
                         auto settled_pseudos = document.style_computer().style_engine().settle_pseudo_records_after_host_record(StyleNodeID { reaction.style_node }, old_is_list_item);
                         DOM::Element::EnginePseudoElementRecords final_pseudo_records {};
                         for (size_t kind = 0; kind < array_size(settled_pseudos.pseudo_records); ++kind) {

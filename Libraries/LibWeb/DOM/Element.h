@@ -345,6 +345,7 @@ public:
     using EnginePseudoElementRecords = Array<Optional<CSS::StyleRecordID>, to_underlying(CSS::PseudoElement::KnownPseudoElementCount)>;
     void update_anchor_name_registry(CSS::ComputedValues const* old_computed_values, CSS::ComputedValues const& new_style);
     CSS::RequiredInvalidationAfterStyleChange apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const&, bool uses_substitution, bool& did_change_custom_properties);
+    void apply_display_none_change(bool display_none_ignoring_animations_changed, bool became_display_none);
     // Republishes which animations this element references, for a record the engine settled whose
     // animation declarations moved.
     void republish_animation_name_registry();

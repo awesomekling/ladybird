@@ -1238,9 +1238,9 @@ impl RetainedState {
         // installed record; a child derived in the same batch waits for that composition. Such a
         // record can drive its base in full and leave the whole transition decision to
         // installation, including when its parent's inherited style moved: the decision reads an
-        // inherited animated value's after-change value from the ancestor that animates it. The
-        // step decides nothing for a hidden record. An existing transition keeps its display
-        // inputs in the host computation; display changes need host teardown beside the decision.
+        // inherited animated value's after-change value from the ancestor that animates it, or
+        // its parent's or its own display moved: the host applies a display change after the step,
+        // as a C++ computation does. The step decides nothing for a hidden record.
         let record_declares_transitions = self.record_declares_transitions(old_style_record);
         let old_record_is_hidden = self
             .computed_group_sets
@@ -1251,13 +1251,15 @@ impl RetainedState {
                 .properties()
                 .iter()
                 .any(|&property| longhand_only_declares_a_css_transition(property))
-            || (!delta
-                .properties()
-                .contains(&crate::css::property_metadata::property_id::DISPLAY)
-                && match record_declares_transitions {
-                    true => !parent_inputs_moved.display && !scratch.ancestor_became_visible,
-                    false => self.tree.flat_tree_children(node).all(|child| child.is_text()),
-                }))
+            || match record_declares_transitions {
+                true => !scratch.ancestor_became_visible,
+                false => {
+                    !delta
+                        .properties()
+                        .contains(&crate::css::property_metadata::property_id::DISPLAY)
+                        && self.tree.flat_tree_children(node).all(|child| child.is_text())
+                }
+            })
             && (record_declares_transitions
                 || delta
                     .properties()
@@ -1272,11 +1274,6 @@ impl RetainedState {
                     .iter()
                     .all(|&property| longhand_only_declares_a_css_transition(property))
         });
-        if record_declares_transitions && !owes_a_transition_step && !scratch.ancestor_became_visible {
-            counters.bump(Counter::EngineComputedRecordBailRecordOverlayPublication1147);
-            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-            return None;
-        }
         let no_css_animation_to_plan = self.computed_group_sets.associated_pseudo_kind(node).is_none()
             && self.state_has_no_animation_name(state)
             && self
