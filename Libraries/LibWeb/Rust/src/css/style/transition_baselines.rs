@@ -103,3 +103,41 @@ impl RetainedState {
         None
     }
 }
+
+impl RetainedState {
+    /// What a transition on an element resolves its lengths against: the font of the record the
+    /// element has installed, including a sampled animated font, the root's font, and the
+    /// viewport. None before the document published any computation inputs.
+    pub(crate) fn transition_length_resolution_context(
+        &self,
+        style_record: u64,
+    ) -> Option<crate::css::animation::FfiAnimationLengthResolutionContext> {
+        use crate::css::animation::{FfiAnimationFontMetrics, FfiAnimationLengthResolutionContext};
+
+        let inputs = self.document_style_computation_inputs?;
+        let view = self.computed_group_sets.style_record_view(style_record)?;
+        let values = crate::css::computed_value_views::ComputedValuesView::new(
+            crate::css::host_shared::SharedPayload::as_pointer_slice(view.payloads),
+        );
+        Some(FfiAnimationLengthResolutionContext {
+            viewport_width: inputs.viewport_width,
+            viewport_height: inputs.viewport_height,
+            font_metrics: FfiAnimationFontMetrics {
+                font_size: values.font_size().to_double(),
+                x_height: super::publication::drive_font_metric(values.font_x_height()),
+                cap_height: super::publication::drive_font_metric(values.font_ascent()),
+                zero_advance: super::publication::drive_font_metric(values.font_zero_advance()),
+                line_height: values.line_height().to_double(),
+            },
+            root_font_metrics: FfiAnimationFontMetrics {
+                font_size: inputs.root_font_size,
+                x_height: inputs.root_font_x_height,
+                cap_height: inputs.root_font_cap_height,
+                zero_advance: inputs.root_font_zero_advance,
+                line_height: inputs.root_line_height,
+            },
+            font_metrics_depend_on_viewport_metrics: view.dependency_flags & (1 << 1) != 0,
+            root_font_metrics_depend_on_viewport_metrics: inputs.root_font_metrics_depend_on_viewport_metrics,
+        })
+    }
+}

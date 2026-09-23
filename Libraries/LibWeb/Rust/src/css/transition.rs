@@ -424,6 +424,26 @@ pub unsafe extern "C" fn rust_decide_transitions(
     }
 }
 
+/// What a transition on an element resolves its lengths against, answered from the record the
+/// element has installed. Returns false before the document published any computation inputs.
+///
+/// # Safety
+/// `style_engine` must be a live style engine, `style_record` a live record of it, and
+/// `context` writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_transition_length_resolution_context(
+    style_engine: *const std::ffi::c_void,
+    style_record: u64,
+    context: *mut crate::css::animation::FfiAnimationLengthResolutionContext,
+) -> bool {
+    let style_engine = unsafe { &*style_engine.cast::<crate::css::style::StyleEngine>() };
+    let Some(length) = style_engine.transition_length_resolution_context(style_record) else {
+        return false;
+    };
+    unsafe { context.write(length) };
+    true
+}
+
 /// One `transition-property` entry's attributes, as they apply to one physical longhand.
 #[repr(C)]
 pub struct FfiTransitionEntry {
