@@ -690,6 +690,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
 
             // The pseudo-element records a retry settled beside the element's record.
             Optional<DOM::Element::EnginePseudoElementRecords> retried_pseudo_element_records;
+            bool retried_unstyled_materialization = false;
             if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetryAfterAncestor
                 || (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize
                     && reaction.reaction & (StyleEngine::RecomputeStyle | StyleEngine::RecomputeDescendantStyles | StyleEngine::AncestorBecameVisible | StyleEngine::InheritedStyle | StyleEngine::InheritedCustomProperties)
@@ -700,6 +701,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 // own install boundaries.
                 auto retried_rows = document.style_computer().style_engine().retry_engine_records_after_ancestor(reaction.style_node);
                 if (!retried_rows.is_empty() && retried_rows[0].style_node == reaction.style_node && retried_rows[0].record.style_record != 0) {
+                    retried_unstyled_materialization = reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize && !element->has_style();
                     auto const& retried = retried_rows[0].record;
                     reaction.new_style_record = retried.style_record;
                     reaction.uses_substitution = retried.uses_substitution;
@@ -738,12 +740,13 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
 
             // An engine-computed first record installs on an element without style, as does one
             // for an element whose ancestor became visible: its style was cleared on entry to
-            // display:none while the engine kept the record. Other record deltas assume the style
-            // they move.
+            // display:none while the engine kept the record. A materialization retried above is
+            // also an install even when the engine held an old record the DOM never received.
+            // Other record deltas assume the style they move.
             if (!element->has_style()
                 && reaction.gap != StyleEngineFFI::FfiStyleDeltaGap::Materialize
                 && !(reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Computed
-                    && (reaction.old_style_record == 0 || (reaction.reaction & StyleEngine::AncestorBecameVisible))))
+                    && (reaction.old_style_record == 0 || (reaction.reaction & StyleEngine::AncestorBecameVisible) || retried_unstyled_materialization)))
                 continue;
             // An earlier display:none reaction in this batch can clear the style of a materialization gap after the
             // inheritance closure was built. The gap must then rematerialize rather than letting its descendants
