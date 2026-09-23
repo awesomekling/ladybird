@@ -862,7 +862,7 @@ impl RetainedState {
             // scope may define, leaves them to a record driven again in full.
             if environment.is_some()
                 && animations_bind_the_record
-                && (self.record_transition_facts(old_style_record, &[]).0
+                && (self.record_declares_transitions(old_style_record)
                     || (self.computed_group_sets.node_has_animation_overlay(node)
                         && !self.composition_resamples_over_a_new_base(old_style_record, facts))
                     || (self.css_defined_animations.node_runs_a_css_animation(node)
@@ -1062,7 +1062,7 @@ impl RetainedState {
             && requires_full_drive
             && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
             && self.computed_group_sets.node_has_animation_overlay(node)
-            && (!self.record_transition_facts(old_style_record, &[]).0 || redrives_a_standing_composition)
+            && (!self.record_declares_transitions(old_style_record) || redrives_a_standing_composition)
             && !has_registered_declarations
             && self
                 .computed_group_sets
@@ -1094,7 +1094,7 @@ impl RetainedState {
             && !requires_full_drive
             && owes_an_animation_plan
             && !self.computed_group_sets.node_has_animation_overlay(node)
-            && !self.record_transition_facts(old_style_record, &[]).0
+            && !self.record_declares_transitions(old_style_record)
             && delta
                 .properties()
                 .iter()
@@ -1109,7 +1109,7 @@ impl RetainedState {
             && !self.computed_group_sets.node_has_animation_overlay(node)
             && self.css_defined_animations.node_runs_a_css_animation(node)
             && css_keyframes_are_engine_computable
-            && !self.record_transition_facts(old_style_record, &[]).0
+            && !self.record_declares_transitions(old_style_record)
             && !has_registered_declarations
             && is_leaf;
         // An element whose Web Animations hold no sampled overlay has the old record as its base.
@@ -1123,7 +1123,7 @@ impl RetainedState {
             && self
                 .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
                 .is_empty()
-            && !self.record_transition_facts(old_style_record, &[]).0
+            && !self.record_declares_transitions(old_style_record)
             && !has_registered_declarations
             && !self.node_style_reads_custom_properties(node)
             && self.tree.flat_tree_children(node).all(|child| child.is_text())
@@ -1149,14 +1149,14 @@ impl RetainedState {
             && !self.css_defined_animations.node_runs_a_css_animation(node)
             && (!names_an_animation || css_keyframes_are_engine_computable)
             && self.effects_sample_over_a_new_base(node, TransitionEffects::Refused, reads_custom_properties)
-            && !self.record_transition_facts(old_style_record, &[]).0
+            && !self.record_declares_transitions(old_style_record)
             && !has_registered_declarations
             && is_leaf;
         // A leaf whose record declares transitions can take a newly driven base beneath its
         // composition in the same way. The transition decision itself is made below against the
         // record the row moves away from.
         let transitions_beneath_a_composition = animations_bind_the_record
-            && self.record_transition_facts(old_style_record, &[]).0
+            && self.record_declares_transitions(old_style_record)
             && !self.css_defined_animations.node_runs_a_css_animation(node)
             && self.effects_sample_over_a_new_base(node, TransitionEffects::Allowed, reads_custom_properties)
             && self
@@ -1233,16 +1233,15 @@ impl RetainedState {
         //
         // A record whose table already declares transitions owes the step whatever the delta
         // moved, since the step is where the element's before-change style is kept up to date.
-        // Which longhands those transitions run on is in the table: a delta that moves one of them
-        // starts a transition, and a started transition samples its own start value into the style
-        // this very update - a value the row's record does not hold - so that one stays in C++.
-        // A leaf can drive its base in full and leave the whole transition decision to
-        // installation, including when its parent's inherited style moved: the decision reads an
-        // inherited animated value's after-change value from the ancestor that animates it. An
-        // existing transition keeps its display and display-none inputs in the host computation;
-        // display changes need host teardown beside the decision.
-        let (record_declares_transitions, transitionable_property_moved) =
-            self.record_transition_facts(old_style_record, delta.properties());
+        // A delta that moves a longhand one of them runs on starts a transition, and the started
+        // transition samples its start value into an overlay the host step publishes over the
+        // installed record; a child derived in the same batch waits for that composition. A leaf
+        // can drive its base in full and leave the whole transition decision to installation,
+        // including when its parent's inherited style moved: the decision reads an inherited
+        // animated value's after-change value from the ancestor that animates it. An existing
+        // transition keeps its display and display-none inputs in the host computation; display
+        // changes need host teardown beside the decision.
+        let record_declares_transitions = self.record_declares_transitions(old_style_record);
         let old_record_is_hidden = self
             .computed_group_sets
             .style_record_view(old_style_record.raw())
@@ -1272,7 +1271,7 @@ impl RetainedState {
                     .iter()
                     .all(|&property| longhand_only_declares_a_css_transition(property))
         });
-        if record_declares_transitions && (!owes_a_transition_step || (transitionable_property_moved && !full_drive)) {
+        if record_declares_transitions && !owes_a_transition_step {
             counters.bump(Counter::EngineComputedRecordBailRecordOverlayPublication1147);
             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
             return None;
@@ -2938,7 +2937,7 @@ impl RetainedState {
     /// the base values an animated box-type, overflow, or text-alignment input feeds.
     fn composition_resamples_over_a_new_base(&self, record: computed::FinalStyleRecordID, facts: u32) -> bool {
         facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
-            && !self.record_transition_facts(record, &[]).0
+            && !self.record_declares_transitions(record)
             && self
                 .computed_group_sets
                 .style_record_view(record.raw())
@@ -3014,15 +3013,11 @@ impl RetainedState {
     /// Whether the table a record was computed into declares transitions at all, and whether any
     /// of the moved properties is a longhand one of them runs on. A record the engine cannot look
     /// into answers both, so the row that asks is refused.
-    pub(super) fn record_transition_facts(&self, record: computed::FinalStyleRecordID, moved: &[u16]) -> (bool, bool) {
+    pub(super) fn record_declares_transitions(&self, record: computed::FinalStyleRecordID) -> bool {
         self.computed_group_sets
             .style_record_view(record.raw())
             .and_then(|view| unsafe { view.longhand_table.as_ref() })
-            .map_or((true, true), |table| {
-                let transitionable = crate::css::style_compute::active_transition_longhands(table);
-                let moved_one = moved.iter().any(|property| transitionable.contains(property));
-                (!transitionable.is_empty(), moved_one)
-            })
+            .is_none_or(crate::css::style_compute::has_active_transition_properties)
     }
 
     /// The context a registered custom property's lengths resolve against for a row that keeps
