@@ -426,12 +426,23 @@ impl RetainedState {
                     counters.bump(Counter::EngineComputedRecordBailRecordTable);
                     return None;
                 };
+                // The parent of an AwaitSampledParent retry has finished its transition step.
+                // Drive this child's base from that published composition; its own transition
+                // step is already owed by the record delta and runs when the host installs it.
+                let defers_transition_after_sampled_parent = !subject.target.is_pseudo()
+                    && self
+                        .host_entry_causes
+                        .get(&subject.target.node())
+                        .is_some_and(|(cause, _)| *cause == "AwaitSampledParent")
+                    && parent
+                        .is_some_and(|parent| self.computed_group_sets.sampled_composition_identity(parent).is_some());
                 // A record kept under display:none is still what the element's own style is driven
                 // from, but the animations it names start only when C++ computes the element out of
                 // that subtree.
                 if (view.dependency_flags & (1 << 2) != 0 && table_names_animations(old_table))
                     || (transition_goal == TransitionDriveGoal::RefuseDeclarations
-                        && crate::css::style_compute::has_active_transition_properties(old_table))
+                        && crate::css::style_compute::has_active_transition_properties(old_table)
+                        && !defers_transition_after_sampled_parent)
                 {
                     counters.bump(Counter::EngineComputedRecordBailRecordOverlayDrive441);
                     counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
