@@ -3409,6 +3409,26 @@ pub unsafe extern "C" fn style_engine_node_record_reads_attributes(engine: *cons
         })
 }
 
+/// Whether the node's current winning values read a container-unit basis. Such a computation
+/// cannot be shared by declaration identity alone across different container states.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_node_record_uses_container_units(engine: *const c_void, node: u32) -> bool {
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return false;
+    };
+    match engine
+        .current_winner_groups()
+        .token_for(super::cascade::WinnerGroupKey::current(node, engine.program.version()))
+    {
+        super::partial_view::Lookup::Known((_, state)) => engine.state_container_unit_mask(node, state) != 0,
+        _ => false,
+    }
+}
+
 /// Which `if()`, `inherit()`, and custom-function substitutions the node's custom declarations read, including
 /// pseudo-elements that were resolved with the originating element's environment.
 ///

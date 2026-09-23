@@ -3645,7 +3645,7 @@ impl RetainedState {
         self.state_substitution_values(node, state).next().is_some()
     }
 
-    fn state_container_unit_mask(&self, node: StyleNodeID, state: CascadeStateID) -> u8 {
+    pub(super) fn state_container_unit_mask(&self, node: StyleNodeID, state: CascadeStateID) -> u8 {
         self.winner_groups
             .winners_in_state(state)
             .filter_map(|winner| self.winner_groups.resolved_winner(winner))
@@ -4055,6 +4055,11 @@ impl RetainedState {
     }
 
     pub(crate) fn style_record_payloads(&self, style_record: u64) -> Option<&[SharedPayload]> {
+        if !computed::ComputedGroupSets::record_is_animation_overlay(style_record)
+            && !self.computed_group_sets.final_style_record_is_live(style_record)
+        {
+            return None;
+        }
         self.computed_group_sets.style_record_payloads(style_record)
     }
 

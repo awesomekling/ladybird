@@ -2320,7 +2320,7 @@ impl super::RetainedState {
                 };
             }
             let snapshot = self.layout_style_snapshots.row(node).unwrap_or_default();
-            if !snapshot.has_committed_box {
+            if !snapshot.has_committed_box || snapshot.style_record != inputs.style_record {
                 return ContainerUnitBasis {
                     basis: 0.0,
                     depends_on_viewport_metrics: false,

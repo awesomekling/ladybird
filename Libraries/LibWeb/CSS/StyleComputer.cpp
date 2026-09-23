@@ -4214,6 +4214,9 @@ NonnullRefPtr<ComputedValues const> StyleComputer::materialize_style_record(DOM:
     m_last_materialization_kept_pseudo_element_styles = false;
     StyleSharingCandidate sharing;
     sharing.may_reuse_or_publish_shared_style = style_sharing_mode == StyleSharingMode::Enabled;
+    if (auto node = abstract_element.element().style_node_id(); node != 0 && !abstract_element.pseudo_element().has_value()
+        && StyleEngineFFI::style_engine_node_record_uses_container_units(m_style_engine.rust_handle(), node.value()))
+        sharing.may_reuse_or_publish_shared_style = false;
     auto publish_computed_groups = [&](NonnullRefPtr<ComputedValues const> values) {
         auto publication = publish_computed_style_inputs(abstract_element, *values);
         if (sharing.new_style_sharing_entry_hash.has_value()) {
