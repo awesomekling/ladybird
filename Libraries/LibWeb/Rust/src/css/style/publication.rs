@@ -13,8 +13,8 @@ use winner_store::{WinnerDeclaration, WinnerStore, WinnerValue, shorthand_longha
 
 use super::*;
 use crate::css::computed_longhand_table::ComputedLonghandTable;
-use drive::FontDriveGoal;
 pub(crate) use drive::drive_font_metric;
+use drive::{FontDriveGoal, TransitionDriveGoal};
 
 /// Another element's published style that a first-time computation may build over: the element
 /// whose cascade state stands in for the previous one, and the record it must still hold.
@@ -1110,21 +1110,26 @@ impl RetainedState {
         // Which longhands those transitions run on is in the table: a delta that moves one of them
         // starts a transition, and a started transition samples its own start value into the style
         // this very update - a value the row's record does not hold - so that one stays in C++.
-        // A leaf introducing transition declarations can instead drive its base in full and leave
-        // the whole transition decision to installation. Display changes still need the host's
-        // display teardown and transition decision in the same computation.
+        // A leaf can drive its base in full and leave the whole transition decision to
+        // installation. An existing transition must also keep its inherited and display-none
+        // inputs in the host computation; display changes need host teardown beside the decision.
         let (record_declares_transitions, transitionable_property_moved) =
             self.record_transition_facts(old_style_record, delta.properties());
+        let old_record_is_hidden = self
+            .computed_group_sets
+            .style_record_view(old_style_record.raw())
+            .is_some_and(|view| view.dependency_flags & (1 << 2) != 0);
         let owes_a_transition_step = (!full_drive
             || delta
                 .properties()
                 .iter()
                 .any(|&property| longhand_only_declares_a_css_transition(property))
-            || (!record_declares_transitions
-                && self.tree.flat_tree_children(node).next().is_none()
+            || (self.tree.flat_tree_children(node).next().is_none()
                 && !delta
                     .properties()
-                    .contains(&crate::css::property_metadata::property_id::DISPLAY)))
+                    .contains(&crate::css::property_metadata::property_id::DISPLAY)
+                && (!record_declares_transitions
+                    || (!parent_inputs_moved.any() && !scratch.recompute_in_full && !old_record_is_hidden))))
             && (record_declares_transitions
                 || delta
                     .properties()
@@ -1139,7 +1144,7 @@ impl RetainedState {
                     .iter()
                     .all(|&property| longhand_only_declares_a_css_transition(property))
         });
-        if record_declares_transitions && (transitionable_property_moved || !owes_a_transition_step) {
+        if record_declares_transitions && (!owes_a_transition_step || (transitionable_property_moved && !full_drive)) {
             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
             return None;
         }
@@ -1148,6 +1153,11 @@ impl RetainedState {
             && self
                 .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
                 .is_empty();
+        let transition_goal = if full_drive && owes_a_transition_step {
+            TransitionDriveGoal::DeferStep
+        } else {
+            TransitionDriveGoal::RefuseDeclarations
+        };
         // Partial drives can share across parents whose inherited inputs agree. Keep the full
         // parent record in the key when a non-inherited property explicitly inherits, including
         // through substitution, or when a full drive may read more of the parent's style.
@@ -1403,6 +1413,7 @@ impl RetainedState {
                     &inputs,
                     &mut scratch.font_drive,
                     goal,
+                    transition_goal,
                     has_registered_declarations,
                     &mut explicitly_inherited_groups,
                     counters,
@@ -1441,6 +1452,7 @@ impl RetainedState {
                         &inputs,
                         &mut scratch.font_drive,
                         goal,
+                        transition_goal,
                         false,
                         &mut explicitly_inherited_groups,
                         counters,
@@ -2165,6 +2177,7 @@ impl RetainedState {
             &inputs,
             &mut scratch.font_drive,
             goal,
+            TransitionDriveGoal::RefuseDeclarations,
             has_registered_declarations,
             &mut explicitly_inherited_groups,
             counters,
@@ -2188,6 +2201,7 @@ impl RetainedState {
                 &inputs,
                 &mut scratch.font_drive,
                 goal,
+                TransitionDriveGoal::RefuseDeclarations,
                 false,
                 &mut explicitly_inherited_groups,
                 counters,
