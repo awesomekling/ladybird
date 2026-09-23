@@ -1151,9 +1151,12 @@ impl RetainedState {
         // A record that declares transitions can take a newly driven base beneath its composition
         // in the same way; a child derived in the same batch waits for that composition. The
         // transition decision itself is made below against the record the row moves away from.
+        // Its CSS animations take the plan the new base settles, as for a record with none.
         let transitions_beneath_a_composition = animations_bind_the_record
             && self.record_declares_transitions(old_style_record)
-            && !self.css_defined_animations.node_runs_a_css_animation(node)
+            && (!self.css_defined_animations.node_runs_a_css_animation(node)
+                || (css_keyframes_are_engine_computable
+                    && self.state_names_resolve_without_the_declaration_scope(node, state)))
             && self.effects_sample_over_a_new_base(node, TransitionEffects::Allowed)
             && self
                 .computed_group_sets
