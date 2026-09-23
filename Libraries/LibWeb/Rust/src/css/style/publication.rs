@@ -715,6 +715,7 @@ impl RetainedState {
                 && !scratch.targeted_record_demand
                 && self.css_defined_animations.node_runs_a_css_animation(node)
             {
+                counters.bump(Counter::EngineComputedRecordBailWinnerElementPublication717);
                 counters.bump(Counter::EngineComputedRecordBailWinnerElement);
                 return None;
             }
@@ -900,6 +901,7 @@ impl RetainedState {
                                     })
                                 });
                         if !resampleable_composition {
+                            counters.bump(Counter::EngineComputedRecordBailRecordOverlayPublication891);
                             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
                             return None;
                         }
@@ -946,6 +948,7 @@ impl RetainedState {
                         None
                     };
                     if !record_may_stand_while_animating && css_animation_plan.is_none() {
+                        counters.bump(Counter::EngineComputedRecordBailRecordOverlayPublication937);
                         counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
                         return None;
                     }
@@ -966,6 +969,7 @@ impl RetainedState {
                                     })
                                 });
                         if !resampleable_composition {
+                            counters.bump(Counter::EngineComputedRecordBailRecordOverlayPublication951);
                             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
                             return None;
                         }
@@ -1092,6 +1096,7 @@ impl RetainedState {
                             .contains(&crate::css::property_metadata::property_id::ANIMATION_FILL_MODE)));
         let animations_bind_the_record = animations_bind_the_record && !derived_beneath_a_composition;
         if animations_bind_the_record {
+            counters.bump(Counter::EngineComputedRecordBailWinnerElementPublication1072);
             counters.bump(Counter::EngineComputedRecordBailWinnerElement);
             return None;
         }
@@ -1167,6 +1172,7 @@ impl RetainedState {
                     .all(|&property| longhand_only_declares_a_css_transition(property))
         });
         if record_declares_transitions && (!owes_a_transition_step || (transitionable_property_moved && !full_drive)) {
+            counters.bump(Counter::EngineComputedRecordBailRecordOverlayPublication1147);
             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
             return None;
         }
@@ -2383,6 +2389,7 @@ impl RetainedState {
         // computation in C++ too, so that fallback retains the input record and can select
         // only the changed groups instead of rebuilding the entire style.
         if self.record_requires_cpp_animation(record) {
+            counters.bump(Counter::EngineComputedRecordBailRecordOverlayPublication2328);
             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
             return None;
         }
@@ -3487,6 +3494,9 @@ impl RetainedState {
                 Ok(Some((_, _, checks))) if checks.whole_context_free => {}
                 Err(counter) => {
                     counters.bump(counter);
+                    if counter == Counter::EngineComputedRecordBailWinnerElementPublication3731 {
+                        counters.bump(Counter::EngineComputedRecordBailWinnerElement);
+                    }
                     return false;
                 }
                 _ => return false,
@@ -3786,7 +3796,7 @@ impl RetainedState {
                     .element_declarations_are_complete_but_for_custom_properties(node, kind);
                 let written = self.facts.element_written_declared_values(node, kind);
                 if !complete || written.len() != declared.len() {
-                    return Err(Counter::EngineComputedRecordBailWinnerElement);
+                    return Err(Counter::EngineComputedRecordBailWinnerElementPublication3731);
                 }
                 Ok(declared
                     .iter()
@@ -4092,6 +4102,9 @@ impl RetainedState {
                 Ok(written) => written,
                 Err(counter) => {
                     counters.bump(counter);
+                    if counter == Counter::EngineComputedRecordBailWinnerElementPublication3731 {
+                        counters.bump(Counter::EngineComputedRecordBailWinnerElement);
+                    }
                     None
                 }
             };
