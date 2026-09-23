@@ -910,7 +910,7 @@ impl RetainedState {
                             let Some(plan) = self.settled_animation_plan_from_record(
                                 node,
                                 old_style_record,
-                                self.animation_name_declaration_scope(state),
+                                self.animation_name_declaration_scope(node, state),
                             ) else {
                                 counters.bump(Counter::EngineComputedRecordBailRecordTable);
                                 return None;
@@ -978,7 +978,7 @@ impl RetainedState {
                         self.settled_animation_plan_from_record(
                             node,
                             old_style_record,
-                            self.animation_name_declaration_scope(state),
+                            self.animation_name_declaration_scope(node, state),
                         )
                     } else {
                         None
@@ -1328,7 +1328,7 @@ impl RetainedState {
                 true => match self.settled_animation_plan_from_record(
                     node,
                     new_style_record,
-                    self.animation_name_declaration_scope(state),
+                    self.animation_name_declaration_scope(node, state),
                 ) {
                     Some(plan) => Some(plan),
                     None => {
@@ -1616,7 +1616,14 @@ impl RetainedState {
                 && table_names_animations(&table)
                 && self.tree.tree_scope(node) == tree::TreeScopeID::DOCUMENT
                 && self.animation_keyframes().only_the_document_scope_defines_keyframes()))
-        .then(|| self.settled_animation_plan(node, u8::MAX, &table, self.animation_name_declaration_scope(state)));
+        .then(|| {
+            self.settled_animation_plan(
+                node,
+                u8::MAX,
+                &table,
+                self.animation_name_declaration_scope(node, state),
+            )
+        });
         let parent_in_display_none_subtree = self
             .tree
             .flat_tree_parent(node)
@@ -1735,8 +1742,9 @@ impl RetainedState {
     /// The tree scope the winning `animation-name` declaration was written in, where its
     /// `@keyframes` are looked for first. An author rule's is the one scope its sheet is attached
     /// to; the document's rules, the other origins' and the element's own declarations have none
-    /// of their own. A sheet several shadow roots adopt does not say which one it matched in.
-    fn animation_name_declaration_scope(&self, state: CascadeStateID) -> AnimationNameScope {
+    /// of their own. A sheet several scopes adopt matched in the one its priority's encapsulation
+    /// context names among the element's contexts.
+    fn animation_name_declaration_scope(&self, node: StyleNodeID, state: CascadeStateID) -> AnimationNameScope {
         let Some(winner) = self
             .winner_groups
             .winner_in_state(state, crate::css::property_metadata::property_id::ANIMATION_NAME)
@@ -1750,10 +1758,22 @@ impl RetainedState {
                 if self.program.sheet_origin(sheet) != crate::css::cascaded_properties::CascadeOrigin::Author {
                     return AnimationNameScope::Known(None);
                 }
-                match self.program.sheet_scopes(sheet).as_slice() {
-                    [tree::TreeScopeID::DOCUMENT] => AnimationNameScope::Known(None),
-                    &[scope] => AnimationNameScope::Known(Some(scope)),
-                    _ => AnimationNameScope::Unknown,
+                let sheet_scopes = self.program.sheet_scopes(sheet);
+                let scope = match sheet_scopes.as_slice() {
+                    &[scope] => scope,
+                    _ => match winner
+                        .priority
+                        .author_context_depth()
+                        .zip(self.author_contexts(node))
+                        .and_then(|(depth, contexts)| contexts.get(depth as usize).copied())
+                    {
+                        Some(scope) if sheet_scopes.contains(&scope) => scope,
+                        _ => return AnimationNameScope::Unknown,
+                    },
+                };
+                match scope {
+                    tree::TreeScopeID::DOCUMENT => AnimationNameScope::Known(None),
+                    scope => AnimationNameScope::Known(Some(scope)),
                 }
             }
             cascade::WinnerSource::Element(_) => AnimationNameScope::Known(None),
@@ -2012,7 +2032,7 @@ impl RetainedState {
         if owes_an_animation_plan {
             // The plan is decided from the record the row installs, which carries the longhands the
             // drive computed. A record without one is no record to settle a plan against.
-            let declaration_scope = self.animation_name_declaration_scope(cascade_state.1);
+            let declaration_scope = self.animation_name_declaration_scope(node, cascade_state.1);
             let Some(plan) = self.settled_animation_plan_from_record(node, delta.1, declaration_scope) else {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
@@ -2036,7 +2056,7 @@ impl RetainedState {
         state: CascadeStateID,
         reads_custom_properties: bool,
     ) -> bool {
-        self.state_names_only_keyframes(state, self.tree.tree_scope(node), |set| {
+        self.state_names_only_keyframes(node, state, |set| {
             !description_reads_container_units(&set.description)
                 && (!reads_custom_properties || !set.description.declares_custom_properties())
         })
@@ -2046,15 +2066,16 @@ impl RetainedState {
     /// winning `animation-name` declaration was written in, which the winner store does not record.
     fn state_names_resolve_without_the_declaration_scope(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
         self.animation_keyframes().only_the_document_scope_defines_keyframes()
-            || self.state_names_only_keyframes(state, self.tree.tree_scope(node), |_| true)
+            || self.state_names_only_keyframes(node, state, |_| true)
     }
 
     fn state_names_only_keyframes(
         &self,
+        node: StyleNodeID,
         state: CascadeStateID,
-        element_tree_scope: tree::TreeScopeID,
         accepts: impl Fn(&animations::PublishedKeyframesSet) -> bool,
     ) -> bool {
+        let element_tree_scope = self.tree.tree_scope(node);
         let Some(winner) = self
             .winner_groups
             .winner_in_state(state, crate::css::property_metadata::property_id::ANIMATION_NAME)
@@ -2066,7 +2087,7 @@ impl RetainedState {
         else {
             return false;
         };
-        let declaration_scope = self.animation_name_declaration_scope(state);
+        let declaration_scope = self.animation_name_declaration_scope(node, state);
         !values.as_slice().is_empty()
             && values.as_slice().iter().all(|value| {
                 let name = match value.data() {
