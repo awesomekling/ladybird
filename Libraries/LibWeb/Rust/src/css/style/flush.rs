@@ -1873,8 +1873,8 @@ impl StyleEngineState {
                     && !(reaction & DERIVABLE != 0 && style_input_nodes_for_cpp.contains(&root));
                 let can_prepare = !(named_rule_context_changed
                     && old_record.is_some()
-                    && ((custom_functions_moved && self.retained.facts.uses_custom_functions(root))
-                        || (counter_styles_moved && self.node_reads_counter_styles(root))))
+                    && custom_functions_moved
+                    && self.retained.facts.uses_custom_functions(root))
                     && (reaction_is_settleable
                         || (old_record.is_none() && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
                     && !self.retained.computed_group_sets.node_answer_is_incomplete(root)
@@ -1909,6 +1909,8 @@ impl StyleEngineState {
                     engine_computed_record_scratch.answer_or_declarations_moved = rule_declarations_edited
                         || !flipped_rules.is_empty()
                         || !selector_truth_changes.refreshes_for(root).is_empty();
+                    engine_computed_record_scratch.recompute_in_full =
+                        counter_styles_moved && self.node_reads_counter_styles(root);
                     self.prepare_root_font_inputs(
                         root,
                         answer_winners_are_complete,
@@ -1917,6 +1919,7 @@ impl StyleEngineState {
                         &mut engine_computed_record_scratch,
                         counters,
                     );
+                    engine_computed_record_scratch.recompute_in_full = false;
                 } else {
                     counters.bump(Counter::RootFontInputsUnprovenFallbacks);
                 }
@@ -2252,8 +2255,8 @@ impl StyleEngineState {
                         decline_cause = "InheritedCustomPropertiesNonConsumer";
                         false
                     } else if (old_style_record != 0
-                        && ((custom_functions_moved && self.retained.facts.uses_custom_functions(node))
-                            || (counter_styles_moved && self.node_reads_counter_styles(node))))
+                        && custom_functions_moved
+                        && self.retained.facts.uses_custom_functions(node))
                         || !(reaction_is_settleable
                             || (old_style_record == 0 && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
                     {
@@ -2354,6 +2357,7 @@ impl StyleEngineState {
                                 & (transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES
                                     | transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE)
                                 != 0
+                                || (counter_styles_moved && self.node_reads_counter_styles(node))
                                 || (container_input_nodes.contains(&node)
                                     && self.container_input_requires_full_drive(node));
                             let delta = self.engine_computed_record_delta(

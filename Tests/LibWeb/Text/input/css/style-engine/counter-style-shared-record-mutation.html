@@ -20,11 +20,11 @@
         const settledCounters = internals.getStyleInvalidationCounters();
         println(`initial consumers answered by engine: ${settledCounters.engineComputedStyleRecords - initialCounters.engineComputedStyleRecords >= targets.length}`);
         println(`initial C++ recomputations: ${settledCounters.elementStyleRecomputations - initialCounters.elementStyleRecomputations}`);
-        const before = internals.styleEngineCounters();
+        const beforeMutation = internals.getStyleInvalidationCounters();
         document.styleSheets[0].cssRules[0].symbols = '"BBBBBBBB"';
         println(`all shared consumers update: ${targets.every((target, index) => target.getBoundingClientRect().width > initialWidths[index])}`);
-        const after = internals.styleEngineCounters();
-        println(`records were shared: ${after.sharedStyleRecordHits > before.sharedStyleRecordHits}`);
+        const afterMutation = internals.getStyleInvalidationCounters();
+        println(`counter-style consumers answered by engine: ${afterMutation.engineComputedStyleRecords - beforeMutation.engineComputedStyleRecords >= targets.length && afterMutation.elementStyleRecomputations === beforeMutation.elementStyleRecomputations}`);
         document.styleSheets[0].cssRules[0].symbols = '"A"';
         println(`all shared consumers restore: ${targets.every((target, index) => target.getBoundingClientRect().width === initialWidths[index])}`);
     });
