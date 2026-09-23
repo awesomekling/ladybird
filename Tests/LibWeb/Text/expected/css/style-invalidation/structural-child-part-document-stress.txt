@@ -823,28 +823,28 @@ PASS: stress warm pseudo-element child mutation: part-shadow-host-document: :has
 PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: part-shadow-host-document: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: part-shadow-host-document: :has(:not(:checked)) after unchecked checkbox append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: part-shadow-host-document: :has(:enabled) after enabled input append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: part-shadow-host-document: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: part-shadow-host-document: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: part-shadow-host-document: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-document: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(:enabled) after enabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: part-shadow-host-document: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: part-shadow-host-document: :has(:enabled) after enabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: part-shadow-host-document: :has(:disabled) after disabled input append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: part-shadow-host-document: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: part-shadow-host-document: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: part-shadow-host-document: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-document: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(:disabled) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: part-shadow-host-document: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: part-shadow-host-document: :has(:disabled) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: part-shadow-host-document: :has(:required) after required input append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: part-shadow-host-document: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: part-shadow-host-document: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: part-shadow-host-document: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-document: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(:required) after required input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: part-shadow-host-document: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: part-shadow-host-document: :has(:required) after required input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: part-shadow-host-document: :has(:optional) after optional input append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: part-shadow-host-document: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: part-shadow-host-document: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: part-shadow-host-document: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-document: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(:optional) after optional input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: part-shadow-host-document: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: part-shadow-host-document: :has(:optional) after optional input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: part-shadow-host-document: :has(:empty) becomes false after text inserted into only child | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
@@ -913,10 +913,10 @@ PASS: stress warm pseudo-element child mutation: part-shadow-host-document: :has
 PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: part-shadow-host-document: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: part-shadow-host-document: :has(:first-of-type) after typed child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: part-shadow-host-document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: part-shadow-host-document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: part-shadow-host-document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: part-shadow-host-document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: part-shadow-host-document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: part-shadow-host-document: :has(:is(:checked, :disabled)) after disabled input append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: part-shadow-host-document: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
@@ -925,16 +925,16 @@ PASS: stress warm pseudo-element child mutation: part-shadow-host-document: :has
 PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: part-shadow-host-document: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: part-shadow-host-document: :has(:where(:empty, :checked)) after empty child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: part-shadow-host-document: :has(rect.hit) after SVG child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: part-shadow-host-document: :has(rect.hit) after SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: part-shadow-host-document: :has(rect.hit) after SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: part-shadow-host-document: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-document: :has(rect.hit) after SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(rect.hit) after SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: part-shadow-host-document: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: part-shadow-host-document: :has(rect.hit) after SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: stress warm child mutation: part-shadow-host-document: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
-PASS: stress cold child mutation: part-shadow-host-document: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress warm child mutation: part-shadow-host-document: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
+PASS: stress cold child mutation: part-shadow-host-document: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm pseudo-element child mutation: part-shadow-host-document: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
-PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=1, elementStyleNoopRecomputations=0
+PASS: stress cold pseudo-element child mutation: part-shadow-host-document: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached child mutation: part-shadow-host-document: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: detached pseudo-element child mutation: part-shadow-host-document: :has(> rect.hit) after direct SVG child append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: stress warm child mutation: part-shadow-host-document: :has(.outer .middle .hit) after deep descendant append | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
