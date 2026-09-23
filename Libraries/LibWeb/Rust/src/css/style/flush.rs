@@ -1824,6 +1824,10 @@ impl StyleEngineState {
             let mut record_deltas = None::<Vec<Option<Vec<PublishedStyleDeltaRecord>>>>;
             let mut engine_computed_record_scratch = publication::EngineComputedRecordScratch::default();
             engine_computed_record_scratch.document_environment_moved = environment_changed;
+            // The font resolver holds the published feature-value table for this generation.
+            // A changed rule therefore moves the font input of every existing record, even when
+            // no selector winner changed for the element.
+            engine_computed_record_scratch.font_environment_moved = font_feature_values_moved;
             self.host.document_environment_moved_for_retries = environment_changed;
             // The viewport the records were driven against, against the one they are driven against
             // now. A record that reads it cannot stand across the difference.
@@ -1870,8 +1874,7 @@ impl StyleEngineState {
                     && !(reaction & DERIVABLE != 0 && style_input_nodes_for_cpp.contains(&root));
                 let can_prepare = !(named_rule_context_changed
                     && old_record.is_some()
-                    && (font_feature_values_moved
-                        || (custom_functions_moved && self.retained.facts.uses_custom_functions(root))
+                    && ((custom_functions_moved && self.retained.facts.uses_custom_functions(root))
                         || (counter_styles_moved && self.node_reads_counter_styles(root))))
                     && (reaction_is_settleable
                         || (old_record.is_none() && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
@@ -2250,8 +2253,7 @@ impl StyleEngineState {
                         decline_cause = "InheritedCustomPropertiesNonConsumer";
                         false
                     } else if (old_style_record != 0
-                        && (font_feature_values_moved
-                            || (custom_functions_moved && self.retained.facts.uses_custom_functions(node))
+                        && ((custom_functions_moved && self.retained.facts.uses_custom_functions(node))
                             || (counter_styles_moved && self.node_reads_counter_styles(node))))
                         || !(reaction_is_settleable
                             || (old_style_record == 0 && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
@@ -2343,8 +2345,8 @@ impl StyleEngineState {
                             // The element's font environment moved: its record resolves a font
                             // cascade out of the published `@font-face` table, and that table is
                             // not the one the record holds.
-                            engine_computed_record_scratch.font_environment_moved =
-                                reaction & transaction::STYLE_REACTION_FONT_INPUTS_CHANGED != 0;
+                            engine_computed_record_scratch.font_environment_moved = font_feature_values_moved
+                                || reaction & transaction::STYLE_REACTION_FONT_INPUTS_CHANGED != 0;
                             // A descendant recompute stands for inputs no winner shows: the root's
                             // font metrics, an ancestor's direction, writing mode or container type.
                             // An ancestor becoming visible stands for a record whose style was cleared
