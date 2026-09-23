@@ -1166,22 +1166,32 @@ impl RetainedState {
         }
         let mut winners = self.resolved_cascade_winners_for_properties(node, &matches, None, None);
         // A pseudo-element takes from its rules only the properties it supports; the element's
-        // own declarations are not held to that. A rule's winner hiding an own declaration of a
-        // property the pseudo-element does not support is not one the filter can undo.
+        // own declarations are not held to that. An own declaration a dropped rule winner hid
+        // wins among the element's own declarations alone, since no rule declares it for this
+        // pseudo-element.
         let (declared_properties, _) = self
             .facts
             .element_declared_properties(node, ElementDeclarationKind::InlineStyle);
         let own_declared: Vec<u16> = declared_properties.iter().map(|declared| declared.property).collect();
-        let mut hides_own_declaration = false;
+        let mut hidden_own_declarations = Vec::new();
         winners.retain(|winner| {
             let supported = !matches!(winner.source, WinnerSource::Rule(_))
                 || crate::css::property_metadata::pseudo_element_supports_property(kind, winner.property);
-            hides_own_declaration |= !supported && own_declared.contains(&winner.property);
+            if !supported && own_declared.contains(&winner.property) {
+                hidden_own_declarations.push(winner.property);
+            }
             supported
         });
-        if hides_own_declaration {
-            counters.bump(Counter::EngineComputedRecordBailProperty);
-            return None;
+        if !hidden_own_declarations.is_empty() {
+            hidden_own_declarations.sort_unstable();
+            hidden_own_declarations.dedup();
+            winners.extend(self.resolved_cascade_winners_for_properties(
+                node,
+                &[],
+                None,
+                Some(&hidden_own_declarations),
+            ));
+            winners.sort_unstable_by_key(|winner| winner.property);
         }
         let state = self.with_cascade_interning_counters(|groups| groups.intern_sorted(&winners, None), counters);
         for property in self.winner_groups.semantic_delta_properties(None, state) {

@@ -3652,8 +3652,7 @@ Optional<RequiredInvalidationAfterStyleChange> StyleComputer::answer_record_dema
 static RefPtr<ComputedValues const> engine_backing_pseudo_values(StyleComputer const& style_computer, DOM::AbstractElement abstract_element, Optional<StyleEngine::StyleRecordDelta&> style_record_delta)
 {
     if (abstract_element.pseudo_element().has_value()
-        || !abstract_element.element().associated_shadow_host_pseudo_element().has_value()
-        || abstract_element.element().associated_shadow_host_pseudo_element() == CSS::PseudoElement::Placeholder)
+        || !abstract_element.element().associated_shadow_host_pseudo_element().has_value())
         return {};
     auto old_record = abstract_element.style_record_identity();
     auto answer = const_cast<StyleComputer&>(style_computer).style_engine().answer_record_demand(abstract_element.element().style_node_id(), {}, false, false);
