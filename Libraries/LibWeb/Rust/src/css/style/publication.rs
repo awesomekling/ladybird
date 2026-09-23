@@ -7766,10 +7766,9 @@ impl StyleEngineState {
         // A row introduced while the host applies a batch was never part of the flush's
         // record loop. Its retained answer can be offered now, after its parent was installed,
         // whether or not this transaction published it anew.
-        // A row the engine already declined keeps the original host path.
-        if armed.is_none()
-            && (self.retained.host_entry_causes.contains_key(&node) || self.backs_host_pseudo_element(node))
-        {
+        // A row the engine already declined keeps the original host path. An element standing
+        // for its host's pseudo-element is offered too: its record cascades the host's matches.
+        if armed.is_none() && self.retained.host_entry_causes.contains_key(&node) {
             return;
         }
         if let Some(index) = armed {
