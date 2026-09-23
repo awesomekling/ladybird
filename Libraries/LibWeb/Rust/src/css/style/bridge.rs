@@ -166,6 +166,7 @@ pub struct FfiEngineComputedRecord {
 pub struct FfiRecordDemandAnswer {
     pub record: FfiEngineComputedRecord,
     pub is_absent: bool,
+    pub is_provisional: bool,
     pub decline_cause: *const u8,
     pub decline_cause_length: usize,
 }
@@ -175,6 +176,7 @@ impl FfiRecordDemandAnswer {
         Self {
             record: FfiEngineComputedRecord::default(),
             is_absent: false,
+            is_provisional: false,
             decline_cause: cause.as_ptr(),
             decline_cause_length: cause.len(),
         }
@@ -3175,6 +3177,19 @@ pub unsafe extern "C" fn style_engine_begin_computed_record_verification(
     engine.host.computed_record_verification_counters = Some(Box::new(engine.counters.clone()));
     engine.host.computed_record_verification_element = node;
     engine.host.computed_record_verification_settled_pseudos = settled_pseudos;
+    engine.host.computed_record_verification_saw_provisional_demand = false;
+}
+
+/// Whether the reference computation consumed a private answer whose pending inputs have not
+/// settled. Its record cannot be compared as a final published answer in this scope.
+///
+/// # Safety
+/// `engine` must be live and inside a verification scope.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_verification_saw_provisional_demand(engine: *const c_void) -> bool {
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    assert!(engine.host.computed_record_verification_counters.is_some());
+    engine.host.computed_record_verification_saw_provisional_demand
 }
 
 /// Leave a C++ computed-record verification scope without exposing its instrumentation work.
@@ -3191,6 +3206,7 @@ pub unsafe extern "C" fn style_engine_end_computed_record_verification(engine: *
     engine.host.computed_record_verification_keep_alive.extend(pins);
     engine.host.computed_record_verification_element = 0;
     engine.host.computed_record_verification_settled_pseudos = 0;
+    engine.host.computed_record_verification_saw_provisional_demand = false;
     engine.counters = *engine
         .host
         .computed_record_verification_counters
@@ -3946,17 +3962,22 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
                     pseudo_records: answer.pseudo_records,
                 },
                 is_absent: false,
+                is_provisional: answer.provisional,
                 decline_cause: std::ptr::null(),
                 decline_cause_length: 0,
             },
             Ok(None) => FfiRecordDemandAnswer {
                 record: FfiEngineComputedRecord::default(),
                 is_absent: true,
+                is_provisional: false,
                 decline_cause: std::ptr::null(),
                 decline_cause_length: 0,
             },
             Err(cause) => FfiRecordDemandAnswer::declined(cause),
         };
+        if result.is_provisional && engine.host.computed_record_verification_counters.is_some() {
+            engine.host.computed_record_verification_saw_provisional_demand = true;
+        }
         engine.record_boundary_call(EventKind::AnswerRecordDemand, |payload| {
             payload.write_u32(node.raw());
             payload.write_u8(pseudo_kind);
@@ -3979,6 +4000,35 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
             payload.write_bytes(cause);
         });
         result
+    })
+}
+
+/// Resolve a hypothetical parent's custom-property declaration against its published registry
+/// snapshot and store. The returned style value transfers one strong reference to the host.
+///
+/// # Safety
+/// All pointers must be live for the call, and `store` and `registry` must have their respective
+/// Rust custom-property types.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_answer_hypothetical_parent_custom_property(
+    engine: *mut c_void,
+    root: u32,
+    store: *const c_void,
+    registry: *const c_void,
+    name: *const u16,
+    name_length: usize,
+) -> *const c_void {
+    abort_on_panic(|| {
+        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+        let Some(root) = StyleNodeID::from_raw(root) else {
+            return std::ptr::null();
+        };
+        if name.is_null() {
+            return std::ptr::null();
+        }
+        let name = unsafe { std::slice::from_raw_parts(name, name_length) };
+        unsafe { engine.answer_hypothetical_parent_custom_property(root, store, registry, name) }
+            .unwrap_or(std::ptr::null())
     })
 }
 

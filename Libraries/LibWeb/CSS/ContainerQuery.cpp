@@ -39,6 +39,8 @@
 
 namespace Web::CSS {
 
+NonnullRefPtr<StyleValue const> answer_custom_property_from_engine(AbstractOrHypotheticalElement const&, Utf16FlyString const&);
+
 NonnullRefPtr<ContainerConditions> ContainerConditions::create(Parser::ValueParserFFI::ContainerConditionsData const* data)
 {
     return adopt_ref(*new ContainerConditions(data));
@@ -331,25 +333,7 @@ static RefPtr<StyleValue const> parse_style_range_literal_value(DOM::Document co
 
 static NonnullRefPtr<StyleValue const> computed_style_query_custom_property_value(AbstractOrHypotheticalElement const& element, Utf16FlyString const& name)
 {
-    if (element.has<DOM::AbstractElement>()) {
-        auto const& abstract_element = element.get<DOM::AbstractElement>();
-        if (!abstract_element.pseudo_element().has_value()) {
-            auto& style_computer = const_cast<DOM::Document&>(element.document()).style_computer();
-            auto answer = style_computer.style_engine().answer_record_demand(abstract_element.element().style_node_id(), {}, false, false, true);
-            if (answer.record.style_record) {
-                bool installable = false;
-                auto environment = abstract_element.element().custom_property_environment_of_engine_record(StyleRecordID { answer.record.style_record }, installable);
-                if (installable) {
-                    if (environment) {
-                        if (auto const* property = environment->get(name))
-                            return property->value;
-                    }
-                    return initial_custom_property_value(element.get_registered_custom_property(name), element.document());
-                }
-            }
-        }
-    }
-    return element.document().style_computer().compute_value_of_custom_property(nullptr, element, name);
+    return answer_custom_property_from_engine(element, name);
 }
 
 static Optional<StyleRangeComparableValue> evaluate_style_range_value(StyleRangeValue const& range_value, AbstractOrHypotheticalElement const& element, DOM::Document const& document, ComputationContext const& computation_context)

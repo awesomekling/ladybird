@@ -1949,6 +1949,7 @@ impl StyleEngineState {
                 computed_record_verification_counters: None,
                 computed_record_verification_element: 0,
                 computed_record_verification_settled_pseudos: 0,
+                computed_record_verification_saw_provisional_demand: false,
                 computed_record_verification_pins: Vec::new(),
                 computed_record_verification_keep_alive: Vec::new(),
                 journal: NormalizationJournal::new(),

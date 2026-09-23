@@ -2645,7 +2645,7 @@ impl RetainedState {
         Some((length, table.effective_color_scheme() as u8))
     }
 
-    fn provisional_registered_value_context(
+    pub(super) fn provisional_registered_value_context(
         &self,
         parent_record: Option<computed::FinalStyleRecordID>,
         inputs: &bridge::FfiDocumentStyleComputationInputs,
@@ -5387,6 +5387,25 @@ impl RetainedState {
 }
 
 impl StyleEngineState {
+    fn restore_private_ancestor_records(
+        &mut self,
+        records: Vec<(
+            StyleNodeID,
+            computed::FinalStyleRecordID,
+            computed::FinalStyleRecordID,
+            Option<tree::ContainerQueryInputRow>,
+        )>,
+    ) {
+        for (node, private, previous, inputs) in records.into_iter().rev() {
+            self.computed_group_sets
+                .revert_engine_computed_record(node, private, previous);
+            match inputs {
+                Some(row) => self.container_query_inputs.set(node, row),
+                None => self.container_query_inputs.clear(node),
+            }
+        }
+    }
+
     /// Answer an observation of one node without draining the document's transaction. A
     /// read-only observation uses a retained match answer or a private matching traversal and
     /// leaves the published winner rows and invalidation facts untouched.
@@ -5425,6 +5444,9 @@ impl StyleEngineState {
         if exclude_inline_style && (!read_only || pseudo.is_some()) {
             return Err("GateDeclarations");
         }
+        let target_has_pending_facts = self.host.journal.inputs().any(|input| {
+            matches!(input.key, InputKey::LocalFeature(changed, _) | InputKey::State(changed, _) if changed == node)
+        });
         if !self.tree.is_live(node)
             || !self.host.tree_staging.is_empty()
             || self.host.program_staging.is_dirty()
@@ -5433,14 +5455,16 @@ impl StyleEngineState {
             || self.host.journal.inputs().any(|input| {
                 input.key.style_node().is_none()
                     || matches!(input.key, InputKey::TreeRelations(_))
-                    || matches!(input.key, InputKey::LocalFeature(changed, _) | InputKey::State(changed, _) if changed == node)
+                    || (!read_only
+                        && matches!(input.key, InputKey::LocalFeature(changed, _) | InputKey::State(changed, _) if changed == node))
             })
         {
             return Err("GateReaction");
         }
         let mut ancestor = self.tree.flat_tree_parent(node);
+        let mut ancestors = Vec::new();
         while let Some(parent) = ancestor {
-            if self
+            let pending = self
                 .host
                 .journal
                 .inputs()
@@ -5449,12 +5473,16 @@ impl StyleEngineState {
                     .host
                     .deferred_element_style_inputs
                     .iter()
-                    .any(|input| input.key.style_node() == Some(parent))
-            {
+                    .any(|input| input.key.style_node() == Some(parent));
+            if pending && (!read_only || pseudo.is_some()) {
                 return Err("GateReaction");
             }
+            ancestors.push((parent, pending));
             ancestor = self.tree.flat_tree_parent(parent);
         }
+        let provisional = read_only
+            && pseudo.is_none()
+            && (target_has_pending_facts || ancestors.iter().any(|(_, pending)| *pending));
 
         if read_only
             && (self.engine_computed_records_pending.contains_key(&node)
@@ -5485,6 +5513,45 @@ impl StyleEngineState {
             }
         }
 
+        let mut private_ancestor_records = Vec::new();
+        if read_only && pseudo.is_none() {
+            let mut private_counters = counters.clone();
+            if let Some(farthest_pending) = ancestors.iter().rposition(|(_, pending)| *pending) {
+                for &(parent, _) in ancestors[..=farthest_pending].iter().rev() {
+                    let previous = self
+                        .computed_group_sets
+                        .assigned_style_record(parent)
+                        .unwrap_or(computed::FinalStyleRecordID::NONE);
+                    let inputs = self.container_query_inputs.get(parent).cloned();
+                    let answer =
+                        self.answer_record_demand(parent, None, false, targeted, true, 0, &mut private_counters);
+                    let Some(private) = answer
+                        .ok()
+                        .flatten()
+                        .and_then(|answer| computed::FinalStyleRecordID::from_raw(answer.style_record))
+                    else {
+                        self.restore_private_ancestor_records(private_ancestor_records);
+                        return Err("GateReaction");
+                    };
+                    if self
+                        .computed_group_sets
+                        .assign_shared_style_record(
+                            computed::ComputedStyleTarget::new(parent, u8::MAX),
+                            private.raw(),
+                            computed::ENGINE_INHERITED_GROUP_COUNT,
+                            false,
+                        )
+                        .is_none()
+                    {
+                        self.restore_private_ancestor_records(private_ancestor_records);
+                        return Err("EngineComputedRecordBailRecord");
+                    }
+                    self.set_element_container_query_inputs(parent, private.raw());
+                    private_ancestor_records.push((parent, private, previous, inputs));
+                }
+            }
+        }
+
         let hidden_inline_declarations = exclude_inline_style
             .then(|| self.facts.hide_inline_declarations_for_demand(node))
             .flatten();
@@ -5495,7 +5562,7 @@ impl StyleEngineState {
         if read_only || !self.begin_cold_matching_batch(node, counters) {
             self.begin_adaptive_cold_matching_batch(node, counters);
         }
-        let retained_dispatch = read_only
+        let retained_dispatch = (read_only && !target_has_pending_facts)
             .then(|| self.retained_answer_dispatch_for_traversal(true))
             .flatten();
         let answer = self.complete_published_match_answer(node, retained_dispatch.as_deref(), counters);
@@ -5589,6 +5656,7 @@ impl StyleEngineState {
                 };
                 let mut result = RetriedEngineRecord {
                     style_record: record.raw(),
+                    provisional,
                     ..RetriedEngineRecord::default()
                 };
                 for delta in &scratch.pseudo_deltas {
@@ -5668,6 +5736,7 @@ impl StyleEngineState {
             self.discard_private_record_demand_matching_batch();
             self.published_match_answers = published_answers.expect("read-only demand saved published answers");
         }
+        self.restore_private_ancestor_records(private_ancestor_records);
         result
     }
 
@@ -6125,6 +6194,7 @@ pub(super) struct DriveSubject {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct RetriedEngineRecord {
     pub(crate) style_record: u64,
+    pub(crate) provisional: bool,
     pub(crate) pseudo_records_present: u8,
     pub(crate) pseudo_records: [u64; bridge::RETRY_PSEUDO_RECORD_SLOTS],
 }
