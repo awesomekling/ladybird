@@ -7,6 +7,13 @@
 use super::*;
 
 impl RetainedState {
+    fn note_pseudo_bail_site(&mut self, node: StyleNodeID, site: &'static str) {
+        if seal::is_reporting() {
+            let cold = self.computed_group_sets.assigned_style_record(node).is_none();
+            self.host_entry_causes.insert(node, (site, cold));
+        }
+    }
+
     /// A pseudo row can predate the current answer even when the element row is current. Rebuild
     /// its winners from that answer before deciding whether the engine can settle its record.
     fn refresh_stale_pseudo_winners(
@@ -408,6 +415,7 @@ impl RetainedState {
                             .is_some()
                     });
                 if needs_host_animation_step {
+                    self.note_pseudo_bail_site(node, "engineComputedRecordBailRecordOverlay@pseudo.rs:398");
                     counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
                     return None;
                 }
@@ -1089,6 +1097,7 @@ impl RetainedState {
         use bridge::element_adjustment_fact as fact;
         let facts = self.computed_group_sets.adjustment_facts(node);
         if facts & fact::HAS_ANIMATIONS != 0 {
+            self.note_pseudo_bail_site(node, "engineComputedRecordBailWinnerElement@pseudo.rs:1078");
             counters.bump(Counter::EngineComputedRecordBailWinnerElement);
             return None;
         }
@@ -1102,6 +1111,7 @@ impl RetainedState {
                 return None;
             };
             if !view.animated_overlay.is_null() {
+                self.note_pseudo_bail_site(node, "engineComputedRecordBailRecordOverlay@pseudo.rs:1091");
                 counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
                 return None;
             }
