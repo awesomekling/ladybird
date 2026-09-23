@@ -1125,6 +1125,9 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailIncompleteWinners);
             return None;
         };
+        // The pseudo-element's custom declarations cascade from these matches too: a shadow host
+        // retains no answer to read them from.
+        let custom_declarations = self.cascade_custom_declarations(host, Some(kind), Some(&matches));
         for entry in &mut matches {
             entry.node = node;
             entry.pseudo_element = None;
@@ -1184,12 +1187,18 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailRecordParent);
             return None;
         };
-        let has_registered_declarations = self.declares_registered_custom_property(host, Some(kind), &inputs);
+        let Some(custom_declarations) = custom_declarations else {
+            counters.bump(Counter::EngineComputedRecordBailCustomProperties);
+            return None;
+        };
+        let has_registered_declarations =
+            self.declarations_name_a_registered_custom_property(&custom_declarations, &inputs);
         let provisional_registered = has_registered_declarations
             .then(|| self.provisional_registered_value_context(Some(parent_record), &inputs));
-        let Some(mut environment) = self.engine_custom_property_environment_of(
+        let Some(mut environment) = self.engine_custom_property_environment_over(
             host,
             Some(kind),
+            custom_declarations.clone(),
             parent_environment,
             &inputs,
             provisional_registered,
@@ -1235,9 +1244,10 @@ impl RetainedState {
             counters,
         );
         let driven = if let Some(registered) = scratch.font_drive.registered_context.take() {
-            environment = self.engine_custom_property_environment_of(
+            environment = self.engine_custom_property_environment_over(
                 host,
                 Some(kind),
+                custom_declarations,
                 parent_environment,
                 &inputs,
                 Some(registered),

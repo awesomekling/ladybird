@@ -472,12 +472,24 @@ impl RetainedState {
             return false;
         }
         self.cascaded_custom_declarations_of(node, pseudo)
-            .is_some_and(|declarations| {
-                declarations.iter().any(|(declared, _)| {
-                    self.custom_property_environments
-                        .name(declared.name)
-                        .is_some_and(|name| registry.registration_facts(&name.text).is_some())
-                })
+            .is_some_and(|declarations| self.declarations_name_a_registered_custom_property(&declarations, inputs))
+    }
+
+    pub(super) fn declarations_name_a_registered_custom_property(
+        &self,
+        declarations: &[(CustomDeclaration, RetainedStyleValueData)],
+        inputs: &bridge::FfiDocumentStyleComputationInputs,
+    ) -> bool {
+        let registry = inputs.custom_property_registry;
+        if registry.is_none() {
+            return false;
+        }
+        let registry = unsafe { &*registry.as_pointer().cast::<CustomPropertyRegistry>() };
+        registry.has_registrations()
+            && declarations.iter().any(|(declared, _)| {
+                self.custom_property_environments
+                    .name(declared.name)
+                    .is_some_and(|name| registry.registration_facts(&name.text).is_some())
             })
     }
     /// Hand each of a node's element-target matches, with the cascade inputs its priority is
@@ -878,7 +890,7 @@ impl RetainedState {
         Some(cascaded.into_iter().map(|(declared, _)| declared).collect())
     }
 
-    fn cascade_custom_declarations(
+    pub(super) fn cascade_custom_declarations(
         &self,
         node: StyleNodeID,
         pseudo: Option<u8>,
@@ -1154,11 +1166,41 @@ impl RetainedState {
         if !self.any_custom_property_is_declared() {
             return Some(parent_environment);
         }
+        let cascaded = self.cascaded_custom_declarations_of(node, pseudo)?;
+        self.engine_custom_property_environment_over(
+            node,
+            pseudo,
+            cascaded,
+            parent_environment,
+            inputs,
+            registered,
+            counters,
+        )
+    }
+
+    /// What `engine_custom_property_environment_of` says of custom declarations cascaded for the
+    /// node or pseudo-element by the caller.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the cascaded declarations and their independent resolution inputs travel together"
+    )]
+    pub(super) fn engine_custom_property_environment_over(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        cascaded: Vec<(CustomDeclaration, RetainedStyleValueData)>,
+        parent_environment: u64,
+        inputs: &bridge::FfiDocumentStyleComputationInputs,
+        registered: Option<RegisteredValueContext>,
+        counters: &mut Counters,
+    ) -> Option<u64> {
+        if !self.any_custom_property_is_declared() {
+            return Some(parent_environment);
+        }
         // Keep the unfiltered parent for an explicit inherit; ordinary inheritance drops
         // non-inheriting registrations before layering this element's declarations.
         let inheritance_environment = parent_environment;
         let parent_environment = self.inheritable_custom_property_environment(parent_environment, inputs)?;
-        let cascaded = self.cascaded_custom_declarations_of(node, pseudo)?;
         if cascaded.is_empty() {
             return Some(parent_environment);
         }
