@@ -29,7 +29,7 @@ impl RetainedState {
                     && (version != self.program.version() || !priority_current)
             });
         if stale {
-            self.republish_winners_from_retained_answer(node, counters);
+            self.republish_winners_from_answer(node, counters);
         }
     }
 
