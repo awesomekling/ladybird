@@ -2532,60 +2532,10 @@ impl super::StyleEngine {
             color_input.current_color_rgba = color.rgba;
         }
 
-        // An animated `overflow` is adjusted the way a computed one is: a `visible` or `clip`
-        // beside a scrolling axis computes to `auto` or `hidden`.
-        let overflow_keyword = |property: u16| match table.effective_value(Some(overlay), property, true).value {
-            value if value.is_null() => None,
-            value => match unsafe { &*value.cast::<crate::css::style_value::StyleValueData>() } {
-                crate::css::style_value::StyleValueData::Keyword { keyword } => Some(*keyword),
-                _ => None,
-            },
-        };
-        let mut adjusted_overlay = None;
-        if let (Some(x), Some(y)) = (
-            overflow_keyword(crate::css::property_metadata::property_id::OVERFLOW_X),
-            overflow_keyword(crate::css::property_metadata::property_id::OVERFLOW_Y),
-        ) {
-            let effective = crate::css::style_compute::resolve_effective_overflow_keywords(x, y);
-            if effective.changed_x || effective.changed_y {
-                let mut adjusted = overlay.clone();
-                for (changed, property, keyword) in [
-                    (
-                        effective.changed_x,
-                        crate::css::property_metadata::property_id::OVERFLOW_X,
-                        effective.x_keyword,
-                    ),
-                    (
-                        effective.changed_y,
-                        crate::css::property_metadata::property_id::OVERFLOW_Y,
-                        effective.y_keyword,
-                    ),
-                ] {
-                    if !changed {
-                        continue;
-                    }
-                    // An axis the overlay does not animate is adjusted over the base value, which
-                    // must win over an important declaration the way the adjusted value would.
-                    let (inherited, result_of_transition) = overlay
-                        .get(property)
-                        .map_or((false, true), |entry| (entry.inherited, entry.result_of_transition));
-                    adjusted.set_owned(
-                        property,
-                        crate::css::style_value::RetainedStyleValueData::from_owned(
-                            crate::css::style_value::StyleValueData::Keyword { keyword },
-                        ),
-                        inherited,
-                        result_of_transition,
-                    );
-                }
-                adjusted_overlay = Some(adjusted);
-            }
-        }
-
         let build_inputs = crate::css::table_group_builder::FfiTableGroupBuildInputs {
             color_input: (&raw const color_input).cast(),
             used_color_scheme,
-            animated_overlay: adjusted_overlay.as_ref().unwrap_or(overlay),
+            animated_overlay: overlay,
             box_display_before_transformation_raw: display_before_box_type_transformation_raw,
             font: font_inputs.as_ref().map_or(std::ptr::null(), std::ptr::from_ref),
         };
