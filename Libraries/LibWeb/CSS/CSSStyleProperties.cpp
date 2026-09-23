@@ -689,14 +689,7 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
                 }
             }
         }
-        // Non-highlight declined demands still need the C++ computation.
-        if (kind == PseudoElement::Selection)
-            return {};
-        bool did_change_custom_properties = false;
-        StyleEngine::StyleRecordDelta style_record_delta {};
-        auto style = style_computer.compute_pseudo_element_style_if_needed(target, did_change_custom_properties, nullptr, style_record_delta, highlight_parent_style_record);
-        highlight_parent_style_record = style ? style_record_delta.new_style_record : StyleRecordID {};
-        return style;
+        return {};
     };
 
     Vector<RefPtr<ComputedValues const>> ancestor_styles;

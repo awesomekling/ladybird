@@ -164,6 +164,7 @@ impl RetainedState {
             None,
             false,
             None,
+            false,
         )
     }
 
@@ -182,6 +183,7 @@ impl RetainedState {
         selected_kind: Option<u8>,
         cssom_read: bool,
         highlight_parent: Option<computed::FinalStyleRecordID>,
+        observe_without_box: bool,
     ) -> Option<()> {
         use pseudo_kind::{AFTER, BACKDROP, BEFORE, FIRST_LETTER, MARKER, SELECTION};
 
@@ -492,12 +494,8 @@ impl RetainedState {
             };
             pseudo_uses_substitution |=
                 state.is_some_and(|state| scratch.substituted_states.contains(&(state, environment)));
-            // A CSSOM demand still needs the pseudo's custom-property environment when
-            // `content` generates no box. Only a batch install can discard that record.
-            if selected_kind.is_none()
-                && !has_registered_declarations
-                && pseudo_content_generates_nothing(&store.view(self), kind)
-            {
+            let no_box = pseudo_content_generates_nothing(&store.view(self), kind);
+            if no_box && !observe_without_box && !has_registered_declarations {
                 remove(self, scratch, counters);
                 continue;
             }
@@ -690,7 +688,7 @@ impl RetainedState {
                 longhand_evaluations,
                 scratch,
                 counters,
-                !cssom_read,
+                !cssom_read && !no_box,
             );
         }
         scratch.pseudo_uses_substitution = pseudo_uses_substitution;
@@ -854,6 +852,7 @@ impl RetainedState {
                 None,
                 false,
                 None,
+                false,
             )
             .is_none()
         {
@@ -1279,6 +1278,7 @@ impl StyleEngineState {
                     Some(kind),
                     cssom_absent,
                     highlight_parent,
+                    read_only,
                 )
                 .is_some()
             {
