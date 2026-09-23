@@ -1,0 +1,3 @@
+backing pseudo settled by engine: true
+incomplete winner refusals: 0
+placeholder color: rgb(0, 128, 0)
