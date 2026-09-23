@@ -15,7 +15,7 @@ use super::style_invalidation::property_feeds_post_compute_adjustment;
 use super::*;
 use crate::css::computed_longhand_table::ComputedLonghandTable;
 pub(crate) use drive::drive_font_metric;
-use drive::{FontDriveGoal, TransitionDriveGoal};
+use drive::{FontDriveGoal, TransitionDriveGoal, table_names_animations};
 
 /// Another element's published style that a first-time computation may build over: the element
 /// whose cascade state stands in for the previous one, and the record it must still hold.
@@ -1496,9 +1496,16 @@ impl RetainedState {
         };
         // The plan is decided from the longhands this drive computed, before the table goes into
         // the record.
-        let animation_plan =
-            (owes_an_animation_plan || full_css_drive_beneath_a_composition || css_base_without_an_overlay)
-                .then(|| self.settled_animation_plan(node, u8::MAX, &table));
+        // A retained record from display:none contributes its base to the drive. Its animation
+        // names must be planned from the new base before the host samples the installed record.
+        let animation_plan = (owes_an_animation_plan
+            || full_css_drive_beneath_a_composition
+            || css_base_without_an_overlay
+            || (old_record_is_hidden
+                && table_names_animations(&table)
+                && self.tree.tree_scope(node) == tree::TreeScopeID::DOCUMENT
+                && self.animation_keyframes().only_the_document_scope_defines_keyframes()))
+        .then(|| self.settled_animation_plan(node, u8::MAX, &table));
         let parent_in_display_none_subtree = self
             .tree
             .flat_tree_parent(node)
