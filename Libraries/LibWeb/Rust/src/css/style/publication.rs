@@ -1868,6 +1868,27 @@ impl RetainedState {
             .is_none()
     }
 
+    /// A first record with only `none` names has no CSS animation to start, even if unrelated
+    /// keyframes in the document make a new animation plan unavailable.
+    fn cold_state_names_no_animation(&self, state: CascadeStateID) -> bool {
+        self.winner_groups
+            .winner_in_state(state, crate::css::property_metadata::property_id::ANIMATION_NAME)
+            .and_then(|winner| self.winner_groups.resolved_winner(winner))
+            .is_none_or(|winner| {
+                let is_none = |value: &StyleValueData| {
+                    matches!(value, StyleValueData::Keyword { keyword }
+                        if *keyword == crate::css::style_compute::keyword::NONE)
+                };
+                match self.specified_values.value(winner.key.value) {
+                    Lookup::Known(value) if is_none(value) => true,
+                    Lookup::Known(StyleValueData::ValueList { values, .. }) => {
+                        !values.as_slice().is_empty() && values.as_slice().iter().all(|value| is_none(value.data()))
+                    }
+                    _ => false,
+                }
+            })
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn engine_cold_record_impl(
         &mut self,
@@ -1975,7 +1996,7 @@ impl RetainedState {
                 || (longhand_declares_a_css_animation(property)
                     && !owes_an_animation_plan
                     && (self.computed_group_sets.associated_pseudo_kind(node).is_some()
-                        || !self.state_has_no_animation_name(state)))
+                        || !self.cold_state_names_no_animation(state)))
             {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
