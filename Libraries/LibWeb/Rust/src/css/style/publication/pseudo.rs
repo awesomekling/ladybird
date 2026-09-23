@@ -943,7 +943,8 @@ impl RetainedState {
             .is_none()
         {
             if scratch.font_drive.request.is_none() {
-                // The originating element's record stays; only its failed pseudo settlement goes.
+                // The element's record may be an engine answer awaiting acknowledgement. Only
+                // pseudo records derived beside it go back when pseudo settlement fails.
                 for pending in self.engine_computed_records_pending.remove(&node).into_iter().flatten() {
                     if pending.pseudo_kind == u8::MAX {
                         self.engine_computed_records_pending
