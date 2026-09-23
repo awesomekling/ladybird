@@ -3393,9 +3393,13 @@ pub unsafe extern "C" fn style_engine_node_record_reads_attributes(engine: *cons
         _ => false,
     };
     element_reads
-        || groups
-            .pseudo_states(node)
-            .any(|(_, _, state, _)| engine.state_reads_attributes(node, state))
+        || engine.retained.custom_declarations_read_attributes(node, None)
+        || groups.pseudo_states(node).any(|(pseudo, _, state, _)| {
+            engine.state_reads_attributes(node, state)
+                || u8::try_from(pseudo.kind.0)
+                    .ok()
+                    .is_some_and(|kind| engine.retained.custom_declarations_read_attributes(node, Some(kind)))
+        })
 }
 
 /// The raw custom-property environment identity a style record was published with.

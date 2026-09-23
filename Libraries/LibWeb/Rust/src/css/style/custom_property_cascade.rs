@@ -40,6 +40,8 @@ fn engine_resolution_context(
     inheritance_store: *const c_void,
     registry: *const c_void,
     length: *const crate::css::style_compute::FfiLengthResolutionContext,
+    attributes: &[crate::css::custom_properties::FfiSubstitutionAttribute],
+    attribute_names_are_ascii_case_insensitive: bool,
 ) -> FfiCascadeResolutionContext {
     FfiCascadeResolutionContext {
         parse_context: std::ptr::from_ref(parse_context).cast(),
@@ -55,9 +57,9 @@ fn engine_resolution_context(
             utf16: std::ptr::null(),
             length: 0,
         },
-        attributes: std::ptr::null(),
-        attribute_count: 0,
-        attribute_names_are_ascii_case_insensitive: false,
+        attributes: attributes.as_ptr(),
+        attribute_count: attributes.len(),
+        attribute_names_are_ascii_case_insensitive,
         custom_functions: std::ptr::null(),
         custom_function_count: 0,
         custom_function_scope_identity: 0,
@@ -67,6 +69,21 @@ fn engine_resolution_context(
         style_query_dependencies: std::ptr::null_mut(),
         callback_context: std::ptr::null_mut(),
     }
+}
+
+fn value_is_engine_resolvable_with_attributes(value: &StyleValueData) -> bool {
+    custom_property_value_is_engine_resolvable(value)
+        || matches!(
+            value,
+            StyleValueData::Unresolved {
+                presence_attr: true,
+                presence_dashed_function: false,
+                presence_env: false,
+                presence_if: false,
+                presence_inherit: false,
+                ..
+            }
+        )
 }
 
 /// What a registered custom property's value is computed against: the element's own font metrics
@@ -405,6 +422,21 @@ impl RetainedState {
         pseudo: Option<u8>,
     ) -> Option<Vec<(CustomDeclaration, RetainedStyleValueData)>> {
         self.cascade_custom_declarations(node, pseudo, None)
+    }
+
+    pub(super) fn custom_declarations_read_attributes(&self, node: StyleNodeID, pseudo: Option<u8>) -> bool {
+        self.cascaded_custom_declarations_of(node, pseudo)
+            .is_some_and(|declarations| {
+                declarations.iter().any(|(_, value)| {
+                    matches!(
+                        value.data(),
+                        StyleValueData::Unresolved {
+                            presence_attr: true,
+                            ..
+                        }
+                    )
+                })
+            })
     }
 
     /// The element's own winning declaration, without importance inherited
@@ -770,6 +802,7 @@ impl RetainedState {
         };
         let parent = unsafe { parent_store.cast::<CustomPropertyStore>().as_ref() };
         let mut values = Vec::with_capacity(cascaded.len());
+        let mut reads_attributes = false;
         for (declared, value) in &cascaded {
             let Some(name) = self.custom_property_environments.name(declared.name) else {
                 counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
@@ -779,11 +812,18 @@ impl RetainedState {
                 counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
                 return None;
             }
-            if !custom_property_value_is_engine_resolvable(value.data()) {
+            if !value_is_engine_resolvable_with_attributes(value.data()) {
                 counters.bump(Counter::EngineComputedRecordBailCustomPropertyUnsupportedSubstitution);
                 counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
                 return None;
             }
+            reads_attributes |= matches!(
+                value.data(),
+                StyleValueData::Unresolved {
+                    presence_attr: true,
+                    ..
+                }
+            );
             // A value the parent already holds, by identity, declares nothing new.
             if parent.is_some_and(|parent| parent.value_is_identical(name.raw.raw(), value.pointer().cast())) {
                 continue;
@@ -819,7 +859,7 @@ impl RetainedState {
         // engine's: handing it back settles a row the host then computes again. The memo is worth
         // only what it saves, so where it holds such an identity this resolves one of its own.
         // Random inputs can be element-scoped, so declarations alone cannot share their result.
-        let can_memoize = random_sources.is_empty() && !has_registered_declaration;
+        let can_memoize = random_sources.is_empty() && !has_registered_declaration && !reads_attributes;
         let memoized = can_memoize
             .then(|| self.custom_property_environments.memoized(&key))
             .flatten();
@@ -865,6 +905,29 @@ impl RetainedState {
         let length = registered
             .as_ref()
             .map_or(std::ptr::null(), |registered| &raw const registered.length);
+        let attribute_element = self.substitution_attribute_element(node, pseudo);
+        let substitution_attributes = if reads_attributes {
+            self.facts
+                .substitution_attributes(attribute_element)
+                .iter()
+                .map(
+                    |(name, value)| crate::css::custom_properties::FfiSubstitutionAttribute {
+                        name: FfiUtf16View {
+                            ascii: std::ptr::null(),
+                            utf16: name.as_ptr(),
+                            length: name.len(),
+                        },
+                        value: FfiUtf16View {
+                            ascii: std::ptr::null(),
+                            utf16: value.as_ptr(),
+                            length: value.len(),
+                        },
+                    },
+                )
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         let resolution_context = engine_resolution_context(
             &parse_context,
             cascaded_store,
@@ -873,6 +936,9 @@ impl RetainedState {
                 .unwrap_or(std::ptr::null()),
             registry.as_pointer(),
             length,
+            &substitution_attributes,
+            !self.html_element_namespace.is_none()
+                && self.facts.namespace_of(attribute_element) == self.html_element_namespace,
         );
         let drive = FfiCustomPropertyDriveInput {
             store: cascaded_store,
