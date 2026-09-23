@@ -1156,11 +1156,14 @@ impl RetainedState {
             && self
                 .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
                 .is_empty();
-        let transition_goal = if full_drive && owes_a_transition_step {
-            TransitionDriveGoal::DeferStep
-        } else {
-            TransitionDriveGoal::RefuseDeclarations
-        };
+        // An existing overlay may carry a transition to retarget or cancel. Its before-change
+        // composition and lifecycle decision still belong to the host's full computation.
+        let transition_goal =
+            if full_drive && owes_a_transition_step && !self.record_holds_an_animation_overlay(old_style_record) {
+                TransitionDriveGoal::DeferStep
+            } else {
+                TransitionDriveGoal::RefuseDeclarations
+            };
         // Partial drives can share across parents whose inherited inputs agree. Keep the full
         // parent record in the key when a non-inherited property explicitly inherits, including
         // through substitution, or when a full drive may read more of the parent's style.
@@ -1468,8 +1471,9 @@ impl RetainedState {
         };
         // The plan is decided from the longhands this drive computed, before the table goes into
         // the record.
-        let animation_plan = (owes_an_animation_plan || full_css_drive_beneath_a_composition || css_base_without_an_overlay)
-            .then(|| self.settled_animation_plan(node, u8::MAX, &table));
+        let animation_plan =
+            (owes_an_animation_plan || full_css_drive_beneath_a_composition || css_base_without_an_overlay)
+                .then(|| self.settled_animation_plan(node, u8::MAX, &table));
         let parent_in_display_none_subtree = self
             .tree
             .flat_tree_parent(node)
