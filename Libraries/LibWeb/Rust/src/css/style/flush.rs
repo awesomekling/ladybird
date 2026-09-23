@@ -2336,8 +2336,9 @@ impl StyleEngineState {
                             None => {
                                 counters.bump(Counter::EngineComputedRecordGateAncestors);
                                 decline_cause = "GateAncestors";
-                                retry_after_ancestor = answer_winners_are_complete
-                                    || self.cascade_winners_are_complete_but_for_custom_properties(node);
+                                // An incomplete answer is retried too: the record the engine drives
+                                // from it reads the installed ancestor's final groups.
+                                retry_after_ancestor = true;
                                 false
                             }
                             Some(relied_on_settled_ancestor) => {
