@@ -590,7 +590,7 @@ PASS: descendant state mutation: part-document: :has(:disabled) after input disa
 PASS: descendant state pseudo-element mutation: part-document: :has(:disabled) after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state mutation: part-document: :has(:enabled) becomes false after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state pseudo-element mutation: part-document: :has(:enabled) becomes false after input disabled | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
-PASS: descendant state mutation: part-document: :has(:placeholder-shown) after textarea placeholder added | elementStyleRecomputations=2, elementStyleNoopRecomputations=2
+PASS: descendant state mutation: part-document: :has(:placeholder-shown) after textarea placeholder added | elementStyleRecomputations=1, elementStyleNoopRecomputations=1
 PASS: descendant state pseudo-element mutation: part-document: :has(:placeholder-shown) after textarea placeholder added | elementStyleRecomputations=2, elementStyleNoopRecomputations=1
 PASS: descendant state mutation: part-document: :has(:placeholder-shown) becomes false after textarea value append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
 PASS: descendant state pseudo-element mutation: part-document: :has(:placeholder-shown) becomes false after textarea value append | elementStyleRecomputations=0, elementStyleNoopRecomputations=0
