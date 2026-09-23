@@ -401,10 +401,20 @@ impl RetainedState {
                 let waapi_leaf_composition = !view.animated_overlay.is_null()
                     && self.tree.flat_tree_children(node).all(|child| child.is_text())
                     && table.is_some_and(|table| !drive::table_names_animations(table));
+                // A pseudo whose effects are all CSS animations it still names is replanned from
+                // its driven table below, and the host samples those animations after installation.
+                let planned_css_composition = kind != BACKDROP
+                    && states[usize::from(kind)].is_some_and(|state| !self.state_has_no_animation_name(state))
+                    && self.animation_keyframes().only_the_document_scope_defines_keyframes()
+                    && self
+                        .element_animation_timing_rows(node, kind + 1)
+                        .iter()
+                        .all(|row| row.owned_css_animation_index(node, kind + 1).is_some());
                 // A pseudo with its own effect or transition needs the host's composition step.
                 // An overlay inherited from its element can be replaced by a full drive from
                 // the element's final style, and the host samples the pseudo after installation.
                 let needs_host_animation_step = (!waapi_leaf_composition
+                    && !planned_css_composition
                     && !self.element_animation_timing_rows(node, kind + 1).is_empty())
                     || transitioning
                     || (unsafe { view.animated_overlay.as_ref() })
