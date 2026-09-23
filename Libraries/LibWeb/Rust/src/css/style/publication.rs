@@ -2657,7 +2657,10 @@ impl RetainedState {
                                         self.container_query_inputs(basis).is_some_and(|inputs| {
                                             self.layout_style_snapshots.row(basis).is_some_and(|snapshot| {
                                                 snapshot.has_committed_box
-                                                    && snapshot.style_record == inputs.style_record
+                                                    && self.committed_container_box_applies(
+                                                        snapshot.style_record,
+                                                        inputs.style_record,
+                                                    )
                                             })
                                         })
                                     })

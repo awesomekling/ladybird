@@ -2282,6 +2282,35 @@ impl super::StyleEngine {
 }
 
 impl super::RetainedState {
+    pub(crate) fn committed_container_box_applies(&self, committed_record: u64, current_record: u64) -> bool {
+        if committed_record == current_record {
+            return true;
+        }
+        self.computed_group_sets
+            .style_record_payloads(committed_record)
+            .zip(self.computed_group_sets.style_record_payloads(current_record))
+            .is_some_and(|(committed, current)| {
+                let committed = crate::css::computed_value_views::ComputedValuesView::new(
+                    crate::css::host_shared::SharedPayload::as_pointer_slice(committed),
+                );
+                let current = crate::css::computed_value_views::ComputedValuesView::new(
+                    crate::css::host_shared::SharedPayload::as_pointer_slice(current),
+                );
+                committed.box_values().display == current.box_values().display
+                    && committed.box_values().display_before_box_type_transformation
+                        == current.box_values().display_before_box_type_transformation
+                    && committed.box_values().position == current.box_values().position
+                    && committed.box_values().float_ == current.box_values().float_
+                    && committed.box_values().size_containment == current.box_values().size_containment
+                    && committed.box_values().inline_size_containment == current.box_values().inline_size_containment
+                    && committed.box_values().layout_containment == current.box_values().layout_containment
+                    && committed.content_visibility() == current.content_visibility()
+                    && committed.box_values().is_size_container == current.box_values().is_size_container
+                    && committed.box_values().is_inline_size_container == current.box_values().is_inline_size_container
+                    && committed.writing_mode() == current.writing_mode()
+            })
+    }
+
     pub(crate) fn container_unit_basis(
         &self,
         subject: StyleNodeID,
@@ -2323,33 +2352,8 @@ impl super::RetainedState {
             // A width change leaves the committed box as the basis until layout replaces it.
             // A box-type or containment change can instead invalidate that basis before the
             // next commit, so compare the style that supplied the box with the current one.
-            let box_basis_still_applies = snapshot.style_record == inputs.style_record
-                || self
-                    .computed_group_sets
-                    .style_record_payloads(snapshot.style_record)
-                    .zip(self.computed_group_sets.style_record_payloads(inputs.style_record))
-                    .is_some_and(|(committed, current)| {
-                        let committed = crate::css::computed_value_views::ComputedValuesView::new(
-                            crate::css::host_shared::SharedPayload::as_pointer_slice(committed),
-                        );
-                        let current = crate::css::computed_value_views::ComputedValuesView::new(
-                            crate::css::host_shared::SharedPayload::as_pointer_slice(current),
-                        );
-                        committed.box_values().display == current.box_values().display
-                            && committed.box_values().display_before_box_type_transformation
-                                == current.box_values().display_before_box_type_transformation
-                            && committed.box_values().position == current.box_values().position
-                            && committed.box_values().float_ == current.box_values().float_
-                            && committed.box_values().size_containment == current.box_values().size_containment
-                            && committed.box_values().inline_size_containment
-                                == current.box_values().inline_size_containment
-                            && committed.box_values().layout_containment == current.box_values().layout_containment
-                            && committed.content_visibility() == current.content_visibility()
-                            && committed.box_values().is_size_container == current.box_values().is_size_container
-                            && committed.box_values().is_inline_size_container
-                                == current.box_values().is_inline_size_container
-                            && committed.writing_mode() == current.writing_mode()
-                    });
+            let box_basis_still_applies =
+                self.committed_container_box_applies(snapshot.style_record, inputs.style_record);
             if !snapshot.has_committed_box || !box_basis_still_applies {
                 return ContainerUnitBasis {
                     basis: 0.0,
