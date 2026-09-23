@@ -1175,6 +1175,8 @@ pub struct HostState {
     /// so the element and the engine still agree on what each target holds when the scope ends.
     computed_record_verification_element: u32,
     computed_record_verification_settled_pseudos: u64,
+    /// A read-only observation during the reference computation used pending ancestor inputs.
+    computed_record_verification_saw_provisional_demand: bool,
     computed_record_verification_pins: Vec<u64>,
     /// The records a verification scope interned that something outside the engine may still be
     /// holding when the scope ends: a layout row stamped from one roots it and pins it again when

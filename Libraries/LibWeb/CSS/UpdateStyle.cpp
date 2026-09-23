@@ -901,17 +901,21 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     if (verify_base_without_effects)
                         set_reference_style_without_effects(false);
                     StyleValueFFI::rust_style_ffi_counters_suspend_for_verification(counters_were_suspended);
+                    // A read-only demand in the reference pass may have built a private ancestor
+                    // record from pending inputs. The published record is checked by the normal
+                    // verifier once that row settles; this private answer is not a final record.
+                    bool const reference_used_provisional_demand = StyleEngineFFI::style_engine_verification_saw_provisional_demand(style_engine.rust_handle());
                     if (auto const missing = dependency_marks() & ~marks_the_engine_row_left; missing != 0) {
                         dbgln("Engine record for {} leaves dependency marks {:#x} unset that the computation sets", element->debug_description(), missing);
                     }
-                    if (defer_final_comparison) {
+                    if (defer_final_comparison && !reference_used_provisional_demand) {
                         if (!reference_font.has_value()) {
                             if (auto const* font = element->style_group<ComputedValues::FontValues>())
                                 reference_font = describe_resolved_font(font->font_list_value());
                         }
                         document.style_computer().pin_style_record(reference_record);
                         deferred_record_verifications.append({ StyleNodeID { reaction.style_node }, reference_record, move(reference_font) });
-                    } else {
+                    } else if (!reference_used_provisional_demand) {
                         auto packed = style_engine.compare_style_records(engine_reference_record, reference_record, true, false, false);
                         if (packed & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged)
                             && !style_engine.style_records_match_for_verification(reaction.style_node, NumericLimits<u8>::max(), engine_reference_record, reference_record)) {
@@ -925,18 +929,20 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     // environment to compare here. The computed record, including every var()
                     // substitution, is still verified above.
                     bool const legacy_environment_is_complete = !needs_custom_property_recompute;
-                    if (legacy_environment_is_complete)
+                    if (legacy_environment_is_complete && !reference_used_provisional_demand)
                         verify_engine_computed_record_environment(*element, StyleRecordID { reaction.new_style_record });
-                    if (verify_base_without_effects && reference_font.has_value()) {
+                    if (!reference_used_provisional_demand && verify_base_without_effects && reference_font.has_value()) {
                         auto engine_view = style_engine.style_record_view(engine_reference_record);
                         auto const* engine_font = static_cast<ComputedValues::FontValues const*>(engine_view.payloads[ComputedValues::FontValues::style_group_index]);
                         if (describe_resolved_font(engine_font->font_list_value()) != *reference_font)
                             dbgln("Engine base font {} differs from reference base font {} for {}", describe_resolved_font(engine_font->font_list_value()), *reference_font, element->debug_description());
                         VERIFY(describe_resolved_font(engine_font->font_list_value()) == *reference_font);
-                    } else if (!animation_plan.has_value() && !defer_final_comparison) {
+                    } else if (!reference_used_provisional_demand && !animation_plan.has_value() && !defer_final_comparison) {
                         verify_engine_computed_record_font(*element, StyleRecordID { reaction.new_style_record });
                     }
                     for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
+                        if (reference_used_provisional_demand)
+                            break;
                         auto const& engine_record = pseudo_element_records[kind];
                         if (!engine_record.has_value())
                             continue;
