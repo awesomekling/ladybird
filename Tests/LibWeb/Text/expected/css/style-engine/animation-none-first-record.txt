@@ -1,0 +1,3 @@
+engine answered: true
+property refusals: 0
+animation count: 0
