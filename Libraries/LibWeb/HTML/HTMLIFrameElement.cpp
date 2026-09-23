@@ -93,7 +93,10 @@ void HTMLIFrameElement::attribute_changed(Utf16FlyString const& name, Optional<U
         if (auto* document = this->content_document_without_origin_check()) {
             if (auto* body_element = document->body()) {
                 auto& mutable_body_element = const_cast<HTMLElement&>(*body_element);
-                mutable_body_element.document().style_computer().style_engine().record_element_style_input_change(mutable_body_element.style_node_id());
+                // NB: The body's presentational hints read these iframe attributes. Publish their
+                //     new values before invalidating the declaration block the engine cascades.
+                CSS::StyleComputer::collect_presentational_hint_properties({ mutable_body_element });
+                CSS::record_element_declarations_changed(mutable_body_element, CSS::ElementDeclarationKind::PresentationalHint, true, true);
             }
         }
     }
