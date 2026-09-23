@@ -915,7 +915,11 @@ impl RetainedState {
                         && animations_bind_the_record
                     {
                         let css_animation_plan = if self.css_defined_animations.node_runs_a_css_animation(node) {
-                            let Some(plan) = self.settled_animation_plan_from_record(node, old_style_record) else {
+                            let Some(plan) = self.settled_animation_plan_from_record(
+                                node,
+                                old_style_record,
+                                self.animation_name_declaration_scope(state),
+                            ) else {
                                 counters.bump(Counter::EngineComputedRecordBailRecordTable);
                                 return None;
                             };
@@ -979,7 +983,11 @@ impl RetainedState {
                         && !record_may_stand_while_animating
                         && self.animation_keyframes().only_the_document_scope_defines_keyframes()
                     {
-                        self.settled_animation_plan_from_record(node, old_style_record)
+                        self.settled_animation_plan_from_record(
+                            node,
+                            old_style_record,
+                            self.animation_name_declaration_scope(state),
+                        )
                     } else {
                         None
                     };
@@ -1314,7 +1322,11 @@ impl RetainedState {
             // The row takes another node's record whole, so its plan is decided from that record's
             // own longhands rather than from a drive of this node's.
             let animation_plan = match owes_an_animation_plan {
-                true => match self.settled_animation_plan_from_record(node, new_style_record) {
+                true => match self.settled_animation_plan_from_record(
+                    node,
+                    new_style_record,
+                    self.animation_name_declaration_scope(state),
+                ) {
                     Some(plan) => Some(plan),
                     None => {
                         counters.bump(Counter::EngineComputedRecordBailProperty);
@@ -1599,7 +1611,7 @@ impl RetainedState {
                 && table_names_animations(&table)
                 && self.tree.tree_scope(node) == tree::TreeScopeID::DOCUMENT
                 && self.animation_keyframes().only_the_document_scope_defines_keyframes()))
-        .then(|| self.settled_animation_plan(node, u8::MAX, &table));
+        .then(|| self.settled_animation_plan(node, u8::MAX, &table, self.animation_name_declaration_scope(state)));
         let parent_in_display_none_subtree = self
             .tree
             .flat_tree_parent(node)
@@ -1677,6 +1689,7 @@ impl RetainedState {
         node: StyleNodeID,
         pseudo_kind: u8,
         table: &ComputedLonghandTable,
+        declaration_scope: AnimationNameScope,
     ) -> animations::SettledAnimationPlan {
         crate::css::style_compute::build_settled_animation_plan(
             table,
@@ -1689,6 +1702,10 @@ impl RetainedState {
                 },
             ),
             self.animation_keyframes(),
+            match declaration_scope {
+                AnimationNameScope::Known(scope) => scope,
+                AnimationNameScope::Unknown => None,
+            },
             self.tree.tree_scope(node),
         )
     }
@@ -1699,11 +1716,41 @@ impl RetainedState {
         &self,
         node: StyleNodeID,
         style_record: computed::FinalStyleRecordID,
+        declaration_scope: AnimationNameScope,
     ) -> Option<animations::SettledAnimationPlan> {
         let view = self.computed_group_sets.style_record_view(style_record.raw())?;
         // SAFETY: A record's table outlives the view the assignment below takes it from.
         let table = unsafe { view.longhand_table.as_ref() }?;
-        Some(self.settled_animation_plan(node, u8::MAX, table))
+        Some(self.settled_animation_plan(node, u8::MAX, table, declaration_scope))
+    }
+
+    /// The tree scope the winning `animation-name` declaration was written in, where its
+    /// `@keyframes` are looked for first. An author rule's is the one scope its sheet is attached
+    /// to; the document's rules, the other origins' and the element's own declarations have none
+    /// of their own. A sheet several shadow roots adopt does not say which one it matched in.
+    fn animation_name_declaration_scope(&self, state: CascadeStateID) -> AnimationNameScope {
+        let Some(winner) = self
+            .winner_groups
+            .winner_in_state(state, crate::css::property_metadata::property_id::ANIMATION_NAME)
+            .and_then(|winner| self.winner_groups.resolved_winner(winner))
+        else {
+            return AnimationNameScope::Unknown;
+        };
+        match winner.source {
+            cascade::WinnerSource::Rule(rule) => {
+                let sheet = self.program.rule_sheet(rule);
+                if self.program.sheet_origin(sheet) != crate::css::cascaded_properties::CascadeOrigin::Author {
+                    return AnimationNameScope::Known(None);
+                }
+                match self.program.sheet_scopes(sheet).as_slice() {
+                    [tree::TreeScopeID::DOCUMENT] => AnimationNameScope::Known(None),
+                    &[scope] => AnimationNameScope::Known(Some(scope)),
+                    _ => AnimationNameScope::Unknown,
+                }
+            }
+            cascade::WinnerSource::Element(_) => AnimationNameScope::Known(None),
+            cascade::WinnerSource::ExactCascade => AnimationNameScope::Unknown,
+        }
     }
 
     /// The animation definitions the engine-computed record the host is about to install for this
@@ -1954,7 +2001,7 @@ impl RetainedState {
         if owes_an_animation_plan {
             // The plan is decided from the record the row installs, which carries the longhands the
             // drive computed. A record without one is no record to settle a plan against.
-            let Some(plan) = self.settled_animation_plan_from_record(node, delta.1) else {
+            let Some(plan) = self.settled_animation_plan_from_record(node, delta.1, AnimationNameScope::Unknown) else {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return None;
             };
@@ -2040,6 +2087,7 @@ impl RetainedState {
         else {
             return false;
         };
+        let declaration_scope = self.animation_name_declaration_scope(state);
         !values.as_slice().is_empty()
             && values.as_slice().iter().all(|value| {
                 let name = match value.data() {
@@ -2050,13 +2098,22 @@ impl RetainedState {
                     StyleValueData::String { string, .. } => string,
                     _ => return false,
                 };
-                // Another scope defining the name can answer for a declaration written in it.
-                self.animation_keyframes()
-                    .name_resolves_without_the_declaration_scope(element_tree_scope, name)
-                    && self
+                // Another scope defining the name can answer for a declaration written in it, so
+                // the name resolves only where that scope is known or cannot matter.
+                match declaration_scope {
+                    AnimationNameScope::Known(declaration_scope) => self
                         .animation_keyframes()
-                        .resolve(0, element_tree_scope, name)
-                        .is_none_or(&accepts)
+                        .resolve_in_declaration_scope(declaration_scope, element_tree_scope, name)
+                        .is_none_or(&accepts),
+                    AnimationNameScope::Unknown => {
+                        self.animation_keyframes()
+                            .name_resolves_without_the_declaration_scope(element_tree_scope, name)
+                            && self
+                                .animation_keyframes()
+                                .resolve_in_declaration_scope(None, element_tree_scope, name)
+                                .is_none_or(&accepts)
+                    }
+                }
             })
     }
 
@@ -6767,6 +6824,12 @@ fn shorthand_longhand_value(
 
 /// Whether a longhand computes in the drive's remaining phase: after the font, line-height and
 /// color-scheme stages, whose outputs the engine does not derive itself yet.
+#[derive(Clone, Copy)]
+enum AnimationNameScope {
+    Known(Option<tree::TreeScopeID>),
+    Unknown,
+}
+
 #[derive(Clone, Copy)]
 enum KeyframesScope {
     DocumentOnly,

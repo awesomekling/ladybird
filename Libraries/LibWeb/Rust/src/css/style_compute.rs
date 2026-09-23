@@ -7102,7 +7102,7 @@ fn build_computed_animation_list(
     table: &ComputedLonghandTable,
     existing_animation_names: &[crate::css::css_string::CssString],
     keyframes: &crate::css::style::animations::AnimationKeyframes,
-    declaration_shadow_root_identity: usize,
+    declaration_scope: Option<crate::css::style::tree::TreeScopeID>,
     element_tree_scope: crate::css::style::tree::TreeScopeID,
     computed_definitions: &mut Vec<crate::css::style::animations::AppliedAnimationDefinition>,
 ) -> FfiComputedAnimationList {
@@ -7155,7 +7155,7 @@ fn build_computed_animation_list(
         let fill_mode = keyword_to_animation_fill_mode(keyword_value(fill_mode_values)).unwrap();
         let composition = keyword_to_animation_composition(keyword_value(composition_values)).unwrap();
         let keyframe_set = keyframes
-            .resolve(declaration_shadow_root_identity, element_tree_scope, name_string)
+            .resolve_in_declaration_scope(declaration_scope, element_tree_scope, name_string)
             .map_or(0, |set| set.pointer);
         animations.push(FfiComputedAnimation {
             duration_is_auto,
@@ -7217,6 +7217,7 @@ pub(crate) fn build_settled_animation_plan(
     table: &ComputedLonghandTable,
     existing_animation_names: &[crate::css::css_string::CssString],
     keyframes: &crate::css::style::animations::AnimationKeyframes,
+    declaration_scope: Option<crate::css::style::tree::TreeScopeID>,
     element_tree_scope: crate::css::style::tree::TreeScopeID,
 ) -> crate::css::style::animations::SettledAnimationPlan {
     let mut computed_definitions = Vec::new();
@@ -7224,7 +7225,7 @@ pub(crate) fn build_settled_animation_plan(
         table,
         existing_animation_names,
         keyframes,
-        0,
+        declaration_scope,
         element_tree_scope,
         &mut computed_definitions,
     );
@@ -7578,7 +7579,9 @@ pub unsafe extern "C" fn rust_compute_properties(
             unsafe { &*drive_input.longhand_table },
             existing_animation_names,
             style_engine.animation_keyframes(),
-            declaration_shadow_root_identity,
+            style_engine
+                .animation_keyframes()
+                .scope_of_shadow_root(declaration_shadow_root_identity),
             element_tree_scope,
             &mut computed_animation_definitions,
         );

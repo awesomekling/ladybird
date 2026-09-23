@@ -755,7 +755,7 @@ impl RetainedState {
             if self.pseudo_owes_css_animation_plan(node, kind, state) {
                 let view = self.computed_group_sets.style_record_view(new_style_record.raw())?;
                 let table = unsafe { view.longhand_table.as_ref() }?;
-                let plan = self.settled_animation_plan(node, kind, table);
+                let plan = self.settled_animation_plan(node, kind, table, AnimationNameScope::Unknown);
                 self.nodes_owing_animation_definitions.insert((node, kind), plan);
             }
             self.note_engine_computed_pseudo_record(
