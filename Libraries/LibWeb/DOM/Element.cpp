@@ -1856,8 +1856,18 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
     if (had_list_marker || originating_style->display().is_list_item()
         || (engine_pseudo_element_records && engine_pseudo_element_records->at(to_underlying(CSS::PseudoElement::Marker)).has_value()))
         recompute_pseudo_element_style(CSS::PseudoElement::Marker, true);
-    if (settled_after_host_record)
+    if (settled_after_host_record) {
+        // The CSS animation plans the engine settled beside the pseudo-elements' records, applied in
+        // pseudo tree order, as for pseudo-elements settled beside an engine record.
+        for (auto pseudo_element : { CSS::PseudoElement::Marker, CSS::PseudoElement::Before, CSS::PseudoElement::FirstLetter, CSS::PseudoElement::Selection, CSS::PseudoElement::After }) {
+            auto kind = to_underlying(pseudo_element);
+            if (!records_settled_after_host_record[kind].has_value() || !*records_settled_after_host_record[kind])
+                continue;
+            if (auto plan = style_computer.take_settled_animation_plan(style_node_id(), kind); plan.has_value())
+                style_computer.apply_settled_animation_plan({ *this, pseudo_element }, *plan);
+        }
         style_computer.style_engine().acknowledge_engine_computed_record(style_node_id());
+    }
 
     return invalidation;
 }

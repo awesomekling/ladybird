@@ -196,6 +196,16 @@ impl RetainedState {
         )
     }
 
+    /// Whether the host applies a CSS animation plan the engine settles for a pseudo-element: its
+    /// state names animations, or the pseudo-element holds CSS animations the state no longer
+    /// names, which an empty plan cancels.
+    fn pseudo_owes_css_animation_plan(&self, node: StyleNodeID, kind: u8, state: Option<CascadeStateID>) -> bool {
+        kind != pseudo_kind::BACKDROP
+            && (state.is_some_and(|state| !self.state_has_no_animation_name(state))
+                || !self.element_css_defined_animations(node, kind + 1).is_empty())
+            && self.animation_keyframes().only_the_document_scope_defines_keyframes()
+    }
+
     /// `old_is_list_item` says whether the element was a list item when the old record it no
     /// longer holds is unknown: C++ computed the new one over it.
     #[allow(clippy::too_many_arguments)]
@@ -407,15 +417,13 @@ impl RetainedState {
                     && self.tree.flat_tree_children(node).all(|child| child.is_text())
                     && table.is_some_and(|table| !drive::table_names_animations(table));
                 // An idle effect composes nothing. A pseudo whose other effects are all CSS
-                // animations it still names is replanned from its driven table below, and the host
-                // samples those animations after installation.
+                // animations is replanned from its driven table below, and the host samples those
+                // animations after installation.
                 let effects = self
                     .element_animation_timing_rows(node, kind + 1)
                     .iter()
                     .filter(|row| !row.is_idle());
-                let replans_css_animations = kind != BACKDROP
-                    && states[usize::from(kind)].is_some_and(|state| !self.state_has_no_animation_name(state))
-                    && self.animation_keyframes().only_the_document_scope_defines_keyframes();
+                let replans_css_animations = self.pseudo_owes_css_animation_plan(node, kind, states[usize::from(kind)]);
                 let planned_css_composition = replans_css_animations
                     && effects
                         .clone()
@@ -780,10 +788,7 @@ impl RetainedState {
             };
             // The host records what the pseudo-element's container units read as the element's own.
             self.note_container_unit_effects_for_host(node, new_style_record, container_unit_mask);
-            if kind != BACKDROP
-                && state.is_some_and(|state| !self.state_has_no_animation_name(state))
-                && self.animation_keyframes().only_the_document_scope_defines_keyframes()
-            {
+            if self.pseudo_owes_css_animation_plan(node, kind, state) {
                 let view = self.computed_group_sets.style_record_view(new_style_record.raw())?;
                 let table = unsafe { view.longhand_table.as_ref() }?;
                 let plan = self.settled_animation_plan(node, kind, table);
