@@ -687,18 +687,6 @@ impl RetainedState {
             }
         };
         let container_unit_mask = self.state_container_unit_mask(node, state);
-        if container_unit_mask != 0
-            && self.document_style_computation_inputs.is_some_and(|inputs| {
-                self.container_unit_basis(node, true, inputs.viewport_width)
-                    .container_has_no_box
-                    || self
-                        .container_unit_basis(node, false, inputs.viewport_height)
-                        .container_has_no_box
-            })
-        {
-            counters.bump(Counter::EngineComputedRecordBailContainerVerdict);
-            return None;
-        }
         // An element's animations compose into its style in the C++ computation.
         let facts = self.computed_group_sets.adjustment_facts(node);
         // Either the root's font inputs moved under this element, or the element's own font

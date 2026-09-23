@@ -2349,12 +2349,9 @@ impl super::RetainedState {
                 };
             }
             let snapshot = self.layout_style_snapshots.row(node).unwrap_or_default();
-            // A width change leaves the committed box as the basis until layout replaces it.
-            // A box-type or containment change can instead invalidate that basis before the
-            // next commit, so compare the style that supplied the box with the current one.
-            let box_basis_still_applies =
-                self.committed_container_box_applies(snapshot.style_record, inputs.style_record);
-            if !snapshot.has_committed_box || !box_basis_still_applies {
+            // The host resolves container units against the committed box until layout replaces
+            // it, including when the container's style has changed since that box was committed.
+            if !snapshot.has_committed_box {
                 return ContainerUnitBasis {
                     basis: 0.0,
                     depends_on_viewport_metrics: false,
