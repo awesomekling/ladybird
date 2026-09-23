@@ -314,7 +314,10 @@ impl RetainedState {
                             .computed_group_sets
                             .style_record_custom_property_environment(new_element_record.raw())
             });
-        let Some(element_environment) = self.computed_group_sets.custom_property_environment_identity(node) else {
+        let Some(element_environment) = self
+            .computed_group_sets
+            .style_record_custom_property_environment(new_element_record.raw())
+        else {
             counters.bump(Counter::EngineComputedRecordBailRecord);
             return None;
         };
