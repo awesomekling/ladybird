@@ -645,11 +645,12 @@ impl RetainedState {
                         remove(self, scratch, counters);
                         continue;
                     }
-                    // The mark a pseudo-element's explicit `inherit` leaves is the originating
-                    // element's own, which this row does not answer for: it stays with C++.
                     if explicitly_inherited_groups != 0 && kind != SELECTION {
-                        counters.bump(Counter::EngineComputedRecordBailDrive);
-                        return None;
+                        if selected_kind.is_some() {
+                            counters.bump(Counter::EngineComputedRecordBailDrive);
+                            return None;
+                        }
+                        scratch.pseudo_explicitly_inherited_groups |= explicitly_inherited_groups;
                     }
                     let font = font.expect("a full drive resolves the font");
                     let (record, _) = self.assemble_and_publish_engine_record(
@@ -700,6 +701,11 @@ impl RetainedState {
                 counters,
                 !cssom_read && !no_box,
             );
+        }
+        if scratch.pseudo_explicitly_inherited_groups != 0 {
+            *self.nodes_owing_explicit_inheritance.entry(node).or_default() |=
+                scratch.pseudo_explicitly_inherited_groups;
+            scratch.pseudo_explicitly_inherited_groups = 0;
         }
         scratch.pseudo_uses_substitution = pseudo_uses_substitution;
         Some(())
