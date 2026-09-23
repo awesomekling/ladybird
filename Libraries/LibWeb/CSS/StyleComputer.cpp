@@ -4823,8 +4823,11 @@ bool custom_property_value_moved(Utf16FlyString const& name, CustomPropertyData 
 RefPtr<ComputedStyleWorkingSet> StyleComputer::compute_style_impl(DOM::AbstractElement abstract_element, ComputeStyleMode mode, Optional<bool&> did_change_custom_properties, StyleScope const& style_scope, StyleEngineMatchResult* reusable_matches, StyleSharingCandidate* sharing, Optional<StyleRecordID> highlight_parent_style_record) const
 {
     // Special path for elements that represent a pseudo-element in some element's internal shadow tree.
-    // FirstLetter is excluded so that ::first-letter rules can match against such elements normally.
-    if (abstract_element.element().associated_shadow_host_pseudo_element().has_value() && abstract_element.pseudo_element() != CSS::PseudoElement::FirstLetter) {
+    // FirstLetter and Selection are excluded so their own rules and highlight inheritance can
+    // match against the internal element normally.
+    if (abstract_element.element().associated_shadow_host_pseudo_element().has_value()
+        && abstract_element.pseudo_element() != CSS::PseudoElement::FirstLetter
+        && abstract_element.pseudo_element() != CSS::PseudoElement::Selection) {
         auto& element = abstract_element.element();
         auto& host_element = *element.root().parent_or_shadow_host_element();
 
