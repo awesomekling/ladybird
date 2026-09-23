@@ -756,10 +756,14 @@ impl RetainedState {
         let delta = match self.computed_group_sets.cascade_state(target) {
             Some((previous_generation, previous_state)) => {
                 if previous_generation != generation {
-                    counters.bump(Counter::EngineComputedRecordBailStaleCascadeState);
-                    return None;
+                    // The old record's cascade state belongs to a replaced rule program. Drive
+                    // the current winners in full instead of comparing states from different
+                    // generations; the old record still supplies the before-change values.
+                    scratch.recompute_in_full = true;
+                    self.winner_groups.semantic_delta(Some(state), state)
+                } else {
+                    self.winner_groups.semantic_delta(Some(previous_state), state)
                 }
-                self.winner_groups.semantic_delta(Some(previous_state), state)
             }
             None => {
                 scratch.recompute_in_full = true;
