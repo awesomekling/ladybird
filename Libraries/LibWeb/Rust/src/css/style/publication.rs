@@ -1085,7 +1085,9 @@ impl RetainedState {
         // the style it moved to, which is the record the host installs. The record the delta starts
         // at is asked to hold no animation of its own - which is what the record's animation state
         // is asked about here, not somewhere else's - so the step decides over transitions alone,
-        // and nothing the element already holds can be cancelled.
+        // and nothing the element already holds can be cancelled. A derived base beneath an
+        // unrelated composition is also safe: no moved property is covered by that overlay, and
+        // the host samples it before applying the transition step to the installed record.
         //
         // When the delta moves nothing else, every other group is copied from the record the delta
         // starts at, so no value a transition runs on moved either: the registration is the whole
@@ -1108,7 +1110,7 @@ impl RetainedState {
                     .properties()
                     .iter()
                     .any(|&property| longhand_only_declares_a_css_transition(property)))
-            && !self.record_holds_an_animation_overlay(old_style_record);
+            && (!self.record_holds_an_animation_overlay(old_style_record) || derived_beneath_a_composition);
         let owes_a_transition_registration = owes_a_transition_step.then(|| {
             !full_drive
                 && !record_declares_transitions
