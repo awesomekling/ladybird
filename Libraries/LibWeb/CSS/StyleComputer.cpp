@@ -1908,6 +1908,12 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_sett
     begin_style_update();
     ScopeGuard end_style_update = [&] { this->end_style_update(); };
     auto new_style = reconstruct_computed_properties_for_animation(installed_style_record);
+    // The installed record was sampled before the step, so its overlay holds the current values of
+    // the element's running transitions and animations. A C++ computation collects the same effects
+    // into its working set before the step, and a running transition's current value is read there.
+    auto const* installed_overlay = static_cast<ComputedValuesFFI::AnimatedOverlay const*>(m_style_engine.style_record_view(installed_style_record).animated_overlay);
+    if (installed_overlay)
+        new_style->install_animated_overlay_from_rust(Badge<StyleComputer> {}, ComputedValuesFFI::rust_animated_overlay_clone(installed_overlay));
     start_needed_transitions(*new_style, abstract_element, nullptr, before_change_style_record);
     // Starting a transition associates a new animation with the element.
     abstract_element.element().publish_animation_timing_rows();
@@ -1915,10 +1921,15 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_sett
 
     // A C++ computation publishes the working set with whatever the started transitions layered
     // into it, whether or not a layered value differs from the base: the overlay is what says the
-    // element holds a transition. The record the row installed holds none, so this does the same.
-    auto animated_properties = new_style->animated_properties_snapshot();
-    if (!animated_properties || animated_properties->is_empty())
+    // element holds a transition. A record the row installed without an overlay holds none, so this
+    // does the same. An installed overlay is published when the step changed it, including when it
+    // cancelled the last running transition.
+    if (installed_overlay) {
+        if (!m_style_engine.animation_overlay_changed(installed_style_record, new_style->animated_overlay()))
+            return {};
+    } else if (auto animated_properties = new_style->animated_properties_snapshot(); !animated_properties || animated_properties->is_empty()) {
         return {};
+    }
 
     auto computed_values = build_animated_computed_values(*new_style, abstract_element, abstract_element.style_scope(), *installed_style);
     Array<void const*, to_underlying(StyleGroupIndex::Count)> payloads;
