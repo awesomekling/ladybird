@@ -1296,8 +1296,8 @@ impl StyleSheetProgram {
     /// case the program still proves that no such declaration exists in any live rule.
     pub(crate) fn has_container_gated_transition_declarations(&self) -> bool {
         use crate::css::property_metadata::property_id as prop;
-        self.rules.iter().any(|rule| {
-            rule.live
+        self.rules.iter().enumerate().any(|(index, rule)| {
+            self.rule_can_decide(RuleID(u32::try_from(index).expect("rule identity space exhausted")))
                 && rule.gated_by_container_query
                 && rule.declared_properties.iter().any(|declared| {
                     matches!(
