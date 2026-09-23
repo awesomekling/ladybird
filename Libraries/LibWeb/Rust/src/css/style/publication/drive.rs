@@ -1059,7 +1059,7 @@ impl RetainedState {
 }
 
 /// Whether a computed table's `animation-name` names any animation.
-fn table_names_animations(table: &ComputedLonghandTable) -> bool {
+pub(super) fn table_names_animations(table: &ComputedLonghandTable) -> bool {
     use crate::css::style_compute::keyword;
     let is_none =
         |value: &StyleValueData| matches!(value, StyleValueData::Keyword { keyword: name } if *name == keyword::NONE);
