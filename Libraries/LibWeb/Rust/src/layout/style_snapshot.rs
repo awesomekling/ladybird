@@ -26,6 +26,7 @@ pub(crate) struct LayoutStyleSnapshotRow {
     pub(crate) scrollable: u8,
     pub(crate) scrolled: u8,
     pub(crate) layout_commit_generation: u64,
+    pub(crate) style_record: u64,
     pub(crate) has_committed_box: bool,
     pub(crate) writing_mode: u8,
 }
@@ -66,6 +67,7 @@ impl LayoutStyleSnapshotStore {
         size: FfiCssPixelSize,
         has_committed_box: bool,
         writing_mode: u8,
+        style_record: u64,
     ) {
         let mut building = self.building.lock().unwrap();
         let building = building
@@ -75,6 +77,7 @@ impl LayoutStyleSnapshotStore {
         row.content_width_raw = size.width.raw_value();
         row.content_height_raw = size.height.raw_value();
         row.layout_commit_generation = building.layout_commit_generation;
+        row.style_record = style_record;
         row.has_committed_box = has_committed_box;
         row.writing_mode = writing_mode;
     }
@@ -147,8 +150,13 @@ impl LayoutNodeArena {
         } else {
             FfiCssPixelSize::default()
         };
-        self.layout_style_snapshots
-            .publish_geometry(style_node, size, has_committed_box, writing_mode);
+        self.layout_style_snapshots.publish_geometry(
+            style_node,
+            size,
+            has_committed_box,
+            writing_mode,
+            self.node_style_record(node),
+        );
     }
 
     pub(crate) fn finish_layout_style_snapshot_commit(&self) {
@@ -198,6 +206,7 @@ mod tests {
             },
             true,
             crate::css::css_enums::writing_mode::HORIZONTAL_TB,
+            17,
         );
         assert!(store.row(node).is_none());
         store.finish_layout_commit();
@@ -207,6 +216,7 @@ mod tests {
                 content_width_raw: 11,
                 content_height_raw: 13,
                 layout_commit_generation: 7,
+                style_record: 17,
                 has_committed_box: true,
                 ..Default::default()
             })
@@ -223,6 +233,7 @@ mod tests {
             FfiCssPixelSize::default(),
             true,
             crate::css::css_enums::writing_mode::HORIZONTAL_TB,
+            19,
         );
         store.finish_layout_commit();
         store.publish_scroll_states(&[FfiLayoutStyleScrollState {
@@ -234,6 +245,7 @@ mod tests {
         }]);
         let row = store.row(node).unwrap();
         assert!(row.has_committed_box);
+        assert_eq!(row.style_record, 19);
         assert_eq!((row.stuck, row.snapped, row.scrollable, row.scrolled), (1, 2, 4, 8));
         store.retire(&[node]);
         assert!(store.row(node).is_none());
