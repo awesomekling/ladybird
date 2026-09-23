@@ -23,9 +23,8 @@
         internals.updateStyle();
         const sharedComputations = () => internals.getStyleInvalidationCounters().elementStyleSharedComputations;
 
-        // The donor recomputes first to the style the stale element is changing to, without changing its color,
-        // so the stale element takes that style from the sharing cache instead of deriving it. The transition
-        // must still start from the stale element's own previous color.
+        // The donor recomputes first to the style the stale element is changing to, without changing its color.
+        // The transition must still start from the stale element's own previous color when the engine drives it.
         donor.className = "item done";
         stale.className = "item done";
         const before = sharedComputations();

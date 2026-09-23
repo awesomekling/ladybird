@@ -13,6 +13,12 @@ pub(super) enum FontDriveGoal {
     RootInputs,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum TransitionDriveGoal {
+    RefuseDeclarations,
+    DeferStep,
+}
+
 #[derive(Default)]
 pub(in crate::css::style) struct FontDriveScratch {
     pub(super) root_inputs: Option<RootFontInputs>,
@@ -352,6 +358,7 @@ impl RetainedState {
         inputs: &bridge::FfiDocumentStyleComputationInputs,
         font_scratch: &mut FontDriveScratch,
         goal: FontDriveGoal,
+        transition_goal: TransitionDriveGoal,
         has_registered_declarations: bool,
         explicitly_inherited_groups: &mut u32,
         counters: &mut Counters,
@@ -429,7 +436,8 @@ impl RetainedState {
                 // from, but the animations it names start only when C++ computes the element out of
                 // that subtree.
                 if (view.dependency_flags & (1 << 2) != 0 && table_names_animations(old_table))
-                    || crate::css::style_compute::has_active_transition_properties(old_table)
+                    || (transition_goal == TransitionDriveGoal::RefuseDeclarations
+                        && crate::css::style_compute::has_active_transition_properties(old_table))
                 {
                     counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
                     return None;
