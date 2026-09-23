@@ -5476,7 +5476,12 @@ impl StyleEngineState {
             ]
             .contains(&kind)
         }) {
-            return Err("NotOfferedPseudoElement");
+            if read_only && pseudo.is_some_and(|kind| kind >= 20) {
+                return Ok(None);
+            }
+            if !read_only || pseudo.is_some_and(|kind| kind >= 20) {
+                return Err("NotOfferedPseudoElement");
+            }
         }
         // A private observation checks the target and its ancestors below. Pending work on
         // another node must not prevent it from answering this pseudo-element.

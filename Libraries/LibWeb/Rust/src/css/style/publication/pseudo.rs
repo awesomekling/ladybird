@@ -222,7 +222,7 @@ impl RetainedState {
         }
         let program_version = self.program.version();
         let in_top_layer = self.top_layer_elements.contains(&node);
-        let mut states: [Option<CascadeStateID>; pseudo_kind::SYNTHETIC_COUNT] = [None; pseudo_kind::SYNTHETIC_COUNT];
+        let mut states: [Option<CascadeStateID>; 20] = [None; 20];
         let mut marker_row_is_stale = false;
         for (pseudo, version, state, priority_current) in self.current_winner_groups().pseudo_states(node) {
             if selected_kind.is_none() && self.deferred_pseudo_element == Some(pseudo.kind) {
@@ -231,7 +231,7 @@ impl RetainedState {
             let Ok(kind) = u8::try_from(pseudo.kind.0) else {
                 continue;
             };
-            if usize::from(kind) >= pseudo_kind::SYNTHETIC_COUNT {
+            if usize::from(kind) >= states.len() {
                 continue;
             }
             if selected_kind.is_some_and(|selected| selected != kind) {
@@ -359,6 +359,9 @@ impl RetainedState {
         let mut pseudo_uses_substitution = scratch.pseudo_uses_substitution;
         for (pseudo_index, kind) in [BEFORE, AFTER, FIRST_LETTER, SELECTION, BACKDROP, MARKER]
             .into_iter()
+            .chain(
+                selected_kind.filter(|kind| ![BEFORE, AFTER, FIRST_LETTER, SELECTION, MARKER, BACKDROP].contains(kind)),
+            )
             .enumerate()
             .skip(scratch.next_pseudo)
         {
@@ -410,7 +413,8 @@ impl RetainedState {
             if kind == MARKER && !implicit && !cssom_read {
                 continue;
             }
-            let has_rules = kinds_with_rules & (1 << kind) != 0;
+            let has_rules = kinds_with_rules & (1 << kind) != 0
+                || (cssom_read && selected_kind == Some(kind) && states[usize::from(kind)].is_some());
             let highlight_parent_record = (kind == SELECTION)
                 .then(|| {
                     highlight_parent.or_else(|| self.retained_highlight_inheritance_parent_style_record(node, kind))
@@ -1295,6 +1299,7 @@ impl StyleEngineState {
         highlight_parent: Option<computed::FinalStyleRecordID>,
         counters: &mut Counters,
     ) -> Result<Option<computed::FinalStyleRecordID>, &'static str> {
+        let cssom_read = read_only && !targeted;
         if ![
             pseudo_kind::BEFORE,
             pseudo_kind::AFTER,
@@ -1304,6 +1309,7 @@ impl StyleEngineState {
             pseudo_kind::SELECTION,
         ]
         .contains(&kind)
+            && !(cssom_read && kind < 20)
         {
             return Err("NotOfferedPseudoElement");
         }
@@ -1322,8 +1328,9 @@ impl StyleEngineState {
         // CSSOM reads still need computed values for an ungenerated pseudo-element. Derive a
         // private record from the originating element without publishing a generated box.
         // Targeted settlement observes generated records only, while keeping the demand private.
-        let cssom_read = read_only && !targeted;
-        let cssom_absent = cssom_read && mask & (1 << kind) == 0 && self.document_style_computation_inputs.is_some();
+        let cssom_absent = cssom_read
+            && (mask & (1 << kind) == 0 || kind == pseudo_kind::MARKER && !is_list_item)
+            && self.document_style_computation_inputs.is_some();
         if !cssom_absent
             && mask & (1 << kind) == 0
             && !(kind == pseudo_kind::MARKER && is_list_item)
