@@ -839,18 +839,52 @@ impl RetainedState {
                 // A declaration in an inherited payload group does not prove that the other
                 // properties in that group still inherit from the current parent. Re-drive the
                 // record in full when its payloads cannot prove the relationship.
-                if self.record_inherits_from_current_parent(node, state, 0) {
+                if self.record_inherits_from_current_parent(node, state, 0)
+                    || (environment.is_some()
+                        && animations_bind_the_record
+                        && self.animation_base_inherits_from_current_parent(node, state, old_style_record))
+                {
                     if goal == FontDriveGoal::RootInputs {
                         // NB: This proof covers the retained font, without publishing the root's
                         //     remaining properties or custom-property environment during preparation.
                         scratch.font_drive.root_inputs = self.root_font_inputs_from_record(old_style_record);
                         return None;
                     }
-                    // Only the environment moved: the record keeps its groups and takes the new one.
-                    // A record the element's animations compose into is not the engine's to move.
-                    if environment.is_some() && animations_bind_the_record {
-                        counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-                        return None;
+                    // Only the environment moved: keep the old composition alive while the host
+                    // samples its WAAPI effects over a candidate with the new base environment.
+                    if let Some(environment) = environment
+                        && animations_bind_the_record
+                    {
+                        let waapi_composition = self.computed_group_sets.node_has_animation_overlay(node)
+                            && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
+                            && !self.css_defined_animations.node_runs_a_css_animation(node)
+                            && !self.record_transition_facts(old_style_record, &[]).0
+                            && self
+                                .computed_group_sets
+                                .style_record_view(old_style_record.raw())
+                                .and_then(|view| unsafe { view.animated_overlay.as_ref() })
+                                .is_some_and(|overlay| {
+                                    overlay.entries().iter().all(|entry| !entry.result_of_transition)
+                                });
+                        if !waapi_composition {
+                            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
+                            return None;
+                        }
+                        let Some(assembly) = self
+                            .computed_group_sets
+                            .republish_animated_base_with_environment(node, environment)
+                        else {
+                            counters.bump(Counter::EngineComputedRecordBailAssemble);
+                            return None;
+                        };
+                        self.batch_pinned_compositions.push((
+                            node,
+                            assembly.pinned_composition.expect("a warm composition was retained"),
+                        ));
+                        let delta = assembly.delta;
+                        self.note_engine_computed_record(node, delta, (generation, state), 0, 0, counters);
+                        self.nodes_owing_an_animation_sample.insert(node);
+                        return Some(delta);
                     }
                     if let Some(environment) = environment {
                         let Some(delta) = self

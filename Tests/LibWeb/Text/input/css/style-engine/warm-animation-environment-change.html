@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    #origin { --accent: red; margin-left: 5px; }
+    #origin.changed { --accent: green; }
+    #origin.changed-again { --accent: blue; }
+    #child { color: var(--accent); }
+</style>
+<div id="origin"></div>
+<script>
+    test(() => {
+        const animatedElement = document.getElementById("origin");
+        internals.updateStyle();
+        const animation = animatedElement.animate(
+            { marginLeft: ["20px", "20px"] },
+            { duration: 1000, composite: "add", fill: "both" },
+        );
+        animation.pause();
+        animation.currentTime = 500;
+        internals.updateStyle();
+
+        const before = internals.getStyleInvalidationCounters();
+        animatedElement.className = "changed";
+        internals.updateStyle();
+        const after = internals.getStyleInvalidationCounters();
+        println(`animated margin survives: ${getComputedStyle(animatedElement).marginLeft}`);
+        println(`warm parent stayed in the engine: ${after.elementStyleRecomputations === before.elementStyleRecomputations}`);
+
+        const child = document.createElement("div");
+        child.id = "child";
+        animatedElement.append(child);
+        internals.updateStyle();
+        println(`new environment reaches child: ${getComputedStyle(child).color}`);
+
+        animatedElement.className = "changed-again";
+        internals.updateStyle();
+        println(`updated environment reaches child: ${getComputedStyle(child).color}`);
+    });
+</script>
