@@ -26,15 +26,6 @@ namespace Web::Animations {
 // https://drafts.csswg.org/web-animations-1/#animatable
 class WEB_API Animatable {
 public:
-    struct TransitionAttributes {
-        double delay;
-        double duration;
-        CSS::EasingFunction timing_function;
-        CSS::TransitionBehavior transition_behavior;
-
-        bool operator==(TransitionAttributes const&) const = default;
-    };
-
     virtual ~Animatable() = default;
 
     enum class GetAnimationsSorted {
@@ -79,17 +70,11 @@ public:
     Vector<GC::Ref<CSS::CSSAnimation>> const* css_defined_animations(Optional<CSS::PseudoElement>);
     void set_css_defined_animations(Optional<CSS::PseudoElement>, Vector<GC::Ref<CSS::CSSAnimation>>&&);
 
-    // Makes the entries that name a property the element's registered transitions, and says whether
-    // that moved them. An element whose declaration registers what it already had is left alone.
-    bool set_registered_transitions(Optional<CSS::PseudoElement>, Vector<CSS::TransitionProperties> const& transitions);
     Vector<CSS::PropertyID> property_ids_with_matching_transition_property_entry(Optional<CSS::PseudoElement>) const;
-    Optional<TransitionAttributes const&> property_transition_attributes(Optional<CSS::PseudoElement>, CSS::PropertyID) const;
     void set_transition(Optional<CSS::PseudoElement>, CSS::PropertyID, GC::Ref<CSS::CSSTransition>);
     void remove_transition(Optional<CSS::PseudoElement>, CSS::PropertyID);
     Vector<CSS::PropertyID> property_ids_with_existing_transitions(Optional<CSS::PseudoElement>) const;
     GC::Ptr<CSS::CSSTransition> property_transition(Optional<CSS::PseudoElement>, CSS::PropertyID) const;
-    // Says whether there was anything registered to clear.
-    bool clear_registered_transitions(Optional<CSS::PseudoElement>);
 
 protected:
     void visit_edges(JS::Cell::Visitor&);

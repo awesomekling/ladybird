@@ -268,8 +268,6 @@ public:
     // Says whether a baseline was recorded, which is a main-side write.
     bool record_transition_stabilization_baseline(DOM::AbstractElement, Optional<StyleRecordID> before_change_style_record = {}) const;
     bool pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(DOM::AbstractElement) const;
-    // Applies the transition registration a record the engine settled left for the host.
-    void register_transitions_for_settled_record(DOM::AbstractElement) const;
     // Runs the whole transition step for a record the engine settled, against the record the row
     // moved away from. Returns what publishing a started transition's values invalidates.
     [[nodiscard]] RequiredInvalidationAfterStyleChange run_transition_step_for_settled_record(DOM::AbstractElement, StyleRecordID before_change_style_record) const;

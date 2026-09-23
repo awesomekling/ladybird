@@ -477,7 +477,6 @@ struct CustomPropertyRegistration;
 struct LogicalAliasMappingContext;
 struct NormalGap;
 struct RequiredInvalidationAfterStyleChange;
-struct TransitionProperties;
 
 // https://drafts.css-houdini.org/css-typed-om-1/#typedefdef-cssnumberish
 using CSSNumberish = Variant<double, GC::Ref<CSSNumericValue>>;

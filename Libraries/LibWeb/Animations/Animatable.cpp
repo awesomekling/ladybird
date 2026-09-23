@@ -23,8 +23,6 @@ namespace Web::Animations {
 struct Animatable::Transition {
     AK_ALLOC_WITH_KMALLOC;
 
-    HashMap<CSS::PropertyID, size_t> transition_attribute_indices;
-    Vector<TransitionAttributes> transition_attributes;
     HashMap<CSS::PropertyID, GC::Ref<CSS::CSSTransition>> associated_transitions;
 };
 
@@ -283,8 +281,6 @@ void Animatable::cancel_css_animations_and_transitions()
         for (auto& animation : transition->associated_transitions)
             animations_to_cancel.append(animation.value);
         transition->associated_transitions.clear();
-        transition->transition_attribute_indices.clear();
-        transition->transition_attributes.clear();
     }
     m_impl->has_css_defined_animations = false;
 
@@ -294,60 +290,29 @@ void Animatable::cancel_css_animations_and_transitions()
     publish_animation_timing_rows();
 }
 
-bool Animatable::set_registered_transitions(Optional<CSS::PseudoElement> pseudo_element, Vector<CSS::TransitionProperties> const& transitions)
-{
-    // An entry naming no property is indexed by nothing, so registering it would grow the element's
-    // attribute list without any property ever reaching it.
-    HashMap<CSS::PropertyID, size_t> attribute_indices;
-    Vector<TransitionAttributes> attributes;
-    for (auto const& entry : transitions) {
-        if (entry.properties.is_empty())
-            continue;
-        auto index_of_this_transition = attributes.size();
-        attributes.empend(entry.delay, entry.duration, entry.timing_function, entry.transition_behavior);
-        for (auto const& property : entry.properties)
-            attribute_indices.set(property, index_of_this_transition);
-    }
-
-    // An element's declaration is recomputed far more often than it changes, and what it registers
-    // is a pure function of that declaration. Leaving the same registration in place keeps this
-    // from writing to the element - and keeps an element that registers nothing from being given a
-    // transition record, and with it an animation list to publish, at all.
-    auto* existing = const_cast<Transition*>(transition_if_exists(pseudo_element));
-    if (!existing) {
-        if (attributes.is_empty())
-            return false;
-    } else if (existing->transition_attributes == attributes && existing->transition_attribute_indices == attribute_indices) {
-        return false;
-    }
-
-    auto* maybe_transition = ensure_transition(pseudo_element);
-    if (!maybe_transition)
-        return false;
-    maybe_transition->transition_attributes = move(attributes);
-    maybe_transition->transition_attribute_indices = move(attribute_indices);
-    return true;
-}
-
+// The longhands the element's installed style gives a matching transition-property entry. The
+// engine reads them from the style's transition longhands. A declaration whose delay and duration
+// are each the single value 0s starts nothing, so it has none unless the element already holds a
+// transition, which such an entry could still cancel.
 Vector<CSS::PropertyID> Animatable::property_ids_with_matching_transition_property_entry(Optional<CSS::PseudoElement> pseudo_element) const
 {
-    auto const* maybe_transition = transition_if_exists(pseudo_element);
-
-    if (!maybe_transition)
+    auto& element = const_cast<DOM::Element&>(static_cast<DOM::Element const&>(*this));
+    auto style_record = DOM::AbstractElement { element, pseudo_element }.style_record_identity();
+    if (!style_record)
         return {};
-
-    return maybe_transition->transition_attribute_indices.keys();
-}
-
-Optional<Animatable::TransitionAttributes const&> Animatable::property_transition_attributes(Optional<CSS::PseudoElement> pseudo_element, CSS::PropertyID property) const
-{
-    auto const* maybe_transition = transition_if_exists(pseudo_element);
-    if (!maybe_transition)
+    auto style = element.document().style_computer().style_engine().style_record_view(style_record);
+    if (!style.present || !style.longhand_table)
         return {};
-    auto& transition = *maybe_transition;
-    if (auto maybe_attr_index = transition.transition_attribute_indices.get(property); maybe_attr_index.has_value())
-        return transition.transition_attributes[maybe_attr_index.value()];
-    return {};
+    if (CSS::StyleValueFFI::rust_transition_delay_and_duration_are_single_zero(style.longhand_table)
+        && property_ids_with_existing_transitions(pseudo_element).is_empty())
+        return {};
+    auto entries = CSS::StyleValueFFI::rust_transition_entries(style.longhand_table);
+    Vector<CSS::PropertyID> property_ids;
+    property_ids.ensure_capacity(entries.count);
+    for (auto const& entry : ReadonlySpan<CSS::StyleValueFFI::FfiTransitionEntry> { entries.entries, entries.count })
+        property_ids.unchecked_append(static_cast<CSS::PropertyID>(entry.property_id));
+    CSS::StyleValueFFI::rust_transition_entries_release(entries.storage);
+    return property_ids;
 }
 
 Vector<CSS::PropertyID> Animatable::property_ids_with_existing_transitions(Optional<CSS::PseudoElement> pseudo_element) const
@@ -391,23 +356,6 @@ void Animatable::remove_transition(Optional<CSS::PseudoElement> pseudo_element, 
     VERIFY(removed_transition.has_value());
     transition.associated_transitions.remove(property_id);
     removed_transition.value()->schedule_disassociation_from_target();
-}
-
-bool Animatable::clear_registered_transitions(Optional<CSS::PseudoElement> pseudo_element)
-{
-    // A transition record is made on demand, so an element that never registered one has nothing
-    // to clear - and asking for one here would give every element a record, and with it an
-    // animation list to publish, for a step that clears nothing.
-    auto* maybe_transition = const_cast<Transition*>(transition_if_exists(pseudo_element));
-    if (!maybe_transition)
-        return false;
-
-    auto& transition = *maybe_transition;
-    if (transition.transition_attribute_indices.is_empty() && transition.transition_attributes.is_empty())
-        return false;
-    transition.transition_attribute_indices.clear();
-    transition.transition_attributes.clear();
-    return true;
 }
 
 void Animatable::visit_edges(JS::Cell::Visitor& visitor)

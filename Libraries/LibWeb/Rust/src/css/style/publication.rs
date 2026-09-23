@@ -1639,8 +1639,8 @@ impl RetainedState {
 
     /// What the engine-computed record the host is about to install for this node leaves to be
     /// applied after the batch, taking the transition debt with the answer so that exactly one
-    /// application drains it: the low two bits are the transition step - 0 nothing, 1 the
-    /// registration alone, 2 the whole step - and `OWES_AN_ANIMATION_PLAN` says the row also left
+    /// application drains it: the low two bits are the transition step - 0 nothing, 1 moved
+    /// declarations that leave the host nothing to do, 2 the whole step - and `OWES_AN_ANIMATION_PLAN` says the row also left
     /// an animation plan, which the host then takes for itself.
     ///
     /// Both effects are answered in one call because every installed row asks, and asking twice

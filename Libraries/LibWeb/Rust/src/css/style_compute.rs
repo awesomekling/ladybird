@@ -2771,7 +2771,6 @@ pub struct FfiLonghandDriveResult {
     pub driver_results: FfiLonghandDriverResults,
     pub inherited_animated_overlay: *mut AnimatedOverlay,
     pub custom_properties: FfiResolvedCustomProperties,
-    pub transitions: FfiComputedTransitionList,
     pub animations: FfiComputedAnimationList,
 }
 
@@ -3967,24 +3966,6 @@ pub struct FfiPreparedLonghandTransaction {
     pub longhand_table: *mut ComputedLonghandTable,
     pub parent_has_animated_values: bool,
     pub custom_property_resolution_is_callback_free: bool,
-}
-
-#[repr(C)]
-pub struct FfiComputedTransition {
-    pub properties: *const u16,
-    pub property_count: usize,
-    pub duration: f64,
-    pub timing_function: *const c_void,
-    pub delay: f64,
-    pub behavior: u8,
-}
-
-#[repr(C)]
-pub struct FfiComputedTransitionList {
-    pub transitions: *const FfiComputedTransition,
-    pub count: usize,
-    pub delay_and_duration_are_single_zero: bool,
-    pub storage: *mut c_void,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -6312,12 +6293,6 @@ unsafe fn compute_longhands(
             driver_results,
             inherited_animated_overlay: std::ptr::null_mut(),
             custom_properties,
-            transitions: FfiComputedTransitionList {
-                transitions: std::ptr::null(),
-                count: 0,
-                delay_and_duration_are_single_zero: false,
-                storage: std::ptr::null_mut(),
-            },
             animations: FfiComputedAnimationList {
                 animations: std::ptr::null(),
                 count: 0,
@@ -6342,11 +6317,6 @@ unsafe fn compute_longhands(
             normal_line_height,
         },
     ))
-}
-
-struct ComputedTransitionListStorage {
-    _property_lists: Vec<Box<[u16]>>,
-    transitions: Box<[FfiComputedTransition]>,
 }
 
 fn computed_value_list(table: &ComputedLonghandTable, property_id: u16) -> &[RetainedStyleValueData] {
@@ -6475,7 +6445,12 @@ pub(crate) fn active_transition_longhands(table: &ComputedLonghandTable) -> Cow<
     }
 }
 
-fn build_computed_transition_list(table: &ComputedLonghandTable) -> FfiComputedTransitionList {
+/// The table's `transition-*` values, per physical longhand they name: shorthands expanded,
+/// logical aliases mapped, and a longhand named more than once taking its last entry. Also says
+/// whether the delay and duration lists are each the single value `0s`.
+pub(crate) fn transition_entries(
+    table: &ComputedLonghandTable,
+) -> (Vec<crate::css::transition::FfiTransitionEntry>, bool) {
     use crate::css::property_metadata::property_id as prop;
 
     let property_values = computed_value_list(table, prop::TRANSITION_PROPERTY);
@@ -6485,53 +6460,53 @@ fn build_computed_transition_list(table: &ComputedLonghandTable) -> FfiComputedT
     let behavior_values = computed_value_list(table, prop::TRANSITION_BEHAVIOR);
     let (writing_mode, direction) = computed_writing_mode_and_direction(table);
 
-    let mut property_lists = Vec::with_capacity(property_values.len());
-    let mut transitions = Vec::with_capacity(property_values.len());
+    let mut entries: Vec<crate::css::transition::FfiTransitionEntry> = Vec::new();
+    let mut entry_indices = vec![usize::MAX; usize::from(crate::css::property_metadata::LAST_LONGHAND_PROPERTY_ID) + 1];
+    let mut properties = Vec::new();
     for (index, property_value) in property_values.iter().enumerate() {
         let transition_property = match property_value.data() {
             StyleValueData::Keyword { keyword } if *keyword == keyword::NONE => None,
             StyleValueData::CustomIdent { custom_ident } => property_id_from_custom_ident(custom_ident),
             _ => unreachable!("computed transition-property must be none or a custom identifier"),
         };
-        let mut properties = Vec::new();
-        if let Some(transition_property) = transition_property {
-            append_transition_longhands(&mut properties, transition_property, &mut || (writing_mode, direction));
+        let Some(transition_property) = transition_property else {
+            continue;
+        };
+        properties.clear();
+        append_transition_longhands(&mut properties, transition_property, &mut || (writing_mode, direction));
+        for &property_id in &properties {
+            let entry = crate::css::transition::FfiTransitionEntry {
+                property_id,
+                delay: time_value_to_milliseconds(delay_values[index % delay_values.len()].data()),
+                duration: time_value_to_milliseconds(duration_values[index % duration_values.len()].data()),
+                timing_function: timing_function_values[index % timing_function_values.len()].pointer(),
+                behavior: match behavior_values[index % behavior_values.len()].data() {
+                    StyleValueData::Keyword { keyword } => keyword_to_transition_behavior(*keyword).unwrap(),
+                    _ => unreachable!("computed transition-behavior must be a keyword"),
+                },
+            };
+            match entry_indices[usize::from(property_id)] {
+                usize::MAX => {
+                    entry_indices[usize::from(property_id)] = entries.len();
+                    entries.push(entry);
+                }
+                index => entries[index] = entry,
+            }
         }
-        let properties = properties.into_boxed_slice();
-        transitions.push(FfiComputedTransition {
-            properties: properties.as_ptr(),
-            property_count: properties.len(),
-            duration: time_value_to_milliseconds(duration_values[index % duration_values.len()].data()),
-            timing_function: timing_function_values[index % timing_function_values.len()]
-                .pointer()
-                .cast(),
-            delay: time_value_to_milliseconds(delay_values[index % delay_values.len()].data()),
-            behavior: match behavior_values[index % behavior_values.len()].data() {
-                StyleValueData::Keyword { keyword } => keyword_to_transition_behavior(*keyword).unwrap(),
-                _ => unreachable!("computed transition-behavior must be a keyword"),
-            },
-        });
-        property_lists.push(properties);
     }
 
-    let delay_and_duration_are_single_zero = delay_values.len() == 1
+    (entries, transition_delay_and_duration_are_single_zero(table))
+}
+
+pub(crate) fn transition_delay_and_duration_are_single_zero(table: &ComputedLonghandTable) -> bool {
+    use crate::css::property_metadata::property_id as prop;
+
+    let duration_values = computed_value_list(table, prop::TRANSITION_DURATION);
+    let delay_values = computed_value_list(table, prop::TRANSITION_DELAY);
+    delay_values.len() == 1
         && duration_values.len() == 1
         && time_value_to_milliseconds(delay_values[0].data()) == 0.0
-        && time_value_to_milliseconds(duration_values[0].data()) == 0.0;
-    let storage = Box::new(ComputedTransitionListStorage {
-        _property_lists: property_lists,
-        transitions: transitions.into_boxed_slice(),
-    });
-    let result = FfiComputedTransitionList {
-        transitions: storage.transitions.as_ptr(),
-        count: storage.transitions.len(),
-        delay_and_duration_are_single_zero,
-        storage: std::ptr::null_mut(),
-    };
-    FfiComputedTransitionList {
-        storage: Box::into_raw(storage).cast(),
-        ..result
-    }
+        && time_value_to_milliseconds(duration_values[0].data()) == 0.0
 }
 
 fn fly_string_is_ascii(string: &crate::css::css_string::CssString, expected: &[u8]) -> bool {
@@ -7091,7 +7066,6 @@ pub unsafe extern "C" fn rust_compute_properties(
 
     let mut computed_animation_definitions = Vec::new();
     if !input.stop_after_longhand_drive {
-        result.transitions = build_computed_transition_list(unsafe { &*drive_input.longhand_table });
         // The sticky flag is the host's own precondition for holding any CSS animation, so an
         // element without it has an empty list in every one of its slots and nothing to match.
         let existing_animation_names = match input.has_css_defined_animations {
@@ -8191,9 +8165,6 @@ pub(crate) unsafe fn take_animation_keyframe_longhand_values(storage: *mut c_voi
 }
 
 unsafe fn destroy_style_computation_result(result: &FfiLonghandDriveResult) {
-    if !result.transitions.storage.is_null() {
-        drop(unsafe { Box::from_raw(result.transitions.storage.cast::<ComputedTransitionListStorage>()) });
-    }
     if !result.animations.storage.is_null() {
         drop(unsafe { Box::from_raw(result.animations.storage.cast::<Box<[FfiComputedAnimation]>>()) });
     }

@@ -1140,19 +1140,17 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     // The step runs here rather than after the batch: a descendant applied later
                     // reads this element's after-change style, which is what the step decides
                     // against, and the C++ computation this row replaces runs it inside itself.
-                    if (transition_debt != 0
-                        || (reaction.old_style_record != 0 && element->associated_shadow_host_pseudo_element().has_value())) {
+                    // A row that owes only the registration leaves nothing for the host: the step
+                    // reads the element's transition declarations from the installed record.
+                    if (transition_debt == 2
+                        || (transition_debt == 0 && reaction.old_style_record != 0 && element->associated_shadow_host_pseudo_element().has_value())) {
                         DOM::AbstractElement settled { *element };
                         if (settled.has_style()) {
-                            if (transition_debt == 1) {
-                                document.style_computer().register_transitions_for_settled_record(settled);
-                            } else {
-                                auto step_invalidation = document.style_computer().run_transition_step_for_settled_record(
-                                    settled, StyleRecordID { reaction.old_style_record });
-                                if (!step_invalidation.is_none()) {
-                                    apply_element_style_invalidation_after_style_change(*element, step_invalidation);
-                                    transaction_invalidation |= step_invalidation;
-                                }
+                            auto step_invalidation = document.style_computer().run_transition_step_for_settled_record(
+                                settled, StyleRecordID { reaction.old_style_record });
+                            if (!step_invalidation.is_none()) {
+                                apply_element_style_invalidation_after_style_change(*element, step_invalidation);
+                                transaction_invalidation |= step_invalidation;
                             }
                         }
                     }
