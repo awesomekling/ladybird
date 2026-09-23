@@ -2197,6 +2197,22 @@ impl AnimationKeyframes {
         self.scopes.keys().all(|&scope| scope == TreeScopeID::DOCUMENT)
     }
 
+    /// Whether an animation of this name resolves the same whatever scope its `animation-name`
+    /// declaration was written in. Only the element's own scope and the document may define it:
+    /// `resolve` tries the declaration's scope first, and any other scope defining the name would
+    /// answer there.
+    #[must_use]
+    pub(crate) fn name_resolves_without_the_declaration_scope(
+        &self,
+        element_tree_scope: TreeScopeID,
+        name: &CssString,
+    ) -> bool {
+        let name = KeyframesName(name.clone());
+        self.scopes.iter().all(|(&scope, sets)| {
+            scope == TreeScopeID::DOCUMENT || scope == element_tree_scope || !sets.contains_key(&name)
+        })
+    }
+
     /// The keyframe set an animation of this name runs, or `None` where no scope in its chain
     /// defines one and the host makes an effect with no keyframes.
     ///
