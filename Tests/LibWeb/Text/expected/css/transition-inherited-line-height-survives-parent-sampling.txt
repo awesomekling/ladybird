@@ -1,0 +1,10 @@
+child started one transition: true
+container at 100000: 13px
+child at 100000: 10px
+child transition survived: true
+container at 300000: 19px
+child at 300000: 10px
+child transition survived: true
+container at 500000: 25px
+child at 500000: 10px
+child transition survived: true

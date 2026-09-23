@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    .container { line-height: 10px; }
+    .container.to { line-height: 40px; }
+    .container.how { transition: line-height 1000s linear; }
+    .transition { line-height: inherit; }
+    .transition.how { transition: line-height 1000s linear; }
+</style>
+<div class="container"><div class="transition">Text sample</div></div>
+<script>
+    test(() => {
+        const container = document.querySelector(".container");
+        const child = document.querySelector(".transition");
+        container.classList.add("how");
+        child.classList.add("how");
+        internals.updateStyle();
+        container.classList.add("to");
+        child.classList.add("to");
+        internals.updateStyle();
+
+        const containerTransition = container.getAnimations()[0];
+        const childTransition = child.getAnimations()[0];
+        println("child started one transition: " + (child.getAnimations().length === 1));
+        for (const time of [100000, 300000, 500000]) {
+            containerTransition.currentTime = time;
+            println("container at " + time + ": " + getComputedStyle(container).lineHeight);
+            println("child at " + time + ": " + getComputedStyle(child).lineHeight);
+            println("child transition survived: " + (child.getAnimations().length === 1 && child.getAnimations()[0] === childTransition));
+        }
+    });
+</script>
