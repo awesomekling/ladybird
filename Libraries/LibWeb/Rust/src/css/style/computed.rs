@@ -2913,6 +2913,38 @@ impl ComputedGroupSets {
         ))
     }
 
+    /// Retain a warm composition while an engine candidate moves only its base environment.
+    /// The host resamples that composition over the candidate before acknowledging the row.
+    pub(super) fn republish_animated_base_with_environment(
+        &mut self,
+        node: StyleNodeID,
+        environment: u64,
+    ) -> Option<EngineComputedAssembly> {
+        let index = node.element_index()? as usize;
+        let slot = self.columns.animation_overlay_slot(index)?;
+        let old_base = *self.style_record_column.get(index)?.as_ref()?;
+        let old_record = *self.style_records.get_index(old_base.index())?;
+        let old_composition = self.final_style_record(old_base, Some(slot));
+        let custom_properties = self.intern_custom_property_environment(environment).0;
+        let new_base = self
+            .intern_style_record(StyleRecord {
+                custom_properties,
+                ..old_record
+            })
+            .0;
+        self.pin_style_record(old_composition.raw());
+        self.release_animation_overlay_assignment(slot);
+        self.columns.set_animation_overlay_slot(index, None);
+        self.columns.custom_properties[index] = custom_properties.0;
+        self.style_record_column[index] = Some(new_base);
+        Some(EngineComputedAssembly {
+            delta: (old_composition, self.final_base_style_record(new_base)),
+            pinned_composition: Some(old_composition.raw()),
+            canonicalized_groups: 0,
+            group_set_unchanged: true,
+        })
+    }
+
     /// Every raw custom-property environment identity a live record was published with.
     pub fn live_custom_property_environments(&self) -> impl Iterator<Item = u64> + '_ {
         self.custom_property_environments
@@ -4559,6 +4591,43 @@ mod tests {
         );
         assert_eq!(sets.custom_property_environment_identity(node), Some(9));
         assert_eq!(sets.live_animation_overlay_records(), 1);
+    }
+
+    #[test]
+    fn environment_candidate_retains_the_old_composition_until_completion() {
+        let mut sets = ComputedGroupSets::default();
+        let node = StyleNodeID::from_raw(1).unwrap();
+        let target = ComputedStyleTarget::new(node, u8::MAX);
+        let base = sets.publish_unowned(Some(target), &[], 0, 7, metadata(0, 0, 0));
+        let animated_overlay = crate::css::animated_overlay::AnimatedOverlay::default();
+        let mut animated_metadata = metadata(0, 0, 0);
+        animated_metadata.animation_overlay_identity = 1;
+        animated_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
+        let composition = sets.publish_unowned(Some(target), &[], 0, 7, animated_metadata);
+
+        let candidate = sets.republish_animated_base_with_environment(node, 11).unwrap();
+        assert_eq!(candidate.delta.0, composition.style_record_identity);
+        assert_ne!(candidate.delta.1, base.style_record_identity);
+        assert_eq!(sets.assigned_final_style_record(target), Some(candidate.delta.1));
+        assert_eq!(
+            sets.style_record_custom_property_environment(candidate.delta.1.raw()),
+            Some(11)
+        );
+        assert!(
+            sets.style_record_view(composition.style_record_identity.raw())
+                .is_some()
+        );
+
+        sets.revert_engine_computed_record(node, candidate.delta.1, candidate.delta.0);
+        sets.unpin_style_record(candidate.pinned_composition.unwrap());
+        assert_eq!(
+            sets.assigned_final_style_record(target),
+            Some(composition.style_record_identity)
+        );
+        assert_eq!(
+            sets.assigned_base_style_record(target),
+            Some(base.style_record_identity)
+        );
     }
 
     #[test]
