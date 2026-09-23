@@ -2501,22 +2501,13 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
                 result.invalidation.recompute_descendant_styles = true;
             }
         }
+        // NB: A row whose effects the caller settles after installation runs its transition step
+        //     first, as a C++ computation does, and the caller applies the change after it. The
+        //     animations are terminated or resumed on the display that ignores them.
         auto const old_display_is_none = old_computed_values->display().is_none();
         auto const new_display_is_none = new_computed_values->display().is_none();
-        if (old_display_is_none != new_display_is_none) {
-            for_each_shadow_including_inclusive_descendant([&](auto& node) {
-                if (!node.is_element())
-                    return TraversalDecision::Continue;
-                auto& element = static_cast<Element&>(node);
-                element.play_or_cancel_animations_after_display_property_change();
-                return TraversalDecision::Continue;
-            });
-            // NB: Clear hidden descendant styles so they cannot become transition before-change styles.
-            //     Descendants needed by SVG resources are scheduled for recomputation; other descendants
-            //     rematerialize on a CSSOM read or when the subtree becomes visible again.
-            if (new_display_is_none)
-                clear_computed_styles_from_display_none_descendants();
-        }
+        if (!CSS::deferring_engine_pseudo_installation())
+            apply_display_none_change(old_computed_values->base_values().display().is_none() != new_computed_values->base_values().display().is_none(), !old_display_is_none && new_display_is_none);
     }
     // The pseudo-element records the engine settled beside this one install with it.
     if (!CSS::deferring_engine_pseudo_installation())
@@ -2750,25 +2741,10 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_style_engine_reaction(b
         style_computer.unpin_style_record(old_style_record);
     }
 
-    if (old_non_animated_display_is_none != new_non_animated_display_is_none) {
-        for_each_shadow_including_inclusive_descendant([&](auto& node) {
-            if (!node.is_element())
-                return TraversalDecision::Continue;
-            auto& element = static_cast<Element&>(node);
-            element.play_or_cancel_animations_after_display_property_change();
-            return TraversalDecision::Continue;
-        });
-    }
-
-    // NB: Clear hidden descendant styles so they cannot become transition before-change styles.
-    //     Descendants needed by SVG resources are scheduled for recomputation; other descendants
-    //     rematerialize on a CSSOM read or when the subtree becomes visible again.
     auto current_computed_values = computed_style();
     VERIFY(current_computed_values);
-    if (old_computed_values && old_computed_values->display().is_none() != current_computed_values->display().is_none()) {
-        if (current_computed_values->display().is_none())
-            clear_computed_styles_from_display_none_descendants();
-    }
+    apply_display_none_change(old_non_animated_display_is_none != new_non_animated_display_is_none,
+        old_computed_values && !old_computed_values->display().is_none() && current_computed_values->display().is_none());
 
     auto const element_style_changed = !invalidation.is_none();
     auto const element_custom_properties_changed = did_change_custom_properties;
@@ -2798,6 +2774,26 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_style_engine_reaction(b
     apply_computed_style_to_layout_node_if_needed(invalidation);
 
     return invalidation;
+}
+
+// Terminates or resumes the animations of a subtree whose display left or entered none, ignoring
+// animations, and clears the styles of a subtree that became display:none.
+void Element::apply_display_none_change(bool display_none_ignoring_animations_changed, bool became_display_none)
+{
+    if (display_none_ignoring_animations_changed) {
+        for_each_shadow_including_inclusive_descendant([&](auto& node) {
+            if (!node.is_element())
+                return TraversalDecision::Continue;
+            auto& element = static_cast<Element&>(node);
+            element.play_or_cancel_animations_after_display_property_change();
+            return TraversalDecision::Continue;
+        });
+    }
+    // NB: Clear hidden descendant styles so they cannot become transition before-change styles.
+    //     Descendants needed by SVG resources are scheduled for recomputation; other descendants
+    //     rematerialize on a CSSOM read or when the subtree becomes visible again.
+    if (became_display_none)
+        clear_computed_styles_from_display_none_descendants();
 }
 
 void Element::clear_computed_styles_from_display_none_descendants()

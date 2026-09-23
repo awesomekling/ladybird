@@ -38,17 +38,18 @@ impl StyleEngineState {
         let ancestor_became_visible = reaction & STYLE_REACTION_ANCESTOR_BECAME_VISIBLE != 0;
 
         // A slot's assigned elements take their style from the slot, and a slot that moved at all
-        // recomputes them.
+        // recomputes them. A slot leaving display:none reveals them as it does its children.
         if self.retained.facts.is_slot(node)
             && (!invalidation_is_none || did_change_custom_properties || ancestor_became_visible)
         {
+            let reaction = STYLE_REACTION_RECOMPUTE_STYLE | (reaction & STYLE_REACTION_ANCESTOR_BECAME_VISIBLE);
             for index in 0..self.retained.tree.assigned_nodes_of(node).len() {
                 let assigned = self.retained.tree.assigned_nodes_of(node)[index];
                 // A text slottable holds a place in the list but has no style of its own to recompute.
                 if assigned.is_text() {
                     continue;
                 }
-                self.record_derived_element_style_input(assigned, STYLE_REACTION_RECOMPUTE_STYLE, 0);
+                self.record_derived_element_style_input(assigned, reaction, 0);
             }
         }
 
