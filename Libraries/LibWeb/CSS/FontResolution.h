@@ -93,6 +93,7 @@ public:
     // Answers every remembered resolution, so the caller can decide which a change to the table
     // has made stale, and forgets the ones it says so about.
     void take_matching(Function<bool(ComputedFontCacheKey const&, Gfx::FontCascadeList const&)> const&);
+    void take_changed(FontFaceSnapshotView const&, Function<bool(ComputedFontCacheKey const&)> const&, Function<void(Gfx::FontCascadeList const&)> const&);
 
 private:
     FontCascadeMemo() = default;
