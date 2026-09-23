@@ -918,10 +918,13 @@ impl RetainedState {
         }
         // A moved font-phase longhand reaches every value the font feeds, so the record is driven
         // through every phase and every group is rebuilt. A moved box-type transformation input
-        // takes the same route, as does a record whose parent inputs moved: the transformation
-        // and the inheritance are part of the full drive.
-        let full_drive = parent_inputs_moved.any()
+        // takes the same route, as does a record whose parent inputs moved or a record that read
+        // the viewport under a viewport move: the transformation and the inheritance are part of
+        // the full drive.
+        let full_drive = derived_beneath_a_composition
+            || parent_inputs_moved.any()
             || font_inputs_moved
+            || (scratch.viewport_moved && self.record_reads_the_viewport(old_style_record))
             || environment_moved_under_substitutions
             || scratch.document_environment_moved
             || scratch.recompute_in_full
