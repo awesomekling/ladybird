@@ -5174,7 +5174,12 @@ impl StyleEngineState {
         }) {
             return Err("NotOfferedPseudoElement");
         }
-        if pseudo.is_some() && (!self.host.journal.is_empty() || !self.host.deferred_element_style_inputs.is_empty()) {
+        // A private observation checks the target and its ancestors below. Pending work on
+        // another node must not prevent it from answering this pseudo-element.
+        if pseudo.is_some()
+            && !read_only
+            && (!self.host.journal.is_empty() || !self.host.deferred_element_style_inputs.is_empty())
+        {
             return Err("GateReaction");
         }
         if exclude_inline_style && (!read_only || pseudo.is_some()) {
@@ -5298,6 +5303,7 @@ impl StyleEngineState {
                     node,
                     kind,
                     read_only,
+                    targeted,
                     computed::FinalStyleRecordID::from_raw(parent_highlight),
                     counters,
                 )?;

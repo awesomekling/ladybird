@@ -1491,12 +1491,7 @@ static void apply_targeted_style_invalidation(DOM::Element& element, RequiredInv
 static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_update(DOM::Element& element, bool& did_change_custom_properties)
 {
     auto& style_computer = element.document().style_computer();
-
-    // FIXME: A targeted record demand does not refresh a container's own pseudo-element
-    //        styles when its scroll-state verdict changes after layout.
-    auto const* box_values = element.style_group<ComputedValues::BoxValues>();
-    bool const has_scroll_state_pseudo_dependency = box_values && box_values->is_scroll_state_container && element.style_depends_on_size_container_query();
-    if (element.parent() && !has_scroll_state_pseudo_dependency) {
+    if (element.parent()) {
         bool const was_unstyled = !element.has_style();
         StringView decline_cause;
         auto invalidation = style_computer.answer_record_demand(element, did_change_custom_properties, decline_cause, {}, false, true);
@@ -1514,6 +1509,23 @@ static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_updat
                         continue;
                     effect.update_computed_properties_for_style(context, DOM::AbstractElement { element });
                 }
+            }
+            auto const* box_values = element.style_group<ComputedValues::BoxValues>();
+            if (box_values && box_values->is_scroll_state_container && element.style_depends_on_size_container_query()) {
+                DOM::Element::EnginePseudoElementRecords pseudo_records {};
+                bool settled_pseudo = false;
+                for (auto kind : { PseudoElement::Before, PseudoElement::After, PseudoElement::FirstLetter, PseudoElement::Marker }) {
+                    auto answer = style_computer.style_engine().answer_record_demand(element.style_node_id(), to_underlying(kind), false, true, true);
+                    if (answer.decline_cause_length)
+                        continue;
+                    pseudo_records[to_underlying(kind)] = StyleRecordID { answer.record.style_record };
+                    settled_pseudo = true;
+                }
+                if (settled_pseudo)
+                    *invalidation |= element.apply_engine_computed_style_record(element.style_record_identity(), pseudo_records, false, did_change_custom_properties);
+                // The container's pseudo rules can change after its descendants finish style and
+                // layout and the scroll-state snapshot is published.
+                invalidation->recompute_descendant_styles = true;
             }
             return *invalidation;
         }

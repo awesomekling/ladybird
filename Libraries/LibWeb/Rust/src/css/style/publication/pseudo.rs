@@ -1218,6 +1218,7 @@ impl StyleEngineState {
         node: StyleNodeID,
         kind: u8,
         read_only: bool,
+        targeted: bool,
         highlight_parent: Option<computed::FinalStyleRecordID>,
         counters: &mut Counters,
     ) -> Result<Option<computed::FinalStyleRecordID>, &'static str> {
@@ -1247,7 +1248,9 @@ impl StyleEngineState {
             .is_some_and(|table| table.display_is_list_item());
         // CSSOM reads still need computed values for an ungenerated pseudo-element. Derive a
         // private record from the originating element without publishing a generated box.
-        let cssom_absent = read_only && mask & (1 << kind) == 0 && self.document_style_computation_inputs.is_some();
+        // Targeted settlement observes generated records only, while keeping the demand private.
+        let cssom_read = read_only && !targeted;
+        let cssom_absent = cssom_read && mask & (1 << kind) == 0 && self.document_style_computation_inputs.is_some();
         if !cssom_absent
             && mask & (1 << kind) == 0
             && !(kind == pseudo_kind::MARKER && is_list_item)
@@ -1278,7 +1281,7 @@ impl StyleEngineState {
                     Some(kind),
                     cssom_absent,
                     highlight_parent,
-                    read_only,
+                    cssom_read,
                 )
                 .is_some()
             {
