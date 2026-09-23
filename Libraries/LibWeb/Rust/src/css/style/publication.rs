@@ -530,6 +530,7 @@ impl RetainedState {
         if pending_element.is_none() {
             scratch.pseudo_deltas.clear();
             scratch.next_pseudo = 0;
+            scratch.pseudo_explicitly_inherited_groups = 0;
             scratch.pseudo_uses_substitution = false;
             scratch.noted_substitution = None;
             scratch.flipped_pseudo_rules = exact_flipped_rules.map_or(0, |flipped| flipped.pseudos);
@@ -5825,6 +5826,7 @@ pub(super) struct EngineComputedRecordContinuation {
     pub(super) root_font_inputs_changed: bool,
     pending_element: Option<(computed::FinalStyleRecordID, computed::FinalStyleRecordID)>,
     next_pseudo: usize,
+    pseudo_explicitly_inherited_groups: u32,
     pseudo_uses_substitution: bool,
     /// What the element being derived noted about substituted winners, when its computation
     /// reached the point of deciding. A record that stands unchanged notes nothing.

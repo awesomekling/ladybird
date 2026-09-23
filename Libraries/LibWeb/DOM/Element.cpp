@@ -1645,8 +1645,13 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
             set_style_uses_var_css_function();
         return true;
     }();
-    if (settled_after_host_record)
+    if (settled_after_host_record) {
         engine_pseudo_element_records = &records_settled_after_host_record;
+        if (auto explicit_inheritance_debt = style_computer.style_engine().take_explicit_inheritance_debt(style_node_id()); explicit_inheritance_debt != 0) {
+            if (auto* parent = this->parent())
+                parent->add_children_explicitly_inherited_non_inherited_style_groups(explicit_inheritance_debt == NumericLimits<u32>::max() ? CSS::ComputedValues::all_style_groups : explicit_inheritance_debt);
+        }
+    }
 
     // Any document change that can cause this element's style to change, could also affect its pseudo-elements.
     auto recompute_pseudo_element_style = [&](CSS::PseudoElement pseudo_element, bool has_implicit_style = false) {
