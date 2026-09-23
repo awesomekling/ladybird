@@ -2710,7 +2710,9 @@ impl RetainedState {
     /// ancestor from a 13px default the way `recascade_font_size_if_needed` does. `None` when the
     /// walk needs a resolution context only C++ can supply, or when its answer would depend on the
     /// viewport, which C++ records on the element beside the size.
-    pub(super) fn monospace_recascaded_font_size(&self, node: StyleNodeID) -> Option<i32> {
+    /// The font size the monospace recascade gives a node, and whether reaching it read the
+    /// viewport. A `calc()` the walk skips is skipped as C++ skips it.
+    pub(super) fn monospace_recascaded_font_size(&self, node: StyleNodeID) -> Option<(i32, bool)> {
         use crate::css::style_compute::{FontSizeRecascadeStatus, recascade_font_size_batch};
 
         let inputs = self.document_style_computation_inputs?;
@@ -2740,10 +2742,8 @@ impl RetainedState {
             },
             std::ptr::null(),
         );
-        (batch.status == FontSizeRecascadeStatus::Complete
-            && !batch.depends_on_viewport_metrics
-            && !batch.skipped_calculated_value)
-            .then_some(batch.current_size_raw)
+        (batch.status == FontSizeRecascadeStatus::Complete)
+            .then_some((batch.current_size_raw, batch.depends_on_viewport_metrics))
     }
 
     /// Whether any of a state's longhand winners is written with `attr()`.
@@ -2818,7 +2818,8 @@ impl RetainedState {
         if !self.font_family_winner_is_monospace(state) {
             return 0;
         }
-        self.monospace_recascaded_font_size(node).unwrap_or(i32::MIN)
+        self.monospace_recascaded_font_size(node)
+            .map_or(i32::MIN, |(size, _)| size)
     }
 
     /// A pseudo-element's transition declarations compute into its record. A named animation
