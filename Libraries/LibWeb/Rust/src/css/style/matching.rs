@@ -150,7 +150,7 @@ impl RetainedState {
 
     /// The pseudo-element winner states a node settled this flush for the kinds the engine
     /// settles pseudo-elements from, to travel with the node's winner state: ::before, ::after,
-    /// ::first-letter, ::marker and ::selection. The other kinds are not settled from these rows.
+    /// ::first-letter, ::marker, ::selection and ::backdrop.
     fn settled_pseudo_winner_states(
         &self,
         effects: &AnswerEffects,
@@ -161,7 +161,7 @@ impl RetainedState {
             .view(&self.winner_groups)
             .pseudo_states(node)
             .filter(|&(pseudo, version, _, priority_current)| {
-                matches!(pseudo.kind.0, 0 | 2 | 3 | 5 | 6) && version == self.program.version() && priority_current
+                matches!(pseudo.kind.0, 0 | 1 | 2 | 3 | 5 | 6) && version == self.program.version() && priority_current
             })
             .map(|(pseudo, _, state, _)| (pseudo, state))
             .collect()

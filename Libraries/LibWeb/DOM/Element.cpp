@@ -1617,6 +1617,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
             && !may_have_style(CSS::PseudoElement::Before)
             && !may_have_style(CSS::PseudoElement::After)
             && !may_have_style(CSS::PseudoElement::FirstLetter)
+            && !(m_rendered_in_top_layer && may_have_style(CSS::PseudoElement::Backdrop))
             && !(document().selection_styles_are_observable()
                 && (may_have_style(CSS::PseudoElement::Selection)
                     || AbstractElement { *this, CSS::PseudoElement::Selection }.highlight_inheritance_parent().has_value())))
@@ -1643,11 +1644,10 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
     // Any document change that can cause this element's style to change, could also affect its pseudo-elements.
     auto recompute_pseudo_element_style = [&](CSS::PseudoElement pseudo_element, bool has_implicit_style = false) {
         // A synthetic pseudo-element the style engine settled beside the element's record takes the engine's
-        // answer; one the engine left alone is unchanged. Backdrop and other highlight
-        // pseudo-elements still use the host's path.
+        // answer; one the engine left alone is unchanged. Other highlight pseudo-elements
+        // still use the host's inheritance path.
         Optional<CSS::StyleRecordID> engine_record;
         if (engine_pseudo_element_records && CSS::is_synthetic_pseudo_element(pseudo_element)
-            && pseudo_element != CSS::PseudoElement::Backdrop
             && (!CSS::is_highlight_pseudo_element(pseudo_element) || pseudo_element == CSS::PseudoElement::Selection)) {
             engine_record = engine_pseudo_element_records->at(to_underlying(pseudo_element));
             if (!engine_record.has_value())

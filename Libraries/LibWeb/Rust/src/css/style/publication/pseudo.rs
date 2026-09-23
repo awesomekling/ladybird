@@ -27,7 +27,7 @@ impl RetainedState {
         record: Option<computed::FinalStyleRecordID>,
         counters: &mut Counters,
     ) -> bool {
-        use pseudo_kind::{AFTER, BACKDROP, BEFORE, FIRST_LETTER, MARKER, SELECTION};
+        use pseudo_kind::{AFTER, BEFORE, FIRST_LETTER, MARKER, SELECTION};
 
         // A marker is generated for a list item only: the stale marker row of an element that is
         // no list item decides nothing. Settling the records checks it again against the
@@ -64,7 +64,6 @@ impl RetainedState {
             }
             let kind = usize::from(pseudo.kind.0);
             if kind >= pseudo_kind::SYNTHETIC_COUNT
-                || kind == usize::from(BACKDROP)
                 || (pseudo_kind::is_highlight(kind) && kind != usize::from(SELECTION))
             {
                 continue;
@@ -156,6 +155,7 @@ impl RetainedState {
                 .apply_to(&mut inputs);
         }
         let program_version = self.program.version();
+        let in_top_layer = self.top_layer_elements.contains(&node);
         let mut states: [Option<CascadeStateID>; pseudo_kind::SYNTHETIC_COUNT] = [None; pseudo_kind::SYNTHETIC_COUNT];
         let mut marker_row_is_stale = false;
         for (pseudo, version, state, priority_current) in self.current_winner_groups().pseudo_states(node) {
@@ -172,9 +172,7 @@ impl RetainedState {
                 continue;
             }
             // Other highlight kinds still use the host's inheritance path.
-            if selected_kind.is_none()
-                && (kind == BACKDROP || pseudo_kind::is_highlight(usize::from(kind)) && kind != SELECTION)
-            {
+            if selected_kind.is_none() && pseudo_kind::is_highlight(usize::from(kind)) && kind != SELECTION {
                 continue;
             }
             if version != program_version || !priority_current {
@@ -192,15 +190,6 @@ impl RetainedState {
                 return None;
             }
             states[usize::from(kind)] = Some(state);
-        }
-        if selected_kind.is_none()
-            && self
-                .computed_group_sets
-                .assigned_pseudo_kinds(node)
-                .any(|kind| kind == BACKDROP)
-        {
-            counters.bump(Counter::EngineComputedRecordBailPseudoBackdrop);
-            return None;
         }
         let display_is_list_item = |engine: &Self, record: computed::FinalStyleRecordID| -> Option<bool> {
             let view = engine.computed_group_sets.style_record_view(record.raw())?;
@@ -299,9 +288,6 @@ impl RetainedState {
         {
             scratch.next_pseudo = pseudo_index + 1;
             if selected_kind.is_some_and(|selected| selected != kind) {
-                continue;
-            }
-            if kind == BACKDROP && selected_kind.is_none() {
                 continue;
             }
             if self.deferred_pseudo_element == Some(tree::PseudoElementKind(u16::from(kind)))
@@ -464,6 +450,7 @@ impl RetainedState {
                     .zip(self.box_type_parent_display(node))
                     .map(|(inherited_groups, parent_display)| PseudoCohortKey {
                         parent_record: if kind == SELECTION
+                            || kind == BACKDROP
                             || state
                                 .is_some_and(|state| self.state_explicitly_inherits_non_inherited_property(node, state))
                         {
@@ -616,6 +603,10 @@ impl RetainedState {
                     (record, longhand_evaluations)
                 }
             };
+            if selected_kind.is_none() && kind == BACKDROP && !in_top_layer {
+                self.computed_group_sets.remove_pseudo(node, kind);
+                continue;
+            }
             self.note_engine_computed_pseudo_record(
                 node,
                 kind,
