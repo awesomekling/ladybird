@@ -214,22 +214,6 @@ void StyleEngine::set_element_presentational_hint_properties(StyleNodeID node, S
         note_css_transitions_may_observe_style_changes();
 }
 
-StyleEngine::ExactCascadePublication StyleEngine::publish_exact_cascade_state(StyleNodeID node, u8 pseudo_kind, ComputedValuesFFI::CascadedPropertyStore const* store, u8 inherited_style_groups, StyleNodeID donor_node, StyleRecordID donor_style_record)
-{
-    return StyleEngineFFI::style_engine_publish_exact_cascade_state(m_impl, node.value(), pseudo_kind, store, inherited_style_groups, donor_node.value(), donor_style_record.value());
-}
-
-ReadonlySpan<ComputedValuesFFI::FfiSourceSlotAssignment> StyleEngine::materialize_retained_cascade_state(StyleNodeID node, u8 pseudo_kind, ComputedValuesFFI::CascadedPropertyStore* store, ReadonlySpan<ComputedValuesFFI::FfiCascadeBlock> blocks)
-{
-    auto view = StyleEngineFFI::style_engine_materialize_retained_cascade_state(m_impl, node.value(), pseudo_kind, store, blocks.data(), blocks.size());
-    return { static_cast<ComputedValuesFFI::FfiSourceSlotAssignment const*>(view.assignments), view.count };
-}
-
-void StyleEngine::discard_retained_cascade_assignments()
-{
-    StyleEngineFFI::style_engine_discard_retained_cascade_assignments(m_impl);
-}
-
 StyleEngine::StyleRecordDelta StyleEngine::publish_computed_groups(StyleNodeID node, u8 pseudo_kind, ReadonlySpan<void const*> payloads, size_t inherited_group_count, u64 custom_property_environment, bool inherited_group_swap_candidate, u64 counter_style_environment_identity, u64 animation_overlay_identity, void const* animated_overlay, ReadonlySpan<void const*> animation_overlay_payloads, void const* computed_longhand_table, void const* custom_property_store)
 {
     VERIFY(inherited_group_count <= payloads.size());
@@ -243,20 +227,6 @@ Optional<StyleEngine::StyleRecordDelta> StyleEngine::publish_animation_overlay(S
     if (delta.new_style_record == 0)
         return {};
     return StyleRecordDelta { StyleRecordID { delta.old_style_record }, StyleRecordID { delta.new_style_record } };
-}
-
-Optional<StyleEngine::StyleRecordDelta> StyleEngine::reaffirm_style_record(StyleNodeID node, u8 pseudo_kind)
-{
-    auto delta = StyleEngineFFI::style_engine_reaffirm_style_record(m_impl, node.value(), pseudo_kind);
-    if (delta.new_style_record == 0)
-        return {};
-    return StyleRecordDelta { StyleRecordID { delta.old_style_record }, StyleRecordID { delta.new_style_record } };
-}
-
-StyleEngine::StyleRecordDelta StyleEngine::assign_shared_style_record(StyleNodeID node, u8 pseudo_kind, StyleRecordID style_record, bool inherited_group_swap_eligible)
-{
-    auto delta = StyleEngineFFI::style_engine_assign_shared_style_record(m_impl, node.value(), pseudo_kind, style_record.value(), ComputedValues::inherited_style_group_count, inherited_group_swap_eligible);
-    return { StyleRecordID { delta.old_style_record }, StyleRecordID { delta.new_style_record } };
 }
 
 void const* StyleEngine::style_record_payloads(StyleRecordID style_record) const
@@ -292,14 +262,6 @@ u32 StyleEngine::compare_style_records(StyleRecordID old_style_record, StyleReco
 bool StyleEngine::animation_overlay_changed(StyleRecordID old_style_record, void const* animated_overlay) const
 {
     return StyleEngineFFI::style_engine_animation_overlay_changed(m_impl, old_style_record.value(), animated_overlay);
-}
-
-Optional<u32> StyleEngine::current_color_dependent_style_groups(StyleNodeID node, u8 pseudo_kind) const
-{
-    auto groups = StyleEngineFFI::style_engine_current_color_dependent_group_mask(m_impl, node.value(), pseudo_kind);
-    if (groups == NumericLimits<u32>::max())
-        return {};
-    return groups;
 }
 
 StyleEngineFFI::FfiAnimationInvalidation StyleEngine::compare_animation_overlay(StyleRecordID old_style_record, void const* animated_overlay, ReadonlySpan<void const*> payloads, bool is_document_element) const
@@ -349,11 +311,6 @@ void StyleEngine::set_element_custom_property_data(StyleNodeID node, CustomPrope
 {
     StyleEngineFFI::style_engine_set_element_custom_property_data(
         m_impl, node.value(), data, data ? data->rust_store() : nullptr, data ? data->identity() : 0);
-}
-
-StyleEngineFFI::FfiRetainedCustomPropertyData StyleEngine::retained_inheritance_custom_property_data(StyleNodeID node, u8 pseudo_kind) const
-{
-    return StyleEngineFFI::style_engine_retained_inheritance_custom_property_data(m_impl, node.value(), pseudo_kind);
 }
 
 void StyleEngine::decide_transitions(StyleRecordID before_style_record, void const* after_longhand_table, void const* after_animated_overlay, StyleValueFFI::FfiTransitionInput& input, StyleValueFFI::FfiTransitionAction* actions) const
@@ -1040,11 +997,6 @@ bool StyleEngine::match_element(StyleNodeID node, Vector<RuleMatch>& matches, Ma
     if (has_pending_transaction())
         flush();
     return read_matches(node, matches, purpose);
-}
-
-bool StyleEngine::consume_published_match_answer(StyleNodeID node, Vector<RuleMatch>& matches)
-{
-    return read_matches(node, matches, {});
 }
 
 void* StyleEngine::compile_selector_query(ReadonlySpan<void const*> selectors)

@@ -240,7 +240,6 @@ class BorderImageSliceStyleValue;
 class BorderRadiusRectStyleValue;
 class BorderRadiusStyleValue;
 class CalculatedStyleValue;
-class CascadedProperties;
 class CustomPropertyData;
 class Clip;
 class ColorFilterStyleValue;

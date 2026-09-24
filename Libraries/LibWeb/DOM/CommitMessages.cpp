@@ -66,19 +66,6 @@ void CommitMessages::note_needs_layout_tree_update(NodeIdentity identity, SetNee
     apply();
 }
 
-void CommitMessages::note_style_substitution_usage(NodeIdentity identity, u8 usage)
-{
-    m_style_messages.append(Message {
-        .identity = identity,
-        .kind = Kind::StyleSubstitutionUsage,
-        .style_substitution_usage = usage,
-        .layout_tree_update_reason = {},
-        .hover_event_data = {},
-        .pseudo_element = {},
-        .custom_property_name = {},
-    });
-}
-
 void CommitMessages::note_style_query_custom_property_reference(NodeIdentity identity, Optional<CSS::PseudoElement> pseudo_element, Utf16FlyString name)
 {
     m_style_messages.append(Message {
@@ -261,10 +248,6 @@ void CommitMessages::apply(Message const& message)
             resource->register_resource_box_referencing_element({}, *referencing_element);
         return;
     }
-    case Kind::StyleSubstitutionUsage:
-        if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
-            element->apply_style_substitution_usage(message.style_substitution_usage);
-        return;
     case Kind::StyleQueryCustomPropertyReference:
         if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
             element->record_style_query_custom_property_reference(message.pseudo_element, message.custom_property_name);
