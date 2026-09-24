@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-use super::RetainedState;
-use super::bridge::{FfiAnimationInvalidation, FfiStyleInvalidationField};
+use super::bridge::{self, FfiAnimationInvalidation, FfiStyleInvalidationField};
+use super::{RetainedState, StyleNodeID};
 use crate::css::animated_overlay::{AnimatedOverlay, overlay_wins};
 use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::computed_values::style_group_payloads_equal;
@@ -88,6 +88,26 @@ impl StyleInvalidation {
         self.non_inherited_inheritance_source |= other.non_inherited_inheritance_source;
         self.any_computed_value_changed |= other.any_computed_value_changed;
         self.affects_hit_testing |= other.affects_hit_testing;
+    }
+
+    fn unpack(packed: u32) -> Self {
+        let has = |field: FfiStyleInvalidationField| packed & field as u32 != 0;
+        Self {
+            level: (packed & FfiStyleInvalidationField::LevelMask as u32) as u8,
+            visual_context: ((packed >> FfiStyleInvalidationField::VisualContextShift as u32) & 0x3) as u8,
+            rebuild_root: ((packed >> FfiStyleInvalidationField::RebuildRootShift as u32)
+                & FfiStyleInvalidationField::RebuildRootMask as u32) as u8,
+            rebuild_stacking_context: has(FfiStyleInvalidationField::RebuildStackingContext),
+            resnap_scroll_container: has(FfiStyleInvalidationField::ResnapScrollContainer),
+            recompute_descendants: has(FfiStyleInvalidationField::RecomputeDescendants),
+            inherited_groups: ((packed >> FfiStyleInvalidationField::InheritedGroupsShift as u32)
+                & FfiStyleInvalidationField::InheritedGroupsMask as u32) as u8,
+            changes_containing_block: has(FfiStyleInvalidationField::ChangesContainingBlock),
+            repaint_text_decorations: has(FfiStyleInvalidationField::RepaintTextDecorations),
+            non_inherited_inheritance_source: has(FfiStyleInvalidationField::NonInheritedInheritanceSource),
+            any_computed_value_changed: has(FfiStyleInvalidationField::AnyComputedValueChanged),
+            affects_hit_testing: has(FfiStyleInvalidationField::AffectsHitTesting),
+        }
     }
 
     fn pack(self) -> u32 {
@@ -873,6 +893,117 @@ impl RetainedState {
         }
         self.style_invalidation_cache.insert(key, packed);
         packed
+    }
+
+    /// What moving `node` (or its `pseudo` element) from one record to another damages, read from
+    /// the two records and the facts the engine holds of the element and its place in the tree.
+    /// Only what the element's box was built with is left to the host: the counter styles its
+    /// generated content resolved.
+    pub(crate) fn element_record_damage(
+        &mut self,
+        node: StyleNodeID,
+        is_pseudo_element: bool,
+        old_style_record: u64,
+        new_style_record: u64,
+    ) -> u32 {
+        let (font_lists_equal, color_changed, stroke_uses_current_color, table_fixup_child_changed) = {
+            let old_record = self
+                .computed_group_sets
+                .style_record_view(old_style_record)
+                .unwrap_or_else(|| panic!("old style record {old_style_record:#x} is not live"));
+            let new_record = self
+                .computed_group_sets
+                .style_record_view(new_style_record)
+                .unwrap_or_else(|| panic!("new style record {new_style_record:#x} is not live"));
+            let old_values = ComputedValuesView::new(SharedPayload::as_pointer_slice(old_record.payloads));
+            let new_values = ComputedValuesView::new(SharedPayload::as_pointer_slice(new_record.payloads));
+            let stroke_uses_current_color = |values: ComputedValuesView<'_>| {
+                let stroke = &values.inherited_svg().stroke;
+                stroke.kind != 0 && stroke.color_is_currentcolor
+            };
+            // The table fixup algorithm needs an authored box's display from before box type
+            // transformation. A flex or grid item can therefore keep the same blockified display
+            // while changing whether it needs anonymous table wrappers.
+            let is_table_fixup_child = |values: ComputedValuesView<'_>| {
+                let display = values.display_before_box_type_transformation();
+                display.is_table_row_group()
+                    || display.is_table_header_group()
+                    || display.is_table_footer_group()
+                    || display.is_table_column_group()
+                    || display.is_table_caption()
+            };
+            (
+                old_values
+                    .font()
+                    .font_cascade_list
+                    .equals(&new_values.font().font_cascade_list),
+                old_values.inherited_text().color != new_values.inherited_text().color,
+                stroke_uses_current_color(old_values) || stroke_uses_current_color(new_values),
+                is_table_fixup_child(old_values) != is_table_fixup_child(new_values),
+            )
+        };
+        let facts = self.computed_group_sets.adjustment_facts(node);
+        let is_svg_graphics_element = facts & bridge::element_adjustment_fact::IS_SVG_GRAPHICS_ELEMENT != 0;
+        let packed = self.compare_style_records(
+            old_style_record,
+            new_style_record,
+            font_lists_equal,
+            is_svg_graphics_element && self.element_folds_transform_into_svg_container_layout(node),
+            !is_pseudo_element && self.element_propagates_overflow_to_viewport(node),
+        );
+        let mut damage = StyleInvalidation::unpack(packed);
+        // An SVG currentColor stroke stores its resolved color alongside the fact that it came from
+        // currentColor. A color-only change can therefore alter the visible stroke width and the SVG
+        // container bounds without changing the stroke longhand itself.
+        if is_svg_graphics_element && color_changed && stroke_uses_current_color {
+            damage.ensure_level(INVALIDATION_RELAYOUT);
+        }
+        // Generated pseudo-element boxes are anonymous, so fixup uses their adjusted display instead.
+        if !is_pseudo_element && table_fixup_child_changed {
+            damage.any_computed_value_changed = true;
+            damage.merge(StyleInvalidation::full());
+        }
+        damage.pack() | (packed & FfiStyleInvalidationField::CacheHit as u32)
+    }
+
+    // SVG container layout unions each child's bounding box mapped by the child's own transform. An
+    // outermost <svg> is laid out by its CSS parent (as is one re-rooted by foreignObject), so its
+    // own transform stays paint-only like any CSS box.
+    fn element_folds_transform_into_svg_container_layout(&self, node: StyleNodeID) -> bool {
+        let Some(parent) = self.tree.parent(node) else {
+            return false;
+        };
+        let parent_facts = self.computed_group_sets.adjustment_facts(parent);
+        parent_facts & bridge::element_adjustment_fact::IS_SVG_ELEMENT != 0
+            && parent_facts & bridge::element_adjustment_fact::IS_SVG_FOREIGN_OBJECT_ELEMENT == 0
+    }
+
+    // https://drafts.csswg.org/css-overflow-3/#overflow-propagation
+    // The root element and, for an html root, its first body child are the elements whose overflow
+    // every full layout pass reads for viewport propagation.
+    fn element_propagates_overflow_to_viewport(&self, node: StyleNodeID) -> bool {
+        use bridge::{element_adjustment_fact, element_construction_fact};
+        if self.computed_group_sets.adjustment_facts(node) & element_adjustment_fact::IS_DOCUMENT_ELEMENT != 0 {
+            return true;
+        }
+        let Some(parent) = self.tree.parent(node) else {
+            return false;
+        };
+        if self.computed_group_sets.adjustment_facts(parent) & element_adjustment_fact::IS_DOCUMENT_ELEMENT == 0
+            || self.computed_group_sets.construction_facts(parent) & element_construction_fact::IS_HTML_HTML_ELEMENT
+                == 0
+        {
+            return false;
+        }
+        let mut child = self.tree.first_element_child(parent);
+        while let Some(candidate) = child {
+            if self.computed_group_sets.adjustment_facts(candidate) & element_adjustment_fact::IS_HTML_BODY_ELEMENT != 0
+            {
+                return candidate == node;
+            }
+            child = self.tree.next_element_sibling(candidate);
+        }
+        false
     }
 }
 

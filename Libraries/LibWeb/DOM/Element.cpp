@@ -1519,23 +1519,17 @@ static bool element_propagates_overflow_to_viewport(DOM::AbstractElement const& 
     return !abstract_element.pseudo_element().has_value() && abstract_element.element().is_viewport_propagation_source();
 }
 
-static CSS::StyleComputer::ComputedStyleInvalidation compute_required_invalidation_with_cache(CSS::StyleComputer& style_computer, CSS::ComputedValues const& old_computed_values, CSS::ComputedValues const& new_computed_values, ElementDependentInvalidationState const& old_state, DOM::AbstractElement& abstract_element, CSS::StyleEngine::StyleRecordDelta const& style_record_delta)
+// NB: The damage C++ computed for a record move before the style engine did, kept only to check the
+//     engine's answer while it replaces this one.
+static CSS::StyleComputer::ComputedStyleInvalidation host_record_damage(CSS::StyleComputer& style_computer, CSS::ComputedValues const& old_computed_values, CSS::ComputedValues const& new_computed_values, DOM::AbstractElement& abstract_element, CSS::StyleEngine::StyleRecordDelta const& style_record_delta)
 {
-    CSS::StyleComputer::ComputedStyleInvalidation result;
-    bool element_folds_transform_into_layout = element_folds_transform_into_svg_container_layout(abstract_element.element());
-    if (style_record_is_unchanged(style_record_delta)) {
-        ++abstract_element.document().style_invalidation_counters().style_record_property_diffs_skipped;
-    } else {
-        auto packed = style_computer.style_engine().compare_style_records(
-            style_record_delta.old_style_record,
-            style_record_delta.new_style_record,
-            old_computed_values.font_list().equals(new_computed_values.font_list()),
-            element_folds_transform_into_layout,
-            element_propagates_overflow_to_viewport(abstract_element));
-        if (packed & to_underlying(CSS::StyleEngineFFI::FfiStyleInvalidationField::CacheHit))
-            ++abstract_element.document().style_invalidation_counters().style_record_property_damage_cache_hits;
-        result = decode_style_record_invalidation(packed);
-    }
+    auto packed = style_computer.style_engine().compare_style_records(
+        style_record_delta.old_style_record,
+        style_record_delta.new_style_record,
+        old_computed_values.font_list().equals(new_computed_values.font_list()),
+        element_folds_transform_into_svg_container_layout(abstract_element.element()),
+        element_propagates_overflow_to_viewport(abstract_element));
+    auto result = decode_style_record_invalidation(packed);
 
     // An SVG currentColor stroke stores its resolved color alongside the fact that it came from
     // currentColor. A color-only change can therefore alter the visible stroke width and the SVG
@@ -1569,9 +1563,57 @@ static CSS::StyleComputer::ComputedStyleInvalidation compute_required_invalidati
             result.invalidation |= CSS::RequiredInvalidationAfterStyleChange::full();
         }
     }
+    return result;
+}
 
-    if (!style_record_is_unchanged(style_record_delta))
-        add_element_dependent_invalidation(result.invalidation, new_computed_values, old_state, abstract_element);
+static bool record_damages_match(CSS::StyleComputer::ComputedStyleInvalidation const& a, CSS::StyleComputer::ComputedStyleInvalidation const& b)
+{
+    auto const& x = a.invalidation;
+    auto const& y = b.invalidation;
+    return a.any_computed_value_changed == b.any_computed_value_changed
+        && x.needs_repaint() == y.needs_repaint()
+        && x.needs_relayout() == y.needs_relayout()
+        && x.needs_layout_tree_rebuild() == y.needs_layout_tree_rebuild()
+        && (!x.needs_layout_tree_rebuild() || x.layout_tree_rebuild_root() == y.layout_tree_rebuild_root())
+        && x.needs_stacking_context_tree_rebuild() == y.needs_stacking_context_tree_rebuild()
+        && x.accumulated_visual_contexts() == y.accumulated_visual_contexts()
+        && x.needs_scroll_container_resnap == y.needs_scroll_container_resnap
+        && x.recompute_descendant_styles == y.recompute_descendant_styles
+        && x.inherited_style_groups_changed() == y.inherited_style_groups_changed()
+        && x.changes_containing_block_establishment == y.changes_containing_block_establishment
+        && x.repaint_propagated_text_decorations == y.repaint_propagated_text_decorations
+        && x.repaint_selection == y.repaint_selection
+        && x.affects_hit_testing == y.affects_hit_testing
+        && x.non_inherited_property_inheritance_sources_changed == y.non_inherited_property_inheritance_sources_changed;
+}
+
+static CSS::StyleComputer::ComputedStyleInvalidation compute_required_invalidation_with_cache(CSS::StyleComputer& style_computer, CSS::ComputedValues const& old_computed_values, CSS::ComputedValues const& new_computed_values, ElementDependentInvalidationState const& old_state, DOM::AbstractElement& abstract_element, CSS::StyleEngine::StyleRecordDelta const& style_record_delta)
+{
+    CSS::StyleComputer::ComputedStyleInvalidation result;
+    if (style_record_is_unchanged(style_record_delta)) {
+        ++abstract_element.document().style_invalidation_counters().style_record_property_diffs_skipped;
+        return result;
+    }
+    // The engine reads what the move damages from the two records and its own facts of the element.
+    auto packed = CSS::StyleEngineFFI::style_engine_element_record_damage(
+        style_computer.style_engine().rust_handle(),
+        abstract_element.element().style_node_id().value(),
+        abstract_element.pseudo_element().has_value(),
+        style_record_delta.old_style_record.value(),
+        style_record_delta.new_style_record.value());
+    if (packed & to_underlying(CSS::StyleEngineFFI::FfiStyleInvalidationField::CacheHit))
+        ++abstract_element.document().style_invalidation_counters().style_record_property_damage_cache_hits;
+    result = decode_style_record_invalidation(packed);
+    static bool const verify_style_record_damage = getenv("LIBWEB_VERIFY_STYLE_RECORD_DAMAGE") != nullptr;
+    if (verify_style_record_damage) {
+        auto host_result = host_record_damage(style_computer, old_computed_values, new_computed_values, abstract_element, style_record_delta);
+        if (!record_damages_match(result, host_result)) {
+            dbgln("StyleEngine: damage for <{}> (style node {}, pseudo {}) disagrees with the host's", abstract_element.element().local_name(), abstract_element.element().style_node_id().value(), abstract_element.pseudo_element().has_value());
+            VERIFY_NOT_REACHED();
+        }
+    }
+
+    add_element_dependent_invalidation(result.invalidation, new_computed_values, old_state, abstract_element);
     return result;
 }
 

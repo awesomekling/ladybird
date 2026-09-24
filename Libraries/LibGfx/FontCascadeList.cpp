@@ -418,6 +418,7 @@ void ladybird_gfx_font_cascade_list_ref(void const*);
 void ladybird_gfx_font_cascade_list_unref(void const*);
 u8 ladybird_gfx_emoji_presentation_for_code_point(u32, u32, bool);
 void const* ladybird_gfx_font_cascade_list_frozen(void const*);
+bool ladybird_gfx_font_cascade_list_equals(void const*, void const*);
 void const* ladybird_gfx_cascade_snapshot_begin(void const*);
 void ladybird_gfx_cascade_snapshot_header(void const*, Gfx::FFI::FfiCascadeSnapshotHeader*);
 void ladybird_gfx_cascade_snapshot_fill(void const*, bool, Gfx::FFI::FfiCascadeSnapshotEntry*, Gfx::FFI::FfiCascadeSnapshotRange*);
@@ -480,6 +481,13 @@ size_t total_range_count(Vector<Gfx::FontCascadeList::SnapshotEntry> const& entr
     return count;
 }
 
+}
+
+extern "C" bool ladybird_gfx_font_cascade_list_equals(void const* list, void const* other)
+{
+    VERIFY(list);
+    VERIFY(other);
+    return static_cast<Gfx::FontCascadeList const*>(list)->equals(*static_cast<Gfx::FontCascadeList const*>(other));
 }
 
 extern "C" void const* ladybird_gfx_font_cascade_list_frozen(void const* list)
