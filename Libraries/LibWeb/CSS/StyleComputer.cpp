@@ -606,8 +606,14 @@ void StyleComputer::collect_animations_into(DOM::AbstractElement abstract_elemen
     // keyframe-borne `inherit` on a non-inherited property discovered here must leave the same invalidation
     // mark behind, or a later change to the parent's value never reaches this element's animated style.
     if (m_keyframes_inherited_non_inherited_style_groups != 0) {
-        if (auto* parent = abstract_element.element().parent())
+        if (auto* parent = abstract_element.element().parent()) {
             parent->add_children_explicitly_inherited_non_inherited_style_groups(m_keyframes_inherited_non_inherited_style_groups);
+            auto parent_style_node = is<DOM::Element>(*parent) ? as<DOM::Element>(*parent).style_node_id()
+                : is<DOM::ShadowRoot>(*parent)                 ? as<DOM::ShadowRoot>(*parent).style_node_id()
+                                                               : StyleNodeID {};
+            if (parent_style_node != 0)
+                StyleEngineFFI::style_engine_note_children_explicitly_inherit(m_style_engine.rust_handle(), parent_style_node.value());
+        }
         m_keyframes_inherited_non_inherited_style_groups = 0;
     }
     if (computed_properties.requires_animated_post_compute_adjustments()) {

@@ -1320,7 +1320,18 @@ impl RetainedState {
     /// The style groups an engine-computed record read straight from the parent through an
     /// explicit `inherit`, taken with the answer so that exactly one application marks the parent.
     pub(crate) fn take_explicit_inheritance_debt(&mut self, node: StyleNodeID) -> u32 {
-        self.nodes_owing_explicit_inheritance.remove(&node).unwrap_or(0)
+        let debt = self.nodes_owing_explicit_inheritance.remove(&node).unwrap_or(0);
+        if debt != 0
+            && let Some(parent) = self.tree.parent(node)
+        {
+            self.children_explicitly_inherit_marks.insert(parent);
+        }
+        debt
+    }
+
+    /// The host marked `node`'s children as explicitly inheriting a non-inherited property.
+    pub(crate) fn note_children_explicitly_inherit(&mut self, node: StyleNodeID) {
+        self.children_explicitly_inherit_marks.insert(node);
     }
 
     /// What the engine-computed record the host is about to install for this node leaves to be
