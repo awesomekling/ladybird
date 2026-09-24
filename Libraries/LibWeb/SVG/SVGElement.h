@@ -44,8 +44,8 @@ public:
 
     Gfx::Size<double> viewport_size_for_percentage_resolution();
 
-    // Republishes the element's parsed presentation attributes onto the rows built for it,
-    // which is where a running layout pass reads them.
+    // Republishes the element's parsed presentation attributes onto the rows built for it, which
+    // is where a running layout pass reads them, at the next invalidation journal drain.
     void publish_svg_attribute_facts();
 
     GC::Ref<SVGAnimatedLength> svg_animated_length_for_attribute(Utf16FlyString const&, SVGLength::Directionality, SVGLengthValue default_value);
