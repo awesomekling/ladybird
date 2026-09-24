@@ -49,7 +49,12 @@ public:
     struct AnimationNames {
         StyleNodeID style_node;
     };
-    using Effect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames, AnimationNames>;
+    // What a row's container conditions read of its containers, which the host records for the
+    // commit as it records them for a row it computes.
+    struct ContainerQueryEffects {
+        StyleNodeID style_node;
+    };
+    using Effect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames, AnimationNames, ContainerQueryEffects>;
 
     void append(Effect effect) { m_effects.append(move(effect)); }
     void apply(DOM::Document&);

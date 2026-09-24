@@ -147,6 +147,11 @@ void StyleEffectDrain::apply(DOM::Document& document)
             },
             [&](AnimationNames const&) {
                 element->republish_animation_name_registry();
+            },
+            [&](ContainerQueryEffects const& row) {
+                auto container_effects = StyleEngineFFI::style_engine_take_container_effects(document.style_computer().style_engine().rust_handle(), row.style_node.value());
+                ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
+                StyleComputer::record_container_query_effects(DOM::AbstractElement { *element }, container_effects);
             });
     }
     m_effects.clear();
@@ -525,9 +530,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 invalidation = element->apply_engine_computed_style_record(new_style_record, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties, engine_record_comparison, engine_record_damage, pseudo_element_damages, &row_effects);
                 // What the row's container conditions read of its containers, recorded as the host
                 // records it for a row it computes.
-                auto container_effects = StyleEngineFFI::style_engine_take_container_effects(style_engine.rust_handle(), reaction.style_node);
-                ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
-                StyleComputer::record_container_query_effects(DOM::AbstractElement { *element }, container_effects);
+                row_effects.append(StyleEffectDrain::ContainerQueryEffects { StyleNodeID { reaction.style_node } });
                 if (acknowledge)
                     style_engine.acknowledge_engine_computed_record(StyleNodeID { reaction.style_node });
             };
