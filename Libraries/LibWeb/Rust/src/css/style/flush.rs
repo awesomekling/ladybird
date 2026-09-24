@@ -2213,6 +2213,7 @@ impl StyleEngineState {
         let mut ready_record = None::<publication::pending::ParkedEngineComputedRecord>;
         let mut waiting_records = Vec::<publication::pending::ParkedEngineComputedRecord>::new();
         while next_published_index < cut_at.unwrap_or(pass.published_nodes.len()) {
+            let settled_rows_before_round = settled_row_count(style_deltas, record_deltas.as_deref());
             let mut resumed_records = std::mem::take(&mut waiting_records).into_iter();
             let mut next_parked_records = Vec::<publication::pending::ParkedEngineComputedRecord>::new();
             for (published_index, node) in pass
@@ -2910,6 +2911,7 @@ impl StyleEngineState {
             let Some(first_batched_index) = batching_start else {
                 continue;
             };
+            let parked_this_round = !next_parked_records.is_empty();
             // A record the scan stopped before it reached waits for the next round with the ones
             // it parked, unless the wave stops before its row: every row after the cut is driven
             // again in the wave that reaches it, and resuming a record there would restart the
@@ -2939,6 +2941,14 @@ impl StyleEngineState {
             next_published_index = if ready_record.is_none() && waiting_records.is_empty() {
                 cut_at.unwrap_or(pass.published_nodes.len())
             } else {
+                // A round that leaves records to resume refilled what one it parked asked for, or
+                // settled a row the next round no longer drives. A round that did neither would
+                // be repeated as it is, forever.
+                debug_assert!(
+                    parked_this_round
+                        || settled_row_count(style_deltas, record_deltas.as_deref()) > settled_rows_before_round,
+                    "a style pass round leaves records to resume without settling or parking a row"
+                );
                 first_batched_index
             };
         }
@@ -2981,6 +2991,7 @@ impl StyleEngineState {
         // boundary: the host computed that row itself, or skipped it.
         self.discard_engine_computed_records(counters);
         self.join_rows_between_installed_ancestors(&mut pass, counters);
+        let resumed_at = pass.next_index;
         pass.published_match_answers = std::mem::take(&mut self.retained.published_match_answers);
         self.retained.batch_answers_complete_but_for_custom_properties =
             std::mem::take(&mut pass.batch_answers_complete_but_for_custom_properties);
@@ -3022,6 +3033,13 @@ impl StyleEngineState {
             counters,
         );
         computation_scratch_memory.release();
+        // Every row before the one this wave resumes at is installed, so nothing that stopped the
+        // last wave stops this one at that row. A wave that settled no row would be taken again
+        // as it is, forever.
+        debug_assert!(
+            pass.next_index > resumed_at,
+            "a resumed style wave stops at the row it resumed at"
+        );
         if !style_deltas.is_empty() {
             self.settle_computed_memory();
             counters.add(Counter::PublishedMatchAnswerRecords, style_deltas.len() as u64);
@@ -3285,4 +3303,13 @@ impl StyleEngineState {
             });
         }
     }
+}
+
+/// The rows a style pass has settled so far: the ones it published before it began parking rows,
+/// and the ones it settled among the parked rows since.
+fn settled_row_count(
+    style_deltas: &[PublishedStyleDeltaRecord],
+    record_deltas: Option<&[Option<Vec<PublishedStyleDeltaRecord>>]>,
+) -> usize {
+    style_deltas.len() + record_deltas.map_or(0, |deltas| deltas.iter().filter(|deltas| deltas.is_some()).count())
 }
