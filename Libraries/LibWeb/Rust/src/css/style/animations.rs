@@ -614,36 +614,6 @@ impl AnimationTimingRow {
         })
     }
 
-    /// Whether this row, synthesized for a CSS animation about to start, says everything about its
-    /// timing that `published` - the row the host published once it created that animation - does.
-    /// The identities only the host can mint are not compared: the effect's, the timeline's, and
-    /// the animation's place in the global animation list.
-    #[must_use]
-    pub(crate) fn predicts(&self, published: &Self) -> bool {
-        Self {
-            timeline: 0,
-            effect_identity: 0,
-            global_list_order: 0,
-            synthesized_index: None,
-            ..*published
-        } == Self {
-            synthesized_index: None,
-            ..*self
-        }
-    }
-
-    /// The row the host published for the CSS animation `(node, slot)` lists at `name_index`, if
-    /// this is it.
-    #[must_use]
-    pub(crate) fn is_listed_css_animation(&self, node: StyleNodeID, slot: AnimationSlot, name_index: u32) -> bool {
-        self.composite_class == animation_class::CSS_ANIMATION_WITH_OWNING_ELEMENT
-            && self.has(timing_row_flag::HAS_OWNING_ELEMENT)
-            && self.has(timing_row_flag::LISTED_BY_OWNING_ELEMENT)
-            && self.composite_owning_node == node.raw()
-            && self.composite_owning_slot == slot
-            && self.composite_class_key == name_index
-    }
-
     /// This row, standing for the `index`th animation a plan starts.
     #[must_use]
     pub(crate) fn with_synthesized_index(self, index: u32) -> Self {
@@ -709,12 +679,6 @@ impl AnimationTimingRow {
             | (flag::PLAYBACK_DIRECTION_MASK << flag::PLAYBACK_DIRECTION_SHIFT));
         retimed.flags |= (fill_mode << flag::FILL_MODE_SHIFT) | (direction << flag::PLAYBACK_DIRECTION_SHIFT);
         Some(retimed)
-    }
-
-    /// Whether the host could not describe this animation's timing at all.
-    #[must_use]
-    pub(crate) fn is_undecidable(&self) -> bool {
-        self.has(timing_row_flag::UNDECIDABLE)
     }
 
     /// Whether the animation holds its current time, which no timeline's time then moves.

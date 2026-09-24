@@ -109,33 +109,6 @@ impl RetainedState {
         true
     }
 
-    /// The three length-resolution contexts a sample of the element's animations computes keyframe
-    /// values in, over the record the element holds: the font context, which reads the element's
-    /// inheritance parent; the line-height context, which reads the element's own font and the
-    /// parent's line height; and the one everything else resolves against, the element's own font.
-    /// A mirror of the host's `get_computation_context_for_property(FontFamily / LineHeight /
-    /// Color)` over the working set it reconstructs from that record, with the container bases
-    /// `container_unit_mask` asks for.
-    ///
-    /// `None` where the element holds no record the engine can read.
-    pub(crate) fn animation_sample_length_contexts(
-        &self,
-        node: StyleNodeID,
-        pseudo_kind: Option<u8>,
-        style_record: u64,
-        container_unit_mask: u8,
-    ) -> Option<FfiAnimationLengthContexts> {
-        let parent_record = self.assigned_inheritance_parent_record(node, pseudo_kind);
-        self.animation_sample_length_contexts_over_root(
-            node,
-            pseudo_kind,
-            style_record,
-            parent_record,
-            container_unit_mask,
-            self.root_element_font_metrics,
-        )
-    }
-
     /// The record the engine assigned the element's inheritance parent: its originating element,
     /// for a pseudo-element.
     pub(crate) fn assigned_inheritance_parent_record(&self, node: StyleNodeID, pseudo_kind: Option<u8>) -> Option<u64> {
@@ -162,9 +135,16 @@ impl RetainedState {
         ))
     }
 
-    /// `animation_sample_length_contexts`, over the inheritance parent's `parent_record` and with
-    /// `rem` resolving against `root`.
-    pub(crate) fn animation_sample_length_contexts_over_root(
+    /// The three length-resolution contexts a sample of the element's animations computes keyframe
+    /// values in, over `style_record` and its inheritance parent's `parent_record`: the font context,
+    /// which reads the inheritance parent; the line-height context, which reads the element's own
+    /// font and the parent's line height; and the one everything else resolves against, the
+    /// element's own font. A mirror of the host's `get_computation_context_for_property(FontFamily /
+    /// LineHeight / Color)` over the working set it reconstructs from that record, with the
+    /// container bases `container_unit_mask` asks for and `rem` resolving against `root`.
+    ///
+    /// `None` where the element holds no record the engine can read.
+    pub(crate) fn animation_sample_length_contexts(
         &self,
         node: StyleNodeID,
         pseudo_kind: Option<u8>,
@@ -500,27 +480,6 @@ impl RetainedState {
     }
 }
 
-/// A description of font group inputs two resolutions can be compared by.
-pub(crate) fn describe_font_group_build_inputs(inputs: &FfiFontGroupBuildInputs) -> String {
-    format!(
-        "size {} line height {} emoji {} ascent {} descent {} x-height {} zero {} first {:p} list {:p} weight {} width {} math {}/{}/{}",
-        inputs.font_size_raw,
-        inputs.line_height_used_raw,
-        inputs.font_variant_emoji,
-        inputs.font_ascent,
-        inputs.font_descent,
-        inputs.font_x_height,
-        inputs.font_zero_advance,
-        inputs.first_available_font,
-        inputs.font_cascade_list,
-        inputs.font_weight,
-        inputs.font_width,
-        inputs.math_shift,
-        inputs.math_style,
-        inputs.math_depth,
-    )
-}
-
 /// The custom-property environments a sample of an element's animations reads: the element's own,
 /// which may be the one a previous sample composed; the one its own declarations resolved to
 /// beneath that composition; and the one it inherits. Each is a raw `Arc` pointer to a
@@ -684,6 +643,22 @@ impl RetainedState {
                 },
             base_is_engine: environment & ENGINE_CUSTOM_PROPERTY_ENVIRONMENT_TAG != 0,
         })
+    }
+}
+
+/// What the engine's own sample of an element leaves for the overlay record: the table after the
+/// animated box-type finalization, and the overlay.
+pub(crate) struct EngineSampledStyle {
+    pub(crate) table: *mut crate::css::computed_longhand_table::ComputedLonghandTable,
+    pub(crate) overlay: *mut crate::css::animated_overlay::AnimatedOverlay,
+}
+
+impl Drop for EngineSampledStyle {
+    fn drop(&mut self) {
+        unsafe {
+            crate::css::computed_longhand_table::rust_computed_longhand_table_release(self.table);
+            crate::css::animated_overlay::rust_animated_overlay_free(self.overlay);
+        }
     }
 }
 

@@ -76,8 +76,6 @@ RENDER_STAGE_ALLOWED = {
             "css/ffi_stats.rs:CPP_CALLBACK_COUNT",
             "css/ffi_stats.rs:REGISTRY",
             "css/ffi_stats.rs:THREAD_UNSAFE_CPP_CALLBACK_COUNT",
-            "css/style/engine_sample_check.rs:EXPECTED_NEW_ANIMATION_ROWS",
-            "css/style/engine_sample_check.rs:EXPECTED_SAMPLED_STYLES",
             "css/style/engine_sample_check.rs:LOG",
             "css/style/engine_sample_check.rs:MODE",
             "css/style/seal.rs:MODE",
