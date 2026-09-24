@@ -34,6 +34,7 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/Event.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/DOM/Position.h>
 #include <LibWeb/DOM/Range.h>
 #include <LibWeb/DOM/Text.h>
@@ -4804,12 +4805,10 @@ void LocalNavigable::perform_scroll_of_viewport_scrolling_box(CSSPixelPoint new_
         scroll_offset_did_change();
 
         if (auto document = active_document()) {
-            // The viewport's box publishes the offset the render side reads, next to the store it
-            // mirrors rather than at each caller.
-            if (auto* layout_node = document->unsafe_layout_node())
-                layout_node->publish_scroll_offset();
+            // The viewport's box publishes the offset the render side reads, journalled next to the
+            // store it mirrors rather than at each caller.
+            document->invalidation_journal().note_scroll_offset(DOM::NodeIdentity::of_document(), true);
             document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::No);
-            document->invalidate_scroll_state();
             document->inform_all_viewport_clients_about_the_current_viewport_rect();
         }
     }

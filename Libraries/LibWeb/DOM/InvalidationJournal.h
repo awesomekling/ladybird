@@ -9,11 +9,13 @@
 #include <AK/Function.h>
 #include <AK/HashMap.h>
 #include <AK/Vector.h>
+#include <LibWeb/CSS/PseudoElement.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/InvalidateDisplayList.h>
+#include <LibWeb/PixelUnits.h>
 
 namespace Web::Painting {
 
@@ -54,11 +56,21 @@ public:
     void note_form_control_paint_facts(NodeIdentity, bool enabled, bool checked, bool indeterminate, bool being_activated);
     void note_paint_facts(NodeIdentity, PaintFactsFamily, Function<void(Layout::Node const&)>&&);
     void note_paint_cache_invalidation(NodeIdentity, Painting::PaintCacheInvalidation);
+    // The scroll offset the element or the document's viewport stores changed, and the rows built
+    // for it publish the new one at the drain.
+    void note_scroll_offset(NodeIdentity, bool offset_changed);
+    // The render side is where a pseudo-element's scroll offset is stored, so the entry carries it.
+    void note_pseudo_element_scroll_offset(NodeIdentity generator, CSS::PseudoElement, CSSPixelPoint, bool offset_changed);
 
     // Writes every entry through to the render side and empties the journal.
     void drain();
 
 private:
+    struct PseudoElementScrollOffset {
+        CSS::PseudoElement type;
+        CSSPixelPoint offset;
+    };
+
     struct Entry {
         NodeIdentity identity;
         // The reason of the first layout mark. Only the layout update trace reads it.
@@ -90,14 +102,20 @@ private:
         Function<void(Layout::Node const&)> layer_image_paint_facts_update;
         Function<void(Layout::Node const&)> replaced_image_paint_facts_update;
         Function<void(Layout::Node const&)> video_paint_facts_update;
+        bool needs_scroll_offset_publish { false };
+        Vector<PseudoElementScrollOffset, 1> pseudo_element_scroll_offsets;
     };
 
     Entry& entry_for(NodeIdentity);
     void drain_if_the_render_side_is_reading();
+    void publish_scroll_offsets(Node&, Entry const&);
 
     Document& m_document;
     Vector<Entry> m_entries;
     HashMap<NodeIdentity, size_t> m_entry_index_by_identity;
+    // Whether a noted scroll offset changed, so the document's scroll state mirrors a stale one.
+    bool m_scroll_state_is_stale { false };
+    bool m_draining { false };
 };
 
 }

@@ -274,7 +274,9 @@ void register_geometry_host(Layout::NodeArena& arena)
         .context = nullptr,
         .set_scroll_offset = [](void*, void* layout_node_shell, CSSPixelPoint offset) {
             auto& box = *static_cast<Layout::Node*>(layout_node_shell);
-            set_scroll_offset(box, offset); },
+            set_scroll_offset(box, offset);
+            // The render side reads the offsets it handed over as soon as the handover is done.
+            box.document().drain_invalidation_journal(); },
     };
     Layout::RustFFI::layout_arena_set_geometry_host(arena.handle(), callbacks);
 }

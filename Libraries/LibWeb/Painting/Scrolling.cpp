@@ -29,6 +29,8 @@ CSSPixelPoint scroll_offset(Layout::Node const& node)
 
     // The box publishes the offset stored for what it is the box of, so this reads the arena
     // rather than asking the element, the pseudo-element or the navigable where that store is.
+    // A write still in the journal lands first.
+    node.document().drain_invalidation_journal();
     return Layout::RustFFI::layout_arena_published_scroll_offset(node.arena_handle(), committed_row_slot(node));
 }
 
@@ -283,6 +285,9 @@ Layout::Node* wheel_scroll_along_containing_block_chain(Layout::Node& node, doub
         double accepted_delta_y;
     };
     Vector<WheelScrollableBox, 4> wheel_scrollable_boxes;
+    // The chain is walked by the offsets the boxes publish, so a write still in the journal lands
+    // first.
+    node.document().drain_invalidation_journal();
     auto overflow = viewport_wheel_overflow(node.document());
     Layout::RustFFI::layout_arena_for_each_wheel_scrollable_box_in_containing_block_chain(
         node.arena_handle(), committed_row_slot(node), wheel_delta_x, wheel_delta_y, overflow.x, overflow.y,
@@ -298,6 +303,8 @@ Layout::Node* wheel_scroll_along_containing_block_chain(Layout::Node& node, doub
 
 Layout::Node* scrolling_box_for_scroll_step_in_containing_block_chain(Layout::Node& target, CSSPixelPoint delta)
 {
+    // As for the wheel, the chain is walked by the offsets the boxes publish.
+    target.document().drain_invalidation_journal();
     auto overflow = viewport_wheel_overflow(target.document());
     return static_cast<Layout::Node*>(Layout::RustFFI::layout_arena_scrolling_box_for_scroll_step(
         target.arena_handle(), committed_row_slot(target), viewport_row_slot(target.document()), delta, overflow.x, overflow.y));
@@ -305,6 +312,7 @@ Layout::Node* scrolling_box_for_scroll_step_in_containing_block_chain(Layout::No
 
 Layout::Node* first_wheel_scrollable_box_in_containing_block_chain(Layout::Node const& node)
 {
+    node.document().drain_invalidation_journal();
     auto overflow = viewport_wheel_overflow(node.document());
     return static_cast<Layout::Node*>(Layout::RustFFI::layout_arena_first_wheel_scrollable_box_in_containing_block_chain(
         node.arena_handle(), committed_row_slot(node), overflow.x, overflow.y));
