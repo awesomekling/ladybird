@@ -54,51 +54,19 @@ impl StyleEngineState {
         })
     }
 
-    /// The host begins applying a style reaction to `node`: what the element holds now is what
-    /// the application moves it from.
-    pub fn begin_style_reaction(&mut self, node: StyleNodeID) {
-        self.host.style_reaction_row_start = Some((node, self.host.held_style_record_displays.get(&node).copied()));
-    }
-
-    /// What applying the reaction that began on `node` moved, from what the element held before
-    /// and holds now.
-    fn style_reaction_row_facts(&mut self, node: StyleNodeID) -> StyleReactionRowFacts {
-        // The host begins every reaction it applies on the element it applies it to. Should it not,
-        // nothing says what the element held before, and its children are told it was unstyled:
-        // that owes them everything.
-        let start = self.host.style_reaction_row_start.take();
-        // A row whose children the engine derived is applied without beginning on it: the engine
-        // derived them over the record it names, and the host applied it over that.
-        let derived_over = self
-            .retained
-            .engine_row_child_facts
-            .get(&node)
-            .map(|row| row.old_style_record);
-        let before = match (start, derived_over) {
-            (Some((row_node, before)), _) if row_node == node => before,
-            (_, Some(old_style_record)) => (old_style_record != 0).then(|| self.record_display(old_style_record)),
-            _ => {
-                debug_assert!(false, "style reaction applied to {node:?} without beginning on it");
-                super::seal::note_broken_assumption("StyleReactionAppliedWithoutBeginning");
-                None
-            }
-        };
-        let now = self.host.held_style_record_displays.get(&node).copied();
-        // An element left without style by the application had none before it either.
-        debug_assert!(
-            now.is_some() || before.is_none(),
-            "style reaction cleared the style of {node:?}"
-        );
-        let Some(before) = before else {
+    /// What applying the reaction to `node` moved, from what the element held before and holds
+    /// now, as the host reports it with the application.
+    fn style_reaction_row_facts(facts: u32) -> StyleReactionRowFacts {
+        if facts & fact::ROW_WAS_UNSTYLED != 0 {
             return StyleReactionRowFacts {
                 was_unstyled: true,
                 ..Default::default()
             };
-        };
+        }
         StyleReactionRowFacts {
             was_unstyled: false,
-            was_display_none: before.is_some_and(|display| display.is_none()),
-            display_changed: matches!((before, now), (Some(before), Some(Some(now))) if before != now),
+            was_display_none: facts & fact::ROW_WAS_DISPLAY_NONE != 0,
+            display_changed: facts & fact::ROW_DISPLAY_CHANGED != 0,
         }
     }
 
@@ -113,7 +81,7 @@ impl StyleEngineState {
         inherited_style_groups_changed: u8,
         facts: u32,
     ) {
-        let row_facts = self.style_reaction_row_facts(node);
+        let row_facts = Self::style_reaction_row_facts(facts);
         let mut derived = Vec::new();
         self.derive_child_reactions(
             node,

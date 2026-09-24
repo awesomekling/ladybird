@@ -1199,15 +1199,9 @@ pub struct HostState {
     /// derive as a child reaction: what makes the next transaction a new pass of a style change
     /// rather than one more generation of the last one.
     externally_recorded_style_input_nodes: HashSet<StyleNodeID>,
-    /// The display of the record each element holds in the host, keyed by the elements that hold
-    /// one. `None` is a held record without a box group. The host reports every record it installs
-    /// or clears, so this is the element's host state exactly, between any two of its reports.
-    held_style_record_displays: HashMap<StyleNodeID, Option<crate::css::display::FfiDisplay>>,
-    /// The record each element holds in the host, kept from the same reports.
+    /// The record each element holds in the host, keyed by the elements that hold one. The host
+    /// reports every record it installs or clears.
     held_style_records: HashMap<StyleNodeID, u64>,
-    /// The element whose style reaction the host is applying, with what it held when the
-    /// application began: `None` for an element without style.
-    style_reaction_row_start: Option<(StyleNodeID, Option<Option<crate::css::display::FfiDisplay>>)>,
     deferred_element_style_input_memory: MemoryLease,
     /// Whether any tree input batch has crossed into the engine. A first batch consisting entirely
     /// of unique arrivals can install its final relation rows as one bulk load.
