@@ -1292,9 +1292,9 @@ impl StyleEngineState {
         // CSSOM reads still need computed values for an ungenerated pseudo-element. Derive a
         // private record from the originating element without publishing a generated box.
         // Targeted settlement observes generated records only, while keeping the demand private.
-        let cssom_absent = cssom_read
-            && (mask & (1 << kind) == 0 || kind == pseudo_kind::MARKER && !is_list_item)
-            && self.computes_records();
+        let cssom_absent = cssom_read && (mask & (1 << kind) == 0 || kind == pseudo_kind::MARKER && !is_list_item);
+        #[cfg(any(test, feature = "style-replay"))]
+        let cssom_absent = cssom_absent && self.computes_records();
         if !cssom_absent
             && mask & (1 << kind) == 0
             && !(kind == pseudo_kind::MARKER && is_list_item)

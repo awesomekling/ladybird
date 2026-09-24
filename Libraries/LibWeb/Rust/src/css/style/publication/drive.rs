@@ -595,6 +595,7 @@ impl RetainedState {
         } = subject;
         let has = |bit: u32| facts & bit != 0;
         let is_document_element = has(fact::IS_DOCUMENT_ELEMENT);
+        #[cfg(any(test, feature = "style-replay"))]
         if !self.computes_records() {
             counters.bump(Counter::EngineComputedRecordBailUnhosted);
             return Err(Unanswered::Refused);
