@@ -15,7 +15,6 @@
         internals.updateStyle();
         const after = internals.styleEngineCounters();
         println(`engine answered: ${after.engineComputedRecordDeltas > before.engineComputedRecordDeltas}`);
-        println(`property refusals: ${after.engineComputedRecordBailProperty - before.engineComputedRecordBailProperty}`);
         println(`animation names: ${target.getAnimations().map(animation => animation.animationName).join(",")}`);
         println(`opacity: ${getComputedStyle(target).opacity}`);
     });

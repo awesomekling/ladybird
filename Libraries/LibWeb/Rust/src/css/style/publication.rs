@@ -2218,16 +2218,6 @@ impl RetainedState {
         }
     }
 
-    /// A pseudo-element's transition declarations compute into its record, and its animation
-    /// declarations leave their plan beside that record.
-    fn pseudo_winner_needs_cpp(&self, winner: &PropertyWinner) -> bool {
-        use crate::css::property_metadata::property_id as prop;
-        winner.property == prop::ANCHOR_NAME
-            || (property_starts_animation(winner.property)
-                && !longhand_only_declares_a_css_transition(winner.property)
-                && !longhand_declares_a_css_animation(winner.property))
-    }
-
     /// Whether a record holds a composition its animations made. The transitions its table
     /// declares are a different question: what they start is decided against the values a delta
     /// moves, and the step the row leaves runs where the row is applied.
@@ -3710,7 +3700,6 @@ impl RetainedState {
         substituted: &mut bool,
         counters: &mut Counters,
     ) -> Option<WinnerStore> {
-        use crate::css::property_metadata::property_id as prop;
         crate::css::ffi_stats::bump(crate::css::ffi_stats::FfiOp::WinnerStoreBuilds);
         // Seeded in cascade order, and within one rule in declaration order, since a logical
         // property and its physical associate resolve by order of appearance.
@@ -3738,16 +3727,11 @@ impl RetainedState {
                 counters.bump(Counter::EngineComputedRecordBailWinnerAnimated);
                 return None;
             }
-            // A pseudo-element's cascade keeps the properties its kind supports; its `content`
-            // computes in the drive when the value needs no element or counter environment.
-            if let Some(kind) = pseudo_kind {
-                if !crate::css::property_metadata::pseudo_element_supports_property(kind, winner.property) {
-                    continue;
-                }
-                if winner.property != prop::CONTENT && self.pseudo_winner_needs_cpp(&winner) {
-                    counters.bump(Counter::EngineComputedRecordBailProperty);
-                    return None;
-                }
+            // A pseudo-element's cascade keeps the properties its kind supports.
+            if let Some(kind) = pseudo_kind
+                && !crate::css::property_metadata::pseudo_element_supports_property(kind, winner.property)
+            {
+                continue;
             }
             // A shorthand written with a substitution is declared beside the longhands it
             // pends; those carry it.
