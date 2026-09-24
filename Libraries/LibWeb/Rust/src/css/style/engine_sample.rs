@@ -125,13 +125,27 @@ impl RetainedState {
         style_record: u64,
         container_unit_mask: u8,
     ) -> Option<FfiAnimationLengthContexts> {
+        let parent_record = self.assigned_inheritance_parent_record(node, pseudo_kind);
         self.animation_sample_length_contexts_over_root(
             node,
             pseudo_kind,
             style_record,
+            parent_record,
             container_unit_mask,
             self.root_element_font_metrics,
         )
+    }
+
+    /// The record the engine assigned the element's inheritance parent: its originating element,
+    /// for a pseudo-element.
+    pub(crate) fn assigned_inheritance_parent_record(&self, node: StyleNodeID, pseudo_kind: Option<u8>) -> Option<u64> {
+        let parent = match pseudo_kind {
+            Some(_) => Some(node),
+            None => self.tree.inheritance_parent(node),
+        }?;
+        self.computed_group_sets
+            .assigned_style_record(parent)
+            .map(computed::FinalStyleRecordID::raw)
     }
 
     /// The font metrics a `rem` resolves against where the document element holds the record the
@@ -148,25 +162,19 @@ impl RetainedState {
         ))
     }
 
-    /// `animation_sample_length_contexts`, with `rem` resolving against `root`.
+    /// `animation_sample_length_contexts`, over the inheritance parent's `parent_record` and with
+    /// `rem` resolving against `root`.
     pub(crate) fn animation_sample_length_contexts_over_root(
         &self,
         node: StyleNodeID,
         pseudo_kind: Option<u8>,
         style_record: u64,
+        parent_record: Option<u64>,
         container_unit_mask: u8,
         root: super::animations::RootElementFontMetrics,
     ) -> Option<FfiAnimationLengthContexts> {
         let inputs: &bridge::FfiDocumentStyleComputationInputs = &self.document_style_computation_inputs;
         let own = self.record_font(style_record)?;
-        // A pseudo-element inherits from its originating element.
-        let parent = match pseudo_kind {
-            Some(_) => Some(node),
-            None => self.tree.inheritance_parent(node),
-        };
-        let parent_record = parent
-            .and_then(|parent| self.computed_group_sets.assigned_style_record(parent))
-            .map(computed::FinalStyleRecordID::raw);
         let parent_font = parent_record.and_then(|record| self.record_font(record));
         let is_document_element =
             self.computed_group_sets.adjustment_facts(node) & element_adjustment_fact::IS_DOCUMENT_ELEMENT != 0;
@@ -693,6 +701,11 @@ pub(crate) struct SettledRowPublication {
 }
 
 impl super::StyleEngineState {
+    /// The record the host holds for an element, as it last installed one.
+    pub(crate) fn held_style_record(&self, node: StyleNodeID) -> Option<u64> {
+        self.host.held_style_records.get(&node).copied()
+    }
+
     /// Publish what the pass's sample of a settled row composed as the element's overlay record,
     /// which the rows after it inherit from, and keep what the host applies when it installs the
     /// row. Or why the engine cannot, where the host samples the row itself.
