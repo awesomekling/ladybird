@@ -671,7 +671,9 @@ impl RetainedState {
                 }
             }) != Some(ControlFlow::Continue(()));
         if !declares {
-            return Ok(self.inheritable_custom_property_environment(parent_environment, inputs));
+            return Ok(Some(
+                self.inheritable_custom_property_environment(parent_environment, inputs),
+            ));
         }
         if !parent_moved {
             return Ok(None);
@@ -1115,13 +1117,25 @@ impl RetainedState {
         noted.filter(|noted| noted.raw.raw() != 0)
     }
 
+    /// The store behind an environment a node inherits, null for the empty one. A record that
+    /// names an environment keeps its store alive (`retain_only` keeps what a record names), so
+    /// a parent's is always held; one that is not inherits nothing.
+    fn inherited_environment_store(&self, environment: u64) -> *const c_void {
+        if environment == 0 {
+            return std::ptr::null();
+        }
+        let store = self.custom_property_environments.store(environment);
+        debug_assert!(store.is_some(), "an inherited environment keeps its store");
+        store.unwrap_or(std::ptr::null())
+    }
+
     fn inheritable_custom_property_environment(
         &mut self,
         parent: u64,
         inputs: &bridge::FfiDocumentStyleComputationInputs,
-    ) -> Option<u64> {
+    ) -> u64 {
         if parent == 0 || inputs.custom_property_registry.is_none() {
-            return Some(parent);
+            return parent;
         }
         let registry = unsafe {
             &*inputs
@@ -1130,13 +1144,16 @@ impl RetainedState {
                 .cast::<CustomPropertyRegistry>()
         };
         if !registry.has_non_inheriting_registrations() {
-            return Some(parent);
+            return parent;
         }
         let key = Self::environment_inputs(parent, inputs.custom_property_registration_generation, &[]);
         if let Some(identity) = self.custom_property_environments.memoized(&key) {
-            return Some(identity);
+            return identity;
         }
-        let source = self.custom_property_environments.store(parent)?;
+        let source = self.inherited_environment_store(parent);
+        if source.is_null() {
+            return parent;
+        }
         let store = unsafe { CustomPropertyStore::inheritable(source.cast(), registry) };
         let identity = if store == source {
             unsafe { Arc::decrement_strong_count(store.cast::<CustomPropertyStore>()) };
@@ -1161,7 +1178,7 @@ impl RetainedState {
             }
         };
         self.custom_property_environments.remember(key, identity, Vec::new());
-        Some(identity)
+        identity
     }
 
     /// The environment of a node the engine computes a record for: the one it inherits when its
@@ -1227,9 +1244,7 @@ impl RetainedState {
         // Keep the unfiltered parent for an explicit inherit; ordinary inheritance drops
         // non-inheriting registrations before layering this element's declarations.
         let inheritance_environment = parent_environment;
-        let parent_environment = self
-            .inheritable_custom_property_environment(parent_environment, inputs)
-            .or_refused()?;
+        let parent_environment = self.inheritable_custom_property_environment(parent_environment, inputs);
         if cascaded.is_empty() {
             return Ok(parent_environment);
         }
@@ -1274,16 +1289,7 @@ impl RetainedState {
             inputs.custom_property_registration_generation,
             &cascaded,
         );
-        let parent_store = match parent_environment {
-            0 => std::ptr::null(),
-            identity => {
-                let Some(store) = self.custom_property_environments.store(identity) else {
-                    counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-                    return Err(Unanswered::Refused);
-                };
-                store
-            }
-        };
+        let parent_store = self.inherited_environment_store(parent_environment);
         let parent = unsafe { parent_store.cast::<CustomPropertyStore>().as_ref() };
         let mut values = Vec::with_capacity(cascaded.len());
         let mut reads_attributes = custom_functions
