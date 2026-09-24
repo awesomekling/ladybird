@@ -132,13 +132,6 @@ impl WinnerStore {
         WinnerView { store: self, engine }
     }
 
-    pub(super) fn content_is_engine_computable(&self, engine: &RetainedState) -> bool {
-        let Some((_, declaration)) = self.declaration(crate::css::property_metadata::property_id::CONTENT) else {
-            return true;
-        };
-        super::content_value_is_engine_computable(self.view(engine).value(declaration))
-    }
-
     fn declaration(&self, property: u16) -> Option<(usize, &WinnerDeclaration)> {
         let index = usize::from(*self.by_property.get(usize::from(
             property.checked_sub(crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID)?,
