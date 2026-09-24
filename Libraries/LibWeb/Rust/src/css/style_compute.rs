@@ -3044,6 +3044,76 @@ pub unsafe extern "C" fn rust_sample_animation_effects(
     })
 }
 
+/// Check the length-resolution contexts the host built for a sample against the ones the engine
+/// builds from the record the element holds.
+fn check_sample_length_contexts(
+    input: &FfiHostAnimationSample,
+    engine: &crate::css::style::StyleEngine,
+    node: crate::css::style::tree::StyleNodeID,
+    container_unit_mask: u8,
+    host: &FfiAnimationLengthContexts,
+) {
+    use crate::css::style::engine_sample_check;
+
+    let pseudo = (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT).then_some(input.pseudo_kind);
+    let record = engine.assigned_style_record_of(node, pseudo);
+    let Some(engine_contexts) =
+        record.and_then(|record| engine.animation_sample_length_contexts(node, pseudo, record, container_unit_mask))
+    else {
+        engine_sample_check::note_declined("length contexts: no record");
+        return;
+    };
+    let describe = |context: &FfiLengthResolutionContext| {
+        let metrics = |metrics: &FfiFontMetrics| {
+            (
+                metrics.font_size,
+                metrics.x_height,
+                metrics.cap_height,
+                metrics.zero_advance,
+                metrics.line_height,
+            )
+        };
+        format!(
+            "viewport {}x{} font {:?} root {:?} depends {}/{} container {}:{}:{}/{}:{}:{} horizontal {}",
+            context.viewport_width,
+            context.viewport_height,
+            metrics(&context.font_metrics),
+            metrics(&context.root_font_metrics),
+            context.font_metrics_depend_on_viewport_metrics,
+            context.root_font_metrics_depend_on_viewport_metrics,
+            context.has_container_width_basis,
+            context.container_width_basis,
+            context.container_width_basis_depends_on_viewport_metrics,
+            context.has_container_height_basis,
+            context.container_height_basis,
+            context.container_height_basis_depends_on_viewport_metrics,
+            context.subject_inline_axis_is_horizontal,
+        )
+    };
+    for (which, host, engine) in [
+        ("length contexts: font", &host.font, &engine_contexts.font),
+        (
+            "length contexts: line height",
+            &host.line_height,
+            &engine_contexts.line_height,
+        ),
+        (
+            "length contexts: remaining",
+            &host.remaining,
+            &engine_contexts.remaining,
+        ),
+    ] {
+        let (host, engine) = (describe(host), describe(engine));
+        if host == engine {
+            engine_sample_check::note_agreed(which);
+        } else {
+            engine_sample_check::note_difference(which, &|| {
+                format!("node {} pseudo {pseudo:?}: host {host}, engine {engine}", node.raw())
+            });
+        }
+    }
+}
+
 /// Check the effects the host chose to sample, and the key each is sampled at, against the ones the
 /// engine chooses from the element's published timing rows.
 fn check_sampled_effect_selection(
@@ -3321,6 +3391,9 @@ unsafe fn sample_described_animation_effects(
             }
         }
     };
+    if crate::css::style::engine_sample_check::is_checking() {
+        check_sample_length_contexts(input, engine, node, container_unit_mask, &length_contexts);
+    }
 
     let tree_counting_inputs = match resolved.uses_tree_counting_function || custom.is_some() {
         true => engine.element_tree_counting_inputs(node),
