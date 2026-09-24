@@ -3655,6 +3655,11 @@ WebIDL::ExceptionOr<GC::Ref<Node>> Document::import_node(GC::Ref<Node> node, Var
 // https://dom.spec.whatwg.org/#concept-node-adopt
 void Document::adopt_node_steps(Node& node)
 {
+    // Adopting moves the style sheets the node's shadow trees hold between the documents' style
+    // engines, besides removing it, so both documents join the frames they have in flight.
+    node.document().join_frame_for_dom_tree_mutation();
+    join_frame_for_dom_tree_mutation();
+
     // 1. Let oldDocument be node’s node document.
     auto& old_document = node.document();
 
