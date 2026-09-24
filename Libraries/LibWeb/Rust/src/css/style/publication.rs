@@ -2553,7 +2553,13 @@ impl RetainedState {
 
     /// A pseudo-element's transition declarations compute into its record. A named animation
     /// whose pseudo holds no CSS animation leaves its start plan beside that record.
-    fn pseudo_winner_needs_cpp(&self, kind: u8, state: CascadeStateID, winner: &PropertyWinner) -> bool {
+    fn pseudo_winner_needs_cpp(
+        &self,
+        node: StyleNodeID,
+        kind: u8,
+        state: CascadeStateID,
+        winner: &PropertyWinner,
+    ) -> bool {
         use crate::css::property_metadata::property_id as prop;
         winner.property == prop::ANCHOR_NAME
             || (property_starts_animation(winner.property)
@@ -2561,7 +2567,7 @@ impl RetainedState {
                 && !(longhand_declares_a_css_animation(winner.property)
                     && (self.state_has_no_animation_name(state)
                         || (kind != pseudo_kind::BACKDROP
-                            && self.animation_keyframes().only_the_document_scope_defines_keyframes()))))
+                            && self.state_names_resolve_without_the_declaration_scope(node, state)))))
     }
 
     /// Whether a record holds a composition its animations made. The transitions its table
@@ -4096,7 +4102,7 @@ impl RetainedState {
                 if !crate::css::property_metadata::pseudo_element_supports_property(kind, winner.property) {
                     continue;
                 }
-                if winner.property != prop::CONTENT && self.pseudo_winner_needs_cpp(kind, state, &winner) {
+                if winner.property != prop::CONTENT && self.pseudo_winner_needs_cpp(node, kind, state, &winner) {
                     counters.bump(Counter::EngineComputedRecordBailProperty);
                     return None;
                 }

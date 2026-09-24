@@ -197,13 +197,16 @@ impl RetainedState {
     }
 
     /// Whether the host applies a CSS animation plan the engine settles for a pseudo-element: its
-    /// state names animations, or the pseudo-element holds CSS animations the state no longer
-    /// names, which an empty plan cancels.
+    /// state names animations whose `@keyframes` resolve without the host, or the pseudo-element
+    /// holds CSS animations the state no longer names, which an empty plan cancels.
     fn pseudo_owes_css_animation_plan(&self, node: StyleNodeID, kind: u8, state: Option<CascadeStateID>) -> bool {
-        kind != pseudo_kind::BACKDROP
-            && (state.is_some_and(|state| !self.state_has_no_animation_name(state))
-                || !self.element_css_defined_animations(node, kind + 1).is_empty())
-            && self.animation_keyframes().only_the_document_scope_defines_keyframes()
+        if kind == pseudo_kind::BACKDROP {
+            return false;
+        }
+        match state.filter(|&state| !self.state_has_no_animation_name(state)) {
+            Some(state) => self.state_names_resolve_without_the_declaration_scope(node, state),
+            None => !self.element_css_defined_animations(node, kind + 1).is_empty(),
+        }
     }
 
     /// `old_is_list_item` says whether the element was a list item when the old record it no
@@ -756,7 +759,10 @@ impl RetainedState {
             if self.pseudo_owes_css_animation_plan(node, kind, state) {
                 let view = self.computed_group_sets.style_record_view(new_style_record.raw())?;
                 let table = unsafe { view.longhand_table.as_ref() }?;
-                let plan = self.settled_animation_plan(node, kind, table, AnimationNameScope::Unknown);
+                let declaration_scope = state.map_or(AnimationNameScope::Unknown, |state| {
+                    self.animation_name_declaration_scope(node, state)
+                });
+                let plan = self.settled_animation_plan(node, kind, table, declaration_scope);
                 self.nodes_owing_animation_definitions.insert((node, kind), plan);
             }
             self.note_engine_computed_pseudo_record(
