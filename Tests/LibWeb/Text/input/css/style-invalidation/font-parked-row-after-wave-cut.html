@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<style>
+    @keyframes pulse {
+        from { opacity: 0.5; }
+        to { opacity: 1; }
+    }
+    .animated {
+        animation: pulse 1s infinite;
+    }
+</style>
+<div id="container"></div>
+<script src="../../include.js"></script>
+<script>
+    test(() => {
+        const container = document.getElementById("container");
+        document.body.offsetWidth;
+
+        // Rows whose fonts are not resolved yet park until the style pass resolves them. The
+        // animated parent's child waits for the host to install the parent, which stops the
+        // wave before the later parked rows.
+        container.innerHTML = `
+            <div id="a" style="font: 11px parked-family-a">A</div>
+            <div id="b" style="font: 12px parked-family-b">
+                <div id="animated" class="animated"><span id="c">C</span></div>
+            </div>
+            <div id="d" style="font: 13px parked-family-d">D</div>
+            <div id="e" style="font: 14px parked-family-e">E</div>`;
+        document.body.offsetWidth;
+
+        for (const element of container.querySelectorAll("[id]"))
+            println(`${element.id}: ${getComputedStyle(element).fontSize}`);
+    });
+</script>
