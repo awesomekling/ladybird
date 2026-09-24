@@ -62,6 +62,7 @@
 #include <LibWeb/HTML/AutoplaySettings.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/EventLoop/FrameCompletion.h>
 #include <LibWeb/HTML/EventLoop/TaskQueue.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLElement.h>
@@ -1656,6 +1657,9 @@ GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
         doors->define_direct_property(writer, door, JS::default_attributes);
     }
     object->define_direct_property("doors"_utf16_fly_string, doors, JS::default_attributes);
+    object->define_direct_property("finishedFrameConsumerCalls"_utf16_fly_string, JS::Value(counters.finished_frame_consumer_calls), JS::default_attributes);
+    object->define_direct_property("frameCompletionsPosted"_utf16_fly_string, JS::Value(HTML::FrameCompletion::the().posted_count()), JS::default_attributes);
+    object->define_direct_property("frameCompletionsDelivered"_utf16_fly_string, JS::Value(HTML::FrameCompletion::the().delivered_count()), JS::default_attributes);
     return object;
 }
 

@@ -113,6 +113,7 @@ public:
         u64 max_submit_to_consume_nanoseconds { 0 };
         // What the DOM side journaled while a frame was in flight, which it could do without waiting for the frame.
         Array<u64, to_underlying(JournalEntryKind::Count)> journal_entries_during_flight {};
+        u64 finished_frame_consumer_calls { 0 };
     };
 
     enum class Type {
@@ -192,6 +193,33 @@ public:
 
     bool running_rendering_task() const { return m_running_rendering_task; }
 
+    // Under LIBWEB_STAGE_THREAD=overlap, a frame finishes beside the document thread and is consumed at step 1 of the
+    // processing model. The consumer is called there whenever FrameCompletion::the() has a completion pending, or it
+    // asked to be called again, no matter whether any page is visible or has a rendering opportunity. Setting it
+    // registers this event loop for completions, so one posted earlier is delivered now.
+    void set_finished_frame_consumer(GC::Ptr<GC::Function<void()>>);
+    // The consumer left work for a later step 1 (e.g. a tail a nested loop may not run). Processing is scheduled
+    // again once the nested loop or pause that held it back ends.
+    void call_finished_frame_consumer_again() { m_finished_frame_consumer_call_requested = true; }
+    bool has_finished_frame_work() const;
+
+    // How deeply the processing model is nested, and what a finished frame may do there. A spin of the event loop
+    // empties the JavaScript execution context stack, so its tasks run above a suspended caller with an empty stack;
+    // a pause (dialogs, synchronous XHR) runs no tasks at all. Consume-commit is script-free, so a forced join may run
+    // it anywhere and step 1 anywhere but inside the rendering task that owns the frame. A consume-tail runs script
+    // (resize observers, screenshots, intersection observer tasks), so only the outermost step 1 runs it.
+    size_t processing_depth() const { return m_processing_depth; }
+    size_t spin_depth() const { return m_spin_depth; }
+    enum class FrameConsumeSite {
+        StepOne,
+        ForcedJoin,
+    };
+    bool may_consume_commit(FrameConsumeSite) const;
+    bool may_run_consume_tail() const;
+    bool consuming_frame() const { return m_consuming_frame_commit || m_running_consume_tail; }
+    void consume_commit(FrameConsumeSite, Function<void()> const&);
+    void run_consume_tail(Function<void()> const&);
+
     RenderingSchedulerCounters const& rendering_scheduler_counters() const { return m_rendering_scheduler_counters; }
     void reset_rendering_scheduler_counters();
 
@@ -265,6 +293,14 @@ private:
     static bool s_a_frame_is_in_flight;
 
     GC::Ptr<GC::Function<void()>> m_rendering_task_function;
+
+    GC::Ptr<GC::Function<void()>> m_finished_frame_consumer;
+    bool m_finished_frame_consumer_call_requested { false };
+    size_t m_processing_depth { 0 };
+    size_t m_spin_depth { 0 };
+    bool m_calling_finished_frame_consumer { false };
+    bool m_consuming_frame_commit { false };
+    bool m_running_consume_tail { false };
 };
 
 WEB_API EventLoop& main_thread_event_loop();
