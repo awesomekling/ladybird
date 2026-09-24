@@ -115,7 +115,6 @@
         child.internals.updateStyle();
         child.document.body.offsetWidth;
 
-        const assembleBefore = child.internals.styleEngineCounters().engineComputedRecordBailAssemble;
         child.internals.resetStyleInvalidationCounters();
         iframe.style.width = "500px";
         document.body.offsetWidth;
@@ -140,6 +139,5 @@
         // The engine recomputes the descendants itself where it can; C++ recomputes the rest.
         const nonInheritedStyleRecomputations = counters.elementStyleRecomputations + counters.engineComputedStyleRecords;
         println(`root font metrics recompute descendants: ${nonInheritedStyleRecomputations >= elementCount / 2}`);
-        println(`assemble refusals: ${child.internals.styleEngineCounters().engineComputedRecordBailAssemble - assembleBefore}`);
     });
 </script>
