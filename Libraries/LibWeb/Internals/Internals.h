@@ -218,6 +218,10 @@ public:
     void dump_join_counters() const;
     GC::Ref<JS::Object> get_rendering_scheduler_counters() const;
     void reset_rendering_scheduler_counters();
+    bool hold_next_recording_frame();
+    void release_held_frame();
+    bool frame_in_flight_holds_document() const;
+    bool frame_in_flight_references_are_alive() const;
     void set_manual_rendering_opportunities(bool enabled);
     void inject_rendering_opportunity(double frame_time_ms);
     void update_compositor_animations();

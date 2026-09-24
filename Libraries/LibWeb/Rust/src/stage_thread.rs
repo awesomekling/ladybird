@@ -39,8 +39,8 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::panic::AssertUnwindSafe;
-use std::sync::OnceLock;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Condvar, Mutex, OnceLock};
 use std::thread::ThreadId;
 
 type Job = Box<dyn FnOnce() + Send>;
@@ -223,6 +223,8 @@ impl SubmittedStage {
     }
 
     fn wait(&mut self) -> StageOutcome {
+        // A held stage would never finish while the main thread waits for it.
+        release_hold_on(self.label);
         match self.outcome.take() {
             Some(outcome) => outcome,
             None => self.from_stage.recv().unwrap_or_else(|_| std::process::abort()),
@@ -276,6 +278,7 @@ pub(crate) unsafe fn submit_stage(label: &'static str, arena: *mut c_void, stage
     let (to_caller, from_stage) = channel::<StageOutcome>();
     let caller = std::thread::current().id();
     let job: Job = Box::new(move || {
+        wait_if_held(label);
         tsan::acquire(thread);
         let waiting_caller = WAITING_CALLER.with(|waiting| waiting.replace(Some(caller)));
         let outcome = std::panic::catch_unwind(AssertUnwindSafe(stage));
@@ -300,6 +303,77 @@ pub(crate) unsafe fn submit_stage(label: &'static str, arena: *mut c_void, stage
     if thread.jobs.send(StageMessage::Run(job)).is_err() {
         // The stage thread only goes away if the process is going away.
         std::process::abort();
+    }
+}
+
+/// A test's hold on the next submitted run of a stage: the stage thread waits before it runs that
+/// stage until the hold is released, so that the main thread runs its tasks beside the frame in
+/// flight at a point the test chooses.
+#[derive(Default)]
+struct StageHold {
+    armed_for: Option<String>,
+    holding: bool,
+}
+
+fn stage_hold() -> &'static (Mutex<StageHold>, Condvar) {
+    static STAGE_HOLD: OnceLock<(Mutex<StageHold>, Condvar)> = OnceLock::new();
+    STAGE_HOLD.get_or_init(Default::default)
+}
+
+/// Makes the stage thread wait before the next submitted run of the stage `label` names, until
+/// [`rust_stage_thread_release_held_stage`] or a main-thread wait for the stage releases it.
+/// Returns false, and holds nothing, unless stages are submitted.
+///
+/// # Safety
+///
+/// `label` must point to `label_length` bytes of UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_stage_thread_hold_next_submitted_stage(label: *const u8, label_length: usize) -> bool {
+    if stage_thread_mode() != Some(StageThreadMode::Overlap) || FRAME_SCHEDULER_HOST.get().is_none() {
+        return false;
+    }
+    // SAFETY: Guaranteed by the caller.
+    let label = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(label, label_length)) };
+    let (hold, _) = stage_hold();
+    hold.lock().expect("the stage hold is never poisoned").armed_for = Some(label.to_owned());
+    true
+}
+
+/// Releases a held stage, or disarms a hold no stage has reached yet.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_release_held_stage() {
+    let (hold, released) = stage_hold();
+    let mut hold = hold.lock().expect("the stage hold is never poisoned");
+    hold.armed_for = None;
+    hold.holding = false;
+    released.notify_all();
+}
+
+/// Releases the stage the stage thread is holding, and disarms a hold for `label` that the stage
+/// thread has not reached yet. A hold for another stage stays armed.
+fn release_hold_on(label: &'static str) {
+    let (hold, released) = stage_hold();
+    let mut hold = hold.lock().expect("the stage hold is never poisoned");
+    if hold.armed_for.as_deref() == Some(label) {
+        hold.armed_for = None;
+    }
+    if hold.holding {
+        hold.holding = false;
+        released.notify_all();
+    }
+}
+
+/// On the stage thread, before a submitted run of `label`: waits while a hold is armed for it.
+fn wait_if_held(label: &'static str) {
+    let (hold, released) = stage_hold();
+    let mut hold = hold.lock().expect("the stage hold is never poisoned");
+    if hold.armed_for.as_deref() != Some(label) {
+        return;
+    }
+    hold.armed_for = None;
+    hold.holding = true;
+    while hold.holding {
+        hold = released.wait(hold).expect("the stage hold is never poisoned");
     }
 }
 
