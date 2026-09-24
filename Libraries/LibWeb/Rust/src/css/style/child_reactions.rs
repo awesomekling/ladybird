@@ -23,6 +23,15 @@ use crate::css::host_shared::SharedPayload;
 /// Every inherited style group, for a change that reaches all of them.
 const ALL_INHERITED_STYLE_GROUPS: u8 = (1 << 7) - 1;
 
+/// What applying a style reaction moved of the element's own state, as its children read it.
+#[derive(Default)]
+struct StyleReactionRowFacts {
+    was_unstyled: bool,
+    was_display_none: bool,
+    /// The element's computed display moved, which its children's box-type transformation reads.
+    display_changed: bool,
+}
+
 /// What an element's installed record generates, as its children read it.
 struct InstalledRecordState {
     is_display_none: bool,
@@ -45,6 +54,41 @@ impl StyleEngineState {
         })
     }
 
+    /// The host begins applying a style reaction to `node`: what the element holds now is what
+    /// the application moves it from.
+    pub fn begin_style_reaction(&mut self, node: StyleNodeID) {
+        self.host.style_reaction_row_start = Some((node, self.host.held_style_record_displays.get(&node).copied()));
+    }
+
+    /// What applying the reaction that began on `node` moved, from what the element held before
+    /// and holds now.
+    fn style_reaction_row_facts(&mut self, node: StyleNodeID) -> StyleReactionRowFacts {
+        let Some((row_node, before)) = self.host.style_reaction_row_start.take() else {
+            panic!("style reaction applied to {node:?} without beginning");
+        };
+        assert_eq!(
+            row_node, node,
+            "style reaction applied to another element than it began on"
+        );
+        let now = self.host.held_style_record_displays.get(&node).copied();
+        // An element left without style by the application had none before it either.
+        assert!(
+            now.is_some() || before.is_none(),
+            "style reaction cleared the style of {node:?}"
+        );
+        let Some(before) = before else {
+            return StyleReactionRowFacts {
+                was_unstyled: true,
+                ..Default::default()
+            };
+        };
+        StyleReactionRowFacts {
+            was_unstyled: false,
+            was_display_none: before.is_some_and(|display| display.is_none()),
+            display_changed: matches!((before, now), (Some(before), Some(Some(now))) if before != now),
+        }
+    }
+
     /// Derive the children's reactions from a reaction C++ applied to `node`: `reaction` is what
     /// the element reacted to, `inherited_style_groups_changed` names the inherited groups its
     /// style moved, and `facts` says what else the application found. What the element's
@@ -56,6 +100,7 @@ impl StyleEngineState {
         inherited_style_groups_changed: u8,
         facts: u32,
     ) {
+        let row_facts = self.style_reaction_row_facts(node);
         let has = |bit: u32| facts & bit != 0;
         let did_change_custom_properties = has(fact::DID_CHANGE_CUSTOM_PROPERTIES);
         let invalidation_is_none = has(fact::INVALIDATION_IS_NONE);
@@ -83,7 +128,7 @@ impl StyleEngineState {
         };
 
         if installed.is_display_none {
-            let (child_reaction, groups) = if has(fact::WAS_UNSTYLED) {
+            let (child_reaction, groups) = if row_facts.was_unstyled {
                 (STYLE_REACTION_RECOMPUTE_STYLE, 0)
             } else {
                 let mut child_reaction = 0;
@@ -126,7 +171,7 @@ impl StyleEngineState {
         if reaction & STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES != 0 || has(fact::RECOMPUTE_DESCENDANT_STYLES) {
             common_child_reaction |= STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES;
         }
-        if ancestor_became_visible || (has(fact::WAS_DISPLAY_NONE) && !installed.in_display_none_subtree) {
+        if ancestor_became_visible || (row_facts.was_display_none && !installed.in_display_none_subtree) {
             common_child_reaction |= STYLE_REACTION_ANCESTOR_BECAME_VISIBLE;
         }
 
@@ -141,7 +186,7 @@ impl StyleEngineState {
         };
         // A child's box-type transformation reads its parent's display: when that moved, the
         // child's record is driven again in full, whatever its own winners did.
-        let display_changed = has(fact::DISPLAY_CHANGED);
+        let display_changed = row_facts.display_changed;
         let mut next = self.retained.tree.first_element_child(node);
         while let Some(child) = next {
             next = self.retained.tree.next_element_sibling(child);

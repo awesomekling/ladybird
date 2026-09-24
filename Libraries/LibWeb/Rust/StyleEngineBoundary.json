@@ -162,7 +162,8 @@
     [171, "RecordTreeCountingStyleInput"],
     [172, "RecordTransitionBaseline"],
     [173, "TransitionBaseline"],
-    [174, "ReleaseTransitionBaselines"]
+    [174, "ReleaseTransitionBaselines"],
+    [175, "BeginStyleReaction"]
   ],
   "operations": [
     { "event": "RecordContainerQueryInput", "ffi": "style_engine_record_container_query_input", "cpp": "record_container_query_input", "return": "void", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.record_container_query_input(node);" },
@@ -244,6 +245,7 @@
     { "event": "PublishedPseudoStyleMask", "ffi": "style_engine_published_pseudo_style_mask", "cpp": "published_pseudo_style_mask", "return": "u64", "receiver": "const", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return 0; }; let result = engine.published_pseudo_style_mask(node);" },
     { "event": "PseudoCascadeStatesAreUnchanged", "ffi": "style_engine_pseudo_cascade_states_are_unchanged", "cpp": "pseudo_cascade_states_are_unchanged", "return": "bool", "receiver": "const", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return false; }; let result = engine.pseudo_cascade_states_are_unchanged(node);" },
     { "event": "AbsorbElementStyleInput", "ffi": "style_engine_absorb_element_style_input", "cpp": "absorb_element_style_input", "return": "u32", "args": [["node", "style_node"], ["reaction", "u8"], ["inherited_style_groups", "u8"], ["absorbs_any", "bool"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return 0; }; let result = engine.absorb_element_style_input(node, reaction, inherited_style_groups, absorbs_any);" },
+    { "event": "BeginStyleReaction", "ffi": "style_engine_begin_style_reaction", "cpp": "begin_style_reaction", "return": "void", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.begin_style_reaction(node);" },
     { "event": "NoteStyleReactionApplied", "ffi": "style_engine_note_style_reaction_applied", "cpp": "note_style_reaction_applied", "return": "void", "args": [["node", "style_node"], ["reaction", "u8"], ["inherited_style_groups_changed", "u8"], ["facts", "u32"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.note_style_reaction_applied(node, reaction, inherited_style_groups_changed, facts);" },
     { "event": "SetElementAdjustmentFacts", "ffi": "style_engine_set_element_adjustment_facts", "cpp": "set_element_adjustment_facts", "return": "void", "args": [["node", "style_node"], ["facts", "u32"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_element_adjustment_facts(node, facts);" },
     { "event": "SetElementAssociatedPseudoKind", "ffi": "style_engine_set_element_associated_pseudo_kind", "cpp": "set_element_associated_pseudo_kind", "return": "void", "args": [["node", "style_node"], ["pseudo_kind_plus_one", "u8"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.set_element_associated_pseudo_kind(node, pseudo_kind_plus_one);" },
