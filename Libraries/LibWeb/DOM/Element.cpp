@@ -2157,8 +2157,16 @@ void Element::publish_custom_property_names()
         .uses_custom_function = m_style_uses_custom_function,
     };
     Vector<RefPtr<CSS::CustomPropertyData const>> published_pseudo_element_data;
+    // The engine keeps the environments of the synthetic pseudo-elements, and names the ones that
+    // hold one in a single answer.
+    auto const synthetic_pseudo_elements_with_data = style_node_id() == 0
+        ? 0
+        : CSS::StyleEngineFFI::style_engine_pseudo_elements_with_custom_property_data(document().style_computer().style_engine().rust_handle(), style_node_id().value());
     for (auto i = 0; i < to_underlying(CSS::PseudoElement::KnownPseudoElementCount); ++i) {
-        if (auto data = custom_property_data(static_cast<CSS::PseudoElement>(i)))
+        auto pseudo_element = static_cast<CSS::PseudoElement>(i);
+        if (is_synthetic_pseudo_element(pseudo_element) && !((synthetic_pseudo_elements_with_data >> i) & 1))
+            continue;
+        if (auto data = custom_property_data(pseudo_element))
             published_pseudo_element_data.append(move(data));
     }
     Vector<Utf16FlyString> published_references;

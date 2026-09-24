@@ -4723,6 +4723,21 @@ pub unsafe extern "C" fn style_engine_pseudo_element_custom_property_data(
     data
 }
 
+/// The kinds of the element's synthetic pseudo-elements that hold a custom-property environment,
+/// one bit per kind, so the host asks for only those.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_pseudo_elements_with_custom_property_data(
+    engine: *const c_void,
+    node: u32,
+) -> u64 {
+    super::seal::note_engine_call("style_engine_pseudo_elements_with_custom_property_data");
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    StyleNodeID::from_raw(node).map_or(0, |node| engine.pseudo_elements_with_custom_property_data(node))
+}
+
 /// Keep the sampled custom-property values of an animation as a published input. Its environment
 /// identity is already installed on the element. Return the reactions derived from the element's
 /// retained declarations and from which sampled names its descendants inherit.
