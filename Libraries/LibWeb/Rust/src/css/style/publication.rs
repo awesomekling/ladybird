@@ -2395,6 +2395,31 @@ impl RetainedState {
         Some((length, table.effective_color_scheme() as u8))
     }
 
+    /// The context a registered custom property resolves against when its caller brings none:
+    /// the record the node (or, for a pseudo-element, its originating element) holds, or else
+    /// the provisional context over the node's inheritance parent.
+    pub(super) fn standing_registered_value_context(
+        &self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        inputs: &bridge::FfiDocumentStyleComputationInputs,
+    ) -> custom_property_cascade::RegisteredValueContext {
+        let own = self.computed_group_sets.assigned_style_record(node);
+        if pseudo.is_none()
+            && let Some((length, color_scheme)) =
+                own.and_then(|record| self.own_font_length_resolution_context(record, inputs))
+        {
+            return custom_property_cascade::RegisteredValueContext { length, color_scheme };
+        }
+        let context_record = match pseudo {
+            Some(_) => own,
+            None => self
+                .record_inheritance_parent(node)
+                .and_then(|parent| self.computed_group_sets.assigned_style_record(parent)),
+        };
+        self.provisional_registered_value_context(context_record, inputs)
+    }
+
     pub(super) fn provisional_registered_value_context(
         &self,
         parent_record: Option<computed::FinalStyleRecordID>,

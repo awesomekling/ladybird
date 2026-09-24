@@ -1152,8 +1152,8 @@ impl RetainedState {
 
     /// The environment of a node the engine computes a record for: the one it inherits when its
     /// cascade declares no custom property, else what its declarations resolve to over that one.
-    /// Refused when the environment is C++'s to compute: a registered name, a substitution the
-    /// engine does not resolve, or an inherited environment the engine holds no store for.
+    /// Refused when an input is missing: the registry, an interned name, or the store of the
+    /// inherited environment.
     pub(super) fn engine_custom_property_environment(
         &mut self,
         node: StyleNodeID,
@@ -1237,10 +1237,6 @@ impl RetainedState {
         let registry_ref = unsafe { &*registry.as_pointer().cast::<CustomPropertyRegistry>() };
         let mut has_registered_declaration = false;
         if registry_ref.has_registrations() {
-            // A registration with a real syntax computes its name's value against the element's
-            // own font and viewport, which this resolution has only where the row keeps the
-            // record it reads them from. Without that context there is nothing to absolutize
-            // against, so the declaration stays with the host.
             for (declared, _) in &cascaded {
                 let Some(name) = self.custom_property_environments.name(declared.name) else {
                     counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
@@ -1248,13 +1244,18 @@ impl RetainedState {
                 };
                 if registry_ref.registration_facts(&name.text).is_some() {
                     has_registered_declaration = true;
-                    if registered.is_none() {
-                        counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-                        return Err(Unanswered::Refused);
-                    }
+                    break;
                 }
             }
         }
+        // A registration with a real syntax computes its name's value against the element's own
+        // font and viewport. A caller that brings no context resolves it against the record the
+        // node holds, as a warm row does, or else provisionally against its parent's, as a first
+        // record does before its drive settles the font.
+        let registered = match registered {
+            None if has_registered_declaration => Some(self.standing_registered_value_context(node, pseudo, inputs)),
+            registered => registered,
+        };
         let key = Self::environment_inputs(
             inheritance_environment,
             inputs.custom_property_registration_generation,
