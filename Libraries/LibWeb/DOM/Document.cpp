@@ -2115,17 +2115,6 @@ void Document::end_style_stabilization_epoch()
     m_animations_created_in_stabilization_epoch.clear();
 }
 
-// Refreshes what derives from committed layout results on the document side, shared by the partial and full layout
-// paths so neither can forget one. What needs none of the document's objects, the layout frame does itself, and what
-// is only read after the layout update comes back through apply_layout_commit_effects().
-void Document::after_layout_commit()
-{
-    // NB: Called during layout update.
-    // A tree update can replace layout nodes referenced by selection state.
-    if (auto range = get_selection()->range())
-        paint_state().recompute_selection_states(*this, *range);
-}
-
 void Document::apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffects const& effects)
 {
     if (effects.boxes_with_auto_content_visibility_collected) {

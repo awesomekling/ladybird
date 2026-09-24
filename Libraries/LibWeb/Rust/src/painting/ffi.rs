@@ -451,30 +451,18 @@ pub unsafe extern "C" fn layout_arena_paintable_has_child_paintables(arena: *mut
 
 /// # Safety
 ///
-/// `arena` must be a live handle from `layout_arena_create`, used on the
-/// document thread. `entries` must point at `entry_count` valid entries.
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread, and
+/// `snapshot` must address a snapshot whose nodes are valid for the call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_selection_apply(
+pub unsafe extern "C" fn layout_arena_selection_apply_snapshot(
     arena: *mut c_void,
-    viewport: NodeSlotId,
-    entries: *const FfiSelectionEntry,
-    entry_count: usize,
-    range_start_offset: usize,
-    range_end_offset: usize,
+    snapshot: *const FfiSelectionSnapshot,
 ) {
     let arena = unsafe { arena_from_handle_mut(arena) };
     let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::SELECTION_WRITER);
-    if !arena.paintable_row_is_populated(viewport) {
-        return;
-    }
-    // SAFETY: The caller guarantees the entry span is valid for this synchronous call.
-    let entries = unsafe { ffi_slice(entries, entry_count) };
-    let text_states = crate::painting::selection::apply(&mut arena.paintable_rows_mut(), viewport, entries);
-    arena.paint_state().borrow_mut().selection = Some(crate::painting::selection::SelectionRange {
-        start_offset: range_start_offset,
-        end_offset: range_end_offset,
-        text_states,
-    });
+    // SAFETY: Guaranteed by the caller.
+    let snapshot = unsafe { crate::painting::selection::SelectionSnapshot::from_ffi(&*snapshot) };
+    snapshot.apply(arena);
 }
 
 /// # Safety

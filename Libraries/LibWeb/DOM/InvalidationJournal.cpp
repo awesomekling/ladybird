@@ -264,7 +264,7 @@ void InvalidationJournal::publish_selection_states()
         return;
     auto selection = m_document.get_selection();
     if (auto range = selection ? selection->range() : nullptr)
-        m_document.paint_state().recompute_selection_states(m_document, *range);
+        m_document.paint_state().recompute_selection_states(*range);
     else
         m_document.paint_state().reset_selection_states(m_document);
 }

@@ -1641,7 +1641,6 @@ private:
     Layout::RustFFI::FfiLayoutUpdateHostCallbacks layout_update_host_callbacks();
 
     void process_pending_list_item_renumbers();
-    void after_layout_commit();
     void apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffects const&);
 
     void run_unloading_cleanup_steps();

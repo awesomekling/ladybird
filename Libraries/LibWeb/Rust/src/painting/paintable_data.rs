@@ -102,6 +102,42 @@ pub struct FfiSelectionEntry {
     pub state: u8,
 }
 
+/// What a node of a selection snapshot is to the range it was read from.
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum FfiSelectionSnapshotRole {
+    StartContainer = 0,
+    /// A node the range covers between its start and end containers, in tree order.
+    Covered = 1,
+    EndContainer = 2,
+}
+
+/// A node a selection range reaches, as the document read it: named by its style node, or as the
+/// document, with what excludes it from selection. Only a node with a style node or the document
+/// can have a box, so no other node is read.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct FfiSelectionSnapshotNode {
+    pub style_node: u32,
+    pub is_document: bool,
+    pub is_text: bool,
+    pub is_inert: bool,
+    /// Whether the node's used `user-select` is `none`, which excludes it only when it has a box.
+    pub user_select_is_none: bool,
+    pub role: FfiSelectionSnapshotRole,
+}
+
+/// A selection range as the document read it, for the rows its nodes are bound to to be stamped
+/// from.
+#[repr(C)]
+pub struct FfiSelectionSnapshot {
+    pub nodes: *const FfiSelectionSnapshotNode,
+    pub node_count: usize,
+    pub start_offset: usize,
+    pub end_offset: usize,
+    pub starts_and_ends_in_one_container: bool,
+}
+
 pub const SELECTION_STATE_NONE: u8 = 0;
 pub const SELECTION_STATE_START: u8 = 1;
 pub const SELECTION_STATE_END: u8 = 2;
