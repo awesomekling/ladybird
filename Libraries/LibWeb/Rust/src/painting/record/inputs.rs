@@ -66,6 +66,8 @@ pub(crate) struct RecordingInputs<'a> {
     // answer with. These are the document's half of that decision.
     pub document_declares_light_or_dark_color_scheme: bool,
     pub image_color_scheme_fallback: u8,
+    // The SVG-as-image renders the main thread resolved before the recording started.
+    pub vector_image_display_lists: std::sync::Arc<crate::painting::record::vector_images::VectorImageDisplayLists>,
     pub inspector_highlight: Option<InspectorHighlight<'a>>,
     pub tooltip_color: Color,
     pub tooltip_text_color: Color,

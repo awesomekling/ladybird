@@ -198,15 +198,16 @@ impl<O: Observer> PaintRecorder<'_, O> {
     ) {
         use libgfx_rust::CompositingAndBlendingOperator;
         let geometry = vector_images::vector_image_render_geometry(dest_rect, accumulated_scale, has_active_view_box);
-        let display_list_id = self
-            .resources
-            .vector_image_placeholder(vector_images::VectorImageRenderRequest::new(
+        let display_list_id = self.resources.vector_image_display_list(
+            vector_images::VectorImageRenderRequest::new(
                 image_identity,
                 color_scheme,
                 geometry.css_width,
                 geometry.css_height,
                 geometry.raster_scale,
-            ));
+            ),
+            &self.inputs.vector_image_display_lists,
+        );
         if compositing_and_blending_operator != CompositingAndBlendingOperator::Normal {
             let dest_device_rect = libgfx_rust::enclosing_int_rect(dest_rect);
             if dest_device_rect.is_empty() {

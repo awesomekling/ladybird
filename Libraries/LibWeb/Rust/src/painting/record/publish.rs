@@ -10,22 +10,23 @@ use crate::painting::host::RecordingPublishHost;
 use crate::painting::paint_state::PendingRecording;
 use crate::painting::record::resources::RecordingResourceManifest;
 use crate::painting::record::vector_images::{
-    VectorImageRenderRequest, is_vector_image_placeholder, vector_image_placeholder_index,
+    VectorImageDisplayLists, VectorImageRenderRequest, is_vector_image_placeholder, vector_image_placeholder_index,
 };
 use crate::painting::record::{RecordingOutput, RecordingResult};
 
-fn resolve_vector_image_placeholders(
+// Patches the placeholders of the renders a recording missed with the display lists the main
+// thread resolved for them since. Only a lookup: rendering an image is the main thread's.
+fn patch_vector_image_placeholders(
     output: &mut RecordingOutput,
-    requests: &[VectorImageRenderRequest],
-    main_thread: &crate::stage::MainThread,
-    publish: &RecordingPublishHost,
+    missed: &[VectorImageRenderRequest],
+    resolved: &VectorImageDisplayLists,
 ) {
-    if requests.is_empty() {
+    if missed.is_empty() {
         return;
     }
-    let resolved_ids: Vec<u64> = requests
+    let resolved_ids: Vec<DisplayListResourceId> = missed
         .iter()
-        .map(|request| publish.resolve_vector_image_display_list(main_thread, &request.to_ffi()))
+        .map(|request| resolved.resolved_or_empty(request))
         .collect();
     let display_list = std::sync::Arc::make_mut(&mut output.display_list);
     let id_field_offset = std::mem::offset_of!(PaintNestedDisplayList, display_list_id);
@@ -47,8 +48,7 @@ fn resolve_vector_image_placeholders(
         },
     );
     for (offset, resolved_id) in patch_offsets {
-        display_list.bytes[offset..offset + std::mem::size_of::<u64>()]
-            .copy_from_slice(&DisplayListResourceId(resolved_id).0.to_ne_bytes());
+        display_list.bytes[offset..offset + std::mem::size_of::<u64>()].copy_from_slice(&resolved_id.0.to_ne_bytes());
     }
 }
 
@@ -67,10 +67,11 @@ pub(crate) fn publish_recording(
         fonts,
         image_frames,
         video_sinks,
-        vector_image_render_requests,
+        painted_vector_images,
+        missed_vector_images,
         ..
     } = resources;
-    let pass = crate::painting::seal::enter(crate::painting::seal::Pass::RecordingPublish);
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::RecordingPublish);
     for font in fonts.values() {
         publish.add_font(main_thread, font);
     }
@@ -83,21 +84,17 @@ pub(crate) fn publish_recording(
     for (resource_id, sink_handle) in video_sinks {
         publish.add_video_sink(main_thread, resource_id, sink_handle);
     }
-    // Resolving a vector image lays out and records another document, which reads that document
-    // and re-enters this arena's SVG paint resource sync. That is a paint stage of its own, so
-    // this one ends before it begins rather than containing it.
-    drop(pass);
-    resolve_vector_image_placeholders(&mut output, &vector_image_render_requests, main_thread, publish);
+    let resolved = arena.paint_state().borrow().vector_image_display_lists.clone();
+    patch_vector_image_placeholders(&mut output, &missed_vector_images, &resolved);
     let recording_from_scratch = recording_from_scratch.map(|mut recording_from_scratch| {
-        resolve_vector_image_placeholders(
+        patch_vector_image_placeholders(
             &mut recording_from_scratch.output,
-            &recording_from_scratch.resources.vector_image_render_requests,
-            main_thread,
-            publish,
+            &recording_from_scratch.resources.missed_vector_images,
+            &resolved,
         );
         recording_from_scratch
     });
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::RecordingPublish);
+    arena.paint_state().borrow_mut().painted_vector_images = painted_vector_images.into_iter().collect();
     if let Some(recording_from_scratch) = recording_from_scratch {
         crate::painting::record::verify::verify_assembled_recording_matches_fresh(
             &output,

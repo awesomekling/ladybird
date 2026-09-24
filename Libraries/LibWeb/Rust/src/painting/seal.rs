@@ -45,12 +45,11 @@
 //! `add_video_sink`. Publish is a pass of its own so that what it resolves is still counted, but
 //! handing the resource service a font is not a read of the document.
 //!
-//! **A nested vector image, recorded beside the publish that asked for it.**
-//! `resolve_vector_image_display_list` lays out and records an SVG-as-image document, which is a
-//! paint stage of that document rather than of this one, so
-//! [`crate::painting::record::publish::publish_recording`] ends the publish around it. The
-//! request names the image and the scheme it renders with, both of them published by the
-//! recording, so resolving it reads nothing of this document.
+//! **Nested vector images, rendered by the main thread.** `FfiVectorImageCallbacks` lays out and
+//! records an SVG-as-image document. The main thread calls it with no pass running: before the
+//! recording, for the renders the last recording painted, and between the recording and its
+//! publish, for the renders the recording missed. The recording and the publish only look renders
+//! up in the map those calls produce.
 //!
 //! **Result sinks of C++ to Rust queries.** A query that answers through a callback appending to
 //! a caller-owned collection runs with no pass in progress at all, so the predicate excludes
