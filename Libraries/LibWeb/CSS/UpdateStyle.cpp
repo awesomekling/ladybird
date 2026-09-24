@@ -544,7 +544,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             if (!engine_derived_children)
                 document.style_computer().style_engine().begin_style_reaction(StyleNodeID { reaction.style_node });
             DOM::begin_style_row_counter_style_invalidation(*element);
-            auto old_custom_property_data = element->custom_property_data({});
+            // The environment the element held before the row, when the row moves it.
+            RefPtr<CustomPropertyData const> old_custom_property_data;
             auto const* previous_inherited_box_values = element->style_group<ComputedValues::InheritedBoxValues>();
             auto const previous_visibility = previous_inherited_box_values
                 ? Optional<Visibility> { static_cast<Visibility>(previous_inherited_box_values->visibility) }
@@ -586,7 +587,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 Optional<DOM::Element::EngineRecordDamage> engine_record_damage;
                 if (reaction.record_damage & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::EngineComputed))
                     engine_record_damage = DOM::Element::EngineRecordDamage { StyleRecordID { reaction.old_style_record }, reaction.record_damage };
-                invalidation = element->apply_engine_computed_style_record(new_style_record, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties, engine_record_comparison, engine_record_damage, pseudo_element_damages, &row_effects);
+                invalidation = element->apply_engine_computed_style_record(new_style_record, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties, engine_record_comparison, engine_record_damage, pseudo_element_damages, &row_effects, &old_custom_property_data);
                 // What the row's container conditions read of its containers, recorded as the host
                 // records it for a row it computes.
                 row_effects.append(StyleEffectDrain::ContainerQueryEffects { StyleNodeID { reaction.style_node } });
@@ -796,6 +797,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 }
             } else if (needs_regular_style_recompute || needs_inherited_style_recompute || needs_full_custom_property_recompute) {
                 StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::HostRecordDemand);
+                old_custom_property_data = element->custom_property_data({});
                 invalidation = apply_engine_record_demand(*element, did_change_custom_properties);
                 if (reaction.reaction & StyleEngine::PseudoInputsMayHaveChanged)
                     sample_animations_for_installed_pseudos(*element);

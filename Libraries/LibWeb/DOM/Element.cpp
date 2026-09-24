@@ -1619,9 +1619,6 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
 
     auto& style_computer = document().style_computer();
     auto originating_style = computed_style();
-    // A reused originating record keeps the pseudo-element inventory it was computed with; the
-    // style engine's answer says which pseudo-elements have rules now.
-    auto const engine_pseudo_element_styles = style_node_id() != 0 ? style_computer.style_engine().published_pseudo_style_mask(style_node_id()) : 0;
     // The engine settles the synthetic pseudo-elements of an element C++ computed against the
     // record C++ just installed, as it settles them beside a record of its own, and C++ installs
     // the engine's records.
@@ -1629,6 +1626,9 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
     bool const settled_after_host_record = [&] {
         if (engine_pseudo_element_records || style_node_id() == 0 || !originating_style)
             return false;
+        // A reused originating record keeps the pseudo-element inventory it was computed with; the
+        // style engine's answer says which pseudo-elements have rules now.
+        auto const engine_pseudo_element_styles = style_computer.style_engine().published_pseudo_style_mask(style_node_id());
         // Most elements have no style for any of the kinds the engine settles. A marker is
         // refreshed for a list item only.
         auto may_have_style = [&](CSS::PseudoElement pseudo_element) {
@@ -2168,8 +2168,14 @@ void Element::finish_recording_container_query_dependencies()
 
 void Element::publish_custom_property_names()
 {
+    publish_custom_property_names(custom_property_data({}));
+}
+
+// `data` is the element's own custom-property environment, which the caller knows already.
+void Element::publish_custom_property_names(RefPtr<CSS::CustomPropertyData const> data)
+{
     PublishedCustomPropertyNames published_names {
-        .data = custom_property_data({}),
+        .data = move(data),
         .uses_var_css_function = m_style_uses_var_css_function,
         .uses_custom_function = m_style_uses_custom_function,
     };
@@ -2336,7 +2342,7 @@ void Element::republish_animation_name_registry()
     CSS::record_element_animation_names(*this, indexable_animation_names(*style));
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison comparison, Optional<EngineRecordDamage> engine_record_damage, EnginePseudoElementDamages const* pseudo_element_damages, CSS::StyleEffectDrain* effect_drain)
+CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison comparison, Optional<EngineRecordDamage> engine_record_damage, EnginePseudoElementDamages const* pseudo_element_damages, CSS::StyleEffectDrain* effect_drain, RefPtr<CSS::CustomPropertyData const>* replaced_custom_property_data)
 {
     VERIFY(parent());
     auto old_style_record = style_record_identity();
@@ -2374,17 +2380,17 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
 
     // The environment the record was published with: what the element inherits, or what the
     // engine resolved its own custom declarations to over that.
-    auto install_custom_property_environment = [&] {
+    auto install_custom_property_environment = [&](RefPtr<CSS::CustomPropertyData const> current) {
         bool installable = false;
         auto data = custom_property_environment_of_engine_record(new_style_record, installable);
         VERIFY(installable);
-        set_custom_property_data({}, data);
+        return set_own_custom_property_data(move(current), move(data));
     };
     auto old_computed_values = computed_style();
     if (!old_computed_values) {
         // The element's first style: what a C++ first computation installs beside the record,
         // with the pseudo-element styles it still computes.
-        install_custom_property_environment();
+        auto custom_property_environment = install_custom_property_environment(custom_property_data({}));
         set_computed_style({}, new_style_record);
         if (!effect_drain)
             update_anchor_name_registry({}, *computed_style());
@@ -2396,7 +2402,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         auto invalidation = CSS::RequiredInvalidationAfterStyleChange::full();
         if (!CSS::deferring_engine_pseudo_installation())
             invalidation |= recompute_pseudo_element_styles(did_change_custom_properties, false, nullptr, &pseudo_element_records, pseudo_element_damages);
-        publish_custom_property_names();
+        publish_custom_property_names(move(custom_property_environment));
         if (effect_drain)
             effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), invalidation });
         else
@@ -2409,14 +2415,21 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     // reaction moved only its pseudo-elements. Its custom properties may have moved with it: the engine resolves the
     // element's own declarations, and a moved environment is what its descendants react to.
     CSS::StyleComputer::ComputedStyleInvalidation result;
+    // The environment the element holds once the record is installed, when this knows it.
+    Optional<RefPtr<CSS::CustomPropertyData const>> held_custom_property_environment;
     if (new_style_record != old_style_record) {
-        auto current_environment = custom_property_data({});
+        auto held_environment = custom_property_data({});
+        auto current_environment = held_environment;
         if (current_environment && current_environment->is_animation_overlay_for({ *this }))
             current_environment = current_environment->parent();
         auto const current_identity = current_environment ? current_environment->identity() : 0;
         if (current_identity != style_computer.style_engine().style_record_custom_property_environment(new_style_record)) {
-            install_custom_property_environment();
+            if (replaced_custom_property_data)
+                *replaced_custom_property_data = held_environment;
+            held_custom_property_environment = install_custom_property_environment(move(held_environment));
             did_change_custom_properties = true;
+        } else {
+            held_custom_property_environment = move(held_environment);
         }
         auto new_computed_values = style_computer.computed_style_record_view(new_style_record);
         VERIFY(new_computed_values);
@@ -2477,7 +2490,10 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     // The pseudo-element records the engine settled beside this one install with it.
     if (!CSS::deferring_engine_pseudo_installation())
         result.invalidation |= recompute_pseudo_element_styles(did_change_custom_properties, old_computed_values->display().is_list_item(), &*old_computed_values, &pseudo_element_records, pseudo_element_damages);
-    publish_custom_property_names();
+    if (held_custom_property_environment.has_value())
+        publish_custom_property_names(held_custom_property_environment.release_value());
+    else
+        publish_custom_property_names();
     if (new_style_record != old_style_record || did_change_custom_properties)
         invalidate_descendant_styles_depending_on_style_container_query();
     if (comparison == EngineRecordComparison::AtInstallation) {
@@ -5347,6 +5363,24 @@ SyntheticPseudoElement& Element::ensure_synthetic_pseudo_element(CSS::PseudoElem
     }
 
     return as<SyntheticPseudoElement>(*pseudo_element_data->get(type).value());
+}
+
+// Installs `data` as the element's own environment over `current`, the one it holds, and returns
+// what the element holds then: an animation overlay the element holds stays composed over it.
+RefPtr<CSS::CustomPropertyData const> Element::set_own_custom_property_data(RefPtr<CSS::CustomPropertyData const> current, RefPtr<CSS::CustomPropertyData const> data)
+{
+    if (!data || !data->is_animation_overlay_for({ *this })) {
+        if (current && current->is_animation_overlay_for({ *this })) {
+            if (current->parent() == data)
+                return current;
+            OrderedHashMap<Utf16FlyString, CSS::StyleProperty> animated_values;
+            for (auto const& [name, property] : current->own_values())
+                animated_values.set(name, property);
+            data = CSS::CustomPropertyData::create_animation_overlay(move(animated_values), move(data), { *this });
+        }
+    }
+    install_custom_property_data({}, data);
+    return data;
 }
 
 void Element::set_custom_property_data(Optional<CSS::PseudoElement> pseudo_element, RefPtr<CSS::CustomPropertyData const> data)

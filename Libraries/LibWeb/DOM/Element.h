@@ -349,7 +349,9 @@ public:
     // An installation given a drain leaves its render-side effects (the layout node restyle, the
     // anchor name registry) there, for its batch to apply once the batch is installed.
     using EnginePseudoElementDamages = Array<Optional<EngineRecordDamage>, to_underlying(CSS::PseudoElement::KnownPseudoElementCount)>;
-    CSS::RequiredInvalidationAfterStyleChange apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const&, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison = EngineRecordComparison::AtInstallation, Optional<EngineRecordDamage> = {}, EnginePseudoElementDamages const* = nullptr, CSS::StyleEffectDrain* = nullptr);
+    // `replaced_custom_property_data` receives the environment the element held before, when the
+    // installation moves it.
+    CSS::RequiredInvalidationAfterStyleChange apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const&, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison = EngineRecordComparison::AtInstallation, Optional<EngineRecordDamage> = {}, EnginePseudoElementDamages const* = nullptr, CSS::StyleEffectDrain* = nullptr, RefPtr<CSS::CustomPropertyData const>* replaced_custom_property_data = nullptr);
     // Compare the record an AfterSample installation left, now sampled, with the style the element
     // held before it, and apply the result to the element's layout node.
     CSS::RequiredInvalidationAfterStyleChange compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange installation_invalidation, CSS::StyleEffectDrain* = nullptr);
@@ -931,6 +933,8 @@ private:
     CSS::RequiredInvalidationAfterStyleChange recompute_pseudo_element_styles(bool& did_change_custom_properties, bool had_list_marker, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const* = nullptr, EnginePseudoElementDamages const* = nullptr);
     void apply_computed_pseudo_element_styles_to_layout_nodes_if_needed(CSS::RequiredInvalidationAfterStyleChange const&);
     void publish_custom_property_names();
+    void publish_custom_property_names(RefPtr<CSS::CustomPropertyData const> data);
+    RefPtr<CSS::CustomPropertyData const> set_own_custom_property_data(RefPtr<CSS::CustomPropertyData const> current, RefPtr<CSS::CustomPropertyData const> data);
     void replace_style_record(CSS::StyleRecordID);
     void clear_computed_styles_from_display_none_descendants();
 
