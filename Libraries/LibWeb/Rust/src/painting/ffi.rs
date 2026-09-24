@@ -2112,9 +2112,9 @@ pub unsafe extern "C" fn layout_arena_inline_paintable_has_content_pieces(
     arena: *mut c_void,
     inline_paintable: NodeSlotId,
 ) -> bool {
-    let arena = unsafe { arena_from_handle(arena) };
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     let mut has_content = false;
-    with_inline_pieces(&arena.paintable_rows(), inline_paintable, |piece, _| {
+    with_inline_pieces(&paintable_rows, inline_paintable, |piece, _| {
         if !piece.is_geometry_only_placeholder {
             has_content = true;
             return false;
@@ -2144,8 +2144,7 @@ pub unsafe extern "C" fn layout_arena_inline_paintable_first_piece_position(
         x: CssPixels::from_raw(0),
         y: CssPixels::from_raw(0),
     };
-    let arena = unsafe { arena_from_handle(arena) };
-    let paintable_rows = arena.paintable_rows();
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     let Some(root) = paintable_rows.inline_pieces_root(inline_paintable) else {
         return result;
     };
