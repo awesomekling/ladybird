@@ -541,9 +541,8 @@ impl RetainedState {
         pseudo_kind: Option<u8>,
     ) -> Result<SampleCustomPropertyEnvironments, &'static str> {
         const UNKNOWN_ELEMENT: &str = "an element the engine holds no environment for";
-        // The engine holds no pseudo-element's environment.
-        if pseudo_kind.is_some() {
-            return Err("a pseudo-element");
+        if let Some(pseudo_kind) = pseudo_kind {
+            return self.pseudo_element_sample_custom_property_environments(node, pseudo_kind);
         }
         let (environment, store) = self.element_custom_property_environment(node).ok_or(UNKNOWN_ELEMENT)?;
         let data = self.element_custom_property_data(node).0;
@@ -592,6 +591,29 @@ impl RetainedState {
             base_store,
             inheritance_store,
             element_declares_own,
+            base_is_engine: !base_store.is_null() && base_environment & ENGINE_CUSTOM_PROPERTY_ENVIRONMENT_TAG != 0,
+        })
+    }
+
+    /// The custom-property environments a sample of one of an element's synthetic pseudo-elements
+    /// reads: the pseudo-element's own, the one its own style resolved to beneath what its
+    /// animations composed, and its originating element's, which it inherits.
+    fn pseudo_element_sample_custom_property_environments(
+        &self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+    ) -> Result<SampleCustomPropertyEnvironments, &'static str> {
+        let (store, base_environment, base_store, declares_own) = self
+            .pseudo_element_custom_property_sample_inputs(node, pseudo_kind)
+            .ok_or("a pseudo-element environment without a store")?;
+        let (_, inheritance_store) = self
+            .element_custom_property_environment(node)
+            .ok_or("an element the engine holds no environment for")?;
+        Ok(SampleCustomPropertyEnvironments {
+            store,
+            base_store,
+            inheritance_store,
+            element_declares_own: !base_store.is_null() && declares_own,
             base_is_engine: !base_store.is_null() && base_environment & ENGINE_CUSTOM_PROPERTY_ENVIRONMENT_TAG != 0,
         })
     }

@@ -5393,7 +5393,18 @@ void Element::install_custom_property_data(Optional<CSS::PseudoElement> pseudo_e
         }
         if (data)
             (void)ensure_synthetic_pseudo_element(pseudo_element.value());
-        CSS::StyleEngineFFI::style_engine_set_pseudo_element_custom_property_data(style_engine.rust_handle(), style_node.value(), to_underlying(pseudo_element.value()), data.ptr(), data ? data->identity() : 0);
+        // A pseudo-element inherits from its originating element, and what its own style resolved
+        // to declares custom properties of its own where it is not the environment the element
+        // passes on.
+        bool const is_animation_overlay = data && data->is_animation_overlay_for({ *this, pseudo_element.value() });
+        auto base = is_animation_overlay ? data->parent() : data;
+        auto animation_base = is_animation_overlay ? base : nullptr;
+        auto originating_data = custom_property_data({});
+        bool const declares_own = base && !(originating_data && originating_data->inheritable(document()).ptr() == base.ptr());
+        CSS::StyleEngineFFI::style_engine_set_pseudo_element_custom_property_data(
+            style_engine.rust_handle(), style_node.value(), to_underlying(pseudo_element.value()), data.ptr(),
+            data ? data->rust_store() : nullptr, data ? data->identity() : 0, is_animation_overlay, declares_own,
+            animation_base.ptr(), animation_base ? animation_base->rust_store() : nullptr, animation_base ? animation_base->identity() : 0);
         return;
     }
 

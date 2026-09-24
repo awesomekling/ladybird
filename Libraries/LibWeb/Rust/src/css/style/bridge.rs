@@ -4768,24 +4768,44 @@ pub unsafe extern "C" fn style_engine_environment_move_needs_recompute(engine: *
 }
 
 /// Keeps the custom-property environment one of an element's synthetic pseudo-elements now holds. A
-/// null `data` records that it holds none.
+/// null `data` records that it holds none. An overlay names what it was composed over as an
+/// element's does, and `declares_own` is whether what the pseudo-element's style resolved to is not
+/// simply the environment its originating element passes on.
 ///
 /// # Safety
-/// `engine` must be live, and `data` must be null or a live `Web::CSS::CustomPropertyData`.
+/// As `style_engine_set_element_custom_property_data`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_set_pseudo_element_custom_property_data(
     engine: *mut c_void,
     node: u32,
     pseudo: u8,
     data: *const c_void,
+    store: *const c_void,
     environment: u64,
+    is_animation_overlay: bool,
+    declares_own: bool,
+    animation_base: *const c_void,
+    animation_base_store: *const c_void,
+    animation_base_environment: u64,
 ) {
     super::seal::note_engine_call("style_engine_set_pseudo_element_custom_property_data");
     let Some(node) = StyleNodeID::from_raw(node) else {
         return;
     };
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    unsafe { engine.set_pseudo_element_custom_property_data(node, pseudo, data, environment) };
+    let animation_base =
+        is_animation_overlay.then_some((animation_base_environment, animation_base_store, animation_base));
+    unsafe {
+        engine.set_pseudo_element_custom_property_data(
+            node,
+            pseudo,
+            data,
+            store,
+            environment,
+            declares_own,
+            animation_base,
+        );
+    }
 }
 
 /// The custom-property environment one of an element's synthetic pseudo-elements holds, as
