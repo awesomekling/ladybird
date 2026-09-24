@@ -1118,6 +1118,7 @@ pub unsafe extern "C" fn layout_arena_update_visual_viewport_transform(arena: *m
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_invalidate_scroll_state(arena: *mut c_void) {
     let arena = unsafe { arena_from_handle(arena) };
+    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
     arena
         .paint_state()
         .borrow_mut()
@@ -2677,7 +2678,9 @@ pub unsafe extern "C" fn layout_arena_publish_visual_context_tree_inputs(
     arena: *mut c_void,
     inputs: crate::painting::host::FfiVisualContextTreeInputs,
 ) {
-    unsafe { arena_from_handle(arena) }.publish_visual_context_tree_inputs(inputs);
+    let arena = unsafe { arena_from_handle(arena) };
+    let _write = arena.join_frame_for_main_side_write("visual context tree inputs");
+    arena.publish_visual_context_tree_inputs(inputs);
 }
 
 /// Publishes the unique node id of what a box is the box of, as the document names it. Called
