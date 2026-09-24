@@ -14,7 +14,6 @@
         internals.updateStyle();
         const after = internals.styleEngineCounters();
         println(`engine answered: ${after.engineComputedRecordDeltas > before.engineComputedRecordDeltas}`);
-        println(`property refusals: ${after.engineComputedRecordBailProperty - before.engineComputedRecordBailProperty}`);
         println(`animation count: ${target.getAnimations().length}`);
     });
 </script>
