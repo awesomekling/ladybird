@@ -117,8 +117,8 @@ pub unsafe extern "C" fn layout_arena_paintable_set_scrollbar_enlarged(
     direction: ScrollDirection,
     enlarged: bool,
 ) {
-    let _writer = crate::painting::published_immutable::enter_writer_if_unattributed("scrollbar interaction");
     let arena = unsafe { arena_from_handle_mut(arena) };
+    let _write = arena.join_frame_for_main_side_write("scrollbar interaction");
     let mut rows = arena.paintable_rows_mut();
     if !rows.paintable_row_is_populated(slot) {
         return;
@@ -2631,6 +2631,7 @@ pub unsafe extern "C" fn layout_arena_publish_image_map_areas(
         })
         .collect::<Vec<_>>()
         .into_boxed_slice();
+    let _write = arena.join_frame_for_main_side_write("image map areas");
     arena.image_map_areas().publish(slot, published);
 }
 
