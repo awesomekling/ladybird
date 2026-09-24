@@ -212,9 +212,6 @@ public:
         ShadowChildrenExplicitlyInherit = 1 << 5,
         WasUnstyled = 1 << 6,
         WasDisplayNone = 1 << 7,
-        IsDisplayNone = 1 << 8,
-        InDisplayNoneSubtree = 1 << 9,
-        HasStyle = 1 << 10,
         DisplayChanged = 1 << 11,
     };
     void record_container_query_input_change(StyleNodeID);
