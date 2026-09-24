@@ -789,6 +789,20 @@ impl ComputedGroupSets {
         self.style_record_view_epoch_depth -= 1;
     }
 
+    /// How many inherited groups a live base record carries, which its assignment to a node takes.
+    pub(super) fn inherited_group_count(&self, raw_record: u64) -> Option<usize> {
+        let final_record = FinalStyleRecordID(raw_record);
+        let record = final_record.base_record()?;
+        if !self.style_record_generation_is_live(record, final_record.base_generation()) {
+            return None;
+        }
+        Some(
+            self.inherited_sets
+                .get(self.style_records.get(record).inherited_groups)
+                .len(),
+        )
+    }
+
     fn group_identities(&self, set: ComputedGroupSetID) -> impl Iterator<Item = ComputedGroupID> {
         self.sets[set].groups.iter().copied()
     }

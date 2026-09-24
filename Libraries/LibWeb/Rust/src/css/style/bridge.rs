@@ -3741,37 +3741,93 @@ pub unsafe extern "C" fn style_engine_declared_only_record(
     hint_count: usize,
     inline_block: *const c_void,
 ) -> u64 {
-    use crate::css::declaration_block::{DeclarationBlock, FfiDeclaredProperty, declaration_from_view};
     abort_on_panic(|| {
         let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
         // A record held by no node is no event a replay could reproduce.
         let Some(subject) = StyleNodeID::from_raw(subject).filter(|_| engine.recording_id().is_none()) else {
             return 0;
         };
-        let hints = if hint_count == 0 {
-            &[]
-        } else {
-            unsafe { std::slice::from_raw_parts(hints.cast::<FfiDeclaredProperty>(), hint_count) }
-        };
-        let hints = hints
-            .iter()
-            .map(|hint| unsafe { declaration_from_view(hint) })
-            .collect::<Vec<_>>();
-        let inline_data = unsafe { inline_block.cast::<DeclarationBlock>().as_ref() }.map(DeclarationBlock::data);
-        let hint_kind = decode_element_declaration_kind(hint_kind);
-        let declarations = hints
-            .iter()
-            .map(|hint| (hint_kind, hint))
-            .chain(inline_data.iter().flat_map(|data| {
-                data.properties
-                    .iter()
-                    .map(|declaration| (ElementDeclarationKind::InlineStyle, declaration))
-            }))
-            .collect::<Vec<_>>();
-        engine
-            .declared_only_record(subject, facts, &declarations)
-            .map_or(0, super::computed::FinalStyleRecordID::raw)
+        unsafe {
+            with_declared_only_declarations(hint_kind, hints, hint_count, inline_block, |declarations| {
+                engine
+                    .declared_only_record(subject, facts, declarations)
+                    .map_or(0, super::computed::FinalStyleRecordID::raw)
+            })
+        }
     })
+}
+
+/// The first record of `node`, which the engine refused one: the record the engine holds for it,
+/// or else the record of its presentational hints and inline style alone, assigned to it; see
+/// `assign_declared_only_first_record`. `subject` is the document's style node. Returns zero
+/// when the engine cannot compute it.
+///
+/// # Safety
+/// As for `style_engine_declared_only_record`.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn style_engine_assign_declared_only_first_record(
+    engine: *mut c_void,
+    node: u32,
+    subject: u32,
+    facts: u32,
+    hint_kind: FfiElementDeclarationKind,
+    hints: *const c_void,
+    hint_count: usize,
+    inline_block: *const c_void,
+) -> u64 {
+    abort_on_panic(|| {
+        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+        // An assignment no recorded event describes is no event a replay could reproduce.
+        let (Some(node), Some(subject)) = (StyleNodeID::from_raw(node), StyleNodeID::from_raw(subject)) else {
+            return 0;
+        };
+        if engine.recording_id().is_some() {
+            return 0;
+        }
+        unsafe {
+            with_declared_only_declarations(hint_kind, hints, hint_count, inline_block, |declarations| {
+                engine
+                    .assign_declared_only_first_record(node, subject, facts, declarations)
+                    .map_or(0, super::computed::FinalStyleRecordID::raw)
+            })
+        }
+    })
+}
+
+/// The declarations a declared-only record cascades, hints first and inline style after them.
+///
+/// # Safety
+/// As for `style_engine_declared_only_record`.
+unsafe fn with_declared_only_declarations<R>(
+    hint_kind: FfiElementDeclarationKind,
+    hints: *const c_void,
+    hint_count: usize,
+    inline_block: *const c_void,
+    body: impl FnOnce(&[(ElementDeclarationKind, &crate::css::declaration_block::DeclaredProperty)]) -> R,
+) -> R {
+    use crate::css::declaration_block::{DeclarationBlock, FfiDeclaredProperty, declaration_from_view};
+    let hints = if hint_count == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(hints.cast::<FfiDeclaredProperty>(), hint_count) }
+    };
+    let hints = hints
+        .iter()
+        .map(|hint| unsafe { declaration_from_view(hint) })
+        .collect::<Vec<_>>();
+    let inline_data = unsafe { inline_block.cast::<DeclarationBlock>().as_ref() }.map(DeclarationBlock::data);
+    let hint_kind = decode_element_declaration_kind(hint_kind);
+    let declarations = hints
+        .iter()
+        .map(|hint| (hint_kind, hint))
+        .chain(inline_data.iter().flat_map(|data| {
+            data.properties
+                .iter()
+                .map(|declaration| (ElementDeclarationKind::InlineStyle, declaration))
+        }))
+        .collect::<Vec<_>>();
+    body(&declarations)
 }
 
 /// Resolve a hypothetical parent's custom-property declaration against its published registry

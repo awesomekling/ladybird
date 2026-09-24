@@ -5194,6 +5194,37 @@ impl StyleEngineState {
         }
     }
 
+    /// The first record of an element the engine refused a record, so that it is not left without
+    /// a style: the record the engine holds for it, or else the record of its declarations alone
+    /// over the initial values, as `declared_only_record` computes them, assigned to it. Neither
+    /// answers the element's cascade; the host logs it and asks for the element again.
+    pub(crate) fn assign_declared_only_first_record(
+        &mut self,
+        node: StyleNodeID,
+        subject: StyleNodeID,
+        facts: u32,
+        declarations: &[(ElementDeclarationKind, &crate::css::declaration_block::DeclaredProperty)],
+        counters: &mut Counters,
+    ) -> Option<computed::FinalStyleRecordID> {
+        if let Some(record) = self.computed_group_sets.assigned_style_record(node) {
+            return Some(record);
+        }
+        let record = self.declared_only_record(subject, facts, declarations, counters)?;
+        let inherited_group_count = self.computed_group_sets.inherited_group_count(record.raw());
+        let assigned = inherited_group_count.map(|inherited_group_count| {
+            self.assign_shared_style_record(
+                computed::ComputedStyleTarget::new(node, u8::MAX),
+                record.raw(),
+                inherited_group_count,
+                false,
+                counters,
+            )
+            .style_record_identity
+        });
+        self.computed_group_sets.unpin_style_record(record.raw());
+        assigned
+    }
+
     /// The record of an element no rule reaches, such as one outside the document: the cascade of
     /// its own declarations alone, in cascade order, over the initial values. The element has no
     /// style node, so the drive is keyed by `subject`, the document's, which names no parent and
