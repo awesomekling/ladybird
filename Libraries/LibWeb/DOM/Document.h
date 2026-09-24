@@ -529,6 +529,9 @@ public:
     // Marks made beside the layout frame in flight are held apart until the frame is over.
     [[nodiscard]] InvalidationJournal& invalidation_journal();
     void drain_invalidation_journal() const;
+    // Hands the journal what was marked beside the frame in flight, once the frame is over and the
+    // document holds its render state again. Whoever ends a frame calls it.
+    void release_held_invalidation_marks();
     // A DOM tree mutation writes the style mirror and the arena as it goes, so it joins the frame
     // in flight before it starts.
     void join_frame_for_dom_tree_mutation() const;
@@ -1724,7 +1727,6 @@ private:
     NonnullRefPtr<Painting::ChromeWidgetRegistry> m_chrome_widget_registry;
     NonnullOwnPtr<InvalidationJournal> m_invalidation_journal;
     NonnullOwnPtr<InvalidationJournal> m_held_invalidation_journal;
-    void release_held_invalidation_marks();
     NonnullOwnPtr<CommitMessages> m_commit_messages;
     bool m_may_have_content_visibility_auto_style { false };
 

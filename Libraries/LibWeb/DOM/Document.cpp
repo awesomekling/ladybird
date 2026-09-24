@@ -639,6 +639,7 @@ Document::Document(Page& page, GC::Ref<EventTarget> relevant_global_event_target
     m_rust_custom_property_registry = CSS::ComputedValuesFFI::rust_custom_property_registry_create();
 
     m_is_decoded_svg = m_page->client().is_svg_page_client();
+    m_held_invalidation_journal->set_holds_next_generation(true);
 
     HTML::main_thread_event_loop().register_document({}, *this);
 }
@@ -2303,13 +2304,19 @@ InvalidationJournal& Document::invalidation_journal()
     return *m_invalidation_journal;
 }
 
-// The frame calls this in its last join. What was marked beside it is what the next drain writes.
+// The frame calls this in its last join, once the document holds its render state again. What was
+// marked beside it is what the next drain writes, and nothing the frame publishes clears it. The
+// frame that drains it has to be asked for, since a frame asked for while this one ran may be the
+// one that is ending.
 void Document::release_held_invalidation_marks()
 {
     if (m_held_invalidation_journal->is_empty())
         return;
     m_invalidation_journal->drain();
     swap(m_invalidation_journal, m_held_invalidation_journal);
+    m_held_invalidation_journal->set_holds_next_generation(true);
+    m_invalidation_journal->set_holds_next_generation(false);
+    request_frame_for_pending_repaint();
 }
 
 void Document::drain_invalidation_journal() const
@@ -10326,11 +10333,13 @@ Optional<Painting::PendingDisplayListRecording> Document::begin_display_list_rec
     if (config.should_show_caret_hit_test_debug_overlay)
         overlay_inputs.caret_debug_rect = m_caret_hit_test_debug_rect;
 
+    // NB: Taken before the render side records, since what runs beside the recording may invalidate the hit-test list.
+    auto const hit_test_display_list_invalidations = m_hit_test_display_list_invalidations;
     auto recording = Painting::begin_rust_display_list_recording(*this, *placeholder_display_list, resource_storage, cache_mode, config, overlay_inputs, run);
     if (!recording.has_value())
         return {};
     recording->visual_context_tree = move(visual_context_tree);
-    recording->hit_test_display_list_invalidations = m_hit_test_display_list_invalidations;
+    recording->hit_test_display_list_invalidations = hit_test_display_list_invalidations;
     return recording;
 }
 
