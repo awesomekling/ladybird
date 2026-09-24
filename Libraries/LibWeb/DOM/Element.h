@@ -522,10 +522,8 @@ public:
     void set_shadow_root(GC::Ptr<ShadowRoot>);
 
     void set_custom_property_data(Optional<CSS::PseudoElement>, RefPtr<CSS::CustomPropertyData const>);
-    // Tell the style engine what custom-property environment this element holds, so a row that
-    // inherits custom properties from it needs no walk to reach it.
-    void publish_custom_property_data_to_style_engine() const;
     void replace_custom_property_data(Optional<CSS::PseudoElement>, RefPtr<CSS::CustomPropertyData const>);
+    // The environment an element holds is the one the style engine keeps for it.
     [[nodiscard]] RefPtr<CSS::CustomPropertyData const> custom_property_data(Optional<CSS::PseudoElement>) const;
 
     [[nodiscard]] bool refresh_inherited_custom_property_data();
@@ -931,7 +929,6 @@ private:
     CSS::StyleRecordID m_style_record_identity;
     u64 m_animation_style_generation { 0 };
     u64 m_animation_subtree_style_generation { 0 };
-    RefPtr<CSS::CustomPropertyData const> m_custom_property_data;
     PublishedCustomPropertyNames m_published_custom_property_names;
     Vector<CSS::StyleProperty> m_published_presentational_hint_properties;
 

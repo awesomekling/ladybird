@@ -888,9 +888,9 @@ pub struct RetainedState {
     /// result rows as it advances.
     frozen_longhand_inputs: HashMap<StyleNodeID, inputs::FrozenLonghandInputRow>,
     /// The custom-property environment each element holds, kept so a row that inherits custom
-    /// properties is not the reason a walk to the element it inherits from happens. `None` records
-    /// an element holding none; a missing entry records an element the engine was never told
-    /// about, which the host still answers for itself.
+    /// properties is not the reason a walk to the element it inherits from happens. This is the only
+    /// copy: the host reads an element's environment from here. `None` records an element holding
+    /// none; a missing entry records an element the engine was never told about.
     element_custom_property_data: HashMap<StyleNodeID, Option<inputs::RetainedCustomPropertyData>>,
     /// The environment each element's animations sampled custom properties into, over the one its
     /// own declarations resolve to. Its own values substitute under it.

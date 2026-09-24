@@ -160,6 +160,14 @@ impl RetainedState {
             .insert(node, Some(unsafe { RetainedCustomPropertyData::retain(data) }));
     }
 
+    /// The environment an element holds, as it was last kept. The host keeps no copy of its own.
+    pub(crate) fn element_custom_property_data(&self, node: StyleNodeID) -> Option<*const std::ffi::c_void> {
+        self.element_custom_property_data
+            .get(&node)?
+            .as_ref()
+            .map(RetainedCustomPropertyData::data)
+    }
+
     pub fn set_sampled_composition_identity(&mut self, node: StyleNodeID, record: u64) {
         self.computed_group_sets.set_sampled_composition_identity(node, record);
     }

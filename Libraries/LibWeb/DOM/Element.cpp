@@ -5331,22 +5331,16 @@ void Element::replace_custom_property_data(Optional<CSS::PseudoElement> pseudo_e
     install_custom_property_data(pseudo_element, move(data));
 }
 
-// The style engine keeps what an element's custom-property environment is, so that a row inheriting
-// custom properties reads it from there instead of walking the flat tree to this element. This is
-// the only place the element's environment moves, so it is the only place that has to say so.
-void Element::publish_custom_property_data_to_style_engine() const
-{
-    auto style_node = style_node_id();
-    if (style_node == 0)
-        return;
-    const_cast<CSS::StyleEngine&>(document().style_computer().style_engine()).set_element_custom_property_data(style_node, m_custom_property_data.ptr());
-}
-
+// The style engine keeps what an element's custom-property environment is: a row inheriting custom
+// properties reads it from there instead of walking the flat tree to this element, and so does the
+// element itself. This is the only place the element's environment moves.
 void Element::install_custom_property_data(Optional<CSS::PseudoElement> pseudo_element, RefPtr<CSS::CustomPropertyData const> data)
 {
     if (!pseudo_element.has_value()) {
-        m_custom_property_data = move(data);
-        publish_custom_property_data_to_style_engine();
+        auto style_node = style_node_id();
+        VERIFY(style_node != 0 || !data);
+        if (style_node != 0)
+            document().style_computer().style_engine().set_element_custom_property_data(style_node, data.ptr());
         return;
     }
 
@@ -5376,8 +5370,13 @@ void Element::install_custom_property_data(Optional<CSS::PseudoElement> pseudo_e
 
 RefPtr<CSS::CustomPropertyData const> Element::custom_property_data(Optional<CSS::PseudoElement> pseudo_element) const
 {
-    if (!pseudo_element.has_value())
-        return m_custom_property_data;
+    if (!pseudo_element.has_value()) {
+        // The style engine keeps the environment each element holds; the element keeps none of its own.
+        auto style_node = style_node_id();
+        if (style_node == 0)
+            return nullptr;
+        return static_cast<CSS::CustomPropertyData const*>(CSS::StyleEngineFFI::style_engine_element_custom_property_data(document().style_computer().style_engine().rust_handle(), style_node.value()));
+    }
 
     if (!CSS::Selector::PseudoElementSelector::is_known_pseudo_element_type(pseudo_element.value()))
         return nullptr;
@@ -5396,21 +5395,20 @@ bool Element::refresh_inherited_custom_property_data()
             parent_data = data->inheritable(document());
     }
 
-    if (m_custom_property_data && m_custom_property_data->is_animation_overlay_for({ *this })) {
-        if (m_custom_property_data->parent() == parent_data)
+    auto current = custom_property_data({});
+    if (current && current->is_animation_overlay_for({ *this })) {
+        if (current->parent() == parent_data)
             return false;
         OrderedHashMap<Utf16FlyString, CSS::StyleProperty> animated_values;
-        for (auto const& [name, property] : m_custom_property_data->own_values())
+        for (auto const& [name, property] : current->own_values())
             animated_values.set(name, property);
-        m_custom_property_data = CSS::CustomPropertyData::create_animation_overlay(move(animated_values), move(parent_data), { *this });
-        publish_custom_property_data_to_style_engine();
+        install_custom_property_data({}, CSS::CustomPropertyData::create_animation_overlay(move(animated_values), move(parent_data), { *this }));
         return true;
     }
 
-    if (m_custom_property_data == parent_data)
+    if (current == parent_data)
         return false;
-    m_custom_property_data = move(parent_data);
-    publish_custom_property_data_to_style_engine();
+    install_custom_property_data({}, move(parent_data));
     return true;
 }
 
