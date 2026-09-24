@@ -2580,7 +2580,22 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_style_engine_reaction(b
     if (old_computed_values && old_computed_values->animated_properties()) {
         old_state.snapshot();
     }
-    RefPtr<CSS::ComputedValues const> materialized_style;
+    // The engine's answer for a row it did not settle itself is a record it shares from a
+    // like element. A row with neither keeps the record it has installed, and the refusal is
+    // reported to the style stage seal: nothing else computes styles.
+    auto shared_record = style_computer.try_share_computed_style_record(*this);
+    auto shared_style = style_computer.computed_style_record_view(shared_record);
+    if (!shared_style) {
+        u8 row_kinds = 0;
+        if (style_computer.style_engine().frozen_longhand_input(style_node_id()).is_present)
+            row_kinds |= 1 << 0;
+        if (!old_style_record)
+            row_kinds |= 1 << 2;
+        static constexpr u8 refused_host_entry = 1;
+        style_computer.style_engine().note_host_entry(style_node_id(), refused_host_entry, row_kinds);
+        return {};
+    }
+    style_record_delta.new_style_record = shared_record;
     // These flags include reads by the previous pseudo styles. Recomputing just the element
     // would otherwise lose those dependencies when the flags below are reset.
     bool const had_style_context_dependencies = m_style_uses_attr_css_function
@@ -2601,15 +2616,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_style_engine_reaction(b
     if (auto* rare_data = element_rare_data(); rare_data && rare_data->custom_property_consumer_data)
         rare_data->custom_property_consumer_data->style_query_references.clear_with_capacity();
     reusable_style_engine_matches = &style_engine_matches;
-    auto shared_record = style_computer.try_share_computed_style_record(*this);
-    auto shared_style = style_computer.computed_style_record_view(shared_record);
-    if (shared_style) {
-        style_record_delta.new_style_record = shared_record;
-    } else {
-        materialized_style = style_computer.materialize_style_record({ *this }, did_change_custom_properties, reusable_style_engine_matches, style_record_delta);
-        style_computer.remember_shared_computed_style_record(*this, style_record_delta.new_style_record);
-    }
-    auto const* new_style = shared_style ? &*shared_style : materialized_style.ptr();
+    auto const* new_style = &*shared_style;
     style_record_delta.old_style_record = old_style_record;
     bool root_font_metrics_changed = is_html_html_element()
         && (root_font_metrics_before_recompute != style_computer.root_element_font_metrics()

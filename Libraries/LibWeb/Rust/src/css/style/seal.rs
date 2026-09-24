@@ -71,6 +71,7 @@ pub(crate) fn is_reporting() -> bool {
 thread_local! {
     static UPDATE_DEPTH: Cell<u32> = const { Cell::new(0) };
     static REPORTED: RefCell<HashSet<&'static str>> = RefCell::new(HashSet::new());
+    static REPORTED_REFUSALS: RefCell<HashSet<(&'static str, bool)>> = RefCell::new(HashSet::new());
     static COUNTS: RefCell<HashMap<&'static str, Counts>> = RefCell::new(HashMap::new());
     static STAGE_INTERLEAVES: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
     static LONGHAND_INPUT_FREEZE_REASONS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
@@ -96,6 +97,8 @@ pub(crate) struct HostEntryKey {
 pub(crate) enum HostEntryKind {
     Row,
     Sampled,
+    /// A row the engine refused and nothing computed: the element keeps the record it has.
+    Refused,
 }
 
 impl HostEntryKind {
@@ -103,6 +106,7 @@ impl HostEntryKind {
         match self {
             Self::Row => "row",
             Self::Sampled => "sampled",
+            Self::Refused => "refused",
         }
     }
 }
@@ -116,8 +120,24 @@ pub(crate) struct HostEntryCounts {
 /// Record one host entry under the reason the engine declined the element, so the census ranks
 /// what reaches the host rather than what the engine attempted. An attempt that declines for a
 /// class the host then skips costs nothing; only an entry does.
+///
+/// A refused row is a violation wherever it happens: the element is left with a record the engine
+/// did not answer for, so `abort` makes it fatal and `1` reports each cause once.
 pub(crate) fn note_host_entry(cause: &'static str, kind: HostEntryKind, cold: bool) {
-    if mode() == Mode::Off || UPDATE_DEPTH.with(|depth| depth.get() == 0) {
+    let mode = mode();
+    if mode == Mode::Off {
+        return;
+    }
+    if kind == HostEntryKind::Refused {
+        assert!(
+            mode != Mode::Abort,
+            "style stage is sealed, but the engine refused a row ({cause}, cold: {cold})"
+        );
+        if REPORTED_REFUSALS.with(|reported| reported.borrow_mut().insert((cause, cold))) {
+            write_report(&format!("STYLE SEAL: refused_row {cause} cold={cold}\n"));
+        }
+    }
+    if UPDATE_DEPTH.with(|depth| depth.get() == 0) {
         return;
     }
     let key = HostEntryKey { cause, kind, cold };
