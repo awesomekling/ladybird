@@ -119,9 +119,6 @@ public:
     };
     [[nodiscard]] DocumentEnvironmentSnapshot const& ensure_document_environment_for_style_update() const;
 
-    // Forget every style one element computed on another's behalf.
-    void drop_style_sharing_cache() const;
-
     struct ComputedStyleInvalidation {
         RequiredInvalidationAfterStyleChange invalidation;
         bool any_computed_value_changed { false };

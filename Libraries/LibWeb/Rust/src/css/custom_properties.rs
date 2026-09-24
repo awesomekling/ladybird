@@ -920,8 +920,6 @@ struct ASFResolutionContext<'a> {
     custom_functions: Option<&'a CustomFunctionRegistry>,
     parse_context: Option<&'a ParseContext>,
     media_environment: Option<&'a FfiMediaEnvironment>,
-    load_media_environment: Option<unsafe extern "C" fn(*mut c_void) -> *const c_void>,
-    callback_context: *mut c_void,
     style_query_length_resolution_context: Option<&'a crate::css::style_compute::FfiLengthResolutionContext>,
     style_query_color_resolution_input: Option<crate::css::color_resolution::ColorResolutionInput<'a>>,
     style_query_tree_counting: Option<(u64, u64)>,
@@ -934,17 +932,6 @@ struct ASFResolutionContext<'a> {
 
 impl ASFResolutionContext<'_> {
     fn media_environment(&mut self) -> Option<&FfiMediaEnvironment> {
-        if self.media_environment.is_none()
-            && let Some(load_media_environment) = self.load_media_environment
-        {
-            crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::MediaEnvironmentCallback);
-            crate::css::style::seal::note_host_call("substitution.load_media_environment");
-            self.media_environment = unsafe {
-                load_media_environment(self.callback_context)
-                    .cast::<FfiMediaEnvironment>()
-                    .as_ref()
-            };
-        }
         self.media_environment
     }
 }
@@ -3459,13 +3446,11 @@ pub(crate) unsafe fn resolve_vars(
     registry: *const c_void,
     parse_context: Option<&ParseContext>,
     media_environment: Option<&FfiMediaEnvironment>,
-    load_media_environment: Option<unsafe extern "C" fn(*mut c_void) -> *const c_void>,
     property_id: u16,
     root_custom_property_name: FfiUtf16View,
     value_data: *const c_void,
     environment: &mut VarResolutionEnvironment,
     attribute_names_are_ascii_case_insensitive: bool,
-    callback_context: *mut c_void,
     style_query_length_resolution_context: *const crate::css::style_compute::FfiLengthResolutionContext,
     style_query_dependencies: *mut c_void,
     final_custom_properties: Option<&HashMap<Vec<u16>, *const c_void>>,
@@ -3512,8 +3497,6 @@ pub(crate) unsafe fn resolve_vars(
         custom_functions: Some(custom_functions),
         parse_context,
         media_environment,
-        load_media_environment,
-        callback_context,
         style_query_length_resolution_context: unsafe { style_query_length_resolution_context.as_ref() },
         style_query_dependencies: unsafe {
             style_query_dependencies

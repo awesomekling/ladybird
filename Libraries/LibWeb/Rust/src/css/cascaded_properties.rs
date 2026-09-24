@@ -560,7 +560,6 @@ pub struct FfiCascadedCustomProperty {
 pub struct FfiCascadeResolutionContext {
     pub parse_context: *const c_void,
     pub media_environment: *const c_void,
-    pub load_media_environment: Option<unsafe extern "C" fn(*mut c_void) -> *const c_void>,
     pub custom_property_store: *const c_void,
     pub animated_custom_property_store: *const c_void,
     pub animated_custom_property_base_store: *const c_void,
@@ -577,7 +576,6 @@ pub struct FfiCascadeResolutionContext {
     pub custom_function_visibility_count: usize,
     pub style_query_length_resolution_context: *const crate::css::style_compute::FfiLengthResolutionContext,
     pub style_query_dependencies: *mut c_void,
-    pub callback_context: *mut c_void,
 }
 
 #[derive(Default)]
@@ -833,7 +831,6 @@ pub(crate) unsafe fn drive_custom_property_resolution(
             outputs.as_mut_ptr(),
             std::ptr::from_mut(&mut finalizer_context).cast(),
             Some(finalize_custom_property_component),
-            false,
         )
     };
     stats.depends_on_viewport_metrics = finalizer_context.depends_on_viewport_metrics.get();
@@ -930,13 +927,11 @@ pub(crate) fn resolve_cascade_value(
                 resolution_context.custom_property_registry,
                 parse_context,
                 media_environment,
-                resolution_context.load_media_environment,
                 property_id,
                 resolution_context.root_custom_property_name,
                 unresolved_data,
                 resolution_environment,
                 resolution_context.attribute_names_are_ascii_case_insensitive,
-                resolution_context.callback_context,
                 resolution_context.style_query_length_resolution_context,
                 resolution_context.style_query_dependencies,
                 final_custom_properties,
@@ -1099,7 +1094,6 @@ unsafe fn resolve_unresolved_style_values(
     outputs: *mut FfiResolvedStyleValue,
     finalizer_context: *mut c_void,
     finalize_component: Option<unsafe extern "C" fn(*mut c_void, *const u32, usize, *mut FfiResolvedStyleValue)>,
-    finalizer_is_host_call: bool,
 ) -> FfiCustomPropertyResolutionStats {
     let resolution_context = unsafe { *resolution_context };
     let inputs = if input_count == 0 {
@@ -1154,9 +1148,6 @@ unsafe fn resolve_unresolved_style_values(
         }
         if let Some(finalize_component) = finalize_component {
             unsafe {
-                if finalizer_is_host_call {
-                    crate::css::style::seal::note_host_call("custom_properties.finalize_component");
-                }
                 finalize_component(
                     finalizer_context,
                     component.as_ptr(),
@@ -1181,32 +1172,6 @@ unsafe fn resolve_unresolved_style_values(
         cycle_participants,
         depends_on_viewport_metrics: false,
         substitution_usage,
-    }
-}
-
-/// # Safety
-/// Every pointer must remain valid for this call. `outputs` must have room for
-/// `input_count` entries, and a finalizer must replace each component output
-/// with a live style value pointer before returning.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_resolve_unresolved_style_values(
-    resolution_context: *const FfiCascadeResolutionContext,
-    inputs: *const FfiUnresolvedStyleValue,
-    input_count: usize,
-    outputs: *mut FfiResolvedStyleValue,
-    finalizer_context: *mut c_void,
-    finalize_component: Option<unsafe extern "C" fn(*mut c_void, *const u32, usize, *mut FfiResolvedStyleValue)>,
-) -> FfiCustomPropertyResolutionStats {
-    unsafe {
-        resolve_unresolved_style_values(
-            resolution_context,
-            inputs,
-            input_count,
-            outputs,
-            finalizer_context,
-            finalize_component,
-            true,
-        )
     }
 }
 

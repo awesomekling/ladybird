@@ -286,7 +286,6 @@ fn engine_resolution_context(
     FfiCascadeResolutionContext {
         parse_context: std::ptr::from_ref(parse_context).cast(),
         media_environment: media_environment.cast(),
-        load_media_environment: None,
         custom_property_store: store,
         animated_custom_property_store: std::ptr::null(),
         animated_custom_property_base_store: std::ptr::null(),
@@ -307,7 +306,6 @@ fn engine_resolution_context(
         custom_function_visibility_count: 0,
         style_query_length_resolution_context: length.cast(),
         style_query_dependencies: std::ptr::null_mut(),
-        callback_context: std::ptr::null_mut(),
     }
 }
 
@@ -1800,7 +1798,6 @@ fn substitute_written_value_against_store_with_attributes(
             registry.as_pointer(),
             Some(&parse_context),
             resolution_inputs.map(|inputs| inputs.media_environment),
-            None,
             property,
             FfiUtf16View {
                 ascii: std::ptr::null(),
@@ -1810,7 +1807,6 @@ fn substitute_written_value_against_store_with_attributes(
             written.pointer().cast(),
             &mut resolution_environment,
             attributes.names_are_ascii_case_insensitive,
-            std::ptr::null_mut(),
             resolution_inputs
                 .and_then(|inputs| inputs.style_query_length)
                 .map_or(std::ptr::null(), std::ptr::from_ref),
