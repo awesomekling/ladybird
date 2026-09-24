@@ -678,6 +678,7 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
         .current_keys = current_keys.data(),
         .effect_count = identities.size(),
         .samples_whole_stack = s_sampling_whole_effect_stack,
+        .style_record = abstract_element.style_record_identity().value(),
         .longhand_table = computed_properties.computed_longhand_table(),
         .animated_overlay = computed_properties.animated_overlay(Badge<StyleComputer> {}),
         .custom_property_store = custom_property_data ? custom_property_data->rust_store() : nullptr,

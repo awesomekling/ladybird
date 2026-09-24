@@ -424,3 +424,91 @@ pub(crate) fn describe_font_group_build_inputs(inputs: &FfiFontGroupBuildInputs)
         inputs.math_depth,
     )
 }
+
+/// The custom-property environments a sample of an element's animations reads: the element's own,
+/// which may be the one a previous sample composed; the one its own declarations resolved to
+/// beneath that composition; and the one it inherits. Each is a raw `Arc` pointer to a
+/// `CustomPropertyStore`, or null.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SampleCustomPropertyEnvironments {
+    pub(crate) store: *const std::ffi::c_void,
+    pub(crate) base_store: *const std::ffi::c_void,
+    pub(crate) inheritance_store: *const std::ffi::c_void,
+    /// Whether the base is not simply what the element inherits.
+    pub(crate) element_declares_own: bool,
+    /// Whether the base is an environment the engine resolved.
+    pub(crate) base_is_engine: bool,
+}
+
+/// `StyleEngine::is_engine_custom_property_environment`.
+const ENGINE_CUSTOM_PROPERTY_ENVIRONMENT_TAG: u64 = 1 << 62;
+
+impl RetainedState {
+    /// The custom-property environments a sample of an element's animations reads, from the
+    /// environments the engine holds for the element and its inheritance parent, or why the engine
+    /// cannot say.
+    pub(crate) fn animation_sample_custom_property_environments(
+        &mut self,
+        node: StyleNodeID,
+        pseudo_kind: Option<u8>,
+    ) -> Result<SampleCustomPropertyEnvironments, &'static str> {
+        const UNKNOWN_ELEMENT: &str = "an element the engine holds no environment for";
+        // The engine holds no pseudo-element's environment.
+        if pseudo_kind.is_some() {
+            return Err("a pseudo-element");
+        }
+        let (environment, store) = self.element_custom_property_environment(node).ok_or(UNKNOWN_ELEMENT)?;
+        let data = self.element_custom_property_data(node).0;
+        // A sample composes the element's animated custom properties over the environment its own
+        // declarations resolved to, and the element then holds the composition.
+        let (base_environment, base_store, base_data) =
+            self.element_custom_property_animation_base(node)
+                .unwrap_or((environment, store, data));
+        let parent = self.tree.inheritance_parent(node);
+        let parent_environment = match parent {
+            Some(parent) => Some(
+                self.element_custom_property_environment(parent)
+                    .ok_or(UNKNOWN_ELEMENT)?,
+            ),
+            None => None,
+        };
+        let inheritance_store = parent_environment.map_or(std::ptr::null(), |(_, store)| store);
+        // The base is what the element inherits where it is the environment the parent passes on.
+        let inputs = self.document_style_computation_inputs;
+        // Where custom properties are registered, the host builds the environment a parent passes
+        // on as an object of its own - a projection without the names that do not inherit, over the
+        // projection of its own parent - which the engine cannot name.
+        let registry = unsafe {
+            inputs
+                .custom_property_registry
+                .as_pointer()
+                .cast::<crate::css::custom_properties::CustomPropertyRegistry>()
+                .as_ref()
+        };
+        let Some(registry) = registry else {
+            return Err("a document that published no registry");
+        };
+        if registry.has_registrations() {
+            return Err("a parent whose inheritable environment the host builds");
+        }
+        // An environment the engine moved the parent to has no host object, so the one the element
+        // holds, the host's view of it, is the parent's by identity.
+        let base_is_inherited = match parent {
+            Some(parent) => {
+                let (parent_data, parent_environment) = self.element_custom_property_data(parent);
+                parent_data == base_data
+                    || (base_environment & ENGINE_CUSTOM_PROPERTY_ENVIRONMENT_TAG != 0
+                        && parent_environment == base_environment)
+            }
+            None => false,
+        };
+        let element_declares_own = !base_store.is_null() && !base_is_inherited;
+        Ok(SampleCustomPropertyEnvironments {
+            store,
+            base_store,
+            inheritance_store,
+            element_declares_own,
+            base_is_engine: !base_store.is_null() && base_environment & ENGINE_CUSTOM_PROPERTY_ENVIRONMENT_TAG != 0,
+        })
+    }
+}

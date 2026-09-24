@@ -2940,6 +2940,8 @@ pub struct FfiHostAnimationSample {
     /// Whether the effects are the element's whole effect stack, rather than the few a transition
     /// step layers over an overlay it already holds.
     pub samples_whole_stack: bool,
+    /// The record the working set was reconstructed from, which is the one the element holds.
+    pub style_record: u64,
     /// The working set's longhand table, which holds every longhand.
     pub longhand_table: *const c_void,
     /// The working set's overlay before this sample, or null.
@@ -3044,6 +3046,55 @@ pub unsafe extern "C" fn rust_sample_animation_effects(
     })
 }
 
+/// Check the custom-property environments the host hands a sample against the ones the engine
+/// holds for the element.
+fn check_sample_custom_property_environments(
+    input: &FfiHostAnimationSample,
+    engine: &mut crate::css::style::StyleEngine,
+    node: crate::css::style::tree::StyleNodeID,
+) {
+    use crate::css::style::{engine_sample::SampleCustomPropertyEnvironments, engine_sample_check};
+
+    let pseudo = (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT).then_some(input.pseudo_kind);
+    let engine_environments = match engine.animation_sample_custom_property_environments(node, pseudo) {
+        Ok(environments) => environments,
+        Err(reason) => {
+            engine_sample_check::note_declined(&format!("custom property environments: {reason}"));
+            return;
+        }
+    };
+    let host = SampleCustomPropertyEnvironments {
+        store: input.custom_property_store,
+        base_store: input.base_custom_property_store,
+        inheritance_store: input.inheritance_custom_property_store,
+        element_declares_own: input.element_declares_own_custom_properties,
+        base_is_engine: input.base_custom_property_environment_is_engine,
+    };
+    // The host views an environment the engine resolved through a copy of its store.
+    let same_store = |host: *const std::ffi::c_void, engine: *const std::ffi::c_void| {
+        host == engine
+            || (!host.is_null()
+                && !engine.is_null()
+                // SAFETY: Both are live stores the sample reads.
+                && unsafe {
+                    (*host.cast::<crate::css::custom_properties::CustomPropertyStore>())
+                        .resolves_like(&*engine.cast::<crate::css::custom_properties::CustomPropertyStore>())
+                })
+    };
+    if same_store(host.store, engine_environments.store)
+        && same_store(host.base_store, engine_environments.base_store)
+        && same_store(host.inheritance_store, engine_environments.inheritance_store)
+        && host.element_declares_own == engine_environments.element_declares_own
+        && host.base_is_engine == engine_environments.base_is_engine
+    {
+        engine_sample_check::note_agreed("custom property environments");
+        return;
+    }
+    engine_sample_check::note_difference("custom property environments", &|| {
+        format!("node {}: host {host:?}, engine {engine_environments:?}", node.raw())
+    });
+}
+
 /// Check the length-resolution contexts the host built for a sample against the ones the engine
 /// builds from the record the element holds.
 fn check_sample_length_contexts(
@@ -3056,9 +3107,14 @@ fn check_sample_length_contexts(
     use crate::css::style::engine_sample_check;
 
     let pseudo = (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT).then_some(input.pseudo_kind);
-    let record = engine.assigned_style_record_of(node, pseudo);
+    // The engine can have assigned the element a record the host has not installed yet, and the
+    // host samples over the one it holds.
+    if engine.assigned_style_record_of(node, pseudo) != Some(input.style_record) {
+        engine_sample_check::note_declined("length contexts: a record the engine has moved past");
+        return;
+    }
     let Some(engine_contexts) =
-        record.and_then(|record| engine.animation_sample_length_contexts(node, pseudo, record, container_unit_mask))
+        engine.animation_sample_length_contexts(node, pseudo, input.style_record, container_unit_mask)
     else {
         engine_sample_check::note_declined("length contexts: no record");
         return;
@@ -3238,6 +3294,7 @@ unsafe fn sample_described_animation_effects(
         selected_keys.push(current_keys[index]);
     }
     if input.samples_whole_stack && crate::css::style::engine_sample_check::is_checking() {
+        check_sample_custom_property_environments(input, engine, node);
         check_sampled_effect_selection(
             input,
             engine,
