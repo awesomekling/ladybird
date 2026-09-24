@@ -48,6 +48,7 @@ bool deferring_engine_pseudo_installation()
 using StyleUpdateMode = DOM::Document::StyleUpdateMode;
 
 extern "C" void ladybird_utf16_fly_string_unref(size_t);
+extern "C" void rust_style_seal_set_in_effect_drain(bool);
 
 }
 
@@ -118,6 +119,10 @@ static void apply_element_style_invalidation_after_style_change(DOM::Element& el
 
 void StyleEffectDrain::apply(DOM::Document& document)
 {
+    // What the drain asks of the engine is the pass's output being applied, which the style seal
+    // counts apart from the pass's round trips.
+    rust_style_seal_set_in_effect_drain(true);
+    ScopeGuard end_effect_drain = [] { rust_style_seal_set_in_effect_drain(false); };
     for (auto const& effect : m_effects) {
         auto element = document.style_computer().element_for_style_node(effect.visit([](auto const& row) { return row.style_node; }));
         if (!element)
@@ -395,6 +400,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 || reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedMaterialization) {
                 // The engine computed this row over the rows installed before it, the way the host
                 // would have computed it here.
+                StyleEngineFFI::style_engine_note_host_step(reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedAfterAncestors ? StyleEngineFFI::FfiStyleHostStep::RetriedAfterAncestors : StyleEngineFFI::FfiStyleHostStep::RetriedMaterialization);
                 retried_unstyled_materialization = reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedMaterialization && !element->has_style();
                 retried_after_installed_ancestors = reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedAfterAncestors;
                 reaction.gap = StyleEngineFFI::FfiStyleDeltaGap::Computed;
@@ -418,6 +424,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 if (document.is_running_update_layout() && container_effects.depends_on_size && reaction.old_style_record != 0
                     && element->style_record_identity().value() == reaction.old_style_record && awaits_layout_basis) {
                     StyleComputer::record_container_query_effects(DOM::AbstractElement { *element }, container_effects);
+                    StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::AwaitsLayoutBasis);
                     continue;
                 }
             }
@@ -465,6 +472,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
 
             // What the element holds now is what the row moves it from: the engine reads the row's
             // facts for the children from that and from what the element holds when it is noted.
+            StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::Row);
+            if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize)
+                StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::MaterializeGap);
             document.style_computer().style_engine().begin_style_reaction(StyleNodeID { reaction.style_node });
             DOM::begin_style_row_counter_style_invalidation(*element);
             auto old_custom_property_data = element->custom_property_data({});
@@ -541,6 +551,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 if ((declarations_changed_during_apply(StyleNodeID { reaction.style_node })
                         || !engine_computed_record_environment_is_installable(*element, StyleRecordID { reaction.new_style_record }))
                     && !element->has_associated_animations()) {
+                    StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::InLoopRecordDemand);
                     auto demand = document.style_computer().style_engine().answer_record_demand(
                         StyleNodeID { reaction.style_node }, {}, false, true);
                     if (demand.record.style_record) {
@@ -585,6 +596,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     ASSERT(!rows_declined_by_previous_wave.contains(StyleNodeID { reaction.style_node }));
                     if (rows_declined_by_previous_wave.contains(StyleNodeID { reaction.style_node }))
                         declined_a_row_again = true;
+                    StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::DeclinedRow);
                     declined_rows.set(StyleNodeID { reaction.style_node });
                     StyleEngineFFI::style_engine_native_container_effects_release(StyleEngineFFI::style_engine_take_container_effects(document.style_computer().style_engine().rust_handle(), reaction.style_node).effects);
                     for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
@@ -679,6 +691,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                             element->apply_display_none_change(old_originating_style->base_values().display().is_none() != new_style->base_values().display().is_none(),
                                 !old_originating_style->display().is_none() && new_style->display().is_none());
                         }
+                        StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::PseudoSettle);
                         auto settled_pseudos = document.style_computer().style_engine().settle_pseudo_records_after_host_record(StyleNodeID { reaction.style_node }, old_is_list_item);
                         DOM::Element::EnginePseudoElementRecords final_pseudo_records {};
                         for (size_t kind = 0; kind < array_size(settled_pseudos.pseudo_records); ++kind) {
@@ -699,10 +712,12 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         row_effects.append(StyleEffectDrain::ExplicitInheritance { StyleNodeID { reaction.style_node }, explicit_inheritance_debt });
                 }
             } else if (needs_regular_style_recompute || needs_inherited_style_recompute || needs_full_custom_property_recompute) {
+                StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::HostRecordDemand);
                 invalidation = apply_engine_record_demand(*element, did_change_custom_properties);
                 if (reaction.reaction & StyleEngine::PseudoInputsMayHaveChanged)
                     sample_animations_for_installed_pseudos(*element);
             } else if (needs_custom_property_recompute && element->refresh_inherited_custom_property_data()) {
+                StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::InheritedCustomPropertyRefresh);
                 did_change_custom_properties = true;
                 element->republish_style_record_environment();
                 element->invalidate_descendant_styles_depending_on_style_container_query();
@@ -725,8 +740,10 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             // The environment moved: the element's descendants take it here, and the ones that read
             // a moved name are recorded for their own computation. The engine derives no reactions
             // for the move.
-            if (did_change_custom_properties)
+            if (did_change_custom_properties) {
+                StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::EnvironmentMove);
                 propagate_custom_property_environment_move(document, *element, old_custom_property_data);
+            }
             if (invalidation.is_none())
                 facts |= StyleEngine::InvalidationIsNone;
             if (invalidation.needs_layout_tree_rebuild())
@@ -859,6 +876,7 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
     auto transaction_only_derived_child_reactions = style_engine_transaction.only_derived_child_reactions;
     if (style_engine_reactions.is_empty()
         && document.style_computer().style_engine().has_pending_transaction()) {
+        StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::Wave);
         auto feedback_transaction = take_style_engine_transaction(document);
         style_engine_reactions = move(feedback_transaction.reactions);
         prefers_broad_matching_batch = feedback_transaction.prefers_broad_matching_batch;
@@ -1014,6 +1032,7 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
         // stabilization epoch. Take it only after consuming the current published answers, since
         // a new transaction retires their scratch.
         if (document.style_computer().style_engine().has_pending_transaction()) {
+            StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::Wave);
             auto next_transaction = take_style_engine_transaction(document);
             style_engine_reactions = move(next_transaction.reactions);
             transaction_only_derived_child_reactions = next_transaction.only_derived_child_reactions;

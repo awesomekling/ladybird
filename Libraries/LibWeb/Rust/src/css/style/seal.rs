@@ -12,11 +12,14 @@
 //! reports each callback site once; `abort` makes the first callback fatal. Reports and census
 //! totals go to stderr or to the file named by `LIBWEB_SEAL_STYLE_STAGE_LOG`.
 //!
-//! `engine_call` counts the engine entry points the host calls while an update runs, apart from
-//! taking the style transaction itself. Nothing computes styles on the host any more, but the
-//! host still walks the transaction's answers and asks the engine about each row it applies;
-//! each such call is a round trip a single sealed pass would have to absorb. The count is only
-//! reported: none of these calls is a violation.
+//! `engine_call` counts the engine entry points the host calls while an update runs, from the
+//! first style transaction it takes until the update ends, and the steps the host takes for the
+//! pass between them (`host:*`). Nothing computes styles on the host any more, but the host still
+//! walks the transaction's answers and asks the engine about each row it applies; each such call
+//! is a round trip a single sealed pass would have to absorb. The calls that publish the update's
+//! inputs before its first transaction, and the ones the host makes while it drains the effects
+//! the pass left behind, are totalled apart. The count is only reported: none of these calls is a
+//! violation.
 //!
 //! A font cache miss is no longer a host service. The installed resolver answers from the
 //! document's published `@font-face` table and the process-wide font services, reads no document
@@ -74,6 +77,13 @@ pub(crate) struct SealState {
     between_pass_batches: HashMap<&'static str, (u64, u64)>,
     host_entry_causes: HashMap<HostEntryKey, u64>,
     engine_calls: HashMap<&'static str, u64>,
+    /// Whether the update has taken its first style transaction. The calls before it publish the
+    /// update's inputs; the ones after it are the round trips of the pass.
+    pass_started: bool,
+    /// Whether the host is draining the effects the pass left, which are its outputs.
+    in_effect_drain: bool,
+    input_calls: u64,
+    effect_drain_calls: u64,
 }
 
 thread_local! {
@@ -172,7 +182,28 @@ pub(crate) fn note_engine_call(entry: &'static str) {
     if mode() == Mode::Off || !update_is_running() {
         return;
     }
-    STATE.with_borrow_mut(|state| *state.engine_calls.entry(entry).or_default() += 1);
+    STATE.with_borrow_mut(|state| {
+        if entry == "style_engine_take_style_transaction" {
+            state.pass_started = true;
+        }
+        if !state.pass_started {
+            state.input_calls += 1;
+        } else if state.in_effect_drain {
+            state.effect_drain_calls += 1;
+        } else {
+            *state.engine_calls.entry(entry).or_default() += 1;
+        }
+    });
+}
+
+/// Note that the host is draining the effects a style pass left behind, or has finished. What
+/// the drain calls is the pass's output being applied, not a round trip of the pass.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_style_seal_set_in_effect_drain(in_drain: bool) {
+    if mode() == Mode::Off {
+        return;
+    }
+    STATE.with_borrow_mut(|state| state.in_effect_drain = in_drain);
 }
 
 /// Report how often the engine declined to compute a record itself, by the reason it recorded.
@@ -210,6 +241,9 @@ pub(crate) fn begin_update() {
         return;
     }
     STATE.with_borrow_mut(|state| {
+        if state.update_depth == 0 {
+            state.pass_started = false;
+        }
         state.update_depth = state
             .update_depth
             .checked_add(1)
@@ -290,12 +324,15 @@ pub(crate) fn flush_census() {
     if mode() == Mode::Off {
         return;
     }
-    let (counts, causes, engine_calls, batches) = STATE.with_borrow_mut(|state| {
+    let (counts, causes, engine_calls, batches, input_calls, effect_drain_calls) = STATE.with_borrow_mut(|state| {
+        state.pass_started = false;
         (
             std::mem::take(&mut state.counts),
             std::mem::take(&mut state.host_entry_causes),
             std::mem::take(&mut state.engine_calls),
             std::mem::take(&mut state.between_pass_batches),
+            std::mem::take(&mut state.input_calls),
+            std::mem::take(&mut state.effect_drain_calls),
         )
     });
     let mut counts = counts.into_iter().collect::<Vec<_>>();
@@ -324,6 +361,16 @@ pub(crate) fn flush_census() {
     }
     if total_engine_calls != 0 {
         write_report(&format!("STYLE SEAL COUNT: engine_calls: {total_engine_calls}\n"));
+    }
+    if input_calls != 0 {
+        write_report(&format!(
+            "STYLE SEAL COUNT: engine_calls_publishing_inputs: {input_calls}\n"
+        ));
+    }
+    if effect_drain_calls != 0 {
+        write_report(&format!(
+            "STYLE SEAL COUNT: engine_calls_in_effect_drain: {effect_drain_calls}\n"
+        ));
     }
     let mut batches = batches.into_iter().collect::<Vec<_>>();
     batches.sort_unstable_by_key(|(batch, _)| *batch);
