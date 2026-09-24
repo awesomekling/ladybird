@@ -2768,12 +2768,28 @@ impl StyleEngineState {
                                     FfiStyleDeltaGap::RetriedMaterialization
                                 },
                             ),
-                            None => (
-                                old_style_record,
-                                0,
-                                FfiStyleDeltaDamage::None,
-                                FfiStyleDeltaGap::Materialize,
-                            ),
+                            // The host asks for the row where it applies it. A hosted engine
+                            // settles every row it is offered, so only an engine no document hosts
+                            // leaves one; should a hosted one, the style seal reports it.
+                            None => {
+                                debug_assert!(
+                                    !self.retained.computes_records(),
+                                    "a hosted engine settles every row it is offered"
+                                );
+                                if self.retained.computes_records() {
+                                    seal::note_host_entry(
+                                        "FlushUnsettledRow",
+                                        seal::HostEntryKind::Refused,
+                                        old_style_record == 0,
+                                    );
+                                }
+                                (
+                                    old_style_record,
+                                    0,
+                                    FfiStyleDeltaDamage::None,
+                                    FfiStyleDeltaGap::Materialize,
+                                )
+                            }
                         },
                     }
                 };
