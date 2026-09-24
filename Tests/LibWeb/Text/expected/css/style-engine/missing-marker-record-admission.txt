@@ -1,4 +1,3 @@
-missing pseudo rows: 0
 discarded engine records: 0
 display: block
 color: rgb(0, 0, 255)

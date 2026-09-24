@@ -7,50 +7,77 @@
 use super::*;
 
 impl RetainedState {
-    /// A pseudo row can predate the current answer even when the element row is current. Rebuild
-    /// its winners from that answer before deciding whether the engine can settle its record.
-    fn refresh_stale_pseudo_winners(
+    /// The pseudo winner rows a settlement reads, republished from the node's answer wherever one
+    /// predates it, is missing, or predates the rules that flipped for its kind: settling then
+    /// reads a current row for every kind it generates. The kinds are those the answer has rules
+    /// for (only `selected_kind` when one is), less a deferred kind, a backdrop outside the top
+    /// layer and a marker no list item generates, which generate no box whatever their rows say.
+    #[allow(clippy::too_many_arguments)]
+    fn refresh_pseudo_winner_rows(
         &mut self,
         node: StyleNodeID,
-        new_element_record: computed::FinalStyleRecordID,
+        new_is_list_item: bool,
+        old_is_list_item: bool,
+        selected_kind: Option<u8>,
+        flipped_pseudo_rules: u64,
         counters: &mut Counters,
     ) {
+        use pseudo_kind::{AFTER, BACKDROP, BEFORE, FIRST_LETTER, MARKER, SELECTION};
+
         let Some(mask) = self.pseudo_style_mask(node) else {
             return;
         };
-        let new_is_list_item = self
-            .computed_group_sets
-            .style_record_view(new_element_record.raw())
-            .and_then(|view| unsafe { view.longhand_table.as_ref() })
-            .is_some_and(|table| table.display_is_list_item());
-        let marker_is_live = new_is_list_item
-            || self
-                .computed_group_sets
-                .pseudo_style_record(node, pseudo_kind::MARKER)
-                .is_some()
-            || [pseudo_kind::BEFORE, pseudo_kind::AFTER, pseudo_kind::BACKDROP]
-                .into_iter()
-                .filter_map(|kind| self.computed_group_sets.pseudo_style_record(node, kind))
-                .filter_map(|record| self.computed_group_sets.style_record_view(record.raw()))
-                .filter_map(|view| unsafe { view.longhand_table.as_ref() })
-                .any(|table| table.display_is_list_item());
-        let stale = self
-            .current_winner_groups()
-            .pseudo_states(node)
-            .any(|(pseudo, version, _, priority_current)| {
-                let kind = usize::from(pseudo.kind.0);
-                kind < pseudo_kind::SYNTHETIC_COUNT
-                    && mask & (1_u64 << kind) != 0
-                    && (kind != usize::from(pseudo_kind::BACKDROP) || self.top_layer_elements.contains(&node))
-                    && (kind != usize::from(pseudo_kind::MARKER) || marker_is_live)
-                    && (version != self.program.version() || !priority_current)
-            });
-        if stale {
-            if self.current_winner_groups().row_stamp(node) == Some(self.flush_stamp) {
-                self.republish_pseudo_winners_from_retained_answer(node, counters);
-            } else {
-                self.republish_winners_from_answer(node, counters);
+        let mut required = match selected_kind {
+            Some(kind) => mask & (1_u64 << kind),
+            None => {
+                let settled = [BEFORE, AFTER, FIRST_LETTER, SELECTION, BACKDROP, MARKER]
+                    .into_iter()
+                    .fold(0_u64, |kinds, kind| kinds | (1 << kind));
+                let mut required = mask & settled;
+                if let Some(deferred) = self.deferred_pseudo_element {
+                    required &= !(1_u64 << deferred.0);
+                }
+                if !self.top_layer_elements.contains(&node) {
+                    required &= !(1_u64 << BACKDROP);
+                }
+                let marker_is_live = new_is_list_item
+                    || old_is_list_item
+                    || [BEFORE, AFTER, BACKDROP]
+                        .into_iter()
+                        .filter_map(|kind| self.computed_group_sets.pseudo_style_record(node, kind))
+                        .filter_map(|record| self.computed_group_sets.style_record_view(record.raw()))
+                        .filter_map(|view| unsafe { view.longhand_table.as_ref() })
+                        .any(|table| table.display_is_list_item());
+                if !marker_is_live {
+                    required &= !(1_u64 << MARKER);
+                }
+                required
             }
+        };
+        let program_version = self.program.version();
+        for (pseudo, version, _, priority_current) in self.current_winner_groups().pseudo_states(node) {
+            let kind = pseudo.kind.0;
+            if kind >= 64 || required & (1_u64 << kind) == 0 {
+                continue;
+            }
+            let unflipped = flipped_pseudo_rules & (1_u64 << kind) != 0
+                && self.current_winner_groups().pseudo_row_stamp(node, pseudo) != Some(self.flush_stamp);
+            if version == program_version && priority_current && !unflipped {
+                required &= !(1_u64 << kind);
+            }
+        }
+        if required == 0 {
+            return;
+        }
+        // The element row may already be compared with the record derived from it in this flush:
+        // keep it and publish only the pseudo rows. An evicted answer is matched again.
+        let republished = self.current_winner_groups().row_stamp(node) == Some(self.flush_stamp)
+            && self
+                .republish_pseudo_winners_from_retained_answer(node, counters)
+                .is_some();
+        if !republished {
+            let rematched = self.republish_winners_from_answer(node, counters);
+            debug_assert!(rematched.is_some(), "a settled node's pseudo winners republish");
         }
     }
 
@@ -63,100 +90,6 @@ impl RetainedState {
         for record in records {
             self.computed_group_sets.unpin_style_record(record.raw());
         }
-    }
-
-    /// Check pseudo winner availability before deriving an originating record that would have
-    /// to be discarded. Marker generation additionally depends on the newly computed display
-    /// and is checked when settling the pseudo records.
-    pub(super) fn engine_pseudo_inputs_available(
-        &mut self,
-        node: StyleNodeID,
-        record: Option<computed::FinalStyleRecordID>,
-        counters: &mut Counters,
-    ) -> bool {
-        use pseudo_kind::{AFTER, BEFORE, FIRST_LETTER, MARKER, SELECTION};
-
-        // A marker is generated for a list item only: the stale marker row of an element that is
-        // no list item decides nothing. Settling the records checks it again against the
-        // element's new record.
-        let record_is_list_item = record
-            .and_then(|record| self.computed_group_sets.style_record_view(record.raw()))
-            .and_then(|view| unsafe { view.longhand_table.as_ref() })
-            .is_some_and(|table| table.display_is_list_item());
-        // What the element's display winner says: `None` when the state or the value cannot say.
-        let display_winner_is_list_item = match self
-            .current_winner_groups()
-            .token_for(WinnerGroupKey::current(node, self.program.version()))
-        {
-            Lookup::Known((_, state)) => match self
-                .winner_groups
-                .winner_in_state(state, crate::css::property_metadata::property_id::DISPLAY)
-                .and_then(|winner| self.winner_groups.resolved_winner(winner))
-            {
-                None => Some(false),
-                Some(winner) => match self.specified_values.value(winner.key.value) {
-                    Lookup::Known(StyleValueData::Display { raw }) => {
-                        Some(crate::css::display::FfiDisplay::from_raw(*raw).is_list_item())
-                    }
-                    _ => None,
-                },
-            },
-            _ => None,
-        };
-        let marker_may_generate = record_is_list_item || display_winner_is_list_item != Some(false);
-        let mut available = 0_u64;
-        for (pseudo, version, _, priority_current) in self.current_winner_groups().pseudo_states(node) {
-            if self.deferred_pseudo_element == Some(pseudo.kind) {
-                continue;
-            }
-            let kind = usize::from(pseudo.kind.0);
-            if kind >= pseudo_kind::SYNTHETIC_COUNT
-                || (pseudo_kind::is_highlight(kind) && kind != usize::from(SELECTION))
-            {
-                continue;
-            }
-            if version != self.program.version() || !priority_current {
-                if kind == usize::from(MARKER) && !marker_may_generate {
-                    continue;
-                }
-                // A row the node's current answer has no rules for is one left from rules that
-                // no longer match: the pseudo-element it styled is not generated.
-                if self.pseudo_style_mask(node).is_some_and(|mask| mask & (1 << kind) == 0) {
-                    continue;
-                }
-                // Settlement refreshes this row from the node's retained match answer after
-                // its element record is decided. Refreshing now would also replace the element
-                // winner row before its normal computed-output comparison.
-                if self
-                    .current_answer_identity(node)
-                    .and_then(|identity| self.match_answers.answer(identity))
-                    .is_some()
-                {
-                    available |= 1 << kind;
-                    continue;
-                }
-                counters.bump(Counter::EngineComputedRecordBailPseudoStale);
-                return false;
-            }
-            available |= 1 << kind;
-        }
-        let Some(mut required) = self.pseudo_style_mask(node) else {
-            counters.bump(Counter::EngineComputedRecordBailPseudoMask);
-            return false;
-        };
-        if let Some(deferred) = self.deferred_pseudo_element {
-            required &= !(1_u64 << deferred.0);
-        }
-        required &= !pseudo_kind::highlight_mask() | (1 << SELECTION);
-        if required & !available == 0 {
-            return true;
-        }
-        let explicit_kinds = (1 << BEFORE) | (1 << AFTER) | (1 << FIRST_LETTER) | (1 << SELECTION);
-        if required & explicit_kinds & !available != 0 {
-            counters.bump(Counter::EngineComputedRecordBailPseudoRow);
-            return false;
-        }
-        true
     }
 
     /// Settle the synthetic pseudo-elements of an element the engine derived a record for, the
@@ -216,8 +149,6 @@ impl RetainedState {
     ) -> Drive<()> {
         use pseudo_kind::{AFTER, BACKDROP, BEFORE, FIRST_LETTER, MARKER, SELECTION};
 
-        self.refresh_stale_pseudo_winners(node, new_element_record, counters);
-
         let Some(mut inputs) = self.document_style_computation_inputs else {
             counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
             return Err(Unanswered::Refused);
@@ -228,45 +159,6 @@ impl RetainedState {
             self.root_font_inputs_from_record(new_element_record)
                 .or_refused()?
                 .apply_to(&mut inputs);
-        }
-        let program_version = self.program.version();
-        let in_top_layer = self.top_layer_elements.contains(&node);
-        let mut states: [Option<CascadeStateID>; 20] = [None; 20];
-        let mut marker_row_is_stale = false;
-        for (pseudo, version, state, priority_current) in self.current_winner_groups().pseudo_states(node) {
-            if selected_kind.is_none() && self.deferred_pseudo_element == Some(pseudo.kind) {
-                continue;
-            }
-            let Ok(kind) = u8::try_from(pseudo.kind.0) else {
-                continue;
-            };
-            if usize::from(kind) >= states.len() {
-                continue;
-            }
-            if selected_kind.is_some_and(|selected| selected != kind) {
-                continue;
-            }
-            if version != program_version || !priority_current {
-                // The backdrop of a node outside the top layer cannot generate a box. Its
-                // retained winner may be stale without changing this transaction's answer.
-                if kind == BACKDROP && selected_kind.is_none() && !in_top_layer {
-                    states[usize::from(kind)] = Some(state);
-                    continue;
-                }
-                // A row the node's current answer has no rules for is one left from rules that
-                // no longer match: the pseudo-element it styled is not generated.
-                if self.pseudo_style_mask(node).is_some_and(|mask| mask & (1 << kind) == 0) {
-                    continue;
-                }
-                // Whether a marker is generated is known once the element's display is.
-                if kind == MARKER {
-                    marker_row_is_stale = true;
-                    continue;
-                }
-                counters.bump(Counter::EngineComputedRecordBailPseudoStale);
-                return Err(Unanswered::Refused);
-            }
-            states[usize::from(kind)] = Some(state);
         }
         let display_is_list_item = |engine: &Self, record: computed::FinalStyleRecordID| -> Option<bool> {
             let view = engine.computed_group_sets.style_record_view(record.raw())?;
@@ -296,9 +188,25 @@ impl RetainedState {
             }
             (None, None) => false,
         };
-        if marker_row_is_stale && (new_is_list_item || old_is_list_item) {
-            counters.bump(Counter::EngineComputedRecordBailPseudoStale);
-            return Err(Unanswered::Refused);
+        self.refresh_pseudo_winner_rows(
+            node,
+            new_is_list_item,
+            old_is_list_item,
+            selected_kind,
+            scratch.flipped_pseudo_rules,
+            counters,
+        );
+        let program_version = self.program.version();
+        let in_top_layer = self.top_layer_elements.contains(&node);
+        // A row still stale after the refresh is one of a kind that generates no box.
+        let mut states: [Option<CascadeStateID>; 20] = [None; 20];
+        for (pseudo, version, state, priority_current) in self.current_winner_groups().pseudo_states(node) {
+            if version != program_version || !priority_current {
+                continue;
+            }
+            if let Some(slot) = states.get_mut(usize::from(pseudo.kind.0)) {
+                *slot = Some(state);
+            }
         }
         // What a pseudo-element inherits from its element: an element record that kept its
         // inherited groups left them alone.
@@ -427,22 +335,10 @@ impl RetainedState {
                 })
                 .flatten();
             let state = states[usize::from(kind)].filter(|_| has_rules);
-            if has_rules && state.is_none() {
-                counters.bump(Counter::EngineComputedRecordBailPseudoRow);
-                return Err(Unanswered::Refused);
-            }
-            // The row has to hold the rules that flipped for this kind: one this flush published
-            // holds the cascade of the node's current answer.
-            if state.is_some()
-                && scratch.flipped_pseudo_rules & (1_u64 << kind) != 0
-                && self.current_winner_groups().pseudo_row_stamp(
-                    node,
-                    tree::PseudoElementTarget::new(tree::PseudoElementKind(u16::from(kind))),
-                ) != Some(self.flush_stamp)
-            {
-                counters.bump(Counter::EngineComputedRecordBailPseudoFlip);
-                return Err(Unanswered::Refused);
-            }
+            debug_assert!(
+                !has_rules || state.is_some(),
+                "a kind with rules has a current winner row"
+            );
             let old_record = old.unwrap_or(computed::FinalStyleRecordID::NONE);
             let remove = |engine: &mut Self, scratch: &mut EngineComputedRecordScratch, counters: &mut Counters| {
                 if old.is_some() {
@@ -922,9 +818,6 @@ impl RetainedState {
             // make is in the record C++ computed.
             if !self.pseudo_winners_are_complete(node) {
                 counters.bump(Counter::EngineComputedRecordBailIncompleteWinners);
-                return Err(Unanswered::Refused);
-            }
-            if !self.engine_pseudo_inputs_available(node, Some(record), counters) {
                 return Err(Unanswered::Refused);
             }
         }

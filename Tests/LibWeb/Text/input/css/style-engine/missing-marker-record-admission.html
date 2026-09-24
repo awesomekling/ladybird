@@ -10,7 +10,7 @@
         const host = document.getElementById("host");
         internals.updateStyle();
         // A cohort hit carries the marker cascade along with the element's winners,
-        // so every list item can settle its marker without a missing-row refusal.
+        // so every list item settles its marker beside its own record.
         const before = internals.styleEngineCounters();
         for (let index = 0; index < 12; ++index) {
             const item = document.createElement("li");
@@ -19,7 +19,6 @@
             internals.updateStyle();
         }
         const after = internals.styleEngineCounters();
-        println(`missing pseudo rows: ${after.engineComputedRecordBailPseudoRow - before.engineComputedRecordBailPseudoRow}`);
         println(`discarded engine records: ${after.engineComputedRecordsAbandoned - before.engineComputedRecordsAbandoned}`);
         host.className = "visible";
         internals.updateStyle();

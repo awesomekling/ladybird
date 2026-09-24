@@ -244,13 +244,6 @@ impl RetainedState {
             scratch.pseudo_uses_substitution = false;
             scratch.noted_substitution = None;
             scratch.flipped_pseudo_rules = exact_flipped_rules.map_or(0, |flipped| flipped.pseudos);
-            if !self.engine_pseudo_inputs_available(
-                node,
-                self.computed_group_sets.assigned_style_record(node),
-                counters,
-            ) {
-                return Err(Unanswered::Refused);
-            }
         }
         let delta = match pending_element {
             Some(delta) => delta,
@@ -2015,9 +2008,6 @@ impl RetainedState {
         if self.record_requires_cpp_animation(record) {
             return None;
         }
-        if !self.engine_pseudo_inputs_available(node, Some(record), counters) {
-            return None;
-        }
         self.computed_group_sets
             .set_pending_cascade_state(target, cascade_state);
         let publication = self.assign_shared_style_record(
@@ -2597,15 +2587,6 @@ impl RetainedState {
         else {
             return Err(Unanswered::Refused);
         };
-        if !scratch.font_drive.is_pending()
-            && !self.engine_pseudo_inputs_available(
-                node,
-                self.computed_group_sets.assigned_style_record(node),
-                counters,
-            )
-        {
-            return Err(Unanswered::Refused);
-        }
         // An armed row's answer may declare past its winners: a record computed from it is no
         // function of the winner state the cold record cache is keyed by.
         if !scratch.font_drive.is_pending()
@@ -5762,16 +5743,6 @@ mod pseudo_kind {
     pub(super) const MARKER: u8 = 5;
     pub(super) const SELECTION: u8 = 6;
     pub(super) const SYNTHETIC_COUNT: usize = 8;
-
-    pub(super) fn is_highlight(kind: usize) -> bool {
-        kind < SYNTHETIC_COUNT && crate::css::property_metadata::pseudo_element_is_highlight(kind as u8)
-    }
-
-    pub(super) fn highlight_mask() -> u64 {
-        (0..SYNTHETIC_COUNT)
-            .filter(|&kind| is_highlight(kind))
-            .fold(0, |mask, kind| mask | 1 << kind)
-    }
 }
 
 /// The element facts a pseudo-element's computation reads: the C++ adjustments for what the
@@ -6418,11 +6389,6 @@ impl StyleEngineState {
             counters.bump(Counter::RootFontInputsUnprovenFallbacks);
             return;
         };
-        let assigned_style_record = self.computed_group_sets.assigned_style_record(node);
-        if !self.engine_pseudo_inputs_available(node, assigned_style_record, counters) {
-            counters.bump(Counter::RootFontInputsUnprovenFallbacks);
-            return;
-        }
         scratch.root_element_inputs = Some((node, RootFontInputs::from_document(&inputs)));
         let probe = |state: &mut Self, scratch: &mut EngineComputedRecordScratch, counters: &mut Counters| {
             state.engine_computed_element_record_delta(
