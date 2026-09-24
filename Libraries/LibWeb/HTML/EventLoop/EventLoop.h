@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/Array.h>
 #include <AK/Function.h>
 #include <AK/Noncopyable.h>
 #include <AK/Queue.h>
@@ -36,6 +37,38 @@ class WEB_API EventLoop : public JS::Cell {
     };
 
 public:
+    // Why a frame ran while main waited for it rather than beside main.
+    enum class FrameLockstepReason : u8 {
+        // A stage of the frame still has joins, so main has to serve them.
+        JoinsLeft,
+        // A document with resize observations must deliver them within the rendering update.
+        ResizeObserverDocument,
+        ViewTransition,
+        // A read of render state outside the rendering update, which cannot return before the frame does.
+        SynchronousCaller,
+        Count,
+    };
+    static StringView frame_lockstep_reason_name(FrameLockstepReason);
+
+    // What an invalidation journal entry is about, for counting the ones made while a frame is in flight.
+    enum class JournalEntryKind : u8 {
+        LayoutUpdate,
+        LayoutTreeUpdate,
+        Repaint,
+        PaintFacts,
+        PaintCache,
+        Editability,
+        Selection,
+        ScrollOffset,
+        Scrollbar,
+        TextData,
+        SVGAttributes,
+        TableSpans,
+        VisualContext,
+        Count,
+    };
+    static StringView journal_entry_kind_name(JournalEntryKind);
+
     struct RenderingSchedulerCounters {
         u64 update_requests { 0 };
         u64 coalesced_update_requests { 0 };
@@ -57,6 +90,29 @@ public:
         u64 dom_manipulation_tasks_between_updates { 0 };
         u64 dom_manipulation_task_microseconds_between_updates { 0 };
         u64 paints { 0 };
+
+        // What the frames of the rendering updates cost the main thread, and what ran beside them. A frame is
+        // "submitted" when it leaves main to run on its own and "consumed" when main takes its result back; one that
+        // runs while main waits for it is "lockstep". Until the frame scheduler lands, the overlap host's spin is the
+        // only thing that submits (one per overlapping stage), and every other rendering update is a lockstep frame.
+        u64 frames_submitted { 0 };
+        u64 frames_consumed { 0 };
+        Array<u64, to_underlying(FrameLockstepReason::Count)> frames_lockstep {};
+        // Frames whose result was thrown away instead of consumed. Must stay 0.
+        u64 frames_dropped { 0 };
+        u64 tasks_started_with_frame_in_flight { 0 };
+        u64 frame_in_flight_nanoseconds { 0 };
+        // Task and microtask time main spent while a frame was in flight: the work overlap exists for.
+        u64 overlap_task_nanoseconds { 0 };
+        // Main's own share of a rendering update: up to the submission, then the two halves of consuming the frame.
+        // Until frames are submitted from the rendering update, main_half_nanoseconds is the whole update.
+        u64 main_half_nanoseconds { 0 };
+        u64 consume_commit_nanoseconds { 0 };
+        u64 consume_tail_nanoseconds { 0 };
+        u64 submit_to_consume_nanoseconds { 0 };
+        u64 max_submit_to_consume_nanoseconds { 0 };
+        // What the DOM side journaled while a frame was in flight, which it could do without waiting for the frame.
+        Array<u64, to_underlying(JournalEntryKind::Count)> journal_entries_during_flight {};
     };
 
     enum class Type {
@@ -139,6 +195,17 @@ public:
     RenderingSchedulerCounters const& rendering_scheduler_counters() const { return m_rendering_scheduler_counters; }
     void reset_rendering_scheduler_counters();
 
+    // The frame scheduler's hook points for the counters above. A frame is in flight from did_submit_frame() until
+    // did_consume_frame_commit(); did_consume_frame_tail() follows once the rest of the rendering update has run.
+    void did_submit_frame();
+    void did_consume_frame_commit(u64 nanoseconds);
+    void did_consume_frame_tail(u64 nanoseconds);
+    void did_drop_frame() { ++m_rendering_scheduler_counters.frames_dropped; }
+    void did_run_frame_in_lockstep(FrameLockstepReason reason) { ++m_rendering_scheduler_counters.frames_lockstep[to_underlying(reason)]; }
+    // Main-thread only, and cheap enough to ask on every journal write.
+    static bool a_frame_is_in_flight() { return s_a_frame_is_in_flight; }
+    void note_journal_entry_during_flight(JournalEntryKind kind) { ++m_rendering_scheduler_counters.journal_entries_during_flight[to_underlying(kind)]; }
+
 private:
     explicit EventLoop(Type);
 
@@ -194,6 +261,8 @@ private:
     RenderingSchedulerCounters m_rendering_scheduler_counters;
     RenderingSchedulerCounters m_rendering_scheduler_counters_at_last_update;
     double m_last_rendering_update_end_time { 0 };
+    u64 m_frame_submitted_at_nanoseconds { 0 };
+    static bool s_a_frame_is_in_flight;
 
     GC::Ptr<GC::Function<void()>> m_rendering_task_function;
 };

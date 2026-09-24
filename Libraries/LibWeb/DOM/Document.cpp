@@ -821,6 +821,9 @@ Document::JoinScope::JoinScope(Document& document, UpdateLayoutReason reason)
     }
 
     ++counters.joins;
+    // A dirty read outside the rendering update runs a frame of its own that it waits for.
+    if (auto& event_loop = HTML::main_thread_event_loop(); !event_loop.running_rendering_task())
+        event_loop.did_run_frame_in_lockstep(HTML::EventLoop::FrameLockstepReason::SynchronousCaller);
     m_layout_commit_generation = m_document.layout_commit_generation();
     m_style_transaction_version = m_document.style_computer().style_engine().published_transaction_version().transaction;
     // A document that has not been dirtied yet has no mutation to measure against.
@@ -851,6 +854,13 @@ void Document::JoinScope::note_extra_pass() const
     ++m_document.m_join_counters[to_underlying(m_reason)].nested;
 }
 
+void Document::JoinScope::note_frame_wait(u64 nanoseconds) const
+{
+    auto& counters = m_document.m_join_counters[to_underlying(m_reason)];
+    ++counters.frame_waits;
+    counters.frame_wait_nanoseconds += nanoseconds;
+}
+
 void Document::dump_join_counters() const
 {
     Vector<size_t> reasons;
@@ -871,11 +881,14 @@ void Document::dump_join_counters() const
         totals.max_nanoseconds = max(totals.max_nanoseconds, counters.max_nanoseconds);
         totals.nanoseconds_since_mutation += counters.nanoseconds_since_mutation;
         totals.joins_that_published_nothing += counters.joins_that_published_nothing;
+        totals.frame_waits += counters.frame_waits;
+        totals.frame_wait_nanoseconds += counters.frame_wait_nanoseconds;
     }
 
-    dbgln("Joins: {} calls, {} joins ({} published nothing), {} clean reads, {} nested, {:.3f}ms blocked ({:.3f}ms of it on clean reads)",
+    dbgln("Joins: {} calls, {} joins ({} published nothing), {} clean reads, {} nested, {:.3f}ms blocked ({:.3f}ms of it on clean reads, {:.3f}ms in {} frame waits)",
         totals.calls, totals.joins, totals.joins_that_published_nothing, totals.clean_reads, totals.nested,
-        totals.total_nanoseconds / 1'000'000.0, totals.clean_read_nanoseconds / 1'000'000.0);
+        totals.total_nanoseconds / 1'000'000.0, totals.clean_read_nanoseconds / 1'000'000.0,
+        totals.frame_wait_nanoseconds / 1'000'000.0, totals.frame_waits);
     for (auto reason : reasons) {
         auto const& counters = m_join_counters[reason];
         dbgln("  {:>9.3f}ms ({:>8.3f}ms clean) {:>7} joins ({:>7} idle) {:>7} clean {:>7} nested  max {:>8.3f}ms  since mutation {:>9.3f}ms  {}",

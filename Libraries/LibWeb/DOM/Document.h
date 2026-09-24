@@ -1244,6 +1244,10 @@ public:
         // dirty bits said work was owed and the versions say none of it changed anything, so this
         // counts how conservative the bits are.
         u64 joins_that_published_nothing { 0 };
+        // Joins that found a frame in flight and blocked until it came back, and how long they blocked. Part of
+        // total_nanoseconds: the time a read cost main because a frame did not finish before script needed it.
+        u64 frame_waits { 0 };
+        u64 frame_wait_nanoseconds { 0 };
     };
     using JoinCountersByReason = Array<JoinCounters, update_layout_reason_count>;
     // Whether style and layout already describe the current DOM, so that a read of layout geometry
@@ -1276,6 +1280,8 @@ public:
 
         // Notes a further pass of the same read, which the first pass already charges time for.
         void note_extra_pass() const;
+        // Notes that the read blocked on the frame in flight for the given time before it could go on.
+        void note_frame_wait(u64 nanoseconds) const;
 
     private:
         Document& m_document;

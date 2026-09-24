@@ -1541,6 +1541,8 @@ GC::Ref<JS::Object> Internals::join_counters_object() const
         object->define_direct_property("maxNanoseconds"_utf16_fly_string, JS::Value(counters.max_nanoseconds), JS::default_attributes);
         object->define_direct_property("nanosecondsSinceMutation"_utf16_fly_string, JS::Value(counters.nanoseconds_since_mutation), JS::default_attributes);
         object->define_direct_property("joinsThatPublishedNothing"_utf16_fly_string, JS::Value(counters.joins_that_published_nothing), JS::default_attributes);
+        object->define_direct_property("frameWaits"_utf16_fly_string, JS::Value(counters.frame_waits), JS::default_attributes);
+        object->define_direct_property("frameWaitNanoseconds"_utf16_fly_string, JS::Value(counters.frame_wait_nanoseconds), JS::default_attributes);
         return object;
     };
 
@@ -1557,6 +1559,8 @@ GC::Ref<JS::Object> Internals::join_counters_object() const
         totals.max_nanoseconds = max(totals.max_nanoseconds, counters.max_nanoseconds);
         totals.nanoseconds_since_mutation += counters.nanoseconds_since_mutation;
         totals.joins_that_published_nothing += counters.joins_that_published_nothing;
+        totals.frame_waits += counters.frame_waits;
+        totals.frame_wait_nanoseconds += counters.frame_wait_nanoseconds;
         if (counters.calls == 0)
             continue;
         auto name = Utf16FlyString::from_utf16(DOM::to_string(static_cast<DOM::UpdateLayoutReason>(reason)));
@@ -1608,6 +1612,50 @@ GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
     object->define_direct_property("domManipulationTasksBetweenUpdates"_utf16_fly_string, JS::Value(counters.dom_manipulation_tasks_between_updates), JS::default_attributes);
     object->define_direct_property("domManipulationTaskMicrosecondsBetweenUpdates"_utf16_fly_string, JS::Value(counters.dom_manipulation_task_microseconds_between_updates), JS::default_attributes);
     object->define_direct_property("paints"_utf16_fly_string, JS::Value(counters.paints), JS::default_attributes);
+
+    object->define_direct_property("framesSubmitted"_utf16_fly_string, JS::Value(counters.frames_submitted), JS::default_attributes);
+    object->define_direct_property("framesConsumed"_utf16_fly_string, JS::Value(counters.frames_consumed), JS::default_attributes);
+    auto frames_lockstep = JS::Object::create(realm, nullptr);
+    for (size_t reason = 0; reason < counters.frames_lockstep.size(); ++reason) {
+        auto name = Utf16FlyString::from_utf8(HTML::EventLoop::frame_lockstep_reason_name(static_cast<HTML::EventLoop::FrameLockstepReason>(reason)));
+        frames_lockstep->define_direct_property(name, JS::Value(counters.frames_lockstep[reason]), JS::default_attributes);
+    }
+    object->define_direct_property("framesLockstep"_utf16_fly_string, frames_lockstep, JS::default_attributes);
+    object->define_direct_property("framesDropped"_utf16_fly_string, JS::Value(counters.frames_dropped), JS::default_attributes);
+    object->define_direct_property("tasksStartedWithFrameInFlight"_utf16_fly_string, JS::Value(counters.tasks_started_with_frame_in_flight), JS::default_attributes);
+    object->define_direct_property("frameInFlightNanoseconds"_utf16_fly_string, JS::Value(counters.frame_in_flight_nanoseconds), JS::default_attributes);
+    object->define_direct_property("overlapTaskNanoseconds"_utf16_fly_string, JS::Value(counters.overlap_task_nanoseconds), JS::default_attributes);
+    object->define_direct_property("mainHalfNanoseconds"_utf16_fly_string, JS::Value(counters.main_half_nanoseconds), JS::default_attributes);
+    object->define_direct_property("consumeCommitNanoseconds"_utf16_fly_string, JS::Value(counters.consume_commit_nanoseconds), JS::default_attributes);
+    object->define_direct_property("consumeTailNanoseconds"_utf16_fly_string, JS::Value(counters.consume_tail_nanoseconds), JS::default_attributes);
+    object->define_direct_property("submitToConsumeNanoseconds"_utf16_fly_string, JS::Value(counters.submit_to_consume_nanoseconds), JS::default_attributes);
+    object->define_direct_property("maxSubmitToConsumeNanoseconds"_utf16_fly_string, JS::Value(counters.max_submit_to_consume_nanoseconds), JS::default_attributes);
+    auto journal_entries = JS::Object::create(realm, nullptr);
+    for (size_t kind = 0; kind < counters.journal_entries_during_flight.size(); ++kind) {
+        auto name = Utf16FlyString::from_utf8(HTML::EventLoop::journal_entry_kind_name(static_cast<HTML::EventLoop::JournalEntryKind>(kind)));
+        journal_entries->define_direct_property(name, JS::Value(counters.journal_entries_during_flight[kind]), JS::default_attributes);
+    }
+    object->define_direct_property("journalEntriesDuringFlight"_utf16_fly_string, journal_entries, JS::default_attributes);
+
+    // Door passes are counted by the Rust door itself, by writer.
+    struct DoorCounters {
+        Utf16FlyString writer;
+        Layout::RustFFI::FfiDoorCounters counters;
+    };
+    Vector<DoorCounters> door_counters;
+    Layout::RustFFI::layout_arena_for_each_door_counters(&door_counters, [](void* context, u8 const* name, size_t name_length, Layout::RustFFI::FfiDoorCounters counters) {
+        auto writer = Utf16FlyString::from_utf8(StringView { reinterpret_cast<char const*>(name), name_length });
+        static_cast<Vector<DoorCounters>*>(context)->append({ move(writer), counters });
+    });
+    auto doors = JS::Object::create(realm, nullptr);
+    for (auto const& [writer, counters_of_writer] : door_counters) {
+        auto door = JS::Object::create(realm, nullptr);
+        door->define_direct_property("passes"_utf16_fly_string, JS::Value(counters_of_writer.passes), JS::default_attributes);
+        door->define_direct_property("waits"_utf16_fly_string, JS::Value(counters_of_writer.waits), JS::default_attributes);
+        door->define_direct_property("waitNanoseconds"_utf16_fly_string, JS::Value(counters_of_writer.wait_nanoseconds), JS::default_attributes);
+        doors->define_direct_property(writer, door, JS::default_attributes);
+    }
+    object->define_direct_property("doors"_utf16_fly_string, doors, JS::default_attributes);
     return object;
 }
 

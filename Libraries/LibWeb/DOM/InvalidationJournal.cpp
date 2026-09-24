@@ -11,6 +11,7 @@
 #include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/DOM/Range.h>
 #include <LibWeb/DOM/Text.h>
+#include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/NodeArena.h>
@@ -34,6 +35,14 @@ static void report_journal_pending_to_census(Document& document, bool pending)
         return;
     if (auto* arena = document.layout_node_arena_if_created())
         Layout::RustFFI::layout_arena_note_invalidation_journal_pending(arena->handle(), pending);
+}
+
+// A frame in flight never waits for the journal, so what is journaled while one is in flight is main-side work that
+// ran beside the frame.
+static void count_entry_during_flight(HTML::EventLoop::JournalEntryKind kind)
+{
+    if (HTML::EventLoop::a_frame_is_in_flight())
+        HTML::main_thread_event_loop().note_journal_entry_during_flight(kind);
 }
 
 InvalidationJournal::InvalidationJournal(Document& document)
@@ -75,6 +84,7 @@ InvalidationJournal::Entry& InvalidationJournal::entry_for(NodeIdentity identity
 
 void InvalidationJournal::note_needs_layout_update(NodeIdentity identity, SetNeedsLayoutReason reason, Layout::LayoutUpdatePropagation propagation)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::LayoutUpdate);
     auto& entry = entry_for(identity);
     if (!entry.needs_layout_update) {
         entry.needs_layout_update = true;
@@ -89,6 +99,7 @@ void InvalidationJournal::note_needs_layout_update(NodeIdentity identity, SetNee
 
 void InvalidationJournal::note_needs_repaint(NodeIdentity identity, InvalidateDisplayList invalidate_display_list)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::Repaint);
     auto& entry = entry_for(identity);
     entry.needs_repaint = true;
     // Each level of display list invalidation covers the one below it, so the widest mark wins.
@@ -99,6 +110,7 @@ void InvalidationJournal::note_needs_repaint(NodeIdentity identity, InvalidateDi
 
 void InvalidationJournal::note_needs_repaint_in_subtree(NodeIdentity identity)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::Repaint);
     auto& entry = entry_for(identity);
     entry.needs_subtree_repaint = true;
     entry.needs_repaint = true;
@@ -109,6 +121,7 @@ void InvalidationJournal::note_needs_repaint_in_subtree(NodeIdentity identity)
 
 void InvalidationJournal::note_needs_layout_tree_update(NodeIdentity identity, SetNeedsLayoutTreeUpdateReason reason)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::LayoutTreeUpdate);
     auto& entry = entry_for(identity);
     if (!entry.needs_layout_tree_update) {
         entry.needs_layout_tree_update = true;
@@ -119,6 +132,7 @@ void InvalidationJournal::note_needs_layout_tree_update(NodeIdentity identity, S
 
 void InvalidationJournal::note_dom_paint_facts(NodeIdentity identity, u8 facts)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::PaintFacts);
     auto& entry = entry_for(identity);
     entry.has_dom_paint_facts = true;
     entry.dom_paint_facts = facts;
@@ -130,6 +144,7 @@ void InvalidationJournal::note_dom_paint_facts(NodeIdentity identity, u8 facts)
 
 void InvalidationJournal::note_canvas_paint_facts(NodeIdentity identity, bool has_content, i32 content_width, i32 content_height, u64 canvas_id, u64 content_generation)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::PaintFacts);
     auto& entry = entry_for(identity);
     entry.has_canvas_paint_facts = true;
     entry.canvas_has_content = has_content;
@@ -142,6 +157,7 @@ void InvalidationJournal::note_canvas_paint_facts(NodeIdentity identity, bool ha
 
 void InvalidationJournal::note_form_control_paint_facts(NodeIdentity identity, bool enabled, bool checked, bool indeterminate, bool being_activated)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::PaintFacts);
     auto& entry = entry_for(identity);
     entry.has_form_control_paint_facts = true;
     entry.form_control_enabled = enabled;
@@ -153,6 +169,7 @@ void InvalidationJournal::note_form_control_paint_facts(NodeIdentity identity, b
 
 void InvalidationJournal::note_paint_facts(NodeIdentity identity, PaintFactsFamily family, Function<void(Layout::Node const&)>&& update)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::PaintFacts);
     auto& entry = entry_for(identity);
     switch (family) {
     case PaintFactsFamily::LayerImage:
@@ -180,6 +197,7 @@ void InvalidationJournal::note_paint_facts(NodeIdentity identity, PaintFactsFami
 
 void InvalidationJournal::note_unanchored_paint_facts(Layout::RustFFI::NodeSlotId slot, Function<void(Layout::Node const&)>&& update)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::PaintFacts);
     if (is_empty())
         report_journal_pending_to_census(m_document, true);
     m_unanchored_paint_facts.append({ slot, move(update) });
@@ -203,6 +221,7 @@ void InvalidationJournal::publish_unanchored_paint_facts()
 
 void InvalidationJournal::note_paint_cache_invalidation(NodeIdentity identity, Painting::PaintCacheInvalidation invalidation)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::PaintCache);
     auto& entry = entry_for(identity);
     switch (invalidation) {
     case Painting::PaintCacheInvalidation::PaintAndHitTest:
@@ -217,12 +236,14 @@ void InvalidationJournal::note_paint_cache_invalidation(NodeIdentity identity, P
 
 void InvalidationJournal::note_editability_stamps(NodeIdentity identity)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::Editability);
     entry_for(identity).needs_editability_stamps_refresh = true;
     drain_if_the_render_side_is_reading();
 }
 
 void InvalidationJournal::note_is_in_focused_text_control(NodeIdentity identity)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::Editability);
     entry_for(identity).needs_focused_text_control_publish = true;
     drain_if_the_render_side_is_reading();
 }
@@ -250,6 +271,7 @@ static void refresh_editability_stamps(Node& node)
 
 void InvalidationJournal::note_selection_states()
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::Selection);
     if (is_empty())
         report_journal_pending_to_census(m_document, true);
     m_selection_states_are_stale = true;
@@ -271,6 +293,7 @@ void InvalidationJournal::publish_selection_states()
 
 void InvalidationJournal::note_scroll_offset(NodeIdentity identity, bool offset_changed)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::ScrollOffset);
     entry_for(identity).needs_scroll_offset_publish = true;
     m_scroll_state_is_stale |= offset_changed;
     drain_if_the_render_side_is_reading();
@@ -278,6 +301,7 @@ void InvalidationJournal::note_scroll_offset(NodeIdentity identity, bool offset_
 
 void InvalidationJournal::note_pseudo_element_scroll_offset(NodeIdentity generator, CSS::PseudoElement type, CSSPixelPoint offset, bool offset_changed)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::ScrollOffset);
     auto& offsets = entry_for(generator).pseudo_element_scroll_offsets;
     if (auto existing = offsets.find_if([&](auto const& pending) { return pending.type == type; }); existing != offsets.end())
         existing->offset = offset;
@@ -289,6 +313,7 @@ void InvalidationJournal::note_pseudo_element_scroll_offset(NodeIdentity generat
 
 void InvalidationJournal::note_scrollbar_enlarged_state(Painting::Scrollbar& scrollbar)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::Scrollbar);
     if (is_empty())
         report_journal_pending_to_census(m_document, true);
     if (!m_scrollbars_with_stale_enlarged_state.contains_slow(NonnullRefPtr { scrollbar }))
@@ -301,6 +326,7 @@ void InvalidationJournal::note_scrollbar_enlarged_state(Painting::Scrollbar& scr
 
 void InvalidationJournal::note_visual_context_box_dirty(Layout::RustFFI::NodeSlotId slot, Layout::RustFFI::FfiVisualContextBoxDirtyKind kind)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::VisualContext);
     if (is_empty())
         report_journal_pending_to_census(m_document, true);
     m_visual_context_box_dirty_marks.append({ slot, kind });
@@ -309,6 +335,7 @@ void InvalidationJournal::note_visual_context_box_dirty(Layout::RustFFI::NodeSlo
 
 void InvalidationJournal::note_visual_context_full_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason reason)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::VisualContext);
     if (is_empty())
         report_journal_pending_to_census(m_document, true);
     if (!m_visual_context_full_rebuild_reasons.contains_slow(reason))
@@ -318,6 +345,7 @@ void InvalidationJournal::note_visual_context_full_rebuild(Layout::RustFFI::FfiV
 
 void InvalidationJournal::note_svg_paint_resources_changed()
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::VisualContext);
     if (is_empty())
         report_journal_pending_to_census(m_document, true);
     m_svg_paint_resources_changed = true;
@@ -326,6 +354,7 @@ void InvalidationJournal::note_svg_paint_resources_changed()
 
 void InvalidationJournal::note_visual_viewport_transform()
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::VisualContext);
     if (is_empty())
         report_journal_pending_to_census(m_document, true);
     m_visual_viewport_transform_is_stale = true;
@@ -360,6 +389,7 @@ void InvalidationJournal::publish_visual_context_marks()
 
 void InvalidationJournal::note_text_data(Text& text, bool whitespace_state_changed)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::TextData);
     // A text node outside the document's tree has no mirror row and no box to take its data.
     auto identity = NodeIdentity::of(text);
     if (!identity)
@@ -373,12 +403,14 @@ void InvalidationJournal::note_text_data(Text& text, bool whitespace_state_chang
 
 void InvalidationJournal::note_svg_attribute_facts(NodeIdentity identity)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::SVGAttributes);
     entry_for(identity).needs_svg_attribute_facts_publish = true;
     drain_if_the_render_side_is_reading();
 }
 
 void InvalidationJournal::note_table_spans(NodeIdentity identity)
 {
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::TableSpans);
     entry_for(identity).needs_table_spans_publish = true;
     drain_if_the_render_side_is_reading();
 }
