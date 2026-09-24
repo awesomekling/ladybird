@@ -1629,10 +1629,7 @@ impl RetainedState {
             })
             .map_err(Unanswered::Suspended)?;
         let has_registered_declarations = self.declares_registered_custom_property(node, None, &inputs);
-        let Some(pseudo_styles) = self.pseudo_style_mask(node) else {
-            counters.bump(Counter::EngineComputedRecordBailWinner);
-            return Err(Unanswered::Refused);
-        };
+        let pseudo_styles = self.pseudo_style_mask_or_rematch(node, counters);
         let cache_key = (self.state_container_unit_mask(node, state) == 0)
             .then_some(())
             .and(parent)
