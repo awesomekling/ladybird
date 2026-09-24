@@ -225,6 +225,11 @@ public:
     void record_derived_element_style_input_change(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups = 0);
     void record_tree_counting_style_input_change(StyleNodeID style_node);
     void record_flat_tree_descendant_style_input_changes(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups = 0);
+    // A row the engine refused keeps the input it was applied for owed: the input is recorded
+    // again once the style update is over, so the next update asks the engine again. A row refused
+    // again on that retry is left to the next change that reaches it.
+    void note_refused_style_row(StyleNodeID);
+    void record_refused_style_rows_again();
     [[nodiscard]] Vector<StyleNodeID> viewport_dependent_style_nodes();
     [[nodiscard]] bool has_recorded_element_style_input_change(StyleNodeID style_node) const;
     void record_benchmark_marker(Utf16View);
@@ -338,6 +343,8 @@ private:
     Vector<StyleEngineFFI::FfiStateDelta> m_state_deltas;
     Vector<StyleEngineFFI::FfiElementDeclarationDelta> m_element_declaration_deltas;
     bool m_css_transitions_may_observe_style_changes { false };
+    Vector<StyleNodeID> m_refused_style_rows;
+    HashTable<StyleNodeID> m_style_rows_recorded_after_refusal;
 };
 
 }

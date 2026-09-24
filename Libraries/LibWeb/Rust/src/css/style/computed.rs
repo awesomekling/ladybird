@@ -20,7 +20,6 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::num::NonZeroU32;
 
-use super::capacity::ShallowCapacityBytes;
 use super::capacity::capacity_bytes;
 use super::cascade::CascadeStateID;
 use super::column::BitColumn;
@@ -736,33 +735,6 @@ pub struct ComputedGroupSets {
     style_records_interned_since_reclamation: usize,
     next_reclamation_after: usize,
     style_record_view_epoch_depth: u32,
-    shared_style_records: HashMap<SharedStyleRecordKey, SharedStyleRecord>,
-    shared_style_record_memory: MemoryLease,
-    shared_computation_contexts: Vec<Option<SharedComputationContext>>,
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct SharedStyleRecord {
-    pub record: u64,
-    pub inherited_group_swap_eligible: bool,
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct SharedComputationContext {
-    pub parent_record: u64,
-    pub record: u64,
-    pub key: SharedStyleRecordKey,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct SharedStyleRecordKey {
-    pub cascade_input: u32,
-    pub tree_scope: u32,
-    pub inherited_groups: InheritedGroupSetID,
-    pub environment: u64,
-    pub font_environment_generation: u64,
-    pub(super) root_font_inputs: super::publication::RootFontInputs,
-    pub shape: [u64; 4],
 }
 
 impl Default for ComputedGroupSets {
@@ -797,9 +769,6 @@ impl Default for ComputedGroupSets {
             style_records_interned_since_reclamation: 0,
             next_reclamation_after: 1024,
             style_record_view_epoch_depth: 0,
-            shared_style_records: HashMap::default(),
-            shared_style_record_memory: MemoryLease::new(MemoryCategory::BatchScratch),
-            shared_computation_contexts: Vec::new(),
         }
     }
 }
@@ -818,79 +787,6 @@ impl ComputedGroupSets {
             "style-record view epoch underflow"
         );
         self.style_record_view_epoch_depth -= 1;
-        if self.style_record_view_epoch_depth == 0 {
-            self.clear_shared_style_records();
-        }
-    }
-
-    pub(super) fn clear_shared_style_records(&mut self) {
-        self.shared_style_records = HashMap::default();
-        self.shared_style_record_memory
-            .shrink_committed(self.shared_style_record_memory.bytes());
-    }
-
-    pub(super) fn inherited_groups_for_shared_style(&self, raw_record: u64) -> Option<InheritedGroupSetID> {
-        if self.style_record_view_epoch_depth == 0 {
-            return None;
-        }
-        let final_record = FinalStyleRecordID(raw_record);
-        let record = final_record.base_record()?;
-        if !self.style_record_generation_is_live(record, final_record.base_generation()) {
-            return None;
-        }
-        Some(self.style_records.get(record).inherited_groups)
-    }
-
-    pub(super) fn shared_style_record(&self, key: SharedStyleRecordKey) -> Option<SharedStyleRecord> {
-        self.shared_style_records.get(&key).copied()
-    }
-
-    pub(super) fn remember_shared_style_record(
-        &mut self,
-        node: StyleNodeID,
-        key: SharedStyleRecordKey,
-        raw_record: u64,
-    ) {
-        // The view epoch keeps base records and inherited-group identities alive. The caller
-        // clears this relation when the published cascade answers change, and ending the epoch
-        // clears it before reclamation can recycle any computed identity.
-        const MAX_SHARED_STYLE_RECORDS: usize = 8192;
-        if self.style_record_view_epoch_depth == 0 || self.shared_style_records.len() >= MAX_SHARED_STYLE_RECORDS {
-            return;
-        }
-        let final_record = FinalStyleRecordID(raw_record);
-        let Some(record) = final_record.base_record() else {
-            return;
-        };
-        if self.style_record_generation_is_live(record, final_record.base_generation()) {
-            self.shared_style_records
-                .entry(key)
-                .or_insert_with(|| SharedStyleRecord {
-                    record: raw_record,
-                    inherited_group_swap_eligible: node
-                        .element_index()
-                        .is_some_and(|index| self.columns.inherited_group_swap_eligible(index as usize)),
-                });
-        }
-    }
-
-    pub(super) fn remember_shared_computation_context(&mut self, node: StyleNodeID, context: SharedComputationContext) {
-        let index = node.element_index().expect("shared computation targets an element") as usize;
-        if self.shared_computation_contexts.len() <= index {
-            self.shared_computation_contexts.resize(index + 1, None);
-        }
-        self.shared_computation_contexts[index] = Some(context);
-    }
-
-    pub(super) fn take_shared_computation_context(&mut self, node: StyleNodeID) -> Option<SharedComputationContext> {
-        self.shared_computation_contexts
-            .get_mut(node.element_index()? as usize)?
-            .take()
-    }
-
-    pub(super) fn inherited_group_count_for_shared_style(&self, raw_record: u64) -> Option<usize> {
-        let groups = self.inherited_groups_for_shared_style(raw_record)?;
-        Some(self.inherited_sets.get(groups).len())
     }
 
     fn group_identities(&self, set: ComputedGroupSetID) -> impl Iterator<Item = ComputedGroupID> {
@@ -955,21 +851,6 @@ impl ComputedGroupSets {
         }
         let assignment = self.pseudo_row(target.node, target.pseudo_kind)?.assignment?;
         Some(self.final_style_record(assignment.style_record, assignment.animation_overlay_slot))
-    }
-
-    /// The installed target's underlying style, without its own sampled effects.
-    pub(super) fn assigned_base_style_record(&self, target: ComputedStyleTarget) -> Option<FinalStyleRecordID> {
-        let style_record = if target.is_pseudo() {
-            self.pseudo_row(target.node, target.pseudo_kind)?
-                .assignment?
-                .style_record
-        } else {
-            *self
-                .style_record_column
-                .get(target.node.element_index()? as usize)?
-                .as_ref()?
-        };
-        Some(self.final_base_style_record(style_record))
     }
 
     pub(super) fn viewport_dependent_nodes(&self) -> Vec<u32> {
@@ -1453,7 +1334,6 @@ impl ComputedGroupSets {
             longhand_table,
         };
         let new_style_record = self.intern_style_record(new_record).0;
-        self.take_shared_computation_context(node);
         self.columns.groups[index] = group_set.0;
         self.columns.inherited_groups[index] = parent_inherited.0;
         self.style_record_column[index] = Some(new_style_record);
@@ -3175,7 +3055,6 @@ impl ComputedGroupSets {
     }
 
     pub fn remove(&mut self, node: StyleNodeID) {
-        self.take_shared_computation_context(node);
         let Some(index) = node.element_index().map(|index| index as usize) else {
             return;
         };
@@ -3295,7 +3174,6 @@ impl ComputedGroupSets {
                 self.columns.cascade_states,
                 self.columns.flags,
                 self.pending_cascade_states,
-                self.shared_computation_contexts,
             ];
             cached [];
             nested [];
@@ -3863,8 +3741,6 @@ impl ComputedGroupSets {
     }
 
     pub fn settle_nested_memory(&mut self, memory: &mut MemoryController) {
-        self.shared_style_record_memory
-            .resize_required_to(memory, self.shared_style_records.shallow_capacity_bytes());
         let group_set = self.group_set_nested_memory.bytes();
         self.group_set_nested_memory.reconcile_committed(memory, group_set);
         let longhand_tables = self.longhand_table_nested_memory.bytes();
@@ -4389,44 +4265,6 @@ mod tests {
         assert_eq!(sets.base_style_record_pins[&base_style_record], 1);
         sets.unpin_style_record(style_record.raw());
         assert!(sets.base_style_record_pins.is_empty());
-    }
-
-    #[test]
-    fn shared_style_records_expire_before_their_view_epoch_can_reclaim_identities() {
-        let mut sets = ComputedGroupSets::default();
-        let node = StyleNodeID::element(1);
-        let target = ComputedStyleTarget::new(node, u8::MAX);
-        let donor = sets.publish_unowned(Some(target), &[], 0, 0, metadata(0, 0, 0));
-        let record = donor.style_record_identity.raw();
-        assert!(sets.inherited_groups_for_shared_style(record).is_none());
-
-        sets.begin_style_record_view_epoch();
-        let key = SharedStyleRecordKey {
-            cascade_input: 1,
-            tree_scope: 0,
-            inherited_groups: sets.inherited_groups_for_shared_style(record).unwrap(),
-            environment: 1,
-            font_environment_generation: 1,
-            root_font_inputs: super::super::publication::RootFontInputs::from_document(&Default::default()),
-            shape: [0; 4],
-        };
-        sets.remember_shared_style_record(node, key, record);
-        assert_eq!(sets.shared_style_record(key).unwrap().record, record);
-        sets.begin_style_record_view_epoch();
-        sets.end_style_record_view_epoch();
-        assert!(sets.shared_style_record(key).is_some());
-        sets.remove(node);
-        assert!(sets.reclaim_unreachable_if_needed().is_none());
-        assert_eq!(sets.shared_style_record(key).unwrap().record, record);
-        sets.end_style_record_view_epoch();
-        assert!(sets.shared_style_record(key).is_none());
-        assert_eq!(sets.shared_style_records.capacity(), 0);
-        sets.reclaim_unreachable();
-        sets.begin_style_record_view_epoch();
-        assert!(sets.inherited_groups_for_shared_style(record).is_none());
-        sets.remember_shared_style_record(node, key, record);
-        assert!(sets.shared_style_record(key).is_none());
-        sets.end_style_record_view_epoch();
     }
 
     #[test]
