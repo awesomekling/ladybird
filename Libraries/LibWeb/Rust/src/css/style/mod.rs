@@ -68,7 +68,7 @@ mod custom_property_environments;
 mod deferred_pseudo;
 #[cfg(test)]
 mod differential_tests;
-mod engine_sample;
+pub(crate) mod engine_sample;
 pub(crate) mod engine_sample_check;
 mod environment_move;
 pub mod exact_matcher;
