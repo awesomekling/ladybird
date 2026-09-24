@@ -1103,20 +1103,6 @@ impl StyleEngine {
             .declared_only_record(subject, facts, declarations, &mut self.counters)
     }
 
-    pub(crate) fn assign_declared_only_first_record(
-        &mut self,
-        node: StyleNodeID,
-        subject: StyleNodeID,
-        facts: u32,
-        declarations: &[(
-            super::transaction::ElementDeclarationKind,
-            &crate::css::declaration_block::DeclaredProperty,
-        )],
-    ) -> Option<super::computed::FinalStyleRecordID> {
-        self.state
-            .assign_declared_only_first_record(node, subject, facts, declarations, &mut self.counters)
-    }
-
     /// Settle the pseudo-element records of an element whose record C++ just installed.
     #[inline]
     pub(crate) fn settle_pseudo_records_after_host_record(

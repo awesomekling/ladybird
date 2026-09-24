@@ -3699,44 +3699,6 @@ pub unsafe extern "C" fn style_engine_declared_only_record(
     })
 }
 
-/// The first record of `node`, which the engine refused one: the record the engine holds for it,
-/// or else the record of its presentational hints and inline style alone, assigned to it; see
-/// `assign_declared_only_first_record`. `subject` is the document's style node. Returns zero
-/// when the engine cannot compute it.
-///
-/// # Safety
-/// As for `style_engine_declared_only_record`.
-#[unsafe(no_mangle)]
-#[allow(clippy::too_many_arguments)]
-pub unsafe extern "C" fn style_engine_assign_declared_only_first_record(
-    engine: *mut c_void,
-    node: u32,
-    subject: u32,
-    facts: u32,
-    hint_kind: FfiElementDeclarationKind,
-    hints: *const c_void,
-    hint_count: usize,
-    inline_block: *const c_void,
-) -> u64 {
-    abort_on_panic(|| {
-        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-        // An assignment no recorded event describes is no event a replay could reproduce.
-        let (Some(node), Some(subject)) = (StyleNodeID::from_raw(node), StyleNodeID::from_raw(subject)) else {
-            return 0;
-        };
-        if engine.recording_id().is_some() {
-            return 0;
-        }
-        unsafe {
-            with_declared_only_declarations(hint_kind, hints, hint_count, inline_block, |declarations| {
-                engine
-                    .assign_declared_only_first_record(node, subject, facts, declarations)
-                    .map_or(0, super::computed::FinalStyleRecordID::raw)
-            })
-        }
-    })
-}
-
 /// The declarations a declared-only record cascades, hints first and inline style after them.
 ///
 /// # Safety
