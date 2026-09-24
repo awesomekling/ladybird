@@ -160,32 +160,24 @@ impl RetainedState {
                 .or_refused()?
                 .apply_to(&mut inputs);
         }
-        let display_is_list_item = |engine: &Self, record: computed::FinalStyleRecordID| -> Option<bool> {
-            let view = engine.computed_group_sets.style_record_view(record.raw())?;
-            let table = unsafe { view.longhand_table.as_ref() }?;
-            Some(table.display_is_list_item())
+        // Every installed record has a view. One without, or one holding no table, is read as a
+        // list item, so its marker is considered rather than dropped.
+        let display_is_list_item = |engine: &Self, record: computed::FinalStyleRecordID| -> bool {
+            let view = engine.computed_group_sets.style_record_view(record.raw());
+            debug_assert!(view.is_some(), "an installed record has a view");
+            view.and_then(|view| unsafe { view.longhand_table.as_ref() })
+                .is_none_or(|table| table.display_is_list_item())
         };
-        let Some(new_is_list_item) = display_is_list_item(self, new_element_record) else {
-            counters.bump(Counter::EngineComputedRecordBailRecord);
-            return Err(Unanswered::Refused);
-        };
-        let Some(new_view_dependency_flags) = self
+        let new_is_list_item = display_is_list_item(self, new_element_record);
+        let new_view_dependency_flags = self
             .computed_group_sets
             .style_record_view(new_element_record.raw())
-            .map(|view| view.dependency_flags)
-        else {
-            counters.bump(Counter::EngineComputedRecordBailRecord);
-            return Err(Unanswered::Refused);
-        };
+            .map(|view| view.dependency_flags);
+        debug_assert!(new_view_dependency_flags.is_some(), "an element record has a view");
+        let new_view_dependency_flags = new_view_dependency_flags.unwrap_or(0);
         let old_is_list_item = match (old_is_list_item, old_element_record) {
             (Some(old_is_list_item), _) => old_is_list_item,
-            (None, Some(record)) => {
-                let Some(list_item) = display_is_list_item(self, record) else {
-                    counters.bump(Counter::EngineComputedRecordBailRecord);
-                    return Err(Unanswered::Refused);
-                };
-                list_item
-            }
+            (None, Some(record)) => display_is_list_item(self, record),
             (None, None) => false,
         };
         self.refresh_pseudo_winner_rows(
@@ -254,17 +246,20 @@ impl RetainedState {
                             .computed_group_sets
                             .style_record_custom_property_environment(new_element_record.raw())
             });
-        let Some(element_environment) = self
+        let element_environment = self
             .computed_group_sets
             .style_record_custom_property_environment(new_element_record.raw())
             .or_else(|| {
                 self.computed_group_sets
                     .animation_overlay_base_custom_property_environment(new_element_record.raw())
             })
-        else {
-            counters.bump(Counter::EngineComputedRecordBailRecord);
-            return Err(Unanswered::Refused);
-        };
+            .unwrap_or_else(|| {
+                debug_assert!(
+                    false,
+                    "an element record was published with a custom-property environment"
+                );
+                0
+            });
         // The kinds the node's match answer has rules for: a winner row is published for each
         // the engine cascaded itself, and a kind with rules but no row is not decided.
         let Some(kinds_with_rules) = self.pseudo_style_mask(node) else {
@@ -302,11 +297,9 @@ impl RetainedState {
             // samples the pseudo's effects after installation.
             let pin_old_composition = match old {
                 Some(old) => {
-                    let Some(view) = self.computed_group_sets.style_record_view(old.raw()) else {
-                        counters.bump(Counter::EngineComputedRecordBailRecord);
-                        return Err(Unanswered::Refused);
-                    };
-                    !view.animated_overlay.is_null()
+                    let view = self.computed_group_sets.style_record_view(old.raw());
+                    debug_assert!(view.is_some(), "an installed pseudo-element record has a view");
+                    view.is_some_and(|view| !view.animated_overlay.is_null())
                 }
                 None => false,
             };
@@ -320,8 +313,7 @@ impl RetainedState {
                 && [BEFORE, AFTER, BACKDROP].into_iter().any(|pseudo| {
                     self.computed_group_sets
                         .pseudo_style_record(node, pseudo)
-                        .and_then(|record| display_is_list_item(self, record))
-                        == Some(true)
+                        .is_some_and(|record| display_is_list_item(self, record))
                 });
             let implicit = kind == MARKER && (new_is_list_item || old_is_list_item || pseudo_is_list_item);
             if kind == MARKER && !implicit && !cssom_read {
@@ -998,11 +990,9 @@ impl RetainedState {
         let old_record = self.computed_group_sets.assigned_style_record(node);
         let holds_an_overlay = match old_record {
             Some(old) => {
-                let Some(view) = self.computed_group_sets.style_record_view(old.raw()) else {
-                    counters.bump(Counter::EngineComputedRecordBailRecord);
-                    return Err(Unanswered::Refused);
-                };
-                !view.animated_overlay.is_null()
+                let view = self.computed_group_sets.style_record_view(old.raw());
+                debug_assert!(view.is_some(), "an installed element record has a view");
+                view.is_some_and(|view| !view.animated_overlay.is_null())
             }
             None => false,
         };

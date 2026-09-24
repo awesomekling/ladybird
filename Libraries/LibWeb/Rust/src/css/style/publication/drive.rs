@@ -358,9 +358,11 @@ impl RetainedState {
             is_required_driver_input, parent_snapshot_for_style_record, property_computation_order_for_phase,
         };
 
+        // The record being driven again has a live base record. Without one, what the selection
+        // leaves standing is unknown: the caller drives in full.
         let Some(view) = self.computed_group_sets.base_style_record_view(old_style_record) else {
-            counters.bump(Counter::EngineComputedRecordBailRecord);
-            return Err(Unanswered::Refused);
+            debug_assert!(false, "the record being driven again has a live base record");
+            return Ok(PartialDrive::DriverInputMoved);
         };
         // The font and writing mode for this drive come from the underlying style.
         let payloads = view.payloads;
@@ -620,19 +622,15 @@ impl RetainedState {
         } else {
             None
         };
-        let old_table = match old_style_record {
-            Some(old_style_record) => {
-                let Some(view) = self.computed_group_sets.base_style_record_view(old_style_record) else {
-                    counters.bump(Counter::EngineComputedRecordBailRecord);
-                    return Err(Unanswered::Refused);
-                };
-                // The transitions the old record declares are decided by the step the row owes
-                // the host, which runs against the record it moves away from once installed. A
-                // record holding no table is driven from a fresh one, like a first record.
-                unsafe { view.longhand_table.as_ref() }
-            }
-            None => None,
-        };
+        // The transitions the old record declares are decided by the step the row owes the host,
+        // which runs against the record it moves away from once installed. A record holding no
+        // table is driven from a fresh one, like a first record, and so is one without the live
+        // base record every record being driven again has.
+        let old_table = old_style_record.and_then(|old_style_record| {
+            let view = self.computed_group_sets.base_style_record_view(old_style_record);
+            debug_assert!(view.is_some(), "the record being driven again has a live base record");
+            view.and_then(|view| unsafe { view.longhand_table.as_ref() })
+        });
         let parent_view = match parent {
             Some(parent) => {
                 let sampled_parent = if subject.target.is_pseudo() && parent == subject.target.node() {
@@ -750,19 +748,17 @@ impl RetainedState {
         let highlight = (subject.target.pseudo_kind() == pseudo_kind::SELECTION)
             .then(|| crate::css::style_compute::HighlightInheritance::new(pseudo_kind::SELECTION, highlight_snapshot));
         // The subject axis is the element's own writing mode when it has one, else its parent's;
-        // the initial writing mode is horizontal.
-        let inherited_box_payload = match old_style_record {
-            Some(old_style_record) => {
-                let Some(view) = self.computed_group_sets.style_record_view(old_style_record.raw()) else {
-                    counters.bump(Counter::EngineComputedRecordBailRecord);
-                    return Err(Unanswered::Refused);
-                };
-                Some(view.payloads[STYLE_GROUP_INDEX_INHERITED_BOX])
-            }
-            None => parent_view
+        // the initial writing mode is horizontal. An installed record always has a view.
+        let own_inherited_box_payload = old_style_record.and_then(|old_style_record| {
+            let view = self.computed_group_sets.style_record_view(old_style_record.raw());
+            debug_assert!(view.is_some(), "the subject's installed record has a view");
+            view.map(|view| view.payloads[STYLE_GROUP_INDEX_INHERITED_BOX])
+        });
+        let inherited_box_payload = own_inherited_box_payload.or_else(|| {
+            parent_view
                 .as_ref()
-                .map(|parent_view| parent_view.payloads[STYLE_GROUP_INDEX_INHERITED_BOX]),
-        };
+                .map(|parent_view| parent_view.payloads[STYLE_GROUP_INDEX_INHERITED_BOX])
+        });
         let subject_inline_axis_is_horizontal = inherited_box_payload.is_none_or(|payload| {
             let inherited_box = unsafe {
                 payload
