@@ -288,23 +288,26 @@ unsafe extern "C" fn layout_arena_resolve_painted_vector_images(
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { arena_from_handle(arena) };
     let mut painted = std::collections::HashSet::new();
-    let device_pixels_per_css_pixel = {
+    let prediction_inputs = {
         let paint_state = arena.paint_state().borrow();
         // The renders the last recording painted, whether it recorded them or copied them.
         if let Some(recording) = paint_state.last_recording.as_ref() {
             painted.extend(recording.vector_images.values().copied());
         }
-        paint_state
-            .visual_context
-            .last_tree_inputs
-            .map(|tree_inputs| tree_inputs.device_pixels_per_css_pixel)
+        paint_state.visual_context.last_tree_inputs.map(|tree_inputs| {
+            crate::painting::record::vector_images::FirstPaintPredictionInputs {
+                device_pixels_per_css_pixel: tree_inputs.device_pixels_per_css_pixel,
+                root_background_source: paint_state.root_background_source,
+                css_viewport_rect: inputs.css_viewport_rect.into(),
+                document_declares_light_or_dark_color_scheme: inputs.document_declares_light_or_dark_color_scheme,
+                image_color_scheme_fallback: inputs.image_color_scheme_fallback,
+            }
+        })
     };
-    if let Some(device_pixels_per_css_pixel) = device_pixels_per_css_pixel {
-        painted.extend(crate::painting::record::vector_images::predict_image_element_renders(
+    if let Some(prediction_inputs) = prediction_inputs {
+        painted.extend(crate::painting::record::vector_images::predict_first_paint_renders(
             arena,
-            device_pixels_per_css_pixel,
-            inputs.document_declares_light_or_dark_color_scheme,
-            inputs.image_color_scheme_fallback,
+            &prediction_inputs,
         ));
     }
     let mut resolved = crate::painting::record::vector_images::VectorImageDisplayLists::default();
