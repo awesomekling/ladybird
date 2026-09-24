@@ -3674,6 +3674,18 @@ impl ComputedGroupSets {
         self.style_record_view(base.raw())
     }
 
+    /// Whether `raw_style_record` still names a record: a base record of a live generation, or an
+    /// animation overlay whose slot has not been reclaimed.
+    pub(crate) fn style_record_is_held(&self, raw_style_record: u64) -> bool {
+        let final_style_record = FinalStyleRecordID(raw_style_record);
+        match final_style_record.base_record() {
+            Some(style_record) => {
+                self.style_record_generation_is_live(style_record, final_style_record.base_generation())
+            }
+            None => self.animation_overlay_slots_by_record.contains_key(&final_style_record),
+        }
+    }
+
     pub fn pin_style_record(&mut self, raw_style_record: u64) {
         let final_style_record = FinalStyleRecordID(raw_style_record);
         if let Some(style_record) = final_style_record.base_record() {
@@ -4250,6 +4262,30 @@ mod tests {
         );
         sets.remove(node);
         assert_eq!(sets.live_animation_overlay_records(), 0);
+    }
+
+    #[test]
+    fn a_replaced_or_retired_record_is_no_longer_held() {
+        let mut sets = ComputedGroupSets::default();
+        let node = StyleNodeID::from_raw(1).unwrap();
+        let target = ComputedStyleTarget::new(node, u8::MAX);
+        let animated_overlay = crate::css::animated_overlay::AnimatedOverlay::default();
+        let mut first_metadata = metadata(0, 0, 0);
+        first_metadata.animation_overlay_identity = 1;
+        first_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
+        let first = sets.publish_unowned(Some(target), &[], 0, 0, first_metadata);
+        assert!(sets.style_record_is_held(first.style_record_identity.raw()));
+
+        // Nothing pins the overlay the node's assignment moves off, so its slot goes with it.
+        let second = sets.publish_unowned(Some(target), &[], 0, 0, metadata(0, 0, 0));
+        assert!(!sets.style_record_is_held(first.style_record_identity.raw()));
+        assert!(sets.style_record_is_held(second.style_record_identity.raw()));
+
+        let unowned = sets.publish_unowned(None, &[], 0, 1, metadata(0, 0, 0));
+        assert!(sets.style_record_is_held(unowned.style_record_identity.raw()));
+        sets.reclaim_unreachable();
+        assert!(!sets.style_record_is_held(unowned.style_record_identity.raw()));
+        assert!(sets.style_record_is_held(second.style_record_identity.raw()));
     }
 
     #[test]

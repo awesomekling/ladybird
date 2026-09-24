@@ -30,6 +30,13 @@ impl RetainedState {
         if style_record == 0 || self.transition_baselines.contains_key(&(node, pseudo_kind)) {
             return false;
         }
+        // A settled row can name a before-change record the engine has already released: an
+        // animation overlay goes the moment its node's assignment moves off it and nothing pins
+        // it. Such a record is no style to decide against, and the pass that samples the target
+        // records the baseline instead.
+        if !self.computed_group_sets.style_record_is_held(style_record) {
+            return false;
+        }
         self.computed_group_sets.pin_style_record(style_record);
         self.transition_baselines.insert((node, pseudo_kind), style_record);
         true
