@@ -7,6 +7,7 @@
 
 #include <AK/AnyOf.h>
 #include <AK/Debug.h>
+#include <AK/ScopeGuard.h>
 #include <AK/TemporaryChange.h>
 #include <AK/Time.h>
 #include <LibCore/EventLoop.h>
@@ -19,6 +20,7 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/EventLoop/FrameCompletion.h>
 #include <LibWeb/HTML/HTMLMediaElement.h>
 #include <LibWeb/HTML/LocalTraversableNavigable.h>
 #include <LibWeb/HTML/NavigableContainer.h>
@@ -157,6 +159,7 @@ void EventLoop::visit_edges(Visitor& visitor)
     visitor.visit(m_rendering_task_function);
     visitor.visit(m_system_event_loop_timer);
     visitor.visit(m_idle_period_timer);
+    visitor.visit(m_finished_frame_consumer);
 }
 
 void EventLoop::schedule()
@@ -189,6 +192,7 @@ void EventLoop::spin_until(GC::Ref<GC::Function<bool()>> goal_condition)
     auto& vm = this->vm();
     vm.save_execution_context_stack();
     vm.clear_execution_context_stack();
+    ++m_spin_depth;
 
     // 5. Perform a microtask checkpoint.
     perform_a_microtask_checkpoint();
@@ -212,6 +216,11 @@ void EventLoop::spin_until(GC::Ref<GC::Function<bool()>> goal_condition)
     }));
 
     vm.restore_execution_context_stack();
+    --m_spin_depth;
+
+    // A finished frame's tail the spin held back runs at the next outermost step 1.
+    if (m_spin_depth == 0 && has_finished_frame_work())
+        schedule();
 
     // 7. Stop task, allowing whatever algorithm that invoked it to resume.
     // NOTE: This is achieved by returning from the function.
@@ -223,12 +232,23 @@ void EventLoop::process()
     if (execution_paused())
         return;
 
+    ++m_processing_depth;
+    ScopeGuard leave_processing = [this] { --m_processing_depth; };
+
     // 1. Let oldestTask and taskStartTime be null.
     GC::Ptr<Task> oldest_task;
     [[maybe_unused]] double task_start_time = 0;
     bool task_started_with_frame_in_flight = false;
 
     m_task_generation++;
+
+    // AD-HOC: A frame that finished beside this event loop is consumed here, before anything else sees the document.
+    if (m_finished_frame_consumer && has_finished_frame_work()) {
+        m_finished_frame_consumer_call_requested = false;
+        ++m_rendering_scheduler_counters.finished_frame_consumer_calls;
+        TemporaryChange at_step_one { m_calling_finished_frame_consumer, true };
+        m_finished_frame_consumer->function()();
+    }
 
     // Some algorithms request that steps or states only occur once the event loop has reached step 1.
     // Invoke a set of tasks that these algorithms request us to in order to achieve this.
@@ -348,6 +368,72 @@ void EventLoop::process()
     if (m_task_queue->has_runnable_tasks() || (!m_microtask_queue.is_empty() && !m_performing_a_microtask_checkpoint)) {
         schedule();
     }
+}
+
+void EventLoop::set_finished_frame_consumer(GC::Ptr<GC::Function<void()>> consumer)
+{
+    VERIFY(this == &main_thread_event_loop());
+    m_finished_frame_consumer = consumer;
+    if (!consumer)
+        return;
+    // The delivery only schedules processing; the consumer runs at step 1, where it is safe to.
+    FrameCompletion::the().register_event_loop([] {
+        main_thread_event_loop().schedule();
+    });
+}
+
+bool EventLoop::has_finished_frame_work() const
+{
+    return m_finished_frame_consumer_call_requested || FrameCompletion::the().is_pending();
+}
+
+bool EventLoop::may_consume_commit(FrameConsumeSite site) const
+{
+    if (consuming_frame())
+        return false;
+    switch (site) {
+    case FrameConsumeSite::ForcedJoin:
+        // The caller needs the frame's result now, wherever it is, and the commit runs no script.
+        return true;
+    case FrameConsumeSite::StepOne:
+        // A rendering update consumes the frame it owns itself; a nested loop inside it must not.
+        return !execution_paused() && !m_running_rendering_task;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+bool EventLoop::may_run_consume_tail() const
+{
+    // Only the outermost step 1, with nothing suspended below it: an empty JavaScript execution context stack is not
+    // enough, since spinning the event loop empties it above a suspended caller, and neither is the lack of a currently
+    // running task, since a nested loop that ran a task leaves none behind for the task it is nested in.
+    return m_calling_finished_frame_consumer
+        && m_processing_depth == 1
+        && m_spin_depth == 0
+        && !execution_paused()
+        && !consuming_frame()
+        && !m_running_rendering_task
+        && !m_performing_a_microtask_checkpoint
+        && !m_currently_running_task
+        && vm().execution_context_stack().is_empty();
+}
+
+void EventLoop::consume_commit(FrameConsumeSite site, Function<void()> const& commit)
+{
+    VERIFY(may_consume_commit(site));
+    TemporaryChange consuming { m_consuming_frame_commit, true };
+    commit();
+}
+
+void EventLoop::run_consume_tail(Function<void()> const& tail)
+{
+    VERIFY(may_run_consume_tail());
+    {
+        TemporaryChange running_tail { m_running_consume_tail, true };
+        tail();
+    }
+    // The tail ends like a task: the microtasks its callbacks queued run before anything else.
+    perform_a_microtask_checkpoint();
 }
 
 void EventLoop::request_rendering_update()
@@ -1270,6 +1356,7 @@ void EventLoop::unpause(Badge<PauseHandle>, JS::Object const& global, HighResolu
 {
     VERIFY(m_execution_pause_depth > 0);
     --m_execution_pause_depth;
+    // Also picks up a frame that finished while paused, and a tail the pause held back.
     if (m_execution_pause_depth == 0)
         schedule();
 
