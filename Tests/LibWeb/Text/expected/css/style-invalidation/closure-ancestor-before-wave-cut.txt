@@ -1,0 +1,4 @@
+banner height: true
+banner color: rgb(0, 0, 255)
+use fill: rgb(255, 0, 0)
+use fill: rgb(255, 0, 0)
