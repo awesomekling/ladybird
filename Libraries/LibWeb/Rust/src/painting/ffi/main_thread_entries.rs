@@ -132,8 +132,8 @@ unsafe extern "C" fn layout_arena_paintable_event_dispatch_node_shell(
     slot: NodeSlotId,
 ) -> *mut c_void {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::hit_test::resolve::event_dispatch_shell_for_paintable(&main_thread, arena, slot)
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
+    crate::painting::hit_test::resolve::event_dispatch_shell_for_paintable(&main_thread, &paintable_rows, slot)
 }
 
 /// # Safety

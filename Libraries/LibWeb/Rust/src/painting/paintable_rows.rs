@@ -9,6 +9,7 @@ use crate::css::css_pixels::CssPixelPoint;
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeSlotId};
 use crate::layout::{fragment_tree, used_values};
+use crate::painting::hit_test::HitTestList;
 use crate::painting::image_map_areas::{ImageMapAreaColumn, ImageMapAreas};
 use crate::painting::node_painting;
 use crate::painting::paintable_data::*;
@@ -18,7 +19,7 @@ use crate::painting::visual_context::dirty::{
 };
 use crate::painting::visual_context::scroll_state::{ScrollOffsetColumn, ScrollOffsets};
 use crate::painting::visual_context::{
-    BoxVisualContextNodeHandles, EMPTY_BOX_VISUAL_CONTEXT_NODE_HANDLES, PaintableVisualContextRecord,
+    BoxVisualContextNodeHandles, EMPTY_BOX_VISUAL_CONTEXT_NODE_HANDLES, PaintableVisualContextRecord, VisualContextTree,
 };
 use smallvec::{SmallVec, smallvec};
 use std::cell::{Cell, Ref, RefCell, RefMut};
@@ -153,6 +154,54 @@ mod tests {
         let committed = arena.committed_paintable_rows();
         assert_eq!(committed.committed_side_data(node).lines().len(), 2);
         assert_eq!(published_state(), (1, 1, true));
+    }
+
+    #[test]
+    fn hit_test_list_and_visual_context_tree_are_published_with_the_rows() {
+        use crate::painting::hit_test::HitTestList;
+        use crate::painting::visual_context::{TransformData, TransformDataRole};
+        use std::sync::Arc;
+
+        let list = |generation| {
+            Some(Arc::new(HitTestList {
+                generation,
+                ..Default::default()
+            }))
+        };
+        let tree = || {
+            Some(Arc::new(VisualContextTree::create(TransformData {
+                matrix: libgfx_rust::FloatMatrix4x4::identity(),
+                origin: Default::default(),
+                sorting_context_root_index: None,
+                flattens_inherited_transform: false,
+                role: TransformDataRole::CssTransform,
+                synthetic_plane: false,
+                establishes_sorting_context: false,
+            })))
+        };
+        let mut arena = LayoutNodeArena::new();
+        *arena.hit_test_list.get_mut() = list(1);
+        let published_tree = tree();
+        arena.paint_state().borrow_mut().visual_context.tree = published_tree.clone();
+        arena.publish_paintable_rows();
+        *arena.hit_test_list.get_mut() = list(2);
+        arena.paint_state().borrow_mut().visual_context.tree = tree();
+
+        let published = arena.paintable_rows.published.as_ref().unwrap();
+        assert_eq!(published.hit_test_list.as_ref().map(|list| list.generation), Some(1));
+        assert!(Arc::ptr_eq(
+            published.visual_context_tree.as_ref().unwrap(),
+            published_tree.as_ref().unwrap()
+        ));
+        let committed = arena.committed_paintable_rows();
+        assert_eq!(
+            committed.with_hit_test_list(|list| list.map(|list| list.generation)),
+            Some(2)
+        );
+        assert!(!Arc::ptr_eq(
+            &committed.visual_context_tree().unwrap(),
+            published_tree.as_ref().unwrap()
+        ));
     }
 
     #[test]
@@ -404,6 +453,8 @@ struct PublishedPaintableRows {
     unique_node_ids: ColumnSnapshot<(NodeSlotId, i64), PAINTABLE_SLOTS_PER_CHUNK>,
     scroll_offsets: std::sync::Arc<ScrollOffsets>,
     image_map_areas: std::sync::Arc<ImageMapAreas>,
+    hit_test_list: Option<std::sync::Arc<HitTestList>>,
+    visual_context_tree: Option<std::sync::Arc<VisualContextTree>>,
 }
 
 const _: () = {
@@ -441,6 +492,10 @@ pub(crate) trait PaintableRowsRead: Deref<Target = LayoutNodeArena> {
     fn unique_node_id(&self, id: NodeSlotId) -> i64;
     /// Reads the image map areas the document published.
     fn with_image_map_areas<R>(&self, read: impl FnOnce(&ImageMapAreas) -> R) -> R;
+    /// Reads the hit-test list of the last recording, as it was when the rows were published.
+    fn with_hit_test_list<R>(&self, read: impl FnOnce(Option<&HitTestList>) -> R) -> R;
+    /// The visual context tree, as it was when the rows were published.
+    fn visual_context_tree(&self) -> Option<std::sync::Arc<VisualContextTree>>;
 }
 
 /// A row's committed side data, as a published generation or the live column holds it.
@@ -737,6 +792,14 @@ impl PaintableRowsRead for CommittedPaintableRows<'_> {
     fn with_image_map_areas<R>(&self, read: impl FnOnce(&ImageMapAreas) -> R) -> R {
         read(&self.published().image_map_areas)
     }
+
+    fn with_hit_test_list<R>(&self, read: impl FnOnce(Option<&HitTestList>) -> R) -> R {
+        read(self.published().hit_test_list.as_deref())
+    }
+
+    fn visual_context_tree(&self) -> Option<std::sync::Arc<VisualContextTree>> {
+        self.published().visual_context_tree.clone()
+    }
 }
 
 /// The paintable rows as a main-side read sees them, from [`crate::painting::ffi`]'s one door
@@ -812,6 +875,20 @@ impl PaintableRowsRead for MainSidePaintableRows<'_> {
             Self::DuringStage(rows) => rows.with_image_map_areas(read),
         }
     }
+
+    fn with_hit_test_list<R>(&self, read: impl FnOnce(Option<&HitTestList>) -> R) -> R {
+        match self {
+            Self::Committed(rows) => rows.with_hit_test_list(read),
+            Self::DuringStage(rows) => rows.with_hit_test_list(read),
+        }
+    }
+
+    fn visual_context_tree(&self) -> Option<std::sync::Arc<VisualContextTree>> {
+        match self {
+            Self::Committed(rows) => rows.visual_context_tree(),
+            Self::DuringStage(rows) => rows.visual_context_tree(),
+        }
+    }
 }
 
 impl<Arena> PaintableRowsRead for PaintableRows<Arena>
@@ -848,6 +925,14 @@ where
 
     fn with_image_map_areas<R>(&self, read: impl FnOnce(&ImageMapAreas) -> R) -> R {
         self.arena.paintable_rows.image_map_areas.with_areas(read)
+    }
+
+    fn with_hit_test_list<R>(&self, read: impl FnOnce(Option<&HitTestList>) -> R) -> R {
+        read(self.arena.hit_test_list.borrow().as_deref())
+    }
+
+    fn visual_context_tree(&self) -> Option<std::sync::Arc<VisualContextTree>> {
+        self.arena.paint_state().borrow().visual_context.tree.clone()
     }
 }
 
@@ -1454,6 +1539,8 @@ impl LayoutNodeArena {
     /// Hands the main side the rows as they are now, if a writer changed them since they were last
     /// handed over.
     pub(crate) fn publish_paintable_rows(&mut self) {
+        let hit_test_list = self.hit_test_list.get_mut().clone();
+        let visual_context_tree = self.paint_state().borrow().visual_context.tree.clone();
         let store = &mut self.paintable_rows;
         let fragment_links = store.committed_fragment_links.get_mut();
         let side_data = store.committed_side_data.get_mut();
@@ -1466,6 +1553,8 @@ impl LayoutNodeArena {
                 unique_node_ids: unique_node_ids.publish(),
                 scroll_offsets: store.scroll_offsets.snapshot(),
                 image_map_areas: store.image_map_areas.snapshot(),
+                hit_test_list,
+                visual_context_tree,
             });
             return;
         };
@@ -1483,6 +1572,31 @@ impl LayoutNodeArena {
         }
         published.scroll_offsets = store.scroll_offsets.snapshot();
         published.image_map_areas = store.image_map_areas.snapshot();
+        published.hit_test_list = hit_test_list;
+        published.visual_context_tree = visual_context_tree;
+    }
+
+    /// Builds the structures a hit-test query derives from the list before the rows are
+    /// published, so that the query only reads. A published generation that still pins the list
+    /// lets go of it first, so building does not copy it.
+    pub(crate) fn prepare_hit_test_list_for_query(&mut self, needs_spatial_indexes: bool, needs_caret_lines: bool) {
+        if let Some(published) = &mut self.paintable_rows.published {
+            published.hit_test_list = None;
+        }
+        let mut list = std::mem::take(self.hit_test_list.get_mut());
+        if let Some(list) = list.as_mut()
+            && ((needs_spatial_indexes && !list.spatial_indexes_built)
+                || (needs_caret_lines && !list.caret_lines_built))
+        {
+            let list = std::sync::Arc::make_mut(list);
+            if needs_spatial_indexes {
+                list.build_spatial_indexes_if_needed();
+            }
+            if needs_caret_lines {
+                list.build_caret_lines_if_needed(&self.paintable_rows());
+            }
+        }
+        *self.hit_test_list.get_mut() = list;
     }
 
     #[cfg(test)]

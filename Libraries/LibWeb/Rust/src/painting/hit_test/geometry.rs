@@ -12,10 +12,10 @@
 use super::{HitTestItem, HitTestItemKind};
 use crate::css::css_pixels::CssPixelRect;
 use crate::layout::node_data::NodeSlotId;
-use crate::painting::paintable_rows::PaintableRowsRef;
+use crate::painting::paintable_rows::PaintableRowsRead;
 use crate::painting::{node_painting, paintable_geometry, text_fragment};
 
-pub(crate) fn populated_block_container(rows: &PaintableRowsRef<'_>, block_container: NodeSlotId) -> NodeSlotId {
+pub(crate) fn populated_block_container(rows: &impl PaintableRowsRead, block_container: NodeSlotId) -> NodeSlotId {
     if block_container.is_invalid() || !rows.paintable_row_is_populated(block_container) {
         return NodeSlotId::INVALID;
     }
@@ -23,7 +23,7 @@ pub(crate) fn populated_block_container(rows: &PaintableRowsRef<'_>, block_conta
 }
 
 pub(crate) fn block_container_margin_rect(
-    rows: &PaintableRowsRef<'_>,
+    rows: &impl PaintableRowsRead,
     block_container: NodeSlotId,
 ) -> Option<CssPixelRect> {
     if populated_block_container(rows, block_container).is_invalid() {
@@ -46,7 +46,7 @@ pub(crate) fn block_container_margin_rect(
     ))
 }
 
-fn absolute_containing_line_box_rect(rows: &PaintableRowsRef<'_>, paintable: NodeSlotId) -> Option<CssPixelRect> {
+fn absolute_containing_line_box_rect(rows: &impl PaintableRowsRead, paintable: NodeSlotId) -> Option<CssPixelRect> {
     let containing_line_box_index = paintable_geometry::committed_containing_line_box_index(rows, paintable)?;
     let block = rows.paintable_data(paintable).containing_block;
     if block.is_invalid() || !rows.paintable_row_is_populated(block) || !node_painting::has_lines(rows, block) {
@@ -58,7 +58,7 @@ fn absolute_containing_line_box_rect(rows: &PaintableRowsRef<'_>, paintable: Nod
 }
 
 /// The line box the item's caret belongs to, for items whose line root is another row.
-pub(crate) fn containing_line_box_rect(rows: &PaintableRowsRef<'_>, item: &HitTestItem) -> Option<CssPixelRect> {
+pub(crate) fn containing_line_box_rect(rows: &impl PaintableRowsRead, item: &HitTestItem) -> Option<CssPixelRect> {
     match item.kind {
         HitTestItemKind::TextFragment => super::resolve::with_item_fragment(rows, item, |fragment| {
             text_fragment::absolute_line_box_rect(rows, item.paintable, fragment)
