@@ -68,7 +68,14 @@ public:
     struct DisplayNoneAnimations {
         StyleNodeID style_node;
     };
-    using Effect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames, AnimationNames, ContainerQueryEffects, AnimationPlan, DisplayNoneAnimations>;
+    // The debts the engine took as it published a row the batch did not install, which the node
+    // owes again for a later row. The node's element may be gone.
+    struct RestoreRowDebts {
+        StyleNodeID style_node;
+        u32 explicit_inheritance_debt { 0 };
+        u8 row_effect_debt { 0 };
+    };
+    using Effect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames, AnimationNames, ContainerQueryEffects, AnimationPlan, DisplayNoneAnimations, RestoreRowDebts>;
 
     void append(Effect effect) { m_effects.append(move(effect)); }
     void apply(DOM::Document&);

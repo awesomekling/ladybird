@@ -780,7 +780,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let expected = event.payload.read_u64()?;
                     let expected_present = event.payload.read_u8()?;
                     let actual = unsafe {
-                        bridge::style_engine_settle_pseudo_records_after_host_record(engine, node, old_is_list_item)
+                        // Debts are not replayed.
+                        bridge::style_engine_settle_pseudo_records_after_host_record(
+                            engine,
+                            node,
+                            old_is_list_item,
+                            false,
+                        )
                     };
                     if actual.style_record != expected || actual.pseudo_records_present != expected_present {
                         return Err(format!(
@@ -816,6 +822,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             targeted,
                             read_only,
                             parent_highlight,
+                            false,
                         )
                     };
                     if actual.record.style_record != expected_record
@@ -2293,6 +2300,9 @@ fn read_style_transaction_outputs(
                 // The trace records no damage: a replay compares only what the engine publishes
                 // for the host to act on, and it computes the damage it answers with again.
                 record_damage: 0,
+                row_facts: 0,
+                explicit_inheritance_debt: 0,
+                row_effect_debt: 0,
             });
         }
         emissions.push(StyleTransactionEmission {
@@ -3106,6 +3116,9 @@ mod tests {
                     gap: FfiStyleDeltaGap::Computed,
                     uses_substitution: true,
                     record_damage: 0,
+                    row_facts: 0,
+                    explicit_inheritance_debt: 0,
+                    row_effect_debt: 0,
                 }],
             }],
             style_atoms_swept: false,

@@ -146,8 +146,14 @@ public:
     // The store of an environment the engine resolved, with one strong reference transferred, and
     // the environment it was resolved over; null for one C++ published.
     [[nodiscard]] void const* borrow_engine_custom_property_environment(u64 identity, u64& parent_identity) const;
-    [[nodiscard]] StyleEngineFFI::FfiRecordDemandAnswer answer_record_demand(StyleNodeID, Optional<u8> pseudo_kind, bool exclude_inline_style, bool targeted, bool read_only = false);
-    [[nodiscard]] StyleEngineFFI::FfiEngineComputedRecord settle_pseudo_records_after_host_record(StyleNodeID, bool old_is_list_item);
+    // Whether a demand, or a settlement of an element's pseudo-elements, also takes the debts the
+    // node's computation left, for the caller to settle.
+    enum class TakeRowDebts : u8 {
+        No,
+        Yes,
+    };
+    [[nodiscard]] StyleEngineFFI::FfiRecordDemandAnswer answer_record_demand(StyleNodeID, Optional<u8> pseudo_kind, bool exclude_inline_style, bool targeted, bool read_only = false, TakeRowDebts = TakeRowDebts::No);
+    [[nodiscard]] StyleEngineFFI::FfiEngineComputedRecord settle_pseudo_records_after_host_record(StyleNodeID, bool old_is_list_item, TakeRowDebts = TakeRowDebts::No);
     void prepare_root_font_resolution(u64 font_environment_generation);
     void publish_font_faces();
 

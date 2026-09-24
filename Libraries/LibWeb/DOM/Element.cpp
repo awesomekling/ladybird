@@ -1623,6 +1623,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
     // record C++ just installed, as it settles them beside a record of its own, and C++ installs
     // the engine's records.
     EnginePseudoElementRecords records_settled_after_host_record {};
+    u32 explicit_inheritance_debt = 0;
     bool const settled_after_host_record = [&] {
         if (engine_pseudo_element_records || style_node_id() == 0 || !originating_style)
             return false;
@@ -1646,7 +1647,8 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
                 && (may_have_style(CSS::PseudoElement::Selection)
                     || AbstractElement { *this, CSS::PseudoElement::Selection }.highlight_inheritance_parent().has_value())))
             return false;
-        auto settled = style_computer.style_engine().settle_pseudo_records_after_host_record(style_node_id(), had_list_marker);
+        auto settled = style_computer.style_engine().settle_pseudo_records_after_host_record(style_node_id(), had_list_marker, CSS::StyleEngine::TakeRowDebts::Yes);
+        explicit_inheritance_debt = settled.explicit_inheritance_debt;
         // What the settled pseudo-elements' container units read of the element's containers.
         auto container_effects = CSS::StyleEngineFFI::style_engine_take_container_effects(style_computer.style_engine().rust_handle(), style_node_id().value());
         ScopeGuard release_container_effects = [&] { CSS::StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
@@ -1666,7 +1668,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
     }();
     if (settled_after_host_record) {
         engine_pseudo_element_records = &records_settled_after_host_record;
-        if (auto explicit_inheritance_debt = style_computer.style_engine().take_explicit_inheritance_debt(style_node_id()); explicit_inheritance_debt != 0) {
+        if (explicit_inheritance_debt != 0) {
             if (auto* parent = this->parent())
                 parent->add_children_explicitly_inherited_non_inherited_style_groups(explicit_inheritance_debt == NumericLimits<u32>::max() ? CSS::ComputedValues::all_style_groups : explicit_inheritance_debt);
         }
@@ -2342,7 +2344,7 @@ void Element::republish_animation_name_registry()
     CSS::record_element_animation_names(*this, indexable_animation_names(*style));
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison comparison, Optional<EngineRecordDamage> engine_record_damage, EnginePseudoElementDamages const* pseudo_element_damages, CSS::StyleEffectDrain* effect_drain, RefPtr<CSS::CustomPropertyData const>* replaced_custom_property_data)
+CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, u32 row_facts, bool& did_change_custom_properties, EngineRecordComparison comparison, Optional<EngineRecordDamage> engine_record_damage, EnginePseudoElementDamages const* pseudo_element_damages, CSS::StyleEffectDrain* effect_drain, RefPtr<CSS::CustomPropertyData const>* replaced_custom_property_data)
 {
     VERIFY(parent());
     auto old_style_record = style_record_identity();
@@ -2361,7 +2363,8 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     // reads the host's.
     if (uses_substitution)
         m_style_uses_var_css_function = true;
-    auto const record_reads = CSS::StyleEngineFFI::style_engine_node_record_reads(style_computer.style_engine().rust_handle(), style_node_id().value());
+    VERIFY(row_facts & to_underlying(CSS::StyleEngineFFI::FfiStyleRowFact::Present));
+    auto const record_reads = static_cast<u8>(row_facts & to_underlying(CSS::StyleEngineFFI::FfiStyleRowFact::RecordReadsMask));
     if (record_reads & CSS::StyleEngine::NodeRecordReadsAttributes) {
         m_style_uses_attr_css_function = true;
         if (associated_shadow_host_pseudo_element().has_value()) {

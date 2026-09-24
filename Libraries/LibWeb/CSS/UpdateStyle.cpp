@@ -125,6 +125,10 @@ void StyleEffectDrain::apply(DOM::Document& document)
     rust_style_seal_set_in_effect_drain(true);
     ScopeGuard end_effect_drain = [] { rust_style_seal_set_in_effect_drain(false); };
     for (auto const& effect : m_effects) {
+        if (auto const* row = effect.get_pointer<RestoreRowDebts>()) {
+            document.style_computer().style_engine().restore_row_debts(row->style_node, row->explicit_inheritance_debt, row->row_effect_debt);
+            continue;
+        }
         auto element = document.style_computer().element_for_style_node(effect.visit([](auto const& row) { return row.style_node; }));
         if (!element)
             continue;
@@ -158,6 +162,9 @@ void StyleEffectDrain::apply(DOM::Document& document)
             },
             [&](DisplayNoneAnimations const&) {
                 element->apply_display_none_change(true, false);
+            },
+            [&](RestoreRowDebts const&) {
+                VERIFY_NOT_REACHED();
             });
     }
     m_effects.clear();
@@ -246,6 +253,9 @@ static StyleEngine::PublishedStyleDelta make_materialize_gap_delta(StyleNodeID s
         .gap = StyleEngineFFI::FfiStyleDeltaGap::Materialize,
         .uses_substitution = false,
         .record_damage = 0,
+        .row_facts = 0,
+        .explicit_inheritance_debt = 0,
+        .row_effect_debt = 0,
     };
 }
 
@@ -379,6 +389,25 @@ static RequiredInvalidationAfterStyleChange apply_engine_record_demand(DOM::Elem
     return *invalidation;
 }
 
+// The debts the engine took as it published a computed element row, which the host settles as it
+// installs the row, or hands back.
+struct PublishedRowDebts {
+    u32 explicit_inheritance { 0 };
+    u8 row_effect { 0 };
+
+    bool is_empty() const { return explicit_inheritance == 0 && row_effect == 0; }
+
+    // A new demand for the row's node recomputed it, and the engine took what that left too. Its
+    // transition step replaces the published one.
+    void combine_with_demand(StyleEngineFFI::FfiRecordDemandAnswer const& demand)
+    {
+        explicit_inheritance |= demand.record.explicit_inheritance_debt;
+        auto const demand_row_effect = static_cast<u8>(demand.row_effect_debt);
+        auto const transition = (demand_row_effect & StyleEngine::SettledRowTransitionDebt) ? (demand_row_effect & StyleEngine::SettledRowTransitionDebt) : (row_effect & StyleEngine::SettledRowTransitionDebt);
+        row_effect = static_cast<u8>(((row_effect | demand_row_effect) & ~StyleEngine::SettledRowTransitionDebt) | transition);
+    }
+};
+
 // `declined_rows` names the rows the previous wave declined, and returns the ones this wave declines.
 // `declined_a_row_again` says whether this wave declined one of the previous wave's again.
 static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Document& document, Vector<StyleEngine::PublishedStyleDelta> const& reactions, HashTable<StyleNodeID>& declined_rows, bool& declined_a_row_again)
@@ -415,6 +444,12 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             // A pseudo-element record installs with its element's, which leads it.
             if (published_reaction.pseudo_kind != NumericLimits<u8>::max())
                 continue;
+            // A row that does not install hands the debts the engine took with it back.
+            PublishedRowDebts row_debts { published_reaction.explicit_inheritance_debt, static_cast<u8>(published_reaction.row_effect_debt) };
+            ScopeGuard restore_unsettled_row_debts = [&] {
+                if (!row_debts.is_empty())
+                    row_effects.append(StyleEffectDrain::RestoreRowDebts { StyleNodeID { published_reaction.style_node }, row_debts.explicit_inheritance, row_debts.row_effect });
+            };
             auto element = document.style_computer().element_for_style_node(published_reaction.style_node);
             if (!element)
                 continue;
@@ -556,9 +591,14 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             // engine-computed record below.
             Optional<StyleComputer::SettledAnimationPlan> animation_plan;
 
+            // What the row's node holds travels with the row, until the host asks the engine for the
+            // node's record again.
+            u32 row_facts = published_reaction.row_facts;
             // An element declaring custom properties of its own layers them over the environment it
-            // inherits, which its cascade decides.
-            bool const cascade_declares_custom_properties = document.style_computer().style_engine().node_declares_custom_properties(reaction.style_node);
+            // inherits, which its cascade decides. A gap row the host added carries no facts.
+            bool const cascade_declares_custom_properties = (row_facts & to_underlying(StyleEngineFFI::FfiStyleRowFact::Present))
+                ? (row_facts & to_underlying(StyleEngineFFI::FfiStyleRowFact::DeclaresCustomProperties)) != 0
+                : document.style_computer().style_engine().node_declares_custom_properties(reaction.style_node);
             bool const needs_full_custom_property_recompute = needs_custom_property_recompute && (element->style_uses_var_css_function() || element->style_uses_inherit_css_function() || cascade_declares_custom_properties);
             // The engine settled the element's record, and the pseudo-element records beside it:
             // C++ installs them.
@@ -584,7 +624,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 Optional<DOM::Element::EngineRecordDamage> engine_record_damage;
                 if (reaction.record_damage & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::EngineComputed))
                     engine_record_damage = DOM::Element::EngineRecordDamage { StyleRecordID { reaction.old_style_record }, reaction.record_damage };
-                invalidation = element->apply_engine_computed_style_record(new_style_record, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties, engine_record_comparison, engine_record_damage, pseudo_element_damages, &row_effects, &old_custom_property_data);
+                invalidation = element->apply_engine_computed_style_record(new_style_record, pseudo_element_records, reaction.uses_substitution, row_facts, did_change_custom_properties, engine_record_comparison, engine_record_damage, pseudo_element_damages, &row_effects, &old_custom_property_data);
                 // What the row's container conditions read of its containers, recorded as the host
                 // records it for a row it computes.
                 row_effects.append(StyleEffectDrain::ContainerQueryEffects { StyleNodeID { reaction.style_node } });
@@ -616,7 +656,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     && !element->has_associated_animations()) {
                     StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::InLoopRecordDemand);
                     auto demand = document.style_computer().style_engine().answer_record_demand(
-                        StyleNodeID { reaction.style_node }, {}, false, true);
+                        StyleNodeID { reaction.style_node }, {}, false, true, false, StyleEngine::TakeRowDebts::Yes);
+                    row_debts.combine_with_demand(demand);
                     if (demand.record.style_record) {
                         reaction.new_style_record = demand.record.style_record;
                         reaction.uses_substitution = demand.record.uses_substitution;
@@ -629,6 +670,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         }
                         retried_pseudo_element_records = pseudo_element_records;
                         refreshed_declarations = true;
+                        row_facts = demand.row_facts;
                     }
                 }
                 auto pseudo_element_records = retried_pseudo_element_records.value_or({});
@@ -641,9 +683,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 }
                 // The row's own effects come with the decision that settled it, whether or not
                 // the record is the one that installs: a C++ computation of this element runs the
-                // transition step itself, so the debt is discharged either way.
-                auto const explicit_inheritance_debt = document.style_computer().style_engine().take_explicit_inheritance_debt(StyleNodeID { reaction.style_node });
-                auto const row_effect_debt = document.style_computer().style_engine().take_settled_row_effect_debt(StyleNodeID { reaction.style_node });
+                // transition step itself, so the debt is discharged either way. The engine took
+                // them as it published the row, and with a new demand's answer.
+                auto const explicit_inheritance_debt = row_debts.explicit_inheritance;
+                auto const row_effect_debt = row_debts.row_effect;
+                row_debts = {};
                 auto const row_sampled_in_pass = StyleEngineFFI::style_engine_take_row_sampled_in_pass(document.style_computer().style_engine().rust_handle(), reaction.style_node);
                 auto const transition_debt = row_effect_debt & StyleEngine::SettledRowTransitionDebt;
                 if (row_effect_debt & StyleEngine::SettledRowOwesAnAnimationPlan)
@@ -848,6 +892,17 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
     return transaction_invalidation;
 }
 
+// The rows of a batch the update gives up on hand back the debts the engine took with them.
+static void restore_unsettled_row_debts(DOM::Document& document, ReadonlySpan<StyleEngine::PublishedStyleDelta> reactions)
+{
+    StyleEffectDrain drain;
+    for (auto const& reaction : reactions) {
+        if (reaction.explicit_inheritance_debt != 0 || reaction.row_effect_debt != 0)
+            drain.append(StyleEffectDrain::RestoreRowDebts { StyleNodeID { reaction.style_node }, reaction.explicit_inheritance_debt, static_cast<u8>(reaction.row_effect_debt) });
+    }
+    drain.apply(document);
+}
+
 static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext document_without_browsing_context)
 {
     auto style_update_started_at = MonotonicTime::now();
@@ -1016,6 +1071,7 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
         if (published_reaction_count > 0 && !transaction_only_derived_child_reactions) {
             if (++style_update_pass > max_style_update_passes) {
                 ++document.style_invalidation_counters().style_update_pass_guard_hits;
+                restore_unsettled_row_debts(document, style_engine_reactions);
                 break;
             }
         }
@@ -1200,7 +1256,7 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
     bool const samples_over_the_record = old_style
         && engine.style_record_view(old_style_record).animation_overlay_identity != 0
         && engine.style_record_view(StyleRecordID { answer.record.style_record }).animation_overlay_identity == 0;
-    auto invalidation = element.apply_engine_computed_style_record(StyleRecordID { answer.record.style_record }, pseudo_element_records, answer.record.uses_substitution, did_change_custom_properties,
+    auto invalidation = element.apply_engine_computed_style_record(StyleRecordID { answer.record.style_record }, pseudo_element_records, answer.record.uses_substitution, answer.row_facts, did_change_custom_properties,
         samples_over_the_record ? DOM::Element::EngineRecordComparison::AfterSample : DOM::Element::EngineRecordComparison::AtInstallation);
     if (!!old_style_record && element.associated_shadow_host_pseudo_element().has_value())
         invalidation |= style_computer.run_transition_step_for_installed_record({ element }, old_style_record);
@@ -1240,13 +1296,15 @@ static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_updat
         if (box_values && box_values->is_scroll_state_container && element.style_depends_on_size_container_query()) {
             DOM::Element::EnginePseudoElementRecords pseudo_records {};
             bool settled_pseudo = false;
+            u32 row_facts = 0;
             for (auto kind : { PseudoElement::Before, PseudoElement::After, PseudoElement::FirstLetter, PseudoElement::Marker }) {
                 auto answer = style_computer.style_engine().answer_record_demand(element.style_node_id(), to_underlying(kind), false, true, true);
                 pseudo_records[to_underlying(kind)] = StyleRecordID { answer.record.style_record };
+                row_facts = answer.row_facts;
                 settled_pseudo = true;
             }
             if (settled_pseudo)
-                *invalidation |= element.apply_engine_computed_style_record(element.style_record_identity(), pseudo_records, false, did_change_custom_properties);
+                *invalidation |= element.apply_engine_computed_style_record(element.style_record_identity(), pseudo_records, false, row_facts, did_change_custom_properties);
             // The container's pseudo rules can change after its descendants finish style and
             // layout and the scroll-state snapshot is published.
             invalidation->recompute_descendant_styles = true;

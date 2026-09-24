@@ -3088,6 +3088,9 @@ impl StyleEngineState {
                         }
                         _ => false,
                     },
+                    row_facts: 0,
+                    explicit_inheritance_debt: 0,
+                    row_effect_debt: 0,
                 };
                 // What the row's application moves for the children is the engine's to derive here,
                 // from the two records and their damage: a child that is a row still to come reads
@@ -3216,6 +3219,9 @@ impl StyleEngineState {
                             gap: FfiStyleDeltaGap::Computed,
                             uses_substitution: false,
                             record_damage: pseudo_damage,
+                            row_facts: 0,
+                            explicit_inheritance_debt: 0,
+                            row_effect_debt: 0,
                         });
                     }
                     record_deltas[published_index] = Some(node_deltas);
@@ -3249,6 +3255,9 @@ impl StyleEngineState {
                                 gap: FfiStyleDeltaGap::Computed,
                                 uses_substitution: false,
                                 record_damage: pseudo_damage,
+                                row_facts: 0,
+                                explicit_inheritance_debt: 0,
+                                row_effect_debt: 0,
                             });
                         }
                     }
