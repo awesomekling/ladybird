@@ -18,7 +18,7 @@
 //! Observation folds those contexts into process-wide totals; the disabled hot
 //! path remains one relaxed atomic load per crossing.
 
-use std::cell::{OnceCell, RefCell};
+use std::cell::OnceCell;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -173,33 +173,35 @@ thread_local! {
     pub(crate) static CPP_CALLBACK_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     pub(crate) static THREAD_UNSAFE_CPP_CALLBACK_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
-thread_local! {
-    // The document thread's complete style updates. A stage run carries this to the stage thread
-    // and back with the seal's state; see `take_style_update_scope`.
-    static COMPLETE_STYLE_UPDATE_STATE: RefCell<CompleteStyleUpdateState> = const { RefCell::new(CompleteStyleUpdateState::new()) };
+// The complete style updates of the document thread. A fly-string reference dropped anywhere
+// inside one, on the document thread or in a stage run on the stage thread, reaches this through
+// `release_utf16_fly_string`, which a drop calls with no engine or update at hand. So it is
+// process-wide rather than per thread; stage runs are lockstep and a process has one document
+// thread, so the lock is uncontended.
+static COMPLETE_STYLE_UPDATE_STATE: Mutex<CompleteStyleUpdateState> = Mutex::new(CompleteStyleUpdateState::new());
+
+fn complete_style_update_state() -> std::sync::MutexGuard<'static, CompleteStyleUpdateState> {
+    COMPLETE_STYLE_UPDATE_STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// The style update state of one document thread, moved to the stage thread for a stage run and
 /// back once it has finished. An update the document thread has open is then open for the stage
-/// too: a fly-string reference the stage drops joins the update's deferred releases, which the
-/// document thread drains, and the seal checks and counts the stage's calls as the update's.
+/// too: the seal checks and counts the stage's calls as the update's.
 pub(crate) struct StyleUpdateScope {
-    complete: CompleteStyleUpdateState,
     seal: crate::css::style::seal::SealState,
 }
 
 /// Take this thread's style update state, for a stage run to carry to the stage thread.
 pub(crate) fn take_style_update_scope() -> StyleUpdateScope {
     StyleUpdateScope {
-        complete: COMPLETE_STYLE_UPDATE_STATE
-            .with_borrow_mut(|state| std::mem::replace(state, CompleteStyleUpdateState::new())),
         seal: crate::css::style::seal::take_state(),
     }
 }
 
 /// Install style update state a stage run carried here.
 pub(crate) fn install_style_update_scope(scope: StyleUpdateScope) {
-    COMPLETE_STYLE_UPDATE_STATE.with_borrow_mut(|state| *state = scope.complete);
     crate::css::style::seal::install_state(scope.seal);
 }
 
@@ -285,14 +287,13 @@ pub(crate) fn bump_cpp_callback(op: FfiOp) {
 }
 
 pub(crate) fn release_utf16_fly_string(raw: usize) {
-    let deferred = COMPLETE_STYLE_UPDATE_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        if state.depth == 0 {
-            return false;
+    let deferred = {
+        let mut state = complete_style_update_state();
+        if state.depth != 0 {
+            state.releases.fly_strings.push(raw);
         }
-        state.releases.fly_strings.push(raw);
-        true
-    });
+        state.depth != 0
+    };
     if deferred {
         return;
     }
@@ -305,55 +306,52 @@ pub(crate) fn release_utf16_fly_string(raw: usize) {
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_style_ffi_complete_style_update_begin() {
     crate::css::style::seal::begin_update();
-    COMPLETE_STYLE_UPDATE_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        assert!(
-            !state.has_outstanding_view,
-            "complete style update entered while deferred releases are being drained"
-        );
-        state.depth = state
-            .depth
-            .checked_add(1)
-            .expect("complete style update depth overflow");
-    });
+    let mut state = complete_style_update_state();
+    assert!(
+        !state.has_outstanding_view,
+        "complete style update entered while deferred releases are being drained"
+    );
+    state.depth = state
+        .depth
+        .checked_add(1)
+        .expect("complete style update depth overflow");
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_style_ffi_complete_style_update_end() -> FfiDeferredCppReleases {
-    let releases = COMPLETE_STYLE_UPDATE_STATE.with(|state| {
-        let mut state = state.borrow_mut();
+    let releases = {
+        let mut state = complete_style_update_state();
         state.depth = state
             .depth
             .checked_sub(1)
             .expect("unbalanced complete style update scope");
         if state.depth != 0 {
-            return FfiDeferredCppReleases {
+            FfiDeferredCppReleases {
                 fly_strings: std::ptr::null(),
                 fly_string_count: 0,
-            };
+            }
+        } else {
+            assert!(!state.has_outstanding_view, "deferred release view was not cleared");
+            state.has_outstanding_view = true;
+            FfiDeferredCppReleases {
+                fly_strings: state.releases.fly_strings.as_ptr(),
+                fly_string_count: state.releases.fly_strings.len(),
+            }
         }
-        assert!(!state.has_outstanding_view, "deferred release view was not cleared");
-        state.has_outstanding_view = true;
-        FfiDeferredCppReleases {
-            fly_strings: state.releases.fly_strings.as_ptr(),
-            fly_string_count: state.releases.fly_strings.len(),
-        }
-    });
+    };
     crate::css::style::seal::end_update();
     releases
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_deferred_cpp_releases_clear() {
-    COMPLETE_STYLE_UPDATE_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        if !state.has_outstanding_view {
-            return;
-        }
-        assert_eq!(state.depth, 0, "deferred releases cleared during a style update");
-        state.releases.fly_strings.clear();
-        state.has_outstanding_view = false;
-    });
+    let mut state = complete_style_update_state();
+    if !state.has_outstanding_view {
+        return;
+    }
+    assert_eq!(state.depth, 0, "deferred releases cleared during a style update");
+    state.releases.fly_strings.clear();
+    state.has_outstanding_view = false;
 }
 
 /// Returns the number of FFI boundary counters.
