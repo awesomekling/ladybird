@@ -5,15 +5,18 @@
  */
 
 use crate::cow_column::{ColumnSnapshot, CowColumn};
+use crate::css::css_pixels::CssPixelPoint;
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeSlotId};
 use crate::layout::{fragment_tree, used_values};
+use crate::painting::image_map_areas::{ImageMapAreaColumn, ImageMapAreas};
 use crate::painting::node_painting;
 use crate::painting::paintable_data::*;
 use crate::painting::record::damage::{DamageSet, PaintDamage, RowPaintState};
 use crate::painting::visual_context::dirty::{
     RemovedBoxBlocks, VisualContextBoxDirtyKind, VisualContextGlobalRebuildReason,
 };
+use crate::painting::visual_context::scroll_state::{ScrollOffsetColumn, ScrollOffsets};
 use crate::painting::visual_context::{
     BoxVisualContextNodeHandles, EMPTY_BOX_VISUAL_CONTEXT_NODE_HANDLES, PaintableVisualContextRecord,
 };
@@ -45,7 +48,7 @@ mod tests {
         arena.publish_paintable_rows();
         arena.paintable_rows_mut().paintable_data_mut(node).offset.x = CssPixels::from_integer(20);
 
-        let published = arena.paintable_rows.published_rows.clone().unwrap();
+        let published = arena.paintable_rows.published.as_ref().unwrap().rows.clone();
         let published_offset = |rows: &ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>| {
             rows.get(node.slot_index() as usize).unwrap().offset.x
         };
@@ -55,6 +58,54 @@ mod tests {
             CssPixels::from_integer(20).into()
         );
         assert_eq!(published_offset(&published), CssPixels::from_integer(10).into());
+    }
+
+    #[test]
+    fn columns_read_beside_the_rows_are_published_with_them() {
+        use crate::css::css_pixels::{CssPixelPoint, CssPixels};
+        use crate::painting::image_map_areas::{AreaShape, PublishedImageMapArea};
+
+        let area = |style_node| {
+            Box::new([PublishedImageMapArea {
+                style_node,
+                shape: AreaShape::Default,
+                editable: false,
+                coords: Box::new([]),
+            }]) as Box<[_]>
+        };
+        let offset = |x| CssPixelPoint::new(CssPixels::from_integer(x), CssPixels::from_integer(0));
+        let mut arena = LayoutNodeArena::new();
+        let node = arena.allocate_for_test().slot;
+        arena.populate_paintable_row(node);
+        arena.scroll_offsets().publish(node, offset(10));
+        arena.unique_node_ids().publish(node, 1);
+        arena.image_map_areas().publish(node, area(1));
+        arena.publish_paintable_rows();
+        arena.scroll_offsets().publish(node, offset(20));
+        arena.unique_node_ids().publish(node, 2);
+        arena.image_map_areas().publish(node, area(2));
+
+        let published = arena.paintable_rows.published.as_ref().unwrap();
+        let (scroll_offsets, image_map_areas) = (published.scroll_offsets.clone(), published.image_map_areas.clone());
+        let unique_node_ids = published.unique_node_ids.clone();
+        let published_state = || {
+            (
+                scroll_offsets.offset(node),
+                unique_node_id_of(unique_node_ids.get(node.slot_index() as usize), node),
+                image_map_areas.area_editability(node, 1),
+            )
+        };
+        assert_eq!(published_state(), (offset(10), 1, 0));
+        let committed = arena.committed_paintable_rows();
+        assert_eq!(
+            (
+                committed.scroll_offset(node),
+                committed.unique_node_id(node),
+                committed.with_image_map_areas(|areas| areas.area_editability(node, 1)),
+            ),
+            (offset(20), 2, -1)
+        );
+        assert_eq!(published_state(), (offset(10), 1, 0));
     }
 
     #[test]
@@ -211,39 +262,36 @@ impl PaintableRowReset {
 // it, so a slot that has been recycled since answers for the new row and not the old one.
 #[derive(Default)]
 pub(crate) struct UniqueNodeIdColumn {
-    ids: RefCell<Vec<(NodeSlotId, i64)>>,
+    ids: RefCell<CowColumn<(NodeSlotId, i64), PAINTABLE_SLOTS_PER_CHUNK>>,
+}
+
+fn unique_node_id_of(entry: Option<&(NodeSlotId, i64)>, slot: NodeSlotId) -> i64 {
+    match entry {
+        Some(&(published_for, id)) if !slot.is_invalid() && published_for == slot => id,
+        _ => 0,
+    }
 }
 
 impl UniqueNodeIdColumn {
     pub(crate) fn id(&self, slot: NodeSlotId) -> i64 {
-        if slot.is_invalid() {
-            return 0;
-        }
-        match self.ids.borrow().get(slot.slot_index() as usize) {
-            Some(&(published_for, id)) if published_for == slot => id,
-            _ => 0,
-        }
+        unique_node_id_of(self.ids.borrow().get(slot.slot_index() as usize), slot)
     }
 
     pub(crate) fn publish(&self, slot: NodeSlotId, id: i64) {
-        if slot.is_invalid() {
+        if slot.is_invalid() || self.id(slot) == id {
             return;
         }
         let index = slot.slot_index() as usize;
         let mut ids = self.ids.borrow_mut();
-        if ids.len() <= index {
-            ids.resize(index + 1, (NodeSlotId::INVALID, 0));
-        }
-        ids[index] = (slot, id);
+        ids.grow_to(index + 1);
+        *ids.get_mut(index).expect("the column grew to hold the slot") = (slot, id);
     }
 
     pub(crate) fn forget(&self, slot: NodeSlotId) {
-        if slot.is_invalid() {
+        if slot.is_invalid() || self.id(slot) == 0 {
             return;
         }
-        if let Some(entry) = self.ids.borrow_mut().get_mut(slot.slot_index() as usize)
-            && entry.0 == slot
-        {
+        if let Some(entry) = self.ids.borrow_mut().get_mut(slot.slot_index() as usize) {
             *entry = (NodeSlotId::INVALID, 0);
         }
     }
@@ -267,11 +315,6 @@ impl CommittedFragmentLinkSlot {
     }
 }
 
-const _: () = {
-    const fn assert_send_and_sync<T: Send + Sync>() {}
-    assert_send_and_sync::<ColumnSnapshot<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK>>();
-};
-
 #[derive(Default)]
 pub(crate) struct PaintableRowStore {
     rows: CowColumn<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>,
@@ -280,9 +323,7 @@ pub(crate) struct PaintableRowStore {
     /// nothing reads it while they run and releasing it lets them write chunks in place, and
     /// publish again when they are done. A row a main-side writer changes is published when the
     /// main side next reads the rows.
-    published_rows: Option<ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>>,
-    /// The committed fragment links as published with `published_rows`, and released with them.
-    published_fragment_links: Option<ColumnSnapshot<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK>>,
+    published: Option<PublishedPaintableRows>,
     side_data: RefCell<Vec<PaintableSideData>>,
     row_reset_versions: Vec<u64>,
     pub(crate) row_paint_states: RefCell<Vec<RowPaintState>>,
@@ -300,11 +341,25 @@ pub(crate) struct PaintableRowStore {
     chrome_state_listens: Cell<bool>,
     paint_recording_in_progress: Cell<bool>,
     layout_commit_generation: Cell<u64>,
-    scroll_offsets: crate::painting::visual_context::scroll_state::ScrollOffsetColumn,
-    image_map_areas: crate::painting::image_map_areas::ImageMapAreaColumn,
+    scroll_offsets: ScrollOffsetColumn,
+    image_map_areas: ImageMapAreaColumn,
     unique_node_ids: UniqueNodeIdColumn,
     visual_context_tree_inputs: Cell<crate::painting::host::FfiVisualContextTreeInputs>,
 }
+
+/// One published generation of the paintable rows and of the columns read beside them.
+struct PublishedPaintableRows {
+    rows: ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>,
+    fragment_links: ColumnSnapshot<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK>,
+    unique_node_ids: ColumnSnapshot<(NodeSlotId, i64), PAINTABLE_SLOTS_PER_CHUNK>,
+    scroll_offsets: std::sync::Arc<ScrollOffsets>,
+    image_map_areas: std::sync::Arc<ImageMapAreas>,
+}
+
+const _: () = {
+    const fn assert_send_and_sync<T: Send + Sync>() {}
+    assert_send_and_sync::<PublishedPaintableRows>();
+};
 
 pub(crate) struct PaintableRows<Arena> {
     arena: Arena,
@@ -328,6 +383,12 @@ pub(crate) trait PaintableRowsRead: Deref<Target = LayoutNodeArena> {
         id: NodeSlotId,
         read: impl FnOnce(Option<&fragment_tree::FragmentLink>) -> R,
     ) -> R;
+    /// The scroll offset the document published for a box, or zero.
+    fn scroll_offset(&self, id: NodeSlotId) -> CssPixelPoint;
+    /// The unique node id the document published for what a box is the box of, or zero.
+    fn unique_node_id(&self, id: NodeSlotId) -> i64;
+    /// Reads the image map areas the document published.
+    fn with_image_map_areas<R>(&self, read: impl FnOnce(&ImageMapAreas) -> R) -> R;
 }
 
 pub(crate) trait PaintableRowsWrite: PaintableRowsRead {
@@ -527,20 +588,16 @@ impl Deref for CommittedPaintableRows<'_> {
 }
 
 impl CommittedPaintableRows<'_> {
-    fn published_rows(&self) -> &ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK> {
+    fn published(&self) -> &PublishedPaintableRows {
         self.arena
             .paintable_rows
-            .published_rows
+            .published
             .as_ref()
             .expect("committed rows are published before they are read")
     }
 
-    fn published_fragment_links(&self) -> &ColumnSnapshot<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK> {
-        self.arena
-            .paintable_rows
-            .published_fragment_links
-            .as_ref()
-            .expect("committed fragment links are published before they are read")
+    fn published_rows(&self) -> &ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK> {
+        &self.published().rows
     }
 }
 
@@ -576,10 +633,23 @@ impl PaintableRowsRead for CommittedPaintableRows<'_> {
     ) -> R {
         debug_assert!(self.paintable_row_is_populated(id));
         read(
-            self.published_fragment_links()
+            self.published()
+                .fragment_links
                 .get(id.slot_index() as usize)
                 .and_then(|slot| slot.link.as_deref()),
         )
+    }
+
+    fn scroll_offset(&self, id: NodeSlotId) -> CssPixelPoint {
+        self.published().scroll_offsets.offset(id)
+    }
+
+    fn unique_node_id(&self, id: NodeSlotId) -> i64 {
+        unique_node_id_of(self.published().unique_node_ids.get(id.slot_index() as usize), id)
+    }
+
+    fn with_image_map_areas<R>(&self, read: impl FnOnce(&ImageMapAreas) -> R) -> R {
+        read(&self.published().image_map_areas)
     }
 }
 
@@ -628,6 +698,27 @@ impl PaintableRowsRead for MainSidePaintableRows<'_> {
             Self::DuringStage(rows) => rows.with_committed_fragment_link(id, read),
         }
     }
+
+    fn scroll_offset(&self, id: NodeSlotId) -> CssPixelPoint {
+        match self {
+            Self::Committed(rows) => rows.scroll_offset(id),
+            Self::DuringStage(rows) => rows.scroll_offset(id),
+        }
+    }
+
+    fn unique_node_id(&self, id: NodeSlotId) -> i64 {
+        match self {
+            Self::Committed(rows) => rows.unique_node_id(id),
+            Self::DuringStage(rows) => rows.unique_node_id(id),
+        }
+    }
+
+    fn with_image_map_areas<R>(&self, read: impl FnOnce(&ImageMapAreas) -> R) -> R {
+        match self {
+            Self::Committed(rows) => rows.with_image_map_areas(read),
+            Self::DuringStage(rows) => rows.with_image_map_areas(read),
+        }
+    }
 }
 
 impl<Arena> PaintableRowsRead for PaintableRows<Arena>
@@ -648,6 +739,18 @@ where
         read: impl FnOnce(Option<&fragment_tree::FragmentLink>) -> R,
     ) -> R {
         self.arena.with_committed_fragment_link(id, read)
+    }
+
+    fn scroll_offset(&self, id: NodeSlotId) -> CssPixelPoint {
+        self.arena.paintable_rows.scroll_offsets.offset(id)
+    }
+
+    fn unique_node_id(&self, id: NodeSlotId) -> i64 {
+        self.arena.paintable_rows.unique_node_ids.id(id)
+    }
+
+    fn with_image_map_areas<R>(&self, read: impl FnOnce(&ImageMapAreas) -> R) -> R {
+        self.arena.paintable_rows.image_map_areas.with_areas(read)
     }
 }
 
@@ -923,12 +1026,12 @@ impl LayoutNodeArena {
     }
 
     /// The scroll offset each box holds, as published by the one place the DOM stores it.
-    pub(crate) fn scroll_offsets(&self) -> &crate::painting::visual_context::scroll_state::ScrollOffsetColumn {
+    pub(crate) fn scroll_offsets(&self) -> &ScrollOffsetColumn {
         &self.paintable_rows.scroll_offsets
     }
 
     /// The areas of the image map each image is associated with, as the document published them.
-    pub(crate) fn image_map_areas(&self) -> &crate::painting::image_map_areas::ImageMapAreaColumn {
+    pub(crate) fn image_map_areas(&self) -> &ImageMapAreaColumn {
         &self.paintable_rows.image_map_areas
     }
 
@@ -1239,28 +1342,44 @@ impl LayoutNodeArena {
 
     /// Lets a writer that runs while nothing reads the published rows write their chunks in place.
     pub(crate) fn release_published_paintable_rows(&mut self) {
-        self.paintable_rows.published_rows = None;
-        self.paintable_rows.published_fragment_links = None;
+        self.paintable_rows.published = None;
     }
 
     /// Hands the main side the rows as they are now, if a writer changed them since they were last
     /// handed over.
     pub(crate) fn publish_paintable_rows(&mut self) {
         let store = &mut self.paintable_rows;
-        if store.published_rows.is_none() || store.rows.written_since_publish() {
-            store.published_rows = Some(store.rows.publish());
+        let fragment_links = store.committed_fragment_links.get_mut();
+        let unique_node_ids = store.unique_node_ids.ids.get_mut();
+        let Some(published) = &mut store.published else {
+            store.published = Some(PublishedPaintableRows {
+                rows: store.rows.publish(),
+                fragment_links: fragment_links.publish(),
+                unique_node_ids: unique_node_ids.publish(),
+                scroll_offsets: store.scroll_offsets.snapshot(),
+                image_map_areas: store.image_map_areas.snapshot(),
+            });
+            return;
+        };
+        if store.rows.written_since_publish() {
+            published.rows = store.rows.publish();
         }
-        let links = store.committed_fragment_links.get_mut();
-        if store.published_fragment_links.is_none() || links.written_since_publish() {
-            store.published_fragment_links = Some(links.publish());
+        if fragment_links.written_since_publish() {
+            published.fragment_links = fragment_links.publish();
         }
+        if unique_node_ids.written_since_publish() {
+            published.unique_node_ids = unique_node_ids.publish();
+        }
+        published.scroll_offsets = store.scroll_offsets.snapshot();
+        published.image_map_areas = store.image_map_areas.snapshot();
     }
 
     #[cfg(test)]
     pub(crate) fn published_fragment_link_for_test(&self, id: NodeSlotId) -> Option<fragment_tree::FragmentLink> {
         self.paintable_rows
-            .published_fragment_links
+            .published
             .as_ref()?
+            .fragment_links
             .get(id.slot_index() as usize)?
             .link_for(id.generation())
             .cloned()
