@@ -38,7 +38,6 @@ ALLOWED = {
 # libweb_rust: `file:name` -> why the state is safe for a render stage on another thread.
 RENDER_STAGE_CRATE = "Libraries/LibWeb/Rust"
 
-STYLE_POOL = "style interning pool; becomes per-engine state before style runs on a stage thread"
 SCRATCH = "per-thread allocation pool or scratch; a thread without one only allocates more"
 DIAGNOSTIC = "seal, census or counter diagnostics; off unless an environment variable turns them on"
 ENVIRONMENT_SWITCH = "read-once environment switch; every thread sees the same answer"
@@ -55,15 +54,6 @@ def render_stage_entries(reason, entries):
 
 
 RENDER_STAGE_ALLOWED = {
-    **render_stage_entries(
-        STYLE_POOL,
-        [
-            "css/style/native_rules/targets.rs:SHARED_TARGET_PAGES",
-            "css/style/program.rs:SHARED_RULE_DECLARATIONS",
-            "css/style/program/rule_records.rs:SHARED_RULE_RECORD_PAGES",
-            "css/style/program/rule_versions.rs:SHARED_RULE_VERSION_PAGES",
-        ],
-    ),
     **render_stage_entries(
         SCRATCH,
         [
@@ -170,6 +160,10 @@ RENDER_STAGE_ALLOWED = {
             "css/parser/stylesheet_cache.rs:CACHE",
             "css/style/atoms.rs:GLOBAL_ATOMS",
             "css/style/matching.rs:DISPATCH_POOLS",
+            "css/style/native_rules/targets.rs:TARGET_PAGES",
+            "css/style/program.rs:RULE_DECLARATIONS",
+            "css/style/program/rule_records.rs:RULE_RECORD_PAGES",
+            "css/style/program/rule_versions.rs:RULE_VERSION_PAGES",
             "css/style/selector.rs:ROUTING_POOLS",
             "css/style/selector.rs:SELECTOR_PROGRAM_POOLS",
         ],

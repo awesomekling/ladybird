@@ -39,7 +39,6 @@ use super::column::Column;
 use super::fast_hash::FastMap as HashMap;
 use super::fast_hash::FastSet as HashSet;
 use super::index::StyleAtomID;
-use super::memory::DeviceClass;
 use super::memory::MemoryCategory;
 use super::memory::MemoryController;
 use super::memory::MemoryLease;
@@ -47,12 +46,11 @@ use super::order::OrderMaintenance;
 use super::order::OrderToken;
 use super::transaction::ProgramVersion;
 use super::tree::TreeScopeID;
+use super::weak_pool::WeakPool;
 use crate::css::style_value::RetainedStyleValueData;
-use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroU32;
-use std::sync::Arc;
-use std::sync::Weak;
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 define_id! {
     /// Identity of a CSSOM `CSSStyleSheet` wrapper object. Assigned by C++, which owns the wrapper.
@@ -310,7 +308,6 @@ impl RuleDeclarationData {
 
 struct SharedRuleDeclarations {
     data: RuleDeclarationData,
-    hash: u64,
     _memory: MemoryLease,
 }
 
@@ -322,33 +319,10 @@ impl std::ops::Deref for Rule {
     }
 }
 
-struct SharedRuleDeclarationTable {
-    by_hash: HashMap<u64, Vec<Weak<SharedRuleDeclarations>>>,
-    memory: MemoryController,
-}
-
-thread_local! {
-    static SHARED_RULE_DECLARATIONS: RefCell<SharedRuleDeclarationTable> = RefCell::new(SharedRuleDeclarationTable {
-        by_hash: HashMap::default(),
-        memory: MemoryController::new(DeviceClass::ForegroundDesktop),
-    });
-}
-
-impl Drop for SharedRuleDeclarations {
-    fn drop(&mut self) {
-        let _ = SHARED_RULE_DECLARATIONS.try_with(|table| {
-            let Ok(mut table) = table.try_borrow_mut() else { return };
-            if let std::collections::hash_map::Entry::Occupied(mut entry) = table.by_hash.entry(self.hash) {
-                entry.get_mut().retain(|candidate| candidate.strong_count() != 0);
-                if entry.get().is_empty() {
-                    entry.remove();
-                }
-            }
-        });
-    }
-}
-
-fn share_rule_declarations(data: RuleDeclarationData) -> Arc<SharedRuleDeclarations> {
+fn share_rule_declarations(
+    data: RuleDeclarationData,
+    pool: &mut WeakPool<SharedRuleDeclarations>,
+) -> Arc<SharedRuleDeclarations> {
     // Canonical IDs are document-local, so equal numeric declarations alone are insufficient:
     // compare the authored values as well before sharing their immutable storage.
     let mut hasher = super::fast_hash::fast_hasher();
@@ -363,33 +337,25 @@ fn share_rule_declarations(data: RuleDeclarationData) -> Arc<SharedRuleDeclarati
         }
     }
     let hash = hasher.finish();
-    SHARED_RULE_DECLARATIONS.with_borrow_mut(|table| {
-        let bucket = table.by_hash.entry(hash).or_default();
-        bucket.retain(|candidate| candidate.strong_count() != 0);
-        if let Some(found) = bucket
-            .iter()
-            .filter_map(Weak::upgrade)
-            .find(|candidate| candidate.data == data)
-        {
-            return found;
-        }
-        let mut memory = MemoryLease::new(MemoryCategory::RuleProgram);
-        memory.resize_required_to(
-            &mut table.memory,
-            size_of::<SharedRuleDeclarations>() as u64 + data.capacity_bytes(),
-        );
-        let declarations = Arc::new(SharedRuleDeclarations {
-            data,
-            hash,
-            _memory: memory,
-        });
-        table
-            .by_hash
-            .get_mut(&hash)
-            .unwrap()
-            .push(Arc::downgrade(&declarations));
-        declarations
-    })
+    if let Some(found) = pool.find(hash, |candidate| candidate.data == data) {
+        return found;
+    }
+    let mut memory = MemoryLease::new(MemoryCategory::RuleProgram);
+    memory.resize_required_to(
+        &mut pool.memory,
+        size_of::<SharedRuleDeclarations>() as u64 + data.capacity_bytes(),
+    );
+    let declarations = Arc::new(SharedRuleDeclarations { data, _memory: memory });
+    pool.insert(hash, &declarations);
+    declarations
+}
+
+fn rule_declaration_pool() -> MutexGuard<'static, WeakPool<SharedRuleDeclarations>> {
+    // Every engine interns through the same pool, from whichever thread runs it. Declarations
+    // never reach back into the pool when they are dropped, so the lock is only held while
+    // interning.
+    static RULE_DECLARATIONS: OnceLock<Mutex<WeakPool<SharedRuleDeclarations>>> = OnceLock::new();
+    RULE_DECLARATIONS.get_or_init(Mutex::default).lock().unwrap()
 }
 
 struct SemanticDeclarationEntry {
@@ -464,7 +430,7 @@ impl StyleSheetProgram {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            empty_declarations: share_rule_declarations(RuleDeclarationData::default()),
+            empty_declarations: share_rule_declarations(RuleDeclarationData::default(), &mut rule_declaration_pool()),
             sheets: Vec::new(),
             rules: RuleRecordTable::default(),
             rule_children: Vec::new(),
@@ -1317,13 +1283,16 @@ impl StyleSheetProgram {
             .zip(&written_values)
             .map(|(declared, value)| super::publication::WrittenValueChecks::prepare(declared.property, value))
             .collect();
-        entry.declarations = share_rule_declarations(RuleDeclarationData {
-            declared_properties: declared,
-            written_values,
-            written_value_checks,
-            custom_declarations,
-            custom_written_values,
-        });
+        entry.declarations = share_rule_declarations(
+            RuleDeclarationData {
+                declared_properties: declared,
+                written_values,
+                written_value_checks,
+                custom_declarations,
+                custom_written_values,
+            },
+            &mut rule_declaration_pool(),
+        );
         match (
             declared_custom_properties_before,
             entry.live && !entry.custom_declarations.is_empty(),
