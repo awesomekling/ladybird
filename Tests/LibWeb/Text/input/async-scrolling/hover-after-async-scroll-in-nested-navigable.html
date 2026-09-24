@@ -83,7 +83,10 @@
         println(`after outer scroll ${hoverStates()}`);
         println(`after outer scroll over=${overs.join(",")}`);
 
-        // A further wheel over the same point now belongs to the nested navigable's own scroller.
+        // A further wheel over the same point now belongs to the nested navigable's own scroller,
+        // once it starts a gesture of its own rather than continuing the one latched to the outer
+        // document.
+        await timeout(600);
         overs = [];
         await internals.wheel(10, 10, 0, 200);
         await waitForHover(frameDocument.getElementById("y"));
