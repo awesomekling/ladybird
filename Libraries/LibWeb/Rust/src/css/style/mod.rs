@@ -882,7 +882,7 @@ pub struct RetainedState {
     /// The base URLs a `url()` resolves against, copied at the transaction boundary with the inputs.
     document_resource_contexts: resource_contexts::DocumentResourceContexts,
     /// Immutable registry generation used by custom-property style queries during a transaction.
-    custom_property_registry: Option<std::sync::Arc<crate::css::custom_properties::CustomPropertyRegistry>>,
+    custom_property_registry: std::sync::Arc<crate::css::custom_properties::CustomPropertyRegistry>,
     /// Independent per-element longhand inputs frozen once for the reaction batch. Same-update
     /// parent results are deliberately absent: the preorder driver supplies those from retained
     /// result rows as it advances.

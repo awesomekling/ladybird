@@ -626,7 +626,7 @@ impl RetainedState {
                 .custom_property_environments
                 .store(environment)
                 .unwrap_or(std::ptr::null());
-            let registry = engine.custom_property_registry.as_deref()?;
+            let registry = &*engine.custom_property_registry;
             let mut dependencies = crate::css::cascaded_properties::StyleQueryDependencies::default();
             let packed_color = values.inherited_text().color;
             let color_resolution_input = crate::css::color_resolution::ColorResolutionInput {

@@ -1268,10 +1268,6 @@ impl RetainedState {
         });
         let custom_functions = reads_functions.then(|| self.prepare_custom_functions(node, pseudo));
         let registry = inputs.custom_property_registry;
-        if registry.is_none() {
-            counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-            return Err(Unanswered::Refused);
-        }
         let registry_ref = unsafe { &*registry.as_pointer().cast::<CustomPropertyRegistry>() };
         let mut has_registered_declaration = false;
         if registry_ref.has_registrations() {
@@ -1711,10 +1707,6 @@ fn substitute_written_value_against_store_with_attributes(
         .collect::<Vec<_>>();
     // The document publishes its registry with every transaction's inputs.
     let registry = inputs.custom_property_registry;
-    if registry.is_none() {
-        debug_assert!(false, "document inputs without a custom property registry");
-        return guaranteed_invalid();
-    }
     let registry_ref = unsafe { &*registry.as_pointer().cast::<CustomPropertyRegistry>() };
     let mut random_function_index = 0_usize;
     let mut parse_context = registry_ref.parse_context(&mut random_function_index);

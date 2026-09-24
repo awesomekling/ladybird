@@ -1343,7 +1343,7 @@ impl RetainedState {
     #[must_use]
     pub(crate) fn shared_custom_property_registry(
         &self,
-    ) -> Option<std::sync::Arc<crate::css::custom_properties::CustomPropertyRegistry>> {
+    ) -> std::sync::Arc<crate::css::custom_properties::CustomPropertyRegistry> {
         self.custom_property_registry.clone()
     }
 
@@ -1751,6 +1751,9 @@ impl StyleEngineState {
     fn new_with_owners(device_class: DeviceClass, atoms: DocumentAtoms, programs: SelectorPrograms) -> Self {
         let mut memory = MemoryController::new(device_class);
         let tree = StyleNodeTree::new(&mut memory);
+        // Until the host publishes the document's registry, the engine's inputs name an empty one.
+        let custom_property_registry =
+            std::sync::Arc::new(crate::css::custom_properties::CustomPropertyRegistry::empty());
         Self {
             retained: RetainedState {
                 memory,
@@ -1783,12 +1786,17 @@ impl StyleEngineState {
                 cascade_compaction_scratch_memory: MemoryLease::new(MemoryCategory::BatchScratch),
                 top_layer_elements: Vec::new(),
                 next_style_transaction_version: StyleTransactionVersion(1),
-                document_style_computation_inputs: Default::default(),
+                document_style_computation_inputs: bridge::FfiDocumentStyleComputationInputs {
+                    custom_property_registry: bridge::FfiHostHandle::from_pointer(
+                        std::sync::Arc::as_ptr(&custom_property_registry).cast(),
+                    ),
+                    ..Default::default()
+                },
                 document_media_snapshot: custom_property_cascade::DocumentMediaSnapshot::default(),
                 document_function_snapshot: custom_property_cascade::DocumentFunctionSnapshot::default(),
                 driven_viewport: (0.0, 0.0),
                 document_resource_contexts: Default::default(),
-                custom_property_registry: None,
+                custom_property_registry,
                 frozen_longhand_inputs: HashMap::default(),
                 element_custom_property_data: HashMap::default(),
                 sampled_custom_property_environments: HashMap::default(),

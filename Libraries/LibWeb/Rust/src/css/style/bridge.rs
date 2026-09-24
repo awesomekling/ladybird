@@ -4307,15 +4307,25 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     // Freeze the registry at every transaction boundary. The registration generation is a
     // semantic invalidation key, while a stylesheet rebuild can replace the native registry
     // contents before that generation becomes the retained transaction's current input.
-    engine.custom_property_registry = unsafe {
-        computation_inputs
-            .custom_property_registry
-            .as_pointer()
-            .cast::<crate::css::custom_properties::CustomPropertyRegistry>()
-            .as_ref()
-            .cloned()
-            .map(std::sync::Arc::new)
-    };
+    engine.custom_property_registry = std::sync::Arc::new(
+        unsafe {
+            computation_inputs
+                .custom_property_registry
+                .as_pointer()
+                .cast::<crate::css::custom_properties::CustomPropertyRegistry>()
+                .as_ref()
+        }
+        .map_or_else(
+            crate::css::custom_properties::CustomPropertyRegistry::empty,
+            Clone::clone,
+        ),
+    );
+    // Inputs that name no registry are those of a document that registers nothing: they name the
+    // empty one the engine froze instead.
+    if computation_inputs.custom_property_registry.is_none() {
+        computation_inputs.custom_property_registry =
+            FfiHostHandle::from_pointer(std::sync::Arc::as_ptr(&engine.custom_property_registry).cast());
+    }
     if engine.document_style_computation_inputs != computation_inputs || resource_contexts_moved {
         // Persistent records are derived from every document computation input, not only the
         // font generation carried in their keys.
@@ -4375,14 +4385,13 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
             for code in computation_inputs.document_supported_scheme_codes {
                 payload.write_u8(code);
             }
-            let custom_property_registry_is_engine_usable = !computation_inputs.custom_property_registry.is_none()
-                && !unsafe {
-                    &*computation_inputs
-                        .custom_property_registry
-                        .as_pointer()
-                        .cast::<CustomPropertyRegistry>()
-                }
-                .has_registrations();
+            let custom_property_registry_is_engine_usable = !unsafe {
+                &*computation_inputs
+                    .custom_property_registry
+                    .as_pointer()
+                    .cast::<CustomPropertyRegistry>()
+            }
+            .has_registrations();
             payload.write_bool(custom_property_registry_is_engine_usable);
             payload.write_u64(computation_inputs.custom_property_registration_generation);
             payload.write_bool(computation_inputs.in_quirks_mode);

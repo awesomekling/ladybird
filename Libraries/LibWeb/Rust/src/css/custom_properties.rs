@@ -3789,14 +3789,20 @@ mod tests {
     }
 }
 
+impl CustomPropertyRegistry {
+    /// The registry of a document that registers no custom property.
+    pub(crate) fn empty() -> Self {
+        Self {
+            registrations: HashMap::new(),
+            document_url: Vec::new(),
+            document_base_url: Vec::new(),
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_custom_property_registry_create() -> *mut c_void {
-    Box::into_raw(Box::new(CustomPropertyRegistry {
-        registrations: HashMap::new(),
-        document_url: Vec::new(),
-        document_base_url: Vec::new(),
-    }))
-    .cast()
+    Box::into_raw(Box::new(CustomPropertyRegistry::empty())).cast()
 }
 
 /// Replaces the effective registered custom-property names for one document.
