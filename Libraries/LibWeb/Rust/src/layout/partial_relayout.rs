@@ -815,7 +815,12 @@ mod tests {
     fn allocate_box_with_a_dummy_shell(arena: &mut LayoutNodeArena) -> NodeAllocation {
         let allocation = arena.allocate_for_test();
         arena.data(allocation.slot).kind.set(NodeKind::Box);
-        arena.data(allocation.slot).shell.set(std::ptr::dangling_mut());
+        arena
+            .data(allocation.slot)
+            .shell
+            .set(crate::layout::node_data::ShellId::of_host_object(
+                std::ptr::dangling_mut(),
+            ));
         allocation
     }
 

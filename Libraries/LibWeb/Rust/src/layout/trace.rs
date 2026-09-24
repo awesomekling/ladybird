@@ -187,7 +187,7 @@ fn owner_name(
     // A row nothing has materialised a shell for is named from the row, the way its shell would
     // describe itself, since materialising one would ask the document something mid-pass.
     let data = arena.data(root);
-    if data.shell.get().is_null() {
+    if data.shell.get().is_none() {
         let kind = data.kind.get();
         if data.flags.get() & NodeFlag::Anonymous as u32 != 0 {
             return format!("{kind:?}(anonymous)");
