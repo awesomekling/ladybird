@@ -281,7 +281,8 @@ enum FrameJoin {
     /// document side (selection, viewport clients, content-visibility, scroll snapping), then the
     /// container queries the commit made pending, then the facts after them.
     AfterLayoutCommit,
-    /// Whether style or layout work is still pending once the loop has run out of rounds.
+    /// Whether style or layout work is still pending once the loop has run out of rounds. A loop
+    /// that stabilizes has these facts from the join that ended it already.
     FinalFacts,
 }
 
@@ -548,9 +549,11 @@ impl LayoutFrame<'_> {
                 continue;
             }
 
-            // Layout-only invalidations still need to be flushed before we can exit.
+            // Layout-only invalidations still need to be flushed before we can exit. The refresh
+            // join has just answered the final facts, and nothing has run on the document thread
+            // since, so the loop has stabilized.
             if layout_is_up_to_date(self.arena(), &facts) {
-                break;
+                return self.messages;
             }
         }
 
