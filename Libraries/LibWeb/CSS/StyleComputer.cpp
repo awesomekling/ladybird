@@ -577,6 +577,10 @@ static void apply_committed_transform_reference_box(StyleEngine& style_engine, D
     animation_context.transform_reference_box_height = committed.height;
 }
 
+// Whether the sample being collected composes the element's whole effect stack, rather than the few
+// effects a transition step layers over an overlay it already holds.
+static bool s_sampling_whole_effect_stack = false;
+
 void StyleComputer::collect_animations_into(DOM::AbstractElement abstract_element, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>> effects, ComputedStyleWorkingSet& computed_properties, AnimationRefresh refresh, ComputedValuesFFI::FfiAnimationLengthContexts const* stage_length_contexts) const
 {
     if (refresh == AnimationRefresh::No) {
@@ -585,7 +589,9 @@ void StyleComputer::collect_animations_into(DOM::AbstractElement abstract_elemen
         return;
     }
     m_keyframes_inherited_non_inherited_style_groups = 0;
+    s_sampling_whole_effect_stack = true;
     collect_animation_effects_into(abstract_element, effects, computed_properties, stage_length_contexts);
+    s_sampling_whole_effect_stack = false;
     publish_animated_custom_properties(computed_properties, abstract_element);
     if (computed_properties.has_animated_property(PropertyID::Display))
         computed_properties.set_display_before_box_type_transformation(computed_properties.display());
@@ -671,6 +677,7 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
         .generations = generations.data(),
         .current_keys = current_keys.data(),
         .effect_count = identities.size(),
+        .samples_whole_stack = s_sampling_whole_effect_stack,
         .longhand_table = computed_properties.computed_longhand_table(),
         .animated_overlay = computed_properties.animated_overlay(Badge<StyleComputer> {}),
         .custom_property_store = custom_property_data ? custom_property_data->rust_store() : nullptr,

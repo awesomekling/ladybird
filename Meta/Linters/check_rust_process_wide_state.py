@@ -71,6 +71,8 @@ RENDER_STAGE_ALLOWED = {
             "css/ffi_stats.rs:CPP_CALLBACK_COUNT",
             "css/ffi_stats.rs:REGISTRY",
             "css/ffi_stats.rs:THREAD_UNSAFE_CPP_CALLBACK_COUNT",
+            "css/style/engine_sample_check.rs:LOG",
+            "css/style/engine_sample_check.rs:MODE",
             "css/style/seal.rs:MODE",
             "font_seal.rs:INSTALLED",
             "layout/main_side_census.rs:CENSUS",
