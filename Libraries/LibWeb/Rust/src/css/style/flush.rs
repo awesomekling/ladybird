@@ -2383,27 +2383,16 @@ impl StyleEngineState {
                 // ancestor is settled as well.
                 // A refreshed answer cannot say which entries moved, so the flag stays conservative
                 // for C++; the pseudo winner states themselves are current here and settle it.
-                // A published-style reaction is the engine's to settle, as are the recompute and
-                // the inherited-style reaction the engine derived for a child of an applied
-                // reaction (a reaction C++ asked for through a recorded input is C++'s), and a
-                // first record takes any published-style reaction.
-                const DERIVABLE_REACTIONS: u8 = transaction::STYLE_REACTION_RECOMPUTE_STYLE
-                    | transaction::STYLE_REACTION_INHERITED_STYLE
-                    | transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES;
-                // A font-environment reaction is the engine's too: the `@font-face` table it
-                // resolves against is a published input now, and a record from an older
-                // font-environment generation is already one the engine refuses to reuse. So are
-                // a descendant recompute and an ancestor becoming visible: C++ answers both with a
-                // full recompute, and so does the engine (see `recompute_in_full`). A reaction
-                // saying the element's pseudo-element inputs may have changed (a deferred
-                // ::selection becoming observable) is too: the element's own record answers as
-                // any other, and installing it recomputes the highlight pseudo-elements the
-                // engine leaves to C++. That makes every reaction kind the engine's; what is
-                // left to C++ is decided by what the reaction rides with.
-                // A document environment change still leaves a concurrent pseudo input to C++.
-                // Clearing styles below display:none records an SVG resource for the host so
-                // it remains usable while hidden. Once the parent record is installed in
-                // that hidden subtree, drive it from the retained answer instead.
+                // Every reaction is the engine's to settle, whether the engine derived it or the
+                // host recorded it as an input: a font-environment reaction resolves against the
+                // published `@font-face` table, a descendant recompute and an ancestor becoming
+                // visible are answered by a full recompute (see `recompute_in_full`), and a
+                // reaction saying the element's pseudo-element inputs may have changed is answered
+                // by the element's own record, whose installation recomputes the highlight
+                // pseudo-elements.
+                // Clearing styles below display:none records an input for an SVG resource so it
+                // remains usable while hidden. Once the parent record is installed in that hidden
+                // subtree, the resource's inherited style moved with it.
                 let hidden_svg_recompute = pass.style_input_nodes_for_cpp.contains(&node)
                     && reaction
                         == (transaction::STYLE_REACTION_PUBLISHED_STYLE | transaction::STYLE_REACTION_RECOMPUTE_STYLE)
@@ -2421,11 +2410,6 @@ impl StyleEngineState {
                             })
                             .is_some_and(|flags| flags & (1 << 2) != 0)
                     });
-                let reaction_is_settleable = !(pass.environment_changed
-                    && reaction & transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED != 0)
-                    && !(reaction & DERIVABLE_REACTIONS != 0
-                        && pass.style_input_nodes_for_cpp.contains(&node)
-                        && !hidden_svg_recompute);
                 let mut parent_inputs_moved =
                     parked_parent_inputs
                         .or(prepared_parent_inputs)
@@ -2510,12 +2494,6 @@ impl StyleEngineState {
                     // C++ only refreshes the inherited environment for a non-consumer. There
                     // is no element record to recompute or compare against the parent's groups,
                     // so the row owes no record and declines nothing.
-                    false
-                } else if !(reaction_is_settleable
-                    || (old_style_record == 0 && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
-                {
-                    counters.bump(Counter::EngineComputedRecordGateReaction);
-                    decline_cause = "GateReaction";
                     false
                 } else if awaits_sampled_parent || awaits_installed_parent {
                     // The parent's sample and transition step run when the host installs it.
