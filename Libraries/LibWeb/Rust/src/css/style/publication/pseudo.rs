@@ -712,10 +712,6 @@ impl RetainedState {
                         continue;
                     }
                     if explicitly_inherited_groups != 0 && kind != SELECTION {
-                        if selected_kind.is_some() {
-                            counters.bump(Counter::EngineComputedRecordBailDrive);
-                            return Err(Unanswered::Refused);
-                        }
                         scratch.pseudo_explicitly_inherited_groups |= explicitly_inherited_groups;
                     }
                     let font = font.expect("a full drive resolves the font");

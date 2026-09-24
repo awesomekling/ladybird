@@ -336,48 +336,6 @@ impl RetainedState {
     /// post-compute adjustments read element facts this context does not carry, so the table
     /// stands only when they came out exactly as before.
     #[allow(clippy::too_many_arguments)]
-    /// Whether what an explicit `inherit` of a non-inherited property would read from the parent
-    /// is the record the engine holds. The installer's sampled composition is an authoritative
-    /// parent record, including its active animation or transition overlay; so is an installed
-    /// record whose transitions cannot start in this update.
-    fn parent_record_answers_explicit_inheritance(&self, parent: Option<StyleNodeID>) -> bool {
-        let Some(parent) = parent else {
-            return true;
-        };
-        // A sampled identity only survives when it still equals the assigned record. A base
-        // record published after the transition step is authoritative just like an overlay. Where
-        // a running transition supplies the value, the child's after-change style inherits the
-        // parent's after-change value, which the transition decision reads from the parent.
-        if self.computed_group_sets.sampled_composition_identity(parent).is_some() {
-            return true;
-        }
-        let Some(record) = self.computed_group_sets.assigned_style_record(parent) else {
-            return false;
-        };
-        let Some(view) = self.computed_group_sets.style_record_view(record.raw()) else {
-            return false;
-        };
-        let Some(table) = (unsafe { view.longhand_table.as_ref() }) else {
-            return false;
-        };
-        let transitioned = crate::css::style_compute::active_transition_longhands(table);
-        if transitioned.is_empty() {
-            return true;
-        }
-        // A parent that declares transitions starts them only in its own transition step. The
-        // record stands when no step is left for it in this update and no transition runs in it.
-        // A post-compute adjustment also marks its overlay entry as a transition's, so that it
-        // wins over an important declaration; only a property the parent transitions runs one.
-        self.nodes_owing_a_transition_registration.get(&parent) != Some(&false)
-            && unsafe { view.animated_overlay.as_ref() }.is_none_or(|overlay| {
-                !overlay
-                    .entries()
-                    .iter()
-                    .any(|entry| entry.result_of_transition && transitioned.contains(&entry.property))
-            })
-    }
-
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn engine_driven_table(
         &mut self,
         node: StyleNodeID,
@@ -540,14 +498,10 @@ impl RetainedState {
             u64::from(results.longhand_evaluations),
         );
         // An `inherit` of a non-inherited property reads the half of the parent's style a child
-        // normally cannot see. The value itself is computed here; what C++ does beside it is one
-        // write on the parent, which the row leaves for the host to drain after the batch.
-        if results.explicitly_inherited_non_inherited_style_groups != 0
-            && !self.parent_record_answers_explicit_inheritance(self.tree.flat_tree_parent(node))
-        {
-            counters.bump(Counter::EngineComputedRecordBailDrive);
-            return Err(Unanswered::Refused);
-        }
+        // normally cannot see, composition included, as the parent holds it now: a parent whose
+        // transition step is still owed holds its children back until it is sampled. The value
+        // itself is computed here; what C++ does beside it is one write on the parent, which the
+        // row leaves for the host to drain after the batch.
         *explicitly_inherited_groups |= results.explicitly_inherited_non_inherited_style_groups;
         // An input the drive reads for properties it did not select moved with the selection: the
         // caller drives the record in full instead.
@@ -1249,14 +1203,10 @@ impl RetainedState {
             line_height_value,
         );
         // An `inherit` of a non-inherited property reads the half of the parent's style a child
-        // normally cannot see. The value itself is computed here; what C++ does beside it is one
-        // write on the parent, which the row leaves for the host to drain after the batch.
-        if results.explicitly_inherited_non_inherited_style_groups != 0
-            && !self.parent_record_answers_explicit_inheritance(subject.parent)
-        {
-            counters.bump(Counter::EngineComputedRecordBailDrive);
-            return Err(Unanswered::Refused);
-        }
+        // normally cannot see, composition included, as the parent holds it now: a parent whose
+        // transition step is still owed holds its children back until it is sampled. The value
+        // itself is computed here; what C++ does beside it is one write on the parent, which the
+        // row leaves for the host to drain after the batch.
         *explicitly_inherited_groups |= results.explicitly_inherited_non_inherited_style_groups;
         let line_height_used_after = line_height_used(&table);
         let keyword_code = |property: u16, map: fn(u16) -> Option<u8>| match value_of(&table, property) {
