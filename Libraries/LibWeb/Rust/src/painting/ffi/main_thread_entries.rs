@@ -285,7 +285,14 @@ unsafe extern "C" fn layout_arena_resolve_painted_vector_images(
 ) {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { arena_from_handle(arena) };
-    let painted = std::mem::take(&mut arena.paint_state().borrow_mut().painted_vector_images);
+    // The renders the last recording painted, whether it recorded them or copied them.
+    let painted: Vec<_> = arena
+        .paint_state()
+        .borrow()
+        .last_recording
+        .as_ref()
+        .map(|recording| recording.vector_images.values().copied().collect())
+        .unwrap_or_default();
     let mut resolved = crate::painting::record::vector_images::VectorImageDisplayLists::default();
     // Each render records another document, which must not find this arena's paint state borrowed.
     for request in painted {
