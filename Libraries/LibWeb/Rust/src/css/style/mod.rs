@@ -1179,21 +1179,6 @@ pub struct HostState {
     /// The capture-local document identity, absent when record-replay is disabled.
     #[cfg(feature = "style-recording")]
     recording_id: Option<u64>,
-    /// The instrumentation state to restore after C++ materializes a record for verification.
-    computed_record_verification_counters: Option<Box<Counters>>,
-    /// The targets the engine settled for the element under verification: its own record, and one
-    /// bit per pseudo-element kind the engine decided. Only those are interned for comparison; a
-    /// target the verification pass computes beside them publishes as an ordinary recompute does,
-    /// so the element and the engine still agree on what each target holds when the scope ends.
-    computed_record_verification_element: u32,
-    computed_record_verification_settled_pseudos: u64,
-    /// A read-only observation during the reference computation used pending ancestor inputs.
-    computed_record_verification_saw_provisional_demand: bool,
-    computed_record_verification_pins: Vec<u64>,
-    /// The records a verification scope interned that something outside the engine may still be
-    /// holding when the scope ends: a layout row stamped from one roots it and pins it again when
-    /// the tree is torn down, which is after every scope. They stay pinned for the document.
-    computed_record_verification_keep_alive: Vec<u64>,
     journal: NormalizationJournal,
     /// Local selector facts through the latest geometry read which reused committed layout. A
     /// normal style observation merges this into `journal`; a newly introduced transition can
