@@ -681,7 +681,6 @@ impl RetainedState {
         match self.engine_custom_property_environment(node, parent_environment, inputs, None, &mut Counters::default())
         {
             Ok(environment) => Ok(Some(environment)),
-            Err(Unanswered::Refused) => Ok(None),
             Err(Unanswered::Suspended(suspension)) => Err(suspension),
         }
     }

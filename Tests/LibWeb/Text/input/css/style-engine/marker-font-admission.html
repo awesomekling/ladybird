@@ -19,7 +19,6 @@
         const after = internals.styleEngineCounters();
         println(`engine answered: ${after.engineComputedRecordDeltas > before.engineComputedRecordDeltas}`);
         println(`C++ recomputations: ${internals.getStyleInvalidationCounters().elementStyleRecomputations - recomputationsBefore}`);
-        println(`discarded records: ${after.engineComputedRecordsAbandoned - before.engineComputedRecordsAbandoned}`);
         println(`font size: ${getComputedStyle(host.lastChild).fontSize}`);
         println(`font family: ${getComputedStyle(host.lastChild).fontFamily}`);
         println(`marker numerals: ${getComputedStyle(host.lastChild, "::marker").fontVariantNumeric}`);

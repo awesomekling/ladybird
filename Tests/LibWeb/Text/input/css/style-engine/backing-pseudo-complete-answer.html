@@ -9,12 +9,10 @@
     test(() => {
         internals.updateStyle();
         const before = internals.styleEngineCounters().engineComputedRecordHostPseudoBackings;
-        const incompleteBefore = internals.styleEngineCounters().engineComputedRecordBailIncompleteWinners;
         input.classList.add("changed");
         internals.updateStyle();
         const after = internals.styleEngineCounters().engineComputedRecordHostPseudoBackings;
         println(`backing pseudo settled by engine: ${after > before}`);
-        println(`incomplete winner refusals: ${internals.styleEngineCounters().engineComputedRecordBailIncompleteWinners - incompleteBefore}`);
         println(`placeholder color: ${getComputedStyle(input, "::placeholder").color}`);
     });
 </script>
