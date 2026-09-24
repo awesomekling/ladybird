@@ -7295,11 +7295,11 @@ pub(crate) struct HostKeyframeSubstitution<'a> {
 impl<'a> KeyframeSubstitutionContext<'a> {
     pub(crate) fn new(
         custom_property_store: *const std::ffi::c_void,
-        inputs: Option<crate::css::style::bridge::FfiDocumentStyleComputationInputs>,
+        inputs: crate::css::style::bridge::FfiDocumentStyleComputationInputs,
     ) -> Self {
         Self {
             custom_property_store,
-            inputs,
+            inputs: Some(inputs),
             host: None,
             substituted_var: false,
             substitution_marks: 0,

@@ -70,7 +70,7 @@ impl StyleEngine {
         self.state.box_type_parent_display_for_target(node, is_pseudo_element)
     }
 
-    pub(crate) fn document_style_computation_inputs(&self) -> Option<bridge::FfiDocumentStyleComputationInputs> {
+    pub(crate) fn document_style_computation_inputs(&self) -> bridge::FfiDocumentStyleComputationInputs {
         self.state.retained.document_style_computation_inputs
     }
 }

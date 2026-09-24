@@ -1783,7 +1783,7 @@ impl StyleEngineState {
                 cascade_compaction_scratch_memory: MemoryLease::new(MemoryCategory::BatchScratch),
                 top_layer_elements: Vec::new(),
                 next_style_transaction_version: StyleTransactionVersion(1),
-                document_style_computation_inputs: None,
+                document_style_computation_inputs: Default::default(),
                 document_media_snapshot: custom_property_cascade::DocumentMediaSnapshot::default(),
                 document_function_snapshot: custom_property_cascade::DocumentFunctionSnapshot::default(),
                 driven_viewport: (0.0, 0.0),

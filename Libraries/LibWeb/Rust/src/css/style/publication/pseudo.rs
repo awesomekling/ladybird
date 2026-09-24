@@ -149,10 +149,7 @@ impl RetainedState {
     ) -> Drive<()> {
         use pseudo_kind::{AFTER, BACKDROP, BEFORE, FIRST_LETTER, MARKER, SELECTION};
 
-        let Some(mut inputs) = self.document_style_computation_inputs else {
-            counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
-            return Err(Unanswered::Refused);
-        };
+        let mut inputs = self.document_style_computation_inputs;
         // NB: Root pseudos use the originating record's current font, independently of
         //     the document context used for the root's own remaining properties.
         if self.computed_group_sets.adjustment_facts(node) & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT != 0 {
@@ -1047,10 +1044,7 @@ impl RetainedState {
         // complete plan the drive's longhands settle, which the host applies before it samples.
         let owes_an_animation_plan =
             !self.state_has_no_animation_name(state) || self.css_defined_animations.node_runs_a_css_animation(node);
-        let Some(mut inputs) = self.document_style_computation_inputs else {
-            counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
-            return Err(Unanswered::Refused);
-        };
+        let mut inputs = self.document_style_computation_inputs;
         if let Some((root, root_inputs)) = scratch.root_element_inputs
             && root == node
         {
@@ -1301,7 +1295,7 @@ impl StyleEngineState {
         // Targeted settlement observes generated records only, while keeping the demand private.
         let cssom_absent = cssom_read
             && (mask & (1 << kind) == 0 || kind == pseudo_kind::MARKER && !is_list_item)
-            && self.document_style_computation_inputs.is_some();
+            && self.computes_records();
         if !cssom_absent
             && mask & (1 << kind) == 0
             && !(kind == pseudo_kind::MARKER && is_list_item)
@@ -1406,10 +1400,12 @@ impl StyleEngineState {
                     .insert(node, element_pending);
             }
         }
-        if let Some(inputs) = self.retained.document_style_computation_inputs
-            && let Some(resolver) = &mut self.retained.font_resolution
-        {
-            resolver.prepare(inputs.font_environment_generation);
+        let font_environment_generation = self
+            .retained
+            .document_style_computation_inputs
+            .font_environment_generation;
+        if let Some(resolver) = &mut self.retained.font_resolution {
+            resolver.prepare(font_environment_generation);
         }
         let mut settled = RetriedEngineRecord::default();
         // An element standing for its host's pseudo-element is that pseudo-element, and has none

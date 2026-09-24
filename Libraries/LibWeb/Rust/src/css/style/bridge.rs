@@ -4297,9 +4297,10 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         unsafe { super::custom_property_cascade::DocumentMediaSnapshot::take_from(&mut computation_inputs) };
     let resource_contexts_moved = engine.document_resource_contexts.moved_for_records(&resource_contexts);
     engine.document_resource_contexts = resource_contexts;
-    engine.custom_property_registrations_changed = engine.document_style_computation_inputs.is_some_and(|previous| {
-        previous.custom_property_registration_generation != computation_inputs.custom_property_registration_generation
-    });
+    engine.custom_property_registrations_changed = engine
+        .document_style_computation_inputs
+        .custom_property_registration_generation
+        != computation_inputs.custom_property_registration_generation;
     if engine.custom_property_registrations_changed {
         engine.custom_property_environments.forget_substitutions();
     }
@@ -4315,14 +4316,14 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
             .cloned()
             .map(std::sync::Arc::new)
     };
-    if engine.document_style_computation_inputs != Some(computation_inputs) || resource_contexts_moved {
+    if engine.document_style_computation_inputs != computation_inputs || resource_contexts_moved {
         // Persistent records are derived from every document computation input, not only the
         // font generation carried in their keys.
         engine.engine_cold_record_cache.clear();
         engine.engine_cold_record_donors.clear();
         engine.engine_pseudo_record_cache.clear();
     }
-    engine.document_style_computation_inputs = Some(computation_inputs);
+    engine.document_style_computation_inputs = computation_inputs;
     engine.clear_ffi_style_transaction_output();
     let mut output = FfiStyleTransactionOutput::default();
     let transaction = || {
@@ -4549,16 +4550,15 @@ pub unsafe extern "C" fn style_engine_publish_animated_custom_property_store(
                 .insert(node, environment);
         }
     }
-    let registry = engine.document_style_computation_inputs.as_ref().and_then(|inputs| {
-        // SAFETY: The document owns the published registry for the lifetime of this input call.
-        unsafe {
-            inputs
-                .custom_property_registry
-                .as_pointer()
-                .cast::<CustomPropertyRegistry>()
-                .as_ref()
-        }
-    });
+    // SAFETY: The document owns the published registry for the lifetime of this input call.
+    let registry = unsafe {
+        engine
+            .document_style_computation_inputs
+            .custom_property_registry
+            .as_pointer()
+            .cast::<CustomPropertyRegistry>()
+            .as_ref()
+    };
     let inheriting_name_was_sampled = if store.is_null() {
         // Removing an overlay may expose any inherited value it covered.
         true

@@ -1872,20 +1872,21 @@ impl StyleEngineState {
             engine_computed_record_scratch.font_environment_moved = font_feature_values_moved;
             // The viewport the records were driven against, against the one they are driven against
             // now. A record that reads it cannot stand across the difference.
-            if let Some(inputs) = self.retained.document_style_computation_inputs {
-                let viewport = (inputs.viewport_width, inputs.viewport_height);
-                engine_computed_record_scratch.viewport_moved = self.retained.driven_viewport != viewport;
-                self.retained.driven_viewport = viewport;
-            }
+            let inputs = self.retained.document_style_computation_inputs;
+            let viewport = (inputs.viewport_width, inputs.viewport_height);
+            engine_computed_record_scratch.viewport_moved = self.retained.driven_viewport != viewport;
+            self.retained.driven_viewport = viewport;
             let computation_loop_timer = PassTimer::start();
             computation_scratch_memory.resize_required_to(
                 &mut self.retained.memory,
                 engine_computed_record_scratch.capacity_bytes(),
             );
-            if let Some(resolver) = &mut self.retained.font_resolution
-                && let Some(inputs) = self.retained.document_style_computation_inputs
-            {
-                resolver.prepare(inputs.font_environment_generation);
+            let font_environment_generation = self
+                .retained
+                .document_style_computation_inputs
+                .font_environment_generation;
+            if let Some(resolver) = &mut self.retained.font_resolution {
+                resolver.prepare(font_environment_generation);
             }
             // NB: This input crosses fixed-font intermediaries independently of inheritance.
             //     Incremental roots use the current retained document inputs already submitted.
@@ -3017,10 +3018,12 @@ impl StyleEngineState {
                 );
             }
         }
-        if let Some(inputs) = self.retained.document_style_computation_inputs
-            && let Some(resolver) = &mut self.retained.font_resolution
-        {
-            resolver.prepare(inputs.font_environment_generation);
+        let font_environment_generation = self
+            .retained
+            .document_style_computation_inputs
+            .font_environment_generation;
+        if let Some(resolver) = &mut self.retained.font_resolution {
+            resolver.prepare(font_environment_generation);
         }
         let mut style_delta_memory = MemoryLease::new(MemoryCategory::BridgeBuffer);
         let mut computation_scratch_memory = MemoryLease::new(MemoryCategory::BatchScratch);

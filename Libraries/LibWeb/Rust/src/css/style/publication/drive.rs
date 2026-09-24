@@ -595,8 +595,8 @@ impl RetainedState {
         } = subject;
         let has = |bit: u32| facts & bit != 0;
         let is_document_element = has(fact::IS_DOCUMENT_ELEMENT);
-        if self.font_resolution.is_none() {
-            counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
+        if !self.computes_records() {
+            counters.bump(Counter::EngineComputedRecordBailUnhosted);
             return Err(Unanswered::Refused);
         }
         // HACK: A cascade that ends in `font-family: monospace` re-runs the font-size cascade over

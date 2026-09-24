@@ -870,8 +870,9 @@ pub struct RetainedState {
     top_layer_elements: Vec<StyleNodeID>,
     /// Monotonic identity assigned to each non-empty normalized style transaction.
     next_style_transaction_version: StyleTransactionVersion,
-    /// Latest document-wide scalar computation facts, copied at the transaction boundary.
-    document_style_computation_inputs: Option<bridge::FfiDocumentStyleComputationInputs>,
+    /// Latest document-wide scalar computation facts, copied at the transaction boundary. The host
+    /// publishes them with every transaction, before it asks for any row.
+    document_style_computation_inputs: bridge::FfiDocumentStyleComputationInputs,
     document_media_snapshot: custom_property_cascade::DocumentMediaSnapshot,
     document_function_snapshot: custom_property_cascade::DocumentFunctionSnapshot,
     /// The viewport the last flush drove records against. A record that reads the viewport cannot

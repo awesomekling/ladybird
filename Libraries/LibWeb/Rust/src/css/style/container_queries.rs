@@ -70,9 +70,7 @@ impl RetainedState {
         if mask == 0 {
             return;
         }
-        let Some(inputs) = self.document_style_computation_inputs else {
-            return;
-        };
+        let inputs = self.document_style_computation_inputs;
         let Some(payloads) = self.computed_group_sets.style_record_payloads(record.raw()) else {
             return;
         };
@@ -520,7 +518,7 @@ impl RetainedState {
                 (1, 1)
             };
             let snapshot = engine.layout_style_snapshots.row(candidate).unwrap_or_default();
-            let document = engine.document_style_computation_inputs.as_ref()?;
+            let document = &engine.document_style_computation_inputs;
             let payloads = engine.computed_group_sets.style_record_payloads(inputs.style_record)?;
             let values = crate::css::computed_value_views::ComputedValuesView::new(
                 crate::css::host_shared::SharedPayload::as_pointer_slice(payloads),
