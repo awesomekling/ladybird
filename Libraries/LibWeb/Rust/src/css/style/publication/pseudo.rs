@@ -1368,8 +1368,9 @@ impl StyleEngineState {
     /// installed, so C++ installs the engine's records for them instead of computing each one:
     /// their inputs are the element's record and the published winner states, all current once
     /// the element's own computation has published its record. `old_is_list_item` is whether the
-    /// element generated a marker before. A zero `style_record` leaves the pseudo-elements to C++;
-    /// the flag says whether a settled one substituted custom properties.
+    /// element generated a marker before. A zero `style_record` is a refused row, reported to the
+    /// style stage seal, and the host keeps the pseudo-element records the element had; the flag
+    /// says whether a settled one substituted custom properties.
     pub(crate) fn settle_pseudo_records_after_host_record(
         &mut self,
         node: StyleNodeID,
@@ -1453,6 +1454,13 @@ impl StyleEngineState {
         };
         let Ok(record) = record else {
             counters.bump(Counter::EngineComputedRecordHostPseudoDeclines);
+            // The host keeps the pseudo-element records the element had, which is a refused row
+            // like any other.
+            seal::note_host_entry(
+                "PseudoSettleDeclined",
+                seal::HostEntryKind::Refused,
+                self.retained.computed_group_sets.assigned_style_record(node).is_none(),
+            );
             return (settled, false);
         };
         counters.bump(Counter::EngineComputedRecordHostPseudoSettles);

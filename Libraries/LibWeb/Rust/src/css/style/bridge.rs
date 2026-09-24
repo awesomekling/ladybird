@@ -3675,6 +3675,16 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
                         .is_none();
                     engine.retained.host_entry_causes.insert(node, (cause, cold));
                 }
+                // A declined pseudo-element demand leaves the host the record the pseudo-element
+                // had, which is a refused row like any other.
+                if pseudo_kind != u8::MAX {
+                    let cold = engine
+                        .retained
+                        .computed_group_sets
+                        .pseudo_style_record(node, pseudo_kind)
+                        .is_none();
+                    super::seal::note_host_entry(cause, super::seal::HostEntryKind::Refused, cold);
+                }
                 FfiRecordDemandAnswer::declined(cause)
             }
         };
