@@ -6,10 +6,6 @@
 
 use super::*;
 
-mod main_thread_entries;
-
-pub(crate) use main_thread_entries::MainThreadFfiEntry;
-
 pub(super) const CALC_NUMERIC_KIND_LENGTH: u8 = 4;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2482,65 +2478,6 @@ fn run_root_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScratch) -
     LayoutStageOutput(pass_fragments)
 }
 
-/// Lays the document out from its viewport: propagates the root and body styles the viewport
-/// takes over, syncs enrolled content, computes and commits fragments, and notifies the host.
-///
-/// # Safety
-///
-/// `arena_handle` must be a live handle with a registered layout host, used on the document
-/// thread, and `root` must be its live viewport box.
-pub(crate) unsafe fn run_root_layout(
-    main_thread: &crate::stage::MainThread,
-    arena_handle: *mut c_void,
-    root: NodeSlotId,
-    viewport_inline_size_raw: i32,
-    viewport_block_size_raw: i32,
-    document_in_quirks_mode: bool,
-    should_collect_devtools_layout_data: bool,
-) {
-    // SAFETY: Guaranteed by the caller.
-    unsafe {
-        prepare_root_layout(main_thread, arena_handle, root);
-        let output = compute_root_layout(
-            arena_handle,
-            root,
-            viewport_inline_size_raw,
-            viewport_block_size_raw,
-            document_in_quirks_mode,
-            should_collect_devtools_layout_data,
-        );
-        commit_root_layout(main_thread, arena_handle, root, &output);
-    }
-}
-
-/// The document-thread half ahead of a root layout: propagates the root and body styles the
-/// viewport takes over and syncs enrolled content.
-///
-/// # Safety
-///
-/// As for [`run_root_layout`].
-pub(crate) unsafe fn prepare_root_layout(
-    main_thread: &crate::stage::MainThread,
-    arena_handle: *mut c_void,
-    root: NodeSlotId,
-) {
-    assert!(!arena_handle.is_null(), "layout node arena handle is null");
-    assert!(!root.is_invalid());
-    // SAFETY: The caller keeps the arena alive for this synchronous call.
-    let propagation_facts = unsafe { read_viewport_propagation_facts(main_thread, arena_handle) };
-    // The style rewrites enroll the affected boxes' text children for content sync, so the sync
-    // follows them, and both precede the pass, which caches decoded style.
-    // SAFETY: As above; the propagation borrows the arena only for its own call.
-    viewport_propagation::propagate_root_styles_to_viewport(
-        unsafe { LayoutNodeArena::from_handle(arena_handle) },
-        root,
-        &propagation_facts,
-        ShellStyleChangeNotice::Now(main_thread),
-    );
-    // SAFETY: As above.
-    unsafe { super::layout_node_arena::sync_enrolled_content_for_layout(main_thread, arena_handle) };
-}
-
 /// The root and body styles the viewport takes over, as the document answers them now.
 ///
 /// # Safety
@@ -2599,7 +2536,7 @@ pub(crate) unsafe fn prepare_root_layout_from_sources(
 /// # Safety
 ///
 /// `arena_handle` must be a live handle whose owner waits for this call, with the arena prepared
-/// by [`prepare_root_layout`] and `root` its live viewport box.
+/// by [`prepare_root_layout_from_sources`] and `root` its live viewport box.
 pub(crate) unsafe fn compute_root_layout(
     arena_handle: *mut c_void,
     root: NodeSlotId,
@@ -2623,21 +2560,6 @@ pub(crate) unsafe fn compute_root_layout(
     };
     // SAFETY: The arena and its scratch belong to the waiting owner.
     unsafe { crate::stage_thread::run_stage(|| run_root_layout_stage(input, scratch)) }
-}
-
-/// Commits a computed root layout on the document thread and notifies the host.
-///
-/// # Safety
-///
-/// As for [`run_root_layout`], and `output` must be the computation of the same root.
-pub(crate) unsafe fn commit_root_layout(
-    main_thread: &crate::stage::MainThread,
-    arena_handle: *mut c_void,
-    root: NodeSlotId,
-    output: &LayoutStageOutput,
-) {
-    // SAFETY: Guaranteed by the caller.
-    unsafe { commit_root_layout_to_arena(arena_handle, root, output).finish(main_thread) };
 }
 
 /// Commits a computed root layout to the arena without the host. The host half, which pays what
@@ -2835,36 +2757,6 @@ fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScr
     LayoutStageOutput(pass_fragments)
 }
 
-/// Lays out one partial relayout boundary in place and commits its fragments. Enrolled content
-/// is not synced here: the caller syncs once ahead of a batch of boundaries.
-///
-/// # Safety
-///
-/// `arena_handle` must be a live handle with a registered layout host, used on the document
-/// thread; `root` must be a live partial relayout boundary and `viewport` the live viewport box.
-pub(crate) unsafe fn compute_subtree_layout(
-    main_thread: &crate::stage::MainThread,
-    arena_handle: *mut c_void,
-    root: NodeSlotId,
-    viewport: NodeSlotId,
-    viewport_inline_size_raw: i32,
-    viewport_block_size_raw: i32,
-    document_in_quirks_mode: bool,
-) {
-    // SAFETY: Guaranteed by the caller.
-    unsafe {
-        let output = compute_subtree_layout_fragments(
-            arena_handle,
-            root,
-            viewport,
-            viewport_inline_size_raw,
-            viewport_block_size_raw,
-            document_in_quirks_mode,
-        );
-        commit_subtree_layout(main_thread, arena_handle, root, &output);
-    }
-}
-
 /// Computes the fragments of one partial relayout boundary without the host, on the stage thread.
 ///
 /// # Safety
@@ -2896,21 +2788,6 @@ pub(crate) unsafe fn compute_subtree_layout_fragments(
     };
     // SAFETY: The arena and its scratch belong to the waiting owner.
     unsafe { crate::stage_thread::run_stage(|| compute_subtree_layout_stage(input, scratch)) }
-}
-
-/// Commits a computed partial relayout boundary on the document thread and notifies the host.
-///
-/// # Safety
-///
-/// As for [`compute_subtree_layout`], and `output` must be the computation of the same root.
-pub(crate) unsafe fn commit_subtree_layout(
-    main_thread: &crate::stage::MainThread,
-    arena_handle: *mut c_void,
-    root: NodeSlotId,
-    output: &LayoutStageOutput,
-) {
-    // SAFETY: Guaranteed by the caller.
-    unsafe { commit_subtree_layout_to_arena(arena_handle, root, output).finish(main_thread) };
 }
 
 /// Commits a computed partial relayout boundary to the arena without the host, leaving the host
