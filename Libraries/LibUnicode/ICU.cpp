@@ -5,6 +5,7 @@
  */
 
 #include <AK/HashMap.h>
+#include <AK/Mutex.h>
 #include <AK/NeverDestroyed.h>
 #include <AK/NonnullOwnPtr.h>
 #include <AK/Utf16View.h>
@@ -18,10 +19,24 @@
 
 namespace Unicode {
 
+// NB: Render stages query locale data (text segmentation, case mapping) off the main thread, so
+//     the caches are locked. Entries are boxed, so references handed out stay valid.
+static Mutex& locale_cache_mutex()
+{
+    static NeverDestroyed<Mutex> mutex;
+    return *mutex;
+}
+
 static auto& locale_cache()
 {
     static NeverDestroyed<HashMap<String, OwnPtr<LocaleData>>> cache;
     return *cache;
+}
+
+static Mutex& time_zone_cache_mutex()
+{
+    static NeverDestroyed<Mutex> mutex;
+    return *mutex;
 }
 
 static auto& time_zone_cache()
@@ -32,6 +47,7 @@ static auto& time_zone_cache()
 
 Optional<LocaleData&> LocaleData::for_locale(StringView locale)
 {
+    MutexLocker locker { locale_cache_mutex() };
     auto locale_data = locale_cache().get(locale);
 
     if (!locale_data.has_value()) {
@@ -91,10 +107,12 @@ Utf16String LocaleData::canonicalize(StringView locale)
         });
     }
 
-    locale_data->locale().canonicalize(status);
+    // NB: Canonicalize a copy, since other threads may be reading the shared locale.
+    auto canonical_locale = locale_data->locale();
+    canonical_locale.canonicalize(status);
     verify_icu_success(status);
 
-    auto result = locale_data->locale().toLanguageTag<StringBuilder>(status);
+    auto result = canonical_locale.toLanguageTag<StringBuilder>(status);
     verify_icu_success(status);
 
     if (keywords_with_yes.is_empty()) {
@@ -175,6 +193,7 @@ icu::TimeZoneNames& LocaleData::time_zone_names()
 
 Optional<TimeZoneData&> TimeZoneData::for_time_zone(Utf16View time_zone)
 {
+    MutexLocker locker { time_zone_cache_mutex() };
     auto time_zone_data = time_zone_cache().get(time_zone);
 
     if (!time_zone_data.has_value()) {
