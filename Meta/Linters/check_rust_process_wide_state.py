@@ -112,6 +112,7 @@ RENDER_STAGE_ALLOWED = {
             "css/style/seal.rs:LONGHAND_INPUT_FREEZE_REASONS",
             "css/style/seal.rs:MODE",
             "css/style/seal.rs:REPORTED",
+            "css/style/seal.rs:REPORTED_REFUSALS",
             "css/style/seal.rs:STAGE_INTERLEAVES",
             "css/style/seal.rs:UPDATE_DEPTH",
             "font_seal.rs:INSTALLED",

@@ -7747,6 +7747,7 @@ impl StyleEngineState {
             return;
         }
         let kind = match kind {
+            1 => seal::HostEntryKind::Refused,
             2 => seal::HostEntryKind::Sampled,
             _ => seal::HostEntryKind::Row,
         };
