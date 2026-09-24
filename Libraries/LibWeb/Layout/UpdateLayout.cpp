@@ -156,6 +156,12 @@ void Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     // own for what changed meanwhile.
     join_frame_in_flight();
 
+    // The style update in this document's frame lays out its container documents first, from work the frame joins the
+    // document thread for, and such work cannot take in a frame in flight. So a frame in flight that holds one of them
+    // is taken in before this document's frame starts.
+    for (auto container = container_document(); container; container = container->container_document())
+        container->join_frame_in_flight();
+
     // Every mark the DOM side has made goes through before the pass that reads them starts; marks
     // made from inside the pass write through on their own.
     drain_invalidation_journal();

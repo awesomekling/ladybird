@@ -1,0 +1,2 @@
+child layout beside the frame: 30
+box after the frame: rgb(0, 128, 0)
