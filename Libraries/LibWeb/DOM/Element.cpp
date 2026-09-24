@@ -1736,10 +1736,11 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
     return invalidation;
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::install_engine_pseudo_element_records_after_sample(bool& did_change_custom_properties, bool old_is_list_item, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const* records)
+CSS::RequiredInvalidationAfterStyleChange Element::install_engine_pseudo_element_records_after_sample(bool& did_change_custom_properties, bool old_is_list_item, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const* records, LayoutNodeStyleApplication layout_node_style_application)
 {
     auto invalidation = recompute_pseudo_element_styles(did_change_custom_properties, old_is_list_item, old_originating_style, records);
-    apply_computed_style_to_layout_node_if_needed(invalidation);
+    if (layout_node_style_application == LayoutNodeStyleApplication::Now)
+        apply_computed_style_to_layout_node_if_needed(invalidation);
     return invalidation;
 }
 
@@ -2236,7 +2237,7 @@ void Element::republish_animation_name_registry()
     CSS::record_element_animation_names(*this, indexable_animation_names(*style));
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison comparison, Optional<EngineRecordDamage> engine_record_damage)
+CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison comparison, Optional<EngineRecordDamage> engine_record_damage, LayoutNodeStyleApplication layout_node_style_application)
 {
     VERIFY(parent());
     auto old_style_record = style_record_identity();
@@ -2294,7 +2295,8 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         if (!CSS::deferring_engine_pseudo_installation())
             invalidation |= recompute_pseudo_element_styles(did_change_custom_properties, false, nullptr, &pseudo_element_records);
         publish_custom_property_names();
-        apply_computed_style_to_layout_node_if_needed(invalidation);
+        if (layout_node_style_application == LayoutNodeStyleApplication::Now)
+            apply_computed_style_to_layout_node_if_needed(invalidation);
         return invalidation;
     }
     // The engine derives records this way only when the element's animation names are exactly what
@@ -2362,12 +2364,12 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     publish_custom_property_names();
     if (new_style_record != old_style_record || did_change_custom_properties)
         invalidate_descendant_styles_depending_on_style_container_query();
-    if (comparison == EngineRecordComparison::AtInstallation)
+    if (comparison == EngineRecordComparison::AtInstallation && layout_node_style_application == LayoutNodeStyleApplication::Now)
         apply_computed_style_to_layout_node_if_needed(result.invalidation);
     return result.invalidation;
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange invalidation)
+CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange invalidation, LayoutNodeStyleApplication layout_node_style_application)
 {
     auto& style_computer = document().style_computer();
     auto const style_record = style_record_identity();
@@ -2389,7 +2391,8 @@ CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style
             document().style_invalidation_counters().element_computed_style_changes++;
         invalidation |= result.invalidation;
     }
-    apply_computed_style_to_layout_node_if_needed(invalidation);
+    if (layout_node_style_application == LayoutNodeStyleApplication::Now)
+        apply_computed_style_to_layout_node_if_needed(invalidation);
     return invalidation;
 }
 

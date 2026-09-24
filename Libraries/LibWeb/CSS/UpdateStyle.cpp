@@ -419,8 +419,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
     // style node. The host applies them once the whole batch is installed, in the order the batch
     // applied the rows, which is flat-tree order. Nothing a later row in the batch computes may
     // depend on one of these being applied.
-    // A row's invalidation marks render state (layout, the layout tree, visual contexts, resnap),
-    // which no row of the batch reads.
+    // A row's layout node restyle and its invalidation touch render state (the layout node's style
+    // side effects, layout, the layout tree, visual contexts, resnap), which no row of the batch
+    // reads. The element already holds the record, and so does its layout node.
     // A row whose record read a non-inherited property straight from the parent, through an
     // explicit `inherit`, owes the parent the mark C++ writes beside such a computation. The
     // union is monotone and a parent applies before its children, so draining it after the batch
@@ -429,11 +430,15 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
         StyleNodeID style_node;
         RequiredInvalidationAfterStyleChange invalidation;
     };
+    struct LayoutNodeStyleEffect {
+        StyleNodeID style_node;
+        RequiredInvalidationAfterStyleChange invalidation;
+    };
     struct ExplicitInheritanceEffect {
         StyleNodeID style_node;
         u32 style_groups;
     };
-    Vector<Variant<ElementInvalidationEffect, ExplicitInheritanceEffect>> row_effects;
+    Vector<Variant<LayoutNodeStyleEffect, ElementInvalidationEffect, ExplicitInheritanceEffect>> row_effects;
     for (auto const& reaction : reactions) {
         auto element = document.style_computer().element_for_style_node(reaction.style_node);
         if (!element || (!element->is_svg_element() && !element->has_associated_animations()))
@@ -599,7 +604,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 Optional<DOM::Element::EngineRecordDamage> engine_record_damage;
                 if (reaction.record_damage & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::EngineComputed))
                     engine_record_damage = DOM::Element::EngineRecordDamage { StyleRecordID { reaction.old_style_record }, reaction.record_damage };
-                invalidation = element->apply_engine_computed_style_record(new_style_record, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties, engine_record_comparison, engine_record_damage);
+                invalidation = element->apply_engine_computed_style_record(new_style_record, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties, engine_record_comparison, engine_record_damage, DOM::Element::LayoutNodeStyleApplication::LeftToCaller);
+                if (engine_record_comparison == DOM::Element::EngineRecordComparison::AtInstallation)
+                    row_effects.append(LayoutNodeStyleEffect { StyleNodeID { reaction.style_node }, invalidation });
                 // What the row's container conditions read of its containers, recorded as the host
                 // records it for a row it computes.
                 auto container_effects = StyleEngineFFI::style_engine_take_container_effects(style_engine.rust_handle(), reaction.style_node);
@@ -726,8 +733,10 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     bool const compares_after_sample = engine_record_comparison == DOM::Element::EngineRecordComparison::AfterSample;
                     if (settled.has_style() && (has_animation_effects || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
                         sample_animations_for_installed_record(settled, compares_after_sample ? SampleInvalidation::AppliedByCaller : SampleInvalidation::Applied);
-                    if (compares_after_sample)
-                        invalidation = element->compare_engine_computed_style_record_after_sample(old_style_record, invalidation);
+                    if (compares_after_sample) {
+                        invalidation = element->compare_engine_computed_style_record_after_sample(old_style_record, invalidation, DOM::Element::LayoutNodeStyleApplication::LeftToCaller);
+                        row_effects.append(LayoutNodeStyleEffect { StyleNodeID { reaction.style_node }, invalidation });
+                    }
                     // The step runs here rather than after the batch: a descendant applied later
                     // reads this element's after-change style, which is what the step decides
                     // against, and the C++ computation this row replaces runs it inside itself.
@@ -766,7 +775,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         auto pseudo_invalidation = element->install_engine_pseudo_element_records_after_sample(
                             did_change_custom_properties, old_is_list_item,
                             old_originating_style ? &*old_originating_style : nullptr,
-                            &final_pseudo_records);
+                            &final_pseudo_records, DOM::Element::LayoutNodeStyleApplication::LeftToCaller);
+                        row_effects.append(LayoutNodeStyleEffect { StyleNodeID { reaction.style_node }, pseudo_invalidation });
                         invalidation |= pseudo_invalidation;
                     }
                     if (element->has_associated_animations() || installed_pseudo_animation_plan)
@@ -818,6 +828,10 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
     // The batch is installed: drain what its rows left behind, in the order they were applied.
     for (auto const& effect : row_effects) {
         effect.visit(
+            [&](LayoutNodeStyleEffect const& row) {
+                if (auto element = document.style_computer().element_for_style_node(row.style_node))
+                    element->apply_computed_style_to_layout_node_if_needed(row.invalidation);
+            },
             [&](ElementInvalidationEffect const& row) {
                 if (auto element = document.style_computer().element_for_style_node(row.style_node))
                     apply_element_style_invalidation_after_style_change(*element, row.invalidation);

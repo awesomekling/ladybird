@@ -344,10 +344,16 @@ public:
         CSS::StyleRecordID old_style_record;
         u32 packed { 0 };
     };
-    CSS::RequiredInvalidationAfterStyleChange apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const&, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison = EngineRecordComparison::AtInstallation, Optional<EngineRecordDamage> = {});
+    // Whether an installation restyles the element's layout node itself, or leaves it to a caller that
+    // applies it with the invalidation the installation answers, once its batch is installed.
+    enum class LayoutNodeStyleApplication {
+        Now,
+        LeftToCaller,
+    };
+    CSS::RequiredInvalidationAfterStyleChange apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const&, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison = EngineRecordComparison::AtInstallation, Optional<EngineRecordDamage> = {}, LayoutNodeStyleApplication = LayoutNodeStyleApplication::Now);
     // Compare the record an AfterSample installation left, now sampled, with the style the element
     // held before it, and apply the result to the element's layout node.
-    CSS::RequiredInvalidationAfterStyleChange compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange installation_invalidation);
+    CSS::RequiredInvalidationAfterStyleChange compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange installation_invalidation, LayoutNodeStyleApplication = LayoutNodeStyleApplication::Now);
     void apply_display_none_change(bool display_none_ignoring_animations_changed, bool became_display_none);
     // Republishes which animations this element references, for a record the engine settled whose
     // animation declarations moved.
@@ -356,7 +362,8 @@ public:
     // element inherits, or one the engine resolved over it. Nothing when it cannot be installed.
     [[nodiscard]] RefPtr<CSS::CustomPropertyData const> custom_property_environment_of_engine_record(CSS::StyleRecordID, bool& installable) const;
     CSS::RequiredInvalidationAfterStyleChange recompute_pseudo_element_styles();
-    CSS::RequiredInvalidationAfterStyleChange install_engine_pseudo_element_records_after_sample(bool& did_change_custom_properties, bool old_is_list_item, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const*);
+    CSS::RequiredInvalidationAfterStyleChange install_engine_pseudo_element_records_after_sample(bool& did_change_custom_properties, bool old_is_list_item, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const*, LayoutNodeStyleApplication = LayoutNodeStyleApplication::Now);
+    void apply_computed_style_to_layout_node_if_needed(CSS::RequiredInvalidationAfterStyleChange const&);
 
     void set_needs_layout_tree_rebuild(SetNeedsLayoutTreeUpdateReason, CSS::LayoutTreeRebuildRoot);
     bool apply_box_presence_change_in_place(SetNeedsLayoutTreeUpdateReason);
@@ -900,7 +907,6 @@ private:
 
     void exit_fullscreen_on_element_removal();
     CSS::RequiredInvalidationAfterStyleChange recompute_pseudo_element_styles(bool& did_change_custom_properties, bool had_list_marker, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const* = nullptr);
-    void apply_computed_style_to_layout_node_if_needed(CSS::RequiredInvalidationAfterStyleChange const&);
     void apply_computed_pseudo_element_styles_to_layout_nodes_if_needed(CSS::RequiredInvalidationAfterStyleChange const&);
     void publish_custom_property_names();
     void replace_style_record(CSS::StyleRecordID);
