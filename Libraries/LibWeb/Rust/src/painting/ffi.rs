@@ -956,14 +956,24 @@ pub unsafe extern "C" fn layout_arena_update_accumulated_visual_contexts(
     arena: *mut c_void,
     viewport: NodeSlotId,
 ) -> crate::painting::host::FfiVisualContextUpdateOutcome {
-    use crate::painting::visual_context::dirty::{VisualContextGlobalRebuildReason, VisualContextUpdateScope};
-    use crate::painting::visual_context::incremental::{
-        IncrementalUpdateResult, debug_assert_every_live_node_is_owned, update_visual_context_tree,
-    };
     let arena_ref = unsafe { arena_from_handle(arena) };
     if !arena_ref.paintable_row_is_populated(viewport) {
         return crate::painting::host::FfiVisualContextUpdateOutcome::default();
     }
+    // SAFETY: The arena belongs to this thread, which waits for the stage.
+    unsafe { crate::stage_thread::run_stage(|| update_accumulated_visual_contexts_stage(arena, viewport)) }
+}
+
+/// The visual context update, run on the render stage right before the rows it leaves are
+/// published.
+fn update_accumulated_visual_contexts_stage(
+    arena: *mut c_void,
+    viewport: NodeSlotId,
+) -> crate::painting::host::FfiVisualContextUpdateOutcome {
+    use crate::painting::visual_context::dirty::{VisualContextGlobalRebuildReason, VisualContextUpdateScope};
+    use crate::painting::visual_context::incremental::{
+        IncrementalUpdateResult, debug_assert_every_live_node_is_owned, update_visual_context_tree,
+    };
     unsafe { arena_from_handle_mut(arena) }.release_published_paintable_rows();
     let arena_ref = unsafe { arena_from_handle(arena) };
     let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
@@ -1084,16 +1094,20 @@ pub unsafe extern "C" fn layout_arena_scroll_snapport_rect(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_update_visual_viewport_transform(arena: *mut c_void) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
-    let mut paint_state = arena.paint_state().borrow_mut();
-    let Some(tree) = &mut paint_state.visual_context.tree else {
-        return false;
+    let update = || {
+        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
+        let mut paint_state = arena.paint_state().borrow_mut();
+        let Some(tree) = &mut paint_state.visual_context.tree else {
+            return false;
+        };
+        let inputs = arena.visual_context_tree_inputs();
+        std::sync::Arc::make_mut(tree).set_visual_viewport_transform(
+            crate::painting::visual_context::node_values::visual_viewport_transform_data(&inputs),
+        );
+        true
     };
-    let inputs = arena.visual_context_tree_inputs();
-    std::sync::Arc::make_mut(tree).set_visual_viewport_transform(
-        crate::painting::visual_context::node_values::visual_viewport_transform_data(&inputs),
-    );
-    true
+    // SAFETY: The arena belongs to this thread, which waits for the stage.
+    unsafe { crate::stage_thread::run_stage(update) }
 }
 
 /// # Safety
@@ -1147,13 +1161,13 @@ pub unsafe extern "C" fn layout_arena_refresh_scroll_state(
     publish: unsafe extern "C" fn(*mut c_void, *const libgfx_rust::FloatPoint, usize),
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollStateRefresh);
-    let snapshot = {
+    let refresh = || {
+        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollStateRefresh);
         let paintable_rows = arena.paintable_rows();
         let mut paint_state = arena.paint_state().borrow_mut();
         let state = &mut paint_state.visual_context;
         if !force && !state.needs_to_refresh_scroll_state {
-            return false;
+            return None;
         }
         state.needs_to_refresh_scroll_state = false;
         crate::painting::visual_context::refresh::refresh_scroll_state(&paintable_rows, &mut state.scroll_state);
@@ -1164,7 +1178,11 @@ pub unsafe extern "C" fn layout_arena_refresh_scroll_state(
         if let Some(tree) = state.tree.as_deref() {
             tree.resolve_sticky_offsets_in_place(&mut snapshot);
         }
-        snapshot
+        Some(snapshot)
+    };
+    // SAFETY: The arena belongs to this thread, which waits for the stage.
+    let Some(snapshot) = (unsafe { crate::stage_thread::run_stage(refresh) }) else {
+        return false;
     };
     // SAFETY: The C++ sink copies the offsets synchronously.
     unsafe { publish(sink, snapshot.as_ptr(), snapshot.len()) };

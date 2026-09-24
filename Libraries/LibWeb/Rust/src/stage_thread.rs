@@ -6,9 +6,11 @@
 
 //! The thread the render pipeline's sealed stages run on.
 //!
-//! With `LIBWEB_STAGE_THREAD=lockstep`, the tree build walk, the layout stage and the display list
-//! recording stage run on one thread of their own while the thread that called them waits for the
-//! result. Nothing runs concurrently, so the stages see exactly the state they would have seen on
+//! With `LIBWEB_STAGE_THREAD=lockstep`, the tree build walk, the layout stage, the display list
+//! recording stage and the render passes that run before the rows are published (the scrollable
+//! overflow measurement, the visual context update, the scroll state refresh and the hit-test
+//! list's derived structures) run on one thread of their own while the thread that called them
+//! waits for the result. Nothing runs concurrently, so the stages see exactly the state they would have seen on
 //! the calling thread, but everything they depend on that belongs to a thread (thread-local state,
 //! thread-bound handles, stack assumptions) is exercised the way a render thread will exercise it.
 //! Without the variable, stages run on the calling thread.
