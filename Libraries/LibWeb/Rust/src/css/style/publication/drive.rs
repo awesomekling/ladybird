@@ -83,8 +83,8 @@ pub(super) type DrivenTable = (
 )]
 pub(super) enum PartialDrive {
     Driven(DrivenTable),
-    /// An input the drive reads for properties it did not select moved with the selection: the
-    /// caller drives the record in full instead.
+    /// An input the drive reads for properties it did not select moved with the selection, or the
+    /// old record holds no table to copy them from: the caller drives the record in full instead.
     DriverInputMoved,
 }
 
@@ -406,9 +406,10 @@ impl RetainedState {
         };
         // The font and writing mode for this drive come from the underlying style.
         let payloads = view.payloads;
+        // A record holding no table has no slots to copy the unselected properties from; the
+        // caller drives it in full.
         let Some(old_table) = (unsafe { view.longhand_table.as_ref() }) else {
-            counters.bump(Counter::EngineComputedRecordBailRecordTable);
-            return Err(Unanswered::Refused);
+            return Ok(PartialDrive::DriverInputMoved);
         };
         let snapshot = match self.record_inheritance_parent(node) {
             None => None,
@@ -674,13 +675,10 @@ impl RetainedState {
                     counters.bump(Counter::EngineComputedRecordBailRecord);
                     return Err(Unanswered::Refused);
                 };
-                let Some(old_table) = (unsafe { view.longhand_table.as_ref() }) else {
-                    counters.bump(Counter::EngineComputedRecordBailRecordTable);
-                    return Err(Unanswered::Refused);
-                };
                 // The transitions the old record declares are decided by the step the row owes
-                // the host, which runs against the record it moves away from once installed.
-                Some(old_table)
+                // the host, which runs against the record it moves away from once installed. A
+                // record holding no table is driven from a fresh one, like a first record.
+                unsafe { view.longhand_table.as_ref() }
             }
             None => None,
         };
@@ -760,15 +758,19 @@ impl RetainedState {
         }
         let snapshot = match &parent_view {
             Some(parent_view) => {
-                let Some(parent_table) = (unsafe { parent_view.longhand_table.as_ref() }) else {
-                    counters.bump(Counter::EngineComputedRecordBailRecordParent);
-                    return Err(Unanswered::Refused);
-                };
-                Some(crate::css::style_compute::ParentSnapshot::new(
-                    parent_table,
-                    unsafe { parent_view.animated_overlay.as_ref() },
-                    parent_font_metrics_depend_on_viewport_metrics,
-                ))
+                // Every record the host or the engine assigns to an element holds its table.
+                let parent_table = unsafe { parent_view.longhand_table.as_ref() };
+                debug_assert!(
+                    parent_table.is_some(),
+                    "an assigned parent record without a longhand table"
+                );
+                parent_table.map(|parent_table| {
+                    crate::css::style_compute::ParentSnapshot::new(
+                        parent_table,
+                        unsafe { parent_view.animated_overlay.as_ref() },
+                        parent_font_metrics_depend_on_viewport_metrics,
+                    )
+                })
             }
             None => None,
         };
