@@ -6,10 +6,12 @@
 
 #pragma once
 
+#include <AK/Function.h>
 #include <AK/Utf16FlyString.h>
 #include <AK/Variant.h>
 #include <AK/Vector.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleDrainScope.h>
 #include <LibWeb/CSS/StyleEngineIdentifiers.h>
 #include <LibWeb/CSS/StyleInvalidation.h>
 #include <LibWeb/Forward.h>
@@ -89,6 +91,10 @@ public:
 
     void append(Effect effect) { m_effects.append(move(effect)); }
     void apply(DOM::Document&);
+    void apply(StyleDrainScope const&, DOM::Document&);
+
+    // Install a published style batch inside the drain: `install` receives the scope that proves it.
+    static void install(DOM::Document&, Function<void(StyleDrainScope const&)> const& install);
 
 private:
     Vector<Effect> m_effects;
