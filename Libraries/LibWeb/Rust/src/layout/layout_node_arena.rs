@@ -828,8 +828,7 @@ pub(crate) struct StaleWalkFacts {
 /// The arena's link to the style engine it mirrors.
 ///
 /// DEBT: This is the one column of the arena that is sendable by assertion rather than by
-/// construction. The engine is not `Send`: it names the layout arena by pointer, and its font
-/// resolutions hold host font cascade lists whose last release has to run on the host's thread.
+/// construction. The engine is not `Send`: it names the layout arena by pointer.
 /// A stage reaches it through the arena only while the document thread, which owns it, waits for
 /// the stage: the tree build walks the style mirror and pins the records it stamps, and layout and
 /// recording look up SVG references and published styles by identity. Those are some thirty-five

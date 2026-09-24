@@ -4405,9 +4405,7 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     let emitted = &mut output;
     // SAFETY: The engine is the calling thread's, and nothing else reaches it while that thread
     // waits. The transaction's inputs were frozen above. DEBT: the engine is not `Send` (it
-    // names the layout arena by pointer, and its font resolutions hold host font cascade lists
-    // whose last release has to run on the host's thread), so the compiler cannot check this
-    // stage yet.
+    // names the layout arena by pointer), so the compiler cannot check this stage yet.
     let engine_on_stage = unsafe { crate::stage_thread::CallerWaits::new(&mut *engine) };
     let scoped = crate::stage_thread::run_stage(move || {
         engine_on_stage
@@ -4423,6 +4421,8 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
             })
     });
     output.scoped = scoped;
+    // Font cascade lists the transaction's font resolutions gave up on the stage thread.
+    crate::css::ffi_stats::release_deferred_font_cascade_lists();
     engine.host.retired_custom_property_data.clear();
     output.reclaimed_style_atoms = std::mem::take(&mut engine.host.reclaimed_style_atoms)
         .into_iter()
