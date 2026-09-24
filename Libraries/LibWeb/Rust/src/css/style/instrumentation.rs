@@ -216,7 +216,6 @@ define_counters! {
     EngineComputedRecordBailRecordParent => "engineComputedRecordBailRecordParent",
     EngineComputedRecordBailDrive => "engineComputedRecordBailDrive",
     EngineComputedRecordBailDriveTreeCounting => "engineComputedRecordBailDriveTreeCounting",
-    EngineComputedRecordBailDriveUnsupportedValue => "engineComputedRecordBailDriveUnsupportedValue",
     EngineComputedRecordBailValue => "engineComputedRecordBailValue",
     EngineComputedRecordBailAssemble => "engineComputedRecordBailAssemble",
     EngineComputedRecordBailRecordOverlayDrive441 => "engineComputedRecordBailRecordOverlayDrive441",
