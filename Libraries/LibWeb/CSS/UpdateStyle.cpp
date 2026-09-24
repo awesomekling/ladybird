@@ -449,6 +449,37 @@ static void propagate_custom_property_environment_move(DOM::Document& document, 
     walk.visit_children(origin, old_origin_base);
 }
 
+static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_demand_answer(DOM::Element&, bool& did_change_custom_properties);
+
+// The engine refused the row. Nothing else computes styles: the element keeps the record it has
+// installed, the refusal is reported to the style stage seal, and the row's input stays owed.
+static RequiredInvalidationAfterStyleChange refuse_style_row(DOM::Element& element)
+{
+    auto& style_engine = element.document().style_computer().style_engine();
+    u8 row_kinds = 0;
+    if (style_engine.frozen_longhand_input(element.style_node_id()).is_present)
+        row_kinds |= 1 << 0;
+    if (!element.has_style()) {
+        row_kinds |= 1 << 2;
+        dbgln("StyleEngine: refused the first style of <{}> (style node {})", element.local_name(), element.style_node_id().value());
+    }
+    static constexpr u8 refused_host_entry = 1;
+    style_engine.note_host_entry(element.style_node_id(), refused_host_entry, row_kinds);
+    style_engine.note_refused_style_row(element.style_node_id());
+    return {};
+}
+
+// A row the engine did not settle in its transaction: ask it for the element's record now, the way
+// a targeted read does.
+static RequiredInvalidationAfterStyleChange apply_engine_record_demand(DOM::Element& element, bool& did_change_custom_properties)
+{
+    auto invalidation = install_targeted_record_demand_answer(element, did_change_custom_properties);
+    if (!invalidation.has_value())
+        return refuse_style_row(element);
+    element.document().style_computer().style_engine().consume_recorded_element_style_input_change(element.style_node_id());
+    return *invalidation;
+}
+
 static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Document& document, Vector<StyleEngine::PublishedStyleDelta> const& reactions)
 {
     // Reactions are applied in preorder, so every element's inheritance inputs are ready when it is
@@ -827,13 +858,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         explicit_inheritance_effect_rows.append({ StyleNodeID { reaction.style_node }, explicit_inheritance_debt });
                 }
             } else if (needs_regular_style_recompute || needs_inherited_style_recompute || needs_full_custom_property_recompute) {
-                if (needs_regular_style_recompute)
-                    document.style_computer().style_engine().consume_recorded_element_style_input_change(reaction.style_node);
-                auto pseudo_element_inputs = (reaction.reaction & StyleEngine::PseudoInputsMayHaveChanged)
-                    ? DOM::Element::PseudoElementInputs::Changed
-                    : DOM::Element::PseudoElementInputs::Unchanged;
-                invalidation = element->apply_style_engine_reaction(did_change_custom_properties, pseudo_element_inputs);
-                if (pseudo_element_inputs == DOM::Element::PseudoElementInputs::Changed)
+                invalidation = apply_engine_record_demand(*element, did_change_custom_properties);
+                if (reaction.reaction & StyleEngine::PseudoInputsMayHaveChanged)
                     sample_animations_for_installed_pseudos(*element);
             } else if (needs_custom_property_recompute && element->refresh_inherited_custom_property_data()) {
                 did_change_custom_properties = true;
@@ -1167,6 +1193,7 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
     }
 
     document.set_has_completed_style_update();
+    document.style_computer().style_engine().record_refused_style_rows_again();
     apply_document_style_invalidation_after_style_change(document, invalidation);
     document.sample_animation_effects_needing_style_update();
 }
@@ -1293,8 +1320,7 @@ static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_updat
         return *invalidation;
     }
 
-    style_computer.style_engine().consume_recorded_element_style_input_change(element.style_node_id());
-    return element.apply_style_engine_reaction(did_change_custom_properties);
+    return refuse_style_row(element);
 }
 
 // A targeted style update has nothing to do when every source of style work in the document is settled: A full style

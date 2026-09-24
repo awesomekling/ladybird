@@ -38,15 +38,6 @@
 
 namespace Web::CSS {
 
-// Matching an originating element answers both its own cascade and every
-// pseudo-element cascade. A caller that computes those cascades as one batch
-// can keep this result between them.
-struct StyleEngineMatchResult {
-    StyleNodeID node;
-    Optional<Vector<StyleEngine::RuleMatch>> matches;
-    Optional<u32> signature;
-};
-
 class WEB_API StyleComputer final : public GC::Cell {
     GC_CELL(StyleComputer, GC::Cell);
     GC_DECLARE_ALLOCATOR(StyleComputer);
@@ -70,7 +61,6 @@ public:
 
     // The document element's style installed: the metrics `rem` resolves against are its font's.
     void update_root_element_font_metrics(ComputedValues const&);
-    [[nodiscard]] StyleRecordID try_share_computed_style_record(DOM::Element&) const;
     [[nodiscard]] JsonArray collect_devtools_applied_style_rules(DOM::AbstractElement, bool include_inherited, bool include_user_agent_styles);
 
     // The way back from a StyleEngine rule identity to what that rule contributes to the cascade.

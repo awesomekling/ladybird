@@ -608,6 +608,27 @@ void StyleEngine::record_derived_element_style_input_change(StyleNodeID style_no
     }
 }
 
+void StyleEngine::note_refused_style_row(StyleNodeID style_node)
+{
+    if (style_node != 0 && !m_refused_style_rows.contains_slow(style_node))
+        m_refused_style_rows.append(style_node);
+}
+
+void StyleEngine::record_refused_style_rows_again()
+{
+    auto recorded_before = move(m_style_rows_recorded_after_refusal);
+    m_style_rows_recorded_after_refusal = {};
+    for (auto style_node : m_refused_style_rows) {
+        if (recorded_before.contains(style_node)) {
+            dbgln("StyleEngine: style node {} was refused again after its input was recorded again", style_node.value());
+            continue;
+        }
+        m_style_rows_recorded_after_refusal.set(style_node);
+        record_derived_element_style_input_change(style_node, PublishedStyle | RecomputeStyle);
+    }
+    m_refused_style_rows.clear();
+}
+
 void StyleEngine::record_tree_counting_style_input_change(StyleNodeID style_node)
 {
     if (style_node == 0)
