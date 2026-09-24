@@ -288,14 +288,14 @@ unsafe extern "C" fn layout_arena_resolve_painted_vector_images(
 ) {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { arena_from_handle(arena) };
-    let mut painted = std::collections::HashSet::new();
+    let mut last_painted = std::collections::HashSet::new();
     let prediction_inputs = {
         let paint_state = arena.paint_state().borrow();
         // The renders the last recording painted, whether it recorded them or copied them, and the
         // ones it missed, whose producers record again.
         if let Some(recording) = paint_state.last_recording.as_ref() {
-            painted.extend(recording.vector_images.values().copied());
-            painted.extend(recording.missed_vector_images.iter().copied());
+            last_painted.extend(recording.vector_images.values().copied());
+            last_painted.extend(recording.missed_vector_images.iter().copied());
         }
         paint_state.visual_context.last_tree_inputs.map(|tree_inputs| {
             crate::painting::record::vector_images::FirstPaintPredictionInputs {
@@ -307,12 +307,19 @@ unsafe extern "C" fn layout_arena_resolve_painted_vector_images(
             }
         })
     };
-    if let Some(prediction_inputs) = prediction_inputs {
-        painted.extend(crate::painting::record::vector_images::predict_first_paint_renders(
-            arena,
-            &prediction_inputs,
-        ));
-    }
+    let predicted = prediction_inputs
+        .map(|prediction_inputs| {
+            crate::painting::record::vector_images::predict_first_paint_renders(arena, &prediction_inputs)
+        })
+        .unwrap_or_default();
+    // The predicted renders go last and in their order: a document images share keeps the layout of
+    // its last render.
+    let predicted_set: std::collections::HashSet<_> = predicted.iter().copied().collect();
+    let mut painted: Vec<_> = last_painted
+        .into_iter()
+        .filter(|request| !predicted_set.contains(request))
+        .collect();
+    painted.extend(predicted);
     let mut resolved = crate::painting::record::vector_images::VectorImageDisplayLists::default();
     // Each render records another document, which must not find this arena's paint state borrowed.
     for request in painted {
