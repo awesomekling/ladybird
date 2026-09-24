@@ -31,7 +31,7 @@ use crate::layout::CssPixels;
 use crate::layout::FfiReplacedContentFacts;
 use crate::layout::node_data::{
     AncestorFact, DomPaintFact, FfiNodeConstructionFacts, FfiNodeLink, FfiStylePayloads, MAX_NODE_SLOT_COUNT, NodeData,
-    NodeFlag, NodeKind, NodeSlotId,
+    NodeFlag, NodeKind, NodeSlotId, ShellId,
 };
 use crate::layout::used_values::FfiCssPixelPoint;
 use std::cell::Cell;
@@ -649,7 +649,7 @@ pub(crate) enum OwedToHost {
 
 #[must_use]
 pub(crate) struct FreedSubtree {
-    shells: Vec<*mut c_void>,
+    shells: Vec<ShellId>,
     rows_with_owned_image_provider: Vec<NodeSlotId>,
     rows_with_image_observers: Vec<NodeSlotId>,
     paintable_row_resets: Vec<crate::painting::paintable_rows::PaintableRowReset>,
@@ -673,7 +673,7 @@ enum HostHandback {
     /// The node whose boxes changed, named the way the box presence host names it. The bits are
     /// read when the handback is paid, so a node a build changes several times is told once.
     BoxPresence(u32),
-    Shell(*mut c_void),
+    Shell(ShellId),
     /// A row's host objects, named by the row. The host tables hold the objects themselves, and
     /// the payer looks them up before it pays anything, which is where the arena let go of them.
     OwnedImageProvider(NodeSlotId),
@@ -684,7 +684,7 @@ enum HostHandback {
     /// the row has when this is paid, and nothing if the row has gone by then.
     ShellStyleChanged {
         slot: NodeSlotId,
-        shell: *mut c_void,
+        shell: ShellId,
         attach_resources: bool,
     },
 }
@@ -704,15 +704,11 @@ impl HostHandbacks {
                     return;
                 }
             }
-            HostHandback::Shell(object) => {
-                if object.is_null() {
-                    return;
-                }
-            }
             HostHandback::OwnedImageProvider(_)
             | HostHandback::ImageObservers(_)
             | HostHandback::OwnedImageProviderDetach(_)
             | HostHandback::PaintableRowReset(_)
+            | HostHandback::Shell(_)
             | HostHandback::ShellStyleChanged { .. } => {}
         }
         self.handbacks.push(handback);
@@ -756,7 +752,7 @@ impl FreedSubtree {
     pub(crate) fn destroy_shells_and_invoke_callbacks(self) {
         let main_thread = crate::stage::MainThread::for_test();
         for shell in self.shells {
-            crate::layout::tree_mutation::destroy_shell(&main_thread, shell);
+            crate::layout::tree_mutation::destroy_shell(&main_thread, shell.host_object(&main_thread));
         }
         assert!(
             self.rows_with_owned_image_provider.is_empty() && self.rows_with_image_observers.is_empty(),
@@ -1176,11 +1172,11 @@ impl LayoutNodeArena {
         );
         let data = self.data(slot);
         assert!(
-            data.shell.get().is_null(),
+            data.shell.get().is_none(),
             "layout node arena bound a second shell to a slot"
         );
         data.kind.set(construction_facts.kind);
-        data.shell.set(construction_facts.shell);
+        data.shell.set(ShellId::of_host_object(construction_facts.shell));
         let element_facts = self.element_construction_facts(StyleNodeID::from_raw(construction_facts.style_node));
         data.flags.set(super::node_facts::construction_flags(
             &construction_facts,
@@ -1300,7 +1296,7 @@ impl LayoutNodeArena {
         let mut paintable_row_resets = Vec::new();
         let mut arena_pinned_style_records = Vec::new();
         for slot in slots_in_pre_order {
-            shells.push(self.data(slot).shell.get());
+            shells.extend(self.data(slot).shell.get());
             if self.rows_with_owned_image_provider.get_mut().remove(&slot) {
                 rows_with_owned_image_provider.push(slot);
             }
@@ -2513,10 +2509,9 @@ impl LayoutNodeArena {
         attach_resources: bool,
         notice: ShellStyleChangeNotice<'_>,
     ) {
-        let shell = self.data(slot).shell.get();
-        if shell.is_null() {
+        let Some(shell) = self.data(slot).shell.get() else {
             return;
-        }
+        };
         match notice {
             ShellStyleChangeNotice::Now(main_thread) => {
                 self.tell_shell_of_style_change(main_thread, slot, shell, attach_resources);
@@ -2533,7 +2528,7 @@ impl LayoutNodeArena {
         &self,
         main_thread: &crate::stage::MainThread,
         slot: NodeSlotId,
-        shell: *mut c_void,
+        shell: ShellId,
         attach_resources: bool,
     ) {
         let (context, shell_style_changed) = main_thread
@@ -2546,7 +2541,7 @@ impl LayoutNodeArena {
         unsafe {
             shell_style_changed(
                 context,
-                shell,
+                shell.host_object(main_thread),
                 self.node_style_record(slot),
                 self.data(slot).style.get(),
                 attach_resources,
@@ -3271,7 +3266,7 @@ impl LayoutNodeArena {
         };
         match handback {
             HostHandback::BoxPresence(style_node) => self.tell_host_box_presence(main_thread, style_node),
-            HostHandback::Shell(shell) => destroy_shell(main_thread, shell),
+            HostHandback::Shell(shell) => destroy_shell(main_thread, shell.host_object(main_thread)),
             HostHandback::OwnedImageProvider(_) => destroy_owned_image_provider(main_thread, object),
             HostHandback::ImageObservers(_) => destroy_image_observers(main_thread, object),
             HostHandback::OwnedImageProviderDetach(_) => {
@@ -3286,7 +3281,7 @@ impl LayoutNodeArena {
                 shell,
                 attach_resources,
             } => {
-                if self.slot_is_live(slot) && self.data(slot).shell.get() == shell {
+                if self.slot_is_live(slot) && self.data(slot).shell.get() == Some(shell) {
                     self.tell_shell_of_style_change(main_thread, slot, shell, attach_resources);
                 }
             }
@@ -3364,7 +3359,9 @@ impl LayoutNodeArena {
         // SAFETY: Registration and unregistration keep the factory context live; the factory binds a
         // shell to this live slot and writes nothing but the slot's shell cell.
         unsafe { factory(context, id, data.kind.get()) };
-        data.shell.get()
+        data.shell
+            .get()
+            .map_or(std::ptr::null_mut(), |shell| shell.host_object(main_thread))
     }
 
     pub(crate) fn shell_count(&self) -> u32 {
@@ -3375,7 +3372,7 @@ impl LayoutNodeArena {
                     .data(NodeSlotId::new(index as u32, metadata.generation))
                     .shell
                     .get()
-                    .is_null()
+                    .is_none()
             {
                 count += 1;
             }
@@ -3401,13 +3398,13 @@ impl LayoutNodeArena {
 
     pub(crate) fn attach_shell(&self, slot: NodeSlotId, shell: *mut c_void) {
         self.assert_owner_thread();
-        assert!(!shell.is_null());
+        let shell = ShellId::of_host_object(shell).expect("a shell is attached");
         let data = self.data(slot);
         assert!(
-            data.shell.get().is_null(),
+            data.shell.get().is_none(),
             "layout node arena attached a second shell to a slot"
         );
-        data.shell.set(shell);
+        data.shell.set(Some(shell));
     }
 
     /// Record whether attaching the row's style resources loaded any image, which is what decides
@@ -5272,9 +5269,8 @@ impl LayoutNodeArena {
     /// The shell of `id`, made now if nothing has asked for it before. Making one runs the host's
     /// shell factory, so only the main thread can ask.
     pub(crate) fn node_shell(&self, main_thread: &crate::stage::MainThread, id: NodeSlotId) -> *mut c_void {
-        let shell = self.data(id).shell.get();
-        if !shell.is_null() {
-            return shell;
+        if let Some(shell) = self.data(id).shell.get() {
+            return shell.host_object(main_thread);
         }
         self.materialize_shell(main_thread, id)
     }
@@ -6536,7 +6532,7 @@ mod tests {
         assert_eq!(arena.data(slot).kind.get(), NodeKind::Unset);
 
         let unbound_freed = arena.free_subtree(slot);
-        assert_eq!(unbound_freed.shell_count(), 1);
+        assert_eq!(unbound_freed.shell_count(), 0);
         unbound_freed.destroy_shells_and_invoke_callbacks();
         assert!(!arena.slot_is_live(slot));
 

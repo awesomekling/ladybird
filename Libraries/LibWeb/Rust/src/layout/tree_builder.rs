@@ -3010,9 +3010,11 @@ struct TreeBuildStageOutput {
 #[must_use]
 pub(crate) struct LayoutTreeBuildWalk(TreeBuildStageOutput);
 
-// SAFETY: The shell pointers the walk's handbacks carry are opaque to it, and only the document
-// thread, which pays them, dereferences them.
-unsafe impl Send for LayoutTreeBuildWalk {}
+// The walk's handbacks name the shells they owe by id, so the walk crosses back on its own terms.
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<LayoutTreeBuildWalk>();
+};
 
 /// Runs the layout tree build walk of the document `document_style_node` names, as a stage. The
 /// host half is left to `rust_pay_layout_tree_build`.

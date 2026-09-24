@@ -7,6 +7,7 @@
 use crate::layout::CssPixels;
 use std::cell::Cell;
 use std::ffi::c_void;
+use std::num::NonZeroUsize;
 
 pub use super::node_slot_id::INVALID_NODE_SLOT_INDEX;
 pub const GENERATED_FOR_AFTER: u8 = 1;
@@ -21,6 +22,23 @@ pub const GENERATED_FOR_LAST_SYNTHETIC: u8 = 8;
 // The full C++ StyleGroupIndex space; LayoutRustBridge.cpp static-asserts the
 // count so the style container array and the registered group indices line up.
 pub const STYLE_GROUP_COUNT: usize = 23;
+
+/// The host's name for a row's shell. A row, and whatever a stage hands back for one, holds this
+/// id rather than the host object; only the document thread turns it back into the object.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ShellId(NonZeroUsize);
+
+impl ShellId {
+    /// The id of the shell the host passes, or `None` for no shell.
+    pub(crate) fn of_host_object(shell: *mut c_void) -> Option<Self> {
+        NonZeroUsize::new(shell.expose_provenance()).map(Self)
+    }
+
+    /// The host object the id names, which only the document thread may reach.
+    pub(crate) fn host_object(self, _: &crate::stage::MainThread) -> *mut c_void {
+        std::ptr::with_exposed_provenance_mut(self.0.get())
+    }
+}
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 #[repr(C)]
@@ -221,7 +239,7 @@ pub(crate) struct NodeData {
     pub dom_paint_facts: Cell<u8>,
     pub ancestor_facts: Cell<u8>,
     pub style: Cell<*const c_void>,
-    pub shell: Cell<*mut c_void>,
+    pub shell: Cell<Option<ShellId>>,
 }
 
 impl Default for NodeData {
@@ -244,7 +262,7 @@ impl Default for NodeData {
             ancestor_facts: Cell::new(0),
             fragment_cache_epoch: Cell::new(0),
             style: Cell::new(std::ptr::null()),
-            shell: Cell::new(std::ptr::null_mut()),
+            shell: Cell::new(None),
         }
     }
 }
