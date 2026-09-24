@@ -898,6 +898,10 @@ pub struct RetainedState {
     /// The environment each element's animations sampled custom properties into, over the one its
     /// own declarations resolve to. Its own values substitute under it.
     sampled_custom_property_environments: HashMap<StyleNodeID, u64>,
+    /// The elements whose style reads what a moved custom-property environment can change other
+    /// than through `var()`: an `if()` or `inherit()` condition, a custom function, or a style
+    /// container query. The host notes each once; a node keeps it until it is retired.
+    environment_move_recompute_nodes: HashSet<StyleNodeID>,
     /// Every font resolution this document has been given. An evaluation step reads it; only a
     /// round between passes adds to it.
     font_resolution: Option<font_resolution::FontResolutionCache>,

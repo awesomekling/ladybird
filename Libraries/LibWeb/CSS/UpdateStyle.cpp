@@ -315,20 +315,14 @@ public:
     }
 
 private:
-    // Whether the element's cascades read a name that changed, through var(). The engine knows
-    // whether the element's record reads custom properties at all, and settles the reaction it gets.
-    bool var_reads_a_changed_name(DOM::Element& element) const
-    {
-        return m_style_engine.node_style_reads_custom_properties(element.style_node_id());
-    }
-
     // An element that has to compute again is recorded with a recompute reaction alone: its
     // descendants are this walk's, or that computation's, to reach. (The engine fans an inherited
-    // custom-properties reaction out to every child of an applied reaction.)
+    // custom-properties reaction out to every child of an applied reaction.) The engine answers
+    // whether it has to: whether its record reads custom properties, or its style reads the
+    // environment through if(), inherit(), a custom function or a style container query.
     bool needs_recompute(DOM::Element& element) const
     {
-        return element.style_uses_if_css_function() || element.style_uses_inherit_css_function() || element.style_uses_custom_function()
-            || element.style_depends_on_style_container_query() || var_reads_a_changed_name(element);
+        return StyleEngineFFI::style_engine_environment_move_needs_recompute(m_style_engine.rust_handle(), element.style_node_id().value());
     }
 
     void mark(DOM::Element& element)

@@ -4488,6 +4488,34 @@ pub unsafe extern "C" fn style_engine_element_custom_property_data(engine: *cons
         .unwrap_or(std::ptr::null())
 }
 
+/// Notes that the element's style reads what a moved custom-property environment can change other
+/// than through `var()`.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_note_element_recomputes_on_environment_move(engine: *mut c_void, node: u32) {
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return;
+    };
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    engine.note_element_recomputes_on_environment_move(node);
+}
+
+/// Whether a moved custom-property environment computes the element again: its style reads a name
+/// through `var()`, or reads the environment another way the host noted.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_environment_move_needs_recompute(engine: *mut c_void, node: u32) -> bool {
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return true;
+    };
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    engine.element_recomputes_on_environment_move(node) || engine.node_style_reads_custom_properties(node)
+}
+
 /// Keeps the custom-property environment one of an element's synthetic pseudo-elements now holds. A
 /// null `data` records that it holds none.
 ///
