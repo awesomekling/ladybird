@@ -85,7 +85,9 @@
         println(`after inner scroll to end over=${overs.join(",")} out=${outs.join(",")}`);
 
         // Once it cannot scroll any further the wheel chains to the outer scroller, and a box from
-        // another scroll container comes under the same stationary pointer.
+        // another scroll container comes under the same stationary pointer. A wheel gesture stays
+        // latched to the scroller it started on, so this starts a new one once the last settled.
+        await timeout(600);
         overs = [];
         outs = [];
         await internals.wheel(10, 10, 0, 500);
