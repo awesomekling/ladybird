@@ -9,6 +9,7 @@ use crate::layout::node_data::NodeSlotId;
 use libgfx_rust::WindingRule;
 use libgfx_rust::path::PathBuilder;
 use std::cell::RefCell;
+use std::sync::Arc;
 
 /// The state an `<area>`'s `shape` attribute represents, as the HTML image map processing model
 /// enumerates it.
@@ -145,38 +146,59 @@ impl PublishedImageMapArea {
 // named by its style-tree identity, because that is what the hit hands back. A row's id carries
 // the generation of the slot it came from, so an entry left behind by a freed row names nothing a
 // live row can ask for. An image with no image map has no entry, which is nearly every image.
+//
+// The entries are shared with the snapshots the paintable rows publish, and copied the next time
+// one changes while a snapshot holds them. They are few, and a copy shares each image's areas.
 #[derive(Default)]
 pub struct ImageMapAreaColumn {
-    areas: RefCell<FastMap<NodeSlotId, Box<[PublishedImageMapArea]>>>,
+    areas: RefCell<Arc<ImageMapAreas>>,
 }
+
+/// The image map areas of an [`ImageMapAreaColumn`] as they were when taken.
+#[derive(Clone, Default)]
+pub struct ImageMapAreas(FastMap<NodeSlotId, Arc<[PublishedImageMapArea]>>);
 
 impl ImageMapAreaColumn {
     pub fn publish(&self, slot: NodeSlotId, areas: Box<[PublishedImageMapArea]>) {
-        if slot.is_invalid() {
+        if slot.is_invalid() || (areas.is_empty() && !self.areas.borrow().0.contains_key(&slot)) {
             return;
         }
         let mut published = self.areas.borrow_mut();
+        let published = &mut Arc::make_mut(&mut published).0;
         if areas.is_empty() {
             published.remove(&slot);
         } else {
-            published.insert(slot, areas);
+            published.insert(slot, areas.into());
         }
     }
 
     pub fn forget(&self, slot: NodeSlotId) {
-        self.areas.borrow_mut().remove(&slot);
+        if !self.areas.borrow().0.contains_key(&slot) {
+            return;
+        }
+        Arc::make_mut(&mut self.areas.borrow_mut()).0.remove(&slot);
     }
 
+    /// The areas as they are now. They do not see later changes to the column.
+    pub fn snapshot(&self) -> Arc<ImageMapAreas> {
+        self.areas.borrow().clone()
+    }
+
+    pub fn with_areas<R>(&self, read: impl FnOnce(&ImageMapAreas) -> R) -> R {
+        read(&self.areas.borrow())
+    }
+}
+
+impl ImageMapAreas {
     /// The first area of the image's map, in tree order, whose shape covers the point, named by
     /// its style-tree identity. Zero when the image has no map, or no shape covers the point.
     pub fn area_for_point(&self, slot: NodeSlotId, x: f32, y: f32, image_width: f32, image_height: f32) -> u32 {
-        let published = self.areas.borrow();
-        let Some(areas) = published.get(&slot) else {
+        let Some(areas) = self.0.get(&slot) else {
             return 0;
         };
         // The shapes are layered in reverse tree order, so the top-most shape covering the point
         // belongs to the first area in tree order whose shape contains it.
-        for area in areas {
+        for area in areas.iter() {
             if area.contains_point(x, y, image_width, image_height) {
                 return area.style_node;
             }
@@ -187,11 +209,10 @@ impl ImageMapAreaColumn {
     /// Whether the area of this image named by `style_node` is editable or an editing host: 1 or
     /// 0, and -1 when the identity names no area of this image.
     pub fn area_editability(&self, slot: NodeSlotId, style_node: u32) -> i8 {
-        let published = self.areas.borrow();
-        let Some(areas) = published.get(&slot) else {
+        let Some(areas) = self.0.get(&slot) else {
             return -1;
         };
-        for area in areas {
+        for area in areas.iter() {
             if area.style_node == style_node {
                 return i8::from(area.editable);
             }

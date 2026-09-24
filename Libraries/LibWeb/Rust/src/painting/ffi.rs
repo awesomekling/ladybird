@@ -884,7 +884,7 @@ fn fresh_visual_context_tree_build(
             viewport,
             &inputs,
         );
-        fresh_tree.viewport_assignment.node_identity = arena.unique_node_ids().id(viewport);
+        fresh_tree.viewport_assignment.node_identity = paintable_rows.unique_node_id(viewport);
         fresh_tree
     };
     {
@@ -2632,9 +2632,8 @@ pub unsafe extern "C" fn layout_arena_image_map_area_for_point(
     image_width: f32,
     image_height: f32,
 ) -> u32 {
-    unsafe { arena_from_handle(arena) }
-        .image_map_areas()
-        .area_for_point(slot, x, y, image_width, image_height)
+    unsafe { main_side_paintable_rows(arena) }
+        .with_image_map_areas(|areas| areas.area_for_point(slot, x, y, image_width, image_height))
 }
 
 /// Whether the `<area>` of this image named by `style_node` is editable or an editing host: 1 or
@@ -2650,9 +2649,7 @@ pub unsafe extern "C" fn layout_arena_image_map_area_editability(
     slot: NodeSlotId,
     style_node: u32,
 ) -> i8 {
-    unsafe { arena_from_handle(arena) }
-        .image_map_areas()
-        .area_editability(slot, style_node)
+    unsafe { main_side_paintable_rows(arena) }.with_image_map_areas(|areas| areas.area_editability(slot, style_node))
 }
 
 /// Publishes what the render side needs to know about the viewport it draws into. The document
@@ -2691,7 +2688,7 @@ pub unsafe extern "C" fn layout_arena_published_scroll_offset(
     arena: *mut c_void,
     slot: NodeSlotId,
 ) -> FfiCssPixelPoint {
-    unsafe { arena_from_handle(arena) }.scroll_offsets().offset(slot).into()
+    unsafe { main_side_paintable_rows(arena) }.scroll_offset(slot).into()
 }
 
 /// The number of layout commits this arena has published. It does not say whether layout is up
