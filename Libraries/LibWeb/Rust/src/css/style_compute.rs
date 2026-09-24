@@ -3238,6 +3238,9 @@ pub(crate) struct SettledRowSample {
     pub(crate) keyframes_inherited_non_inherited_style_groups: u32,
     pub(crate) uses_tree_counting_function: bool,
     pub(crate) substitution_marks: u8,
+    /// An animated display as the sample composed it, before the box-type transformation adjusted
+    /// it.
+    pub(crate) animated_display_before_box_type_transformation: Option<u32>,
     /// The table after the animated box-type finalization, and the overlay.
     pub(crate) style: crate::css::style::engine_sample::EngineSampledStyle,
 }
@@ -3570,6 +3573,9 @@ pub(crate) fn sample_settled_row(
         }
         _ => overlay,
     };
+    let animated_display_before_box_type_transformation = unsafe { overlay.as_ref() }
+        .filter(|sampled| sampled.get(property_id::DISPLAY).is_some())
+        .map(|sampled| effective_display(unsafe { &*table.cast::<ComputedLonghandTable>() }, Some(sampled)).encoded());
     let finalized = unsafe { finalize_engine_sample(engine, node, None, table.cast(), record_overlay, overlay) };
     let table = match finalized {
         Ok(table) => table,
@@ -3586,6 +3592,7 @@ pub(crate) fn sample_settled_row(
         keyframes_inherited_non_inherited_style_groups: result.keyframes_inherited_non_inherited_style_groups,
         uses_tree_counting_function: result.uses_tree_counting_function,
         substitution_marks: result.substitution_marks,
+        animated_display_before_box_type_transformation,
         style: crate::css::style::engine_sample::EngineSampledStyle { table, overlay },
     })
 }
@@ -6498,6 +6505,24 @@ fn effective_keyword(table: &ComputedLonghandTable, overlay: Option<&AnimatedOve
 fn webkit_box_layout_transformation_applies(table: &ComputedLonghandTable, overlay: Option<&AnimatedOverlay>) -> bool {
     effective_keyword(table, overlay, property_id::_WEBKIT_BOX_ORIENT) == keyword::VERTICAL
         && effective_keyword(table, overlay, property_id::CONTINUE) != keyword::AUTO
+}
+
+/// The used color scheme of a style whose composition animates `color-scheme`, resolved from the
+/// animated value against the document's preferred and supported schemes.
+pub(crate) fn animated_used_color_scheme(
+    table: &ComputedLonghandTable,
+    overlay: &AnimatedOverlay,
+    inputs: &crate::css::style::bridge::FfiDocumentStyleComputationInputs,
+) -> u8 {
+    let StyleValueData::ColorScheme { scheme_codes, .. } =
+        effective_longhand_data(table, Some(overlay), property_id::COLOR_SCHEME)
+    else {
+        unreachable!("computed color-scheme must have color-scheme data");
+    };
+    let supported = inputs
+        .has_document_supported_schemes
+        .then(|| &inputs.document_supported_scheme_codes[..usize::from(inputs.document_supported_scheme_count)]);
+    resolve_effective_color_scheme(scheme_codes.as_slice(), inputs.preferred_color_scheme, supported)
 }
 
 fn keyword_from_style_value(value: &StyleValueData) -> u16 {

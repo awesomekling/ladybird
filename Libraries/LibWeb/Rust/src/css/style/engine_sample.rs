@@ -696,11 +696,7 @@ impl super::StyleEngineState {
 
         let style_record = sample.style_record;
         let overlay = unsafe { &*sample.style.overlay };
-        // The host resolves an animated color scheme and an animated display's pre-transformation
-        // value from its working set.
-        if overlay.get(property_id::COLOR_SCHEME).is_some() || overlay.get(property_id::DISPLAY).is_some() {
-            return Err("an animated color scheme or display");
-        }
+        let table = unsafe { &*sample.style.table };
         let (used_color_scheme, display_before_box_type_transformation) = {
             let view = self
                 .computed_group_sets
@@ -715,12 +711,21 @@ impl super::StyleEngineState {
             let display = ComputedValuesView::new(SharedPayload::as_pointer_slice(base_payloads))
                 .display_before_box_type_transformation()
                 .encoded();
+            let scheme = match overlay.get(property_id::COLOR_SCHEME) {
+                Some(_) => crate::css::style_compute::animated_used_color_scheme(
+                    table,
+                    overlay,
+                    &self.retained.document_style_computation_inputs,
+                ),
+                None => u8::try_from(scheme).map_err(|_| "a record with no effective color scheme")?,
+            };
             (
-                u8::try_from(scheme).map_err(|_| "a record with no effective color scheme")?,
-                display,
+                scheme,
+                sample
+                    .animated_display_before_box_type_transformation
+                    .unwrap_or(display),
             )
         };
-        let table = unsafe { &*sample.style.table };
         let font_unresolved = std::cell::Cell::new(false);
         let payloads = {
             let retained = &self.retained;
