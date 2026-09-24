@@ -450,6 +450,12 @@ struct RecordingPublishContext {
     GC::Ref<DOM::Document const> document;
 };
 
+static u64 add_empty_display_list(RecordingPublishContext& context)
+{
+    auto const& document = *context.document;
+    return context.resource_storage.add_display_list(DisplayList::create(document.paint_state().visual_context_tree(document)), document.paint_state().visual_context_tree(document)).value();
+}
+
 static Layout::RustFFI::FfiRecordingPublishCallbacks recording_publish_callbacks(RecordingPublishContext& context)
 {
     return {
@@ -460,25 +466,31 @@ static Layout::RustFFI::FfiRecordingPublishCallbacks recording_publish_callbacks
         .add_image_frame = [](void* context_pointer, void const* frame) {
             auto& context = *static_cast<RecordingPublishContext*>(context_pointer);
             context.resource_storage.add_image_frame(*static_cast<Gfx::DecodedImageFrame const*>(frame)); },
+        .add_video_sink = [](void* context_pointer, u64 resource_id, u64 sink_handle) {
+            auto& context = *static_cast<RecordingPublishContext*>(context_pointer);
+            context.resource_storage.add_video_sink(VideoSinkResourceId { resource_id }, Media::VideoSinkHandle { sink_handle }); },
+    };
+}
+
+static Layout::RustFFI::FfiVectorImageCallbacks vector_image_callbacks(RecordingPublishContext& context)
+{
+    return {
+        .context = &context,
         .resolve_vector_image_display_list = [](void* context_pointer, Layout::RustFFI::FfiVectorImageRenderRequest const* request) -> u64 {
             auto& context = *static_cast<RecordingPublishContext*>(context_pointer);
-            auto const& document = *context.document;
-            auto empty_display_list = [&] {
-                return context.resource_storage.add_display_list(Compositing::DisplayList::create(document.paint_state().visual_context_tree(document)), document.paint_state().visual_context_tree(document)).value();
-            };
             // The recording published the image and the scheme it renders with, so finding it is a
             // lookup rather than a walk back to the element that references it.
             auto const* svg_image_data = SVG::SVGDecodedImageData::with_vector_image_identity(request->image_identity);
             if (!svg_image_data)
-                return empty_display_list();
+                return add_empty_display_list(context);
             auto display_list = svg_image_data->record_display_list_at_scale({ request->css_width, request->css_height }, request->raster_scale, static_cast<CSS::PreferredColorScheme>(request->color_scheme), context.resource_storage);
             if (!display_list.has_value())
-                return empty_display_list();
+                return add_empty_display_list(context);
             return context.resource_storage.add_display_list(move(*display_list)).value();
         },
-        .add_video_sink = [](void* context_pointer, u64 resource_id, u64 sink_handle) {
-            auto& context = *static_cast<RecordingPublishContext*>(context_pointer);
-            context.resource_storage.add_video_sink(Compositing::VideoSinkResourceId { resource_id }, Media::VideoSinkHandle { sink_handle }); },
+        .empty_display_list = [](void* context_pointer) -> u64 {
+            return add_empty_display_list(*static_cast<RecordingPublishContext*>(context_pointer));
+        },
     };
 }
 
@@ -520,6 +532,10 @@ static OverlayLabelFonts overlay_label_fonts(float css_size, double device_pixel
 RefPtr<Compositing::DisplayList> record_rust_display_list(DOM::Document& document, Compositing::DisplayList const& placeholder_display_list, Compositing::DisplayListResourceStorage& resource_storage, PaintCommandCacheMode cache_mode, HTML::PaintConfig const& config, InspectorOverlayInputs const& overlay_inputs)
 {
     auto* arena = layout_arena_handle(document);
+    RecordingPublishContext publish_context { resource_storage, document };
+    // Rendering an SVG-as-image lays out and records its document, so it happens here on the main
+    // thread before the recording starts; the recording only looks the renders up.
+    Layout::RustFFI::layout_arena_resolve_painted_vector_images(arena, vector_image_callbacks(publish_context));
     auto device_pixels_per_css_pixel = document.page().client().device_pixels_per_css_pixel();
     auto device_viewport_rect = document.page().css_to_device_rect(document.viewport_rect());
     auto wheel_event_region_state = document.paint_state().collect_root_blocking_wheel_event_regions(document);
@@ -630,10 +646,10 @@ RefPtr<Compositing::DisplayList> record_rust_display_list(DOM::Document& documen
         inputs.background_color = document.background_color();
     }
     reconcile_navigable_container_paint_facts(document);
-    RecordingPublishContext publish_context { resource_storage, document };
     auto rust_timer = Core::ElapsedTimer::start_new(Core::TimerType::Precise);
     if (!Layout::RustFFI::layout_arena_record_display_list(arena, viewport_row_slot(document), inputs))
         return nullptr;
+    Layout::RustFFI::layout_arena_resolve_missed_vector_images(arena, vector_image_callbacks(publish_context));
     Layout::RustFFI::layout_arena_publish_recording(arena, recording_publish_callbacks(publish_context));
     take_recording_trace_if_pending(document);
     if (Layout::RustFFI::layout_arena_last_recording_has_blocking_wheel_event_listeners(arena))

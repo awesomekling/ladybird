@@ -71,6 +71,7 @@ impl FfiRecordingInputs {
         &self,
         tree_inputs: super::FfiVisualContextTreeInputs,
         root_background_source: super::FfiRootBackgroundSource,
+        vector_image_display_lists: std::sync::Arc<crate::painting::record::vector_images::VectorImageDisplayLists>,
     ) -> crate::painting::record::inputs::RecordingInputs<'_> {
         use crate::painting::display_list::commands::UniqueNodeId;
         use crate::painting::force_dark::ForceDarkSettings;
@@ -145,6 +146,7 @@ impl FfiRecordingInputs {
             document_has_supported_color_schemes: self.document_has_supported_color_schemes,
             document_declares_light_or_dark_color_scheme: self.document_declares_light_or_dark_color_scheme,
             image_color_scheme_fallback: self.image_color_scheme_fallback,
+            vector_image_display_lists,
             inspector_highlight: self.has_inspector_highlight.then(|| {
                 // SAFETY: The caller lends the label bytes and supplies live fonts for this overlay.
                 let (text, fonts) = unsafe {
@@ -544,13 +546,41 @@ pub struct FfiSnapAreaGeometry {
     pub always_stop: bool,
 }
 
+/// Renders SVG-as-image documents for a recording. Each call lays out and records another
+/// document, so only the main thread makes them, outside every paint pass.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct FfiVectorImageCallbacks {
+    pub context: *mut c_void,
+    pub resolve_vector_image_display_list: unsafe extern "C" fn(*mut c_void, *const FfiVectorImageRenderRequest) -> u64,
+    pub empty_display_list: unsafe extern "C" fn(*mut c_void) -> u64,
+}
+
+impl FfiVectorImageCallbacks {
+    pub(crate) fn resolve_vector_image_display_list(
+        &self,
+        _: &crate::stage::MainThread,
+        request: &FfiVectorImageRenderRequest,
+    ) -> u64 {
+        crate::painting::seal::note_host_call("resolve_vector_image_display_list");
+        // SAFETY: The C++ host records the image's display list synchronously and reads the
+        // request only for the duration of the call.
+        unsafe { (self.resolve_vector_image_display_list)(self.context, request) }
+    }
+
+    pub(crate) fn empty_display_list(&self, _: &crate::stage::MainThread) -> u64 {
+        crate::painting::seal::note_host_call("empty_display_list");
+        // SAFETY: The C++ host stores an empty display list synchronously.
+        unsafe { (self.empty_display_list)(self.context) }
+    }
+}
+
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiRecordingPublishCallbacks {
     pub context: *mut c_void,
     pub add_font: unsafe extern "C" fn(*mut c_void, *const c_void),
     pub add_image_frame: unsafe extern "C" fn(*mut c_void, *const c_void),
-    pub resolve_vector_image_display_list: unsafe extern "C" fn(*mut c_void, *const FfiVectorImageRenderRequest) -> u64,
     pub add_video_sink: unsafe extern "C" fn(*mut c_void, u64, u64),
 }
 
@@ -559,7 +589,6 @@ pub(crate) struct RecordingPublishHost {
     context: *mut c_void,
     add_font: unsafe extern "C" fn(*mut c_void, *const c_void),
     add_image_frame: unsafe extern "C" fn(*mut c_void, *const c_void),
-    resolve_vector_image_display_list: unsafe extern "C" fn(*mut c_void, *const FfiVectorImageRenderRequest) -> u64,
     add_video_sink: unsafe extern "C" fn(*mut c_void, u64, u64),
 }
 
@@ -569,7 +598,6 @@ impl From<FfiRecordingPublishCallbacks> for RecordingPublishHost {
             context: host.context,
             add_font: host.add_font,
             add_image_frame: host.add_image_frame,
-            resolve_vector_image_display_list: host.resolve_vector_image_display_list,
             add_video_sink: host.add_video_sink,
         }
     }
@@ -588,17 +616,6 @@ impl RecordingPublishHost {
     ) {
         // SAFETY: The C++ host copies the live frame synchronously.
         unsafe { (self.add_image_frame)(self.context, frame.as_raw()) };
-    }
-
-    pub(crate) fn resolve_vector_image_display_list(
-        &self,
-        _: &crate::stage::MainThread,
-        request: &FfiVectorImageRenderRequest,
-    ) -> u64 {
-        crate::painting::seal::note_host_call("resolve_vector_image_display_list");
-        // SAFETY: The C++ host records the image's display list synchronously and reads the
-        // request only for the duration of the call.
-        unsafe { (self.resolve_vector_image_display_list)(self.context, request) }
     }
 
     pub(crate) fn add_video_sink(&self, _: &crate::stage::MainThread, resource_id: u64, sink_handle: u64) {

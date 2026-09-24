@@ -1344,6 +1344,7 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
                 paint_state
                     .root_background_source
                     .expect("a recording follows paint preparation"),
+                paint_state.vector_image_display_lists.clone(),
             )
         }
     };
