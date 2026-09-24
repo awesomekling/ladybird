@@ -3450,6 +3450,12 @@ impl LayoutNodeArena {
         }
     }
 
+    pub(crate) fn for_each_layer_image_paint_facts_owner(&self, mut callback: impl FnMut(NodeSlotId)) {
+        for id in self.layer_image_paint_facts.borrow().keys() {
+            callback(*id);
+        }
+    }
+
     pub(crate) fn layer_image_paint_facts(
         &self,
         id: NodeSlotId,

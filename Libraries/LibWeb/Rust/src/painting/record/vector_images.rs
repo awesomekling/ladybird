@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-use crate::css::css_pixels::CssPixels;
+use crate::css::css_pixels::{CssPixelRect, CssPixels};
 use crate::css::retained_fly_string::{RetainedUtf16FlyString, RetainedUtf16FlyStringList};
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
@@ -69,23 +69,67 @@ pub(crate) fn image_color_scheme(
         })
 }
 
-/// The renders the next recording is predicted to need for the SVG-as-image elements it paints
-/// afresh, at the size each element's committed box gives and the scale of an untransformed box.
-/// The renders the last recording painted are resolved already, so this covers an element's
-/// first paint, and a render it predicts wrong is only a miss.
-pub(crate) fn predict_image_element_renders(
+/// What predicting the renders of a recording's first paints reads from its inputs.
+pub(crate) struct FirstPaintPredictionInputs {
+    pub device_pixels_per_css_pixel: f64,
+    pub root_background_source: Option<crate::painting::host::FfiRootBackgroundSource>,
+    pub css_viewport_rect: CssPixelRect,
+    pub document_declares_light_or_dark_color_scheme: bool,
+    pub image_color_scheme_fallback: u8,
+}
+
+/// The renders the next recording is predicted to need for the SVG-as-images it paints afresh:
+/// image elements, and background and mask layers. Each is predicted at the size its committed
+/// box gives and the scale of an untransformed box. The renders the last recording painted are
+/// resolved already, so this covers a first paint, and a render it predicts wrong is only a miss.
+pub(crate) fn predict_first_paint_renders(
     layout_arena: &LayoutNodeArena,
-    device_pixels_per_css_pixel: f64,
-    document_declares_light_or_dark_color_scheme: bool,
-    image_color_scheme_fallback: u8,
+    inputs: &FirstPaintPredictionInputs,
 ) -> Vec<VectorImageRenderRequest> {
     use crate::painting::image_content::ImageContent;
+    use crate::painting::record::paint::background_resolution::{
+        LayerResolutionContext, ResolvedBackground, committed_layer_image_paint_facts, resolve_background_for_paint,
+        resolve_mask_layers,
+    };
     use crate::painting::replaced_paint_facts::{ImagePaintFacts, ReplacedPaintFacts};
     let rows = layout_arena.paintable_rows();
     let converter =
-        crate::painting::display_list::device_pixels::DevicePixelConverter::new(device_pixels_per_css_pixel);
+        crate::painting::display_list::device_pixels::DevicePixelConverter::new(inputs.device_pixels_per_css_pixel);
     let every_row_records = layout_arena.paint_damage_covers_everything();
+    let records_afresh = |row: NodeSlotId| {
+        rows.paintable_row_is_populated(row)
+            && (every_row_records || !layout_arena.row_paint_state(row).damage().is_empty())
+    };
+    let color_scheme = |owner: NodeSlotId| {
+        image_color_scheme(
+            layout_arena,
+            owner,
+            inputs.document_declares_light_or_dark_color_scheme,
+            inputs.image_color_scheme_fallback,
+        )
+    };
     let mut requests = Vec::new();
+    let mut predict = |image_identity: u64, color_scheme: u8, dest_rect: libgfx_rust::IntRect, has_active_view_box| {
+        if dest_rect.is_empty() {
+            return;
+        }
+        let geometry = vector_image_render_geometry(
+            dest_rect.to_float(),
+            FloatSize {
+                width: 1.0,
+                height: 1.0,
+            },
+            has_active_view_box,
+        );
+        requests.push(VectorImageRenderRequest::new(
+            image_identity,
+            color_scheme,
+            geometry.css_width,
+            geometry.css_height,
+            geometry.raster_scale,
+        ));
+    };
+
     layout_arena.for_each_replaced_paint_facts(|row, facts| {
         let ReplacedPaintFacts::Image(ImagePaintFacts {
             natural,
@@ -99,37 +143,71 @@ pub(crate) fn predict_image_element_renders(
         else {
             return;
         };
-        if !rows.paintable_row_is_populated(row)
-            || (!every_row_records && layout_arena.row_paint_state(row).damage().is_empty())
-        {
+        if !records_afresh(row) {
             return;
         }
         let draw_rect =
             crate::painting::record::paint::replaced::image_content_draw_rect(&rows, converter, row, natural);
-        if draw_rect.is_empty() {
-            return;
-        }
-        let geometry = vector_image_render_geometry(
-            draw_rect.to_float(),
-            FloatSize {
-                width: 1.0,
-                height: 1.0,
-            },
-            *has_active_view_box,
-        );
-        requests.push(VectorImageRenderRequest::new(
-            *image_identity,
-            image_color_scheme(
-                layout_arena,
-                row,
-                document_declares_light_or_dark_color_scheme,
-                image_color_scheme_fallback,
-            ),
-            geometry.css_width,
-            geometry.css_height,
-            geometry.raster_scale,
-        ));
+        predict(*image_identity, color_scheme(row), draw_rect, *has_active_view_box);
     });
+
+    // A layer paints its image at its image rect, whose device size is what a first paint renders at,
+    // tiled or not.
+    let Some(root_background_source) = inputs.root_background_source else {
+        return requests;
+    };
+    let context = LayerResolutionContext {
+        layout_arena: &rows,
+        root_background_source,
+        css_viewport_rect: inputs.css_viewport_rect,
+    };
+    let mut predict_layers = |resolved: &ResolvedBackground<'_>| {
+        for layer in &resolved.layers {
+            let Some(image) = layer.image else {
+                continue;
+            };
+            let ImageContent::Vector {
+                image_identity,
+                has_active_view_box,
+                ..
+            } = committed_layer_image_paint_facts(layout_arena, &image).content
+            else {
+                continue;
+            };
+            let mut image_rect = layer.image_rect;
+            image_rect.x = layer.background_positioning_area.left() + layer.position_x;
+            image_rect.y = layer.background_positioning_area.top() + layer.position_y;
+            let mut dest_rect = converter.rounded_device_rect(image_rect);
+            dest_rect.width = dest_rect.width.max(1);
+            dest_rect.height = dest_rect.height.max(1);
+            predict(
+                image_identity,
+                color_scheme(image.facts_owner),
+                dest_rect,
+                has_active_view_box,
+            );
+        }
+    };
+    let mut painting_rows = Vec::new();
+    layout_arena.for_each_layer_image_paint_facts_owner(|owner| {
+        painting_rows.push(owner);
+        // The body's background paints on the root element when it propagates there.
+        if root_background_source.use_body_background_properties && owner == root_background_source.body_layout_node {
+            painting_rows.push(root_background_source.root_layout_node);
+        }
+    });
+    for row in painting_rows {
+        if !records_afresh(row) {
+            continue;
+        }
+        if let Some(background) = resolve_background_for_paint(context, row) {
+            predict_layers(&background.resolved);
+        }
+        if let Some(style) = rows.node_style_if_live(row) {
+            let border_box = crate::painting::paintable_geometry::absolute_border_box_rect(&rows, row);
+            predict_layers(&resolve_mask_layers(context, row, style, border_box));
+        }
+    }
     requests
 }
 
