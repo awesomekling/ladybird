@@ -169,28 +169,14 @@ pub struct FfiEngineComputedRecord {
     pub pseudo_records: [u64; RETRY_PSEUDO_RECORD_SLOTS],
 }
 
-/// One synchronous record demand. A nonempty cause names the census refusal that left the
-/// computation to the host; its bytes are static and never need releasing.
+/// One synchronous record demand: the row's record, or the absence of a pseudo-element that
+/// generates no box.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiRecordDemandAnswer {
     pub record: FfiEngineComputedRecord,
     pub is_absent: bool,
     pub is_provisional: bool,
-    pub decline_cause: *const u8,
-    pub decline_cause_length: usize,
-}
-
-impl FfiRecordDemandAnswer {
-    fn declined(cause: &'static str) -> Self {
-        Self {
-            record: FfiEngineComputedRecord::default(),
-            is_absent: false,
-            is_provisional: false,
-            decline_cause: cause.as_ptr(),
-            decline_cause_length: cause.len(),
-        }
-    }
 }
 
 /// One record slot per synthetic pseudo-element kind in a retried record.
@@ -3627,7 +3613,11 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
     abort_on_panic(|| {
         let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
         let Some(node) = StyleNodeID::from_raw(node) else {
-            return FfiRecordDemandAnswer::declined("GateReaction");
+            return FfiRecordDemandAnswer {
+                record: FfiEngineComputedRecord::default(),
+                is_absent: true,
+                is_provisional: false,
+            };
         };
         let result = match engine.answer_record_demand(
             node,
@@ -3637,7 +3627,7 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
             read_only,
             parent_highlight,
         ) {
-            Ok(Some(answer)) => FfiRecordDemandAnswer {
+            super::publication::RecordDemandAnswer::Record(answer) => FfiRecordDemandAnswer {
                 record: FfiEngineComputedRecord {
                     style_record: answer.style_record,
                     uses_substitution: engine.nodes_with_substituted_records.contains(&node),
@@ -3646,39 +3636,12 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
                 },
                 is_absent: false,
                 is_provisional: answer.provisional,
-                decline_cause: std::ptr::null(),
-                decline_cause_length: 0,
             },
-            Ok(None) => FfiRecordDemandAnswer {
+            super::publication::RecordDemandAnswer::Absent => FfiRecordDemandAnswer {
                 record: FfiEngineComputedRecord::default(),
                 is_absent: true,
                 is_provisional: false,
-                decline_cause: std::ptr::null(),
-                decline_cause_length: 0,
             },
-            Err(cause) => {
-                // The host recomputes a declined element demand itself. Name that entry by the
-                // decline, not as a row the engine was never offered.
-                if super::seal::is_reporting() && !read_only && pseudo_kind == u8::MAX {
-                    let cold = engine
-                        .retained
-                        .computed_group_sets
-                        .assigned_style_record(node)
-                        .is_none();
-                    engine.retained.host_entry_causes.insert(node, (cause, cold));
-                }
-                // A declined pseudo-element demand leaves the host the record the pseudo-element
-                // had, which is a refused row like any other.
-                if pseudo_kind != u8::MAX {
-                    let cold = engine
-                        .retained
-                        .computed_group_sets
-                        .pseudo_style_record(node, pseudo_kind)
-                        .is_none();
-                    super::seal::note_host_entry(cause, super::seal::HostEntryKind::Refused, cold);
-                }
-                FfiRecordDemandAnswer::declined(cause)
-            }
         };
         engine.record_boundary_call(EventKind::AnswerRecordDemand, |payload| {
             payload.write_u32(node.raw());
@@ -3694,12 +3657,8 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
             for record in result.record.pseudo_records {
                 payload.write_u64(record);
             }
-            let cause = if result.decline_cause_length == 0 {
-                &[][..]
-            } else {
-                unsafe { std::slice::from_raw_parts(result.decline_cause, result.decline_cause_length) }
-            };
-            payload.write_bytes(cause);
+            // Where a declined demand once named its cause; kept so recordings keep their format.
+            payload.write_bytes(&[]);
         });
         result
     })

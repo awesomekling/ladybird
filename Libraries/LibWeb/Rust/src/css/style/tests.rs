@@ -2414,7 +2414,7 @@ fn pseudo_record_demand_reports_absence_without_rules() {
         },
     );
     let answer = engine.answer_record_demand(nodes[1], Some(2), false, false, false, 0);
-    assert!(matches!(answer, Ok(None)), "{answer:?}");
+    assert!(matches!(answer, publication::RecordDemandAnswer::Absent), "{answer:?}");
 }
 
 #[test]
@@ -2446,7 +2446,7 @@ fn read_only_pseudo_demand_does_not_publish_match_state() {
     let published_count = engine.published_match_answers.entries.len();
 
     let answer = engine.answer_record_demand(nodes[1], Some(2), false, false, true, 0);
-    assert!(matches!(answer, Ok(None)), "{answer:?}");
+    assert!(matches!(answer, publication::RecordDemandAnswer::Absent), "{answer:?}");
     assert_eq!(engine.retained_match_answers.column, retained_answers);
     assert_eq!(
         engine.retained_match_answers.cascade_input_column,

@@ -4750,8 +4750,104 @@ impl StyleEngineState {
     /// Answer an observation of one node without draining the document's transaction. A
     /// read-only observation uses a retained match answer or a private matching traversal and
     /// leaves the published winner rows and invalidation facts untouched.
+    ///
+    /// Every demand is answered: the row's record, or a pseudo-element that generates no box.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn answer_record_demand(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        exclude_inline_style: bool,
+        targeted: bool,
+        read_only: bool,
+        parent_highlight: u64,
+        counters: &mut Counters,
+    ) -> RecordDemandAnswer {
+        match self.answer_or_decline_record_demand(
+            node,
+            pseudo,
+            exclude_inline_style,
+            targeted,
+            read_only,
+            parent_highlight,
+            counters,
+        ) {
+            Ok(Some(record)) => RecordDemandAnswer::Record(record),
+            Ok(None) => RecordDemandAnswer::Absent,
+            Err(cause) => self.declined_record_demand_fallback(node, pseudo, read_only, cause, counters),
+        }
+    }
+
+    /// A demand the engine declined still answers. None does: each decline is an input the
+    /// demand's caller owes first. Should one happen, the seal reports it, and the row keeps the
+    /// record it has; an element without one takes the initial values.
+    fn declined_record_demand_fallback(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        read_only: bool,
+        cause: &'static str,
+        counters: &mut Counters,
+    ) -> RecordDemandAnswer {
+        debug_assert!(false, "a record demand declined ({cause})");
+        let installed = match pseudo {
+            Some(kind) => self.computed_group_sets.pseudo_style_record(node, kind),
+            None => self.computed_group_sets.assigned_style_record(node),
+        };
+        seal::note_host_entry(cause, seal::HostEntryKind::Refused, installed.is_none());
+        let answer = |record: computed::FinalStyleRecordID| {
+            RecordDemandAnswer::Record(RetriedEngineRecord {
+                style_record: record.raw(),
+                ..RetriedEngineRecord::default()
+            })
+        };
+        if pseudo.is_some() {
+            return installed.map_or(RecordDemandAnswer::Absent, answer);
+        }
+        let record = match installed {
+            Some(record) if !read_only => return answer(record),
+            Some(record) => {
+                self.computed_group_sets.pin_style_record(record.raw());
+                record
+            }
+            None => {
+                let mut document = node;
+                while let Some(parent) = self.tree.parent(document) {
+                    document = parent;
+                }
+                let facts = self.computed_group_sets.adjustment_facts(node);
+                let Some(record) = self.declared_only_record(document, facts, &[], counters) else {
+                    return RecordDemandAnswer::Absent;
+                };
+                record
+            }
+        };
+        // A private answer is pinned where the demand keeps its answers; a published one is the
+        // row's record.
+        if read_only {
+            self.drop_demand_pseudo_record(node, u8::MAX);
+            self.demand_pseudo_records.insert((node, u8::MAX), record);
+            return answer(record);
+        }
+        let inherited_group_count = self
+            .computed_group_sets
+            .inherited_group_count(record.raw())
+            .unwrap_or(computed::ENGINE_INHERITED_GROUP_COUNT);
+        let assigned = self
+            .assign_shared_style_record(
+                computed::ComputedStyleTarget::new(node, u8::MAX),
+                record.raw(),
+                inherited_group_count,
+                false,
+                counters,
+            )
+            .style_record_identity;
+        self.computed_group_sets.unpin_style_record(record.raw());
+        answer(assigned)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn answer_or_decline_record_demand(
         &mut self,
         node: StyleNodeID,
         pseudo: Option<u8>,
@@ -4840,7 +4936,7 @@ impl StyleEngineState {
         let previous_container_effect = read_only.then(|| self.container_effects_for_host.get(&node).cloned());
         let mut private_origin_record = None;
         if pseudo.is_some() && self.computed_group_sets.assigned_style_record(node).is_none() {
-            let parent = self.answer_record_demand(node, None, false, targeted, read_only, 0, counters)?;
+            let parent = self.answer_or_decline_record_demand(node, None, false, targeted, read_only, 0, counters)?;
             // An element demand answers a live record. Without one the pseudo-element has no
             // originating record, and generates no box.
             let record = parent.map(|parent| parent.style_record).filter(|&record| {
@@ -4879,8 +4975,15 @@ impl StyleEngineState {
                         .assigned_style_record(parent)
                         .unwrap_or(computed::FinalStyleRecordID::NONE);
                     let inputs = self.container_query_inputs.get(parent).cloned();
-                    let answer =
-                        self.answer_record_demand(parent, None, false, targeted, true, 0, &mut private_counters);
+                    let answer = self.answer_or_decline_record_demand(
+                        parent,
+                        None,
+                        false,
+                        targeted,
+                        true,
+                        0,
+                        &mut private_counters,
+                    );
                     let Some(private) = answer
                         .ok()
                         .flatten()
@@ -5545,6 +5648,14 @@ pub(crate) struct RetriedEngineRecord {
 }
 
 const _: () = assert!(pseudo_kind::SYNTHETIC_COUNT == bridge::RETRY_PSEUDO_RECORD_SLOTS);
+
+/// The answer to one record demand: the row's record, or, for a pseudo-element that generates
+/// no box, its absence.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum RecordDemandAnswer {
+    Record(RetriedEngineRecord),
+    Absent,
+}
 
 /// A pseudo-element record the engine settled beside its originating element's; a removal when
 /// the new record is none.
