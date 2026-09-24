@@ -6734,6 +6734,14 @@ Optional<Compositor::CompositorFrame> LocalNavigable::record_compositor_frame(Pa
         || !m_compositor_display_list_paint_config.has_value()
         || !(m_compositor_display_list_paint_config.value() == paint_config);
 
+    // Keyboard eligibility reads the DOM and the layout tree as this frame paints them, so it is taken before the
+    // recording starts: with an overlapping render stage, tasks can change both while the recording runs. The epoch of
+    // the display list it goes with is only known after the recording, so a placeholder marks where it goes.
+    static constexpr u64 keyboard_scroll_epoch_placeholder = NumericLimits<u64>::max();
+    auto keyboard_scroll_state = is_top_level_traversable()
+        ? page().take_keyboard_scroll_state_for_compositor(keyboard_scroll_epoch_placeholder)
+        : Compositing::KeyboardScrollState {};
+
     RefPtr<Compositing::DisplayList> display_list;
     Compositing::DisplayListResourceSet display_list_command_resources;
     Compositing::DisplayListResourceSet display_list_resources;
@@ -6766,9 +6774,8 @@ Optional<Compositor::CompositorFrame> LocalNavigable::record_compositor_frame(Pa
     // Keyboard eligibility belongs to this publication, not to the cached paint commands. Refresh it even if
     // recording was skipped or returned the same display list, and send it with the corresponding scroll state.
     auto& published_display_list = display_list ? *display_list : *m_compositor_display_list;
-    auto keyboard_scroll_state = is_top_level_traversable()
-        ? page().take_keyboard_scroll_state_for_compositor(published_display_list.compatible_visual_context_tree_structural_epoch())
-        : Compositing::KeyboardScrollState {};
+    if (keyboard_scroll_state.visual_context_tree_structural_epoch == keyboard_scroll_epoch_placeholder)
+        keyboard_scroll_state.visual_context_tree_structural_epoch = published_display_list.compatible_visual_context_tree_structural_epoch();
     auto async_scrolling_metadata = published_display_list.async_scrolling_metadata().value_or({});
     async_scrolling_metadata.keyboard_scroll_state = keyboard_scroll_state;
     published_display_list.set_async_scrolling_metadata(move(async_scrolling_metadata));
