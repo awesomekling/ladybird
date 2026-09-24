@@ -186,7 +186,6 @@ define_counters! {
     EngineComputedRecordBailWinnerElement => "engineComputedRecordBailWinnerElement",
     EngineComputedRecordBailWinnerElementPublication717 => "engineComputedRecordBailWinnerElementPublication717",
     EngineComputedRecordBailWinnerElementPublication1072 => "engineComputedRecordBailWinnerElementPublication1072",
-    EngineComputedRecordBailWinnerElementPublication3731 => "engineComputedRecordBailWinnerElementPublication3731",
     EngineComputedRecordBailWinnerAnimated => "engineComputedRecordBailWinnerAnimated",
     EngineComputedRecordBailNoEnvironment => "engineComputedRecordBailNoEnvironment",
     EngineComputedRecordBailCustomPropertyUnsupportedSubstitution => "engineComputedRecordBailCustomPropertyUnsupportedSubstitution",
@@ -223,7 +222,6 @@ define_counters! {
     EngineComputedRecordBailRecordOverlayDrive441 => "engineComputedRecordBailRecordOverlayDrive441",
     EngineComputedRecordBailRecordOverlay => "engineComputedRecordBailRecordOverlay",
     EngineComputedRecordBailRecordOverlayPublication937 => "engineComputedRecordBailRecordOverlayPublication937",
-    EngineComputedRecordBailRecordOverlayPublication2328 => "engineComputedRecordBailRecordOverlayPublication2328",
     EngineComputedRecordBailRecordTable => "engineComputedRecordBailRecordTable",
     PrefixDeadDeltaBailMatched => "prefixDeadDeltaBailMatched",
     PrefixDeadDeltaBailOwnAdditions => "prefixDeadDeltaBailOwnAdditions",
@@ -443,16 +441,8 @@ impl Counters {
                 "BailWinnerElement@publication.rs:1072",
             ),
             (
-                Counter::EngineComputedRecordBailWinnerElementPublication3731,
-                "BailWinnerElement@publication.rs:3731",
-            ),
-            (
                 Counter::EngineComputedRecordBailRecordOverlayPublication937,
                 "BailRecordOverlay@publication.rs:937",
-            ),
-            (
-                Counter::EngineComputedRecordBailRecordOverlayPublication2328,
-                "BailRecordOverlay@publication.rs:2328",
             ),
         ] {
             if moved(counter as usize) {

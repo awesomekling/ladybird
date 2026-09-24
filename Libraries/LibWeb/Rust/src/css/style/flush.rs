@@ -2284,15 +2284,14 @@ impl StyleEngineState {
                     } else if resuming_font {
                         true
                     } else if direct_inherited_delta.is_some() {
-                        decline_cause = "DirectInheritedDelta";
                         false
                     } else if reaction == transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES
                         && !parent_inputs_moved.display
                         && !self.node_style_reads_custom_properties(node)
                     {
                         // C++ only refreshes the inherited environment for a non-consumer. There
-                        // is no element record to recompute or compare against the parent's groups.
-                        decline_cause = "InheritedCustomPropertiesNonConsumer";
+                        // is no element record to recompute or compare against the parent's groups,
+                        // so the row owes no record and declines nothing.
                         false
                     } else if !(reaction_is_settleable
                         || (old_style_record == 0 && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
@@ -2465,6 +2464,7 @@ impl StyleEngineState {
                         && !skip_hidden
                         && engine_computed_delta.is_none()
                         && direct_inherited_delta.is_none()
+                        && (engine_computed_gate_passes || !decline_cause.is_empty())
                     {
                         if engine_computed_gate_passes {
                             decline_cause = counters

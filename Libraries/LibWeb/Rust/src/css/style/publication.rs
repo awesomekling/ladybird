@@ -2341,12 +2341,9 @@ impl RetainedState {
                     derived_under_parent(self, record).then_some((record, true))
                 })
         })?;
-        // A record with transitions will need C++ on its next change. Keep its initial
-        // computation in C++ too, so that fallback retains the input record and can select
-        // only the changed groups instead of rebuilding the entire style.
+        // A record with an animation overlay or transitions is not shared; the row drives its
+        // own. Missing the cache declines nothing.
         if self.record_requires_cpp_animation(record) {
-            counters.bump(Counter::EngineComputedRecordBailRecordOverlayPublication2328);
-            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
             return None;
         }
         if !self.engine_pseudo_inputs_available(node, Some(record), counters) {
@@ -3532,9 +3529,6 @@ impl RetainedState {
                 Ok(Some((_, _, checks))) if checks.whole_context_free => {}
                 Err(counter) => {
                     counters.bump(counter);
-                    if counter == Counter::EngineComputedRecordBailWinnerElementPublication3731 {
-                        counters.bump(Counter::EngineComputedRecordBailWinnerElement);
-                    }
                     return false;
                 }
                 _ => return false,
@@ -3828,14 +3822,10 @@ impl RetainedState {
                 .written_winner_declaration(rule, winner.property, winner.important, winner.key.value)
                 .map(|(index, value)| (index, value, self.program.written_value_checks(rule, index)))),
             WinnerSource::Element(kind) => {
+                // The host publishes an element's declarations complete and with the values they
+                // were written with; only a replayed recording carries none.
                 let (declared, _) = self.facts.element_declared_properties(node, kind);
-                let complete = self
-                    .facts
-                    .element_declarations_are_complete_but_for_custom_properties(node, kind);
                 let written = self.facts.element_written_declared_values(node, kind);
-                if !complete || written.len() != declared.len() {
-                    return Err(Counter::EngineComputedRecordBailWinnerElementPublication3731);
-                }
                 Ok(declared
                     .iter()
                     .rposition(|declared| {
@@ -3843,12 +3833,12 @@ impl RetainedState {
                             && declared.important == winner.important
                             && declared.value == winner.key.value
                     })
-                    .map(|index| {
-                        (
+                    .and_then(|index| {
+                        Some((
                             index,
-                            &written[index],
+                            written.get(index)?,
                             self.facts.element_written_value_checks(node, kind, index),
-                        )
+                        ))
                     }))
             }
             WinnerSource::ExactCascade => Err(Counter::EngineComputedRecordBailWinnerOperator),
@@ -4155,9 +4145,6 @@ impl RetainedState {
                 Ok(written) => written,
                 Err(counter) => {
                     counters.bump(counter);
-                    if counter == Counter::EngineComputedRecordBailWinnerElementPublication3731 {
-                        counters.bump(Counter::EngineComputedRecordBailWinnerElement);
-                    }
                     None
                 }
             };
@@ -5407,9 +5394,8 @@ impl StyleEngineState {
         {
             return Err("GateReaction");
         }
-        if exclude_inline_style && (!read_only || pseudo.is_some()) {
-            return Err("GateDeclarations");
-        }
+        // Only a read-only observation of an element leaves its inline style out.
+        debug_assert!(!exclude_inline_style || (read_only && pseudo.is_none()));
         let target_has_pending_facts = self.host.journal.inputs().any(|input| {
             matches!(input.key, InputKey::LocalFeature(changed, _) | InputKey::State(changed, _) if changed == node)
         });
