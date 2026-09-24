@@ -33,27 +33,20 @@ unsafe extern "C" {
 /// moves, and released when the node is retired.
 pub(crate) struct RetainedCustomPropertyData {
     data: crate::css::host_shared::HostShared<std::ffi::c_void>,
-    store: crate::css::host_shared::HostShared<std::ffi::c_void>,
 }
 
 impl RetainedCustomPropertyData {
     /// # Safety
-    /// `data` must be a live `Web::CSS::CustomPropertyData`, and `store` must be the one it
-    /// carries.
-    unsafe fn retain(data: *const std::ffi::c_void, store: *const std::ffi::c_void) -> Self {
+    /// `data` must be a live `Web::CSS::CustomPropertyData`.
+    unsafe fn retain(data: *const std::ffi::c_void) -> Self {
         unsafe { web_css_custom_property_data_reference(data) };
         Self {
             data: crate::css::host_shared::HostShared::new(data),
-            store: crate::css::host_shared::HostShared::new(store),
         }
     }
 
     pub(crate) fn data(&self) -> *const std::ffi::c_void {
         self.data.as_ptr()
-    }
-
-    pub(crate) fn store(&self) -> *const std::ffi::c_void {
-        self.store.as_ptr()
     }
 }
 
@@ -106,7 +99,6 @@ impl RetainedState {
 
     pub(crate) fn freeze_longhand_inputs(&mut self, nodes: &[StyleNodeID]) {
         self.frozen_longhand_inputs.clear();
-        self.legacy_finalized_longhand_rows.clear();
         self.frozen_longhand_inputs.reserve(nodes.len());
         for &node in nodes {
             if self.frozen_longhand_inputs.contains_key(&node) || !self.tree().is_live(node) {
@@ -160,39 +152,7 @@ impl RetainedState {
             }
         }
         self.element_custom_property_data
-            .insert(node, Some(unsafe { RetainedCustomPropertyData::retain(data, store) }));
-    }
-
-    /// Which element a row inherits custom properties from. A pseudo-element row inherits from its
-    /// own originating element, exactly as `element_to_inherit_style_from` says.
-    fn custom_property_inheritance_parent(&self, node: StyleNodeID, pseudo_kind: u8) -> Option<StyleNodeID> {
-        if pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT {
-            self.tree.inheritance_parent(node)
-        } else {
-            Some(node)
-        }
-    }
-
-    /// What a row inherits custom properties from: `Some(row)` when the engine knows, where the
-    /// row's own `Option` is `None` for an element holding no environment, and `None` when the
-    /// engine has not been told and the host has to walk for itself.
-    pub(crate) fn retained_inheritance_custom_property_data(
-        &self,
-        node: StyleNodeID,
-        pseudo_kind: u8,
-    ) -> Option<Option<&RetainedCustomPropertyData>> {
-        if !self.tree.is_live(node) {
-            return None;
-        }
-        // A row with no inheritance parent inherits nothing, and that needs nothing retained.
-        let Some(parent) = self.custom_property_inheritance_parent(node, pseudo_kind) else {
-            return Some(None);
-        };
-        self.element_custom_property_data.get(&parent).map(Option::as_ref)
-    }
-
-    pub(crate) fn resolved_font(&self, request: bridge::FfiFontResolutionRequest) -> Option<bridge::FfiResolvedFont> {
-        self.font_resolution.as_ref()?.lookup(request)
+            .insert(node, Some(unsafe { RetainedCustomPropertyData::retain(data) }));
     }
 
     pub fn set_sampled_composition_identity(&mut self, node: StyleNodeID, record: u64) {
@@ -1064,14 +1024,6 @@ impl RetainedState {
         self.facts.note_attribute_name_forms(name, forms);
     }
 
-    pub(crate) fn substitution_attributes(&self, node: StyleNodeID) -> SubstitutionAttributeSnapshot<'_> {
-        SubstitutionAttributeSnapshot {
-            text: self.facts.substitution_attributes(node),
-            names_are_ascii_case_insensitive: !self.html_element_namespace.is_none()
-                && self.facts.namespace_of(node) == self.html_element_namespace,
-        }
-    }
-
     /// Record the id an element answers to, or clear it with atom zero.
     pub fn set_element_id_name(&mut self, node: StyleNodeID, name: StyleAtomID) {
         self.tree.set_element_id_name(node, name, &mut self.memory);
@@ -1274,17 +1226,6 @@ impl RetainedState {
         );
     }
 
-    /// The definition the last plan applied to each of the CSS animations the host holds for one of
-    /// an element's animation lists, in the same order as the names.
-    #[must_use]
-    pub(crate) fn element_applied_animation_definitions(
-        &self,
-        node: StyleNodeID,
-        slot: animations::AnimationSlot,
-    ) -> &[animations::AppliedAnimationDefinition] {
-        self.css_defined_animations.applied_definitions(node, slot)
-    }
-
     /// The names of the CSS animations the host holds for one of an element's animation lists.
     #[must_use]
     pub(crate) fn element_css_defined_animations(
@@ -1367,16 +1308,6 @@ impl RetainedState {
         }
     }
 
-    /// The effects the host described for one of an element's animation lists.
-    #[must_use]
-    pub(crate) fn element_animation_effect_descriptions(
-        &self,
-        node: StyleNodeID,
-        slot: animations::AnimationSlot,
-    ) -> &[animations::PublishedEffect] {
-        self.animation_effect_descriptions.effects(node, slot)
-    }
-
     /// Lend out the effects the host described for one of an element's animation lists; see
     /// `AnimationEffectDescriptions::take`.
     pub(crate) fn take_element_animation_effect_descriptions(
@@ -1409,24 +1340,6 @@ impl RetainedState {
         &self,
     ) -> Option<std::sync::Arc<crate::css::custom_properties::CustomPropertyRegistry>> {
         self.custom_property_registry.clone()
-    }
-
-    /// The document's custom-property registry as this transaction froze it, for a caller that
-    /// needs to ask about one name rather than about the document. `None` where the engine holds
-    /// no registry and so can answer nothing.
-    #[must_use]
-    pub(crate) fn custom_property_registry(&self) -> Option<&crate::css::custom_properties::CustomPropertyRegistry> {
-        self.custom_property_registry.as_deref()
-    }
-
-    /// The timing of the animations the host holds for one of an element's animation lists.
-    #[must_use]
-    pub(crate) fn element_animation_timing_rows(
-        &self,
-        node: StyleNodeID,
-        slot: animations::AnimationSlot,
-    ) -> &[animations::AnimationTimingRow] {
-        self.animation_timing_rows.rows(node, slot)
     }
 
     /// The `linear()` stops the rows of one of an element's animation lists name by range.
@@ -1468,11 +1381,6 @@ impl RetainedState {
     pub fn set_root_element_font_metrics(&mut self, words: &[u64], depends_on_viewport_metrics: bool) {
         self.root_element_font_metrics =
             animations::RootElementFontMetrics::from_words(words, depends_on_viewport_metrics);
-    }
-
-    #[must_use]
-    pub(crate) fn root_element_font_metrics(&self) -> animations::RootElementFontMetrics {
-        self.root_element_font_metrics
     }
 
     /// Record the custom properties an element declares or references. Also an index rather than an
@@ -1879,7 +1787,6 @@ impl StyleEngineState {
                 frozen_longhand_inputs: HashMap::default(),
                 element_custom_property_data: HashMap::default(),
                 sampled_custom_property_environments: HashMap::default(),
-                legacy_finalized_longhand_rows: HashMap::default(),
                 font_resolution: None,
                 font_face_snapshot: None,
                 font_cascade_memo: None,
@@ -1912,8 +1819,6 @@ impl StyleEngineState {
                 root_element_font_metrics: Default::default(),
                 animation_keyframes: Default::default(),
                 custom_property_registrations_changed: false,
-                pending_element_style_computation_selections: HashMap::default(),
-                pending_pseudo_style_computation_selections: HashMap::default(),
                 engine_computed_records_pending: HashMap::default(),
                 demand_pseudo_records: HashMap::default(),
                 flush_stamp: 0,
@@ -2693,8 +2598,6 @@ impl StyleEngineState {
             self.retained.winner_groups.remove(node);
             self.retained.computed_group_sets.remove(node);
             self.retained.drop_demand_pseudo_records(node);
-            self.retained.pending_element_style_computation_selections.remove(&node);
-            self.retained.pending_pseudo_style_computation_selections.remove(&node);
             self.retained.nodes_with_substituted_records.remove(&node);
             self.retained.nodes_with_tree_counting_records.remove(&node);
             self.retained.nodes_owing_a_transition_registration.remove(&node);
@@ -3478,80 +3381,3 @@ impl StyleEngineState {
 // per-update document environment holds the viewport, the root metrics and the initial font, and
 // a record's font group holds the five metrics `Length::FontMetrics` carries - so the row can be
 // answered without reading the DOM.
-impl RetainedState {
-    pub(crate) fn retained_font_length_resolution_context(
-        &self,
-        node: StyleNodeID,
-        pseudo_kind: u8,
-        document: &crate::css::style_compute::FfiFontLengthResolutionDocumentInputs,
-    ) -> crate::css::style_compute::FfiLengthResolutionContext {
-        use crate::css::computed_value_views::ComputedValuesView;
-        use crate::css::css_enums::writing_mode;
-        use crate::css::host_shared::SharedPayload;
-        use crate::css::style_compute::{FfiFontMetrics, FfiLengthResolutionContext};
-
-        let values_for = |record: u64| -> Option<ComputedValuesView<'_>> {
-            let payloads = self.computed_group_sets.style_record_payloads(record)?;
-            Some(ComputedValuesView::new(SharedPayload::as_pointer_slice(payloads)))
-        };
-        let parent_record = self
-            .retained_inheritance_parent_style_record(node, pseudo_kind)
-            .map_or(0, |record| record.raw());
-        let parent_values = if parent_record == 0 {
-            None
-        } else {
-            values_for(parent_record)
-        };
-
-        // The row's own inline axis comes from the record it still holds, the way the host read it
-        // from the same record; a row with no record of its own borrows its parent's answer.
-        let own_record = self
-            .computed_group_sets
-            .assigned_style_record(node)
-            .map_or(0, |record| record.raw());
-        let inline_axis_is_horizontal = (own_record != 0)
-            .then(|| values_for(own_record))
-            .flatten()
-            .or(parent_values)
-            .is_none_or(|values| values.writing_mode() == writing_mode::HORIZONTAL_TB);
-
-        let font_metrics = match parent_values {
-            Some(values) => FfiFontMetrics {
-                font_size: values.font_size().to_double(),
-                x_height: super::publication::drive_font_metric(values.font_x_height()),
-                cap_height: super::publication::drive_font_metric(values.font_ascent()),
-                zero_advance: super::publication::drive_font_metric(values.font_zero_advance()),
-                line_height: values.line_height().to_double(),
-            },
-            // No element to inherit from: the document's initial font, with the initial line
-            // height, exactly as `Length::ResolutionContext::for_document` builds it.
-            None => document.initial_font_metrics,
-        };
-        let font_metrics_depend_on_viewport_metrics = parent_record != 0
-            && self
-                .computed_group_sets
-                .style_record_dependency_flags(parent_record)
-                .is_some_and(|flags| flags & (1 << 1) != 0);
-        let root_font_metrics = match parent_values {
-            Some(_) => document.root_font_metrics,
-            None => font_metrics,
-        };
-        FfiLengthResolutionContext {
-            viewport_width: document.viewport_width,
-            viewport_height: document.viewport_height,
-            font_metrics,
-            root_font_metrics,
-            font_metrics_depend_on_viewport_metrics,
-            root_font_metrics_depend_on_viewport_metrics: parent_values.is_some()
-                && document.root_font_metrics_depend_on_viewport_metrics,
-            has_container_width_basis: false,
-            has_container_height_basis: false,
-            container_width_basis: 0.0,
-            container_height_basis: 0.0,
-            container_width_basis_depends_on_viewport_metrics: false,
-            container_height_basis_depends_on_viewport_metrics: false,
-            subject_inline_axis_is_horizontal: inline_axis_is_horizontal,
-            resolved_viewport_relative_length: std::ptr::null_mut(),
-        }
-    }
-}

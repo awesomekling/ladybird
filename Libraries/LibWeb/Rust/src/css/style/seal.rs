@@ -149,46 +149,6 @@ pub(crate) fn note_host_entry(cause: &'static str, kind: HostEntryKind, cold: bo
     }
 }
 
-/// Record that the row the host is driving now applied its results to the main side.
-fn note_host_entry_applied() {
-    let Some(key) = CURRENT_HOST_ENTRY.with(|current| current.borrow_mut().take()) else {
-        return;
-    };
-    HOST_ENTRY_CAUSES.with(|causes| {
-        causes.borrow_mut().entry(key).or_default().applied += 1;
-    });
-}
-
-/// Record that one row's computation was entered from the host's per-element driver.
-///
-/// This is not a seal violation on its own: the row may neither read live host state nor write
-/// anything the host can see. It is counted because the end state is one sealed pass over the
-/// whole update, and a host loop that enters the engine once per element is not that - between
-/// two rows control is on the host side, holding host state. Driving this to zero is what makes
-/// the stage a single function rather than a sequence of calls.
-pub(crate) fn note_host_driven_row(kinds: u8) {
-    if mode() == Mode::Off || UPDATE_DEPTH.with(|depth| depth.get() == 0) {
-        return;
-    }
-    HOST_DRIVEN_ROWS.with(|rows| rows.set(rows.get().wrapping_add(1)));
-    let names = [
-        "in_frozen_batch",
-        "pseudo_element",
-        "no_previous_record",
-        "highlight_parent",
-        "longhand_drive_only",
-    ];
-    HOST_DRIVEN_ROW_KINDS.with(|counts| {
-        let mut counts = counts.borrow_mut();
-        for (index, name) in names.into_iter().enumerate() {
-            if kinds & (1 << index) != 0 {
-                let count = counts.entry(name).or_default();
-                *count = count.wrapping_add(1);
-            }
-        }
-    });
-}
-
 /// Report how often the engine declined to compute a record itself, by the reason it recorded.
 /// A host-driven row inside a published batch is a row one of these declined.
 ///
@@ -205,47 +165,6 @@ pub(crate) fn flush_engine_decline_census<'a>(counters: impl Iterator<Item = (&'
     for (name, value) in rows {
         write_report(&format!("STYLE SEAL COUNT: engine_record {name}: {value}\n"));
     }
-}
-
-/// Record that one row's animations were sampled by the host after the stage returned.
-///
-/// The stage could not sample the element for itself, so it hands the rest of its
-/// finalization back and the host samples between two sealed calls. That is no longer a
-/// callback out of sealed computation, but it is still main-side work inside the update, and
-/// it stays counted for the same reason `host_driven_rows` is: the end state is one sealed
-/// pass, and a row the host has to finish is not that.
-pub(crate) fn note_host_sampled_animation_row() {
-    if mode() == Mode::Off || UPDATE_DEPTH.with(|depth| depth.get() == 0) {
-        return;
-    }
-    HOST_SAMPLED_ANIMATION_ROWS.with(|rows| rows.set(rows.get().wrapping_add(1)));
-    note_host_entry("animation_sampling", HostEntryKind::Sampled, false);
-}
-
-pub(crate) fn note_longhand_input_freeze(reasons: u8) {
-    note_stage_interleave("longhand_input_freeze");
-    if mode() == Mode::Off || UPDATE_DEPTH.with(|depth| depth.get() == 0) {
-        return;
-    }
-    let names = [
-        "element_adjustment_facts",
-        "monospace_recascade",
-        "tree_counting_inputs",
-        "custom_property_inheritance_walk",
-        "custom_property_adapter",
-        "font_length_resolution_context",
-        "box_type_parent_display",
-        "unused_bit_7",
-    ];
-    LONGHAND_INPUT_FREEZE_REASONS.with(|counts| {
-        let mut counts = counts.borrow_mut();
-        for (index, name) in names.into_iter().enumerate() {
-            if reasons & (1 << index) != 0 {
-                let count = counts.entry(name).or_default();
-                *count = count.wrapping_add(1);
-            }
-        }
-    });
 }
 
 fn write_report(report: &str) {
@@ -278,38 +197,6 @@ pub(crate) fn end_update() {
     });
     if finished && mode() == Mode::Report {
         flush_census();
-    }
-}
-
-/// Record a return to main-thread work before the complete style stage has finished.
-pub(crate) fn note_stage_interleave(name: &'static str) {
-    let mode = mode();
-    if mode == Mode::Off || UPDATE_DEPTH.with(|depth| depth.get() == 0) {
-        return;
-    }
-    STAGE_INTERLEAVES.with(|interleaves| {
-        let mut interleaves = interleaves.borrow_mut();
-        let count = interleaves.entry(name).or_default();
-        *count = count.wrapping_add(1);
-    });
-    if name == "longhand_result_apply" {
-        note_host_entry_applied();
-    }
-    let allowed = match name {
-        "longhand_input_freeze" => {
-            std::env::var("LIBWEB_SEAL_STYLE_STAGE_ALLOW_LONGHAND_INPUT_FREEZE").as_deref() == Ok("1")
-        }
-        "longhand_result_apply" => {
-            std::env::var("LIBWEB_SEAL_STYLE_STAGE_ALLOW_LONGHAND_RESULT_APPLY").as_deref() == Ok("1")
-        }
-        _ => false,
-    };
-    assert!(
-        mode != Mode::Abort || allowed,
-        "style stage is sealed, but interleaves main-thread work for {name}"
-    );
-    if REPORTED.with(|reported| reported.borrow_mut().insert(name)) {
-        write_report(&format!("STYLE SEAL: stage_interleave {name}\n"));
     }
 }
 

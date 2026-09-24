@@ -9,6 +9,7 @@ use super::bridge::{
     FfiTreeDelta,
 };
 use super::matching::{SelectorQueryCache, SelectorQueryContext};
+#[cfg(any(test, feature = "style-recording"))]
 use super::publication::ExactCascadeDonor;
 use super::*;
 use crate::css::declaration_block;
@@ -62,48 +63,12 @@ impl StyleEngine {
         )
     }
 
-    pub(crate) unsafe fn retain_resolved_custom_property_environment(
-        &mut self,
-        store: *const std::ffi::c_void,
-        parent: u64,
-    ) -> u64 {
-        unsafe {
-            self.state
-                .custom_property_environments
-                .retain_engine_environment(store, parent)
-        }
-    }
-
     pub(crate) fn box_type_parent_display(
         &self,
         node: StyleNodeID,
         is_pseudo_element: bool,
     ) -> Option<crate::css::display::FfiDisplay> {
         self.state.box_type_parent_display_for_target(node, is_pseudo_element)
-    }
-
-    /// The element's font answer, as far as retained engine state has one.
-    pub(crate) fn resolved_font_for_longhand_drive(
-        &self,
-        request: bridge::FfiFontResolutionRequest,
-    ) -> Option<bridge::FfiResolvedFont> {
-        self.state.retained.resolved_font(request)
-    }
-
-    /// Answer one longhand drive's font request between two drives of its element, through the
-    /// same between-pass service the engine's own computation uses.
-    pub(crate) fn service_longhand_drive_font_request(
-        &mut self,
-        style_node: u32,
-        request: bridge::FfiFontResolutionRequest,
-    ) {
-        self.state.refill_font_requests(
-            vec![(
-                StyleNodeID::from_raw(style_node),
-                font_resolution::FontRequest::new(request),
-            )],
-            &mut self.counters,
-        );
     }
 
     pub(crate) fn document_style_computation_inputs(&self) -> Option<bridge::FfiDocumentStyleComputationInputs> {
@@ -1194,33 +1159,6 @@ impl StyleEngine {
         )
     }
 
-    /// Keep the style record already assigned to a target whose recomputation its input record
-    /// answered.
-    #[inline]
-    pub(crate) fn reaffirm_style_record(
-        &mut self,
-        target: computed::ComputedStyleTarget,
-    ) -> Option<computed::FinalStyleRecordID> {
-        self.state.reaffirm_style_record(target, &mut self.counters)
-    }
-
-    #[inline]
-    pub(crate) fn assign_shared_style_record(
-        &mut self,
-        target: computed::ComputedStyleTarget,
-        style_record: u64,
-        inherited_group_count: usize,
-        inherited_group_swap_eligible: bool,
-    ) -> computed::ComputedGroupPublication {
-        self.state.assign_shared_style_record(
-            target,
-            style_record,
-            inherited_group_count,
-            inherited_group_swap_eligible,
-            &mut self.counters,
-        )
-    }
-
     /// Intern the immutable computed-group payloads of a style which has no live StyleEngine target.
     #[inline]
     pub(crate) fn intern_computed_groups(
@@ -1259,18 +1197,6 @@ impl StyleEngine {
             payloads,
             &mut self.counters,
         )
-    }
-
-    #[inline]
-    pub(crate) fn publish_exact_cascade_state(
-        &mut self,
-        target: computed::ComputedStyleTarget,
-        store: &CascadedPropertyStore,
-        inherited_style_groups: u8,
-        donor: Option<ExactCascadeDonor>,
-    ) -> (bridge::FfiExactCascadePublication, Vec<(u16, SpecifiedWinnerKey)>, bool) {
-        self.state
-            .publish_exact_cascade_state(target, store, inherited_style_groups, donor, &mut self.counters)
     }
 
     #[cfg(feature = "style-recording")]

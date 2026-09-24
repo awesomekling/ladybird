@@ -97,7 +97,6 @@ public:
         StyleRecordID new_style_record;
     };
     using StyleRecordView = StyleEngineFFI::FfiStyleRecordView;
-    using ExactCascadePublication = StyleEngineFFI::FfiExactCascadePublication;
     // Publish the immutable input identities of an element or pseudo-element's base style and
     // return its previous and current StyleRecordID assignments. A zero node interns an unassigned
     // record for a style target which is not registered in the engine.

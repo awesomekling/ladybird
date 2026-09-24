@@ -47,25 +47,7 @@ pub(crate) struct AppliedAnimationDefinition {
     words: [u64; APPLIED_DEFINITION_WORD_COUNT],
 }
 
-/// The word the timeline kind sits in, and its shift, so the stage can refuse to decide the one
-/// kind whose materialization reads the tree.
-const APPLIED_DEFINITION_FLAGS_WORD: usize = 3;
-/// `animation-duration: auto`, whose value is the effect's intrinsic duration rather than the
-/// definition's.
-const APPLIED_DEFINITION_DURATION_IS_AUTO: u64 = 1;
 const APPLIED_DEFINITION_TIMELINE_KIND_SHIFT: u32 = 40;
-/// The fields of the flags word a change to which moves no time: `animation-direction`,
-/// `animation-fill-mode` and `animation-composition`, each a byte. Everything else in that word -
-/// `duration_is_auto`, the play state and the timeline - is a change the retime cannot describe.
-const APPLIED_DEFINITION_RETIMABLE_FLAGS_MASK: u64 = (0xff << 8) | (0xff << 24) | (0xff << 32);
-/// The `animation-play-state` byte of the flags word. `apply_css_properties` compares it against
-/// the play state the last definition applied, and runs `play_from_css()` or `pause_from_css()`
-/// when the two differ.
-const APPLIED_DEFINITION_PLAY_STATE_MASK: u64 = 0xff << 16;
-const APPLIED_DEFINITION_KEYFRAME_SET_WORD: usize = 4;
-const APPLIED_DEFINITION_TIMING_FUNCTION_WORD: usize = 5;
-/// `AnimationTimelineSource::Kind::Scroll`.
-const APPLIED_DEFINITION_TIMELINE_KIND_SCROLL: u64 = 2;
 
 impl AppliedAnimationDefinition {
     #[must_use]
@@ -98,114 +80,6 @@ impl AppliedAnimationDefinition {
                 animation.timing_function as u64,
             ],
         }
-    }
-
-    /// Whether the timeline this definition asks for is one whose materialization the stage can
-    /// predict. A scroll timeline is rebuilt from the element's surroundings every time it is
-    /// applied, and whether the rebuilt one would replace the animation's is a question about the
-    /// tree, so a definition that names one is never called unchanged.
-    #[must_use]
-    fn timeline_is_decidable(&self) -> bool {
-        (self.words[APPLIED_DEFINITION_FLAGS_WORD] >> APPLIED_DEFINITION_TIMELINE_KIND_SHIFT) & 0xff
-            != APPLIED_DEFINITION_TIMELINE_KIND_SCROLL
-    }
-
-    /// Whether applying `self` to an animation that last had `published` applied would leave it
-    /// exactly as it is.
-    #[must_use]
-    pub(crate) fn would_change_nothing(&self, published: &Self) -> bool {
-        if !self.timeline_is_decidable() {
-            return false;
-        }
-        // An animation no plan has described yet publishes a null timing function, which no
-        // computed definition ever has.
-        if published.words[APPLIED_DEFINITION_TIMING_FUNCTION_WORD] == 0 {
-            return false;
-        }
-        for index in 0..APPLIED_DEFINITION_WORD_COUNT {
-            if index == APPLIED_DEFINITION_TIMING_FUNCTION_WORD {
-                continue;
-            }
-            if self.words[index] != published.words[index] {
-                return false;
-            }
-        }
-        unsafe {
-            crate::css::style_value::rust_style_value_equals(
-                self.words[APPLIED_DEFINITION_TIMING_FUNCTION_WORD] as *const _,
-                published.words[APPLIED_DEFINITION_TIMING_FUNCTION_WORD] as *const _,
-            )
-        }
-    }
-
-    /// Whether applying `self` to an animation that last had `published` applied would leave its
-    /// timing exactly as it is and only give its effect another keyframe set.
-    ///
-    /// The host applies such a definition by handing the effect its new keyframes and then taking
-    /// `apply_css_properties`' early return, since every property that function compares is
-    /// unchanged. Handing over keyframes moves no time, changes no play state and creates nothing:
-    /// the animation keeps its identity, its row and its place in the element's list, and the only
-    /// thing that changes about it is the `@keyframes` rule its declarations come from.
-    #[must_use]
-    pub(crate) fn change_is_only_keyframes(&self, published: &Self) -> bool {
-        if self.words[APPLIED_DEFINITION_KEYFRAME_SET_WORD] == published.words[APPLIED_DEFINITION_KEYFRAME_SET_WORD] {
-            return false;
-        }
-        let mut without_the_keyframes = *self;
-        without_the_keyframes.words[APPLIED_DEFINITION_KEYFRAME_SET_WORD] =
-            published.words[APPLIED_DEFINITION_KEYFRAME_SET_WORD];
-        without_the_keyframes.would_change_nothing(published)
-    }
-
-    /// Whether applying `self` to an animation that last had `published` applied would change only
-    /// what its effect is sampled from and how far a given time is along it, and move no time.
-    ///
-    /// `apply_css_properties` hands such a definition to the effect's plain setters -
-    /// `set_specified_iteration_duration`, `set_specified_start_delay`, `set_iteration_count`,
-    /// `set_fill_mode`, `set_playback_direction`, `set_composite` - and then normalizes the
-    /// specified timing. None of them notifies the animation, so the start time, the hold time and
-    /// the pending tasks stay exactly as they are: the retimed row is the published row with those
-    /// three times restamped and those two flag fields replaced.
-    ///
-    /// Everything that *would* move time is refused: a play-state change runs `play_from_css()` or
-    /// `pause_from_css()`, and an `auto` duration is the effect's intrinsic one rather than the
-    /// definition's.
-    #[must_use]
-    pub(crate) fn change_is_only_simple_timing(&self, published: &Self) -> bool {
-        if !self.timeline_is_decidable() {
-            return false;
-        }
-        // An animation no plan has described yet publishes a null timing function, and nothing is
-        // known about the timing it is being retimed from.
-        if published.words[APPLIED_DEFINITION_TIMING_FUNCTION_WORD] == 0 {
-            return false;
-        }
-        if self.words[APPLIED_DEFINITION_FLAGS_WORD] & APPLIED_DEFINITION_DURATION_IS_AUTO != 0 {
-            return false;
-        }
-        self.words[APPLIED_DEFINITION_FLAGS_WORD] & !APPLIED_DEFINITION_RETIMABLE_FLAGS_MASK
-            == published.words[APPLIED_DEFINITION_FLAGS_WORD] & !APPLIED_DEFINITION_RETIMABLE_FLAGS_MASK
-    }
-
-    /// Whether the only thing applying `self` to an animation that last had `published` applied
-    /// would do is run `play_from_css()` or `pause_from_css()` on it.
-    ///
-    /// Every other field of the definition is unchanged, so `apply_css_properties` hands the effect
-    /// the values it already has and the play-state branch at its end is the whole of the change.
-    /// Whether that branch moves anything the stage samples is a question about the animation's
-    /// published row, which `row_absorbs_a_play_state_change` answers.
-    #[must_use]
-    pub(crate) fn change_is_only_play_state(&self, published: &Self) -> bool {
-        if self.words[APPLIED_DEFINITION_FLAGS_WORD] & APPLIED_DEFINITION_PLAY_STATE_MASK
-            == published.words[APPLIED_DEFINITION_FLAGS_WORD] & APPLIED_DEFINITION_PLAY_STATE_MASK
-        {
-            return false;
-        }
-        let mut without_the_play_state = *self;
-        without_the_play_state.words[APPLIED_DEFINITION_FLAGS_WORD] = (self.words[APPLIED_DEFINITION_FLAGS_WORD]
-            & !APPLIED_DEFINITION_PLAY_STATE_MASK)
-            | (published.words[APPLIED_DEFINITION_FLAGS_WORD] & APPLIED_DEFINITION_PLAY_STATE_MASK);
-        without_the_play_state.would_change_nothing(published)
     }
 }
 
@@ -446,13 +320,7 @@ pub(crate) mod timing_row_flag {
     pub(crate) const START_DELAY_IS_PERCENTAGE: u32 = 1 << 4;
     pub(crate) const END_DELAY_IS_PERCENTAGE: u32 = 1 << 5;
     pub(crate) const ITERATION_DURATION_IS_PERCENTAGE: u32 = 1 << 6;
-    pub(crate) const HAS_PENDING_PLAYBACK_RATE: u32 = 1 << 7;
-    pub(crate) const HAS_PENDING_PLAY_TASK: u32 = 1 << 8;
-    pub(crate) const HAS_PENDING_PAUSE_TASK: u32 = 1 << 9;
-    pub(crate) const IS_FINISHED: u32 = 1 << 10;
-    pub(crate) const REPLACE_STATE_IS_REMOVED: u32 = 1 << 11;
     pub(crate) const HAS_TIMELINE: u32 = 1 << 12;
-    pub(crate) const TIMELINE_IS_MONOTONICALLY_INCREASING: u32 = 1 << 13;
     pub(crate) const TIMELINE_IS_PROGRESS_BASED: u32 = 1 << 14;
     pub(crate) const FILL_MODE_SHIFT: u32 = 15;
     pub(crate) const FILL_MODE_MASK: u32 = 0b111;
@@ -476,11 +344,6 @@ pub(crate) mod timing_row_flag {
     /// The animation names an owning element, which is the first thing the class-specific composite
     /// order of a CSS animation or transition compares.
     pub(crate) const HAS_OWNING_ELEMENT: u32 = 1 << 28;
-    /// The owning element currently lists this CSS animation at the place its class-specific key
-    /// names. A CSS animation the element has stopped listing - one script revived after a plan
-    /// cancelled it - keeps the place it was last given, so the key alone does not say which of the
-    /// two animations claiming a place the element's plan works on.
-    pub(crate) const LISTED_BY_OWNING_ELEMENT: u32 = 1 << 29;
 }
 
 /// `Animations::AnimationClass`, in declaration order, which is also the inter-class composite
@@ -531,7 +394,6 @@ const TIME_START_DELAY: usize = 2;
 const TIME_END_DELAY: usize = 3;
 const TIME_ITERATION_DURATION: usize = 4;
 const TIME_PLAYBACK_RATE: usize = 5;
-const TIME_PENDING_PLAYBACK_RATE: usize = 6;
 const TIME_ITERATION_COUNT: usize = 7;
 const TIME_ITERATION_START: usize = 8;
 const TIME_EASING_X1: usize = 9;
@@ -584,179 +446,6 @@ impl AnimationTimingRow {
         }
     }
 
-    /// The row a CSS animation this definition is about to start would publish, built from the
-    /// definition alone.
-    ///
-    /// `CSSAnimation::apply_css_properties` settles the effect's timing from the definition and
-    /// then starts it, and a brand-new animation's current time is unresolved, so both "play an
-    /// animation" and "pause an animation" hold it at time zero and leave the rest to a task that
-    /// runs after this style update. The timeline's current time therefore never enters the
-    /// arithmetic, which is why the caller may sample the row without a published sample for it.
-    ///
-    /// `None` for a definition whose row this cannot settle: a scroll timeline, which is
-    /// materialized from the element's surroundings, and an `auto` duration, which the host takes
-    /// from the effect's intrinsic duration.
-    #[must_use]
-    pub(crate) fn for_new_css_animation(
-        definition: &crate::css::style_compute::FfiComputedAnimation,
-        owning_node: StyleNodeID,
-        owning_slot: AnimationSlot,
-        name_index: u32,
-        synthesized_index: u32,
-    ) -> Option<Self> {
-        use crate::css::style_compute::FfiAnimationTimelineKind;
-        use timing_row_flag as flag;
-
-        // NB: `animation-duration: auto` - the initial value - has the intrinsic iteration duration
-        //     of the effect, which against a monotonic timeline is zero; the drive already computed
-        //     the definition's duration as zero for it.
-        if definition.timeline_kind != FfiAnimationTimelineKind::Document {
-            return None;
-        }
-        // `Bindings::PlaybackDirection` and `Bindings::FillMode` are in IDL order, which is not the
-        // order the CSS keywords are in: a mirror of `css_animation_direction_to_playback_direction`
-        // and `css_fill_mode_to_bindings_fill_mode`.
-        let direction = match definition.direction {
-            0 => 2, // alternate
-            1 => 3, // alternate-reverse
-            2 => 0, // normal
-            3 => 1, // reverse
-            _ => return None,
-        };
-        let fill_mode = match definition.fill_mode {
-            0 => 2, // backwards
-            1 => 3, // both
-            2 => 1, // forwards
-            3 => 0, // none
-            _ => return None,
-        };
-        // A pending play or pause task settles nothing the phase or the active time is derived
-        // from, but the row the host publishes for this animation carries one, so this one does
-        // too. `animation_play_state::PAUSED` is 0.
-        let pending_task = match definition.play_state {
-            0 => flag::HAS_PENDING_PAUSE_TASK,
-            _ => flag::HAS_PENDING_PLAY_TASK,
-        };
-        let mut times = [0.0; TIMING_ROW_TIMES];
-        times[TIME_HOLD] = 0.0;
-        times[TIME_START_DELAY] = definition.delay;
-        times[TIME_ITERATION_DURATION] = definition.duration;
-        times[TIME_ITERATION_COUNT] = definition.iteration_count;
-        times[TIME_PLAYBACK_RATE] = 1.0;
-        Some(Self {
-            flags: flag::HAS_HOLD_TIME
-                | flag::HAS_TIMELINE
-                | flag::TIMELINE_IS_MONOTONICALLY_INCREASING
-                | flag::HAS_OWNING_ELEMENT
-                // The plan starts this animation into the place the definition holds, so the
-                // element lists it there for as long as the row stands for it.
-                | flag::LISTED_BY_OWNING_ELEMENT
-                | pending_task
-                | (fill_mode << flag::FILL_MODE_SHIFT)
-                | (direction << flag::PLAYBACK_DIRECTION_SHIFT),
-            // The document timeline's identity is never asked for: the hold time settles the
-            // current time, so the row is sampled with no timeline time at all.
-            timeline: 0,
-            easing_interval_count: 0,
-            // The effect this animation would get has no identity until the host creates it.
-            effect_identity: 0,
-            composite_class: 0,
-            composite_owning_slot: owning_slot,
-            composite_transition_property: 0,
-            composite_owning_node: owning_node.raw(),
-            // The host's class-specific composite order key for a CSS animation is its place in the
-            // `animation-name` list, which is the place the plan gives this definition.
-            composite_class_key: name_index,
-            // Only two CSS transitions with no owning element are ordered by the global list, and a
-            // CSS animation this element owns is neither.
-            global_list_order: 0,
-            // A CSS animation's `animation-timing-function` is applied per keyframe, so the effect's
-            // own easing is always the identity `linear`.
-            first_linear_point: 0,
-            linear_point_count: 0,
-            times,
-            synthesized_index: Some(synthesized_index),
-        })
-    }
-
-    /// This row with the timing a definition that moves no time would stamp on it: the three
-    /// specified times and the two flag fields `apply_css_properties` sets through the effect's
-    /// plain setters, which notify the animation of nothing.
-    ///
-    /// `None` for a definition whose direction or fill mode is not one of the CSS keywords.
-    #[must_use]
-    pub(crate) fn retimed_for_definition(
-        &self,
-        definition: &crate::css::style_compute::FfiComputedAnimation,
-    ) -> Option<Self> {
-        use timing_row_flag as flag;
-
-        // The same two IDL-order mappings `for_new_css_animation` makes.
-        let direction = match definition.direction {
-            0 => 2, // alternate
-            1 => 3, // alternate-reverse
-            2 => 0, // normal
-            3 => 1, // reverse
-            _ => return None,
-        };
-        let fill_mode = match definition.fill_mode {
-            0 => 2, // backwards
-            1 => 3, // both
-            2 => 1, // forwards
-            3 => 0, // none
-            _ => return None,
-        };
-        // A time the host holds as a percentage of a progress-based timeline is not the specified
-        // one the definition carries, so it is not restamped from it.
-        if self.flags
-            & (flag::START_DELAY_IS_PERCENTAGE | flag::ITERATION_DURATION_IS_PERCENTAGE | flag::END_DELAY_IS_PERCENTAGE)
-            != 0
-        {
-            return None;
-        }
-        let mut retimed = *self;
-        retimed.times[TIME_START_DELAY] = definition.delay;
-        retimed.times[TIME_ITERATION_DURATION] = definition.duration;
-        retimed.times[TIME_ITERATION_COUNT] = definition.iteration_count;
-        retimed.flags &= !((flag::FILL_MODE_MASK << flag::FILL_MODE_SHIFT)
-            | (flag::PLAYBACK_DIRECTION_MASK << flag::PLAYBACK_DIRECTION_SHIFT));
-        retimed.flags |= (fill_mode << flag::FILL_MODE_SHIFT) | (direction << flag::PLAYBACK_DIRECTION_SHIFT);
-        Some(retimed)
-    }
-
-    #[must_use]
-    pub(crate) fn effect_identity(&self) -> u64 {
-        self.effect_identity
-    }
-
-    /// Which of the computation's starting animations this row stands for, for a row the stage
-    /// synthesized rather than read from the published list.
-    #[must_use]
-    pub(crate) fn synthesized_index(&self) -> Option<u32> {
-        self.synthesized_index
-    }
-
-    /// The place in the element's `animation-name` list of the CSS animation this row describes,
-    /// for a row that is one of the animations `(node, slot)`'s own plan works on. `None` for every
-    /// other row: a transition, an animation script started, a CSS animation another element owns,
-    /// and a CSS animation whose owning element has stopped listing it.
-    ///
-    /// The host's class-specific composite order key for a CSS animation *is* that place, so the
-    /// row already carries it - but only an animation the element still lists there really holds
-    /// it, and only one the element lists is an animation its plan works on.
-    #[must_use]
-    pub(crate) fn owned_css_animation_index(&self, node: StyleNodeID, slot: AnimationSlot) -> Option<u32> {
-        if self.composite_class != animation_class::CSS_ANIMATION_WITH_OWNING_ELEMENT
-            || !self.has(timing_row_flag::HAS_OWNING_ELEMENT)
-            || !self.has(timing_row_flag::LISTED_BY_OWNING_ELEMENT)
-            || self.composite_owning_node != node.raw()
-            || self.composite_owning_slot != slot
-        {
-            return None;
-        }
-        Some(self.composite_class_key)
-    }
-
     #[must_use]
     fn has(&self, flag: u32) -> bool {
         self.flags & flag != 0
@@ -771,15 +460,6 @@ impl AnimationTimingRow {
     }
 }
 
-/// `Animations::AnimationPlayState`, as far as relevance needs it.
-#[derive(Clone, Copy, PartialEq)]
-enum PlayState {
-    Idle,
-    Paused,
-    Finished,
-    Running,
-}
-
 /// `AnimationEffect::Phase`.
 #[derive(Clone, Copy, PartialEq)]
 enum Phase {
@@ -789,112 +469,14 @@ enum Phase {
     Idle,
 }
 
-/// Whether the animation this row describes is relevant, at `timeline_time`.
-///
-/// A mirror of `Animation::is_relevant()` and everything under it:
-/// `AnimationEffect::is_current()`, `is_in_effect()`, `phase()` and `Animation::play_state()`.
-/// `None` means the mirror declines to answer - a row the host marked undecidable, a timeline it
-/// did not publish a sample for, or times whose kinds the host's arithmetic would refuse to mix -
-/// and the caller must ask the host instead.
-#[must_use]
-pub(crate) fn row_is_relevant(row: &AnimationTimingRow, timeline_time: Option<TimeValue>) -> Option<bool> {
-    use timing_row_flag as flag;
-
-    if row.has(flag::UNDECIDABLE) {
-        return None;
-    }
-
-    // An animation is relevant if its associated effect is current or in effect, and its replace
-    // state is not removed. Rows exist only for animations that have a keyframe effect.
-    if row.has(flag::REPLACE_STATE_IS_REMOVED) {
-        return Some(false);
-    }
-
-    let timing = resolve_timing(row, timeline_time)?;
-
-    // https://www.w3.org/TR/web-animations-1/#in-play
-    let is_in_play = timing.phase == Phase::Active && !row.has(flag::IS_FINISHED);
-
-    // https://www.w3.org/TR/web-animations-1/#current
-    let is_current = is_in_play
-        || (timing.playback_rate > 0.0 && timing.phase == Phase::Before)
-        || (timing.playback_rate < 0.0 && timing.phase == Phase::After)
-        || (row.has(flag::HAS_TIMELINE)
-            && !row.has(flag::TIMELINE_IS_MONOTONICALLY_INCREASING)
-            && play_state(row, timing.current_time, timing.end_time)? != PlayState::Idle);
-    if is_current {
-        return Some(true);
-    }
-
-    // https://www.w3.org/TR/web-animations-1/#in-effect, via the active time.
-    Some(timing.active_time.is_some())
-}
-
-/// Whether running `play_from_css()` or `pause_from_css()` on the animation this row describes
-/// would leave everything the stage samples exactly as published.
-///
-/// A mirror of `Animation::play_an_animation` with the auto-rewind flag and of `Animation::pause`,
-/// restricted to the envelope in which neither of them moves a time:
-///
-/// - a monotonically increasing timeline, so neither procedure has a finite timeline, neither ever
-///   auto-aligns a start time, and `row_is_relevant` never consults the play state at all;
-/// - a resolved current time that is at least zero and below the associated effect end, with a
-///   playback rate above zero and no pending playback rate - so the rate is already the effective
-///   one, `play_an_animation` takes none of its three rewind branches at step 6, and `pause` needs
-///   no seek at step 5;
-/// - not already marked finished, so `update_finished_state` cannot clear that flag underneath
-///   `is_in_play`.
-///
-/// What is then left of either procedure is bookkeeping in the two pending-task bits: each cancels
-/// whichever task was scheduled and schedules its own. A row that already carries one of them is
-/// fine - `play_an_animation` runs only for an animation that is not already running, and `pause`
-/// only for one that is not already paused, so the two never fight. Those bits then turn
-/// `update_finished_state`'s step 2 off, so no hold time is touched either. A play whose animation
-/// holds no hold time and aborts no pause aborts at step 10 and does nothing at all; one that does
-/// hold a hold time keeps it and only loses its start time, and a current time read from a hold
-/// time does not consult the start time. `row_current_key` never consults the play state or the
-/// pending tasks, and `row_is_relevant` consults them only through `play_state`, which it asks for
-/// only about a timeline that is not monotonically increasing.
-#[must_use]
-pub(crate) fn row_absorbs_a_play_state_change(row: &AnimationTimingRow, timeline_time: Option<TimeValue>) -> bool {
-    use timing_row_flag as flag;
-
-    if row.has(flag::UNDECIDABLE)
-        || !row.has(flag::HAS_TIMELINE)
-        || !row.has(flag::TIMELINE_IS_MONOTONICALLY_INCREASING)
-        || row.has(flag::HAS_PENDING_PLAYBACK_RATE)
-        || row.has(flag::IS_FINISHED)
-    {
-        return false;
-    }
-    // A rate that is not a number is one no comparison the host makes is true of.
-    if row.times[TIME_PLAYBACK_RATE].partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
-        return false;
-    }
-    let Some(timing) = resolve_timing(row, timeline_time) else {
-        return false;
-    };
-    let Some(current_time) = timing.current_time else {
-        return false;
-    };
-    // The host compares the lower bound against the raw value and the upper one as a time.
-    current_time.value >= 0.0
-        && current_time
-            .compare(timing.end_time)
-            .is_some_and(std::cmp::Ordering::is_lt)
-}
-
 /// A mirror of `AnimationEffect::ResolvedTiming`, with what `Animation` contributes to it.
 #[derive(Clone, Copy)]
 struct ResolvedTiming {
     phase: Phase,
-    current_time: Option<TimeValue>,
     active_time: Option<TimeValue>,
     active_duration: TimeValue,
-    end_time: TimeValue,
     iteration_duration: TimeValue,
     iteration_count: f64,
-    playback_rate: f64,
 }
 
 /// Resolve everything the phase and the active time are derived from. `None` where the host's
@@ -975,13 +557,10 @@ fn resolve_timing(row: &AnimationTimingRow, timeline_time: Option<TimeValue>) ->
 
     Some(ResolvedTiming {
         phase,
-        current_time,
         active_time,
         active_duration,
-        end_time,
         iteration_duration,
         iteration_count,
-        playback_rate,
     })
 }
 
@@ -1110,39 +689,6 @@ pub(crate) fn row_current_key(
     // `AnimationKeyFrameKeyScaleFactor`, and the host's clamp to what an `i64` key can hold.
     let key = output_progress * 100.0 * 1000.0;
     Some(Some(key.clamp(i64::MIN as f64, i64::MAX as f64)))
-}
-
-/// A mirror of `Animation::play_state_at()`. `associated_effect_end` is the effect's end time,
-/// since a row only exists for an animation that has one.
-#[must_use]
-fn play_state(
-    row: &AnimationTimingRow,
-    current_time: Option<TimeValue>,
-    associated_effect_end: TimeValue,
-) -> Option<PlayState> {
-    use timing_row_flag as flag;
-
-    let pending = row.has(flag::HAS_PENDING_PLAY_TASK) || row.has(flag::HAS_PENDING_PAUSE_TASK);
-    if current_time.is_none() && !row.has(flag::HAS_START_TIME) && !pending {
-        return Some(PlayState::Idle);
-    }
-    if row.has(flag::HAS_PENDING_PAUSE_TASK)
-        || (!row.has(flag::HAS_START_TIME) && !row.has(flag::HAS_PENDING_PLAY_TASK))
-    {
-        return Some(PlayState::Paused);
-    }
-    let effective_playback_rate = match row.has(flag::HAS_PENDING_PLAYBACK_RATE) {
-        true => row.times[TIME_PENDING_PLAYBACK_RATE],
-        false => row.times[TIME_PLAYBACK_RATE],
-    };
-    if let Some(current_time) = current_time {
-        let finished = (effective_playback_rate > 0.0 && current_time.compare(associated_effect_end)?.is_ge())
-            || (effective_playback_rate < 0.0 && current_time.value <= 0.0);
-        if finished {
-            return Some(PlayState::Finished);
-        }
-    }
-    Some(PlayState::Running)
 }
 
 /// Per element and pseudo-element, the timing of every animation the host holds a keyframe effect
@@ -1319,72 +865,6 @@ pub(crate) fn composite_order(a: &AnimationTimingRow, b: &AnimationTimingRow) ->
     }
 }
 
-/// The rows an element would publish once a plan that does nothing to its CSS animations but
-/// cancel and renumber them has been applied: a cancelled animation drops out of the effect stack,
-/// one the plan moved takes its new place in it, and the composite order is redone over what is
-/// left.
-///
-/// `new_indices[j]` is the place `animation-name` order gives the element's `j`th CSS animation,
-/// or `NO_MATCHED_ANIMATION` for one no definition claimed and that the plan therefore cancels.
-/// Everything else the element holds - its transitions, the animations script started - the plan
-/// does not touch, so those rows travel unchanged.
-///
-/// `None` where the published rows are not the list the plan is about: an animation the plan works
-/// on that published no row at all, or two rows claiming one place in the list.
-#[must_use]
-pub(crate) fn rows_after_cancel_and_renumber(
-    rows: &[AnimationTimingRow],
-    node: StyleNodeID,
-    slot: AnimationSlot,
-    new_indices: &[i32],
-) -> Option<Vec<AnimationTimingRow>> {
-    let mut planned = Vec::with_capacity(rows.len());
-    let mut was_found = vec![false; new_indices.len()];
-    for row in rows {
-        let Some(existing) = row.owned_css_animation_index(node, slot) else {
-            planned.push(*row);
-            continue;
-        };
-        let existing = existing as usize;
-        if *was_found.get(existing)? {
-            return None;
-        }
-        was_found[existing] = true;
-        let new_index = new_indices[existing];
-        if new_index == NO_MATCHED_ANIMATION {
-            continue;
-        }
-        let mut planned_row = *row;
-        planned_row.composite_class_key = new_index as u32;
-        planned.push(planned_row);
-    }
-    if was_found.iter().any(|found| !found) {
-        return None;
-    }
-    // The published list is already in composite order, so a stable sort keeps the relative order
-    // of the rows the order declines to tell apart.
-    planned.sort_by(composite_order);
-    Some(planned)
-}
-
-/// The rows an element would publish once a plan that also starts animations has been applied: the
-/// rows the plan leaves behind, with the ones the stage synthesized for the animations it starts
-/// merged into the composite order.
-///
-/// The published list is already in composite order and no two of an element's own CSS animations
-/// can claim one place in its `animation-name` list, so a stable sort settles the merge.
-#[must_use]
-pub(crate) fn rows_with_synthesized(
-    published: &[AnimationTimingRow],
-    synthesized: &[AnimationTimingRow],
-) -> Vec<AnimationTimingRow> {
-    let mut rows = Vec::with_capacity(published.len() + synthesized.len());
-    rows.extend_from_slice(published);
-    rows.extend_from_slice(synthesized);
-    rows.sort_by(composite_order);
-    rows
-}
-
 /// The current time each of the document's animation timelines was sampled at when the style
 /// update began. A timeline's time is a cached value that only the rendering loop moves, so one
 /// sample serves the whole update.
@@ -1450,29 +930,6 @@ impl RootElementFontMetrics {
             depends_on_viewport_metrics,
         }
     }
-}
-
-/// Whether any of an element's animations for one pseudo-element is relevant, which is what
-/// `Element::get_animations_internal()` filters its list by. `None` where any single row declines
-/// to answer, since an unanswered row could be the relevant one.
-#[must_use]
-pub(crate) fn any_row_is_relevant(rows: &[AnimationTimingRow], samples: &AnimationTimelineSamples) -> Option<bool> {
-    let mut any = false;
-    for row in rows {
-        if row.has(timing_row_flag::NOT_ASSOCIATED) {
-            continue;
-        }
-        any |= row_is_relevant(row, row_timeline_time(row, samples)?)?;
-    }
-    Some(any)
-}
-
-/// Whether the row describes an effect that belongs to no animation the element holds - §19.2's
-/// provisional transition duplicate. The host's own effect list has no such effect, so every walk
-/// of the published rows has to skip them.
-#[must_use]
-pub(crate) fn row_is_not_associated(row: &AnimationTimingRow) -> bool {
-    row.has(timing_row_flag::NOT_ASSOCIATED)
 }
 
 /// The current time of the timeline a row names, as the host sampled it when this style update
@@ -1995,13 +1452,8 @@ impl std::hash::Hash for KeyframesName {
 /// when that scope's rule cache is rebuilt. A replayed engine is never published to and resolves
 /// nothing, the way it reads no layout arena.
 /// One `@keyframes` rule of a scope: the host's keyframe set, and what the rule declares.
-///
-/// The description is the same shape as an element effect's, with the two holes a rule keeps until
-/// an animation runs it - a keyframe's own easing, and `composite: auto` - left open for the
-/// definition to fill in.
 pub(crate) struct PublishedKeyframesSet {
     pub(crate) pointer: usize,
-    pub(crate) description: PublishedEffect,
     /// Whether the rule animates a value the element's descendants inherit. A record the engine
     /// settles publishes the style beneath the animation and applies its plan once the whole batch
     /// is installed; the descendants take the animated values through the overlay's invalidation.
@@ -2088,7 +1540,6 @@ impl AnimationKeyframes {
                     // The host names a set by its own pointer, which is what it publishes as the
                     // description's identity.
                     pointer: description.identity as usize,
-                    description,
                     declares_an_inherited_property,
                 },
             );
@@ -2141,38 +1592,6 @@ impl AnimationKeyframes {
         self.scopes.iter().all(|(&scope, sets)| {
             scope == TreeScopeID::DOCUMENT || scope == element_tree_scope || !sets.contains_key(&name)
         })
-    }
-
-    /// The keyframe set an animation of this name runs, or `None` where no scope in its chain
-    /// defines one and the host makes an effect with no keyframes.
-    ///
-    /// The chain is the one the host walked: the tree scope of the winning `animation-name`
-    /// declaration first, because that declaration can come from a shadow-root rule - `:host()` and
-    /// `::slotted()` - while the element it styles is outside that subtree, and a same-named
-    /// document rule must not win over it; then the scope the element itself is in; then the
-    /// document.
-    #[must_use]
-    pub(crate) fn resolve(
-        &self,
-        declaration_shadow_root_identity: usize,
-        element_tree_scope: TreeScopeID,
-        name: &CssString,
-    ) -> Option<&PublishedKeyframesSet> {
-        self.resolve_in_declaration_scope(
-            self.scope_of_shadow_root(declaration_shadow_root_identity),
-            element_tree_scope,
-            name,
-        )
-    }
-
-    /// The tree scope a shadow root's host-side pointer identity names, or `None` for the
-    /// document's identity 0 and for a shadow root that defines no keyframes.
-    #[must_use]
-    pub(crate) fn scope_of_shadow_root(&self, shadow_root_identity: usize) -> Option<TreeScopeID> {
-        match shadow_root_identity {
-            0 => None,
-            identity => self.scope_by_shadow_root.get(&identity).copied(),
-        }
     }
 
     /// The same lookup, for a declaration whose tree scope is already known. `None` is the scope of
@@ -2310,24 +1729,6 @@ pub(crate) struct ContainerUnitBasis {
     pub(crate) container: Option<StyleNodeID>,
     /// Whether that container has no committed box, so the answer is zero until layout runs.
     pub(crate) container_has_no_box: bool,
-}
-
-impl super::StyleEngine {
-    /// The container-unit basis for one physical axis of `subject`.
-    ///
-    /// A mirror of `nearest_query_container_for_axis` plus the basis read that follows it, taken
-    /// from the published container-query inputs and the retained layout snapshot instead of from
-    /// the DOM and the layout tree. `viewport` is the subject's own viewport length for the axis,
-    /// which is what the host falls back to.
-    pub(crate) fn container_unit_basis(
-        &self,
-        subject: StyleNodeID,
-        axis_is_horizontal: bool,
-        viewport: f64,
-    ) -> ContainerUnitBasis {
-        self.retained
-            .container_unit_basis(subject, axis_is_horizontal, viewport)
-    }
 }
 
 /// The groups an animation overlay record rebuilds over its base, and the storage their payloads

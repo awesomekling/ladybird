@@ -811,26 +811,6 @@ impl CustomPropertyStore {
             .map_or(std::ptr::null(), |store_parent| Arc::as_ptr(store_parent).cast())
             == parent
     }
-
-    /// Copy the values declared by `source` over `parent`.
-    ///
-    /// # Safety
-    /// `source` must be a live store and `parent` must be null or a live store.
-    pub(crate) unsafe fn copy_declared_own_over(source: *const c_void, parent: *const c_void) -> *const c_void {
-        let source = unsafe { &*source.cast::<CustomPropertyStore>() };
-        let entries = source
-            .declared_names
-            .iter()
-            .map(|name_raw| {
-                let entry = source
-                    .own_values
-                    .get(name_raw)
-                    .expect("declared custom property must be an own value");
-                (*name_raw, entry.clone())
-            })
-            .collect();
-        Self::child(unsafe { Self::retained_parent(parent) }, entries)
-    }
 }
 
 const MAX_SUBSTITUTED_TOKEN_COUNT: usize = 16384;

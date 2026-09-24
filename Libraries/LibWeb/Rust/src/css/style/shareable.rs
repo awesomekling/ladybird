@@ -75,7 +75,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         frozen_longhand_inputs,
         element_custom_property_data,
         sampled_custom_property_environments,
-        legacy_finalized_longhand_rows,
         font_resolution,
         font_face_snapshot,
         font_cascade_memo,
@@ -108,8 +107,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         root_element_font_metrics,
         animation_keyframes,
         custom_property_registrations_changed,
-        pending_element_style_computation_selections,
-        pending_pseudo_style_computation_selections,
         engine_computed_records_pending,
         demand_pseudo_records,
         flush_stamp,
@@ -212,7 +209,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(frozen_longhand_inputs);
     assert_member_is_sync(element_custom_property_data);
     assert_member_is_sync(sampled_custom_property_environments);
-    assert_member_is_sync(legacy_finalized_longhand_rows);
     // The published `@font-face` table is the one piece of document state a font resolution reads,
     // so it has to be shareable for the stage's own thread to resolve from it.
     assert_member_is_sync(font_face_snapshot);
@@ -243,8 +239,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(root_element_font_metrics);
     assert_member_is_sync(animation_keyframes);
     assert_member_is_sync(custom_property_registrations_changed);
-    assert_member_is_sync(pending_element_style_computation_selections);
-    assert_member_is_sync(pending_pseudo_style_computation_selections);
     assert_member_is_sync(engine_computed_records_pending);
     assert_member_is_sync(demand_pseudo_records);
     assert_member_is_sync(flush_stamp);

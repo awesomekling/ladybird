@@ -92,7 +92,6 @@ mod prefix;
 pub mod program;
 mod program_updates;
 mod publication;
-pub(crate) use publication::drive_font_metric;
 #[cfg(feature = "style-recording")]
 pub mod record_replay;
 mod resource_contexts;
@@ -894,9 +893,6 @@ pub struct RetainedState {
     /// The environment each element's animations sampled custom properties into, over the one its
     /// own declarations resolve to. Its own values substitute under it.
     sampled_custom_property_environments: HashMap<StyleNodeID, u64>,
-    /// Finalized legacy longhand rows produced earlier in the current direct-application batch.
-    /// Descendants inherit from these stage results before the host projects them onto elements.
-    legacy_finalized_longhand_rows: HashMap<computed::ComputedStyleTarget, LegacyFinalizedLonghandRow>,
     /// Every font resolution this document has been given. An evaluation step reads it; only a
     /// round between passes adds to it.
     font_resolution: Option<font_resolution::FontResolutionCache>,
@@ -998,10 +994,6 @@ pub struct RetainedState {
     /// previously substituted record must then be driven again even when its cascade winners
     /// did not move.
     custom_property_registrations_changed: bool,
-    /// Pending selections for elements, and separately for the few pseudo-elements that hold one.
-    /// Both are keyed by the element so that retiring it releases every selection by key.
-    pending_element_style_computation_selections: HashMap<StyleNodeID, StyleComputationSelection>,
-    pending_pseudo_style_computation_selections: HashMap<StyleNodeID, Vec<(u8, StyleComputationSelection)>>,
     /// Records the engine derived for published reactions that C++ has not installed yet. Their
     /// columns already moved so descendants in the same flush build on them; the cascade state
     /// and answer consumption follow C++'s acknowledgement, and a discarded transaction reverts
@@ -1235,42 +1227,6 @@ pub struct HostState {
     layout_arena: Option<std::ptr::NonNull<std::ffi::c_void>>,
 }
 
-struct LegacyFinalizedLonghandRow {
-    table: crate::css::host_shared::HostShared<crate::css::computed_longhand_table::ComputedLonghandTable>,
-    previous_style_record: u64,
-    assembled_style_record: u64,
-    was_host_published: bool,
-}
-
-impl LegacyFinalizedLonghandRow {
-    unsafe fn retain(
-        table: *const crate::css::computed_longhand_table::ComputedLonghandTable,
-        previous_style_record: u64,
-        assembled_style_record: u64,
-    ) -> Self {
-        unsafe { crate::css::computed_longhand_table::rust_computed_longhand_table_retain(table) };
-        Self {
-            table: crate::css::host_shared::HostShared::new(table),
-            previous_style_record,
-            assembled_style_record,
-            was_host_published: false,
-        }
-    }
-
-    fn table(&self) -> &crate::css::computed_longhand_table::ComputedLonghandTable {
-        // SAFETY: This row owns one reference until it is dropped at the batch boundary.
-        unsafe { self.table.deref() }
-    }
-}
-
-impl Drop for LegacyFinalizedLonghandRow {
-    fn drop(&mut self) {
-        unsafe {
-            crate::css::computed_longhand_table::rust_computed_longhand_table_release(self.table.cast_mut());
-        }
-    }
-}
-
 /// Mutable engine state; operations borrow their instrumentation from the boundary.
 pub struct StyleEngineState {
     pub(super) retained: RetainedState,
@@ -1289,12 +1245,6 @@ impl std::ops::DerefMut for StyleEngineState {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.retained
     }
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct StyleComputationSelection {
-    pub computed_property_words: [u64; crate::css::property_metadata::LONGHAND_WORD_COUNT],
-    pub computed_property_closure_is_exact: bool,
 }
 
 #[cfg(test)]
