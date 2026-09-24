@@ -905,6 +905,9 @@ pub struct RetainedState {
     /// The last request computed for the document element, retained so the next update can
     /// publish its answer before evaluation begins.
     root_font_request: Option<font_resolution::FontRequest>,
+    /// `font-family: monospace`, the family the monospace font-size recascade resolves an
+    /// ancestor's font-relative lengths against.
+    monospace_font_family: RetainedStyleValueData,
     /// Random bases are filled between record passes and read by the value drive.
     random_base_values: HashMap<(Vec<u16>, Option<StyleNodeID>), f64>,
     random_base_requests: Vec<(StyleNodeID, Vec<u16>, bool)>,

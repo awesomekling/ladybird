@@ -1791,6 +1791,15 @@ impl StyleEngineState {
                 font_face_snapshot: None,
                 font_cascade_memo: None,
                 root_font_request: None,
+                monospace_font_family: RetainedStyleValueData::from_owned(
+                    crate::css::parser::value_parser::value_list(
+                        vec![StyleValueData::Keyword {
+                            keyword: crate::css::style_compute::keyword::MONOSPACE,
+                        }],
+                        1,
+                        true,
+                    ),
+                ),
                 random_base_values: HashMap::default(),
                 random_base_requests: Vec::new(),
                 layout_style_snapshots: Default::default(),
