@@ -182,7 +182,6 @@ define_counters! {
     EngineComputedRecordBailWinner => "engineComputedRecordBailWinner",
     EngineComputedRecordBailWinnerOperator => "engineComputedRecordBailWinnerOperator",
     EngineComputedRecordBailWinnerSpelling => "engineComputedRecordBailWinnerSpelling",
-    EngineComputedRecordBailWinnerAnimated => "engineComputedRecordBailWinnerAnimated",
     EngineComputedRecordBailNoEnvironment => "engineComputedRecordBailNoEnvironment",
     EngineComputedRecordBailCustomPropertyCssWide => "engineComputedRecordBailCustomPropertyCssWide",
     EngineComputedRecordBailCustomProperties => "engineComputedRecordBailCustomProperties",

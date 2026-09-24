@@ -547,7 +547,6 @@ pub struct RecordedExactCascadeWinner {
     pub property: u16,
     pub value: u64,
     pub operator: CascadeOperator,
-    pub animation_relevance: u32,
     pub important: bool,
 }
 
@@ -2639,7 +2638,6 @@ pub unsafe fn replay_publish_exact_cascade_state(
                     value: super::cascade::SpecifiedValueID(winner.value),
                     operator: winner.operator,
                     continuation: super::cascade::CascadeContinuationID::default(),
-                    animation_relevance: winner.animation_relevance,
                     important: winner.important,
                 },
             )

@@ -895,8 +895,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             property: event.payload.read_u16()?,
                             value: event.payload.read_u64()?,
                             operator: read_cascade_operator(&mut event.payload)?,
-                            animation_relevance: event.payload.read_u32()?,
-                            important: event.payload.read_bool()?,
+                            important: {
+                                // The recording still carries the retired animation relevance.
+                                event.payload.read_u32()?;
+                                event.payload.read_bool()?
+                            },
                         });
                     }
                     let expected = read_exact_cascade_publication(&mut event.payload)?;
