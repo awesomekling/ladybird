@@ -2299,11 +2299,11 @@ void Document::drain_invalidation_journal() const
     m_invalidation_journal->drain();
 }
 
-void Document::join_frame_in_flight() const
+void Document::join_frame_in_flight(SourceLocation location) const
 {
     // A document with no arena has no frame to be in flight.
     if (m_layout_node_arena)
-        Layout::RustFFI::layout_arena_join_frame_in_flight(m_layout_node_arena->handle());
+        Layout::RustFFI::layout_arena_join_frame_in_flight(m_layout_node_arena->handle(), reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
 }
 
 void Document::join_frame_for_dom_tree_mutation() const

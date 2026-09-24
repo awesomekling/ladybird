@@ -343,6 +343,13 @@ pub(crate) fn take_frame_in_flight() -> bool {
 /// that forced a join once.
 #[track_caller]
 pub(crate) fn join_frame_in_flight(arena: *mut c_void) {
+    let location = std::panic::Location::caller();
+    join_frame_in_flight_at(arena, location.file(), location.line(), location.column());
+}
+
+/// Like [`join_frame_in_flight`], for a call site outside Rust that names itself (column 0 when it
+/// has none).
+pub(crate) fn join_frame_in_flight_at(arena: *mut c_void, file: &'static str, line: u32, column: u32) {
     if RUNNING_JOIN_WORK.with(Cell::get) != 0 {
         return;
     }
@@ -356,14 +363,14 @@ pub(crate) fn join_frame_in_flight(arena: *mut c_void) {
     let Some(label) = label else {
         return;
     };
-    let location = std::panic::Location::caller();
-    let first_time = FORCED_JOIN_SITES.with(|sites| {
-        sites
-            .borrow_mut()
-            .insert((location.file(), location.line() as usize, location.column()))
-    });
+    let first_time = FORCED_JOIN_SITES.with(|sites| sites.borrow_mut().insert((file, line as usize, column)));
     if first_time {
-        eprintln!("STAGE OVERLAP: forced join of {label} at {location}");
+        // A C++ call site has no column.
+        if column == 0 {
+            eprintln!("STAGE OVERLAP: forced join of {label} at {file}:{line}");
+        } else {
+            eprintln!("STAGE OVERLAP: forced join of {label} at {file}:{line}:{column}");
+        }
     }
     take_frame_in_flight();
     let host = FRAME_SCHEDULER_HOST.get().expect("a submitted frame has a scheduler");
@@ -391,10 +398,30 @@ pub extern "C" fn rust_stage_thread_take_frame_in_flight() -> bool {
 }
 
 /// A forced join of the whole frame in flight, as an access to render state makes one: waits for
-/// it, takes it back and runs the scheduler's consume-commit.
+/// it, takes it back and runs the scheduler's consume-commit. `file` and `line` name the C++ call
+/// site for the forced-join log.
+///
+/// # Safety
+///
+/// `file` and `file_length` must name a string that lives for the rest of the process, as a
+/// `SourceLocation`'s file name does.
 #[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_join_frame_in_flight() {
-    join_frame_in_flight(std::ptr::null_mut());
+pub unsafe extern "C" fn rust_stage_thread_join_frame_in_flight(file: *const u8, file_length: usize, line: u32) {
+    // SAFETY: The caller passes a string that lives for the rest of the process.
+    let file = unsafe { call_site_file(file, file_length) };
+    join_frame_in_flight_at(std::ptr::null_mut(), file, line, 0);
+}
+
+/// The file name of a C++ call site, as `SourceLocation` gives it.
+///
+/// # Safety
+///
+/// `file` and `file_length` must name a string that lives for the rest of the process.
+pub(crate) unsafe fn call_site_file(file: *const u8, file_length: usize) -> &'static str {
+    assert!(!file.is_null(), "call site file name is null");
+    // SAFETY: The caller passes a string that lives for the rest of the process.
+    let bytes = unsafe { std::slice::from_raw_parts(file, file_length) };
+    std::str::from_utf8(bytes).unwrap_or("<non-UTF-8 file name>")
 }
 
 fn next_message() -> Option<StageMessage> {
