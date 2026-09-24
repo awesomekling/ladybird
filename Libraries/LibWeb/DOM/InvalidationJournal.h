@@ -15,6 +15,7 @@
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/InvalidateDisplayList.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/PixelUnits.h>
 
 namespace Web::Painting {
@@ -72,6 +73,16 @@ public:
     // Whether the scrollbar is enlarged may have changed, and it publishes the answer it has at the
     // drain to the row it is built for.
     void note_scrollbar_enlarged_state(Painting::Scrollbar&);
+    // The accumulated visual contexts built from the row's box need the given kind of update.
+    void note_visual_context_box_dirty(Layout::RustFFI::NodeSlotId, Layout::RustFFI::FfiVisualContextBoxDirtyKind);
+    // Every accumulated visual context needs rebuilding, for the given reason.
+    void note_visual_context_full_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason);
+    // The SVG paint resources may have changed, and the enrolled ones resync at the next visual
+    // context update.
+    void note_svg_paint_resources_changed();
+    // The visual viewport moved or zoomed, and the visual context tree takes the transform it has
+    // at the drain.
+    void note_visual_viewport_transform();
 
     // Writes every entry through to the render side and empties the journal.
     void drain();
@@ -123,6 +134,7 @@ private:
     void drain_if_the_render_side_is_reading();
     void publish_scroll_offsets(Node&, Entry const&);
     void publish_selection_states();
+    void publish_visual_context_marks();
     bool is_empty() const;
 
     Document& m_document;
@@ -132,6 +144,14 @@ private:
     bool m_scroll_state_is_stale { false };
     bool m_selection_states_are_stale { false };
     Vector<NonnullRefPtr<Painting::Scrollbar>> m_scrollbars_with_stale_enlarged_state;
+    struct VisualContextBoxDirtyMark {
+        Layout::RustFFI::NodeSlotId slot;
+        Layout::RustFFI::FfiVisualContextBoxDirtyKind kind;
+    };
+    Vector<VisualContextBoxDirtyMark> m_visual_context_box_dirty_marks;
+    Vector<Layout::RustFFI::FfiVisualContextGlobalRebuildReason, 1> m_visual_context_full_rebuild_reasons;
+    bool m_svg_paint_resources_changed { false };
+    bool m_visual_viewport_transform_is_stale { false };
     bool m_draining { false };
 };
 

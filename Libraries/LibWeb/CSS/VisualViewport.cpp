@@ -9,6 +9,7 @@
 #include <LibWeb/CSS/VisualViewport.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/EventDispatcher.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
@@ -229,12 +230,7 @@ void VisualViewport::reset()
 
 void VisualViewport::update_accumulated_visual_context()
 {
-    if (m_document->has_committed_viewport_box() && m_document->paint_state().has_visual_context_tree()) {
-        m_document->paint_state().update_visual_viewport_accumulated_visual_context(*m_document);
-        return;
-    }
-
-    m_document->schedule_full_accumulated_visual_context_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason::FirstBuild);
+    m_document->invalidation_journal().note_visual_viewport_transform();
 }
 
 }
