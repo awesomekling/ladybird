@@ -197,7 +197,8 @@ pub struct OwnedPath {
 }
 
 // SAFETY: OwnedPath has unique ownership of an immutable Gfx::Path. Its mutating operation
-// requires exclusive Rust access, while shared operations perform only const queries.
+// requires exclusive Rust access, while shared operations perform only const queries, which
+// are safe to run concurrently (PathImplSkia publishes its lazy SkPath with an atomic).
 unsafe impl Send for OwnedPath {}
 // SAFETY: See the Send implementation above.
 unsafe impl Sync for OwnedPath {}
