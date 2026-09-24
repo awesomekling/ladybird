@@ -396,6 +396,8 @@ NodeWithStyle::NodeWithStyle(DOM::Document& document, BindToPreparedArenaSlot bi
     VERIFY(m_style_record_identity);
     m_style_payloads = RustFFI::layout_arena_node_style_payloads(arena_handle(), slot);
     VERIFY(m_style_payloads);
+    // The shell reads its style through the row's payloads, which only a live record keeps.
+    VERIFY(document.style_computer().style_record_payloads(m_style_record_identity));
 }
 
 NodeWithStyle::NodeWithStyle(DOM::Document& document, BindToPreparedArenaSlot bind, RustFFI::NodeSlotId slot, RustFFI::NodeKind kind, CSS::LayoutStyle style)
