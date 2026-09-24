@@ -3794,7 +3794,7 @@ pub unsafe extern "C" fn style_engine_answer_hypothetical_parent_custom_property
 }
 
 /// Settle the synthetic pseudo-element records of an element whose record C++ has just installed.
-/// A zero `style_record` leaves them to C++.
+/// A kind the answer does not name keeps the record it has.
 ///
 /// # Safety
 /// `engine` must be live.

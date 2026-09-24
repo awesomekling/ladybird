@@ -1580,8 +1580,6 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
         auto container_effects = CSS::StyleEngineFFI::style_engine_take_container_effects(style_computer.style_engine().rust_handle(), style_node_id().value());
         ScopeGuard release_container_effects = [&] { CSS::StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
         CSS::StyleComputer::record_container_query_effects(AbstractElement { *this }, container_effects);
-        if (settled.style_record == 0)
-            return false;
         for (size_t kind = 0; kind < array_size(settled.pseudo_records); ++kind) {
             if (!((settled.pseudo_records_present >> kind) & 1))
                 continue;

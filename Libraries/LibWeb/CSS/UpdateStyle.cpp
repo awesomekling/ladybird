@@ -879,7 +879,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         auto pseudo_invalidation = element->install_engine_pseudo_element_records_after_sample(
                             did_change_custom_properties, old_is_list_item,
                             old_originating_style ? &*old_originating_style : nullptr,
-                            settled_pseudos.style_record ? &final_pseudo_records : nullptr);
+                            &final_pseudo_records);
                         invalidation |= pseudo_invalidation;
                     }
                     if (element->has_associated_animations() || installed_pseudo_animation_plan)

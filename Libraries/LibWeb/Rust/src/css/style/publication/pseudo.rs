@@ -1362,9 +1362,9 @@ impl StyleEngineState {
     /// installed, so C++ installs the engine's records for them instead of computing each one:
     /// their inputs are the element's record and the published winner states, all current once
     /// the element's own computation has published its record. `old_is_list_item` is whether the
-    /// element generated a marker before. A zero `style_record` is a refused row, reported to the
-    /// style stage seal, and the host keeps the pseudo-element records the element had; the flag
-    /// says whether a settled one substituted custom properties.
+    /// element generated a marker before. The answer always names the element's record; a kind it
+    /// does not name keeps the record it has. The flag says whether a settled one substituted
+    /// custom properties.
     pub(crate) fn settle_pseudo_records_after_host_record(
         &mut self,
         node: StyleNodeID,
@@ -1441,22 +1441,28 @@ impl StyleEngineState {
                 &mut scratch,
                 counters,
             );
-            let Err(Unanswered::Suspended(Suspension::Font)) = record else {
-                break record;
-            };
-            let request = scratch.font_drive.take_suspended_request();
-            suspended_memory.resize_required_to(&mut self.memory, scratch.font_drive.capacity_bytes());
-            self.refill_font_requests(vec![(Some(node), request)], counters);
+            match record {
+                Err(Unanswered::Suspended(Suspension::RandomBases)) => self.refill_random_base_requests(),
+                Err(Unanswered::Suspended(Suspension::Font)) => {
+                    let request = scratch.font_drive.take_suspended_request();
+                    suspended_memory.resize_required_to(&mut self.memory, scratch.font_drive.capacity_bytes());
+                    self.refill_font_requests(vec![(Some(node), request)], counters);
+                }
+                record => break record,
+            }
         };
         let Ok(record) = record else {
+            // The settle reads the record the host just installed and the published winner
+            // states, all current. Should it decline, the seal reports it and every
+            // pseudo-element keeps the record it has.
+            debug_assert!(false, "the pseudo settle declined an element the host installed");
             counters.bump(Counter::EngineComputedRecordHostPseudoDeclines);
-            // The host keeps the pseudo-element records the element had, which is a refused row
-            // like any other.
-            seal::note_host_entry(
-                "PseudoSettleDeclined",
-                seal::HostEntryKind::Refused,
-                self.retained.computed_group_sets.assigned_style_record(node).is_none(),
-            );
+            seal::note_host_entry("PseudoSettleDeclined", seal::HostEntryKind::Refused, false);
+            settled.style_record = self
+                .retained
+                .computed_group_sets
+                .assigned_style_record(node)
+                .map_or(0, computed::FinalStyleRecordID::raw);
             return (settled, false);
         };
         counters.bump(Counter::EngineComputedRecordHostPseudoSettles);
