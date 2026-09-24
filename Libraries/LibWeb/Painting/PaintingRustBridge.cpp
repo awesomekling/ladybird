@@ -674,6 +674,17 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
     };
 }
 
+bool discard_retired_rust_display_list_recording(PendingDisplayListRecording& recording)
+{
+    auto& document = *recording.document;
+    if (!Layout::RustFFI::layout_arena_discard_retired_recording(layout_arena_handle(document)))
+        return false;
+    // What was marked beside a recording in the frame in flight is what the next drain writes.
+    if (recording.run == RecordingRun::InSubmittedFrame)
+        document.release_held_invalidation_marks();
+    return true;
+}
+
 NonnullRefPtr<Compositing::DisplayList> finish_rust_display_list_recording(PendingDisplayListRecording& recording)
 {
     auto& document = *recording.document;

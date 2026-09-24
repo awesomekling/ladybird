@@ -268,6 +268,34 @@ unsafe extern "C" fn layout_arena_last_recording_missed_vector_images(arena: *mu
         .is_some_and(|recording| !recording.missed_vector_images.is_empty())
 }
 
+/// Discards the pending recording if the document retired the render state it was made for since,
+/// and tore down what was recorded. Returns whether it did; the recording is not published then.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_discard_retired_recording(arena: *mut c_void) -> bool {
+    let arena_handle = arena;
+    let arena = unsafe { arena_from_handle(arena) };
+    let _write = arena.join_frame_for_main_side_write("retired recording discard");
+    let mut paint_state = arena.paint_state().borrow_mut();
+    let Some(generation) = paint_state
+        .pending_recording
+        .as_ref()
+        .map(|pending| pending.frame_generation)
+    else {
+        return false;
+    };
+    // SAFETY: The caller passes a live handle.
+    if !unsafe { crate::layout::frame_retirement::frame_was_retired(arena_handle, generation) } {
+        return false;
+    }
+    paint_state.pending_recording = None;
+    paint_state.pending_recording_trace = None;
+    true
+}
+
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`; the callbacks in `publish` are
@@ -277,20 +305,12 @@ unsafe extern "C" fn layout_arena_publish_recording(
     arena: *mut c_void,
     publish: crate::painting::host::FfiRecordingPublishCallbacks,
 ) -> u64 {
-    let arena_handle = arena;
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { arena_from_handle(arena) };
     let _write = arena.join_frame_for_main_side_write("recording publication");
     let Some(pending) = arena.paint_state().borrow_mut().pending_recording.take() else {
         return 0;
     };
-    // The document retired the render state the recording was made for, and tore down what was
-    // recorded, so the recording is not published.
-    // SAFETY: The caller passes a live handle.
-    if unsafe { crate::layout::frame_retirement::frame_was_retired(arena_handle, pending.frame_generation) } {
-        arena.paint_state().borrow_mut().pending_recording_trace = None;
-        return 0;
-    }
     let publish = crate::painting::host::RecordingPublishHost::from(publish);
     crate::painting::published_immutable::before_publication(arena);
     let sequence = crate::painting::record::publish::publish_recording(arena, pending, &main_thread, &publish);

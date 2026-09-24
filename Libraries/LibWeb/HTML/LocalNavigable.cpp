@@ -6780,6 +6780,9 @@ Optional<Compositor::CompositorFrame> LocalNavigable::finish_compositor_frame(Pe
     auto const& paint_config = pending_frame.paint_config;
     auto& keyboard_scroll_state = pending_frame.keyboard_scroll_state;
     bool const should_record_display_list = pending_frame.recording != nullptr;
+    // A task beside the frame in flight retired the document's render state, and what was recorded for it is gone.
+    if (should_record_display_list && Painting::discard_retired_rust_display_list_recording(*pending_frame.recording))
+        return {};
 
     RefPtr<Compositing::DisplayList> display_list;
     Compositing::DisplayListResourceSet display_list_command_resources;
