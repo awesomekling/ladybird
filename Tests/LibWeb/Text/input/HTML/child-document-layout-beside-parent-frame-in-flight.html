@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<div id="box" style="width: 50px; height: 50px; background-color: red"></div>
+<iframe id="frame" style="display: none" srcdoc="<div id=inner style='width: 20px'></div>"></iframe>
+<script>
+    function nextTask() {
+        const { promise, resolve } = Promise.withResolvers();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = resolve;
+        channel.port2.postMessage(null);
+        return promise;
+    }
+
+    function nextFrame() {
+        return new Promise(resolve => requestAnimationFrame(resolve));
+    }
+
+    asyncTest(async done => {
+        await new Promise(resolve => window.addEventListener("load", resolve));
+        await nextFrame();
+        await nextFrame();
+
+        // Under LIBWEB_STAGE_THREAD=overlap, the recording this style change needs is submitted to the render side and
+        // held there. The child document is not rendered, so the frame does not hold it. The task below changes the
+        // child's tree beside the frame and lays the child out, and the child's style update lays out this document
+        // first, which the frame in flight holds. In the other modes, the task runs after the rendering update.
+        internals.holdNextRecordingFrame();
+        box.style.backgroundColor = "green";
+        await nextTask();
+        const inner = frame.contentDocument.getElementById("inner");
+        inner.append(frame.contentDocument.createElement("span"));
+        inner.style.width = "30px";
+        const innerWidth = inner.offsetWidth;
+        internals.releaseHeldFrame();
+
+        await nextFrame();
+        await nextFrame();
+        println(`child layout beside the frame: ${innerWidth}`);
+        println(`box after the frame: ${getComputedStyle(box).backgroundColor}`);
+        done();
+    });
+</script>
