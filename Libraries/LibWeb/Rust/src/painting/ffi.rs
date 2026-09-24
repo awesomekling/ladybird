@@ -177,8 +177,7 @@ pub unsafe extern "C" fn layout_arena_paintable_compute_scrollbar_data(
     device_scroll_offset: f32,
     device_pixels_per_css_pixel: f64,
 ) -> FfiOptionalScrollbarData {
-    let arena = unsafe { arena_from_handle(arena) };
-    let paintable_rows = arena.paintable_rows();
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     let data = crate::painting::chrome_geometry::ChromeGeometry {
         arena: &paintable_rows,
         metrics,
@@ -216,8 +215,8 @@ pub unsafe extern "C" fn layout_arena_paintable_minimum_scroll_offset(
     arena: *mut c_void,
     slot: NodeSlotId,
 ) -> FfiCssPixelPoint {
-    let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::chrome_geometry::minimum_scroll_offset(&arena.paintable_rows(), slot).into()
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
+    crate::painting::chrome_geometry::minimum_scroll_offset(&paintable_rows, slot).into()
 }
 
 /// # Safety
@@ -228,16 +227,16 @@ pub unsafe extern "C" fn layout_arena_paintable_maximum_scroll_offset(
     arena: *mut c_void,
     slot: NodeSlotId,
 ) -> FfiCssPixelPoint {
-    let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::chrome_geometry::maximum_scroll_offset(&arena.paintable_rows(), slot).into()
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
+    crate::painting::chrome_geometry::maximum_scroll_offset(&paintable_rows, slot).into()
 }
 
-fn scroll_offset_reader(arena: &LayoutNodeArena) -> impl Fn(NodeSlotId) -> CssPixelPoint {
+fn scroll_offset_reader(paintable_rows: &impl PaintableRowsRead) -> impl Fn(NodeSlotId) -> CssPixelPoint {
     move |node| {
-        if !arena.paintable_row_is_populated(node) {
+        if !paintable_rows.paintable_row_is_populated(node) {
             return CssPixelPoint::default();
         }
-        arena.scroll_offsets().offset(node)
+        paintable_rows.scroll_offset(node)
     }
 }
 
@@ -251,9 +250,9 @@ pub unsafe extern "C" fn layout_arena_paintable_wheel_scrollable_axes(
     viewport_overflow_x: u8,
     viewport_overflow_y: u8,
 ) -> FfiPhysicalResizeAxes {
-    let arena = unsafe { arena_from_handle(arena) };
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     let axes = crate::painting::chrome_geometry::wheel_scrollable_axes(
-        &arena.paintable_rows(),
+        &paintable_rows,
         slot,
         viewport_overflow_x,
         viewport_overflow_y,
@@ -1059,9 +1058,8 @@ pub unsafe extern "C" fn layout_arena_snap_container_geometry(
     snap_container: NodeSlotId,
     out_geometry: *mut crate::painting::host::FfiSnapContainerGeometry,
 ) -> bool {
-    let arena = unsafe { arena_from_handle(arena) };
-    let Some(geometry) = crate::painting::scroll_snap::snap_container_geometry(&arena.paintable_rows(), snap_container)
-    else {
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
+    let Some(geometry) = crate::painting::scroll_snap::snap_container_geometry(&paintable_rows, snap_container) else {
         return false;
     };
     // SAFETY: The caller provides writable storage for the geometry.
@@ -1928,9 +1926,8 @@ pub unsafe extern "C" fn layout_arena_text_caret_rect_in_dom_range(
     primary: NodeSlotId,
     offset: usize,
 ) -> FfiOptionalCssPixelRect {
-    let arena = unsafe { arena_from_handle(arena) };
-    let paintable_rows = arena.paintable_rows();
-    let fragments = arena.text_fragments(primary);
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
+    let fragments = paintable_rows.text_fragments(primary);
     let node_slots = fragments.as_slice();
     match crate::painting::caret::caret_rect_in_dom_range(&paintable_rows, node_slots, offset) {
         Some(rect) => FfiOptionalCssPixelRect {
@@ -2194,9 +2191,8 @@ pub unsafe extern "C" fn layout_arena_text_visual_lines(
     context: *mut c_void,
     push: unsafe extern "C" fn(*mut c_void, FfiVisualLine),
 ) {
-    let arena = unsafe { arena_from_handle(arena) };
-    let paintable_rows = arena.paintable_rows();
-    let fragments = arena.text_fragments(primary);
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
+    let fragments = paintable_rows.text_fragments(primary);
     let node_slots = fragments.as_slice();
     for line in crate::painting::visual_lines::collect_visual_lines(&paintable_rows, node_slots) {
         // SAFETY: The consumer copies the POD line synchronously.
@@ -2242,10 +2238,10 @@ pub unsafe extern "C" fn layout_arena_text_has_rendered_text_before(
     primary: NodeSlotId,
     offset: usize,
 ) -> bool {
-    let arena = unsafe { arena_from_handle(arena) };
-    let fragments = arena.text_fragments(primary);
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
+    let fragments = paintable_rows.text_fragments(primary);
     let node_slots = fragments.as_slice();
-    has_rendered_text_matching(&arena.paintable_rows(), node_slots, |fragment| {
+    has_rendered_text_matching(&paintable_rows, node_slots, |fragment| {
         fragment.dom_start_offset_in_node < offset
     })
 }
@@ -2260,10 +2256,10 @@ pub unsafe extern "C" fn layout_arena_text_has_rendered_text_after(
     primary: NodeSlotId,
     offset: usize,
 ) -> bool {
-    let arena = unsafe { arena_from_handle(arena) };
-    let fragments = arena.text_fragments(primary);
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
+    let fragments = paintable_rows.text_fragments(primary);
     let node_slots = fragments.as_slice();
-    has_rendered_text_matching(&arena.paintable_rows(), node_slots, |fragment| {
+    has_rendered_text_matching(&paintable_rows, node_slots, |fragment| {
         fragment.dom_end_offset_in_node > offset
     })
 }
@@ -2286,9 +2282,8 @@ pub unsafe extern "C" fn layout_arena_visual_line_caret_inline_coordinate(
     primary: NodeSlotId,
     offset: usize,
 ) -> FfiOptionalCssPixels {
-    let arena = unsafe { arena_from_handle(arena) };
-    let paintable_rows = arena.paintable_rows();
-    let fragments = arena.text_fragments(primary);
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
+    let fragments = paintable_rows.text_fragments(primary);
     let node_slots = fragments.as_slice();
     let coordinate = crate::painting::visual_lines::caret_inline_coordinate(
         &paintable_rows,
@@ -2319,9 +2314,8 @@ pub unsafe extern "C" fn layout_arena_visual_line_offset_closest_to_inline_coord
     inline_coordinate: CssPixels,
     fallback_offset: usize,
 ) -> usize {
-    let arena = unsafe { arena_from_handle(arena) };
-    let paintable_rows = arena.paintable_rows();
-    let fragments = arena.text_fragments(primary);
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
+    let fragments = paintable_rows.text_fragments(primary);
     let node_slots = fragments.as_slice();
     crate::painting::visual_lines::offset_closest_to_inline_coordinate(
         &paintable_rows,
@@ -2351,11 +2345,10 @@ pub unsafe extern "C" fn layout_arena_text_range_rects(
     context: *mut c_void,
     push_rect: unsafe extern "C" fn(*mut c_void, FfiCssPixelRect),
 ) {
-    let arena = unsafe { arena_from_handle(arena) };
-    let paintable_rows = arena.paintable_rows();
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     let rect_to_viewport_transform = unsafe { rect_to_viewport_transform_from_ffi(&rect_to_viewport_transform) };
 
-    let fragments = arena.text_fragments(primary);
+    let fragments = paintable_rows.text_fragments(primary);
     let node_slots = fragments.as_slice();
     crate::painting::text_fragment::for_each_fragment_of_nodes(&paintable_rows, node_slots, |block, _, fragment| {
         let fragment_dom_start = fragment.dom_start_offset_in_node;
@@ -2372,7 +2365,7 @@ pub unsafe extern "C" fn layout_arena_text_range_rects(
             range_end_offset,
         );
 
-        let rect_in_viewport_space = if arena.slot_is_live(block) {
+        let rect_in_viewport_space = if paintable_rows.slot_is_live(block) {
             crate::painting::rect_to_viewport_transform::transform_rect_to_viewport_or_identity(
                 rect_to_viewport_transform.as_ref(),
                 &paintable_rows,
