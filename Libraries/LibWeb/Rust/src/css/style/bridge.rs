@@ -118,6 +118,12 @@ pub enum FfiStyleDeltaGap {
     RetryAfterAncestor,
     /// An unstyled descendant of a hidden ancestor needs no record in this batch.
     SkippedHidden,
+    /// The engine computed the new record over the ancestors the host installed before it, for a
+    /// row tied to those ancestors. C++ applies it as a record that reads them as they now stand.
+    RetriedAfterAncestors,
+    /// The engine computed the new record over the installed ancestors for a row C++ would
+    /// otherwise have computed itself. C++ installs it even on an element without a style.
+    RetriedMaterialization,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

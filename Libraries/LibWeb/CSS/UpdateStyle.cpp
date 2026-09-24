@@ -595,14 +595,23 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             Optional<DOM::Element::EnginePseudoElementRecords> retried_pseudo_element_records;
             bool retried_unstyled_materialization = false;
             bool retried_after_installed_ancestors = false;
-            if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetryAfterAncestor
+            if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedAfterAncestors
+                || reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedMaterialization) {
+                // The engine computed this row over the rows installed before it, the way the host
+                // would have computed it here.
+                retried_unstyled_materialization = reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedMaterialization && !element->has_style();
+                retried_after_installed_ancestors = reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedAfterAncestors;
+                reaction.gap = StyleEngineFFI::FfiStyleDeltaGap::Computed;
+            } else if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetryAfterAncestor
                 || (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize
                     && reaction.reaction & (StyleEngine::RecomputeStyle | StyleEngine::RecomputeDescendantStyles | StyleEngine::AncestorBecameVisible | StyleEngine::InheritedStyle | StyleEngine::InheritedCustomProperties)
                     && !element->has_associated_animations())) {
                 // The preceding row has installed and published this element's parent. Ask now,
                 // before applying this row, rather than deriving its descendants ahead of their
                 // own install boundaries.
-                auto retried_rows = document.style_computer().style_engine().retry_engine_records_after_ancestor(reaction.style_node);
+                ReadonlySpan<StyleEngineFFI::FfiRetriedRecordRow> retried_rows;
+                if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetryAfterAncestor)
+                    retried_rows = document.style_computer().style_engine().retry_engine_records_after_ancestor(reaction.style_node);
                 if (!retried_rows.is_empty() && retried_rows[0].style_node == reaction.style_node && retried_rows[0].record.style_record != 0) {
                     retried_unstyled_materialization = reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize && !element->has_style();
                     retried_after_installed_ancestors = reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetryAfterAncestor;
