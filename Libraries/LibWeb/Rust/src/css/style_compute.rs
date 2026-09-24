@@ -3062,7 +3062,7 @@ pub unsafe extern "C" fn rust_sample_animation_effects(
 /// holds for the element.
 fn check_sample_custom_property_environments(
     input: &FfiHostAnimationSample,
-    engine: &mut crate::css::style::StyleEngine,
+    engine: &mut crate::css::style::StyleEngineState,
     node: crate::css::style::tree::StyleNodeID,
 ) {
     use crate::css::style::{engine_sample::SampleCustomPropertyEnvironments, engine_sample_check};
@@ -3111,7 +3111,7 @@ fn check_sample_custom_property_environments(
 /// builds from the record the element holds.
 fn check_sample_length_contexts(
     input: &FfiHostAnimationSample,
-    engine: &crate::css::style::StyleEngine,
+    engine: &crate::css::style::StyleEngineState,
     node: crate::css::style::tree::StyleNodeID,
     container_unit_mask: u8,
     host: &FfiAnimationLengthContexts,
@@ -3186,7 +3186,7 @@ fn check_sample_length_contexts(
 /// engine chooses from the element's published timing rows.
 fn check_sampled_effect_selection(
     input: &FfiHostAnimationSample,
-    engine: &crate::css::style::StyleEngine,
+    engine: &crate::css::style::StyleEngineState,
     node: crate::css::style::tree::StyleNodeID,
     slot: crate::css::style::animations::AnimationSlot,
     descriptions: &[crate::css::style::animations::PublishedEffect],
@@ -3332,10 +3332,13 @@ unsafe extern "C" fn host_inputs_sample_length_contexts(
 /// Everything the engine needs to sample the element itself, or why it cannot.
 fn prepare_engine_sample(
     input: &FfiHostAnimationSample,
-    engine: &mut crate::css::style::StyleEngine,
+    engine: &mut crate::css::style::StyleEngineState,
     node: crate::css::style::tree::StyleNodeID,
     descriptions: &[crate::css::style::animations::PublishedEffect],
+    environments: crate::css::style::engine_sample::SampleCustomPropertyEnvironments,
+    root: Option<crate::css::style::animations::RootElementFontMetrics>,
 ) -> Result<(Box<EngineSampleRun>, FfiHostAnimationSample), String> {
+    let root = root.unwrap_or_else(|| engine.root_element_font_metrics());
     use crate::css::style::animations;
 
     let pseudo = (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT).then_some(input.pseudo_kind);
@@ -3349,9 +3352,6 @@ fn prepare_engine_sample(
         engine.animation_timeline_samples(),
     )
     .ok_or("effect selection")?;
-    let environments = engine
-        .animation_sample_custom_property_environments(node, pseudo)
-        .map_err(|reason| format!("custom property environments: {reason}"))?;
     let view = engine
         .style_record_view(input.style_record)
         .ok_or("a record with no view")?;
@@ -3361,7 +3361,7 @@ fn prepare_engine_sample(
     );
     let horizontal = {
         let contexts = engine
-            .animation_sample_length_contexts(node, pseudo, input.style_record, 0)
+            .animation_sample_length_contexts_over_root(node, pseudo, input.style_record, 0, root)
             .ok_or("length contexts")?;
         contexts.remaining.subject_inline_axis_is_horizontal
     };
@@ -3370,7 +3370,8 @@ fn prepare_engine_sample(
     let axis_masks = [0u8, 1 << 0, 1 << 1, (1 << 0) | (1 << 1)];
     let mut length_contexts = [None; 4];
     for (index, mask) in axis_masks.into_iter().enumerate() {
-        length_contexts[index] = engine.animation_sample_length_contexts(node, pseudo, input.style_record, mask);
+        length_contexts[index] =
+            engine.animation_sample_length_contexts_over_root(node, pseudo, input.style_record, mask, root);
     }
     let length_contexts = length_contexts.map(|contexts| contexts.expect("the record has a view"));
     let parent = match pseudo {
@@ -3469,7 +3470,7 @@ fn overlays_agree(host: *const c_void, engine: *const c_void) -> bool {
 /// As `sample_described_animation_effects`.
 unsafe fn sample_whole_effect_stack(
     input: &FfiHostAnimationSample,
-    engine: &mut crate::css::style::StyleEngine,
+    engine: &mut crate::css::style::StyleEngineState,
     node: crate::css::style::tree::StyleNodeID,
     descriptions: &[crate::css::style::animations::PublishedEffect],
 ) -> FfiHostAnimationSampleResult {
@@ -3483,7 +3484,12 @@ unsafe fn sample_whole_effect_stack(
     if checking {
         engine_sample_check::expect_sampled_style(std::ptr::from_ref(&*engine).addr(), node, input.pseudo_kind, None);
     }
-    let (mut run, run_input) = match prepare_engine_sample(input, engine, node, descriptions) {
+    let pseudo = (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT).then_some(input.pseudo_kind);
+    let prepared = engine
+        .animation_sample_custom_property_environments(node, pseudo)
+        .map_err(|reason| format!("custom property environments: {reason}"))
+        .and_then(|environments| prepare_engine_sample(input, engine, node, descriptions, environments, None));
+    let (mut run, run_input) = match prepared {
         Ok(prepared) => prepared,
         Err(reason) => {
             engine_sample_check::note_declined(&format!("whole sample: {reason}"));
@@ -3521,6 +3527,15 @@ unsafe fn sample_whole_effect_stack(
     let Some((host, host_result)) = host_sample else {
         return result;
     };
+    if pseudo.is_none() {
+        check_settled_row_sample(
+            engine,
+            node,
+            input.style_record,
+            &result,
+            run.overlay.cast_const().cast(),
+        );
+    }
     let custom_properties = |result: &FfiHostAnimationSampleResult| {
         (0..result.animated_custom_property_count)
             .map(|index| unsafe { &*result.animated_custom_properties.add(index) })
@@ -3578,7 +3593,6 @@ unsafe fn sample_whole_effect_stack(
     };
     run.overlay = sampled;
     let engine_identity = std::ptr::from_ref(&*engine).addr();
-    let pseudo = (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT).then_some(input.pseudo_kind);
     match unsafe { finalize_engine_sample(engine, node, pseudo, run.record_table, run.record_overlay, run.overlay) } {
         Ok(table) => engine_sample_check::expect_sampled_style(
             engine_identity,
@@ -3595,6 +3609,192 @@ unsafe fn sample_whole_effect_stack(
         }
     }
     result
+}
+
+/// What the engine's sample of a row its pass settled composed, over the record the row settled:
+/// what a host's sample reports, and the style the overlay record is built from.
+pub(crate) struct SettledRowSample {
+    pub(crate) style_record: u64,
+    pub(crate) outcome: FfiHostAnimationSampleOutcome,
+    pub(crate) keyframes_inherited_non_inherited_style_groups: u32,
+    pub(crate) depends_on_viewport_metrics: bool,
+    pub(crate) font_metrics_depend_on_viewport_metrics: bool,
+    pub(crate) uses_tree_counting_function: bool,
+    pub(crate) substitution_marks: u8,
+    /// The table after the animated box-type finalization, and the overlay.
+    pub(crate) style: crate::css::style::engine_sample_check::EngineSampledStyle,
+}
+
+unsafe extern "C" fn settled_row_overlay(context: *mut c_void) -> *mut c_void {
+    context
+}
+
+/// Sample the animations of an element whose row the pass settled, over the record the row
+/// settled and before the host installs it: the effects the element's timing rows select, the
+/// environments its new record and its parent's were published with, and the length contexts and
+/// fonts the engine builds; or why the engine cannot.
+pub(crate) fn sample_settled_row(
+    engine: &mut crate::css::style::StyleEngineState,
+    node: crate::css::style::tree::StyleNodeID,
+    root: Option<crate::css::style::animations::RootElementFontMetrics>,
+    layout_arena: crate::css::style::animations::LentLayoutArena,
+) -> Result<SettledRowSample, String> {
+    use crate::css::animated_overlay::{
+        rust_animated_overlay_clone, rust_animated_overlay_clone_inherited, rust_animated_overlay_create,
+        rust_animated_overlay_free,
+    };
+    use crate::css::cascaded_properties::NO_PSEUDO_ELEMENT;
+
+    let slot = animation_slot(NO_PSEUDO_ELEMENT);
+    let style_record = engine
+        .assigned_style_record_of(node, None)
+        .ok_or("a row without a record")?;
+    let environments = engine
+        .settled_row_custom_property_environments(node)
+        .map_err(|reason| format!("custom property environments: {reason}"))?;
+    let (table, record_overlay) = {
+        let view = engine.style_record_view(style_record).ok_or("a record with no view")?;
+        (
+            view.longhand_table.cast::<c_void>().as_ptr(),
+            view.animated_overlay.cast::<AnimatedOverlay>().as_ptr(),
+        )
+    };
+    // The host samples over the style it reconstructs from the record, overlay and all.
+    let overlay = match record_overlay.is_null() {
+        true => rust_animated_overlay_create(),
+        false => unsafe { rust_animated_overlay_clone(record_overlay) },
+    };
+    let input = FfiHostAnimationSample {
+        style_engine: std::ptr::null_mut(),
+        style_node: node.raw(),
+        pseudo_kind: NO_PSEUDO_ELEMENT,
+        identities: std::ptr::null(),
+        generations: std::ptr::null(),
+        current_keys: std::ptr::null(),
+        effect_count: 0,
+        samples_whole_stack: false,
+        style_record,
+        longhand_table: table,
+        animated_overlay: overlay.cast_const().cast(),
+        custom_property_store: std::ptr::null(),
+        base_custom_property_store: std::ptr::null(),
+        inheritance_custom_property_store: std::ptr::null(),
+        element_declares_own_custom_properties: false,
+        base_custom_property_environment_is_engine: false,
+        inheritance_parent_style_record: 0,
+        kept_length_contexts: std::ptr::null(),
+        callback_context: overlay.cast(),
+        prepare_overlay_for_mutation: Some(settled_row_overlay),
+        length_contexts: None,
+        layout_arena: layout_arena.as_ptr(),
+    };
+    let sampled = match engine.take_element_animation_effect_descriptions(node, slot) {
+        // An element with no effect described clears what it composed.
+        None => Ok((
+            None,
+            FfiHostAnimationSampleResult::with_outcome(FfiHostAnimationSampleOutcome::Cleared),
+        )),
+        Some(descriptions) => {
+            let sampled = prepare_engine_sample(&input, engine, node, &descriptions, environments, root).map(
+                |(run, run_input)| {
+                    let result = unsafe { sample_described_animation_effects(&run_input, engine, node, &descriptions) };
+                    (Some(run), result)
+                },
+            );
+            engine.restore_element_animation_effect_descriptions(node, slot, descriptions);
+            sampled
+        }
+    };
+    let (_run, result) = match sampled {
+        Ok(sampled) => sampled,
+        Err(reason) => {
+            unsafe { rust_animated_overlay_free(overlay) };
+            return Err(reason);
+        }
+    };
+    let animates_custom_properties = result.animated_custom_property_count != 0;
+    unsafe { rust_release_animated_custom_property_results(result.animated_custom_properties_storage) };
+    if animates_custom_properties {
+        unsafe { rust_animated_overlay_free(overlay) };
+        return Err("animated custom properties".into());
+    }
+    // A sample that clears keeps what the element inherited.
+    let overlay = match result.outcome {
+        FfiHostAnimationSampleOutcome::Cleared => {
+            let cleared = unsafe { rust_animated_overlay_clone_inherited(overlay) };
+            unsafe { rust_animated_overlay_free(overlay) };
+            cleared
+        }
+        _ => overlay,
+    };
+    let finalized = unsafe { finalize_engine_sample(engine, node, None, table.cast(), record_overlay, overlay) };
+    let table = match finalized {
+        Ok(table) => table,
+        Err(reason) => {
+            unsafe { rust_animated_overlay_free(overlay) };
+            return Err(format!("sampled style: {reason}"));
+        }
+    };
+    Ok(SettledRowSample {
+        style_record,
+        outcome: result.outcome,
+        keyframes_inherited_non_inherited_style_groups: result.keyframes_inherited_non_inherited_style_groups,
+        depends_on_viewport_metrics: result.depends_on_viewport_metrics,
+        font_metrics_depend_on_viewport_metrics: result.font_metrics_depend_on_viewport_metrics,
+        uses_tree_counting_function: result.uses_tree_counting_function,
+        substitution_marks: result.substitution_marks,
+        style: crate::css::style::engine_sample_check::EngineSampledStyle { table, overlay },
+    })
+}
+
+/// Check what a whole-stack sample reported against the engine's sample of the row its pass
+/// settled, where the host sampled the record the row settled.
+fn check_settled_row_sample(
+    engine: &crate::css::style::StyleEngineState,
+    node: crate::css::style::tree::StyleNodeID,
+    style_record: u64,
+    result: &FfiHostAnimationSampleResult,
+    overlay: *const c_void,
+) {
+    use crate::css::style::engine_sample_check;
+
+    let engine_identity = std::ptr::from_ref(engine).addr();
+    engine_sample_check::with_settled_row_sample(engine_identity, node, |settled| {
+        if settled.style_record != style_record {
+            engine_sample_check::note_declined("settled row: the host sampled another record");
+            return false;
+        }
+        let agrees = settled.outcome == result.outcome
+            && settled.keyframes_inherited_non_inherited_style_groups
+                == result.keyframes_inherited_non_inherited_style_groups
+            && settled.depends_on_viewport_metrics == result.depends_on_viewport_metrics
+            && settled.font_metrics_depend_on_viewport_metrics == result.font_metrics_depend_on_viewport_metrics
+            && settled.uses_tree_counting_function == result.uses_tree_counting_function
+            && settled.substitution_marks == result.substitution_marks
+            && result.animated_custom_property_count == 0;
+        if agrees {
+            engine_sample_check::note_agreed("settled row");
+        } else {
+            engine_sample_check::note_difference("settled row", &|| {
+                format!(
+                    "node {}: pass {:?} marks {} groups {}, host {:?} marks {} groups {} overlay {:?}",
+                    node.raw(),
+                    settled.outcome,
+                    settled.substitution_marks,
+                    settled.keyframes_inherited_non_inherited_style_groups,
+                    result.outcome,
+                    result.substitution_marks,
+                    result.keyframes_inherited_non_inherited_style_groups,
+                    describe_overlay(overlay)
+                        .iter()
+                        .map(|entry| entry.0)
+                        .collect::<Vec<_>>(),
+                )
+            });
+        }
+        // The style it left is checked where the host finalizes its own.
+        true
+    });
 }
 
 /// Check the style the host's whole-stack sample of an element left in its working set - the
@@ -3619,9 +3819,29 @@ pub unsafe extern "C" fn rust_check_sampled_style(
     let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
         return;
     };
+    if pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT
+        && let Some(settled) = engine_sample_check::take_settled_row_sample(engine.addr(), node)
+    {
+        check_sampled_style_against("settled row style", node, pseudo_kind, table, overlay, &settled.style);
+    }
     let Some(expected) = engine_sample_check::take_expected_sampled_style(engine.addr(), node, pseudo_kind) else {
         return;
     };
+    check_sampled_style_against("sampled style", node, pseudo_kind, table, overlay, &expected);
+}
+
+/// Check the finalized table and the overlay a host's sample left against what an engine sample
+/// left.
+fn check_sampled_style_against(
+    label: &'static str,
+    node: crate::css::style::tree::StyleNodeID,
+    pseudo_kind: u8,
+    table: *const c_void,
+    overlay: *const c_void,
+    expected: &crate::css::style::engine_sample_check::EngineSampledStyle,
+) {
+    use crate::css::style::engine_sample_check;
+
     let (table, expected_table) = (unsafe { &*table.cast::<ComputedLonghandTable>() }, unsafe {
         &*expected.table
     });
@@ -3637,10 +3857,10 @@ pub unsafe extern "C" fn rust_check_sampled_style(
     });
     let overlay_agrees = overlays_agree(overlay, expected.overlay.cast_const().cast());
     if table_agrees && overlay_agrees {
-        engine_sample_check::note_agreed("sampled style");
+        engine_sample_check::note_agreed(label);
         return;
     }
-    engine_sample_check::note_difference("sampled style", &|| {
+    engine_sample_check::note_difference(label, &|| {
         format!(
             "node {} pseudo {pseudo_kind}: table {table_agrees}, overlay {overlay_agrees}: host {:?}, engine {:?}",
             node.raw(),
@@ -3675,7 +3895,7 @@ const ANIMATED_POST_COMPUTE_ADJUSTMENT_PROPERTIES: [u16; 7] = [
 /// # Safety
 /// `record_table` and `overlay` must be live, and `record_overlay` live or null.
 unsafe fn finalize_engine_sample(
-    engine: &crate::css::style::StyleEngine,
+    engine: &crate::css::style::StyleEngineState,
     node: crate::css::style::tree::StyleNodeID,
     pseudo: Option<u8>,
     record_table: *const ComputedLonghandTable,
@@ -3750,7 +3970,7 @@ unsafe fn finalize_engine_sample(
 
 unsafe fn sample_described_animation_effects(
     input: &FfiHostAnimationSample,
-    engine: &mut crate::css::style::StyleEngine,
+    engine: &mut crate::css::style::StyleEngineState,
     node: crate::css::style::tree::StyleNodeID,
     descriptions: &[crate::css::style::animations::PublishedEffect],
 ) -> FfiHostAnimationSampleResult {

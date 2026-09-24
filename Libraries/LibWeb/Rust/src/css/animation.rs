@@ -7286,7 +7286,7 @@ pub(crate) struct KeyframeSubstitutionContext<'a> {
 
 /// The element the host's sampling substitutes keyframes against, and the environment it inherits.
 pub(crate) struct HostKeyframeSubstitution<'a> {
-    pub(crate) engine: &'a mut crate::css::style::StyleEngine,
+    pub(crate) engine: &'a mut crate::css::style::StyleEngineState,
     pub(crate) node: crate::css::style::tree::StyleNodeID,
     pub(crate) pseudo: Option<u8>,
     pub(crate) inheritance_store: *const std::ffi::c_void,

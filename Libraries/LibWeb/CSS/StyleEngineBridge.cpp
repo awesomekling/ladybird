@@ -21,6 +21,7 @@
 #include <LibWeb/CSS/StyleSheetState.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/StyleValueRustFFI.h>
 
@@ -887,8 +888,12 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
             }
         }
     }
+    // A sample the pass takes resolves a percentage translation against the boxes the last layout
+    // committed.
+    auto* layout_node_arena = m_style_computer->document().layout_node_arena_if_created();
+    auto* layout_arena = layout_node_arena ? layout_node_arena->handle() : nullptr;
     auto bridge_started_at = MonotonicTime::now();
-    auto view = StyleEngineFFI::style_engine_take_style_transaction(m_impl, root.value(), computation_inputs);
+    auto view = StyleEngineFFI::style_engine_take_style_transaction(m_impl, root.value(), computation_inputs, layout_arena);
     auto bridge_microseconds = (MonotonicTime::now() - bridge_started_at).to_truncated_microseconds();
     if (view.reclaimed_style_atom_count != 0) {
         HashTable<StyleAtomID> reclaimed_atoms;

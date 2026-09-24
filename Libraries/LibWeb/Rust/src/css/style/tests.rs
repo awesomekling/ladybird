@@ -11533,8 +11533,14 @@ fn replay_ffi_reclaims_the_non_empty_recorded_atom_set() {
         device_pixels_per_css_pixel: 2.0,
         ..Default::default()
     };
-    let output =
-        unsafe { bridge::style_engine_take_style_transaction(engine_pointer, nodes[0].raw(), computation_inputs) };
+    let output = unsafe {
+        bridge::style_engine_take_style_transaction(
+            engine_pointer,
+            nodes[0].raw(),
+            computation_inputs,
+            std::ptr::null_mut(),
+        )
+    };
 
     // Inputs that name no registry name the empty one the engine froze.
     assert_eq!(

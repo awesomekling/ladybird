@@ -1438,11 +1438,11 @@ impl StyleEngineState {
             nodes: Vec::new(),
             scoped: true,
         });
-        let _ = self.take_style_transaction(root, |_, _, _| {}, counters);
+        let _ = self.take_style_transaction(root, |_, _, _| {}, counters, super::animations::LentLayoutArena::NONE);
         // A pass the host would install in waves reports every wave, as the host's diagnostic
         // take does.
         while self.host.suspended_style_pass.is_some() {
-            let _ = self.take_style_transaction(root, |_, _, _| {}, counters);
+            let _ = self.take_style_transaction(root, |_, _, _| {}, counters, super::animations::LentLayoutArena::NONE);
         }
         let capture = self
             .diagnostic_plan_capture

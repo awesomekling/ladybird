@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use super::animations::LentLayoutArena;
+use super::engine_sample_check;
 use super::*;
 
 /// A style pass the host installs in waves. The pass settles its rows in the order the host
@@ -227,6 +229,7 @@ impl StyleEngineState {
         mut emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
         clock: &mut TransactionClock,
         counters: &mut Counters,
+        layout_arena: LentLayoutArena,
     ) -> bool {
         // The previous transaction's uninstalled records can no longer be consumed. Revert
         // them before this transaction publishes anything: a later C++ computation can install
@@ -2062,6 +2065,7 @@ impl StyleEngineState {
                 &mut style_delta_memory,
                 &mut computation_scratch_memory,
                 counters,
+                layout_arena,
             );
             computation_loop_timer.stop(Counter::ComputationLoopMicroseconds, counters);
             computation_scratch_memory.resize_required_to(&mut self.retained.memory, pass.scratch.capacity_bytes());
@@ -2144,6 +2148,7 @@ impl StyleEngineState {
         style_delta_memory: &mut MemoryLease,
         computation_scratch_memory: &mut MemoryLease,
         counters: &mut Counters,
+        layout_arena: LentLayoutArena,
     ) {
         loop {
             let derived_children = self.run_style_pass_round(
@@ -2152,6 +2157,7 @@ impl StyleEngineState {
                 style_delta_memory,
                 computation_scratch_memory,
                 counters,
+                layout_arena,
             );
             if derived_children.is_empty() {
                 return;
@@ -2277,6 +2283,7 @@ impl StyleEngineState {
         style_delta_memory: &mut MemoryLease,
         computation_scratch_memory: &mut MemoryLease,
         counters: &mut Counters,
+        layout_arena: LentLayoutArena,
     ) -> Vec<(StyleNodeID, u8, u8, bool)> {
         // Where each row of the pass stands, for a reaction a row derives for a child that is a row
         // still to come.
@@ -2887,6 +2894,38 @@ impl StyleEngineState {
                         },
                     );
                 }
+                // The engine samples a settled row that animates beside the host, which checks
+                // the two once it samples the row it installs.
+                if engine_sample_check::is_checking()
+                    && engine_computed_delta.is_some()
+                    && self.retained.engine_computed_records_pending.contains_key(&node)
+                    && (self.retained.computed_group_sets.adjustment_facts(node)
+                        & bridge::element_adjustment_fact::HAS_ANIMATIONS
+                        != 0
+                        || self.retained.nodes_owing_an_animation_sample.contains(&node))
+                    && !self
+                        .retained
+                        .nodes_owing_animation_definitions
+                        .contains_key(&(node, u8::MAX))
+                    && !self.retained.nodes_owing_a_transition_registration.contains_key(&node)
+                {
+                    let engine_identity = std::ptr::from_ref(&*self).addr();
+                    // A document element this pass settled is not installed yet, and a `rem` the
+                    // row resolves reads the record it settled.
+                    let root = pass
+                        .scratch
+                        .root_element_inputs()
+                        .and_then(|root| self.retained.assigned_root_element_font_metrics(root));
+                    match crate::css::style_compute::sample_settled_row(self, node, root, layout_arena) {
+                        Ok(sample) => {
+                            engine_sample_check::expect_settled_row_sample(engine_identity, node, Some(sample));
+                        }
+                        Err(reason) => {
+                            engine_sample_check::note_declined(&format!("settled row: {reason}"));
+                            engine_sample_check::expect_settled_row_sample(engine_identity, node, None);
+                        }
+                    }
+                }
                 let (old_style_record, new_style_record, damage, gap) = if skip_hidden {
                     (0, 0, FfiStyleDeltaDamage::None, FfiStyleDeltaGap::SkippedHidden)
                 } else {
@@ -3297,6 +3336,7 @@ impl StyleEngineState {
         &mut self,
         mut emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
         counters: &mut Counters,
+        layout_arena: LentLayoutArena,
     ) -> bool {
         let mut pass = self
             .host
@@ -3369,6 +3409,7 @@ impl StyleEngineState {
             &mut style_delta_memory,
             &mut computation_scratch_memory,
             counters,
+            layout_arena,
         );
         computation_scratch_memory.release();
         // Every row before the one this wave resumes at is installed, so nothing that stopped the
@@ -3562,6 +3603,7 @@ impl StyleEngineState {
         root: StyleNodeID,
         emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
         counters: &mut Counters,
+        layout_arena: LentLayoutArena,
     ) -> bool {
         self.retained.engine_row_child_facts.clear();
         if self.host.suspended_style_pass.is_some() {
@@ -3573,14 +3615,14 @@ impl StyleEngineState {
                 && !self.host.program_staging.is_dirty()
                 && self.host.sheet_rule_replacement.is_none()
             {
-                return self.continue_style_pass(emit, counters);
+                return self.continue_style_pass(emit, counters, layout_arena);
             }
             self.abandon_suspended_style_pass();
         }
         let mut clock = TransactionClock::new();
         self.install_witness_effects();
         self.install_pending_matching_context();
-        let scoped = self.take_style_transaction_with_clock(root, emit, &mut clock, counters);
+        let scoped = self.take_style_transaction_with_clock(root, emit, &mut clock, counters, layout_arena);
         self.finish_memory_evaluation_loop();
         // Include transaction-local destruction on both ordinary and early-return paths.
         clock.finish(counters);

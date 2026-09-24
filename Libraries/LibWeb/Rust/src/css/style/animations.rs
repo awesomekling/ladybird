@@ -1822,6 +1822,31 @@ pub(crate) unsafe fn committed_transform_reference_box(
     Some((rect.width.to_double(), rect.height.to_double()))
 }
 
+/// The document's layout arena, which the host lends a style pass for the one call it blocks on, so
+/// a sample the pass takes resolves a percentage translation against the boxes the last layout
+/// committed. The engine never keeps it past the call.
+#[derive(Clone, Copy)]
+pub struct LentLayoutArena(*mut std::ffi::c_void);
+
+// SAFETY: The host blocks on the call it lends the arena for, and the pass only reads the rows the
+// last layout committed.
+unsafe impl Send for LentLayoutArena {}
+
+impl LentLayoutArena {
+    /// No arena: a document that has none, which has no committed boxes.
+    pub(crate) const NONE: Self = Self(std::ptr::null_mut());
+
+    /// # Safety
+    /// `arena` must be the document's live layout arena, or null, for as long as the call lasts.
+    pub(crate) unsafe fn lend(arena: *mut std::ffi::c_void) -> Self {
+        Self(arena)
+    }
+
+    pub(crate) fn as_ptr(self) -> *mut std::ffi::c_void {
+        self.0
+    }
+}
+
 /// One physical axis' container-unit basis for an element, and what resolving it says about the
 /// DOM.
 ///
