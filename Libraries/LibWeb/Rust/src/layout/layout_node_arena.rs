@@ -1982,6 +1982,8 @@ impl LayoutNodeArena {
     pub(crate) const SCROLL_OFFSETS_WRITER: &str = "scroll offsets";
     /// The writer the main side's selection state writes are attributed to.
     pub(crate) const SELECTION_WRITER: &str = "selection state";
+    /// The writer the rendering update's compositor animation choices are attributed to.
+    pub(crate) const COMPOSITOR_ELIGIBILITY_WRITER: &str = "compositor animation eligibility";
 
     /// The one door a main-side writer of render-owned state goes through. A write joins the
     /// frame in flight and lands after it, the way a main-side read of render state waits for it:
@@ -5707,6 +5709,21 @@ pub unsafe extern "C" fn layout_arena_set_node_flag(arena: *mut c_void, id: Node
     unsafe { LayoutNodeArena::from_handle(arena) }.set_node_flag(id, flag, value);
 }
 
+/// Whether the box keeps content the compositor animates. Like the frames below, it is chosen by
+/// the rendering update between frames, so it goes through the same door rather than a journal.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_node_retains_compositor_animated_content(
+    arena: *mut c_void,
+    id: NodeSlotId,
+    value: bool,
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the document thread.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
+    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::COMPOSITOR_ELIGIBILITY_WRITER);
+    arena.set_node_flag(id, NodeFlag::HasAnimatedOpacityOrTransform, value);
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_node_needs_compositor_animation_frame(
     arena: *mut c_void,
@@ -5717,7 +5734,7 @@ pub unsafe extern "C" fn layout_arena_set_node_needs_compositor_animation_frame(
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the document thread.
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    let _write = arena.join_frame_for_main_side_write("compositor animation eligibility");
+    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::COMPOSITOR_ELIGIBILITY_WRITER);
     arena.set_node_needs_compositor_animation_frame(id, kind, value);
 }
 
