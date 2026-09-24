@@ -161,7 +161,6 @@ enum class InvalidateLayoutTreeReason {
     X(HTMLInputElementHeight, true)                 \
     X(HTMLInputElementWidth, true)                  \
     X(HTMLLabelElementActivationBehavior, false)    \
-    X(HostedDocumentBeforePaint, false)             \
     X(InspectAccessibilityTree, false)              \
     X(InspectDOMTree, false)                        \
     X(InspectDevToolsLayoutData, false)             \
@@ -181,7 +180,6 @@ enum class InvalidateLayoutTreeReason {
     X(SVGGraphicsElementGetScreenCTM, false)        \
     X(SVGLengthValue, false)                        \
     X(SVGPathLength, false)                         \
-    X(SourceSetNormalizeSourceDensities, false)     \
     X(ViewTransitionCapture, false)                 \
     X(WindowScroll, false)
 
