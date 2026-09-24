@@ -5660,7 +5660,9 @@ pub unsafe extern "C" fn layout_arena_set_node_needs_compositor_animation_frame(
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the document thread.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_node_needs_compositor_animation_frame(id, kind, value);
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
+    let _write = arena.join_frame_for_main_side_write("compositor animation eligibility");
+    arena.set_node_needs_compositor_animation_frame(id, kind, value);
 }
 
 #[unsafe(no_mangle)]
