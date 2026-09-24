@@ -2118,16 +2118,12 @@ void Document::end_style_stabilization_epoch()
 // Refreshes what derives from committed layout results on the document side, shared by the partial and full layout
 // paths so neither can forget one. What needs none of the document's objects, the layout frame does itself, and what
 // is only read after the layout update comes back through apply_layout_commit_effects().
-void Document::after_layout_commit(LayoutTreeChanged layout_tree_changed)
+void Document::after_layout_commit()
 {
     // NB: Called during layout update.
     // A tree update can replace layout nodes referenced by selection state.
     if (auto range = get_selection()->range())
         paint_state().recompute_selection_states(*this, *range);
-
-    // Broadcast the current viewport rect to any new committed boxes, so they know whether they're visible or not.
-    if (layout_tree_changed == LayoutTreeChanged::Yes)
-        inform_all_viewport_clients_about_the_current_viewport_rect();
 }
 
 void Document::apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffects const& effects)
@@ -2156,6 +2152,10 @@ void Document::apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffec
         schedule_scroll_container_resnap();
         m_document->set_needs_repaint();
     }
+
+    // Broadcast the current viewport rect to any new committed boxes, so they know whether they're visible or not.
+    if (effects.layout_tree_changed)
+        inform_all_viewport_clients_about_the_current_viewport_rect();
 }
 
 bool Document::is_clean_for_layout_geometry_read() const
