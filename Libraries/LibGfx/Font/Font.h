@@ -91,7 +91,6 @@ public:
 
     SkFont skia_font(float scale) const;
 
-    Font const& bold_variant() const;
     hb_font_t* harfbuzz_font() const;
     FontVariationSettings const& variation_settings() const { return m_font_variation_settings; }
     ShapeFeatures const& features() const { return m_shape_features; }
@@ -112,7 +111,6 @@ private:
     mutable Atomic<u64> m_hinting_memo { 0 };
 #endif
 
-    mutable RefPtr<Font const> m_bold_variant;
     mutable OnceFlag m_harfbuzz_font_once;
     mutable hb_font_t* m_harfbuzz_font { nullptr };
 
