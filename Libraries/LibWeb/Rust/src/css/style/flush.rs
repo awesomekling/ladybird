@@ -2899,16 +2899,16 @@ impl StyleEngineState {
                 // A settled row that animates is sampled here, over the record the row settled and
                 // the effect stack its animation plan leaves, and the composition is published as
                 // the element's record: the rows after it read the sampled parent in this wave, and
-                // the host installs the composition after it applies the plan. A row whose
-                // transition step the host applies first is sampled by the host.
-                if engine_computed_delta.is_some()
+                // the host installs the composition after it applies the plan. The host runs a
+                // row's transition step after it installs the composition, as it does after its own
+                // sample.
+                let animates = engine_computed_delta.is_some()
                     && self.retained.engine_computed_records_pending.contains_key(&node)
                     && (self.retained.computed_group_sets.adjustment_facts(node)
                         & bridge::element_adjustment_fact::HAS_ANIMATIONS
                         != 0
-                        || self.retained.nodes_owing_an_animation_sample.contains(&node))
-                    && !self.retained.nodes_owing_a_transition_registration.contains_key(&node)
-                {
+                        || self.retained.nodes_owing_an_animation_sample.contains(&node));
+                if animates {
                     // A document element this pass settled is not installed yet, and a `rem` the
                     // row resolves reads the record it settled.
                     let root = pass

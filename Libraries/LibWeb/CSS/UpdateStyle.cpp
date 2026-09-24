@@ -863,7 +863,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                     bool const installed_pass_sample = row_sampled_in_pass.present && settled.has_style()
                         && install_composition_sampled_in_pass(settled, row_sampled_in_pass, row_sample_invalidation);
                     if (plan_after_pass_sample.has_value()) {
-                        if (installed_pass_sample)
+                        // The transition step below samples the element's animations as the plan
+                        // leaves them.
+                        if (installed_pass_sample && transition_debt != 2)
                             row_effects.append(StyleEffectDrain::AnimationPlan { StyleNodeID { reaction.style_node }, plan_after_pass_sample.release_value() });
                         else
                             document.style_computer().apply_settled_animation_plan(settled, *plan_after_pass_sample);
