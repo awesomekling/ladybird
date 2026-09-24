@@ -57,6 +57,10 @@
     }
 
     promiseTest(async () => {
+        // The test starts at DOMContentLoaded, when the srcdoc iframe may still hold its initial
+        // about:blank document. The window's load event waits for the iframe's.
+        if (document.readyState !== "complete")
+            await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
         await animationFrame();
         await animationFrame();
 
