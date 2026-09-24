@@ -7282,9 +7282,6 @@ pub(crate) struct KeyframeSubstitutionContext<'a> {
     pub(crate) substituted_var: bool,
     /// Every arbitrary-substitution function a substituted value held, as `SUBSTITUTION_MARK_*` bits.
     pub(crate) substitution_marks: u8,
-    /// Made on the first substitution and thrown away with the context: the substitution counters
-    /// belong to a document the sampling side holds no mutable borrow of.
-    discarded_counters: Option<Box<crate::css::style::instrumentation::Counters>>,
 }
 
 /// The element the host's sampling substitutes keyframes against, and the environment it inherits.
@@ -7306,7 +7303,6 @@ impl<'a> KeyframeSubstitutionContext<'a> {
             host: None,
             substituted_var: false,
             substitution_marks: 0,
-            discarded_counters: None,
         }
     }
 
@@ -7317,7 +7313,6 @@ impl<'a> KeyframeSubstitutionContext<'a> {
             host: Some(host),
             substituted_var: false,
             substitution_marks: 0,
-            discarded_counters: None,
         }
     }
 
@@ -7374,13 +7369,11 @@ impl<'a> KeyframeSubstitutionContext<'a> {
             ),
             None => {
                 let inputs = self.inputs?;
-                let counters = self.discarded_counters.get_or_insert_with(Box::default);
                 crate::css::style::custom_property_cascade::substitute_written_value_against_store(
                     self.custom_property_store,
                     inputs,
                     property,
                     written,
-                    counters,
                 )?
             }
         };

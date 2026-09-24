@@ -3720,13 +3720,20 @@ impl RetainedState {
         // Seeded in cascade order, and within one rule in declaration order, since a logical
         // property and its physical associate resolve by order of appearance.
         let mut declarations = Vec::with_capacity(self.winner_groups.winner_count_in_state(state));
-        // A parent declaring none has no inherited value, and `inherit()` takes its fallback.
-        // `None` is a parent environment the engine holds no store for.
+        // A parent declaring none has no inherited value, and `inherit()` takes its fallback. A
+        // record's parent holds its environment before the record is driven.
         let inheritance_store = match inheritance_environment {
-            Some(0) => Some(std::ptr::null()),
-            Some(identity) => self.custom_property_environments.store(identity),
-            None => None,
+            Some(0) => std::ptr::null(),
+            Some(identity) => self.custom_property_environments.store(identity).unwrap_or_else(|| {
+                debug_assert!(false, "an inherited environment without a store");
+                std::ptr::null()
+            }),
+            None => {
+                debug_assert!(false, "a record driven before its parent holds an environment");
+                std::ptr::null()
+            }
         };
+        let inputs = self.document_style_computation_inputs;
         for winner in self.winner_groups.winners_in_state(state).collect::<Vec<_>>() {
             // A revert whose continuation resumes at nothing leaves the property undeclared.
             let Some(winner) = self.winner_groups.resolved_winner(winner) else {
@@ -3783,6 +3790,10 @@ impl RetainedState {
                 crate::css::style_value::StyleValueData::Unresolved { .. } => {
                     *substituted = true;
                     let value = value.clone_retained();
+                    let Some(inputs) = inputs else {
+                        counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
+                        return None;
+                    };
                     let value = self.substitute_written_value(
                         node,
                         pseudo_kind,
@@ -3790,8 +3801,9 @@ impl RetainedState {
                         winner.property,
                         value,
                         inheritance_store,
+                        inputs,
                         counters,
-                    )?;
+                    );
                     (
                         WinnerValue::Substituted {
                             value: invalid_as_unset(value),
@@ -3812,6 +3824,10 @@ impl RetainedState {
                         counters.bump(Counter::EngineComputedRecordBailWinnerSpelling);
                         return None;
                     };
+                    let Some(inputs) = inputs else {
+                        counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
+                        return None;
+                    };
                     let resolved = self.substitute_written_value(
                         node,
                         pseudo_kind,
@@ -3819,8 +3835,9 @@ impl RetainedState {
                         shorthand,
                         written,
                         inheritance_store,
+                        inputs,
                         counters,
-                    )?;
+                    );
                     let value = match resolved.data() {
                         crate::css::style_value::StyleValueData::GuaranteedInvalid => unset_value(),
                         _ => expanded_longhand_value(shorthand, winner.property, &resolved)
