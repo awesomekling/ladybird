@@ -1285,10 +1285,12 @@ impl StyleEngineState {
         let Some(mask) = self.pseudo_style_mask(node) else {
             return Err("EngineComputedRecordBailPseudoMask");
         };
-        let element = self
-            .computed_group_sets
-            .assigned_style_record(node)
-            .ok_or("EngineComputedRecordBailRecord")?;
+        // The demand settled the originating element first; a pseudo-element without an
+        // originating record generates no box.
+        let Some(element) = self.computed_group_sets.assigned_style_record(node) else {
+            debug_assert!(false, "a pseudo-element demand has an originating record");
+            return Ok(None);
+        };
         let is_list_item = self
             .computed_group_sets
             .style_record_view(element.raw())
