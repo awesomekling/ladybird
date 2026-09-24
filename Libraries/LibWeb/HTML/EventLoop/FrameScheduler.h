@@ -13,6 +13,7 @@
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/Forward.h>
+#include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 
 namespace Web::HTML {
@@ -92,32 +93,32 @@ public:
     // Ends the main half. Returns true if a frame is in flight, in which case the tail runs once it has been taken in.
     bool submit(Vector<GC::Ref<DOM::Document>> documents);
 
-    // Event loop step 1: takes in a finished frame, and runs the tail of a frame that is taken in.
-    void run_at_step_1();
+    // The event loop's finished frame consumer, called at step 1 once the render side has posted a frame completion:
+    // takes in a finished frame, and runs the tail of a frame that is taken in, where the event loop lets it.
+    void consume_finished_frame();
     // Waits for the frame in flight, takes it in and runs its tail. For a rendering update that has to start now.
     void finish_frame_now();
 
     // Takes in the frame the render side has handed back: publishes its recordings and hands off their compositor
     // frames. Runs no script: what the render side told the documents (their commit messages, which can dispatch
     // events) waits for the next rendering update or layout update to apply it.
-    void consume_commit();
+    void consume_commit(EventLoop::FrameConsumeSite);
 
     // Called before a document's render state goes away: the frame in flight must not own it anymore.
     void retire_frames_for(DOM::Document&);
 
+    EventLoop& event_loop() { return m_event_loop; }
+
     void visit_edges(JS::Cell::Visitor&);
 
 private:
+    void commit();
     void run_tail();
-    bool may_run_tail() const;
-    void frame_completion_notify_poll();
 
     EventLoop& m_event_loop;
     State m_state { State::Idle };
     bool m_synchronous_update { false };
     OwnPtr<FrameTicket> m_ticket;
-    // FIXME: Replace this poll with a completion notification that schedules the event loop from the render side.
-    GC::Ptr<Platform::Timer> m_completion_poll_timer;
 };
 
 }

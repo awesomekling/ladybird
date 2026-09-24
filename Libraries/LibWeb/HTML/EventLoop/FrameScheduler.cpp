@@ -6,15 +6,14 @@
 
 #include <AK/Time.h>
 #include <LibCore/EventLoop.h>
-#include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/EventLoop/FrameCompletion.h>
 #include <LibWeb/HTML/EventLoop/FrameInFlightReferences.h>
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/PendingDisplayListRecording.h>
-#include <LibWeb/Platform/Timer.h>
 
 namespace Web::HTML {
 
@@ -27,14 +26,13 @@ static void install_frame_scheduler_host(FrameScheduler& scheduler)
     if (!Layout::RustFFI::rust_stage_thread_wants_frame_scheduler_host())
         return;
     s_frame_scheduler_with_host = &scheduler;
-    static Core::WeakEventLoopReference* s_main_event_loop = nullptr;
-    s_main_event_loop = &Core::EventLoop::current_weak().leak_ref();
     Layout::RustFFI::rust_stage_thread_set_frame_scheduler_host({
-        .frame_completion_notify = [] {
-            if (auto event_loop = s_main_event_loop->take(); event_loop.is_alive())
-                event_loop->wake(); },
-        .consume_commit = [] { s_frame_scheduler_with_host->consume_commit(); },
+        .frame_completion_notify = [] { FrameCompletion::the().post(); },
+        .consume_commit = [] { s_frame_scheduler_with_host->consume_commit(EventLoop::FrameConsumeSite::ForcedJoin); },
     });
+    scheduler.event_loop().set_finished_frame_consumer(GC::create_function(GC::Heap::the(), [&scheduler] {
+        scheduler.consume_finished_frame();
+    }));
 }
 
 FrameScheduler::FrameScheduler(EventLoop& event_loop)
@@ -110,26 +108,27 @@ bool FrameScheduler::submit(Vector<GC::Ref<DOM::Document>> documents)
     m_ticket->documents = move(documents);
     m_state = State::InFlight;
     m_event_loop.did_submit_frame();
-    if (!m_completion_poll_timer) {
-        m_completion_poll_timer = Platform::Timer::create_repeating(GC::Heap::the(), 1, GC::create_function(GC::Heap::the(), [this] {
-            frame_completion_notify_poll();
-        }));
-    }
-    m_completion_poll_timer->start();
+    // A forced join during the main half can take in a recording that was submitted before its navigable went into
+    // the ticket. The frame has finished then, and its completion was taken with that join, so post one for step 1.
+    if (!Layout::RustFFI::rust_stage_thread_has_frame_in_flight())
+        FrameCompletion::the().post();
     return true;
 }
 
-void FrameScheduler::frame_completion_notify_poll()
+void FrameScheduler::consume_commit(EventLoop::FrameConsumeSite site)
 {
-    if (m_state != State::InFlight && m_state != State::CommittedTailPending) {
-        m_completion_poll_timer->stop();
-        return;
-    }
-    if (m_state == State::CommittedTailPending || Layout::RustFFI::rust_stage_thread_frame_in_flight_has_finished())
+    // A completion posted for the frame taken in here has nothing left to deliver.
+    FrameCompletion::the().take();
+    m_event_loop.consume_commit(site, [this] { commit(); });
+    // A forced join leaves the tail of a submitted frame for the next step 1, and nothing else would call the
+    // consumer again: no completion is pending anymore.
+    if (site == EventLoop::FrameConsumeSite::ForcedJoin && m_state == State::CommittedTailPending) {
+        m_event_loop.call_finished_frame_consumer_again();
         m_event_loop.schedule();
+    }
 }
 
-void FrameScheduler::consume_commit()
+void FrameScheduler::commit()
 {
     VERIFY(m_ticket);
     VERIFY(!Layout::RustFFI::rust_stage_thread_has_frame_in_flight());
@@ -158,30 +157,34 @@ void FrameScheduler::consume_commit()
         m_event_loop.did_consume_frame_commit(MonotonicTime::now().nanoseconds() - start_nanoseconds);
 }
 
-bool FrameScheduler::may_run_tail() const
+void FrameScheduler::consume_finished_frame()
 {
-    // The tail runs script, so it waits for an empty JavaScript execution context stack and an event loop that is not
-    // paused.
-    // FIXME: Decide which nested event loops (spin_until) may run a tail.
-    return !m_event_loop.execution_paused() && Bindings::main_thread_vm().execution_context_stack().is_empty();
-}
-
-void FrameScheduler::run_at_step_1()
-{
+    FrameCompletion::the().take();
     if (m_state == State::InFlight && Layout::RustFFI::rust_stage_thread_frame_in_flight_has_finished()) {
+        if (!m_event_loop.may_consume_commit(EventLoop::FrameConsumeSite::StepOne)) {
+            m_event_loop.call_finished_frame_consumer_again();
+            return;
+        }
         Layout::RustFFI::rust_stage_thread_take_frame_in_flight();
-        consume_commit();
+        consume_commit(EventLoop::FrameConsumeSite::StepOne);
     }
-    if (m_state == State::CommittedTailPending && may_run_tail())
-        run_tail();
+    if (m_state != State::CommittedTailPending)
+        return;
+    if (!m_event_loop.may_run_consume_tail()) {
+        m_event_loop.call_finished_frame_consumer_again();
+        return;
+    }
+    m_event_loop.run_consume_tail([this] { run_tail(); });
 }
 
 void FrameScheduler::finish_frame_now()
 {
     if (m_state == State::InFlight) {
         Layout::RustFFI::rust_stage_thread_take_frame_in_flight();
-        consume_commit();
+        consume_commit(EventLoop::FrameConsumeSite::ForcedJoin);
     }
+    // NB: The tail is the rest of the previous rendering update, which the rendering update starting now has to
+    //     follow. It runs here, where a lockstep frame would have run it too.
     if (m_state == State::CommittedTailPending)
         run_tail();
     VERIFY(m_state == State::Idle);
@@ -202,7 +205,6 @@ void FrameScheduler::run_tail()
 
 void FrameScheduler::visit_edges(JS::Cell::Visitor& visitor)
 {
-    visitor.visit(m_completion_poll_timer);
     if (!m_ticket)
         return;
     for (auto& [navigable, frame] : m_ticket->navigables) {
