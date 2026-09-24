@@ -29,7 +29,7 @@
 //! They are counted when instrumented, but are not seal violations. Debug/dump callbacks would be
 //! allowed only outside an update; none exists in the audited callback set.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
@@ -61,14 +61,37 @@ pub(crate) fn is_reporting() -> bool {
     mode() != Mode::Off
 }
 
+/// The seal's view of the style updates a document thread runs: whether one is open, and the
+/// census it keeps. It belongs to the document thread, and a stage run carries it to the stage
+/// thread and back (see [`take_state`]), so the part of an update that runs there is sealed and
+/// counted as the rest is.
+#[derive(Default)]
+pub(crate) struct SealState {
+    update_depth: u32,
+    reported: HashSet<&'static str>,
+    reported_refusals: HashSet<(&'static str, bool)>,
+    counts: HashMap<&'static str, Counts>,
+    between_pass_batches: HashMap<&'static str, (u64, u64)>,
+    host_entry_causes: HashMap<HostEntryKey, u64>,
+    engine_calls: HashMap<&'static str, u64>,
+}
+
 thread_local! {
-    static UPDATE_DEPTH: Cell<u32> = const { Cell::new(0) };
-    static REPORTED: RefCell<HashSet<&'static str>> = RefCell::new(HashSet::new());
-    static REPORTED_REFUSALS: RefCell<HashSet<(&'static str, bool)>> = RefCell::new(HashSet::new());
-    static COUNTS: RefCell<HashMap<&'static str, Counts>> = RefCell::new(HashMap::new());
-    static BETWEEN_PASS_BATCHES: RefCell<HashMap<&'static str, (u64, u64)>> = RefCell::new(HashMap::new());
-    static HOST_ENTRY_CAUSES: RefCell<HashMap<HostEntryKey, u64>> = RefCell::new(HashMap::new());
-    static ENGINE_CALLS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
+    static STATE: RefCell<SealState> = RefCell::new(SealState::default());
+}
+
+fn update_is_running() -> bool {
+    STATE.with_borrow(|state| state.update_depth != 0)
+}
+
+/// Take this thread's seal state, for a stage run to carry to the stage thread.
+pub(crate) fn take_state() -> SealState {
+    STATE.with_borrow_mut(std::mem::take)
+}
+
+/// Install seal state a stage run carried here.
+pub(crate) fn install_state(state: SealState) {
+    STATE.with_borrow_mut(|current| *current = state);
 }
 
 /// What one host entry is: the reason the engine sent this element to the host, which way in it
@@ -115,28 +138,24 @@ pub(crate) fn note_host_entry(cause: &'static str, kind: HostEntryKind, cold: bo
             mode != Mode::Abort,
             "style stage is sealed, but the engine refused a row ({cause}, cold: {cold})"
         );
-        if REPORTED_REFUSALS.with(|reported| reported.borrow_mut().insert((cause, cold))) {
+        if STATE.with_borrow_mut(|state| state.reported_refusals.insert((cause, cold))) {
             write_report(&format!("STYLE SEAL: refused_row {cause} cold={cold}\n"));
         }
     }
-    if UPDATE_DEPTH.with(|depth| depth.get() == 0) {
+    if !update_is_running() {
         return;
     }
     let key = HostEntryKey { cause, kind, cold };
-    HOST_ENTRY_CAUSES.with(|causes| {
-        *causes.borrow_mut().entry(key).or_default() += 1;
-    });
+    STATE.with_borrow_mut(|state| *state.host_entry_causes.entry(key).or_default() += 1);
 }
 
 /// Record one engine entry point the host called. Only calls made while an update runs are
 /// counted, and none is fatal: the census ranks the round trips left between host and engine.
 pub(crate) fn note_engine_call(entry: &'static str) {
-    if mode() == Mode::Off || UPDATE_DEPTH.with(|depth| depth.get() == 0) {
+    if mode() == Mode::Off || !update_is_running() {
         return;
     }
-    ENGINE_CALLS.with(|calls| {
-        *calls.borrow_mut().entry(entry).or_default() += 1;
-    });
+    STATE.with_borrow_mut(|state| *state.engine_calls.entry(entry).or_default() += 1);
 }
 
 /// Report how often the engine declined to compute a record itself, by the reason it recorded.
@@ -173,17 +192,24 @@ pub(crate) fn begin_update() {
     if mode() == Mode::Off {
         return;
     }
-    UPDATE_DEPTH.with(|depth| depth.set(depth.get().checked_add(1).expect("style update depth overflowed")));
+    STATE.with_borrow_mut(|state| {
+        state.update_depth = state
+            .update_depth
+            .checked_add(1)
+            .expect("style update depth overflowed");
+    });
 }
 
 pub(crate) fn end_update() {
     if mode() == Mode::Off {
         return;
     }
-    let finished = UPDATE_DEPTH.with(|depth| {
-        let next = depth.get().checked_sub(1).expect("unbalanced style update scope");
-        depth.set(next);
-        next == 0
+    let finished = STATE.with_borrow_mut(|state| {
+        state.update_depth = state
+            .update_depth
+            .checked_sub(1)
+            .expect("unbalanced style update scope");
+        state.update_depth == 0
     });
     if finished && mode() == Mode::Report {
         flush_census();
@@ -198,12 +224,11 @@ pub(crate) fn end_update() {
 /// counted but not a crossing. The count stays because the batch is still a round *between* passes
 /// rather than part of one, and that is what a single sealed pass would have to absorb.
 pub(crate) fn between_pass_input_batch<T>(name: &'static str, requests: u64, batch: impl FnOnce() -> T) -> T {
-    if mode() == Mode::Off || UPDATE_DEPTH.with(|depth| depth.get() == 0) {
+    if mode() == Mode::Off || !update_is_running() {
         return batch();
     }
-    BETWEEN_PASS_BATCHES.with(|batches| {
-        let mut batches = batches.borrow_mut();
-        let counts = batches.entry(name).or_default();
+    STATE.with_borrow_mut(|state| {
+        let counts = state.between_pass_batches.entry(name).or_default();
         counts.0 = counts.0.wrapping_add(requests);
         counts.1 = counts.1.wrapping_add(1);
     });
@@ -226,10 +251,9 @@ pub(crate) fn note_host_call(callback: &'static str) {
     if mode == Mode::Off {
         return;
     }
-    let during_style = UPDATE_DEPTH.with(|depth| depth.get() != 0);
-    COUNTS.with(|counts| {
-        let mut counts = counts.borrow_mut();
-        let counts = counts.entry(callback).or_default();
+    let during_style = update_is_running();
+    STATE.with_borrow_mut(|state| {
+        let counts = state.counts.entry(callback).or_default();
         counts.calls = counts.calls.wrapping_add(1);
         counts.during_style = counts.during_style.wrapping_add(u64::from(during_style));
     });
@@ -240,7 +264,7 @@ pub(crate) fn note_host_call(callback: &'static str) {
         mode != Mode::Abort,
         "style stage is sealed, but a running update called {callback}()"
     );
-    if REPORTED.with(|reported| reported.borrow_mut().insert(callback)) {
+    if STATE.with_borrow_mut(|state| state.reported.insert(callback)) {
         write_report(&format!("STYLE SEAL: a running update called {callback}()\n"));
     }
 }
@@ -251,11 +275,15 @@ pub(crate) fn flush_census() {
     if mode() == Mode::Off {
         return;
     }
-    let mut counts = COUNTS.with(|counts| {
-        std::mem::take(&mut *counts.borrow_mut())
-            .into_iter()
-            .collect::<Vec<_>>()
+    let (counts, causes, engine_calls, batches) = STATE.with_borrow_mut(|state| {
+        (
+            std::mem::take(&mut state.counts),
+            std::mem::take(&mut state.host_entry_causes),
+            std::mem::take(&mut state.engine_calls),
+            std::mem::take(&mut state.between_pass_batches),
+        )
     });
+    let mut counts = counts.into_iter().collect::<Vec<_>>();
     counts.sort_unstable_by_key(|(callback, _)| *callback);
     for (callback, counts) in counts {
         write_report(&format!(
@@ -263,11 +291,7 @@ pub(crate) fn flush_census() {
             counts.calls, counts.during_style
         ));
     }
-    let mut causes = HOST_ENTRY_CAUSES.with(|causes| {
-        std::mem::take(&mut *causes.borrow_mut())
-            .into_iter()
-            .collect::<Vec<_>>()
-    });
+    let mut causes = causes.into_iter().collect::<Vec<_>>();
     causes.sort_unstable_by(|(first, left), (second, right)| right.cmp(left).then_with(|| first.cmp(second)));
     for (key, entries) in &causes {
         write_report(&format!(
@@ -277,8 +301,7 @@ pub(crate) fn flush_census() {
             u8::from(key.cold),
         ));
     }
-    let mut engine_calls =
-        ENGINE_CALLS.with(|calls| std::mem::take(&mut *calls.borrow_mut()).into_iter().collect::<Vec<_>>());
+    let mut engine_calls = engine_calls.into_iter().collect::<Vec<_>>();
     engine_calls.sort_unstable_by(|(first, left), (second, right)| right.cmp(left).then_with(|| first.cmp(second)));
     let total_engine_calls: u64 = engine_calls.iter().map(|(_, calls)| calls).sum();
     for (entry, calls) in engine_calls {
@@ -287,11 +310,7 @@ pub(crate) fn flush_census() {
     if total_engine_calls != 0 {
         write_report(&format!("STYLE SEAL COUNT: engine_calls: {total_engine_calls}\n"));
     }
-    let mut batches = BETWEEN_PASS_BATCHES.with(|batches| {
-        std::mem::take(&mut *batches.borrow_mut())
-            .into_iter()
-            .collect::<Vec<_>>()
-    });
+    let mut batches = batches.into_iter().collect::<Vec<_>>();
     batches.sort_unstable_by_key(|(batch, _)| *batch);
     for (batch, (requests, rounds)) in batches {
         write_report(&format!(

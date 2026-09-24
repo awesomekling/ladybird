@@ -44,6 +44,7 @@ ENVIRONMENT_SWITCH = "read-once environment switch; every thread sees the same a
 IDENTITY = "process-wide atomic counter handing out unique identities"
 BUILT_ONCE = "built once and read-only after; every thread shares the same table"
 STAGE_THREAD = "the stage thread itself, and the caller waiting on it"
+STYLE_UPDATE_SCOPE = "the document thread's open style update; a stage run carries it to the stage thread and back"
 LOCKED = "process-wide and behind a mutex"
 REPLAY = "style replay capture; replay builds only, or off unless an environment variable turns it on"
 TEST_ONLY = "test only"
@@ -65,20 +66,12 @@ RENDER_STAGE_ALLOWED = {
     **render_stage_entries(
         DIAGNOSTIC,
         [
-            "css/ffi_stats.rs:COMPLETE_STYLE_UPDATE_STATE",
             "css/ffi_stats.rs:COUNTERS_ENABLED",
             "css/ffi_stats.rs:COUNTER_CONTEXT",
             "css/ffi_stats.rs:CPP_CALLBACK_COUNT",
             "css/ffi_stats.rs:REGISTRY",
             "css/ffi_stats.rs:THREAD_UNSAFE_CPP_CALLBACK_COUNT",
-            "css/style/seal.rs:BETWEEN_PASS_BATCHES",
-            "css/style/seal.rs:COUNTS",
-            "css/style/seal.rs:ENGINE_CALLS",
-            "css/style/seal.rs:HOST_ENTRY_CAUSES",
             "css/style/seal.rs:MODE",
-            "css/style/seal.rs:REPORTED",
-            "css/style/seal.rs:REPORTED_REFUSALS",
-            "css/style/seal.rs:UPDATE_DEPTH",
             "font_seal.rs:INSTALLED",
             "layout/main_side_census.rs:CENSUS",
             "layout/main_side_census.rs:COUNTED_PASSAGE_DEPTH",
@@ -144,6 +137,13 @@ RENDER_STAGE_ALLOWED = {
             "css/style_compute.rs:LONGHANDS",
             "css/style_compute.rs:PHASE_BOUNDARIES",
             "css/style_compute.rs:PX",
+        ],
+    ),
+    **render_stage_entries(
+        STYLE_UPDATE_SCOPE,
+        [
+            "css/ffi_stats.rs:COMPLETE_STYLE_UPDATE_STATE",
+            "css/style/seal.rs:STATE",
         ],
     ),
     **render_stage_entries(
