@@ -1387,11 +1387,8 @@ void Element::run_attribute_change_steps(Utf16FlyString const& local_name, Optio
         if (auto* svg_element = as_if<SVG::SVGElement>(*this))
             svg_element->publish_svg_attribute_facts();
         if (local_name.is_one_of(HTML::AttributeNames::colspan, HTML::AttributeNames::rowspan, HTML::AttributeNames::span)) {
-            Layout::publish_table_spans(*this);
-            if (auto* layout_node = unsafe_layout_node()) {
-                if (layout_node->synchronize_table_span_data())
-                    layout_node->set_needs_layout_update(SetNeedsLayoutReason::TableSpanAttributeChange);
-            }
+            if (auto identity = NodeIdentity::of(*this))
+                document().invalidation_journal().note_table_spans(identity);
         }
         if (!document().suppresses_attribute_style_invalidation()) {
             CSS::Invalidation::invalidate_style_after_attribute_change(

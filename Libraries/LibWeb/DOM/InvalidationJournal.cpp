@@ -19,6 +19,7 @@
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
 #include <LibWeb/Painting/Scrollbar.h>
+#include <LibWeb/SVG/SVGElement.h>
 #include <LibWeb/Selection/Selection.h>
 
 namespace Web::DOM {
@@ -370,6 +371,29 @@ void InvalidationJournal::note_text_data(Text& text, bool whitespace_state_chang
     drain_if_the_render_side_is_reading();
 }
 
+void InvalidationJournal::note_svg_attribute_facts(NodeIdentity identity)
+{
+    entry_for(identity).needs_svg_attribute_facts_publish = true;
+    drain_if_the_render_side_is_reading();
+}
+
+void InvalidationJournal::note_table_spans(NodeIdentity identity)
+{
+    entry_for(identity).needs_table_spans_publish = true;
+    drain_if_the_render_side_is_reading();
+}
+
+// The spans go under the element's identity for the rows the build has yet to stamp, and onto the
+// row it already has, which relays out if they moved.
+static void publish_table_spans(Element& element)
+{
+    Layout::publish_table_spans(element);
+    if (auto* layout_node = element.unsafe_layout_node()) {
+        if (layout_node->synchronize_table_span_data())
+            layout_node->set_needs_layout_update(SetNeedsLayoutReason::TableSpanAttributeChange);
+    }
+}
+
 // The mirror holds the characters the layout tree build renders, and a text box that already
 // exists renders them again once its content is invalidated.
 static void publish_text_data(Text& text, bool whitespace_state_changed)
@@ -486,6 +510,14 @@ void InvalidationJournal::drain()
             if (entry.needs_text_data_publish && node) {
                 if (auto* text = as_if<Text>(*node))
                     publish_text_data(*text, entry.text_whitespace_state_changed);
+            }
+            if (entry.needs_svg_attribute_facts_publish && node) {
+                if (auto* svg_element = as_if<SVG::SVGElement>(*node))
+                    Layout::publish_svg_attribute_facts(*svg_element);
+            }
+            if (entry.needs_table_spans_publish && node) {
+                if (auto* element = as_if<Element>(*node))
+                    publish_table_spans(*element);
             }
             if (entry.needs_editability_stamps_refresh && node)
                 refresh_editability_stamps(*node);

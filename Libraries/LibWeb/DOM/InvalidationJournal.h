@@ -80,6 +80,12 @@ public:
     // The text node's data changed, and the mirror and the text's box take what it holds at the
     // drain. Whether it was nothing but ASCII whitespace may have changed as well.
     void note_text_data(Text&, bool whitespace_state_changed);
+    // The SVG element's presentation attributes changed, and the rows built for it take the values
+    // it parses at the drain.
+    void note_svg_attribute_facts(NodeIdentity);
+    // The table cell's or column's span attributes changed, and the mirror and the row built for it
+    // take the spans it has at the drain.
+    void note_table_spans(NodeIdentity);
     // The accumulated visual contexts built from the row's box need the given kind of update.
     void note_visual_context_box_dirty(Layout::RustFFI::NodeSlotId, Layout::RustFFI::FfiVisualContextBoxDirtyKind);
     // Every accumulated visual context needs rebuilding, for the given reason.
@@ -137,6 +143,8 @@ private:
         bool needs_scroll_offset_publish { false };
         bool needs_text_data_publish { false };
         bool text_whitespace_state_changed { false };
+        bool needs_svg_attribute_facts_publish { false };
+        bool needs_table_spans_publish { false };
         Vector<PseudoElementScrollOffset, 1> pseudo_element_scroll_offsets;
     };
 
