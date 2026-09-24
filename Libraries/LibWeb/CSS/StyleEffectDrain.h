@@ -9,6 +9,7 @@
 #include <AK/Utf16FlyString.h>
 #include <AK/Variant.h>
 #include <AK/Vector.h>
+#include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineIdentifiers.h>
 #include <LibWeb/CSS/StyleInvalidation.h>
 #include <LibWeb/Forward.h>
@@ -54,7 +55,14 @@ public:
     struct ContainerQueryEffects {
         StyleNodeID style_node;
     };
-    using Effect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames, AnimationNames, ContainerQueryEffects>;
+    // The animation plan a row leaves for the element's CSS animations. The pass sampled the element
+    // over the effect stack the plan leaves and published the composition the rows after it read,
+    // so the animations the plan starts, retimes and cancels are nothing the batch reads.
+    struct AnimationPlan {
+        StyleNodeID style_node;
+        StyleComputer::SettledAnimationPlan plan;
+    };
+    using Effect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames, AnimationNames, ContainerQueryEffects, AnimationPlan>;
 
     void append(Effect effect) { m_effects.append(move(effect)); }
     void apply(DOM::Document&);
