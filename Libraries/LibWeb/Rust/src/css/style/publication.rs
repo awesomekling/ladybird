@@ -323,6 +323,45 @@ impl RetainedState {
         Ok(delta)
     }
 
+    /// The winners a driven element's record is computed from. A republish admits the row
+    /// whatever the memory budget; a demand's pending winners can still stand over the row it
+    /// published, and an answer that published nothing is matched again.
+    fn driven_element_winners(
+        &mut self,
+        node: StyleNodeID,
+        winner_key: WinnerGroupKey,
+        counters: &mut Counters,
+    ) -> Option<(u64, CascadeStateID)> {
+        if let Lookup::Known(token) = self.current_winner_groups().token_for(winner_key) {
+            return Some(token);
+        }
+        if let Lookup::Known(token) = self.winner_groups.token_for(winner_key) {
+            return Some(token);
+        }
+        self.rematch_driven_winners(node, counters);
+        match self.winner_groups.token_for(winner_key) {
+            Lookup::Known(token) => Some(token),
+            _ => None,
+        }
+    }
+
+    /// A driven element that holds no winners even after matching again has nothing to compute
+    /// a record from. None does: a rematch publishes its row whatever the memory budget. Should
+    /// one, the seal reports it, and the element keeps the record it has.
+    fn driven_element_without_winners(&self, node: StyleNodeID) -> RecordDelta {
+        debug_assert!(false, "a driven element holds no winners after matching again");
+        let record = self
+            .computed_group_sets
+            .assigned_style_record(node)
+            .unwrap_or(computed::FinalStyleRecordID::NONE);
+        seal::note_host_entry(
+            "DrivenRowWithoutWinners",
+            seal::HostEntryKind::Refused,
+            record == computed::FinalStyleRecordID::NONE,
+        );
+        (record, record)
+    }
+
     /// `exact_flipped_rules` are the rules that flipped for the node when the reaction is exactly
     /// those flips and nothing else the record depends on moved. `parent_inputs_moved` says which
     /// of the parent's inputs may have moved under the record.
@@ -380,8 +419,8 @@ impl RetainedState {
         );
         // The winners the record was computed from, against the winners the node holds now: the
         // same comparison a C++ publication makes to select what it recomputes.
-        let Lookup::Known((generation, state)) = self.current_winner_groups().token_for(winner_key) else {
-            unreachable!("the node's winners were republished from its answer");
+        let Some((generation, state)) = self.driven_element_winners(node, winner_key, counters) else {
+            return Ok(ElementAnswer::Delta(self.driven_element_without_winners(node)));
         };
         let container_unit_mask = self.state_container_unit_mask(node, state);
         let tree_counting_key = self.state_tree_counting_key(node, state);

@@ -193,7 +193,28 @@ impl RetainedState {
     pub(super) fn republish_driven_winners(&mut self, node: StyleNodeID, counters: &mut Counters) -> bool {
         let matches = self.matches_to_republish(node, counters);
         debug_assert!(matches.is_some(), "a driven row without the facts to match it");
-        self.republish_winners_from_matches(node, matches.unwrap_or_default(), counters)
+        self.republish_demanded_winners(node, matches.unwrap_or_default(), counters)
+    }
+
+    /// Publish new winners for a driven row from a fresh match, for when the retained answer
+    /// could not publish them.
+    pub(super) fn rematch_driven_winners(&mut self, node: StyleNodeID, counters: &mut Counters) -> bool {
+        let matches = self.match_element_for_cascade(node, counters);
+        self.republish_demanded_winners(node, matches.unwrap_or_default(), counters)
+    }
+
+    /// The row is driven now, so its winners are no cache the memory budget may decline: closed
+    /// admission refuses rows for later, not the row a drive reads next.
+    fn republish_demanded_winners(
+        &mut self,
+        node: StyleNodeID,
+        matches: Vec<RuleMatch>,
+        counters: &mut Counters,
+    ) -> bool {
+        let admitting = self.winner_groups.admit_demanded_rows();
+        let complete = self.republish_winners_from_matches(node, matches, counters);
+        self.winner_groups.restore_admission(admitting);
+        complete
     }
 
     fn matches_to_republish(&mut self, node: StyleNodeID, counters: &mut Counters) -> Option<Vec<RuleMatch>> {
