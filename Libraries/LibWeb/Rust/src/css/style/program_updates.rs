@@ -1335,6 +1335,7 @@ impl StyleEngineState {
     }
 
     pub(super) fn discard_style_transaction_outputs(&mut self, counters: &mut Counters) {
+        self.abandon_suspended_style_pass();
         self.clear_ffi_style_transaction_output();
         self.discard_engine_computed_records(counters);
         self.retain_prefix_states();

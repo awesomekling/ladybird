@@ -1155,6 +1155,8 @@ pub struct HostState {
     /// the ancestor it has just applied, so the crossing happens once for the run rather than
     /// once for each row in it.
     pub(super) armed_retry_nodes: Vec<tree::StyleNodeID>,
+    /// The style pass the host is installing wave by wave, between two of its waves.
+    pub(super) suspended_style_pass: Option<Box<flush::StylePass>>,
     /// What the last such call settled, which the host reads as one table.
     pub(super) retried_record_rows: Vec<bridge::FfiRetriedRecordRow>,
     /// The font resolver the host installed. A step that misses the cache returns `NeedsInput`;

@@ -5000,14 +5000,6 @@ impl StyleEngineState {
         if pseudo.is_some_and(|kind| kind >= 20) {
             return Ok(None);
         }
-        // A private observation checks the target and its ancestors below. Pending work on
-        // another node must not prevent it from answering this pseudo-element.
-        if pseudo.is_some()
-            && !read_only
-            && (!self.host.journal.is_empty() || !self.host.deferred_element_style_inputs.is_empty())
-        {
-            return Err("GateReaction");
-        }
         // Only a read-only observation of an element leaves its inline style out.
         debug_assert!(!exclude_inline_style || (read_only && pseudo.is_none()));
         let target_has_pending_facts = self.host.journal.inputs().any(|input| {
@@ -5040,7 +5032,11 @@ impl StyleEngineState {
                     .deferred_element_style_inputs
                     .iter()
                     .any(|input| input.key.style_node() == Some(parent));
-            if pending && (!read_only || pseudo.is_some()) {
+            // A demand the host makes where it applies a row reads its ancestors as the host
+            // installed them before it; what is still pending for one of them reaches the row
+            // through the reaction that ancestor derives. A private observation of a
+            // pseudo-element has no such later reaction.
+            if pending && read_only && pseudo.is_some() {
                 return Err("GateReaction");
             }
             ancestors.push((parent, pending));
@@ -5636,6 +5632,13 @@ impl std::ops::DerefMut for EngineComputedRecordScratch {
 pub(super) struct DerivedChildInputs {
     /// Whether the node's record settled this flush: what its descendants inherit from is in place.
     pub(super) settled: bool,
+    /// Whether the node's final record is only in place once the host installs it: a record the
+    /// host computes, or one whose animation sample, transition step or animation plan the host
+    /// completes at installation.
+    pub(super) awaits_host: bool,
+    /// Whether the host installed the node in an earlier wave of the pass: what its change moved
+    /// for its descendants is in place, or joins the pass as rows of their own.
+    pub(super) installed: bool,
     /// Whether the node took an inherited-style reaction and resolved no record of its own, so
     /// its immediate children cannot take the direct inherited-group path. Deliberately separate
     /// from the chain proof: that is the accumulated confinement argument, this is the immediate

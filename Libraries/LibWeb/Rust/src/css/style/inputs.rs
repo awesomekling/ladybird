@@ -1895,6 +1895,7 @@ impl StyleEngineState {
                 root_font_inputs_changed_for_retries: false,
                 viewport_moved_for_retries: false,
                 armed_retry_nodes: Vec::new(),
+                suspended_style_pass: None,
                 retried_record_rows: Vec::new(),
                 font_resolver: None,
                 random_state: std::collections::hash_map::RandomState::new(),
@@ -2136,6 +2137,7 @@ impl StyleEngineState {
             || !self.host.tree_staging.is_empty()
             || self.host.program_staging.is_dirty()
             || self.host.sheet_rule_replacement.is_some()
+            || self.host.suspended_style_pass.is_some()
     }
 
     #[must_use]
