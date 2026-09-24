@@ -922,7 +922,7 @@ fn append_text_clip_paths<O: Observer>(recorder: &mut PaintRecorder<'_, O>, pain
     let scale = recorder.inputs.device_pixels_per_css_pixel;
 
     let append_fragment = |recorder: &mut PaintRecorder<'_, O>, owner: NodeSlotId, fragment_index: usize| {
-        let side = recorder.layout_arena.paintable_side_data(owner);
+        let side = recorder.layout_arena.committed_side_data(owner);
         let fragment = &side.fragments()[fragment_index];
         let is_text = recorder
             .layout_arena
@@ -976,8 +976,8 @@ fn append_text_clip_paths<O: Observer>(recorder: &mut PaintRecorder<'_, O>, pain
             && node_painting::has_lines(recorder.layout_arena, root)
         {
             let layout_arena = recorder.layout_arena;
-            for piece_index in &layout_arena.paintable_side_data(paintable).piece_indices {
-                let side = layout_arena.paintable_side_data(root);
+            for piece_index in layout_arena.committed_side_data(paintable).piece_indices() {
+                let side = layout_arena.committed_side_data(root);
                 let piece = &side.inline_box_pieces()[*piece_index as usize];
                 for fragment_index in piece.first_fragment_index..piece.first_fragment_index + piece.fragment_count {
                     append_fragment(recorder, root, fragment_index as usize);
@@ -1005,7 +1005,7 @@ fn append_text_clip_paths<O: Observer>(recorder: &mut PaintRecorder<'_, O>, pain
             stack.push(first_child);
         }
         if node_painting::has_lines(recorder.layout_arena, current) {
-            let count = recorder.layout_arena.paintable_side_data(current).fragments().len();
+            let count = recorder.layout_arena.committed_side_data(current).fragments().len();
             for fragment_index in 0..count {
                 append_fragment(recorder, current, fragment_index);
             }

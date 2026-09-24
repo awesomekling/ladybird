@@ -88,7 +88,7 @@ fn compute_render_spans<O: Observer>(
     let layout_arena = recorder.layout_arena;
     let mut spans: Vec<RenderSpan> = Vec::new();
     for &fragment_index in owned_fragment_indices {
-        let side = layout_arena.paintable_side_data(block);
+        let side = layout_arena.committed_side_data(block);
         let fragment = &side.fragments()[fragment_index as usize];
         if fragment.glyph_run.is_none() {
             continue;
@@ -279,7 +279,7 @@ pub(crate) fn paint_fragments_foreground<O: Observer>(
     owner: Option<NodeSlotId>,
 ) {
     let filter = crate::painting::fragment_ownership::effective_filter(recorder.layout_arena, owner.unwrap_or(block));
-    let fragment_count = recorder.layout_arena.paintable_side_data(block).fragments().len();
+    let fragment_count = recorder.layout_arena.committed_side_data(block).fragments().len();
     let mut indices = Vec::with_capacity(fragment_count);
     filter.for_each_owned_fragment_index(fragment_count, |index| indices.push(index as u32));
     paint_fragments(recorder, block, &indices);
@@ -336,7 +336,7 @@ fn selection_rect<O: Observer>(recorder: &PaintRecorder<'_, O>, block: NodeSlotI
     let Some(offsets) = span.selection_offsets else {
         return CssPixelRect::default();
     };
-    let side = recorder.layout_arena.paintable_side_data(block);
+    let side = recorder.layout_arena.committed_side_data(block);
     let fragment = &side.fragments()[span.fragment_index as usize];
     text_fragment::rect_for_selection_offsets(recorder.layout_arena, fragment, offsets, || {
         text_fragment::first_available_font(recorder.layout_arena, fragment)
@@ -352,7 +352,7 @@ fn paint_text_shadow<O: Observer>(
     if shadow_layers.is_empty() {
         return;
     }
-    let side = recorder.layout_arena.paintable_side_data(block);
+    let side = recorder.layout_arena.committed_side_data(block);
     let fragment = &side.fragments()[span.fragment_index as usize];
     let Some(run) = &fragment.glyph_run else {
         return;
@@ -449,7 +449,7 @@ fn paint_text_fragment<O: Observer>(
     if span.start_code_unit == span.end_code_unit {
         return;
     }
-    let side = recorder.layout_arena.paintable_side_data(block);
+    let side = recorder.layout_arena.committed_side_data(block);
     let fragment = &side.fragments()[span.fragment_index as usize];
     if recorder.inputs.should_show_line_box_borders {
         let converter = recorder.converter;

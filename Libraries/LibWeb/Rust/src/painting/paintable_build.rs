@@ -334,9 +334,8 @@ impl<'a> PaintableCommit<'a> {
         if !fragment_content_unchanged
             || !self
                 .arena()
-                .paintable_side_data(node)
+                .live_committed_side_data(node)
                 .overflow_valid_across_recommits
-                .get()
         {
             self.schedule_scrollable_overflow_recalculation(node);
         } else if !offset_unchanged {
@@ -377,9 +376,7 @@ impl<'a> PaintableCommit<'a> {
             return false;
         }
         let has_pieces = !line_data.inline_box_pieces.is_empty();
-        let mut side = self.arena().paintable_side_data_mut(slot);
-        side.inline_content = Some(line_data.clone());
-        drop(side);
+        self.arena().committed_side_data_mut(slot).inline_content = Some(line_data.clone());
         if has_pieces {
             self.arena().note_line_root_needs_fragment_ownership(slot);
         }
@@ -449,7 +446,7 @@ impl<'a> PaintableCommit<'a> {
         let mut paintable_rows = arena.paintable_rows_mut();
         let mut piece_indices_by_node: Vec<(NodeSlotId, Vec<u32>)> = Vec::new();
         for (piece_index, piece) in paintable_rows
-            .paintable_side_data(slot)
+            .committed_side_data(slot)
             .inline_box_pieces()
             .iter()
             .enumerate()
@@ -488,7 +485,7 @@ impl<'a> PaintableCommit<'a> {
                 }
             };
             for piece_index in &piece_indices {
-                let piece = paintable_rows.paintable_side_data(slot).inline_box_pieces()[*piece_index as usize];
+                let piece = paintable_rows.committed_side_data(slot).inline_box_pieces()[*piece_index as usize];
                 let border_rect = CssPixelRect::from(piece.border_box_rect);
                 if piece.is_geometry_only_placeholder {
                     let content_rect = border_rect;
@@ -540,7 +537,7 @@ impl<'a> PaintableCommit<'a> {
                 }
             }
             // This box has at most one piece per line, so its piece indices are ordered by line.
-            paintable_rows.paintable_side_data_mut(piece_node).piece_indices = piece_indices;
+            paintable_rows.committed_side_data_mut(piece_node).piece_indices = Some(piece_indices.into());
         }
     }
 }

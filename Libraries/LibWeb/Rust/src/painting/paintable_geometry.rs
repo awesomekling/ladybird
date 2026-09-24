@@ -325,12 +325,12 @@ pub(crate) fn scrollable_overflow_rect(arena: &impl PaintableRowsRead, slot: Nod
     if !arena.paintable_row_is_populated(slot) {
         return None;
     }
-    let cache = arena.paintable_side_data(slot);
-    if !cache.overflow_valid_across_recommits.get() {
+    let cache = arena.live_committed_side_data(slot);
+    if !cache.overflow_valid_across_recommits {
         return None;
     }
     Some(
-        CssPixelRect::from(cache.overflow_relative_to_padding_box.get().rect)
+        CssPixelRect::from(cache.overflow_relative_to_padding_box.rect)
             .translated_by(absolute_padding_box_rect(arena, slot).location()),
     )
 }
@@ -338,10 +338,9 @@ pub(crate) fn scrollable_overflow_rect(arena: &impl PaintableRowsRead, slot: Nod
 pub(crate) fn has_scrollable_overflow(arena: &impl PaintableRowsRead, slot: NodeSlotId) -> bool {
     arena.ensure_scrollable_overflow(slot);
     arena.paintable_row_is_populated(slot)
-        && arena.paintable_side_data(slot).overflow_valid_across_recommits.get()
+        && arena.live_committed_side_data(slot).overflow_valid_across_recommits
         && arena
-            .paintable_side_data(slot)
+            .live_committed_side_data(slot)
             .overflow_relative_to_padding_box
-            .get()
             .has_scrollable_overflow
 }

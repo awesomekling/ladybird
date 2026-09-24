@@ -95,7 +95,7 @@ pub(crate) fn paint<O: Observer>(recorder: &mut PaintRecorder<'_, O>, paintable:
             if recorder.is_recording_svg_resource_content()
                 || recorder
                     .layout_arena
-                    .paintable_side_data(paintable)
+                    .committed_side_data(paintable)
                     .inline_content
                     .as_ref()
                     .is_none_or(|content| content.items.is_empty())
