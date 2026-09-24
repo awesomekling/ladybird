@@ -264,10 +264,6 @@ void EventLoop::process()
     for (auto& reached_step_1_task : reached_step_1_tasks)
         reached_step_1_task->function()();
 
-    // A frame the render side has finished is taken in here, and the rest of its rendering update runs, before the
-    // next task.
-    m_frame_scheduler->run_at_step_1();
-
     // 2. If the event loop has a task queue with at least one runnable task, then:
     if (m_task_queue->has_runnable_tasks()) {
         // 1. Let taskQueue be one such task queue, chosen in an implementation-defined manner.
