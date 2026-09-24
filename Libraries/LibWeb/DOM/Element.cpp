@@ -5393,6 +5393,20 @@ void Element::publish_style_recomputes_on_environment_move() const
     CSS::StyleEngineFFI::style_engine_note_element_recomputes_on_environment_move(style_engine.rust_handle(), style_node.value());
 }
 
+void Element::publish_size_container_query_facts() const
+{
+    auto style_node = style_node_id();
+    if (style_node == 0)
+        return;
+    if (!m_is_size_query_container && !m_style_depends_on_size_container_query)
+        return;
+    auto* style_engine = const_cast<CSS::StyleEngine&>(document().style_computer().style_engine()).rust_handle();
+    if (m_is_size_query_container)
+        CSS::StyleEngineFFI::style_engine_note_size_query_container(style_engine, style_node.value());
+    if (m_style_depends_on_size_container_query)
+        CSS::StyleEngineFFI::style_engine_note_style_depends_on_size_container_query(style_engine, style_node.value());
+}
+
 RefPtr<CSS::CustomPropertyData const> Element::custom_property_data(Optional<CSS::PseudoElement> pseudo_element) const
 {
     if (pseudo_element.has_value() && !CSS::Selector::PseudoElementSelector::is_known_pseudo_element_type(pseudo_element.value()))

@@ -50,6 +50,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         published_container_verdicts,
         container_gates_unheld,
         container_input_nodes,
+        size_container_queries,
         declaration_block_version,
         last_transaction_only_derived_child_reactions,
         sheets_excluded_from_routing,
@@ -185,6 +186,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(published_container_verdicts);
     assert_member_is_sync(container_gates_unheld);
     assert_member_is_sync(container_input_nodes);
+    assert_member_is_sync(size_container_queries);
     assert_member_is_sync(declaration_block_version);
     assert_member_is_sync(last_transaction_only_derived_child_reactions);
     assert_member_is_sync(sheets_excluded_from_routing);

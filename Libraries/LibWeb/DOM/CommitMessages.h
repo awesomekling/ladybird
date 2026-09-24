@@ -66,7 +66,6 @@ public:
 private:
     enum class Kind : u8 {
         BoxPresence,
-        ContentSizeChangedForContainerQueries,
         HoverTargetAfterScroll,
         NavigableContainerViewportCommitted,
         NeedsLayoutTreeUpdate,

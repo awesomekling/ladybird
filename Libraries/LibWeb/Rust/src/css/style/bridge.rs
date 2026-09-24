@@ -5369,3 +5369,82 @@ mod tests {
         assert!(engine.memory().bytes_in_category(MemoryCategory::RelationColumns) > 0);
     }
 }
+
+/// Notes that a size query or container-relative unit resolved against the element.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_note_size_query_container(engine: *mut c_void, node: u32) {
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return;
+    };
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    engine.note_size_query_container(node);
+}
+
+/// Notes that a size query or container-relative unit decided the element's style.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_note_style_depends_on_size_container_query(engine: *mut c_void, node: u32) {
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return;
+    };
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    engine.note_style_depends_on_size_container_query(node);
+}
+
+/// Notes that a style computation asked about a container that had no committed box yet.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_note_size_container_needs_evaluation_after_layout(
+    engine: *mut c_void,
+    node: u32,
+) {
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return;
+    };
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    engine.note_size_container_needs_evaluation_after_layout(node);
+}
+
+/// Whether a container asked about before it had a box still waits for the layout that gives it one.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_has_size_containers_needing_evaluation_after_layout(
+    engine: *const c_void,
+) -> bool {
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    engine.has_size_containers_needing_evaluation_after_layout()
+}
+
+/// The elements the size query container dependent walks have visited; `reset` starts the count
+/// again.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_size_query_container_scan_visits(engine: *mut c_void, reset: bool) -> u64 {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    engine.size_query_container_scan_visits(reset)
+}
+
+/// Records every element whose style a size query or container-relative unit decided against the
+/// container `node`, as a change of what the container answers does.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_record_size_container_query_dependents(engine: *mut c_void, node: u32) {
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return;
+    };
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    engine.size_container_content_size_changed(node);
+}

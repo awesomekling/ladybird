@@ -68,7 +68,6 @@ pub struct FfiLayoutUpdateHostCallbacks {
     /// Applies what the frame's layout commits leave for the document once the frame is over.
     pub apply_layout_commit_effects: unsafe extern "C" fn(*mut c_void, *const FfiLayoutCommitEffects),
     pub note_full_layouts_performed: unsafe extern "C" fn(*mut c_void, u64),
-    pub evaluate_pending_container_queries: unsafe extern "C" fn(*mut c_void),
     pub record_stabilization_bound_failure: unsafe extern "C" fn(*mut c_void),
 }
 
@@ -164,7 +163,6 @@ pub(crate) struct LayoutUpdateHost {
         unsafe extern "C" fn(*mut c_void, *mut c_void, unsafe extern "C" fn(*mut c_void, *const FfiSelectionSnapshot)),
     apply_layout_commit_effects: unsafe extern "C" fn(*mut c_void, *const FfiLayoutCommitEffects),
     note_full_layouts_performed: unsafe extern "C" fn(*mut c_void, u64),
-    evaluate_pending_container_queries: unsafe extern "C" fn(*mut c_void),
     record_stabilization_bound_failure: unsafe extern "C" fn(*mut c_void),
 }
 
@@ -186,7 +184,6 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             read_selection: host.read_selection,
             apply_layout_commit_effects: host.apply_layout_commit_effects,
             note_full_layouts_performed: host.note_full_layouts_performed,
-            evaluate_pending_container_queries: host.evaluate_pending_container_queries,
             record_stabilization_bound_failure: host.record_stabilization_bound_failure,
         }
     }
@@ -270,10 +267,6 @@ impl LayoutUpdateHost {
 
     fn note_full_layouts_performed(&self, _: &crate::stage::MainThread, count: u64) {
         unsafe { (self.note_full_layouts_performed)(self.context, count) }
-    }
-
-    fn evaluate_pending_container_queries(&self, _: &crate::stage::MainThread) {
-        unsafe { (self.evaluate_pending_container_queries)(self.context) }
     }
 
     fn record_stabilization_bound_failure(&self, _: &crate::stage::MainThread) {
@@ -780,6 +773,7 @@ impl LayoutFrame<'_> {
             };
             let pending_commit = unsafe { commit_root_layout_to_arena(arena_handle, layout_root, &output) };
             drop(output);
+            self.arena().evaluate_size_containers_needing_evaluation_after_layout();
 
             self.messages.full_layouts_performed += 1;
             self.arena().note_full_layout();
@@ -793,7 +787,6 @@ impl LayoutFrame<'_> {
                     pending_commit.finish(main_thread);
                     arena(arena_handle).end_layout_pass_preparation_handbacks(main_thread);
                 }
-                host.evaluate_pending_container_queries(main_thread);
                 Joined {
                     value: host.needs_style_update_after_layout(main_thread),
                     facts: host.document_facts(main_thread),

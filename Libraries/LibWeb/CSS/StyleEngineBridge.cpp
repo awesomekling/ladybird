@@ -579,6 +579,15 @@ void StyleEngine::record_container_query_input_change(StyleNodeID style_node)
     record_container_query_input(style_node);
 }
 
+void StyleEngine::record_size_container_query_dependents(StyleNodeID container)
+{
+    if (container == 0)
+        return;
+    flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
+    note_recorded_input(*this, m_style_computer);
+    StyleEngineFFI::style_engine_record_size_container_query_dependents(m_impl, container.value());
+}
+
 void StyleEngine::record_element_style_input_change(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups)
 {
     if (style_node != 0 && reaction != 0) {
