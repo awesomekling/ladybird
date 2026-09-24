@@ -2934,8 +2934,8 @@ pub unsafe extern "C" fn layout_arena_hit_test_caret_line_for_position(
     offset: usize,
     affinity_is_downstream: bool,
 ) -> crate::painting::host::FfiCaretLineForPosition {
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
     with_hit_test_list_and_caret_lines(arena, Default::default(), |list, arena| {
+        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
         match list.caret_line_for_position(arena, &query, offset, affinity_is_downstream) {
             Some(line_index) => crate::painting::host::FfiCaretLineForPosition {
                 has_line: true,
@@ -3089,37 +3089,46 @@ pub unsafe extern "C" fn layout_arena_hit_test_list_generation(arena: *mut c_voi
     arena.hit_test_list.borrow().as_ref().map_or(0, |list| list.generation)
 }
 
+/// The rows a hit-test query reads, with the list and visual context tree published beside them.
+/// The structures the query derives from the list are built before the rows are published.
+///
+/// SAFETY: Same as [`main_side_paintable_rows`].
+unsafe fn hit_test_paintable_rows<'a>(
+    arena: *mut c_void,
+    needs_spatial_indexes: bool,
+    needs_caret_lines: bool,
+) -> MainSidePaintableRows<'a> {
+    if !unsafe { arena_from_handle(arena) }.a_stage_is_running() {
+        unsafe { arena_from_handle_mut(arena) }
+            .prepare_hit_test_list_for_query(needs_spatial_indexes, needs_caret_lines);
+    }
+    unsafe { main_side_paintable_rows(arena) }
+}
+
 fn with_hit_test_list_items_only<R>(
     arena: *mut c_void,
     default: R,
-    query: impl FnOnce(&crate::painting::hit_test::HitTestList, &crate::layout::LayoutNodeArena) -> R,
+    query: impl FnOnce(&crate::painting::hit_test::HitTestList, &MainSidePaintableRows<'_>) -> R,
 ) -> R {
     // SAFETY: The caller passes a live arena handle (documented on every entry point below).
-    let arena = unsafe { arena_from_handle(arena) };
-    // Hit testing reads overflow, and reading overflow never measures it.
-    arena.measure_scrollable_overflow_before_publication();
-    let hit_test_list = arena.hit_test_list.borrow();
-    let Some(list) = hit_test_list.as_ref() else {
-        return default;
-    };
-    query(list, arena)
+    let rows = unsafe { hit_test_paintable_rows(arena, false, false) };
+    rows.with_hit_test_list(|list| match list {
+        Some(list) => query(list, &rows),
+        None => default,
+    })
 }
 
 fn with_hit_test_list_and_caret_lines<R>(
     arena: *mut c_void,
     default: R,
-    query: impl FnOnce(&crate::painting::hit_test::HitTestList, &crate::layout::LayoutNodeArena) -> R,
+    query: impl FnOnce(&crate::painting::hit_test::HitTestList, &MainSidePaintableRows<'_>) -> R,
 ) -> R {
     // SAFETY: The caller passes a live arena handle (documented on every entry point below).
-    let arena = unsafe { arena_from_handle(arena) };
-    // Hit testing reads overflow, and reading overflow never measures it.
-    arena.measure_scrollable_overflow_before_publication();
-    let mut hit_test_list = arena.hit_test_list.borrow_mut();
-    let Some(list) = hit_test_list.as_mut() else {
-        return default;
-    };
-    list.build_caret_lines_if_needed(arena);
-    query(list, arena)
+    let rows = unsafe { hit_test_paintable_rows(arena, false, true) };
+    rows.with_hit_test_list(|list| match list {
+        Some(list) if list.caret_lines_built => query(list, &rows),
+        _ => default,
+    })
 }
 
 fn with_hit_test_list_spatial_indexes_and_visual_context_tree<R>(
@@ -3129,27 +3138,20 @@ fn with_hit_test_list_spatial_indexes_and_visual_context_tree<R>(
     query: impl FnOnce(
         &crate::painting::hit_test::HitTestList,
         &crate::painting::visual_context::VisualContextTree,
-        &crate::layout::LayoutNodeArena,
+        &MainSidePaintableRows<'_>,
     ) -> R,
 ) -> R {
     // SAFETY: The caller passes a live arena handle (documented on every entry point below).
-    let arena = unsafe { arena_from_handle(arena) };
-    // Hit testing reads overflow, and reading overflow never measures it.
-    arena.measure_scrollable_overflow_before_publication();
-    let mut hit_test_list = arena.hit_test_list.borrow_mut();
-    let Some(list) = hit_test_list.as_mut() else {
+    let rows = unsafe { hit_test_paintable_rows(arena, true, needs_caret_lines) };
+    let Some(tree) = rows.visual_context_tree() else {
         return default;
     };
-    list.build_spatial_indexes_if_needed();
-    if needs_caret_lines {
-        list.build_caret_lines_if_needed(arena);
-    }
-    // Geometry queries can update overflow and dirty the visual context state. Keep the
-    // current tree alive without borrowing that state for the duration of the query.
-    let Some(tree) = arena.paint_state().borrow().visual_context.tree.clone() else {
-        return default;
-    };
-    query(list, &tree, arena)
+    rows.with_hit_test_list(|list| match list {
+        Some(list) if list.spatial_indexes_built && (!needs_caret_lines || list.caret_lines_built) => {
+            query(list, &tree, &rows)
+        }
+        _ => default,
+    })
 }
 
 fn ffi_topmost(item: Option<crate::painting::hit_test::query::TopmostItem>) -> crate::painting::host::FfiTopmostItem {
@@ -3172,8 +3174,8 @@ pub unsafe extern "C" fn layout_arena_hit_test_find_topmost_item(
     callbacks: crate::painting::host::FfiHitTestQueryCallbacks,
     point: FfiCssPixelPoint,
 ) -> crate::painting::host::FfiTopmostItem {
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
     with_hit_test_list_spatial_indexes_and_visual_context_tree(arena, false, Default::default(), |list, tree, arena| {
+        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
         ffi_topmost(list.find_topmost_item(arena, tree, &callbacks, point.into()))
     })
 }
@@ -3187,8 +3189,8 @@ pub unsafe extern "C" fn layout_arena_hit_test_find_topmost_items_for_caret(
     callbacks: crate::painting::host::FfiHitTestQueryCallbacks,
     point: FfiCssPixelPoint,
 ) -> crate::painting::host::FfiTopmostItemsForCaret {
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
     with_hit_test_list_spatial_indexes_and_visual_context_tree(arena, false, Default::default(), |list, tree, arena| {
+        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
         let (caret_item, hit_item) = list.find_topmost_items_for_caret(arena, tree, &callbacks, point.into());
         crate::painting::host::FfiTopmostItemsForCaret {
             caret_item: ffi_topmost(caret_item),
@@ -3208,9 +3210,9 @@ pub unsafe extern "C" fn layout_arena_hit_test_all(
     push_context: *mut c_void,
     push: unsafe extern "C" fn(*mut c_void, usize),
 ) {
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
     let indices =
         with_hit_test_list_spatial_indexes_and_visual_context_tree(arena, false, Vec::new(), |list, tree, arena| {
+            let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
             list.hit_test_all(arena, tree, &callbacks, point.into())
         });
     for index in indices {
@@ -3295,8 +3297,8 @@ pub unsafe extern "C" fn layout_arena_hit_test_find_closest_line(
     scoped: bool,
     respect_clip: bool,
 ) -> crate::painting::host::FfiClosestLine {
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
     with_hit_test_list_spatial_indexes_and_visual_context_tree(arena, true, Default::default(), |list, tree, arena| {
+        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
         let closest = list.find_closest_line(
             arena,
             tree,
@@ -3331,13 +3333,13 @@ pub unsafe extern "C" fn layout_arena_hit_test_adjacent_line(
     direction: u8,
     inline_coordinate_raw: i32,
 ) -> crate::painting::host::FfiAdjacentLine {
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
     let direction = if direction == 1 {
         crate::painting::hit_test::caret::CaretLineDirection::Next
     } else {
         crate::painting::hit_test::caret::CaretLineDirection::Previous
     };
     with_hit_test_list_and_caret_lines(arena, Default::default(), |list, arena| {
+        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
         match list.adjacent_line(
             arena,
             &callbacks,
@@ -3388,7 +3390,7 @@ mod tests {
     }
 
     #[test]
-    fn hit_test_queries_can_remeasure_viewport_overflow_and_invalidate_painting() {
+    fn hit_test_queries_measure_viewport_overflow_before_reading_it() {
         for (spatial_indexes, caret_lines) in [(true, false), (true, true), (false, true), (false, false)] {
             let mut arena = LayoutNodeArena::new();
             let viewport = arena.allocate_for_test().slot;
@@ -3397,7 +3399,7 @@ mod tests {
             arena.scrollable_overflow.viewport.set(Some(viewport));
             let root = arena.allocate_for_test().slot;
             arena.populate_paintable_row(root);
-            *arena.hit_test_list.borrow_mut() = Some(HitTestList::default());
+            *arena.hit_test_list.borrow_mut() = Some(std::sync::Arc::new(HitTestList::default()));
             {
                 let mut state = arena.paint_state().borrow_mut();
                 state.root_background_source = Some(FfiRootBackgroundSource {
@@ -3415,7 +3417,7 @@ mod tests {
                 })));
                 state.visual_context.dirty_boxes.clear();
             }
-            // Leave stale overflow for the hit-test geometry query to remeasure. Losing
+            // Leave stale overflow for the hit-test query to measure before it reads. Losing
             // scrollability must invalidate both the root background and visual context.
             arena.committed_side_data_mut(viewport).overflow_relative_to_padding_box = FfiOverflowData {
                 rect: CssPixelRect::new(
@@ -3435,8 +3437,8 @@ mod tests {
             arena.clear_paint_damage_consumed_by_published_recording();
 
             let handle = std::ptr::from_mut(&mut arena).cast();
-            let query = |_: &HitTestList, arena: &LayoutNodeArena| {
-                crate::painting::paintable_geometry::scrollable_overflow_rect(&arena.paintable_rows(), viewport)
+            let query = |_: &HitTestList, rows: &MainSidePaintableRows<'_>| {
+                crate::painting::paintable_geometry::scrollable_overflow_rect(rows, viewport)
             };
             let rect = if spatial_indexes {
                 with_hit_test_list_spatial_indexes_and_visual_context_tree(

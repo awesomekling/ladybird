@@ -971,8 +971,9 @@ pub(crate) struct LayoutNodeArena {
     pub(super) layout_trace: super::trace::LayoutTrace,
     pub(crate) paintable_rows: crate::painting::paintable_rows::PaintableRowStore,
     paint_state: RefCell<crate::painting::paint_state::PaintState>,
-    // Hit testing can measure overflow and invalidate painting state while querying this list.
-    pub(crate) hit_test_list: RefCell<Option<crate::painting::hit_test::HitTestList>>,
+    // The list the last recording produced. Each published generation of the rows pins the list
+    // and the visual context tree as they were when it was published.
+    pub(crate) hit_test_list: RefCell<Option<std::sync::Arc<crate::painting::hit_test::HitTestList>>>,
     // Where the recording stage's workspace waits between runs. It is not a column: nothing
     // outside a running recording may reach it, and it is no part of the committed paint state.
     recording_scratch: crate::painting::record::scratch::RecordingScratchSlot,

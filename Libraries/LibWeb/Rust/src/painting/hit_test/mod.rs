@@ -12,11 +12,10 @@ pub mod resolve;
 use crate::css::css_pixels::CssPixels;
 use crate::css::css_pixels::{CssPixelPoint, CssPixelRect};
 use crate::css::style::fast_hash::FastMap;
-use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::display_list::commands::ContextRef;
 use crate::painting::host::FfiHitTestQueryCallbacks;
-use crate::painting::paintable_rows::PaintableRowsRef;
+use crate::painting::paintable_rows::PaintableRowsRead;
 use crate::painting::visual_context::{ClipBehavior, VisualContextTree};
 use std::sync::Arc;
 
@@ -70,7 +69,7 @@ impl HitTestItem {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct SpatialIndex {
     pub cells: FastMap<u64, Vec<usize>>,
     pub unbucketed_items: Vec<usize>,
@@ -124,7 +123,9 @@ pub fn rects_overlap_in_block_axis(a: CssPixelRect, b: CssPixelRect, writing_mod
         && block_axis_start(b, writing_mode) < block_axis_end(a, writing_mode)
 }
 
-#[derive(Default)]
+/// A published generation of the rows pins the list recorded against it. The derived structures
+/// are built before publication, when a query first needs them.
+#[derive(Clone, Default)]
 pub struct HitTestList {
     pub generation: u64,
     pub items: Arc<Vec<HitTestItem>>,
@@ -167,7 +168,7 @@ impl HitTestList {
         items.extend_from_slice(source);
     }
 
-    pub(crate) fn caret_line_rect_for_item(rows: &PaintableRowsRef<'_>, item: &HitTestItem) -> CssPixelRect {
+    pub(crate) fn caret_line_rect_for_item(rows: &impl PaintableRowsRead, item: &HitTestItem) -> CssPixelRect {
         let Some(line_rect) = geometry::containing_line_box_rect(rows, item) else {
             return item.caret_rect;
         };
@@ -193,12 +194,12 @@ impl HitTestList {
         }
     }
 
-    pub(crate) fn build_caret_lines_if_needed(&mut self, arena: &LayoutNodeArena) {
+    pub(crate) fn build_caret_lines_if_needed(&mut self, arena: &impl PaintableRowsRead) {
         if self.caret_lines_built {
             return;
         }
         self.caret_lines_built = true;
-        let rows = arena.paintable_rows();
+        let rows = arena;
         // Inline boxes and text from one layout line can be separated in paint order.
         // Gather that line's caret targets together while preserving the order in
         // which lines first appeared, and the paint order of targets within each line.
@@ -220,7 +221,7 @@ impl HitTestList {
         }
         for group in groups {
             for item_index in group {
-                self.add_item_to_caret_items(&rows, item_index);
+                self.add_item_to_caret_items(rows, item_index);
             }
         }
     }
@@ -280,7 +281,7 @@ impl HitTestList {
         }
     }
 
-    fn add_item_to_caret_items(&mut self, rows: &PaintableRowsRef<'_>, item_index: usize) {
+    fn add_item_to_caret_items(&mut self, rows: &impl PaintableRowsRead, item_index: usize) {
         let item = &self.items[item_index];
         let caret_item_index = self.caret_item_indices.len();
         self.caret_item_indices.push(item_index);

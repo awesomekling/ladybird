@@ -138,7 +138,7 @@ fn publish_recording_output(arena: &LayoutNodeArena, mut output: RecordingOutput
                     items: list.items.clone(),
                 }));
         }
-        *hit_test_list = Some(list);
+        *hit_test_list = Some(std::sync::Arc::new(list));
     }
     let output = std::rc::Rc::new(output);
     if publishes_recording {
