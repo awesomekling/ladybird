@@ -52,6 +52,11 @@ impl RetainedCustomPropertyData {
 
 impl Drop for RetainedCustomPropertyData {
     fn drop(&mut self) {
+        assert_eq!(
+            crate::stage_thread::acting_thread(),
+            std::thread::current().id(),
+            "a custom-property environment must be released on the document thread"
+        );
         // SAFETY: The row owns exactly one reference, taken in `retain`.
         unsafe { web_css_custom_property_data_unreference(self.data.as_ptr()) };
     }
@@ -1918,6 +1923,7 @@ impl StyleEngineState {
                 ffi_style_node_query: Vec::new(),
                 ffi_style_node_query_memory: MemoryLease::new(MemoryCategory::BridgeBuffer),
                 reclaimed_style_atoms: Vec::new(),
+                retired_custom_property_data: Vec::new(),
                 style_atoms_swept: false,
                 replay_reclaimed_style_atoms: None,
                 layout_arena: None,
@@ -2635,7 +2641,9 @@ impl StyleEngineState {
                 self.retained.container_query_inputs.clear(node);
                 // An identity can be minted again for another element, so a retained environment
                 // must not outlive the element that installed it.
-                self.retained.element_custom_property_data.remove(&node);
+                if let Some(Some(data)) = self.retained.element_custom_property_data.remove(&node) {
+                    self.host.retired_custom_property_data.push(data);
+                }
                 self.retained.sampled_custom_property_environments.remove(&node);
             }
             self.retained
