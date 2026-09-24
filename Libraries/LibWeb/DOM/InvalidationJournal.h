@@ -31,6 +31,7 @@ enum class PaintFactsFamily : u8 {
     LayerImage,
     ReplacedImage,
     Video,
+    NavigableContainer,
 };
 
 // What the DOM side has marked dirty on the render side but has not written there yet. An entry
@@ -55,6 +56,9 @@ public:
     void note_canvas_paint_facts(NodeIdentity, bool has_content, i32 content_width, i32 content_height, u64 canvas_id, u64 content_generation);
     void note_form_control_paint_facts(NodeIdentity, bool enabled, bool checked, bool indeterminate, bool being_activated);
     void note_paint_facts(NodeIdentity, PaintFactsFamily, Function<void(Layout::Node const&)>&&);
+    // The row, and every row it descends from, is built for no DOM node an entry could name, so
+    // the update is made on the row itself at the drain, if it is still live.
+    void note_unanchored_paint_facts(Layout::RustFFI::NodeSlotId, Function<void(Layout::Node const&)>&&);
     void note_paint_cache_invalidation(NodeIdentity, Painting::PaintCacheInvalidation);
     // Whether the node is an editing host, or a text node that produces a fragment when empty,
     // may have changed, and the rows built for it restamp both at the drain.
@@ -124,6 +128,7 @@ private:
         Function<void(Layout::Node const&)> layer_image_paint_facts_update;
         Function<void(Layout::Node const&)> replaced_image_paint_facts_update;
         Function<void(Layout::Node const&)> video_paint_facts_update;
+        Function<void(Layout::Node const&)> navigable_container_paint_facts_update;
         bool needs_editability_stamps_refresh { false };
         bool needs_focused_text_control_publish { false };
         bool needs_scroll_offset_publish { false };
@@ -135,6 +140,7 @@ private:
     void publish_scroll_offsets(Node&, Entry const&);
     void publish_selection_states();
     void publish_visual_context_marks();
+    void publish_unanchored_paint_facts();
     bool is_empty() const;
 
     Document& m_document;
@@ -143,6 +149,11 @@ private:
     // Whether a noted scroll offset changed, so the document's scroll state mirrors a stale one.
     bool m_scroll_state_is_stale { false };
     bool m_selection_states_are_stale { false };
+    struct UnanchoredPaintFacts {
+        Layout::RustFFI::NodeSlotId slot;
+        Function<void(Layout::Node const&)> update;
+    };
+    Vector<UnanchoredPaintFacts> m_unanchored_paint_facts;
     Vector<NonnullRefPtr<Painting::Scrollbar>> m_scrollbars_with_stale_enlarged_state;
     struct VisualContextBoxDirtyMark {
         Layout::RustFFI::NodeSlotId slot;

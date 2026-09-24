@@ -44,6 +44,7 @@ bool InvalidationJournal::is_empty() const
 {
     return m_entries.is_empty()
         && !m_selection_states_are_stale
+        && m_unanchored_paint_facts.is_empty()
         && m_scrollbars_with_stale_enlarged_state.is_empty()
         && m_visual_context_box_dirty_marks.is_empty()
         && m_visual_context_full_rebuild_reasons.is_empty()
@@ -61,6 +62,7 @@ InvalidationJournal::Entry& InvalidationJournal::entry_for(NodeIdentity identity
             .layer_image_paint_facts_update = {},
             .replaced_image_paint_facts_update = {},
             .video_paint_facts_update = {},
+            .navigable_container_paint_facts_update = {},
             .pseudo_element_scroll_offsets = {},
         });
         return m_entries.size() - 1;
@@ -163,8 +165,37 @@ void InvalidationJournal::note_paint_facts(NodeIdentity identity, PaintFactsFami
         // Applying changed video facts requests a repaint; see note_dom_paint_facts().
         m_document.request_frame_for_journalled_repaint({});
         break;
+    case PaintFactsFamily::NavigableContainer:
+        entry.navigable_container_paint_facts_update = move(update);
+        // Applying changed navigable container facts invalidates the paint cache, which only a
+        // rendering update repaints; see note_dom_paint_facts().
+        m_document.request_frame_for_journalled_repaint({});
+        break;
     }
     drain_if_the_render_side_is_reading();
+}
+
+void InvalidationJournal::note_unanchored_paint_facts(Layout::RustFFI::NodeSlotId slot, Function<void(Layout::Node const&)>&& update)
+{
+    if (is_empty())
+        report_journal_pending_to_census(m_document, true);
+    m_unanchored_paint_facts.append({ slot, move(update) });
+    m_document.request_frame_for_journalled_repaint({});
+    drain_if_the_render_side_is_reading();
+}
+
+// These go through in the order they were noted, since no entry merges them. What they mark for
+// repaint lands in the entries, so they go through ahead of them.
+void InvalidationJournal::publish_unanchored_paint_facts()
+{
+    auto updates = move(m_unanchored_paint_facts);
+    auto* arena = m_document.layout_node_arena_if_created();
+    if (!arena)
+        return;
+    for (auto const& [slot, update] : updates) {
+        if (auto* layout_node = arena->node_if_live(slot))
+            update(*layout_node);
+    }
 }
 
 void InvalidationJournal::note_paint_cache_invalidation(NodeIdentity identity, Painting::PaintCacheInvalidation invalidation)
@@ -385,6 +416,8 @@ void InvalidationJournal::drain()
     for (auto& scrollbar : exchange(m_scrollbars_with_stale_enlarged_state, {}))
         scrollbar->publish_enlarged_state({});
 
+    publish_unanchored_paint_facts();
+
     while (!m_entries.is_empty()) {
         auto entries = move(m_entries);
         m_entry_index_by_identity.clear_with_capacity();
@@ -409,7 +442,7 @@ void InvalidationJournal::drain()
             if (node && (entry.needs_scroll_offset_publish || !entry.pseudo_element_scroll_offsets.is_empty()))
                 publish_scroll_offsets(*node, entry);
 
-            if (!entry.needs_layout_update && !entry.needs_repaint && !entry.needs_subtree_repaint && !entry.has_dom_paint_facts && !entry.has_canvas_paint_facts && !entry.has_form_control_paint_facts && !entry.invalidate_paint_and_hit_test_cache && !entry.invalidate_propagated_text_decoration_caches && !entry.layer_image_paint_facts_update && !entry.replaced_image_paint_facts_update && !entry.video_paint_facts_update)
+            if (!entry.needs_layout_update && !entry.needs_repaint && !entry.needs_subtree_repaint && !entry.has_dom_paint_facts && !entry.has_canvas_paint_facts && !entry.has_form_control_paint_facts && !entry.invalidate_paint_and_hit_test_cache && !entry.invalidate_propagated_text_decoration_caches && !entry.layer_image_paint_facts_update && !entry.replaced_image_paint_facts_update && !entry.video_paint_facts_update && !entry.navigable_container_paint_facts_update)
                 continue;
             // A node whose box went away between the mark and here has nothing left to mark.
             auto* layout_node = arena ? entry.identity.bound_layout_node(*arena) : nullptr;
@@ -451,6 +484,8 @@ void InvalidationJournal::drain()
                 entry.replaced_image_paint_facts_update(*layout_node);
             if (entry.video_paint_facts_update)
                 entry.video_paint_facts_update(*layout_node);
+            if (entry.navigable_container_paint_facts_update)
+                entry.navigable_container_paint_facts_update(*layout_node);
             if (entry.invalidate_paint_and_hit_test_cache)
                 Painting::apply_paint_cache_invalidation(*layout_node, Painting::PaintCacheInvalidation::PaintAndHitTest, Painting::PaintCacheInvalidationStage::JournalDrain);
             if (entry.invalidate_propagated_text_decoration_caches)
