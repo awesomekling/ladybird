@@ -156,6 +156,9 @@ void StyleEffectDrain::apply(DOM::Document& document)
             },
             [&](AnimationPlan const& row) {
                 document.style_computer().apply_settled_animation_plan(DOM::AbstractElement { *element }, row.plan);
+            },
+            [&](DisplayNoneAnimations const&) {
+                element->apply_display_none_change(true, false);
             });
     }
     m_effects.clear();
@@ -767,8 +770,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     if (defer_pseudos) {
                         if (old_originating_style) {
                             auto const new_style = element->computed_style();
-                            element->apply_display_none_change(old_originating_style->base_values().display().is_none() != new_style->base_values().display().is_none(),
-                                !old_originating_style->display().is_none() && new_style->display().is_none());
+                            if (old_originating_style->base_values().display().is_none() != new_style->base_values().display().is_none())
+                                row_effects.append(StyleEffectDrain::DisplayNoneAnimations { StyleNodeID { reaction.style_node } });
+                            element->apply_display_none_change(false, !old_originating_style->display().is_none() && new_style->display().is_none());
                         }
                         StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::PseudoSettle);
                         auto settled_pseudos = document.style_computer().style_engine().settle_pseudo_records_after_host_record(StyleNodeID { reaction.style_node }, old_is_list_item);

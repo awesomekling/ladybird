@@ -2467,8 +2467,12 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         //     animations are terminated or resumed on the display that ignores them.
         auto const old_display_is_none = old_computed_values->display().is_none();
         auto const new_display_is_none = new_computed_values->display().is_none();
-        if (!CSS::deferring_engine_pseudo_installation())
-            apply_display_none_change(old_computed_values->base_values().display().is_none() != new_computed_values->base_values().display().is_none(), !old_display_is_none && new_display_is_none);
+        if (!CSS::deferring_engine_pseudo_installation()) {
+            bool const animations_display_changed = old_computed_values->base_values().display().is_none() != new_computed_values->base_values().display().is_none();
+            if (effect_drain && animations_display_changed)
+                effect_drain->append(CSS::StyleEffectDrain::DisplayNoneAnimations { style_node_id() });
+            apply_display_none_change(animations_display_changed && !effect_drain, !old_display_is_none && new_display_is_none);
+        }
     }
     // The pseudo-element records the engine settled beside this one install with it.
     if (!CSS::deferring_engine_pseudo_installation())

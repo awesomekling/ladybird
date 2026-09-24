@@ -62,7 +62,13 @@ public:
         StyleNodeID style_node;
         StyleComputer::SettledAnimationPlan plan;
     };
-    using Effect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames, AnimationNames, ContainerQueryEffects, AnimationPlan>;
+    // A row whose display left or entered none, ignoring animations, terminates or resumes the
+    // animations of its subtree. The rows of the batch read the animations' published timing, which
+    // moves only once the batch is installed.
+    struct DisplayNoneAnimations {
+        StyleNodeID style_node;
+    };
+    using Effect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames, AnimationNames, ContainerQueryEffects, AnimationPlan, DisplayNoneAnimations>;
 
     void append(Effect effect) { m_effects.append(move(effect)); }
     void apply(DOM::Document&);
