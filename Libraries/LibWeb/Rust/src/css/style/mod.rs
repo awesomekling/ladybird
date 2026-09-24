@@ -975,6 +975,12 @@ pub struct RetainedState {
     /// The nodes whose record the engine derived beneath a composition their animations made: the
     /// host samples those animations again over the new record once the batch is applied.
     nodes_owing_an_animation_sample: HashSet<StyleNodeID>,
+    /// The rows whose animations the pass sampled itself, with what it published for them: the
+    /// host installs the composition rather than sampling again, and applies what it left.
+    rows_sampled_in_pass: HashMap<StyleNodeID, engine_sample::SettledRowPublication>,
+    /// The identity the next overlay the engine composes itself is published under, which the
+    /// high bit keeps apart from the host's.
+    next_engine_animation_overlay_identity: u64,
     /// https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
     /// Per transition target, the before-change style its transitions are decided against for the
     /// rest of the style stabilization epoch, pinned until the epoch commits.

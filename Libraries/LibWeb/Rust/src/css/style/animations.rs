@@ -1889,14 +1889,14 @@ impl Drop for AnimationOverlayPayloads {
     }
 }
 
-impl super::StyleEngine {
+impl super::StyleEngineState {
     /// The payloads of the record an element's sampled animation overlay composes over its current
     /// record: the groups a value of the overlay lives in, and the groups that read an animated
     /// `color`, rebuilt from the longhand table with the overlay applied, and every other group the
     /// base's. `None` where the engine holds no such record.
     ///
-    /// `font` supplies the platform font of the animated style, which only the host can resolve,
-    /// where the font group has to be rebuilt.
+    /// `font` supplies the platform font of the animated style where the font group has to be
+    /// rebuilt; `None` where the font is not resolved leaves no payloads.
     ///
     /// # Safety
     /// `table` must be the longhand table the overlay was sampled over, and both must be live for
@@ -1914,7 +1914,7 @@ impl super::StyleEngine {
         overlay: Option<&crate::css::animated_overlay::AnimatedOverlay>,
         used_color_scheme: u8,
         display_before_box_type_transformation_raw: u32,
-        font: &mut dyn FnMut() -> crate::css::table_group_builder::FfiFontGroupBuildInputs,
+        font: &mut dyn FnMut() -> Option<crate::css::table_group_builder::FfiFontGroupBuildInputs>,
     ) -> Option<AnimationOverlayPayloads> {
         use crate::css::computed_value_types::{
             STYLE_GROUP_INDEX_ANCHOR, STYLE_GROUP_INDEX_FONT, STYLE_GROUP_INDEX_SURROUND,
@@ -1966,7 +1966,10 @@ impl super::StyleEngine {
         // Colors resolve against the element's font metrics as they stood when the overlay was last
         // published, or against the animated font where the overlay rebuilds the font group.
         let inputs = self.document_style_computation_inputs();
-        let font_inputs = (groups & (1 << STYLE_GROUP_INDEX_FONT) != 0).then(&mut *font);
+        let font_inputs = match groups & (1 << STYLE_GROUP_INDEX_FONT) != 0 {
+            true => Some(font()?),
+            false => None,
+        };
         let values = ComputedValuesView::new(SharedPayload::as_pointer_slice(view.payloads));
         let font_metrics = match &font_inputs {
             Some(font) => crate::css::style_compute::FfiFontMetrics {
