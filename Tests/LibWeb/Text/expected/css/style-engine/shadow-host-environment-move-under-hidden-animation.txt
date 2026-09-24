@@ -1,0 +1,4 @@
+focused: visible
+display: inline-block
+color: rgb(1, 2, 3)
+dppx: 2

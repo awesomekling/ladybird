@@ -3293,10 +3293,22 @@ impl RetainedState {
         if !armed && !scratch.font_drive.is_pending() && self.computed_group_sets.node_answer_is_incomplete(node) {
             return 0;
         }
-        let cascade_winners_are_complete = republished_complete.unwrap_or_else(|| {
-            self.current_published_answer(node)
-                .is_some_and(|answer| answer.cascade_winners_are_complete)
-        });
+        // A row this transaction published no answer for (one whose ancestor's environment moved,
+        // say) has winners no answer here vouches for. A shadow host's answer is never retained
+        // either, so rebuild the winners from an exact match: that answer says whether they are
+        // complete.
+        let cascade_winners_are_complete = match republished_complete {
+            Some(complete) => complete,
+            None => match self.current_published_answer(node) {
+                Some(answer) => answer.cascade_winners_are_complete,
+                None => {
+                    let Some(complete) = self.republish_winners_from_answer(node, counters) else {
+                        return 0;
+                    };
+                    complete
+                }
+            },
+        };
         let record = self.engine_computed_record_delta(
             node,
             cascade_winners_are_complete,

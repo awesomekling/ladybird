@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>@media (min-resolution: 2dppx) { #t { color: rgb(1, 2, 3); } }</style>
+<input id="visible">
+<div id="a"><input id="t"></div>
+<script>
+promiseTest(async () => {
+    const a = document.getElementById("a");
+    const t = document.getElementById("t");
+    document.getElementById("visible").focus();
+    getComputedStyle(a).display;
+    const anim = a.animate({ display: ["block", "none"] }, { duration: 1000, fill: "forwards" });
+    anim.pause();
+    anim.currentTime = 1000;
+    t.focus();
+    println(`focused: ${document.activeElement.id}`);
+    for (let i = 0; i < 2; ++i) await new Promise(r => requestAnimationFrame(r));
+    internals.setBrowserZoom(2);
+    for (let i = 0; i < 2; ++i) await new Promise(r => requestAnimationFrame(r));
+    println(`display: ${getComputedStyle(t).display}`);
+    println(`color: ${getComputedStyle(t).color}`);
+    println(`dppx: ${window.devicePixelRatio}`);
+});
+</script>
