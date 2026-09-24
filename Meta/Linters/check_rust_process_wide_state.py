@@ -161,6 +161,7 @@ RENDER_STAGE_ALLOWED = {
             "stage_thread.rs:OVERLAP_HOST",
             "stage_thread.rs:IN_FLIGHT",
             "stage_thread.rs:RUNNING_JOIN_WORK",
+            "stage_thread.rs:SPINNING",
             "stage_thread.rs:FORCED_JOIN_SITES",
         ],
     ),

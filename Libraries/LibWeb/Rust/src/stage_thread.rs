@@ -183,6 +183,9 @@ thread_local! {
     static INCOMING: RefCell<Option<Receiver<StageMessage>>> = const { RefCell::new(None) };
     // On the calling thread, the overlapping stage it spins its event loop for.
     static IN_FLIGHT: Cell<*const InFlight<'static>> = const { Cell::new(std::ptr::null()) };
+    // On the calling thread, the stages whose runs are suspended in a spin further up its stack,
+    // finished or not.
+    static SPINNING: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
     // On the calling thread, how deep it is in work a stage joined it for.
     static RUNNING_JOIN_WORK: Cell<u32> = const { Cell::new(0) };
     // On the calling thread, the call sites that forced a join already logged.
@@ -241,6 +244,12 @@ fn run_join_work(
     if thread.jobs.send(reply).is_err() {
         std::process::abort();
     }
+}
+
+/// Whether a run of the stage `label` is suspended in a spin further up the calling thread's
+/// stack. Its caller has not taken in its result yet, and may hold what a second run would need.
+pub(crate) fn is_suspended_in_spin(label: &'static str) -> bool {
+    SPINNING.with(|spinning| spinning.borrow().contains(&label))
 }
 
 /// Called where main-thread code reaches render-owned state: if an overlapping stage is running,
@@ -517,11 +526,13 @@ unsafe fn run_stage_on<R: Send>(
             // for the thread-local.
             let record = std::ptr::from_ref(&in_flight).cast::<InFlight<'static>>();
             IN_FLIGHT.with(|slot| slot.set(record));
+            SPINNING.with(|spinning| spinning.borrow_mut().push(label));
             // SAFETY: The host spins on this thread, and the record outlives the spin.
             unsafe { (host.spin_until)(stage_is_done, std::ptr::from_ref(&in_flight).cast_mut().cast()) };
             // A spin that returns early (its event loop is exiting) still waits for the stage.
             in_flight.wait();
             IN_FLIGHT.with(|slot| slot.set(std::ptr::null()));
+            SPINNING.with(|spinning| spinning.borrow_mut().pop());
         }
         None => in_flight.wait(),
     }

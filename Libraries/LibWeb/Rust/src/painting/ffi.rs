@@ -1345,6 +1345,12 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
     inputs: crate::painting::host::FfiRecordingInputs,
 ) -> bool {
     crate::layout::main_side_census::note_rendering_update(arena_handle);
+    if crate::stage_thread::is_suspended_in_spin("recording") {
+        // The suspended recording's caller holds the recording scratch and has not published its
+        // recording yet, so this one would wait for it forever.
+        eprintln!("STAGE OVERLAP: a recording started while another is suspended in its spin");
+        std::process::abort();
+    }
     let arena = unsafe { arena_from_handle(arena_handle) };
     {
         let mut paint_state = arena.paint_state().borrow_mut();

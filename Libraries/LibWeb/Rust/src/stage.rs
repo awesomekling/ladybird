@@ -91,6 +91,7 @@ impl<'host> MainThread<'host> {
 ///     move_to_worker(token);
 /// }
 /// ```
+#[track_caller]
 pub(crate) unsafe fn from_ffi_entry<'host>(_: &impl FfiEntry, arena_handle: *mut c_void) -> MainThread<'host> {
     // SAFETY: Implementations are restricted below to marker types whose values can only be
     // constructed in their designated FFI entry module, and the caller vouches for the handle.
