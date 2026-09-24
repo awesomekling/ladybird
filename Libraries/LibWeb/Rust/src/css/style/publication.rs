@@ -91,15 +91,13 @@ impl RootFontInputs {
 impl RetainedState {
     /// The inheritance parent a node's record is computed from. C++ styles an element whose
     /// inheritance parent has no style, such as a slot inside a `display: none` subtree, from the
-    /// initial values, the way it styles the document element. Only a retry can tell such a
-    /// parent from one whose record the host has yet to install: it runs after the host installed
-    /// every preceding row.
+    /// initial values, the way it styles the document element. A parent whose record the host
+    /// has yet to install is no such parent: the pass stops before its children until it is
+    /// installed, and a demand settles its ancestors first.
     pub(super) fn record_inheritance_parent(&self, node: StyleNodeID) -> Option<StyleNodeID> {
-        self.tree.inheritance_parent(node).filter(|&parent| {
-            !self.inheritance_parents_are_installed
-                || self.computed_group_sets.assigned_style_record(parent).is_some()
-                || self.computed_group_sets.sampled_composition_identity(parent).is_some()
-        })
+        self.tree
+            .inheritance_parent(node)
+            .filter(|&parent| self.computed_group_sets.assigned_style_record(parent).is_some())
     }
 
     pub(crate) fn retained_highlight_inheritance_parent_style_record(
@@ -481,18 +479,9 @@ impl RetainedState {
         // declaring none keeps its record's, which is the parent's; a moved environment
         // republishes the record under the new one.
         let mut environment = {
-            let parent_environment = match self.record_inheritance_parent(node) {
-                Some(parent) => {
-                    let Some(parent_environment) =
-                        self.computed_group_sets.custom_property_environment_identity(parent)
-                    else {
-                        counters.bump(Counter::EngineComputedRecordBailRecordParent);
-                        return Err(Unanswered::Refused);
-                    };
-                    parent_environment
-                }
-                None => 0,
-            };
+            let parent_environment = self
+                .record_inheritance_parent(node)
+                .map_or(0, |parent| self.held_custom_property_environment(parent));
             // The row keeps the record it reads its own font from unless the font itself is
             // moving, so that is when a registered name can be computed here rather than by the
             // host: the value absolutizes against the same metrics C++ would use.
@@ -1571,33 +1560,34 @@ impl RetainedState {
         node: StyleNodeID,
         inputs: &bridge::FfiDocumentStyleComputationInputs,
         scratch: &mut EngineComputedRecordScratch,
-    ) -> Drive<u64> {
+    ) -> Result<u64, Suspension> {
         if let Some(&current) = scratch.current_custom_property_environments.get(&node) {
             return Ok(current);
         }
-        let held = self
-            .computed_group_sets
-            .custom_property_environment_identity(node)
-            .or_refused()?;
+        let held = self.held_custom_property_environment(node);
         let animates =
             self.computed_group_sets.adjustment_facts(node) & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
                 || self.computed_group_sets.node_has_animation_overlay(node);
         let current = match self.record_inheritance_parent(node) {
-            Some(parent) if !animates => match self.current_custom_property_environment(parent, inputs, scratch) {
-                Ok(parent_environment) => {
-                    let parent_moved = self.computed_group_sets.custom_property_environment_identity(parent)
-                        != Some(parent_environment);
-                    self.environment_over_current_parent(node, parent_environment, parent_moved, inputs)
-                        .map_err(Unanswered::Suspended)?
-                        .unwrap_or(held)
-                }
-                Err(Unanswered::Refused) => held,
-                Err(suspended @ Unanswered::Suspended(_)) => return Err(suspended),
-            },
+            Some(parent) if !animates => {
+                let parent_environment = self.current_custom_property_environment(parent, inputs, scratch)?;
+                let parent_moved =
+                    self.computed_group_sets.custom_property_environment_identity(parent) != Some(parent_environment);
+                self.environment_over_current_parent(node, parent_environment, parent_moved, inputs)?
+                    .unwrap_or(held)
+            }
             _ => held,
         };
         scratch.current_custom_property_environments.insert(node, current);
         Ok(current)
+    }
+
+    /// The custom-property environment a node with a record holds. Every record is assigned with
+    /// its environment, so a node the drive reads as an inheritance parent always holds one.
+    fn held_custom_property_environment(&self, node: StyleNodeID) -> u64 {
+        let environment = self.computed_group_sets.custom_property_environment_identity(node);
+        debug_assert!(environment.is_some(), "an inheritance parent without an environment");
+        environment.unwrap_or(0)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1625,28 +1615,19 @@ impl RetainedState {
         // An element without a styled inheritance parent, the document element among them,
         // inherits from the initial values.
         let parent = self.record_inheritance_parent(node);
-        let parent_record = match parent {
-            Some(parent) => match self
-                .computed_group_sets
+        let parent_record = parent.and_then(|parent| {
+            self.computed_group_sets
                 .sampled_composition_identity(parent)
                 .and_then(computed::FinalStyleRecordID::from_raw)
                 .or_else(|| self.computed_group_sets.assigned_style_record(parent))
-            {
-                Some(parent_record) => Some(parent_record),
-                None => {
-                    counters.bump(Counter::EngineComputedRecordBailRecordParent);
-                    return Err(Unanswered::Refused);
-                }
-            },
-            None => None,
-        };
+        });
         // The document element's environment is its own, which is nothing without declarations;
         // any other node's is its declarations resolved over the parent's.
         let parent_environment = parent
             .map_or(Ok(0), |parent| {
                 self.current_custom_property_environment(parent, &inputs, scratch)
             })
-            .count_refusal(counters, Counter::EngineComputedRecordBailRecordParent)?;
+            .map_err(Unanswered::Suspended)?;
         let has_registered_declarations = self.declares_registered_custom_property(node, None, &inputs);
         let Some(pseudo_styles) = self.pseudo_style_mask(node) else {
             counters.bump(Counter::EngineComputedRecordBailWinner);
@@ -5022,8 +5003,12 @@ impl StyleEngineState {
         let mut private_ancestor_records = Vec::new();
         if read_only && pseudo.is_none() {
             let mut private_counters = counters.clone();
-            if let Some(farthest_pending) = ancestors.iter().rposition(|(_, pending)| *pending) {
-                for &(parent, _) in ancestors[..=farthest_pending].iter().rev() {
+            // An ancestor without a record, one in a subtree C++ has not styled yet, is settled
+            // first too: the target inherits from it, as a C++ read styles the whole chain.
+            if let Some(farthest) = ancestors.iter().rposition(|&(parent, pending)| {
+                pending || self.computed_group_sets.assigned_style_record(parent).is_none()
+            }) {
+                for &(parent, _) in ancestors[..=farthest].iter().rev() {
                     let previous = self
                         .computed_group_sets
                         .assigned_style_record(parent)
@@ -6572,10 +6557,8 @@ impl StyleEngineState {
             ..EngineComputedRecordScratch::default()
         };
         let mut suspended_memory = MemoryLease::new(MemoryCategory::BatchScratch);
-        self.retained.inheritance_parents_are_installed = true;
         let style_record =
             self.drive_record_over_installed_ancestors_loop(node, armed, &mut scratch, &mut suspended_memory, counters);
-        self.retained.inheritance_parents_are_installed = false;
         counters.add(
             Counter::RetryAfterAncestorMicroseconds,
             u64::try_from(started_at.elapsed().as_micros()).unwrap_or(u64::MAX),

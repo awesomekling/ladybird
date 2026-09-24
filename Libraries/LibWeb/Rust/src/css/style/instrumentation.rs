@@ -191,7 +191,6 @@ define_counters! {
     EngineCustomPropertyEnvironmentMemoHits => "engineCustomPropertyEnvironmentMemoHits",
     EngineCustomPropertyEnvironmentBails => "engineCustomPropertyEnvironmentBails",
     EngineComputedRecordBailRootFontInputs => "engineComputedRecordBailRootFontInputs",
-    EngineComputedRecordBailRecordParent => "engineComputedRecordBailRecordParent",
     EngineComputedRecordBailDriveTreeCounting => "engineComputedRecordBailDriveTreeCounting",
     EngineComputedRecordBailValue => "engineComputedRecordBailValue",
     PrefixDeadDeltaBailMatched => "prefixDeadDeltaBailMatched",
