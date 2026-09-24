@@ -18,6 +18,7 @@
 //! There is one stage thread per process. A WebContent process runs every document it hosts on its
 //! one main thread, so a thread per process is also a thread per event loop.
 
+use crate::css::ffi_stats::{StyleUpdateScope, install_style_update_scope, take_style_update_scope};
 use std::any::Any;
 use std::cell::Cell;
 use std::panic::AssertUnwindSafe;
@@ -118,15 +119,21 @@ unsafe fn run_stage_on<R: Send>(thread: &StageThread, stage: impl FnOnce() -> R)
         }
     }
 
-    let (reply, result) = channel::<Result<R, Box<dyn Any + Send>>>();
+    type Outcome<R> = (Result<R, Box<dyn Any + Send>>, StyleUpdateScope);
+    let (reply, result) = channel::<Outcome<R>>();
     let stage = CallerWaits(stage);
     let caller = std::thread::current().id();
+    // The stage runs inside whatever style update the caller has open, so it takes that update's
+    // state along and hands it back with its result.
+    let style_update = take_style_update_scope();
     let job: Box<dyn FnOnce() + Send + '_> = Box::new(move || {
         WAITING_CALLER.with(|waiting| waiting.set(Some(caller)));
+        install_style_update_scope(style_update);
         let outcome = std::panic::catch_unwind(AssertUnwindSafe(stage.into_inner()));
+        let style_update = take_style_update_scope();
         WAITING_CALLER.with(|waiting| waiting.set(None));
         // The calling thread is waiting on this reply, so it cannot have gone away.
-        let _ = reply.send(outcome);
+        let _ = reply.send((outcome, style_update));
     });
     // SAFETY: The job borrows from the calling thread's frame. It drops everything it captured
     // before it replies, and this function does not return before the reply arrives.
@@ -135,10 +142,13 @@ unsafe fn run_stage_on<R: Send>(thread: &StageThread, stage: impl FnOnce() -> R)
         // The stage thread only goes away if the process is going away.
         std::process::abort();
     }
-    match result.recv() {
-        Ok(Ok(value)) => value,
-        Ok(Err(payload)) => std::panic::resume_unwind(payload),
-        Err(_) => std::process::abort(),
+    let Ok((outcome, style_update)) = result.recv() else {
+        std::process::abort();
+    };
+    install_style_update_scope(style_update);
+    match outcome {
+        Ok(value) => value,
+        Err(payload) => std::panic::resume_unwind(payload),
     }
 }
 
@@ -188,6 +198,19 @@ mod tests {
         };
         assert_eq!(outer, test_thread().id);
         assert_eq!(inner, outer);
+    }
+
+    #[test]
+    fn a_stage_run_defers_releases_into_the_callers_style_update() {
+        use crate::css::ffi_stats::*;
+        rust_style_ffi_complete_style_update_begin();
+        // SAFETY: Nothing is captured.
+        unsafe { run_stage_on(test_thread(), || release_utf16_fly_string(0x1230)) };
+        let releases = rust_style_ffi_complete_style_update_end();
+        // SAFETY: The view stays valid until the releases are cleared.
+        let released = unsafe { std::slice::from_raw_parts(releases.fly_strings, releases.fly_string_count) };
+        assert_eq!(released, [0x1230]);
+        rust_deferred_cpp_releases_clear();
     }
 
     #[test]

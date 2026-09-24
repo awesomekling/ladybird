@@ -174,7 +174,33 @@ thread_local! {
     pub(crate) static THREAD_UNSAFE_CPP_CALLBACK_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 thread_local! {
+    // The document thread's complete style updates. A stage run carries this to the stage thread
+    // and back with the seal's state; see `take_style_update_scope`.
     static COMPLETE_STYLE_UPDATE_STATE: RefCell<CompleteStyleUpdateState> = const { RefCell::new(CompleteStyleUpdateState::new()) };
+}
+
+/// The style update state of one document thread, moved to the stage thread for a stage run and
+/// back once it has finished. An update the document thread has open is then open for the stage
+/// too: a fly-string reference the stage drops joins the update's deferred releases, which the
+/// document thread drains, and the seal checks and counts the stage's calls as the update's.
+pub(crate) struct StyleUpdateScope {
+    complete: CompleteStyleUpdateState,
+    seal: crate::css::style::seal::SealState,
+}
+
+/// Take this thread's style update state, for a stage run to carry to the stage thread.
+pub(crate) fn take_style_update_scope() -> StyleUpdateScope {
+    StyleUpdateScope {
+        complete: COMPLETE_STYLE_UPDATE_STATE
+            .with_borrow_mut(|state| std::mem::replace(state, CompleteStyleUpdateState::new())),
+        seal: crate::css::style::seal::take_state(),
+    }
+}
+
+/// Install style update state a stage run carried here.
+pub(crate) fn install_style_update_scope(scope: StyleUpdateScope) {
+    COMPLETE_STYLE_UPDATE_STATE.with_borrow_mut(|state| *state = scope.complete);
+    crate::css::style::seal::install_state(scope.seal);
 }
 
 #[derive(Default)]
