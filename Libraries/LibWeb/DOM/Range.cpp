@@ -15,6 +15,7 @@
 #include <LibWeb/DOM/DocumentType.h>
 #include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/Event.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/ProcessingInstruction.h>
 #include <LibWeb/DOM/Range.h>
@@ -106,7 +107,7 @@ void Range::set_associated_selection(Badge<Selection::Selection>, GC::Ptr<Select
         // The range this selection painted through is no longer its range; take the highlight back.
         auto& document = m_start_container->document();
         if (document.has_committed_viewport_box()) {
-            document.paint_state().reset_selection_states(document);
+            document.invalidation_journal().note_selection_states();
             Painting::set_needs_repaint(*document.unsafe_layout_node(), InvalidateDisplayList::PaintCommands);
         }
 
@@ -128,7 +129,7 @@ void Range::update_associated_selection()
 
     // NB: Called during selection update after range change.
     if (document.has_committed_viewport_box()) {
-        document.paint_state().recompute_selection_states(document, *this);
+        document.invalidation_journal().note_selection_states();
         Painting::set_needs_repaint(*document.unsafe_layout_node(), InvalidateDisplayList::PaintCommands);
     }
 

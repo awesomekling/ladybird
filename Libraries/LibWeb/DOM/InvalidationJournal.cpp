@@ -8,12 +8,15 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/InvalidationJournal.h>
+#include <LibWeb/DOM/Range.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Layout/TextNode.h>
 #include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/Painting/DocumentPaintState.h>
+#include <LibWeb/Selection/Selection.h>
 
 namespace Web::DOM {
 
@@ -192,6 +195,27 @@ static void refresh_editability_stamps(Node& node)
     }
 }
 
+void InvalidationJournal::note_selection_states()
+{
+    if (m_entries.is_empty() && !m_selection_states_are_stale)
+        report_journal_pending_to_census(m_document, true);
+    m_selection_states_are_stale = true;
+    drain_if_the_render_side_is_reading();
+}
+
+// The selection's range is the one the last association or boundary change left, so restamping
+// from it lands every write since the last drain at once.
+void InvalidationJournal::publish_selection_states()
+{
+    if (!m_document.has_committed_viewport_box())
+        return;
+    auto selection = m_document.get_selection();
+    if (auto range = selection ? selection->range() : nullptr)
+        m_document.paint_state().recompute_selection_states(m_document, *range);
+    else
+        m_document.paint_state().reset_selection_states(m_document);
+}
+
 void InvalidationJournal::note_scroll_offset(NodeIdentity identity, bool offset_changed)
 {
     entry_for(identity).needs_scroll_offset_publish = true;
@@ -255,13 +279,16 @@ void InvalidationJournal::drain()
 {
     // Publishing a pseudo-element's offset reads it back, and that read drains. The drain already
     // running takes whatever such a read would have.
-    if (m_entries.is_empty() || m_draining)
+    if ((m_entries.is_empty() && !m_selection_states_are_stale) || m_draining)
         return;
     TemporaryChange draining { m_draining, true };
 
     auto* publication_arena = m_document.layout_node_arena_if_created();
     if (publication_arena)
         Layout::RustFFI::layout_arena_before_invalidation_journal_drain(publication_arena->handle());
+
+    if (exchange(m_selection_states_are_stale, false))
+        publish_selection_states();
 
     while (!m_entries.is_empty()) {
         auto entries = move(m_entries);
