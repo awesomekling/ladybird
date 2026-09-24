@@ -35,33 +35,6 @@ impl std::ops::DerefMut for StyleEngine {
 }
 
 impl StyleEngine {
-    /// What a keyframe's written value substitutes to on the element being sampled; see
-    /// `RetainedState::substitute_keyframe_value`.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the written value and its independent resolution inputs travel together"
-    )]
-    pub(crate) fn substitute_keyframe_value(
-        &mut self,
-        node: StyleNodeID,
-        pseudo: Option<u8>,
-        store: *const std::ffi::c_void,
-        inheritance_store: *const std::ffi::c_void,
-        property: u16,
-        root_custom_property_name: &[u16],
-        written: &crate::css::style_value::RetainedStyleValueData,
-    ) -> crate::css::style_value::RetainedStyleValueData {
-        self.state.retained.substitute_keyframe_value(
-            node,
-            pseudo,
-            store,
-            inheritance_store,
-            property,
-            root_custom_property_name,
-            written,
-        )
-    }
-
     pub(crate) fn box_type_parent_display(
         &self,
         node: StyleNodeID,
@@ -514,7 +487,20 @@ impl StyleEngine {
         root: StyleNodeID,
         emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
     ) -> bool {
-        self.state.take_style_transaction(root, emit, &mut self.counters)
+        self.state
+            .take_style_transaction(root, emit, &mut self.counters, super::animations::LentLayoutArena::NONE)
+    }
+
+    /// Take the pending style transaction with the document's layout arena lent to its pass.
+    #[inline]
+    pub(crate) fn take_style_transaction_lending_layout_arena(
+        &mut self,
+        root: StyleNodeID,
+        layout_arena: super::animations::LentLayoutArena,
+        emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
+    ) -> bool {
+        self.state
+            .take_style_transaction(root, emit, &mut self.counters, layout_arena)
     }
 
     #[inline]

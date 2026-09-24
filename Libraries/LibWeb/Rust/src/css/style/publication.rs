@@ -5581,6 +5581,11 @@ impl FromIterator<Option<u16>> for FlippedRules {
 }
 
 impl EngineComputedRecordScratch {
+    /// The document element, where the pass drives its font inputs.
+    pub(super) fn root_element_inputs(&self) -> Option<StyleNodeID> {
+        self.root_element_inputs.map(|(root, _)| root)
+    }
+
     pub(super) fn capacity_bytes(&self) -> u64 {
         capacity::capacity_bytes! {
             shallow [self.cohorts, self.derived_child_inputs, self.cold_cohorts, self.stores,

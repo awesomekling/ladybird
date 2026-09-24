@@ -4357,13 +4357,15 @@ fn record_interned_atom(engine: &mut StyleEngine, raw: usize, atom: StyleAtomID)
 /// Takes the pending style transaction and returns its versioned semantic match answers.
 ///
 /// # Safety
-/// `engine` must be live. The returned answer slice remains valid until the next mutable
-/// `style_engine_*` entry point or an explicit discard of the transaction outputs.
+/// `engine` must be live, and `layout_arena` the document's live layout arena or null. The
+/// returned answer slice remains valid until the next mutable `style_engine_*` entry point or an
+/// explicit discard of the transaction outputs.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_take_style_transaction(
     engine: *mut c_void,
     root: u32,
     mut computation_inputs: FfiDocumentStyleComputationInputs,
+    layout_arena: *mut c_void,
 ) -> FfiStyleTransactionView {
     super::seal::note_engine_call("style_engine_take_style_transaction");
     let Some(root) = StyleNodeID::from_raw(root) else {
@@ -4418,16 +4420,22 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     let emitted = &mut output;
     // The transaction's inputs were frozen above.
     let engine_on_stage = &mut *engine;
+    // SAFETY: The host passes its document's live layout arena, or null, and blocks on the stage.
+    let layout_arena = unsafe { super::animations::LentLayoutArena::lend(layout_arena) };
     let scoped = crate::stage_thread::run_stage(move || {
-        engine_on_stage.take_style_transaction(root, |transaction_version, program_version, answers| {
-            assert!(
-                emitted.answers.is_empty(),
-                "a style transaction emitted more than one batch"
-            );
-            emitted.transaction_version = transaction_version.0;
-            emitted.program_version = program_version.0;
-            emitted.answers.extend_from_slice(answers);
-        })
+        engine_on_stage.take_style_transaction_lending_layout_arena(
+            root,
+            layout_arena,
+            |transaction_version, program_version, answers| {
+                assert!(
+                    emitted.answers.is_empty(),
+                    "a style transaction emitted more than one batch"
+                );
+                emitted.transaction_version = transaction_version.0;
+                emitted.program_version = program_version.0;
+                emitted.answers.extend_from_slice(answers);
+            },
+        )
     });
     output.scoped = scoped;
     // Font cascade lists the transaction's font resolutions gave up on the stage thread.

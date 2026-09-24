@@ -442,8 +442,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     let start = Instant::now();
-                    let actual_view =
-                        unsafe { bridge::style_engine_take_style_transaction(engine, root, computation_inputs) };
+                    let actual_view = unsafe {
+                        bridge::style_engine_take_style_transaction(
+                            engine,
+                            root,
+                            computation_inputs,
+                            std::ptr::null_mut(),
+                        )
+                    };
                     let actual_reclaimed_atoms = if actual_view.reclaimed_style_atom_count == 0 {
                         Vec::new()
                     } else {

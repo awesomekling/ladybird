@@ -58,6 +58,14 @@ impl RetainedState {
         })
     }
 
+    pub(crate) fn root_element_font_metrics(&self) -> super::animations::RootElementFontMetrics {
+        self.root_element_font_metrics
+    }
+
+    pub(crate) fn document_style_computation_inputs(&self) -> bridge::FfiDocumentStyleComputationInputs {
+        self.document_style_computation_inputs
+    }
+
     /// Keep what the container units a sample over `style_record` resolved read of the element's
     /// containers for the host, as a record the engine computes does. Whether there was a record to
     /// read them over.
@@ -90,6 +98,38 @@ impl RetainedState {
         style_record: u64,
         container_unit_mask: u8,
     ) -> Option<FfiAnimationLengthContexts> {
+        self.animation_sample_length_contexts_over_root(
+            node,
+            pseudo_kind,
+            style_record,
+            container_unit_mask,
+            self.root_element_font_metrics,
+        )
+    }
+
+    /// The font metrics a `rem` resolves against where the document element holds the record the
+    /// engine assigned it, which a pass can settle before the host installs it.
+    pub(crate) fn assigned_root_element_font_metrics(
+        &self,
+        root: StyleNodeID,
+    ) -> Option<super::animations::RootElementFontMetrics> {
+        let record = self.computed_group_sets.assigned_style_record(root)?;
+        let inputs = self.root_font_inputs_from_raw_record(record.raw())?;
+        Some(super::animations::RootElementFontMetrics::from_words(
+            &inputs.metrics,
+            inputs.depends_on_viewport,
+        ))
+    }
+
+    /// `animation_sample_length_contexts`, with `rem` resolving against `root`.
+    pub(crate) fn animation_sample_length_contexts_over_root(
+        &self,
+        node: StyleNodeID,
+        pseudo_kind: Option<u8>,
+        style_record: u64,
+        container_unit_mask: u8,
+        root: super::animations::RootElementFontMetrics,
+    ) -> Option<FfiAnimationLengthContexts> {
         let inputs: &bridge::FfiDocumentStyleComputationInputs = &self.document_style_computation_inputs;
         let own = self.record_font(style_record)?;
         // A pseudo-element inherits from its originating element.
@@ -108,8 +148,8 @@ impl RetainedState {
             self.container_unit_bases(node, container_unit_mask, subject_inline_axis_is_horizontal, inputs);
         // What a `rem` resolves against is the font of the record the host last installed on the
         // document element, which is what the host's own member holds - not the document inputs,
-        // which were published before this update installed anything.
-        let root = self.root_element_font_metrics;
+        // which were published before this update installed anything - unless the caller names
+        // the record a pass settled for it.
         let document_root_font_metrics = FfiFontMetrics {
             font_size: root.font_size,
             x_height: root.x_height,
@@ -393,6 +433,11 @@ pub(crate) fn font_group_build_inputs(
 }
 
 impl RetainedState {
+    /// The font the document's font resolver resolved for a request, if it has.
+    pub(crate) fn resolved_font(&self, request: bridge::FfiFontResolutionRequest) -> Option<bridge::FfiResolvedFont> {
+        self.font_resolution.as_ref()?.lookup(request)
+    }
+
     /// The inputs the font group of an element's overlay record is built from, resolved by the
     /// engine over the record's table and the overlay a sample composed. `None` where the document's
     /// font resolver has not resolved that font yet.
@@ -526,6 +571,58 @@ impl RetainedState {
             inheritance_store,
             element_declares_own,
             base_is_engine: !base_store.is_null() && base_environment & ENGINE_CUSTOM_PROPERTY_ENVIRONMENT_TAG != 0,
+        })
+    }
+
+    /// The custom-property environments a sample of a row the pass settled reads, from the
+    /// environment its new record was published with and the one its inheritance parent passes on,
+    /// before the host installs either; or why the engine cannot say.
+    pub(crate) fn settled_row_custom_property_environments(
+        &self,
+        node: StyleNodeID,
+    ) -> Result<SampleCustomPropertyEnvironments, &'static str> {
+        // The environment an earlier sample composed the element's animated custom properties into
+        // is the host's until the engine owns animation overlays.
+        if self.sampled_custom_property_environments.contains_key(&node) {
+            return Err("custom properties an earlier sample animated");
+        }
+        let registry = unsafe {
+            self.document_style_computation_inputs
+                .custom_property_registry
+                .as_pointer()
+                .cast::<crate::css::custom_properties::CustomPropertyRegistry>()
+                .as_ref()
+        };
+        match registry {
+            None => return Err("a document that published no registry"),
+            Some(registry) if registry.has_registrations() => {
+                return Err("a parent whose inheritable environment the host builds");
+            }
+            Some(_) => {}
+        }
+        let store_of = |environment: u64| match environment {
+            0 => Ok(std::ptr::null()),
+            environment => self
+                .custom_property_environments
+                .store(environment)
+                .ok_or("an environment without a store"),
+        };
+        let environment = self
+            .computed_group_sets
+            .custom_property_environment_identity(node)
+            .unwrap_or(0);
+        let store = store_of(environment)?;
+        let parent_environment = self
+            .tree
+            .inheritance_parent(node)
+            .and_then(|parent| self.computed_group_sets.custom_property_environment_identity(parent))
+            .unwrap_or(0);
+        Ok(SampleCustomPropertyEnvironments {
+            store,
+            base_store: store,
+            inheritance_store: store_of(parent_environment)?,
+            element_declares_own: environment != 0 && environment != parent_environment,
+            base_is_engine: environment & ENGINE_CUSTOM_PROPERTY_ENVIRONMENT_TAG != 0,
         })
     }
 }
