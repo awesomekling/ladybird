@@ -302,10 +302,10 @@ StyleEngineFFI::FfiFrozenLonghandInputRow StyleEngine::frozen_longhand_input(Sty
     return StyleEngineFFI::style_engine_frozen_longhand_input(m_impl, node.value());
 }
 
-void StyleEngine::set_element_custom_property_data(StyleNodeID node, CustomPropertyData const* data)
+void StyleEngine::set_element_custom_property_data(StyleNodeID node, CustomPropertyData const* data, bool is_animation_overlay, bool declares)
 {
     StyleEngineFFI::style_engine_set_element_custom_property_data(
-        m_impl, node.value(), data, data ? data->rust_store() : nullptr, data ? data->identity() : 0);
+        m_impl, node.value(), data, data ? data->rust_store() : nullptr, data ? data->identity() : 0, is_animation_overlay, declares);
 }
 
 void StyleEngine::decide_transitions(StyleRecordID before_style_record, void const* after_longhand_table, void const* after_animated_overlay, StyleValueFFI::FfiTransitionInput& input, StyleValueFFI::FfiTransitionAction* actions) const

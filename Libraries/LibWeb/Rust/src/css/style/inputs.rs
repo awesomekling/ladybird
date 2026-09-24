@@ -48,6 +48,25 @@ impl RetainedCustomPropertyData {
     pub(crate) fn data(&self) -> *const std::ffi::c_void {
         self.data.as_ptr()
     }
+
+    /// Another reference to the same environment, for another element that holds it.
+    pub(crate) fn share(&self) -> Self {
+        // SAFETY: This row keeps the environment live.
+        unsafe { Self::retain(self.data()) }
+    }
+}
+
+/// The custom-property environment an element or one of its pseudo-elements holds. The engine
+/// names it by identity; the host's object for it is kept when the host installed it, while one
+/// the engine moved the element to is an environment the engine resolved, which the host views
+/// from its store.
+pub(crate) struct HeldCustomPropertyEnvironment {
+    pub(crate) identity: u64,
+    /// Whether it is the element's animation overlay, over the environment its style resolves to.
+    pub(crate) is_animation_overlay: bool,
+    /// Whether it declares custom properties of its own, over the environment it inherits.
+    pub(crate) declares: bool,
+    pub(crate) data: Option<RetainedCustomPropertyData>,
 }
 
 impl Drop for RetainedCustomPropertyData {
@@ -137,13 +156,15 @@ impl RetainedState {
         data: *const std::ffi::c_void,
         store: *const std::ffi::c_void,
         environment: u64,
+        is_animation_overlay: bool,
+        declares: bool,
     ) {
         if data.is_null() {
             self.element_custom_property_data.insert(node, None);
             return;
         }
         if let Some(Some(existing)) = self.element_custom_property_data.get(&node)
-            && existing.data() == data
+            && existing.data.as_ref().is_some_and(|existing| existing.data() == data)
         {
             return;
         }
@@ -156,16 +177,32 @@ impl RetainedState {
                 unsafe { self.custom_property_environments.retain(environment, store) };
             }
         }
-        self.element_custom_property_data
-            .insert(node, Some(unsafe { RetainedCustomPropertyData::retain(data) }));
+        self.element_custom_property_data.insert(
+            node,
+            Some(HeldCustomPropertyEnvironment {
+                identity: environment,
+                is_animation_overlay,
+                declares,
+                data: Some(unsafe { RetainedCustomPropertyData::retain(data) }),
+            }),
+        );
     }
 
-    /// The environment an element holds, as it was last kept. The host keeps no copy of its own.
-    pub(crate) fn element_custom_property_data(&self, node: StyleNodeID) -> Option<*const std::ffi::c_void> {
-        self.element_custom_property_data
-            .get(&node)?
-            .as_ref()
-            .map(RetainedCustomPropertyData::data)
+    /// The environment an element holds, as it was last kept: the host's object for it, or null with
+    /// the identity of one the engine resolved. The host keeps no copy of its own.
+    pub(crate) fn element_custom_property_data(&self, node: StyleNodeID) -> (*const std::ffi::c_void, u64) {
+        Self::held_environment_answer(self.element_custom_property_data.get(&node).and_then(Option::as_ref))
+    }
+
+    fn held_environment_answer(held: Option<&HeldCustomPropertyEnvironment>) -> (*const std::ffi::c_void, u64) {
+        held.map_or((std::ptr::null(), 0), |held| {
+            (
+                held.data
+                    .as_ref()
+                    .map_or(std::ptr::null(), RetainedCustomPropertyData::data),
+                held.identity,
+            )
+        })
     }
 
     /// Keep the custom-property environment one of an element's synthetic pseudo-elements now holds;
@@ -178,6 +215,7 @@ impl RetainedState {
         node: StyleNodeID,
         pseudo: u8,
         data: *const std::ffi::c_void,
+        environment: u64,
     ) {
         if data.is_null() {
             self.pseudo_element_custom_property_data.remove(&(node, pseudo));
@@ -186,19 +224,30 @@ impl RetainedState {
         if self
             .pseudo_element_custom_property_data
             .get(&(node, pseudo))
+            .and_then(|existing| existing.data.as_ref())
             .is_some_and(|existing| existing.data() == data)
         {
             return;
         }
-        self.pseudo_element_custom_property_data
-            .insert((node, pseudo), unsafe { RetainedCustomPropertyData::retain(data) });
+        self.pseudo_element_custom_property_data.insert(
+            (node, pseudo),
+            HeldCustomPropertyEnvironment {
+                identity: environment,
+                is_animation_overlay: false,
+                declares: false,
+                data: Some(unsafe { RetainedCustomPropertyData::retain(data) }),
+            },
+        );
     }
 
-    /// The environment one of an element's synthetic pseudo-elements holds, null for none.
-    pub(crate) fn pseudo_element_custom_property_data(&self, node: StyleNodeID, pseudo: u8) -> *const std::ffi::c_void {
-        self.pseudo_element_custom_property_data
-            .get(&(node, pseudo))
-            .map_or(std::ptr::null(), RetainedCustomPropertyData::data)
+    /// The environment one of an element's synthetic pseudo-elements holds, as
+    /// `element_custom_property_data` answers for the element.
+    pub(crate) fn pseudo_element_custom_property_data(
+        &self,
+        node: StyleNodeID,
+        pseudo: u8,
+    ) -> (*const std::ffi::c_void, u64) {
+        Self::held_environment_answer(self.pseudo_element_custom_property_data.get(&(node, pseudo)))
     }
 
     /// Note that the element's style reads what a moved custom-property environment can change other
@@ -1987,6 +2036,7 @@ impl StyleEngineState {
                 deferred_element_style_inputs_are_pending: false,
                 externally_recorded_style_input_nodes: HashSet::default(),
                 held_style_record_displays: HashMap::default(),
+                held_style_records: HashMap::default(),
                 style_reaction_row_start: None,
                 deferred_element_style_input_memory: MemoryLease::new(MemoryCategory::NormalizationJournal),
                 initial_tree_batch_applied: false,
@@ -2267,6 +2317,7 @@ impl StyleEngineState {
         self.retained.set_element_container_query_inputs(node, style_record);
         if style_record == 0 {
             self.host.held_style_record_displays.remove(&node);
+            self.host.held_style_records.remove(&node);
         } else {
             let display = self
                 .retained
@@ -2281,6 +2332,7 @@ impl StyleEngineState {
                     .display
                 });
             self.host.held_style_record_displays.insert(node, display);
+            self.host.held_style_records.insert(node, style_record);
             // A `rem` resolves against the font metrics of the record the document element holds.
             if self.retained.computed_group_sets.adjustment_facts(node)
                 & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT
@@ -2763,10 +2815,11 @@ impl StyleEngineState {
             for &node in &retired_nodes {
                 self.retained.container_query_inputs.clear(node);
                 self.host.held_style_record_displays.remove(&node);
+                self.host.held_style_records.remove(&node);
                 // An identity can be minted again for another element, so a retained environment
                 // must not outlive the element that installed it.
-                if let Some(Some(data)) = self.retained.element_custom_property_data.remove(&node) {
-                    self.host.retired_custom_property_data.push(data);
+                if let Some(Some(held)) = self.retained.element_custom_property_data.remove(&node) {
+                    self.host.retired_custom_property_data.extend(held.data);
                 }
                 self.retained.sampled_custom_property_environments.remove(&node);
                 self.retained.environment_move_recompute_nodes.remove(&node);
@@ -2781,8 +2834,8 @@ impl StyleEngineState {
                     .copied()
                     .collect();
                 for key in keys {
-                    if let Some(data) = self.retained.pseudo_element_custom_property_data.remove(&key) {
-                        self.host.retired_custom_property_data.push(data);
+                    if let Some(held) = self.retained.pseudo_element_custom_property_data.remove(&key) {
+                        self.host.retired_custom_property_data.extend(held.data);
                     }
                 }
             }

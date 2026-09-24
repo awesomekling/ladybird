@@ -280,146 +280,33 @@ static RefPtr<CustomPropertyData const> custom_property_environment_base(DOM::El
 }
 
 // An element's custom properties moved. Every styled descendant holds the environment it inherits
-// by identity, so each takes the moved one here, directly, and only the descendants whose cascades
-// read a name that changed value are asked to compute again. The engine is told nothing: the walk
-// is the propagation, in the flat tree the engine would have derived reactions over.
-class CustomPropertyEnvironmentMove {
-public:
-    explicit CustomPropertyEnvironmentMove(DOM::Document& document)
-        : m_document(document)
-        , m_style_engine(document.style_computer().style_engine())
-    {
-    }
-
-    void visit_children(DOM::Element& parent, RefPtr<CustomPropertyData const> const& old_parent_data)
-    {
-        for (auto* child = parent.first_child(); child; child = child->next_sibling()) {
-            auto* element = as_if<DOM::Element>(*child);
-            if (!element || element->assigned_slot())
-                continue;
-            visit(*element, parent, old_parent_data);
-        }
-        if (auto shadow_root = parent.shadow_root()) {
-            for (auto* child = shadow_root->first_child(); child; child = child->next_sibling()) {
-                if (auto* element = as_if<DOM::Element>(*child))
-                    visit(*element, parent, old_parent_data);
-            }
-        }
-        if (auto* slot = as_if<HTML::HTMLSlotElement>(parent)) {
-            for (auto const& node : slot->assigned_nodes()) {
-                if (auto* element = as_if<DOM::Element>(*node))
-                    visit(*element, parent, old_parent_data);
-            }
-        }
-    }
-
-private:
-    // An element that has to compute again is recorded with a recompute reaction alone: its
-    // descendants are this walk's, or that computation's, to reach. (The engine fans an inherited
-    // custom-properties reaction out to every child of an applied reaction.) The engine answers
-    // whether it has to: whether its record reads custom properties, or its style reads the
-    // environment through if(), inherit(), a custom function or a style container query.
-    bool needs_recompute(DOM::Element& element) const
-    {
-        return StyleEngineFFI::style_engine_environment_move_needs_recompute(m_style_engine.rust_handle(), element.style_node_id().value());
-    }
-
-    void mark(DOM::Element& element)
-    {
-        m_style_engine.record_derived_element_style_input_change(element.style_node_id(), StyleEngine::RecomputeStyle);
-    }
-
-    void visit(DOM::Element& element, DOM::Element& parent, RefPtr<CustomPropertyData const> const& old_parent_data)
-    {
-        // An unstyled subtree materializes against whatever it inherits then.
-        if (!element.has_style())
-            return;
-        // An element whose row this batch installs later holds a record the engine computed over
-        // the moved environment already. The row installs it, and moves the environment below the
-        // element in turn; republishing the element's record here would leave its row's record and
-        // the one the element held before it to nobody.
-        if (StyleEngineFFI::style_engine_assigned_style_record(m_style_engine.rust_handle(), element.style_node_id().value(), NumericLimits<u8>::max()) != element.style_record_identity().value())
-            return;
-        auto new_parent_inheritable = [&]() -> RefPtr<CustomPropertyData const> {
-            auto data = custom_property_environment_base(parent, parent.custom_property_data({}));
-            return data ? data->inheritable(m_document) : nullptr;
-        }();
-        auto old_parent_inheritable = [&]() -> RefPtr<CustomPropertyData const> {
-            auto data = custom_property_environment_base(parent, old_parent_data);
-            return data ? data->inheritable(m_document) : nullptr;
-        }();
-        auto existing = element.custom_property_data({});
-        bool const has_animation_overlay = existing && existing->is_animation_overlay_for({ element });
-        auto existing_base = custom_property_environment_base(element, existing);
-        auto move_pseudo_element_environments = [&](RefPtr<CustomPropertyData const> const& moved) {
-            auto existing_inheritable = existing_base ? existing_base->inheritable(m_document) : nullptr;
-            auto moved_inheritable = moved ? moved->inheritable(m_document) : nullptr;
-            for (auto kind = 0; kind < to_underlying(PseudoElement::KnownPseudoElementCount); ++kind) {
-                auto pseudo_element = static_cast<PseudoElement>(kind);
-                auto pseudo_data = element.custom_property_data(pseudo_element);
-                if (!pseudo_data)
-                    continue;
-                if (pseudo_data.ptr() == existing_base.ptr())
-                    element.set_custom_property_data(pseudo_element, moved);
-                else if (pseudo_data.ptr() == existing_inheritable.ptr())
-                    element.set_custom_property_data(pseudo_element, moved_inheritable);
-                else
-                    mark(element);
-            }
-        };
-        // An element that has to compute again takes the moved environment in that computation,
-        // which reaches its own descendants in turn.
-        //
-        // An element declaring no custom property of its own holds the environment it inherits,
-        // whichever data it holds it in; its cascade declaring some now is a computation's to find.
-        bool const holds_inherited_environment = existing_base.ptr() == old_parent_inheritable.ptr()
-            || ((!existing_base || existing_base->declared_count() == 0) && !m_style_engine.node_declares_custom_properties(element.style_node_id()));
-        if (holds_inherited_environment && !has_animation_overlay) {
-            if (needs_recompute(element)) {
-                mark(element);
-                return;
-            }
-            if (new_parent_inheritable.ptr() == existing_base.ptr())
-                return;
-            move_pseudo_element_environments(new_parent_inheritable);
-            element.set_custom_property_data({}, new_parent_inheritable);
-            element.republish_style_record_environment();
-            visit_children(element, existing_base);
-            return;
-        }
-        // The element declares custom properties of its own over the environment it inherits. Its
-        // declared values stand while it reads nothing that changed; a computation decides the rest.
-        if (!existing_base || existing_base->declared_count() == 0 || has_animation_overlay || needs_recompute(element)) {
-            mark(element);
-            return;
-        }
-        if (existing_base->parent().ptr() == new_parent_inheritable.ptr())
-            return;
-        OrderedHashMap<Utf16FlyString, StyleProperty> own_values;
-        size_t declared = 0;
-        for (auto const& [name, property] : existing_base->own_values()) {
-            if (declared++ >= existing_base->declared_count())
-                break;
-            own_values.set(name, property);
-        }
-        RefPtr<CustomPropertyData const> moved = CustomPropertyData::create(move(own_values), new_parent_inheritable);
-        move_pseudo_element_environments(moved);
-        element.set_custom_property_data({}, moved);
-        element.republish_style_record_environment();
-        visit_children(element, existing_base);
-    }
-
-    GC::Ref<DOM::Document> m_document;
-    StyleEngine& m_style_engine;
-};
-
+// by identity, and the style engine, which keeps what each holds, moves them: each takes the moved
+// one directly, and only the descendants whose style reads the environment are recorded to compute
+// again. What is left here is to install the records the move republished over the moved ones.
 static void propagate_custom_property_environment_move(DOM::Document& document, DOM::Element& origin, RefPtr<CustomPropertyData const> old_origin_data)
 {
     // Nothing inherits from an element with nothing below it in the flat tree.
     if (!origin.first_element_child() && !origin.shadow_root() && !is<HTML::HTMLSlotElement>(origin))
         return;
-    CustomPropertyEnvironmentMove walk { document };
-    walk.visit_children(origin, custom_property_environment_base(origin, move(old_origin_data)));
+    auto old_base = custom_property_environment_base(origin, move(old_origin_data));
+    auto new_base = custom_property_environment_base(origin, origin.custom_property_data({}));
+    struct MovedRecord {
+        StyleNodeID node;
+        StyleRecordID record;
+    };
+    Vector<MovedRecord> moved_records;
+    StyleEngineFFI::style_engine_move_custom_property_environment(
+        document.style_computer().style_engine().rust_handle(), origin.style_node_id().value(),
+        old_base ? old_base->identity() : 0, new_base ? new_base->identity() : 0,
+        [](void* context, u32 node, u64 record) {
+            static_cast<Vector<MovedRecord>*>(context)->append({ StyleNodeID { node }, StyleRecordID { record } });
+        },
+        &moved_records);
+    for (auto const& [node, record] : moved_records) {
+        auto element = document.style_computer().element_for_style_node(node);
+        if (element && record != element->style_record_identity())
+            element->refresh_computed_style({}, record);
+    }
 }
 
 static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_demand_answer(DOM::Element&, bool& did_change_custom_properties);
