@@ -68,6 +68,7 @@ mod custom_property_environments;
 mod deferred_pseudo;
 #[cfg(test)]
 mod differential_tests;
+pub(crate) mod engine_sample_check;
 mod environment_move;
 pub mod exact_matcher;
 pub use crate::fast_hash;

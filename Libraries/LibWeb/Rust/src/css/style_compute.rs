@@ -2937,6 +2937,9 @@ pub struct FfiHostAnimationSample {
     pub generations: *const u64,
     pub current_keys: *const f64,
     pub effect_count: usize,
+    /// Whether the effects are the element's whole effect stack, rather than the few a transition
+    /// step layers over an overlay it already holds.
+    pub samples_whole_stack: bool,
     /// The working set's longhand table, which holds every longhand.
     pub longhand_table: *const c_void,
     /// The working set's overlay before this sample, or null.
@@ -3033,6 +3036,88 @@ pub unsafe extern "C" fn rust_sample_animation_effects(
     })
 }
 
+/// Check the effects the host chose to sample, and the key each is sampled at, against the ones the
+/// engine chooses from the element's published timing rows.
+fn check_sampled_effect_selection(
+    input: &FfiHostAnimationSample,
+    engine: &crate::css::style::StyleEngine,
+    node: crate::css::style::tree::StyleNodeID,
+    slot: crate::css::style::animations::AnimationSlot,
+    descriptions: &[crate::css::style::animations::PublishedEffect],
+    host_effects: &[crate::css::animation::FfiAnimationPreparationEffect],
+    host_keys: &[f64],
+) {
+    use crate::css::style::{animations, engine_sample_check};
+
+    let Some(engine_selected) = animations::select_sampled_effects(
+        engine.element_animation_timing_rows(node, slot),
+        engine.element_animation_timing_row_linear_points(node, slot),
+        engine.animation_timeline_samples(),
+    ) else {
+        let rows = engine.element_animation_timing_rows(node, slot);
+        let reason = rows
+            .iter()
+            .find_map(|row| {
+                let Some(time) = animations::row_timeline_time(row, engine.animation_timeline_samples()) else {
+                    return Some("effect selection: a timeline with no sample");
+                };
+                animations::row_current_key(row, engine.element_animation_timing_row_linear_points(node, slot), time)
+                    .is_none()
+                    .then(|| match row.is_undecidable() {
+                        true => "effect selection: an undecidable row",
+                        false => "effect selection: a key the mirror declines",
+                    })
+            })
+            .unwrap_or("effect selection");
+        engine_sample_check::note_declined(reason);
+        return;
+    };
+    // The sampler composes only the effects it holds a description of two keyframes or more for.
+    let engine_selected = engine_selected
+        .into_iter()
+        .filter(|effect| {
+            descriptions
+                .iter()
+                .any(|description| description.identity == effect.identity && description.keyframes.len() >= 2)
+        })
+        .collect::<Vec<_>>();
+    let host_selected = host_effects
+        .iter()
+        .zip(host_keys)
+        .map(|(effect, &current_key)| animations::RowSelectedEffect {
+            identity: effect.identity,
+            current_key,
+        })
+        .collect::<Vec<_>>();
+    if engine_selected == host_selected {
+        engine_sample_check::note_agreed("effect selection");
+        return;
+    }
+    engine_sample_check::note_difference("effect selection", &|| {
+        let raw = unsafe {
+            std::slice::from_raw_parts(input.identities, input.effect_count)
+                .iter()
+                .zip(std::slice::from_raw_parts(input.generations, input.effect_count))
+                .collect::<Vec<_>>()
+        };
+        let published = descriptions
+            .iter()
+            .map(|description| {
+                (
+                    description.identity,
+                    description.generation,
+                    description.keyframes.len(),
+                )
+            })
+            .collect::<Vec<_>>();
+        format!(
+            "node {} slot {slot}: host {host_selected:?}, engine {engine_selected:?}, host inputs {raw:?}, descriptions {published:?}, rows {:?}",
+            node.raw(),
+            engine.element_animation_timing_rows(node, slot)
+        )
+    });
+}
+
 unsafe fn sample_described_animation_effects(
     input: &FfiHostAnimationSample,
     engine: &mut crate::css::style::StyleEngine,
@@ -3073,6 +3158,17 @@ unsafe fn sample_described_animation_effects(
             generation: generations[index],
         });
         selected_keys.push(current_keys[index]);
+    }
+    if input.samples_whole_stack && crate::css::style::engine_sample_check::is_checking() {
+        check_sampled_effect_selection(
+            input,
+            engine,
+            node,
+            animation_slot(input.pseudo_kind),
+            descriptions,
+            &preparation_effects,
+            &selected_keys,
+        );
     }
     if selected.is_empty() {
         return FfiHostAnimationSampleResult::with_outcome(Cleared);

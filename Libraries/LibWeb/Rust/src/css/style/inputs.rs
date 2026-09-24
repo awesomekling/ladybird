@@ -1471,6 +1471,16 @@ impl RetainedState {
         self.custom_property_registry.clone()
     }
 
+    /// The timing rows of one of an element's animation lists, in composite order.
+    #[must_use]
+    pub(crate) fn element_animation_timing_rows(
+        &self,
+        node: StyleNodeID,
+        slot: animations::AnimationSlot,
+    ) -> &[animations::AnimationTimingRow] {
+        self.animation_timing_rows.rows(node, slot)
+    }
+
     /// The `linear()` stops the rows of one of an element's animation lists name by range.
     #[must_use]
     pub(crate) fn element_animation_timing_row_linear_points(

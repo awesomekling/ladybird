@@ -441,6 +441,12 @@ impl AnimationTimingRow {
         }
     }
 
+    /// Whether the host could not describe this animation's timing at all.
+    #[must_use]
+    pub(crate) fn is_undecidable(&self) -> bool {
+        self.has(timing_row_flag::UNDECIDABLE)
+    }
+
     #[must_use]
     fn has(&self, flag: u32) -> bool {
         self.flags & flag != 0
@@ -686,6 +692,48 @@ pub(crate) fn row_current_key(
     Some(Some(key.clamp(i64::MIN as f64, i64::MAX as f64)))
 }
 
+/// One effect a sample composes, as the engine chooses it from an element's published timing rows:
+/// the effect's identity and the key its keyframes are sampled at.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct RowSelectedEffect {
+    pub(crate) identity: u64,
+    pub(crate) current_key: f64,
+}
+
+/// The effects of one of an element's animation lists that a sample composes, in the order it
+/// composes them, chosen from the published timing rows alone.
+///
+/// A mirror of the list the host's sample walks: the provisionally started transitions, then the
+/// animations associated with the element in composite order - which is the order the rows are
+/// published in - keeping each effect whose transformed progress resolves. An idle animation's
+/// progress never resolves, so it is dropped with the rest. `None` where a row declines to be
+/// decided, or needs the time of a timeline no sample was published for.
+#[must_use]
+pub(crate) fn select_sampled_effects(
+    rows: &[AnimationTimingRow],
+    linear_points: &[crate::css::animation::FfiLinearEasingPoint],
+    samples: &AnimationTimelineSamples,
+) -> Option<Vec<RowSelectedEffect>> {
+    let mut selected = Vec::with_capacity(rows.len());
+    for row in rows {
+        // A hold time is the current time, whatever the timeline's is - which for a timeline this
+        // update associated with the document, a brand-new animation's most of all, was never
+        // sampled.
+        let timeline_time = match row.has(timing_row_flag::HAS_HOLD_TIME) {
+            true => None,
+            false => row_timeline_time(row, samples)?,
+        };
+        let Some(current_key) = row_current_key(row, linear_points, timeline_time)? else {
+            continue;
+        };
+        selected.push(RowSelectedEffect {
+            identity: row.effect_identity,
+            current_key,
+        });
+    }
+    Some(selected)
+}
+
 /// Per element and pseudo-element, the timing of every animation the host holds a keyframe effect
 /// for, published whole whenever any of it can have changed.
 /// One element's published list: the rows, and the `linear()` stops the rows name by range.
@@ -801,7 +849,8 @@ fn owning_element_differs(a: &AnimationTimingRow, b: &AnimationTimingRow) -> boo
 
 /// A mirror of `KeyframeEffect::composite_order()` over two published rows, plus the one rule the
 /// published list adds on top of it: a provisionally started transition is not in the element's
-/// effect stack yet, and composes below every effect that is.
+/// effect stack yet, and composes below every effect that is, in the order it was started. The
+/// caller's sort must be stable.
 ///
 /// Where the spec asks for the tree order of two differing owning elements, the host has a `FIXME`
 /// that returns 0 and leaves the global animation list to decide. That is mirrored as it stands -
@@ -812,11 +861,14 @@ pub(crate) fn composite_order(a: &AnimationTimingRow, b: &AnimationTimingRow) ->
     use std::cmp::Ordering;
     use timing_row_flag as flag;
 
-    match a.has(flag::NOT_ASSOCIATED).cmp(&b.has(flag::NOT_ASSOCIATED)) {
-        // `false` orders before `true`, so an associated effect would sort first. It is the
-        // provisional transition that composes below, so the two are compared the other way round.
-        Ordering::Equal => {}
-        order => return order.reverse(),
+    match (a.has(flag::NOT_ASSOCIATED), b.has(flag::NOT_ASSOCIATED)) {
+        (false, false) => {}
+        // The host samples its provisional transitions in the order it started them, which is the
+        // order it publishes them in, and the sort keeps it.
+        (true, true) => return Ordering::Equal,
+        // It is the provisional transition that composes below.
+        (true, false) => return Ordering::Less,
+        (false, true) => return Ordering::Greater,
     }
 
     // 1. Animations that differ by class are sorted by the inter-class composite order.
