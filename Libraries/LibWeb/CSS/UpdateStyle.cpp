@@ -180,7 +180,7 @@ void StyleEffectDrain::apply(StyleDrainScope const& scope, DOM::Document& docume
                 document.style_computer().apply_settled_animation_plan(DOM::AbstractElement { *element }, row.plan);
             },
             [&](DisplayNoneAnimations const&) {
-                element->apply_display_none_change(true, false);
+                element->apply_display_none_change(scope, true, false);
             },
             [&](RestoreRowDebts const&) {
                 VERIFY_NOT_REACHED();
@@ -681,7 +681,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 Optional<DOM::Element::EngineRecordDamage> engine_record_damage;
                 if (reaction.record_damage & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::EngineComputed))
                     engine_record_damage = DOM::Element::EngineRecordDamage { StyleRecordID { reaction.old_style_record }, reaction.record_damage };
-                invalidation = element->apply_engine_computed_style_record(new_style_record, pseudo_element_records, reaction.uses_substitution, row_facts, did_change_custom_properties, engine_record_comparison, engine_record_damage, pseudo_element_damages, &row_effects, &old_custom_property_data);
+                invalidation = element->apply_engine_computed_style_record(scope, new_style_record, pseudo_element_records, reaction.uses_substitution, row_facts, did_change_custom_properties, engine_record_comparison, engine_record_damage, pseudo_element_damages, &row_effects, &old_custom_property_data);
                 // What the row's container conditions read of its containers, recorded as the host
                 // records it for a row it computes.
                 row_effects.append(StyleEffectDrain::ContainerQueryEffects { StyleNodeID { reaction.style_node } });
@@ -841,7 +841,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                     if (!installed_pass_sample && settled.has_style() && (has_animation_effects || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
                         sample_animations_for_installed_record(settled, row_sample_invalidation);
                     if (compares_after_sample)
-                        invalidation = element->compare_engine_computed_style_record_after_sample(old_style_record, invalidation, &row_effects);
+                        invalidation = element->compare_engine_computed_style_record_after_sample(scope, old_style_record, invalidation, &row_effects);
                     // The step runs here rather than after the batch: a descendant applied later
                     // reads this element's after-change style, which is what the step decides
                     // against, and the C++ computation this row replaces runs it inside itself.
@@ -869,7 +869,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                             auto const new_style = element->computed_style();
                             if (old_originating_style->base_values().display().is_none() != new_style->base_values().display().is_none())
                                 row_effects.append(StyleEffectDrain::DisplayNoneAnimations { StyleNodeID { reaction.style_node } });
-                            element->apply_display_none_change(false, !old_originating_style->display().is_none() && new_style->display().is_none());
+                            element->apply_display_none_change(scope, false, !old_originating_style->display().is_none() && new_style->display().is_none());
                         }
                         StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::PseudoSettle);
                         auto settled_pseudos = document.style_computer().style_engine().settle_pseudo_records_after_host_record(StyleNodeID { reaction.style_node }, old_is_list_item);
@@ -880,7 +880,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                         }
                         g_deferring_engine_pseudo_installation = previous_pseudo_deferral;
                         auto pseudo_invalidation = element->install_engine_pseudo_element_records_after_sample(
-                            did_change_custom_properties, old_is_list_item,
+                            scope, did_change_custom_properties, old_is_list_item,
                             old_originating_style ? &*old_originating_style : nullptr,
                             &final_pseudo_records, &row_effects);
                         invalidation |= pseudo_invalidation;
@@ -1323,7 +1323,7 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
     bool const samples_over_the_record = old_style
         && engine.style_record_view(old_style_record).animation_overlay_identity != 0
         && engine.style_record_view(StyleRecordID { answer.record.style_record }).animation_overlay_identity == 0;
-    auto invalidation = element.apply_engine_computed_style_record(StyleRecordID { answer.record.style_record }, pseudo_element_records, answer.record.uses_substitution, answer.row_facts, did_change_custom_properties,
+    auto invalidation = element.apply_engine_computed_style_record(scope, StyleRecordID { answer.record.style_record }, pseudo_element_records, answer.record.uses_substitution, answer.row_facts, did_change_custom_properties,
         samples_over_the_record ? DOM::Element::EngineRecordComparison::AfterSample : DOM::Element::EngineRecordComparison::AtInstallation);
     if (!!old_style_record && element.associated_shadow_host_pseudo_element().has_value())
         invalidation |= style_computer.run_transition_step_for_installed_record({ element }, old_style_record);
@@ -1333,7 +1333,7 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
     engine.acknowledge_engine_computed_record(element.style_node_id());
     if (samples_over_the_record) {
         sample_animations_for_installed_record(DOM::AbstractElement { element }, SampleInvalidation::AppliedByCaller);
-        invalidation = element.compare_engine_computed_style_record_after_sample(old_style_record, invalidation);
+        invalidation = element.compare_engine_computed_style_record_after_sample(scope, old_style_record, invalidation);
     }
     return invalidation;
 }
@@ -1370,7 +1370,7 @@ static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_updat
                 settled_pseudo = true;
             }
             if (settled_pseudo)
-                *invalidation |= element.apply_engine_computed_style_record(element.style_record_identity(), pseudo_records, false, row_facts, did_change_custom_properties);
+                *invalidation |= element.apply_engine_computed_style_record(scope, element.style_record_identity(), pseudo_records, false, row_facts, did_change_custom_properties);
             // The container's pseudo rules can change after its descendants finish style and
             // layout and the scroll-state snapshot is published.
             invalidation->recompute_descendant_styles = true;

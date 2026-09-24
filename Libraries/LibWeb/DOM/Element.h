@@ -351,11 +351,11 @@ public:
     using EnginePseudoElementDamages = Array<Optional<EngineRecordDamage>, to_underlying(CSS::PseudoElement::KnownPseudoElementCount)>;
     // `replaced_custom_property_data` receives the environment the element held before, when the
     // installation moves it. `row_facts` is the `FfiStyleRowFact` word the record's row carries.
-    CSS::RequiredInvalidationAfterStyleChange apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const&, bool uses_substitution, u32 row_facts, bool& did_change_custom_properties, EngineRecordComparison = EngineRecordComparison::AtInstallation, Optional<EngineRecordDamage> = {}, EnginePseudoElementDamages const* = nullptr, CSS::StyleEffectDrain* = nullptr, RefPtr<CSS::CustomPropertyData const>* replaced_custom_property_data = nullptr);
+    CSS::RequiredInvalidationAfterStyleChange apply_engine_computed_style_record(CSS::StyleDrainScope const&, CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const&, bool uses_substitution, u32 row_facts, bool& did_change_custom_properties, EngineRecordComparison = EngineRecordComparison::AtInstallation, Optional<EngineRecordDamage> = {}, EnginePseudoElementDamages const* = nullptr, CSS::StyleEffectDrain* = nullptr, RefPtr<CSS::CustomPropertyData const>* replaced_custom_property_data = nullptr);
     // Compare the record an AfterSample installation left, now sampled, with the style the element
     // held before it, and apply the result to the element's layout node.
-    CSS::RequiredInvalidationAfterStyleChange compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange installation_invalidation, CSS::StyleEffectDrain* = nullptr);
-    void apply_display_none_change(bool display_none_ignoring_animations_changed, bool became_display_none);
+    CSS::RequiredInvalidationAfterStyleChange compare_engine_computed_style_record_after_sample(CSS::StyleDrainScope const&, CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange installation_invalidation, CSS::StyleEffectDrain* = nullptr);
+    void apply_display_none_change(CSS::StyleDrainScope const&, bool display_none_ignoring_animations_changed, bool became_display_none);
     // Republishes which animations this element references, for a record the engine settled whose
     // animation declarations moved.
     void republish_animation_name_registry();
@@ -363,7 +363,7 @@ public:
     // element inherits, or one the engine resolved over it. Nothing when it cannot be installed.
     [[nodiscard]] RefPtr<CSS::CustomPropertyData const> custom_property_environment_of_engine_record(CSS::StyleRecordID, bool& installable) const;
     CSS::RequiredInvalidationAfterStyleChange recompute_pseudo_element_styles();
-    CSS::RequiredInvalidationAfterStyleChange install_engine_pseudo_element_records_after_sample(bool& did_change_custom_properties, bool old_is_list_item, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const*, CSS::StyleEffectDrain* = nullptr);
+    CSS::RequiredInvalidationAfterStyleChange install_engine_pseudo_element_records_after_sample(CSS::StyleDrainScope const&, bool& did_change_custom_properties, bool old_is_list_item, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const*, CSS::StyleEffectDrain* = nullptr);
     void apply_computed_style_to_layout_node_if_needed(CSS::RequiredInvalidationAfterStyleChange const&);
 
     void set_needs_layout_tree_rebuild(SetNeedsLayoutTreeUpdateReason, CSS::LayoutTreeRebuildRoot);
@@ -930,13 +930,13 @@ private:
     Utf16FlyString make_html_uppercased_qualified_name() const;
 
     void exit_fullscreen_on_element_removal();
-    CSS::RequiredInvalidationAfterStyleChange recompute_pseudo_element_styles(bool& did_change_custom_properties, bool had_list_marker, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const* = nullptr, EnginePseudoElementDamages const* = nullptr);
+    CSS::RequiredInvalidationAfterStyleChange recompute_pseudo_element_styles(CSS::StyleDrainScope const&, bool& did_change_custom_properties, bool had_list_marker, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const* = nullptr, EnginePseudoElementDamages const* = nullptr);
     void apply_computed_pseudo_element_styles_to_layout_nodes_if_needed(CSS::RequiredInvalidationAfterStyleChange const&);
     void publish_custom_property_names();
     void publish_custom_property_names(RefPtr<CSS::CustomPropertyData const> data);
     RefPtr<CSS::CustomPropertyData const> set_own_custom_property_data(RefPtr<CSS::CustomPropertyData const> current, RefPtr<CSS::CustomPropertyData const> data);
     void replace_style_record(CSS::StyleRecordID);
-    void clear_computed_styles_from_display_none_descendants();
+    void clear_computed_styles_from_display_none_descendants(CSS::StyleDrainScope const&);
 
     WebIDL::ExceptionOr<GC::Ptr<Node>> insert_adjacent(Utf16View where, GC::Ref<Node> node);
 
