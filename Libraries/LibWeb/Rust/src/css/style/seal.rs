@@ -222,10 +222,8 @@ pub(crate) fn end_update() {
         return;
     }
     let finished = STATE.with_borrow_mut(|state| {
-        state.update_depth = state
-            .update_depth
-            .checked_sub(1)
-            .expect("unbalanced style update scope");
+        debug_assert!(state.update_depth != 0, "unbalanced style update scope");
+        state.update_depth = state.update_depth.saturating_sub(1);
         state.update_depth == 0
     });
     if finished && mode() == Mode::Report {
