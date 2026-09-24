@@ -1647,6 +1647,9 @@ void record_element_custom_states_changed(DOM::Element& element)
     if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
         return;
 
+    // The engine writes the states into the style mirror the layout frame reads, so a change made
+    // beside the frame in flight waits for it.
+    element.document().join_frame_in_flight();
     Vector<StyleAtomID> atoms;
     if (auto states = element.custom_state_set()) {
         for (auto const& state : states->states())
@@ -1712,6 +1715,8 @@ void record_element_parts_changed(DOM::Element& element)
     Vector<StyleNodeID> pair_hosts;
     auto const exposing_host = collect_part_exposure(element, pair_names, pair_hosts);
 
+    // As for custom states, the parts go into the style mirror the layout frame reads.
+    element.document().join_frame_in_flight();
     Vector<StyleAtomID> pair_atoms;
     pair_atoms.ensure_capacity(pair_names.size());
     for (auto const& name : pair_names)
@@ -1748,6 +1753,8 @@ static void record_element_inline_style_properties(DOM::Element& element)
     auto* style_engine = style_engine_for(element);
     if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
         return;
+    // As for custom states, the declarations go into the style mirror the layout frame reads.
+    element.document().join_frame_in_flight();
     auto const inline_style = element.inline_style();
     style_engine->set_element_inline_style_properties(element.style_node_id(), inline_style ? &inline_style->declaration_block() : nullptr);
 }
