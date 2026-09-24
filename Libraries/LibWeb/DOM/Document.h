@@ -18,6 +18,7 @@
 #include <AK/Optional.h>
 #include <AK/OwnPtr.h>
 #include <AK/RefPtr.h>
+#include <AK/SourceLocation.h>
 #include <AK/Utf16FlyString.h>
 #include <AK/Utf16String.h>
 #include <AK/Utf16View.h>
@@ -532,8 +533,9 @@ public:
     // in flight before it starts.
     void join_frame_for_dom_tree_mutation() const;
     // Waits for this document's layout frame if it runs beside the document thread. A read of what
-    // the frame writes, or a write to what it reads, joins it first.
-    void join_frame_in_flight() const;
+    // the frame writes, or a write to what it reads, joins it first. The call site names itself in
+    // the forced-join log.
+    void join_frame_in_flight(SourceLocation = SourceLocation::current()) const;
     // What the render side has told this document and the document has not acted on yet.
     [[nodiscard]] CommitMessages& commit_messages() { return *m_commit_messages; }
     void apply_commit_messages();

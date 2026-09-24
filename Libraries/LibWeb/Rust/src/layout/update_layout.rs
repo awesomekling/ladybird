@@ -1145,15 +1145,24 @@ pub unsafe extern "C" fn layout_arena_frame_state(arena: *mut c_void) -> FfiLayo
 }
 
 /// Waits for the document's layout frame if it is in flight. Once this returns, the document is
-/// idle or the thread runs inside its frame.
+/// idle or the thread runs inside its frame. `file` and `line` name the C++ call site for the
+/// forced-join log.
 ///
 /// # Safety
 ///
-/// `arena` must be a live handle on the document thread.
+/// `arena` must be a live handle on the document thread. `file` and `file_length` must name a
+/// string that lives for the rest of the process, as a `SourceLocation`'s file name does.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_join_frame_in_flight(arena: *mut c_void) {
+pub unsafe extern "C" fn layout_arena_join_frame_in_flight(
+    arena: *mut c_void,
+    file: *const u8,
+    file_length: usize,
+    line: u32,
+) {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    crate::stage_thread::join_frame_in_flight(arena);
+    // SAFETY: The caller passes a string that lives for the rest of the process.
+    let file = unsafe { crate::stage_thread::call_site_file(file, file_length) };
+    crate::stage_thread::join_frame_in_flight_at(arena, file, line, 0);
 }
 
 /// # Safety

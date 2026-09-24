@@ -85,8 +85,10 @@ void FrameScheduler::add_to_ticket(LocalNavigable& navigable, LocalNavigable::Pe
 void FrameScheduler::retire_frames_for(DOM::Document& document)
 {
     // FIXME: Retire the document's frame (discard its presentation work) instead of taking it in.
-    if (m_ticket && m_ticket->navigables.first_matching([&](auto const& entry) { return entry.frame.document.ptr() == &document; }).has_value())
-        Layout::RustFFI::rust_stage_thread_join_frame_in_flight();
+    if (m_ticket && m_ticket->navigables.first_matching([&](auto const& entry) { return entry.frame.document.ptr() == &document; }).has_value()) {
+        auto location = SourceLocation::current();
+        Layout::RustFFI::rust_stage_thread_join_frame_in_flight(reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
+    }
 }
 
 bool FrameScheduler::submit(Vector<GC::Ref<DOM::Document>> documents)
