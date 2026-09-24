@@ -132,9 +132,15 @@ enum ElementStyleAdjustmentFact : u32 {
     IsTh = 1 << 15,
     IsDocumentElement = 1 << 16,
     HasAnimations = 1 << 17,
+    // An SVG graphics element folds its own transform into its SVG container's layout, which the
+    // style engine's damage for the element reads.
+    IsSvgGraphicsElement = 1 << 18,
     // The element stands for an element-reference pseudo-element of its shadow host, whose style
     // it takes.
     IsShadowHostPseudoElement = 1 << 19,
+    // An HTML <body>. The root's first one propagates its overflow to the viewport, which the style
+    // engine's damage for the element reads.
+    IsHtmlBodyElement = 1 << 20,
     // The element types layout tree construction branches on. An element's type is fixed when it is
     // created, so the store holds these rather than the tree builder asking the DOM for them.
     IsSvgElement = 1 << 21,

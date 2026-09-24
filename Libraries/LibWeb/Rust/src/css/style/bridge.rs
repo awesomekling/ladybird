@@ -678,9 +678,15 @@ pub mod element_adjustment_fact {
     pub const IS_TH: u32 = 1 << 15;
     pub const IS_DOCUMENT_ELEMENT: u32 = 1 << 16;
     pub const HAS_ANIMATIONS: u32 = 1 << 17;
+    /// An SVG graphics element folds its own transform into its SVG container's layout, which the
+    /// engine's damage for the element reads.
+    pub const IS_SVG_GRAPHICS_ELEMENT: u32 = 1 << 18;
     /// The element stands for an element-reference pseudo-element of its shadow host, whose
     /// style C++ computes and installs on it.
     pub const IS_SHADOW_HOST_PSEUDO_ELEMENT: u32 = 1 << 19;
+    /// An HTML `<body>`. The root's first one propagates its overflow to the viewport, which the
+    /// engine's damage for the element reads.
+    pub const IS_HTML_BODY_ELEMENT: u32 = 1 << 20;
     // The element types layout tree construction branches on. An element's type is fixed when it
     // is created, so the store holds these rather than the tree builder asking the DOM for them.
     pub const IS_SVG_ELEMENT: u32 = 1 << 21;
@@ -3181,6 +3187,25 @@ pub unsafe extern "C" fn style_engine_compare_style_records(
         element_folds_transform_into_layout,
         element_propagates_overflow_to_viewport,
     )
+}
+
+/// Computes what moving an element, or one of its pseudo-elements, from one final style record to
+/// another damages, from the records and the element's own facts. The counter styles its box was
+/// built with are the host's to compare.
+///
+/// # Safety
+/// `engine` must be live and both style records must remain pinned or assigned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_element_record_damage(
+    engine: *mut c_void,
+    node: u32,
+    is_pseudo_element: bool,
+    old_style_record: u64,
+    new_style_record: u64,
+) -> u32 {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    let node = StyleNodeID::from_raw(node).expect("damage is computed for a live style node");
+    engine.element_record_damage(node, is_pseudo_element, old_style_record, new_style_record)
 }
 
 /// Returns whether a candidate animation overlay changes any effective value in a style record.
