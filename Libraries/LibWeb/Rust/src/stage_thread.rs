@@ -144,6 +144,15 @@ pub extern "C" fn rust_stage_thread_set_frame_scheduler_host(host: FfiFrameSched
     let _ = FRAME_SCHEDULER_HOST.set(host);
 }
 
+static THREAD_SETUP: OnceLock<extern "C" fn()> = OnceLock::new();
+
+/// Makes the stage thread run `setup` first thing once it starts. Call it before the first stage
+/// runs; the first setup installed stays.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_set_thread_setup(setup: extern "C" fn()) {
+    let _ = THREAD_SETUP.set(setup);
+}
+
 // The size Linux and macOS give a process's main thread, where the stages ran before.
 const STAGE_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
 
@@ -154,6 +163,9 @@ impl StageThread {
             .name("RenderStages".into())
             .stack_size(STAGE_THREAD_STACK_SIZE)
             .spawn(move || {
+                if let Some(setup) = THREAD_SETUP.get() {
+                    setup();
+                }
                 INCOMING.with(|slot| *slot.borrow_mut() = Some(incoming));
                 while let Some(message) = next_message() {
                     match message {

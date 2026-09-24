@@ -34,6 +34,11 @@ namespace Web::HTML {
 WEB_API void hold_for_frame_in_flight(DOM::Document&);
 WEB_API void release_holds_for_frame_in_flight();
 
+// The stage thread only reads what the frame references and never touches the heap itself. This makes that a debug
+// assertion (and a collection there a verification failure) for whatever C++ code the stages call. Call it before the
+// first stage runs.
+void forbid_heap_access_on_the_stage_thread();
+
 // Whether a frame in flight holds the document.
 WEB_API bool frame_in_flight_holds(DOM::Document const&);
 // Whether each document a frame in flight holds is alive, and so are its navigable, page and window.

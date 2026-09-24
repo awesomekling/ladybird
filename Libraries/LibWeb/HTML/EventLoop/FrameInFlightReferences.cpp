@@ -7,12 +7,14 @@
 #include <LibGC/Cell.h>
 #include <LibGC/CellAllocator.h>
 #include <LibGC/Heap.h>
+#include <LibGC/HeapAccess.h>
 #include <LibGC/Root.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/EventLoop/FrameInFlightReferences.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/Window.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Page/Page.h>
 
 namespace Web::HTML {
@@ -93,6 +95,11 @@ void release_holds_for_frame_in_flight()
     (*s_frame_in_flight_holds)->release();
     delete s_frame_in_flight_holds;
     s_frame_in_flight_holds = nullptr;
+}
+
+void forbid_heap_access_on_the_stage_thread()
+{
+    Layout::RustFFI::rust_stage_thread_set_thread_setup([] { GC::forbid_heap_access_on_this_thread(); });
 }
 
 bool frame_in_flight_holds(DOM::Document const& document)
