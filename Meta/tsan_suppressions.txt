@@ -8,8 +8,8 @@
 # into and out of a std::sync::mpsc channel but not the atomics that order them.
 race:std::sync::mpmc
 
-# The stylesheet cache is protected by the uninstrumented Rust standard library mutex.
-# TSan cannot see that synchronization, so a cache lookup can appear to race with insertion.
+# The stylesheet cache is behind a std::sync::Mutex, which TSan cannot see for the same reason, so
+# comparing a key another thread inserted under the lock looks unsynchronized.
 race:libweb_rust::css::parser::stylesheet_cache
 
 # FFmpeg's and dav1d's frame threads hand buffers to each other through synchronization inside
