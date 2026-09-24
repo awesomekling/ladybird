@@ -1644,6 +1644,7 @@ void Node::remove(bool suppress_observers)
     // 2. Assert: parent is non-null.
     VERIFY(parent);
 
+    document().join_frame_for_dom_tree_mutation();
     document().flush_deferred_style_change_event();
     bool const was_connected = is_connected();
     bool const was_tracked_by_style_engine = is_tracked_by_style_engine();
@@ -2922,6 +2923,7 @@ void Node::remove_all_children(bool suppress_observers)
     if (auto history = document().editing_history_if_exists())
         history->notify_dom_mutation();
 
+    document().join_frame_for_dom_tree_mutation();
     document().flush_deferred_style_change_event();
     bool const was_connected = is_connected();
     bool const was_tracked_by_style_engine = is_tracked_by_style_engine();
