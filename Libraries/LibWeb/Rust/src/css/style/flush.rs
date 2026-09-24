@@ -2904,23 +2904,17 @@ impl StyleEngineState {
                         },
                     );
                 }
-                // A settled row that animates is sampled here, over the record the row settled, and
-                // the composition is published as the element's record: the rows after it read the
-                // sampled parent in this wave, and the host installs the composition. A row whose
-                // animation plan or transition step the host applies first is sampled by the host;
-                // with the check on, the pass samples a row with a plan beside it, over the stack
-                // the plan leaves, and the host's sample after it applies the plan is checked.
-                let owes_a_plan = self
-                    .retained
-                    .nodes_owing_animation_definitions
-                    .contains_key(&(node, u8::MAX));
+                // A settled row that animates is sampled here, over the record the row settled and
+                // the effect stack its animation plan leaves, and the composition is published as
+                // the element's record: the rows after it read the sampled parent in this wave, and
+                // the host installs the composition after it applies the plan. A row whose
+                // transition step the host applies first is sampled by the host.
                 if engine_computed_delta.is_some()
                     && self.retained.engine_computed_records_pending.contains_key(&node)
                     && (self.retained.computed_group_sets.adjustment_facts(node)
                         & bridge::element_adjustment_fact::HAS_ANIMATIONS
                         != 0
                         || self.retained.nodes_owing_an_animation_sample.contains(&node))
-                    && (!owes_a_plan || engine_sample_check::is_checking())
                     && !self.retained.nodes_owing_a_transition_registration.contains_key(&node)
                 {
                     // A document element this pass settled is not installed yet, and a `rem` the
@@ -2929,24 +2923,13 @@ impl StyleEngineState {
                         .scratch
                         .root_element_inputs()
                         .and_then(|root| self.retained.assigned_root_element_font_metrics(root));
-                    let engine_identity = std::ptr::from_ref(&*self).addr();
-                    let sampled = crate::css::style_compute::sample_settled_row(self, node, root, layout_arena);
-                    let published = match (sampled, owes_a_plan) {
-                        (Ok(sample), true) => {
-                            engine_sample_check::expect_settled_row_sample(engine_identity, node, Some(sample));
-                            Ok(())
-                        }
-                        (Ok(sample), false) => self
-                            .publish_settled_row_sample(node, sample, counters)
-                            .map(|_| ())
-                            .map_err(String::from),
-                        (Err(reason), _) => Err(reason),
-                    };
+                    let published = crate::css::style_compute::sample_settled_row(self, node, root, layout_arena)
+                        .and_then(|sample| {
+                            self.publish_settled_row_sample(node, sample, counters)
+                                .map_err(String::from)
+                        });
                     match published {
-                        Ok(()) => engine_sample_check::note_taken(match owes_a_plan {
-                            true => "planned row sample",
-                            false => "settled row sample",
-                        }),
+                        Ok(_) => engine_sample_check::note_taken("settled row sample"),
                         Err(reason) => engine_sample_check::note_declined(&format!("settled row: {reason}")),
                     }
                 }

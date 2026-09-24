@@ -3494,14 +3494,6 @@ pub unsafe extern "C" fn style_engine_take_settled_animation_definitions(
 ) -> FfiSettledAnimationDefinitions {
     super::seal::note_engine_call("style_engine_take_settled_animation_definitions");
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    if pseudo_kind == u8::MAX
-        && let Some(node) = StyleNodeID::from_raw(node)
-    {
-        super::engine_sample_check::note_settled_row_plan_taken(
-            std::ptr::from_ref::<super::StyleEngineState>(&*engine).addr(),
-            node,
-        );
-    }
     let Some(node) = StyleNodeID::from_raw(node) else {
         return FfiSettledAnimationDefinitions {
             definitions: std::ptr::null(),
