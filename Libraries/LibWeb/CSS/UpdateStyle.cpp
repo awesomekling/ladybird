@@ -357,7 +357,7 @@ static RefPtr<CustomPropertyData const> custom_property_environment_base(DOM::El
 // by identity, and the style engine, which keeps what each holds, moves them: each takes the moved
 // one directly, and only the descendants whose style reads the environment are recorded to compute
 // again. What is left here is to install the records the move republished over the moved ones.
-static void propagate_custom_property_environment_move(DOM::Document& document, DOM::Element& origin, RefPtr<CustomPropertyData const> old_origin_data)
+static void propagate_custom_property_environment_move(DOM::Document& document, DOM::Element& origin, RefPtr<CustomPropertyData const> old_origin_data, HashTable<StyleNodeID>& republished_nodes)
 {
     // Nothing inherits from an element with nothing below it in the flat tree.
     if (!origin.first_element_child() && !origin.shadow_root() && !is<HTML::HTMLSlotElement>(origin))
@@ -378,8 +378,10 @@ static void propagate_custom_property_environment_move(DOM::Document& document, 
         &moved_records);
     for (auto const& [node, record] : moved_records) {
         auto element = document.style_computer().element_for_style_node(node);
-        if (element && record != element->style_record_identity())
+        if (element && record != element->style_record_identity()) {
             element->refresh_computed_style({}, record);
+            republished_nodes.set(node);
+        }
     }
 }
 
@@ -464,6 +466,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
     // explicit-inheritance marks are monotone and a parent applies before its children, so draining
     // them after the batch marks the parent no later than the C++ path does.
     StyleEffectDrain row_effects;
+    // The elements whose records an environment move of a row before them republished.
+    HashTable<StyleNodeID> republished_nodes;
     for (auto const& reaction : reactions) {
         auto element = document.style_computer().element_for_style_node(reaction.style_node);
         if (!element || (!element->is_svg_element() && !element->has_relevant_animations()))
@@ -651,8 +655,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 // a moved custom-property environment since, and the element holds the republished
                 // record the engine now assigns it: the published one is nobody's any more.
                 auto new_style_record = StyleRecordID { reaction.new_style_record };
-                if (reaction.new_style_record == reaction.old_style_record && element->style_record_identity().value() != reaction.old_style_record
-                    && StyleEngineFFI::style_engine_assigned_style_record(style_engine.rust_handle(), reaction.style_node, NumericLimits<u8>::max()) == element->style_record_identity().value())
+                bool const holds_republished_record = reaction.new_style_record == reaction.old_style_record && element->style_record_identity().value() != reaction.old_style_record
+                    && republished_nodes.contains(StyleNodeID { reaction.style_node });
+                if (holds_republished_record)
                     new_style_record = element->style_record_identity();
                 // The engine answered the record with what the move from the record it names damages.
                 Optional<DOM::Element::EngineRecordDamage> engine_record_damage;
@@ -897,7 +902,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             // for the move.
             if (did_change_custom_properties) {
                 StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::EnvironmentMove);
-                propagate_custom_property_environment_move(document, *element, old_custom_property_data);
+                propagate_custom_property_environment_move(document, *element, old_custom_property_data, republished_nodes);
             }
             // The children of a row the engine derived them for have their reactions in the batch
             // already. A row that installed another record than the one the engine derived them
