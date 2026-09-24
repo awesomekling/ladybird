@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<span id="root">text <span id="target">target</span></span>
+<script>
+    asyncTest(done => {
+        const observer = new IntersectionObserver(entries => {
+            for (const entry of entries)
+                println(`#${entry.target.id} isIntersecting: ${entry.isIntersecting}`);
+            done();
+        }, { root: document.getElementById("root") });
+        observer.observe(document.getElementById("target"));
+    });
+</script>
