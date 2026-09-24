@@ -277,10 +277,13 @@ impl RetainedState {
                 return Err(Unanswered::Refused);
             }
             self.container_effects_for_host.remove(&node);
-            if !self.container_verdicts_stand(node) {
-                self.abandon_engine_computed_record(node, scratch, counters);
-                return Err(Unanswered::Refused);
-            }
+            // The republish published the verdicts it just evaluated; this notes their effects
+            // for the host.
+            let verdicts_stand = self.container_verdicts_stand(node);
+            debug_assert!(
+                verdicts_stand,
+                "container verdicts moved after their winners were republished"
+            );
         }
         let old_style_record = (delta.0 != computed::FinalStyleRecordID::NONE).then_some(delta.0);
         let generation = self.winner_groups.generation();
@@ -362,10 +365,13 @@ impl RetainedState {
             };
             cascade_winners_are_complete = complete;
         }
-        if !self.container_verdicts_stand(node) {
-            counters.bump(Counter::EngineComputedRecordBailContainerVerdict);
-            return Err(Unanswered::Refused);
-        }
+        // Verdicts that did not move stand, and a republish published the ones it just evaluated;
+        // this notes their effects for the host.
+        let verdicts_stand = self.container_verdicts_stand(node);
+        debug_assert!(
+            verdicts_stand,
+            "container verdicts moved after their winners were republished"
+        );
         // A custom property the cascade declares is no winner the columns hold; the engine
         // computes the environment it decides itself.
         if !cascade_winners_are_complete && !self.cascade_winners_are_complete_but_for_custom_properties(node) {
