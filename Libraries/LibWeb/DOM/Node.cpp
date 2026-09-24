@@ -986,6 +986,8 @@ static void run_post_connection_steps(Nodes const& nodes)
 
 void Node::insert_nodes_before(ReadonlySpan<GC::Ref<Node>> nodes, GC::Ptr<Node> child, bool suppress_observers, GC::Ref<Node> metadata_node, ChildrenChangedMetadata::AffectsElements affects_elements)
 {
+    document().join_frame_for_dom_tree_mutation();
+
     // 5. If child is non-null:
     if (child)
         adjust_live_ranges_for_insertion(*child, nodes.size());

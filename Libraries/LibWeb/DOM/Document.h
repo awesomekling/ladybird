@@ -527,6 +527,9 @@ public:
     // The marks the DOM side has made on this document's render state but not written there yet.
     [[nodiscard]] InvalidationJournal& invalidation_journal() { return *m_invalidation_journal; }
     void drain_invalidation_journal() const;
+    // A DOM tree mutation writes the style mirror and the arena as it goes, so it joins the frame
+    // in flight before it starts.
+    void join_frame_for_dom_tree_mutation() const;
     // What the render side has told this document and the document has not acted on yet.
     [[nodiscard]] CommitMessages& commit_messages() { return *m_commit_messages; }
     void apply_commit_messages();
