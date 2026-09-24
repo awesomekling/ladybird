@@ -10315,21 +10315,16 @@ Painting::HitTestDisplayList const* Document::ensure_hit_test_display_list()
     if (!has_committed_viewport_box())
         return nullptr;
 
-    auto rebuild_hit_test_display_list = [&] {
+    // A stale list is a forced join: the frame the renderer publishes records the list we hit test. Nothing records
+    // a display list of its own for hit testing, so a document that cannot publish a frame has nothing to hit test.
+    if (!m_hit_test_display_list || !m_hit_test_display_list->is_current() || m_hit_test_display_list->visual_context_tree_structural_epoch() != visual_context_tree_structural_epoch()) {
+        auto navigable = this->navigable();
+        if (!navigable)
+            return nullptr;
         set_needs_to_record_display_list();
-        HTML::PaintConfig paint_config { .paint_overlay = true };
-        if (auto navigable = this->navigable()) {
-            if (navigable->record_display_list_and_scroll_state(paint_config))
-                return;
-            (void)record_display_list(paint_config, navigable->display_list_resource_storage(), Painting::PaintCommandCacheMode::ReadWrite);
-            return;
-        }
-        Compositing::DisplayListResourceStorage throwaway_resource_storage_for_hit_test_only_recording;
-        (void)record_display_list(paint_config, throwaway_resource_storage_for_hit_test_only_recording, Painting::PaintCommandCacheMode::ReadOnly);
-    };
-
-    if (!m_hit_test_display_list || !m_hit_test_display_list->is_current() || m_hit_test_display_list->visual_context_tree_structural_epoch() != visual_context_tree_structural_epoch())
-        rebuild_hit_test_display_list();
+        if (!navigable->record_display_list_and_scroll_state({ .paint_overlay = true }))
+            return nullptr;
+    }
 
     return m_hit_test_display_list.ptr();
 }
