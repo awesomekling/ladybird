@@ -33,7 +33,7 @@ use crate::css::ffi_support::FfiUtf16View;
 use crate::css::parser::value_parser::ParseOutcome;
 use crate::css::rule::CompiledFunction;
 use crate::css::style_value::{RetainedStyleValueData, StyleValueData, release_style_value};
-use custom_property_environments::CascadedCustomProperty;
+use custom_property_environments::{CascadedCustomProperty, CustomPropertyName};
 
 /// A transaction's media features copied from the host. The length context's only output pointer
 /// is cleared before retaining it, so neither part borrows the style update's stack.
@@ -1101,6 +1101,20 @@ impl RetainedState {
         }
     }
 
+    /// The name a cascaded custom declaration names, as its store entry keys it. A block's
+    /// publication notes every custom property name it declares before the block is set
+    /// (`collect_native_custom_declarations`), so a live declaration's name is always known.
+    /// A replay notes names without their fly strings, and a name without one cannot key a
+    /// store entry: `None` there, and the declaration declares nothing.
+    fn declared_custom_property_name(&self, name: StyleAtomID) -> Option<&CustomPropertyName> {
+        let noted = self.custom_property_environments.name(name);
+        debug_assert!(
+            noted.is_some(),
+            "a custom declaration's name is noted at its publication"
+        );
+        noted.filter(|noted| noted.raw.raw() != 0)
+    }
+
     fn inheritable_custom_property_environment(
         &mut self,
         parent: u64,
@@ -1238,9 +1252,8 @@ impl RetainedState {
         let mut has_registered_declaration = false;
         if registry_ref.has_registrations() {
             for (declared, _) in &cascaded {
-                let Some(name) = self.custom_property_environments.name(declared.name) else {
-                    counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-                    return Err(Unanswered::Refused);
+                let Some(name) = self.declared_custom_property_name(declared.name) else {
+                    continue;
                 };
                 if registry_ref.registration_facts(&name.text).is_some() {
                     has_registered_declaration = true;
@@ -1277,14 +1290,9 @@ impl RetainedState {
             .as_ref()
             .is_some_and(|functions| functions.reads_attributes);
         for (declared, value) in &cascaded {
-            let Some(name) = self.custom_property_environments.name(declared.name) else {
-                counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-                return Err(Unanswered::Refused);
+            let Some(name) = self.declared_custom_property_name(declared.name) else {
+                continue;
             };
-            if name.raw.raw() == 0 {
-                counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-                return Err(Unanswered::Refused);
-            }
             reads_attributes |= matches!(
                 value.data(),
                 StyleValueData::Unresolved {
