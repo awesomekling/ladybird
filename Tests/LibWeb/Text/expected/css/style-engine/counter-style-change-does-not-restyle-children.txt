@@ -1,0 +1,3 @@
+elements: 25
+records computed: 39
+transactions: 2
