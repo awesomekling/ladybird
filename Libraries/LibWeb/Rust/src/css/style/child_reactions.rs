@@ -63,16 +63,20 @@ impl StyleEngineState {
     /// What applying the reaction that began on `node` moved, from what the element held before
     /// and holds now.
     fn style_reaction_row_facts(&mut self, node: StyleNodeID) -> StyleReactionRowFacts {
-        let Some((row_node, before)) = self.host.style_reaction_row_start.take() else {
-            panic!("style reaction applied to {node:?} without beginning");
+        // The host begins every reaction it applies on the element it applies it to. Should it not,
+        // nothing says what the element held before, and its children are told it was unstyled:
+        // that owes them everything.
+        let before = match self.host.style_reaction_row_start.take() {
+            Some((row_node, before)) if row_node == node => before,
+            _ => {
+                debug_assert!(false, "style reaction applied to {node:?} without beginning on it");
+                super::seal::note_broken_assumption("StyleReactionAppliedWithoutBeginning");
+                None
+            }
         };
-        assert_eq!(
-            row_node, node,
-            "style reaction applied to another element than it began on"
-        );
         let now = self.host.held_style_record_displays.get(&node).copied();
         // An element left without style by the application had none before it either.
-        assert!(
+        debug_assert!(
             now.is_some() || before.is_none(),
             "style reaction cleared the style of {node:?}"
         );
