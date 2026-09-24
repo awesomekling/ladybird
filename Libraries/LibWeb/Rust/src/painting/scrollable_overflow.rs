@@ -723,6 +723,12 @@ pub(crate) struct ScrollableOverflowState {
     pub(crate) geometry_changed: Cell<bool>,
     pub(crate) scrollability_changed: Cell<bool>,
     pub(crate) recalculations: Cell<u64>,
+    /// Rows whose overflow a query could read unmeasured: new rows, and rows whose measurement
+    /// was invalidated.
+    pub(crate) rows_to_measure: RefCell<Vec<NodeSlotId>>,
+    /// Boxes a recalculation settled, whose stored scroll offsets are clamped to their new
+    /// overflow before rendering.
+    pub(crate) scroll_offsets_to_clamp: RefCell<Vec<NodeSlotId>>,
 }
 
 impl LayoutNodeArena {
@@ -764,7 +770,7 @@ impl LayoutNodeArena {
         self.clear_pending_rebuilt_subtree_roots();
     }
 
-    pub(crate) fn ensure_scrollable_overflow(&self, slot: NodeSlotId) {
+    fn ensure_scrollable_overflow(&self, slot: NodeSlotId) {
         let _writer =
             crate::painting::published_immutable::enter_writer_if_unattributed("lazy scrollable overflow measurement");
         if !self.paintable_row_is_populated(slot)
@@ -804,81 +810,129 @@ fn box_holds_scroll_state(arena: &LayoutNodeArena, slot: NodeSlotId) -> bool {
         || arena.node_flags_if_live(slot) & crate::layout::node_data::NodeFlag::HasScrollOffset as u32 != 0
 }
 
+impl LayoutNodeArena {
+    /// Measures every scrollable overflow a query could read before the rows are published, so
+    /// that reading overflow never measures it: first what the scheduled recalculation settles,
+    /// then every other row whose overflow a commit or an invalidation left unmeasured.
+    pub(crate) fn measure_scrollable_overflow_before_publication(&self) {
+        self.settle_scheduled_scrollable_overflow();
+        let Some(viewport) = self.scrollable_overflow.viewport.get() else {
+            return;
+        };
+        if !self.paintable_row_is_populated(viewport) || self.scrollable_overflow.rows_to_measure.borrow().is_empty() {
+            return;
+        }
+        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollableOverflow);
+        let rows = std::mem::take(&mut *self.scrollable_overflow.rows_to_measure.borrow_mut());
+        for slot in rows {
+            if self.slot_is_live(slot) && self.paintable_row_is_populated(slot) {
+                self.ensure_scrollable_overflow(slot);
+            }
+        }
+    }
+
+    pub(crate) fn note_row_overflow_unmeasured(&self, slot: NodeSlotId) {
+        self.scrollable_overflow.rows_to_measure.borrow_mut().push(slot);
+    }
+
+    fn settle_scheduled_scrollable_overflow(&self) {
+        let arena = self;
+        let Some(viewport) = arena.scrollable_overflow.viewport.get() else {
+            return;
+        };
+        let full_layout_commit = arena.scrollable_overflow.full_layout_commit.replace(false);
+        let (pending_boxes, needs_full_recalculation) = arena.take_scrollable_overflow_recalculation_state();
+        if (pending_boxes.is_empty() && !needs_full_recalculation) || !arena.paintable_row_is_populated(viewport) {
+            return;
+        }
+        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollableOverflow);
+        arena
+            .scrollable_overflow
+            .recalculations
+            .set(arena.scrollable_overflow.recalculations.get() + 1);
+        arena.ensure_overflow_contained_boxes();
+
+        // Settle scroll containers and stored offsets first, and keep already measured
+        // ancestors in the set so changes invalidate their paint caches even when a cached
+        // recording would otherwise skip the subtree.
+        let mut roots = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut add = |slot: NodeSlotId| {
+            if arena.paintable_row_is_populated(slot) && seen.insert(slot) {
+                if !full_layout_commit || slot == viewport || box_holds_scroll_state(arena, slot) {
+                    roots.push(slot);
+                }
+                true
+            } else {
+                false
+            }
+        };
+        if needs_full_recalculation {
+            arena.for_each_node_in_layout_subtree_in_pre_order(viewport, |slot| {
+                if arena.paintable_row_is_populated(slot)
+                    && (slot == viewport
+                        || box_holds_scroll_state(arena, slot)
+                        || (!full_layout_commit && arena.paintable_side_data(slot).overflow_measured_this_commit.get()))
+                {
+                    add(slot);
+                }
+            });
+        } else {
+            for slot in pending_boxes {
+                if !arena.slot_is_live(slot) || !arena.paintable_row_is_populated(slot) {
+                    continue;
+                }
+                // NB: A full commit queues changed descendants individually, including scroll
+                //     containers behind clipping boundaries. Partial commits also queue their root.
+                if !full_layout_commit && !arena.paintable_side_data(slot).overflow_measured_this_commit.get() {
+                    // A subtree commit can replace scroll containers whose overflow does not
+                    // propagate through the relayout root (for example, overflow: hidden).
+                    arena.for_each_node_in_layout_subtree_in_pre_order(slot, |child| {
+                        if arena.paintable_row_is_populated(child) && box_holds_scroll_state(arena, child) {
+                            add(child);
+                        }
+                    });
+                }
+                add(slot);
+                let mut block = arena.node_containing_block_if_live(slot);
+                while let Some(slot) = block {
+                    if !add(slot) {
+                        break;
+                    }
+                    block = arena.node_containing_block_if_live(slot);
+                }
+            }
+        }
+        for &slot in &roots {
+            arena.ensure_scrollable_overflow(slot);
+        }
+        arena
+            .scrollable_overflow
+            .scroll_offsets_to_clamp
+            .borrow_mut()
+            .extend(roots);
+    }
+}
+
+/// Measures the scrollable overflow left to measure, then hands the document the scroll
+/// offsets the boxes it settled now store out of range.
 pub(crate) fn update_scrollable_overflow(arena: &LayoutNodeArena, main_thread: &crate::stage::MainThread) {
-    let Some(viewport) = arena.scrollable_overflow.viewport.get() else {
-        return;
-    };
-    let full_layout_commit = arena.scrollable_overflow.full_layout_commit.replace(false);
-    let (pending_boxes, needs_full_recalculation) = arena.take_scrollable_overflow_recalculation_state();
-    if (pending_boxes.is_empty() && !needs_full_recalculation) || !arena.paintable_row_is_populated(viewport) {
+    arena.measure_scrollable_overflow_before_publication();
+    let settled = std::mem::take(&mut *arena.scrollable_overflow.scroll_offsets_to_clamp.borrow_mut());
+    if settled.is_empty() {
         return;
     }
     let pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollableOverflow);
-    arena
-        .scrollable_overflow
-        .recalculations
-        .set(arena.scrollable_overflow.recalculations.get() + 1);
-    arena.ensure_overflow_contained_boxes();
-
-    // Ordinary boxes are measured when their contribution or geometry is queried. Settle
-    // scroll containers and stored offsets before DOM reads or painting observe them.
-    // Keep already measured ancestors in the set so changes invalidate their paint caches
-    // even when a cached recording would otherwise skip the subtree.
-    let mut roots = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    let mut add = |slot: NodeSlotId| {
-        if arena.paintable_row_is_populated(slot) && seen.insert(slot) {
-            if !full_layout_commit || slot == viewport || box_holds_scroll_state(arena, slot) {
-                roots.push(slot);
-            }
-            true
-        } else {
-            false
-        }
-    };
-    if needs_full_recalculation {
-        arena.for_each_node_in_layout_subtree_in_pre_order(viewport, |slot| {
-            if arena.paintable_row_is_populated(slot)
-                && (slot == viewport
-                    || box_holds_scroll_state(arena, slot)
-                    || (!full_layout_commit && arena.paintable_side_data(slot).overflow_measured_this_commit.get()))
-            {
-                add(slot);
-            }
-        });
-    } else {
-        for slot in pending_boxes {
-            if !arena.slot_is_live(slot) || !arena.paintable_row_is_populated(slot) {
-                continue;
-            }
-            // NB: A full commit queues changed descendants individually, including scroll
-            //     containers behind clipping boundaries. Partial commits also queue their root.
-            if !full_layout_commit && !arena.paintable_side_data(slot).overflow_measured_this_commit.get() {
-                // A subtree commit can replace scroll containers whose overflow does not
-                // propagate through the relayout root (for example, overflow: hidden).
-                arena.for_each_node_in_layout_subtree_in_pre_order(slot, |child| {
-                    if arena.paintable_row_is_populated(child) && box_holds_scroll_state(arena, child) {
-                        add(child);
-                    }
-                });
-            }
-            add(slot);
-            let mut block = arena.node_containing_block_if_live(slot);
-            while let Some(slot) = block {
-                if !add(slot) {
-                    break;
-                }
-                block = arena.node_containing_block_if_live(slot);
-            }
-        }
-    }
     // The new overflow can leave a stored scroll offset outside the range the box now allows.
     // Decide that here, where the measurement is, and leave the writes for after the pass: the
     // store is the document's, and the document is told what to put in it rather than asked
     // where it is.
     let mut clamped = Vec::new();
-    for slot in roots {
-        arena.ensure_scrollable_overflow(slot);
+    let mut seen = std::collections::HashSet::new();
+    for slot in settled {
+        if !seen.insert(slot) || !arena.slot_is_live(slot) || !arena.paintable_row_is_populated(slot) {
+            continue;
+        }
         let offset = arena.scroll_offsets().offset(slot);
         if offset == CssPixelPoint::default() {
             continue;

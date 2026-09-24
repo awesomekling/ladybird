@@ -522,7 +522,7 @@ pub unsafe extern "C" fn layout_arena_paintable_scrollable_overflow(
         return FfiOptionalOverflowData::default();
     };
     let mut value = paintable_rows
-        .live_committed_side_data(slot)
+        .committed_side_data(slot)
         .overflow_relative_to_padding_box;
     value.rect = rect.into();
     FfiOptionalOverflowData { has_value: true, value }
@@ -3095,6 +3095,8 @@ fn with_hit_test_list_items_only<R>(
 ) -> R {
     // SAFETY: The caller passes a live arena handle (documented on every entry point below).
     let arena = unsafe { arena_from_handle(arena) };
+    // Hit testing reads overflow, and reading overflow never measures it.
+    arena.measure_scrollable_overflow_before_publication();
     let hit_test_list = arena.hit_test_list.borrow();
     let Some(list) = hit_test_list.as_ref() else {
         return default;
@@ -3109,6 +3111,8 @@ fn with_hit_test_list_and_caret_lines<R>(
 ) -> R {
     // SAFETY: The caller passes a live arena handle (documented on every entry point below).
     let arena = unsafe { arena_from_handle(arena) };
+    // Hit testing reads overflow, and reading overflow never measures it.
+    arena.measure_scrollable_overflow_before_publication();
     let mut hit_test_list = arena.hit_test_list.borrow_mut();
     let Some(list) = hit_test_list.as_mut() else {
         return default;
@@ -3129,6 +3133,8 @@ fn with_hit_test_list_spatial_indexes_and_visual_context_tree<R>(
 ) -> R {
     // SAFETY: The caller passes a live arena handle (documented on every entry point below).
     let arena = unsafe { arena_from_handle(arena) };
+    // Hit testing reads overflow, and reading overflow never measures it.
+    arena.measure_scrollable_overflow_before_publication();
     let mut hit_test_list = arena.hit_test_list.borrow_mut();
     let Some(list) = hit_test_list.as_mut() else {
         return default;

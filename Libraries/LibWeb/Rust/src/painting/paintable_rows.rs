@@ -184,7 +184,7 @@ mod tests {
     }
 
     #[test]
-    fn overflow_queries_refresh_invalidated_data_while_geometry_is_borrowed() {
+    fn overflow_is_measured_before_publication_while_geometry_is_borrowed() {
         use crate::css::css_pixels::{CssPixelRect, CssPixels};
         use crate::layout::node_data::NodeKind;
         use crate::painting::paintable_geometry;
@@ -218,6 +218,10 @@ mod tests {
         let geometry = rows.paintable_data(node);
         let previous_geometry = *geometry;
         rows.clear_cached_overflow_data(node);
+        // Reading overflow never measures it.
+        assert_eq!(paintable_geometry::scrollable_overflow_rect(&rows, node), None);
+        assert!(!arena.scrollable_overflow.geometry_changed.get());
+        arena.measure_scrollable_overflow_before_publication();
         assert_eq!(paintable_geometry::scrollable_overflow_rect(&rows, node), Some(rect));
         assert!(!paintable_geometry::has_scrollable_overflow(&rows, node));
         assert_eq!(*geometry, previous_geometry);
@@ -526,6 +530,7 @@ where
         }
         if self.arena.live_committed_side_data(id).overflow_valid_across_recommits {
             self.arena.committed_side_data_mut(id).overflow_valid_across_recommits = false;
+            self.arena.note_row_overflow_unmeasured(id);
         }
     }
 
@@ -1205,6 +1210,7 @@ impl LayoutNodeArena {
             };
             row_paint_states[index].clear();
             absolute_rect_memo[index] = None;
+            self.scrollable_overflow.rows_to_measure.get_mut().push(layout_node);
             visual_context_records[index] = None;
             stacking_context_entries[index] = None;
         }
@@ -1491,8 +1497,10 @@ impl LayoutNodeArena {
     }
 
     /// The paintable rows as last published. Rows a main-side writer changed since are published
-    /// first: that writer has finished, since the main side reads between writes.
+    /// first: that writer has finished, since the main side reads between writes. Overflow a
+    /// commit or a writer left unmeasured is measured before they are.
     pub(crate) fn committed_paintable_rows(&mut self) -> CommittedPaintableRows<'_> {
+        self.measure_scrollable_overflow_before_publication();
         self.publish_paintable_rows();
         CommittedPaintableRows { arena: self }
     }

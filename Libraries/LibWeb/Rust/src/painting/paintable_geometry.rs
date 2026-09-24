@@ -320,12 +320,12 @@ pub(crate) fn absolute_border_box_rect(arena: &impl PaintableRowsRead, slot: Nod
     )
 }
 
+/// The overflow measured before the rows were published. Reading it never measures it.
 pub(crate) fn scrollable_overflow_rect(arena: &impl PaintableRowsRead, slot: NodeSlotId) -> Option<CssPixelRect> {
-    arena.ensure_scrollable_overflow(slot);
     if !arena.paintable_row_is_populated(slot) {
         return None;
     }
-    let cache = arena.live_committed_side_data(slot);
+    let cache = arena.committed_side_data(slot);
     if !cache.overflow_valid_across_recommits {
         return None;
     }
@@ -336,11 +336,9 @@ pub(crate) fn scrollable_overflow_rect(arena: &impl PaintableRowsRead, slot: Nod
 }
 
 pub(crate) fn has_scrollable_overflow(arena: &impl PaintableRowsRead, slot: NodeSlotId) -> bool {
-    arena.ensure_scrollable_overflow(slot);
-    arena.paintable_row_is_populated(slot)
-        && arena.live_committed_side_data(slot).overflow_valid_across_recommits
-        && arena
-            .live_committed_side_data(slot)
-            .overflow_relative_to_padding_box
-            .has_scrollable_overflow
+    if !arena.paintable_row_is_populated(slot) {
+        return false;
+    }
+    let cache = arena.committed_side_data(slot);
+    cache.overflow_valid_across_recommits && cache.overflow_relative_to_padding_box.has_scrollable_overflow
 }
