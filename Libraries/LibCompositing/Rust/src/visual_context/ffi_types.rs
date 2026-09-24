@@ -10,7 +10,11 @@
 use crate::display_list::commands::OptionalF32;
 use libgfx_rust::{FloatMatrix4x4, FloatPoint, FloatRect, FloatSize};
 
-#[derive(Clone, Copy, Debug)]
+/// What the render side needs to know about the viewport it is drawing into: how many device
+/// pixels a CSS pixel is, where the visual viewport sits and how far it is zoomed, and the
+/// overflow the viewport applies to a wheel. The document publishes these; nothing on the render
+/// side asks for them.
+#[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
 pub struct FfiVisualContextTreeInputs {
     pub device_pixels_per_css_pixel: f64,

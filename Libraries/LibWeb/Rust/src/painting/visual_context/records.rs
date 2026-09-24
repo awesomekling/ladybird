@@ -7,7 +7,6 @@
 //! What the main thread keeps alongside a visual context tree while it builds and updates it: the
 //! document's state, and the records the builder keeps per box.
 
-
 use super::{ClipNodeIndex, ContextRef, EffectNodeIndex, SpatialNodeIndex, VisualContextTree, dirty, scroll_state};
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::host::FfiCompositorAnimationPublishOutcome;

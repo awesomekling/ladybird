@@ -6,7 +6,6 @@
 
 //! The compositor animations a visual context tree carries, and the trees derived by sampling them.
 
-
 use super::{EffectNodeData, EffectNodeIndex, EffectsData, SpatialData, SpatialNodeIndex, VisualContextTree};
 use crate::host::{FfiVisualAnimationSummary, FfiVisualAnimationTargetKind, FfiVisualAnimationTransformOperationKind};
 use crate::visual_animation::{VisualAnimation, VisualAnimationSample, VisualAnimationValue};

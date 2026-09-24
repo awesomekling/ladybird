@@ -379,7 +379,7 @@ impl AbsposEngine<'_> {
         let arena = self.callbacks.arena();
         // A pseudo-element queries from its generator; an anonymous box names no element.
         let querying_element = arena.node_style_node(positioned_box)?;
-        let containing_block = self.callbacks.containing_block(positioned_box);
+        let containing_block = arena.containing_block_by_walking_ancestors(positioned_box);
         if containing_block.is_invalid() {
             return None;
         }
@@ -427,12 +427,12 @@ impl AbsposEngine<'_> {
         if !eligible_anchors.contains(&anchor_box) {
             return false;
         }
-        let mut ancestor = self.callbacks.containing_block(anchor_box);
+        let mut ancestor = arena.containing_block_by_walking_ancestors(anchor_box);
         while !ancestor.is_invalid() {
             if ancestor == containing_block {
                 return true;
             }
-            ancestor = self.callbacks.containing_block(ancestor);
+            ancestor = arena.containing_block_by_walking_ancestors(ancestor);
         }
         false
     }

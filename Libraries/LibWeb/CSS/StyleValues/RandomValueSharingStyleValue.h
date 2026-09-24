@@ -27,7 +27,6 @@ private:
     }
 
     ValueComparingRefPtr<StyleValue const> fixed_value() const { return wrap_rust_child_or_null(m_value->random_value_sharing.fixed_value); }
-
 };
 
 }

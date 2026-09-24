@@ -463,7 +463,7 @@ static Layout::RustFFI::FfiRecordingPublishCallbacks recording_publish_callbacks
             context.resource_storage.add_image_frame(*static_cast<Gfx::DecodedImageFrame const*>(frame)); },
         .add_video_sink = [](void* context_pointer, u64 resource_id, u64 sink_handle) {
             auto& context = *static_cast<RecordingPublishContext*>(context_pointer);
-            context.resource_storage.add_video_sink(VideoSinkResourceId { resource_id }, Media::VideoSinkHandle { sink_handle }); },
+            context.resource_storage.add_video_sink(Compositing::VideoSinkResourceId { resource_id }, Media::VideoSinkHandle { sink_handle }); },
     };
 }
 
@@ -475,7 +475,7 @@ static Layout::RustFFI::FfiVectorImageCallbacks vector_image_callbacks(Recording
             auto& context = *static_cast<RecordingPublishContext*>(context_pointer);
             auto const& document = *context.document;
             auto empty_display_list = [&] {
-                return context.resource_storage.add_display_list(DisplayList::create(document.paint_state().visual_context_tree(document)), document.paint_state().visual_context_tree(document)).value();
+                return context.resource_storage.add_display_list(Compositing::DisplayList::create(document.paint_state().visual_context_tree(document)), document.paint_state().visual_context_tree(document)).value();
             };
             // The recording published the image and the scheme it renders with, so finding it is a
             // lookup rather than a walk back to the element that references it.
@@ -667,7 +667,7 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
     };
 }
 
-NonnullRefPtr<DisplayList> finish_rust_display_list_recording(PendingDisplayListRecording& recording)
+NonnullRefPtr<Compositing::DisplayList> finish_rust_display_list_recording(PendingDisplayListRecording& recording)
 {
     auto& document = *recording.document;
     auto* arena = layout_arena_handle(document);

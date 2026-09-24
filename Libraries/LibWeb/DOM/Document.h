@@ -569,8 +569,8 @@ public:
 
     // The row the document's layout tree is rooted at. The tree build records it in the arena, so
     // the document keeps no copy of its own.
-    [[nodiscard]] Layout::RustFFI::NodeSlotId layout_root_slot() const;
-    [[nodiscard]] bool has_layout_root() const { return layout_root_slot().index != Layout::RustFFI::INVALID_NODE_SLOT_INDEX; }
+    [[nodiscard]] Compositing::RustFFI::NodeSlotId layout_root_slot() const;
+    [[nodiscard]] bool has_layout_root() const { return layout_root_slot().index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX; }
     bool has_committed_viewport_box() const;
 
     Painting::DocumentPaintState& paint_state();
@@ -1338,7 +1338,7 @@ public:
     [[nodiscard]] bool may_have_dom_paint_facts() const { return m_may_have_dom_paint_facts; }
 
     void register_scroll_snap_container(Layout::Node const&);
-    [[nodiscard]] Vector<Layout::RustFFI::NodeSlotId> collect_scroll_snap_containers();
+    [[nodiscard]] Vector<Compositing::RustFFI::NodeSlotId> collect_scroll_snap_containers();
 
     virtual Vector<Utf16FlyString> supported_property_names() const override;
     Vector<GC::Ref<DOM::Element>> const& potentially_named_elements() const { return m_potentially_named_elements; }
@@ -1649,7 +1649,7 @@ private:
     virtual void finalize() override final;
 
     u32 prepare_layout_tree_build();
-    Layout::RustFFI::FfiLayoutTreeBuildOutcome finish_layout_tree_build(void* walk, Layout::RustFFI::NodeSlotId replaced_root);
+    Layout::RustFFI::FfiLayoutTreeBuildOutcome finish_layout_tree_build(void* walk, Compositing::RustFFI::NodeSlotId replaced_root);
     void tear_down_layout_tree();
     void process_pending_top_layer_layout_changes();
 
@@ -2009,8 +2009,8 @@ private:
     Optional<MonotonicTime> m_compositor_animation_wakeup_deadline;
     RefPtr<Core::Timer> m_compositor_animation_observation_timer;
     bool m_force_visual_context_tree_rebuild_on_next_compositor_animation_update_for_testing { false };
-    Vector<Layout::RustFFI::NodeSlotId> m_layout_nodes_with_forced_compositor_effects_layer;
-    Vector<Layout::RustFFI::NodeSlotId> m_layout_nodes_with_forced_compositor_background_color_frame;
+    Vector<Compositing::RustFFI::NodeSlotId> m_layout_nodes_with_forced_compositor_effects_layer;
+    Vector<Compositing::RustFFI::NodeSlotId> m_layout_nodes_with_forced_compositor_background_color_frame;
 
     bool m_temporary_document_for_fragment_parsing { false };
 

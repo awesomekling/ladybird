@@ -264,7 +264,7 @@ fn padding_inflated_scrollable_overflow(
 }
 
 fn fragment_node_is_in_focused_text_control(layout_arena: &LayoutNodeArena, node: NodeSlotId) -> bool {
-    layout_arena.node_flags_if_live(node) & NodeFlag::IsInFocusedTextControl as u32 != 0
+    layout_arena.node_is_in_focused_text_control(node)
 }
 
 #[derive(Clone, Copy)]

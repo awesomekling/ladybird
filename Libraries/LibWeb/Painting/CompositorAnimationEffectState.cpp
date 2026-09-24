@@ -118,8 +118,17 @@ static RefPtr<CSS::StyleValue const> resolved_compositor_animation_style_value(C
 {
     ++target.document().style_invalidation_counters().compositor_keyframe_value_resolutions;
     auto style_value = CSS::StyleValue::adopt_rust_style_value_data(CSS::StyleValueFFI::rust_style_value_retain(value.data()));
-    if (style_value->is_unresolved())
-        style_value = target.document().style_computer().resolve_unresolved_style_value(target, CSS::PropertyNameAndID::from_id(property_id), style_value->as_unresolved());
+    if (style_value->is_unresolved()) {
+        // A value the engine declines to substitute is left to the main thread.
+        auto custom_property_data = target.custom_property_data();
+        auto const* substituted = CSS::StyleValueFFI::rust_substitute_compositor_keyframe_value(
+            target.document().style_computer().style_engine().rust_handle(),
+            custom_property_data ? custom_property_data->rust_store() : nullptr,
+            to_underlying(property_id), value.data());
+        if (!substituted)
+            return nullptr;
+        style_value = CSS::StyleValue::adopt_rust_style_value_data(substituted);
+    }
     if (style_value->is_guaranteed_invalid() || style_value->is_unresolved() || style_value->is_pending_substitution())
         return nullptr;
     CSS::ComputationContext computation_context {

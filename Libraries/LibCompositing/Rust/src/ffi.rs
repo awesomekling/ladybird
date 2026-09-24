@@ -202,7 +202,7 @@ pub unsafe extern "C" fn display_list_replay(
         )
     };
     // SAFETY: The caller guarantees `callbacks` is live for the call.
-    let mut painter = unsafe { *callbacks };
+    let mut painter = crate::host::replay::DisplayListReplayHost::new(unsafe { *callbacks });
     let effect_clip_plan =
         unsafe { &*effect_clip_plan.cast::<crate::display_list::effect_clip_plan::EffectClipPlan>() };
     crate::display_list::replay::replay_display_list(

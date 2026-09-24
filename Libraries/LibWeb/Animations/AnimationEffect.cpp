@@ -990,6 +990,9 @@ AnimationUpdateContext::~AnimationUpdateContext()
             apply_layout_node_style_side_effects(*pseudo_element_node, target->style_record_identity(element.pseudo_element()));
         }
 
+        if (it.value.caller_applies_invalidation)
+            continue;
+
         if (invalidation.needs_relayout())
             target->set_needs_layout_update(DOM::SetNeedsLayoutReason::KeyframeEffect);
         if (invalidation.needs_layout_tree_rebuild()) {

@@ -8,11 +8,11 @@
 
 #include <AK/Optional.h>
 #include <AK/kmalloc.h>
+#include <LibCompositing/DisplayList/AccumulatedVisualContext.h>
 #include <LibCore/ElapsedTimer.h>
 #include <LibGC/Ptr.h>
 #include <LibGfx/Color.h>
 #include <LibWeb/Forward.h>
-#include <LibWeb/Painting/AccumulatedVisualContext.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
 #include <LibWeb/Painting/PaintableTypes.h>
 #include <LibWeb/PixelUnits.h>
@@ -34,8 +34,8 @@ struct PendingDisplayListRecording {
     AK_ALLOC_WITH_KMALLOC;
 
     GC::Ref<DOM::Document> document;
-    DisplayListResourceStorage& resource_storage;
-    AccumulatedVisualContextTree visual_context_tree;
+    Compositing::DisplayListResourceStorage& resource_storage;
+    Compositing::AccumulatedVisualContextTree visual_context_tree;
     PaintCommandCacheMode cache_mode;
     // How the render side runs this recording: InSubmittedFrame only if it went to the frame in flight.
     RecordingRun run { RecordingRun::Now };

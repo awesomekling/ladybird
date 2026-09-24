@@ -36,7 +36,7 @@ Box::Box(DOM::Document& document, BindToPreparedArenaSlot bind, Compositing::Rus
 {
 }
 
-Box::Box(DOM::Document& document, BindToPreparedArenaSlot bind, RustFFI::NodeSlotId slot, RustFFI::NodeKind kind, CSS::LayoutStyle style)
+Box::Box(DOM::Document& document, BindToPreparedArenaSlot bind, Compositing::RustFFI::NodeSlotId slot, RustFFI::NodeKind kind, CSS::LayoutStyle style)
     : NodeWithStyle(document, bind, slot, kind, move(style))
 {
 }

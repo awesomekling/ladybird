@@ -27,7 +27,7 @@ TextNode::TextNode(DOM::Document& document, DOM::Text& text, AttachToDOMNode att
     Painting::push_selection_pseudo_style_of_parent(*this);
 }
 
-TextNode::TextNode(DOM::Document& document, BindToPreparedArenaSlot bind, RustFFI::NodeSlotId slot, RustFFI::NodeKind kind)
+TextNode::TextNode(DOM::Document& document, BindToPreparedArenaSlot bind, Compositing::RustFFI::NodeSlotId slot, RustFFI::NodeKind kind)
     : Node(document, bind, slot, kind)
 {
     invalidate_text_for_rendering();
@@ -71,7 +71,7 @@ GeneratedTextNode::GeneratedTextNode(DOM::Document& document, Utf16String text)
 {
 }
 
-GeneratedTextNode::GeneratedTextNode(DOM::Document& document, BindToPreparedArenaSlot bind, RustFFI::NodeSlotId slot, RustFFI::NodeKind kind)
+GeneratedTextNode::GeneratedTextNode(DOM::Document& document, BindToPreparedArenaSlot bind, Compositing::RustFFI::NodeSlotId slot, RustFFI::NodeKind kind)
     : TextNode(document, bind, slot, kind)
 {
 }

@@ -989,6 +989,9 @@ pub(crate) struct LayoutNodeArena {
     next_rows_built_for_same_node: Vec<Cell<NodeSlotId>>,
     fc_run_cache_store: super::fc_run_cache::FcRunCacheArenaStore,
     pub(super) layout_trace: super::trace::LayoutTrace,
+    #[cfg(debug_assertions)]
+    pub(super) read_scope: Cell<super::read_scope::ReadScope>,
+    pub(super) innermost_run: Cell<(NodeSlotId, NodeSlotId)>,
     pub(crate) paintable_rows: crate::painting::paintable_rows::PaintableRowStore,
     paint_state: RefCell<crate::painting::paint_state::PaintState>,
     // The list the last recording produced. Each published generation of the rows pins the list
@@ -1105,6 +1108,9 @@ impl LayoutNodeArena {
             next_rows_built_for_same_node: Vec::new(),
             fc_run_cache_store: super::fc_run_cache::FcRunCacheArenaStore::default(),
             layout_trace: super::trace::LayoutTrace::default(),
+            #[cfg(debug_assertions)]
+            read_scope: Cell::new(super::read_scope::ReadScope::default()),
+            innermost_run: Cell::new((NodeSlotId::INVALID, NodeSlotId::INVALID)),
             paintable_rows: crate::painting::paintable_rows::PaintableRowStore::default(),
             paint_state: RefCell::new(crate::painting::paint_state::PaintState::default()),
             hit_test_list: RefCell::new(None),
@@ -1818,13 +1824,6 @@ impl LayoutNodeArena {
             .get(index as usize)
             .copied()
             .unwrap_or_default()
-    }
-
-    /// The shadow-including parent element of `element`: the DOM parent, or the shadow host when
-    /// the DOM parent is a shadow root. Elements whose layout the tree build never reached, and the
-    /// root element, have none.
-    pub(crate) fn shadow_including_parent_element(&self, element: StyleNodeID) -> Option<StyleNodeID> {
-        StyleNodeID::from_raw(self.shadow_including_parent(element).element)
     }
 
     /// The host of the shadow root `element` is in, or none when it is in the document tree. The
@@ -3032,13 +3031,6 @@ impl LayoutNodeArena {
             scroll_offset != FfiCssPixelPoint::default(),
         );
         self.scroll_offsets().publish(slot, scroll_offset.into());
-        // Only a row in a user agent shadow tree can be in a text control's, which the
-        // construction flags already answered, so this asks for almost no row at all.
-        if crate::layout::node_facts::has_flag(self.data(slot), NodeFlag::IsInUserAgentShadowTree) {
-            let in_focused_text_control =
-                style_node.is_some_and(|style_node| self.is_identity_in_focused_text_control(style_node));
-            self.set_node_flag(slot, NodeFlag::IsInFocusedTextControl, in_focused_text_control);
-        }
         self.enroll_node_for_replaced_content_facts_sync_if_eligible(slot);
     }
 
@@ -3057,6 +3049,18 @@ impl LayoutNodeArena {
     /// Whether the node sits in the user agent shadow tree of the focused text control.
     pub(crate) fn is_identity_in_focused_text_control(&self, node: StyleNodeID) -> bool {
         self.identities_in_focused_text_control.contains(&node)
+    }
+
+    /// Whether the row's node sits in the user agent shadow tree of a form-associated text control
+    /// that is focused right now. Only a row in a user agent shadow tree can be in a text control's,
+    /// which the construction flags already answered, so this asks the published set for almost no
+    /// row at all, and the overflow measurement need not ask the document who has focus.
+    pub(crate) fn node_is_in_focused_text_control(&self, id: NodeSlotId) -> bool {
+        self.slot_is_live(id)
+            && crate::layout::node_facts::has_flag(self.data(id), NodeFlag::IsInUserAgentShadowTree)
+            && self
+                .node_style_node(id)
+                .is_some_and(|style_node| self.is_identity_in_focused_text_control(style_node))
     }
 
     /// Record whether the node sits in the user agent shadow tree of the focused text control.

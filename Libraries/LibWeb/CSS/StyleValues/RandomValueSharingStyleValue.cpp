@@ -6,8 +6,8 @@
 
 #include "RandomValueSharingStyleValue.h"
 #include <LibWeb/CSS/Serialize.h>
-#include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleComputeFFI.h>
+#include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/DOM/Document.h>
 
 namespace Web::CSS {

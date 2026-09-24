@@ -1377,7 +1377,7 @@ impl StyleEngineState {
             .is_some()
             && let Some(pending) = self.retained.engine_computed_records_pending.remove(&node)
         {
-            let mut element_pending = Vec::new();
+            let mut element_pending = smallvec::SmallVec::<[_; 1]>::new();
             for record in pending {
                 if record.pseudo_kind == u8::MAX {
                     element_pending.push(record);

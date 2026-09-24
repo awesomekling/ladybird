@@ -47,6 +47,7 @@
 #include <LibWeb/CSS/PseudoElement.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleSheetState.h>
+#include <LibWeb/Compositor/CompositorFrame.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/EventTarget.h>

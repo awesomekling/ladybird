@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Vector.h>
+#include <LibWeb/CSS/PseudoElement.h>
 #include <LibWeb/DOM/HoverEventData.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/NodeIdentity.h>

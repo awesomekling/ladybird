@@ -23,7 +23,7 @@ class GeneratedTextNode;
 class TextNode : public Node {
 public:
     TextNode(DOM::Document&, DOM::Text&, AttachToDOMNode = AttachToDOMNode::Yes);
-    TextNode(DOM::Document&, BindToPreparedArenaSlot, RustFFI::NodeSlotId, RustFFI::NodeKind);
+    TextNode(DOM::Document&, BindToPreparedArenaSlot, Compositing::RustFFI::NodeSlotId, RustFFI::NodeKind);
     virtual ~TextNode() override;
 
     DOM::Text const& dom_node() const { return static_cast<DOM::Text const&>(*Node::dom_node()); }
@@ -53,7 +53,7 @@ public:
     GeneratedTextNode(DOM::Document&, Utf16String);
     // A row the build stamped for generated text renders the characters the arena holds for it,
     // so the shell materialised into it carries none of its own.
-    GeneratedTextNode(DOM::Document&, BindToPreparedArenaSlot, RustFFI::NodeSlotId, RustFFI::NodeKind);
+    GeneratedTextNode(DOM::Document&, BindToPreparedArenaSlot, Compositing::RustFFI::NodeSlotId, RustFFI::NodeKind);
     virtual ~GeneratedTextNode() override;
 
     virtual DOM::Text const* dom_text() const override { return nullptr; }

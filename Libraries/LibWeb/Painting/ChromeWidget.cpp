@@ -108,7 +108,7 @@ Layout::Node* ChromeWidget::layout_node() const
 
 bool ChromeWidget::is_current() const
 {
-    if (m_slot.index == Layout::RustFFI::INVALID_NODE_SLOT_INDEX)
+    if (m_slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
         return false;
     auto current_version = committed_row_reset_version(*m_arena, m_slot);
     if (current_version == m_row_reset_version)

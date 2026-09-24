@@ -28,6 +28,7 @@
 #include <LibGfx/Size.h>
 #include <LibIPC/ConnectionToServer.h>
 #include <LibMedia/Forward.h>
+#include <LibWeb/Compositor/CompositorFrame.h>
 #include <LibWeb/Compositor/CompositorHost.h>
 #include <LibWeb/Export.h>
 

@@ -61,7 +61,7 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
         .prepare_for_rendering = [](void* context) { static_cast<Document*>(context)->prepare_for_rendering(); },
         .root_background_source = [](void* context) { return Painting::rust_root_background_source(*static_cast<Document*>(context)); },
         .prepare_layout_tree_build = [](void* context) -> u32 { return static_cast<Document*>(context)->prepare_layout_tree_build(); },
-        .finish_layout_tree_build = [](void* context, void* walk, Layout::RustFFI::NodeSlotId replaced_root) -> Layout::RustFFI::FfiLayoutTreeBuildOutcome { return static_cast<Document*>(context)->finish_layout_tree_build(walk, replaced_root); },
+        .finish_layout_tree_build = [](void* context, void* walk, Compositing::RustFFI::NodeSlotId replaced_root) -> Layout::RustFFI::FfiLayoutTreeBuildOutcome { return static_cast<Document*>(context)->finish_layout_tree_build(walk, replaced_root); },
         .rebuild_list_owners_with_stale_item_counters = [](void* context, u32 const* list_owners, size_t count) {
             auto& document = *static_cast<Document*>(context);
             for (auto list_owner : ReadonlySpan<u32> { list_owners, count }) {
@@ -81,11 +81,11 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
         .apply_layout_commit_effects = [](void* context, Layout::RustFFI::FfiLayoutCommitEffects const* effects) { static_cast<Document*>(context)->apply_layout_commit_effects(*effects); },
         .note_full_layouts_performed = [](void* context, u64 count) { static_cast<Document*>(context)->style_invalidation_counters().relayouts_performed += count; },
         .record_stabilization_bound_failure = [](void* context) { ++static_cast<Document*>(context)->m_style_invalidation_counters.style_stabilization_bound_failures; },
-        .attach_style_resources = [](void* context, Layout::RustFFI::NodeSlotId slot, bool owns_content_replacement_image) {
+        .attach_style_resources = [](void* context, Compositing::RustFFI::NodeSlotId slot, bool owns_content_replacement_image) {
             auto& document = *static_cast<Document*>(context);
             if (Layout::attach_owed_style_resources(document, slot, owns_content_replacement_image))
                 document.m_owed_image_provider_arrived_with_image = true; },
-        .attach_generated_image = [](void* context, Layout::RustFFI::NodeSlotId slot, u32 style_node, Layout::RustFFI::FfiPseudoElement pseudo_element, Layout::RustFFI::FfiGeneratedContentItem item, Layout::RustFFI::NodeSlotId pseudo_element_box) {
+        .attach_generated_image = [](void* context, Compositing::RustFFI::NodeSlotId slot, u32 style_node, Layout::RustFFI::FfiPseudoElement pseudo_element, Layout::RustFFI::FfiGeneratedContentItem item, Compositing::RustFFI::NodeSlotId pseudo_element_box) {
             auto& document = *static_cast<Document*>(context);
             if (Layout::attach_owed_generated_image(document, slot, style_node, pseudo_element, item, pseudo_element_box))
                 document.m_owed_image_provider_arrived_with_image = true; },

@@ -61,7 +61,6 @@ impl StyleInvalidation {
             && !self.resnap_scroll_container
             && !self.recompute_descendants
             && self.inherited_groups == 0
-            && !self.changes_containing_block
             && !self.repaint_selection
             && !self.affects_hit_testing
             && !self.repaint_text_decorations
@@ -129,7 +128,6 @@ impl StyleInvalidation {
             recompute_descendants: has(FfiStyleInvalidationField::RecomputeDescendants),
             inherited_groups: ((packed >> FfiStyleInvalidationField::InheritedGroupsShift as u32)
                 & FfiStyleInvalidationField::InheritedGroupsMask as u32) as u8,
-            changes_containing_block: has(FfiStyleInvalidationField::ChangesContainingBlock),
             repaint_text_decorations: has(FfiStyleInvalidationField::RepaintTextDecorations),
             non_inherited_inheritance_source: has(FfiStyleInvalidationField::NonInheritedInheritanceSource),
             any_computed_value_changed: has(FfiStyleInvalidationField::AnyComputedValueChanged),
