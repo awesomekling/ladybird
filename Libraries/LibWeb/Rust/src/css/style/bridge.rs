@@ -4488,6 +4488,42 @@ pub unsafe extern "C" fn style_engine_element_custom_property_data(engine: *cons
         .unwrap_or(std::ptr::null())
 }
 
+/// Keeps the custom-property environment one of an element's synthetic pseudo-elements now holds. A
+/// null `data` records that it holds none.
+///
+/// # Safety
+/// `engine` must be live, and `data` must be null or a live `Web::CSS::CustomPropertyData`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_set_pseudo_element_custom_property_data(
+    engine: *mut c_void,
+    node: u32,
+    pseudo: u8,
+    data: *const c_void,
+) {
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return;
+    };
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    unsafe { engine.set_pseudo_element_custom_property_data(node, pseudo, data) };
+}
+
+/// The custom-property environment one of an element's synthetic pseudo-elements holds. Null when
+/// it holds none.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_pseudo_element_custom_property_data(
+    engine: *const c_void,
+    node: u32,
+    pseudo: u8,
+) -> *const c_void {
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    StyleNodeID::from_raw(node).map_or(std::ptr::null(), |node| {
+        engine.pseudo_element_custom_property_data(node, pseudo)
+    })
+}
+
 /// Keep the sampled custom-property values of an animation as a published input. Its environment
 /// identity is already installed on the element. Return the reactions derived from the element's
 /// retained declarations and from which sampled names its descendants inherit.
