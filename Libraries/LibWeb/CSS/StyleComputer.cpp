@@ -102,6 +102,7 @@
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/Node.h>
+#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Platform/FontPlugin.h>
@@ -562,14 +563,20 @@ static RefPtr<CustomPropertyData const> inheritable_custom_property_data(DOM::Ab
     return data->inheritable(abstract_element.document());
 }
 
-// The size of the element's transform reference box, as the last committed layout left it, which a
-// keyframe or transition resolves a percentage translation against. The stage asks the engine by
-// identity rather than following the element's layout-node pointer: the box is an earlier stage's
-// committed output, and the pointer is a live read of a later stage's objects.
-static void apply_committed_transform_reference_box(StyleEngine& style_engine, DOM::AbstractElement abstract_element, StyleValueFFI::FfiAnimationContext& animation_context)
+static void* layout_arena_handle(DOM::Document& document)
 {
-    auto committed = StyleEngineFFI::style_engine_committed_transform_reference_box(
-        style_engine.rust_handle(), abstract_element.element().style_node_id().value());
+    auto* arena = document.layout_node_arena_if_created();
+    return arena ? arena->handle() : nullptr;
+}
+
+// The size of the element's transform reference box, as the last committed layout left it, which a
+// keyframe or transition resolves a percentage translation against. The stage asks the layout arena
+// by identity rather than following the element's layout-node pointer: the box is an earlier stage's
+// committed output, and the pointer is a live read of a later stage's objects.
+static void apply_committed_transform_reference_box(DOM::AbstractElement abstract_element, StyleValueFFI::FfiAnimationContext& animation_context)
+{
+    auto committed = StyleEngineFFI::layout_arena_committed_transform_reference_box(
+        layout_arena_handle(abstract_element.document()), abstract_element.element().style_node_id().value());
     if (!committed.has_box)
         return;
     animation_context.has_transform_reference_box = true;
@@ -711,6 +718,7 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
                 .line_height = length_context_for(PropertyID::LineHeight),
                 .remaining = length_context_for(PropertyID::Color),
             }; },
+        .layout_arena = layout_arena_handle(abstract_element.document()),
     };
     auto result = ComputedValuesFFI::rust_sample_animation_effects(&input);
 
@@ -1181,7 +1189,7 @@ void StyleComputer::start_needed_transitions(ComputedStyleWorkingSet& new_style,
     // The lengths the transitions resolve against are those of the record the element installed.
     transition_animation_context.has_length_resolution_context = StyleValueFFI::rust_transition_length_resolution_context(
         m_style_engine.rust_handle(), abstract_element.style_record_identity().value(), &transition_animation_context.length_resolution_context);
-    apply_committed_transform_reference_box(m_style_engine, abstract_element, transition_animation_context);
+    apply_committed_transform_reference_box(abstract_element, transition_animation_context);
 
     struct PreparedTransition {
         size_t stabilization_state_index;

@@ -1804,13 +1804,14 @@ impl SettledAnimationPlan {
 /// does lazily today and only for the rows that are painted.
 ///
 /// # Safety
-/// `arena` must be the document's live layout arena.
+/// `arena` must be the document's live layout arena, or null for a document that has none, which
+/// has no committed boxes.
 #[must_use]
 pub(crate) unsafe fn committed_transform_reference_box(
     arena: *mut std::ffi::c_void,
     node: StyleNodeID,
 ) -> Option<(f64, f64)> {
-    let arena = unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() };
+    let arena = unsafe { arena.cast::<crate::layout::LayoutNodeArena>().as_ref() }?;
     let row = arena.bound_row(node);
     if row.is_invalid() || !arena.paintable_row_is_populated(row) {
         return None;

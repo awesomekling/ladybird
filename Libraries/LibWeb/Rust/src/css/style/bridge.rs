@@ -1607,42 +1607,29 @@ pub struct FfiCommittedTransformReferenceBox {
     pub height: f64,
 }
 
-/// Names the layout arena whose committed boxes the style stage may read. The document calls this
-/// once, when it builds its arena; the engine only ever reads through the handle.
-///
-/// # Safety
-/// `engine` must be live, and `arena` must be the document's layout arena, which outlives it.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_set_layout_arena(engine: *mut c_void, arena: *mut c_void) {
-    super::seal::note_engine_call("style_engine_set_layout_arena");
-    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    engine.host.layout_arena = std::ptr::NonNull::new(arena);
-}
-
 /// The transform reference box the last committed layout left for `node`, which the animation
 /// stage resolves percentage translations against. An element with no committed box, and every
 /// element while the document has no layout arena, has none.
 ///
 /// # Safety
-/// `engine` must be live.
+/// `arena` must be the document's live layout arena, or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_committed_transform_reference_box(
-    engine: *mut c_void,
+pub unsafe extern "C" fn layout_arena_committed_transform_reference_box(
+    arena: *mut c_void,
     node: u32,
 ) -> FfiCommittedTransformReferenceBox {
-    super::seal::note_engine_call("style_engine_committed_transform_reference_box");
+    super::seal::note_engine_call("layout_arena_committed_transform_reference_box");
     let none = FfiCommittedTransformReferenceBox {
         has_box: false,
         width: 0.0,
         height: 0.0,
     };
-    let engine = unsafe { &*engine.cast::<StyleEngine>() };
-    let (Some(arena), Some(node)) = (engine.host.layout_arena, StyleNodeID::from_raw(node)) else {
+    let Some(node) = StyleNodeID::from_raw(node) else {
         return none;
     };
-    // SAFETY: The arena the document named outlives the engine, and this reads its committed
-    // paintable rows without touching the engine it can reach back into.
-    match unsafe { super::animations::committed_transform_reference_box(arena.as_ptr(), node) } {
+    // SAFETY: The caller passes a live arena or null, and this reads its committed paintable rows
+    // without touching the engine it can reach back into.
+    match unsafe { super::animations::committed_transform_reference_box(arena, node) } {
         Some((width, height)) => FfiCommittedTransformReferenceBox {
             has_box: true,
             width,
