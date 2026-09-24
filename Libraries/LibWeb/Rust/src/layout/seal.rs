@@ -36,7 +36,7 @@
 //!   them. `FfiLayoutHostCallbacks::deliver_commit_messages`, sent from
 //!   `commit::CommitNotifications::notify_host`.
 //! - box presence - a row telling the document that it gained or lost a box, and the paintable
-//!   row resets that ride with it. Commit queues them, and `commit_entry_pass` pays them with the
+//!   row resets that ride with it. Commit queues them, and `PendingLayoutCommit::finish` pays them with the
 //!   main thread capability through `LayoutNodeArena::finish_paying_host_handbacks` once commit
 //!   has returned.
 //!

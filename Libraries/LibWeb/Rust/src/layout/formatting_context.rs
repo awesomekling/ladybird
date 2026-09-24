@@ -2641,11 +2641,86 @@ pub(crate) unsafe fn commit_root_layout(
     root: NodeSlotId,
     output: &LayoutStageOutput,
 ) {
-    let host = LayoutHost::of(main_thread);
-    // SAFETY: Computation has finished and its input borrows are no longer used.
-    let arena = unsafe { commit_entry_pass(main_thread, arena_handle, &host, root, &output.0) };
-    arena.did_commit_full_layout(root);
-    arena.end_active_layout_pass(main_thread);
+    // SAFETY: Guaranteed by the caller.
+    unsafe { commit_root_layout_to_arena(arena_handle, root, output).finish(main_thread) };
+}
+
+/// Commits a computed root layout to the arena without the host. The host half, which pays what
+/// the commit owes the host, notifies it and then settles the arena, is left to
+/// [`PendingLayoutCommit::finish`].
+///
+/// # Safety
+///
+/// `arena_handle` must be a live handle whose owner waits for this call or makes it itself, and
+/// `output` must be the computation of `root`, its live viewport box.
+pub(crate) unsafe fn commit_root_layout_to_arena(
+    arena_handle: *mut c_void,
+    root: NodeSlotId,
+    output: &LayoutStageOutput,
+) -> PendingLayoutCommit {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { commit_entry_pass_to_arena(arena_handle, root, &output.0, CommittedEntry::Root) }
+}
+
+/// Which layout entry a [`PendingLayoutCommit`] committed.
+enum CommittedEntry {
+    Root,
+    Subtree,
+}
+
+/// A pass committed to the arena whose host half has not run yet. Until it has, the host has not
+/// heard of the commit and the arena still counts the pass as running.
+#[must_use]
+pub(crate) struct PendingLayoutCommit {
+    arena_handle: *mut c_void,
+    root: NodeSlotId,
+    entry: CommittedEntry,
+    notifications: commit::CommitNotifications,
+}
+
+impl PendingLayoutCommit {
+    /// Pays the host what the commit owes it, delivers the commit's notifications and then settles
+    /// the arena-local bookkeeping every layout entry owes its caller: cache maintenance and the
+    /// reset of the update flags the committed subtree satisfied. The reset follows the host code,
+    /// so what that code marks inside the subtree is satisfied as well.
+    ///
+    /// # Safety
+    ///
+    /// The arena must still be live, with no borrow taken during the pass still in use.
+    pub(crate) unsafe fn finish(self, main_thread: &crate::stage::MainThread) {
+        let Self {
+            arena_handle,
+            root,
+            entry,
+            notifications,
+        } = self;
+        let host = LayoutHost::of(main_thread);
+        // The boxes the commit gave or took reach the host first, as they did while it ran.
+        // SAFETY: Guaranteed by the caller; commit's mutable borrow has ended.
+        unsafe { LayoutNodeArena::from_handle(arena_handle) }.finish_paying_host_handbacks(main_thread);
+        // SAFETY: The host and shells remain live, and commit's mutable borrow has ended.
+        unsafe { notifications.notify_host(main_thread, &host) };
+        // SAFETY: Host callbacks have returned; borrow the arena again for the epilogue, which
+        // performs no host callbacks.
+        let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+        // SAFETY: The scratch lives beside the arena for as long as the handle does.
+        unsafe { LayoutScratch::from_handle(arena_handle) }.clear_inline_item_stashes();
+        arena.end_layout_pass();
+        // SAFETY: The scratch lives beside the arena for as long as the handle does.
+        unsafe { LayoutScratch::from_handle(arena_handle) }.end_layout_pass();
+        arena.reset_layout_update_flags_in_subtree(root);
+        match entry {
+            CommittedEntry::Root => arena.did_commit_full_layout(root),
+            CommittedEntry::Subtree => {
+                // Commit reset the subtree's rows, and its new size may affect ancestor scrollable
+                // overflow. Partial relayout roots are SVG viewports or abspos boxes, never SVG
+                // content boxes that would require a new layout instead of an overflow update.
+                debug_assert!(!node_facts::kind_is_svg_box(arena.data(root).kind.get()));
+                arena.schedule_scrollable_overflow_recalculation(root);
+            }
+        }
+        arena.end_active_layout_pass(main_thread);
+    }
 }
 
 fn finish_entry_pass(
@@ -2668,45 +2743,33 @@ fn finish_entry_pass(
     pass_fragments
 }
 
-/// Commits the finished entry pass rooted at `commit_root` and settles the arena-local
-/// bookkeeping every layout entry owes its caller: host notifications, cache maintenance, and
-/// the reset of the update flags the committed subtree satisfied. Returns the arena re-borrowed
-/// after commit for entry-specific epilogues.
+/// Commits the finished entry pass rooted at `commit_root` to the arena. What the commit owes the
+/// host waits in the handback span it opens, which [`PendingLayoutCommit::finish`] pays.
 ///
 /// # Safety
 ///
-/// `arena_handle` must be the live arena the pass computed against, and no borrow taken during
-/// the pass may still be live.
-unsafe fn commit_entry_pass<'a>(
-    main_thread: &crate::stage::MainThread,
+/// `arena_handle` must be the live arena the pass computed against, its owner must wait for this
+/// call or make it itself, and no borrow taken during the pass may still be live.
+unsafe fn commit_entry_pass_to_arena(
     arena_handle: *mut c_void,
-    host: &LayoutHost,
     commit_root: NodeSlotId,
     pass_fragments: &fragment_tree::CompletedPassFragments,
-) -> &'a LayoutNodeArena {
+    entry: CommittedEntry,
+) -> PendingLayoutCommit {
     // SAFETY: Computation has finished and its input borrows are no longer used.
-    unsafe { LayoutNodeArena::from_handle(arena_handle) }.begin_paying_host_handbacks(main_thread);
+    unsafe { LayoutNodeArena::from_handle(arena_handle) }.begin_layout_commit_handbacks();
     // SAFETY: As above. Commit performs no host callbacks while it borrows the arena exclusively.
     let notifications = commit::commit_replacing(
         commit_root,
         unsafe { LayoutNodeArena::from_handle_mut(arena_handle) },
         pass_fragments,
     );
-    // The boxes the commit gave or took reach the host first, as they did while it ran.
-    // SAFETY: Commit's mutable borrow has ended.
-    unsafe { LayoutNodeArena::from_handle(arena_handle) }.finish_paying_host_handbacks(main_thread);
-    // SAFETY: The host and shells remain live, and commit's mutable borrow has ended.
-    unsafe { notifications.notify_host(main_thread, host) };
-    // SAFETY: Host callbacks have returned; borrow the arena again for the epilogue, which
-    // performs no host callbacks.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
-    // SAFETY: The scratch lives beside the arena for as long as the handle does.
-    unsafe { LayoutScratch::from_handle(arena_handle) }.clear_inline_item_stashes();
-    arena.end_layout_pass();
-    // SAFETY: The scratch lives beside the arena for as long as the handle does.
-    unsafe { LayoutScratch::from_handle(arena_handle) }.end_layout_pass();
-    arena.reset_layout_update_flags_in_subtree(commit_root);
-    arena
+    PendingLayoutCommit {
+        arena_handle,
+        root: commit_root,
+        entry,
+        notifications,
+    }
 }
 
 /// The host-free partial layout stage. Its input carries no host table or main-thread capability.
@@ -2850,15 +2913,23 @@ pub(crate) unsafe fn commit_subtree_layout(
     root: NodeSlotId,
     output: &LayoutStageOutput,
 ) {
-    let host = LayoutHost::of(main_thread);
-    // SAFETY: Computation has finished and its input borrows are no longer used.
-    let arena = unsafe { commit_entry_pass(main_thread, arena_handle, &host, root, &output.0) };
-    // Commit reset the subtree's rows, and its new size may affect ancestor scrollable overflow.
-    // Partial relayout roots are SVG viewports or abspos boxes, never SVG content boxes that
-    // would require a new layout instead of an overflow update.
-    debug_assert!(!node_facts::kind_is_svg_box(arena.data(root).kind.get()));
-    arena.schedule_scrollable_overflow_recalculation(root);
-    arena.end_active_layout_pass(main_thread);
+    // SAFETY: Guaranteed by the caller.
+    unsafe { commit_subtree_layout_to_arena(arena_handle, root, output).finish(main_thread) };
+}
+
+/// Commits a computed partial relayout boundary to the arena without the host, leaving the host
+/// half to [`PendingLayoutCommit::finish`].
+///
+/// # Safety
+///
+/// As for [`commit_root_layout_to_arena`], with `root` a live partial relayout boundary.
+pub(crate) unsafe fn commit_subtree_layout_to_arena(
+    arena_handle: *mut c_void,
+    root: NodeSlotId,
+    output: &LayoutStageOutput,
+) -> PendingLayoutCommit {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { commit_entry_pass_to_arena(arena_handle, root, &output.0, CommittedEntry::Subtree) }
 }
 
 fn layout_subtree_with_frozen_root_geometry(run: &FormattingContextRun<'_>) {
