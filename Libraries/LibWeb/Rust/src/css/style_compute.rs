@@ -3391,7 +3391,8 @@ unsafe fn sample_described_animation_effects(
             }
         }
     };
-    if crate::css::style::engine_sample_check::is_checking() {
+    // A transition step samples over the after-change style it is computing, which is no record yet.
+    if input.samples_whole_stack && crate::css::style::engine_sample_check::is_checking() {
         check_sample_length_contexts(input, engine, node, container_unit_mask, &length_contexts);
     }
 
