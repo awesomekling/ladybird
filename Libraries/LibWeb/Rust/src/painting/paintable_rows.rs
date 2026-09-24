@@ -1163,6 +1163,11 @@ impl LayoutNodeArena {
         self.needs_full_scrollable_overflow_recalculation.set(true);
     }
 
+    pub(crate) fn has_scheduled_scrollable_overflow_recalculation(&self) -> bool {
+        self.needs_full_scrollable_overflow_recalculation.get()
+            || !self.boxes_needing_scrollable_overflow_recalculation.borrow().is_empty()
+    }
+
     pub(crate) fn take_scrollable_overflow_recalculation_state(&self) -> (Vec<NodeSlotId>, bool) {
         (
             std::mem::take(&mut *self.boxes_needing_scrollable_overflow_recalculation.borrow_mut()),
@@ -1625,13 +1630,18 @@ impl LayoutNodeArena {
             && ((needs_spatial_indexes && !list.spatial_indexes_built)
                 || (needs_caret_lines && !list.caret_lines_built))
         {
-            let list = std::sync::Arc::make_mut(list);
-            if needs_spatial_indexes {
-                list.build_spatial_indexes_if_needed();
-            }
-            if needs_caret_lines {
-                list.build_caret_lines_if_needed(&self.paintable_rows());
-            }
+            let rows = self.paintable_rows();
+            let build = || {
+                let list = std::sync::Arc::make_mut(list);
+                if needs_spatial_indexes {
+                    list.build_spatial_indexes_if_needed();
+                }
+                if needs_caret_lines {
+                    list.build_caret_lines_if_needed(&rows);
+                }
+            };
+            // SAFETY: The arena belongs to this thread, which waits for the stage.
+            unsafe { crate::stage_thread::run_stage(build) };
         }
         *self.hit_test_list.get_mut() = list;
     }
@@ -1651,7 +1661,7 @@ impl LayoutNodeArena {
     /// first: that writer has finished, since the main side reads between writes. Overflow a
     /// commit or a writer left unmeasured is measured before they are.
     pub(crate) fn committed_paintable_rows(&mut self) -> CommittedPaintableRows<'_> {
-        self.measure_scrollable_overflow_before_publication();
+        self.measure_scrollable_overflow_on_stage_before_publication();
         self.publish_paintable_rows();
         CommittedPaintableRows { arena: self }
     }

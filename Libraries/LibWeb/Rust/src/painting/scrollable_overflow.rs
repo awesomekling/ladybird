@@ -831,6 +831,19 @@ impl LayoutNodeArena {
         }
     }
 
+    /// Runs [`Self::measure_scrollable_overflow_before_publication`] on the render stage, when a
+    /// commit, an invalidation or a writer left it anything to do.
+    pub(crate) fn measure_scrollable_overflow_on_stage_before_publication(&self) {
+        let overflow = &self.scrollable_overflow;
+        let has_work = overflow.full_layout_commit.get()
+            || !overflow.rows_to_measure.borrow().is_empty()
+            || self.has_scheduled_scrollable_overflow_recalculation();
+        if has_work {
+            // SAFETY: The arena belongs to this thread, which waits for the stage.
+            unsafe { crate::stage_thread::run_stage(|| self.measure_scrollable_overflow_before_publication()) };
+        }
+    }
+
     pub(crate) fn note_row_overflow_unmeasured(&self, slot: NodeSlotId) {
         self.scrollable_overflow.rows_to_measure.borrow_mut().push(slot);
     }
@@ -914,13 +927,39 @@ impl LayoutNodeArena {
     }
 }
 
-/// Measures the scrollable overflow left to measure, then hands the document the scroll
-/// offsets the boxes it settled now store out of range.
-pub(crate) fn update_scrollable_overflow(arena: &LayoutNodeArena, main_thread: &crate::stage::MainThread) {
+/// Hands the document the in-range scroll offsets [`measure_and_find_scroll_offsets_to_clamp`]
+/// decided on, for it to store.
+pub(crate) fn hand_over_clamped_scroll_offsets(
+    arena: &LayoutNodeArena,
+    main_thread: &crate::stage::MainThread,
+    clamped: Vec<(NodeSlotId, CssPixelPoint)>,
+) {
+    if clamped.is_empty() {
+        return;
+    }
+    let Some(host) = main_thread
+        .host_tables()
+        .and_then(|host_tables| host_tables.geometry_host.get())
+    else {
+        return;
+    };
+    for (slot, offset) in clamped {
+        let shell = arena.shell_if_live(main_thread, slot);
+        if !shell.is_null() {
+            // SAFETY: The registered host receives a live shell. No mutable arena or cache
+            // borrow is held while it re-enters geometry queries to store the offset.
+            unsafe { host.set_scroll_offset(main_thread, shell, offset.into()) };
+        }
+    }
+}
+
+/// Measures the scrollable overflow left to measure, then finds the scroll offsets the boxes it
+/// settled now store out of range, with the offsets in range they are to store instead.
+pub(crate) fn measure_and_find_scroll_offsets_to_clamp(arena: &LayoutNodeArena) -> Vec<(NodeSlotId, CssPixelPoint)> {
     arena.measure_scrollable_overflow_before_publication();
     let settled = std::mem::take(&mut *arena.scrollable_overflow.scroll_offsets_to_clamp.borrow_mut());
     if settled.is_empty() {
-        return;
+        return Vec::new();
     }
     let pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollableOverflow);
     // The new overflow can leave a stored scroll offset outside the range the box now allows.
@@ -951,21 +990,7 @@ pub(crate) fn update_scrollable_overflow(arena: &LayoutNodeArena, main_thread: &
         }
     }
     drop(pass);
-
-    let Some(host) = main_thread
-        .host_tables()
-        .and_then(|host_tables| host_tables.geometry_host.get())
-    else {
-        return;
-    };
-    for (slot, offset) in clamped {
-        let shell = arena.shell_if_live(main_thread, slot);
-        if !shell.is_null() {
-            // SAFETY: The registered host receives a live shell. No mutable arena or cache
-            // borrow is held while it re-enters geometry queries to store the offset.
-            unsafe { host.set_scroll_offset(main_thread, shell, offset.into()) };
-        }
-    }
+    clamped
 }
 
 /// Retain the last published transform group so a style change can invalidate overflow
