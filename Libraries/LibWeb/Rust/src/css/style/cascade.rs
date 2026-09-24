@@ -2593,6 +2593,15 @@ impl WinnerGroups {
         self.admitting = memory.is_tier3_admitting(MemoryCategory::CascadeWinnerGroup);
     }
 
+    /// Admit rows until `restore_admission` puts back the returned admission.
+    pub(super) fn admit_demanded_rows(&mut self) -> bool {
+        std::mem::replace(&mut self.admitting, true)
+    }
+
+    pub(super) fn restore_admission(&mut self, admitting: bool) {
+        self.admitting = admitting;
+    }
+
     pub(super) fn begin_quota_period(&mut self) {
         self.admitting = true;
     }
@@ -3378,6 +3387,30 @@ mod tests {
         assert!(matches!(
             groups.lookup(WinnerGroupKey::current(refused, ProgramVersion(1))),
             Lookup::Missing(WinnerGroupGap::MissingNode(node)) if node == refused
+        ));
+    }
+
+    #[test]
+    fn closed_winner_admission_still_admits_a_demanded_row() {
+        let mut memory = memory();
+        memory.set_tier3_limit_for_test(0);
+        memory.begin_tier3_quota_period();
+        let mut groups = WinnerGroups::new();
+        let state = groups.intern_sorted(&[winner(1, 1, 3)], None);
+        assert!(groups.set(StyleNodeID::element(1), state, ProgramVersion(1)));
+        groups.settle_memory(&mut memory);
+        memory.finish_evaluation_loop();
+        groups.update_admission(&memory);
+        assert!(!groups.admits_new_rows());
+
+        let demanded = StyleNodeID::element(2);
+        let admitting = groups.admit_demanded_rows();
+        assert!(groups.set(demanded, state, ProgramVersion(1)));
+        groups.restore_admission(admitting);
+        assert!(!groups.admits_new_rows());
+        assert!(matches!(
+            groups.lookup(WinnerGroupKey::current(demanded, ProgramVersion(1))),
+            Lookup::Known(_)
         ));
     }
 
