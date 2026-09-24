@@ -24,6 +24,11 @@ if (ENABLE_MEMORY_SANITIZER)
     add_cxx_link_options(-fsanitize=memory -fsanitize-memory-track-origins)
 endif()
 
+if (ENABLE_THREAD_SANITIZER)
+    add_cxx_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+    add_cxx_link_options(-fsanitize=thread)
+endif()
+
 if (ENABLE_UNDEFINED_SANITIZER)
     if (WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$")
         add_cxx_compile_options(-fsanitize=undefined)
