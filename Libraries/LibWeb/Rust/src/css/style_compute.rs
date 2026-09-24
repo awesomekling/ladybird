@@ -2767,6 +2767,22 @@ struct AnimatedCustomPropertyResults {
 }
 
 impl AnimatedCustomPropertyResults {
+    /// Take back the pairs lent from `storage`, which is released.
+    ///
+    /// # Safety
+    /// `storage` must be null or storage `lend` returned that nobody released.
+    unsafe fn take(
+        storage: *mut c_void,
+    ) -> Vec<(
+        crate::css::retained_fly_string::RetainedUtf16FlyString,
+        RetainedStyleValueData,
+    )> {
+        if storage.is_null() {
+            return Vec::new();
+        }
+        unsafe { Box::from_raw(storage.cast::<Self>()) }._retained
+    }
+
     /// Lend the host the settled pairs: the rows, their count, and the storage it releases with
     /// `rust_release_animated_custom_property_results`. Null and empty where nothing animated a name.
     fn lend(
@@ -3241,6 +3257,11 @@ pub(crate) struct SettledRowSample {
     /// An animated display as the sample composed it, before the box-type transformation adjusted
     /// it.
     pub(crate) animated_display_before_box_type_transformation: Option<u32>,
+    /// The custom properties the sample animated, and the values it gave them.
+    pub(crate) animated_custom_properties: Vec<(
+        crate::css::retained_fly_string::RetainedUtf16FlyString,
+        RetainedStyleValueData,
+    )>,
     /// The table after the animated box-type finalization, and the overlay.
     pub(crate) style: crate::css::style::engine_sample::EngineSampledStyle,
 }
@@ -3573,12 +3594,8 @@ pub(crate) fn sample_settled_row(
     // What the container units the sample resolved read of the element's containers is the
     // host's to record, with what the row's record read of them.
     let container_unit_mask = run.map_or(0, |run| run.container_unit_mask.get());
-    let animates_custom_properties = result.animated_custom_property_count != 0;
-    unsafe { rust_release_animated_custom_property_results(result.animated_custom_properties_storage) };
-    if animates_custom_properties {
-        unsafe { rust_animated_overlay_free(overlay) };
-        return Err("animated custom properties".into());
-    }
+    let animated_custom_properties =
+        unsafe { AnimatedCustomPropertyResults::take(result.animated_custom_properties_storage) };
     // A sample that clears keeps what the element inherited.
     let overlay = match result.outcome {
         FfiHostAnimationSampleOutcome::Cleared => {
@@ -3608,6 +3625,7 @@ pub(crate) fn sample_settled_row(
         uses_tree_counting_function: result.uses_tree_counting_function,
         substitution_marks: result.substitution_marks,
         animated_display_before_box_type_transformation,
+        animated_custom_properties,
         style: crate::css::style::engine_sample::EngineSampledStyle { table, overlay },
     })
 }

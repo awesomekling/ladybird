@@ -301,6 +301,32 @@ static void sample_animations_for_installed_record(DOM::AbstractElement abstract
     context.elements.set(abstract_element, move(data));
 }
 
+// The environment a style pass composed an element's animated custom properties into, viewed as the
+// element's, or the element's record's environment again where the sample animated none; and what
+// that moves, recorded for the next transaction.
+static void install_sampled_custom_property_environment(DOM::Element& element, StyleEngineFFI::FfiRowSampledInPass const& sample)
+{
+    auto data = element.custom_property_data({});
+    RefPtr<CustomPropertyData const> base = data;
+    if (data && data->is_animation_overlay_for({ element }))
+        base = data->parent();
+    RefPtr<CustomPropertyData const> installed = base;
+    if (sample.custom_property_environment != 0) {
+        VERIFY(sample.custom_property_store);
+        installed = CustomPropertyData::view_animation_overlay(sample.custom_property_store, sample.custom_property_environment, base, { element });
+    }
+    element.replace_custom_property_data({}, installed);
+    auto& style_engine = element.document().style_computer().style_engine();
+    if (sample.custom_property_reactions & 1)
+        style_engine.record_derived_element_style_input_change(element.style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle);
+    if (sample.custom_property_reactions & 2) {
+        style_engine.record_flat_tree_descendant_style_input_changes(
+            element.style_node_id(),
+            StyleEngine::InheritedStyle,
+            RequiredInvalidationAfterStyleChange::all_inherited_style_groups);
+    }
+}
+
 // The pass sampled the element's animations over the record the row settled and published the
 // composition, which the rows after it already read: install it as the host's own sample would
 // have, and record what the sample found out on the element and its parent.
@@ -323,6 +349,8 @@ static bool install_composition_sampled_in_pass(DOM::AbstractElement abstract_el
         element.set_style_uses_custom_function();
     if (sample.uses_tree_counting_function)
         element.set_style_uses_tree_counting_function();
+    if (sample.custom_property_environment_moved)
+        install_sampled_custom_property_environment(element, sample);
     // A keyframe-borne `inherit` on a non-inherited property leaves the same mark on the parent a
     // full style computation does.
     if (auto style_groups = sample.keyframes_inherited_non_inherited_style_groups; style_groups != 0) {
@@ -1199,12 +1227,22 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
     constexpr size_t max_style_update_passes = 8;
     size_t style_update_pass = 0;
     size_t style_reaction_pass = 0;
+    // Far above the flat tree depths a style change reaches by derived reactions alone.
+    constexpr size_t max_style_reaction_waves = 16384;
     HashTable<StyleNodeID> declined_rows;
     while (!style_engine_reactions.is_empty()) {
         auto apply_started_at = MonotonicTime::now();
         ArmedScopeGuard record_apply_time = [&] {
             timing_counters.style_update_apply_microseconds += (MonotonicTime::now() - apply_started_at).to_truncated_microseconds();
         };
+        // Waves of derived reactions do not count as passes, but a style change that keeps
+        // producing them is a feedback loop, such as an animation overlay recomputing its element
+        // over and over. Stop it rather than let it grow without end.
+        if (style_reaction_pass >= max_style_reaction_waves) {
+            dbgln("FIXME: Style update stopped after {} waves of reactions", style_reaction_pass);
+            ++document.style_invalidation_counters().style_update_pass_guard_hits;
+            break;
+        }
         // One more tree generation of the same style change is not a new pass of it.
         if (style_reaction_pass++ > 0 && !transaction_only_derived_child_reactions)
             document.record_style_stabilization_pass();

@@ -631,6 +631,26 @@ impl CustomPropertyStore {
         result
     }
 
+    /// Whether this store resolves every custom property to the same value as `other`, such as an
+    /// environment the engine minted again for the same declarations.
+    pub(crate) fn resolves_like(&self, other: &Self) -> bool {
+        let mut names = std::collections::HashSet::new();
+        for mut store in [self, other] {
+            loop {
+                names.extend(store.own_values.keys().copied());
+                let Some(parent) = store.parent.as_deref() else {
+                    break;
+                };
+                store = parent;
+            }
+        }
+        names.into_iter().all(|name| match (self.get(name), other.get(name)) {
+            (Some(ours), Some(theirs)) => ours.value == theirs.value && ours.important == theirs.important,
+            (None, None) => true,
+            _ => false,
+        })
+    }
+
     pub(crate) fn get(&self, name_raw: usize) -> Option<&CustomPropertyEntry> {
         self.own_values
             .get(&name_raw)
@@ -797,6 +817,88 @@ impl CustomPropertyStore {
             })
             .collect();
         Self::child(unsafe { Self::retained_parent(parent) }, entries)
+    }
+
+    /// The store an element's animations compose custom properties into: `base` with the animated
+    /// values over its own, as `rust_custom_property_store_create_animation_overlay` composes it.
+    /// Returns one strong reference.
+    ///
+    /// # Safety
+    /// `base` must be null or a live store.
+    pub(crate) unsafe fn animation_overlay_over(
+        base: *const c_void,
+        animated: &[(RetainedUtf16FlyString, RetainedStyleValueData)],
+    ) -> *const c_void {
+        let base = unsafe { base.cast::<Self>().as_ref() };
+        let (mut own_values, mut own_names, parent, inheritance_parent, ancestor_count) = match base {
+            Some(base) => (
+                base.own_values.clone(),
+                base.own_names.clone(),
+                base.parent.clone(),
+                base.inheritance_parent.clone(),
+                base.ancestor_count,
+            ),
+            None => (HashMap::new(), HashMap::new(), None, None, 0),
+        };
+        let mut declared_names = Vec::with_capacity(animated.len());
+        for (name, value) in animated {
+            let text: Arc<[u16]> = match unsafe { ak::utf16_string_units(name.raw_word()) } {
+                ak::Utf16StringUnits::Ascii(bytes) => bytes.iter().map(|&unit| u16::from(unit)).collect(),
+                ak::Utf16StringUnits::Utf16(units) => units.into(),
+            };
+            declared_names.push(name.raw());
+            own_names.insert(text.clone(), name.raw());
+            own_values.insert(
+                name.raw(),
+                CustomPropertyEntry {
+                    _name: name.clone(),
+                    name: text,
+                    value: value.clone_retained(),
+                    important: false,
+                },
+            );
+        }
+        Arc::into_raw(Arc::new(Self {
+            own_values,
+            declared_names,
+            own_names,
+            ancestor_count,
+            parent,
+            inheritance_parent,
+        }))
+        .cast()
+    }
+
+    /// Whether what `store` composes over its base is exactly `animated`, name for name and value
+    /// for value.
+    ///
+    /// # Safety
+    /// `store` must be a live store.
+    pub(crate) unsafe fn composes_exactly(
+        store: *const c_void,
+        animated: &[(RetainedUtf16FlyString, RetainedStyleValueData)],
+    ) -> bool {
+        let store = unsafe { &*store.cast::<Self>() };
+        store.declared_names.len() == animated.len()
+            && animated.iter().all(|(name, value)| {
+                store.declared_names.contains(&name.raw())
+                    && store
+                        .own_values
+                        .get(&name.raw())
+                        .is_some_and(|entry| entry.value == *value)
+            })
+    }
+
+    /// Whether two environments resolve every custom property alike, a null store being none.
+    ///
+    /// # Safety
+    /// Each of `first` and `second` must be null or a live store.
+    pub(crate) unsafe fn resolve_alike(first: *const c_void, second: *const c_void) -> bool {
+        match unsafe { (first.cast::<Self>().as_ref(), second.cast::<Self>().as_ref()) } {
+            (None, None) => true,
+            (Some(first), Some(second)) => std::ptr::eq(first, second) || first.resolves_like(second),
+            _ => false,
+        }
     }
 
     /// Whether `store` holds values of its own over exactly `parent`, a null `parent` being none.

@@ -3444,6 +3444,15 @@ pub struct FfiRowSampledInPass {
     /// or every group as `u32::MAX`.
     pub keyframes_inherited_non_inherited_style_groups: u32,
     pub uses_tree_counting_function: bool,
+    /// Whether the sample moved the element's custom-property environment: to the one the engine
+    /// composed its animated custom properties into, borrowed as its identity and its store, or,
+    /// with zero and null, back to the one its record was published with.
+    pub custom_property_environment_moved: bool,
+    pub custom_property_environment: u64,
+    pub custom_property_store: *const c_void,
+    /// `1` where the element's own style reads custom properties, and `2` where a name its
+    /// descendants inherit moved: what the host records for the next transaction.
+    pub custom_property_reactions: u8,
 }
 
 /// Takes what the pass published for a row whose animations it sampled, so that exactly one
@@ -3464,6 +3473,10 @@ pub unsafe extern "C" fn style_engine_take_row_sampled_in_pass(engine: *mut c_vo
             substitution_marks: 0,
             keyframes_inherited_non_inherited_style_groups: 0,
             uses_tree_counting_function: false,
+            custom_property_environment_moved: false,
+            custom_property_environment: 0,
+            custom_property_store: std::ptr::null(),
+            custom_property_reactions: 0,
         },
         Some(published) => FfiRowSampledInPass {
             present: true,
@@ -3473,6 +3486,15 @@ pub unsafe extern "C" fn style_engine_take_row_sampled_in_pass(engine: *mut c_vo
             substitution_marks: published.substitution_marks,
             keyframes_inherited_non_inherited_style_groups: published.keyframes_inherited_non_inherited_style_groups,
             uses_tree_counting_function: published.uses_tree_counting_function,
+            custom_property_environment_moved: published.custom_properties.is_some(),
+            custom_property_environment: published.custom_properties.map_or(0, |moved| moved.environment),
+            custom_property_store: published
+                .custom_properties
+                .and_then(|moved| engine.custom_property_environments.store(moved.environment))
+                .unwrap_or(std::ptr::null()),
+            custom_property_reactions: published.custom_properties.map_or(0, |moved| {
+                u8::from(moved.element_reads) | (u8::from(moved.inherited_names_moved) << 1)
+            }),
         },
     }
 }
