@@ -2003,8 +2003,15 @@ RefPtr<CustomPropertyData const> StyleComputer::engine_custom_property_environme
     auto const* store = m_style_engine.borrow_engine_custom_property_environment(identity, parent_identity);
     if (!store)
         return {};
-    auto data = CustomPropertyData::from_rust_store(store, nullptr, identity, true);
-    m_engine_custom_property_environments.set(identity, data);
+    // An environment resolved over another engine environment is held over the host's view of it, as
+    // the engine's store is over the parent's: a child inherits the parent's environment by identity
+    // wherever the element's own declarations do not inherit.
+    RefPtr<CustomPropertyData const> data;
+    if (auto parent = engine_custom_property_environment(parent_identity))
+        data = CustomPropertyData::from_rust_store(store, move(parent), identity, false);
+    else
+        data = CustomPropertyData::from_rust_store(store, nullptr, identity, true);
+    m_engine_custom_property_environments.set(identity, *data);
     return data;
 }
 
