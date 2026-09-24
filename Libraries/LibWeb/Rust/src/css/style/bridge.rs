@@ -4315,15 +4315,21 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     engine.document_style_computation_inputs = Some(computation_inputs);
     engine.clear_ffi_style_transaction_output();
     let mut output = FfiStyleTransactionOutput::default();
-    output.scoped = engine.take_style_transaction(root, |transaction_version, program_version, answers| {
-        assert!(
-            output.answers.is_empty(),
-            "a style transaction emitted more than one batch"
-        );
-        output.transaction_version = transaction_version.0;
-        output.program_version = program_version.0;
-        output.answers.extend_from_slice(answers);
-    });
+    let transaction = || {
+        engine.take_style_transaction(root, |transaction_version, program_version, answers| {
+            assert!(
+                output.answers.is_empty(),
+                "a style transaction emitted more than one batch"
+            );
+            output.transaction_version = transaction_version.0;
+            output.program_version = program_version.0;
+            output.answers.extend_from_slice(answers);
+        })
+    };
+    // SAFETY: The engine and the output are the calling thread's, and nothing else reaches them
+    // while it waits. The transaction's inputs were frozen above.
+    output.scoped = unsafe { crate::stage_thread::run_stage(transaction) };
+    engine.host.retired_custom_property_data.clear();
     output.reclaimed_style_atoms = std::mem::take(&mut engine.host.reclaimed_style_atoms)
         .into_iter()
         .map(|reclaimed| FfiReclaimedStyleAtom {

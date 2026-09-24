@@ -1200,6 +1200,10 @@ pub struct HostState {
     /// Identities released at transaction settlement. The FFI keeps this batch borrowed until C++
     /// has removed its matching fly-string references and atom-keyed memo entries.
     reclaimed_style_atoms: Vec<ReclaimedStyleAtom>,
+    /// The custom-property environments of elements a transaction retired. Their reference counts
+    /// belong to the host and are not atomic, and a transaction may run on the stage thread, so
+    /// the transaction leaves them here and the bridge releases them on the document thread.
+    retired_custom_property_data: Vec<inputs::RetainedCustomPropertyData>,
     /// Whether transaction settlement performed an atom sweep, including a sweep that reclaimed
     /// no identities. Recording consumes this alongside the release batch.
     style_atoms_swept: bool,
