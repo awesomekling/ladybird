@@ -1191,19 +1191,13 @@ pub unsafe extern "C" fn layout_arena_refresh_scroll_state(
     true
 }
 
+/// What a recording stage runs on. The stage holds the arena exclusively while the owning thread
+/// waits for it, so the input is sendable because the arena is, not because it is shared.
 struct RecordingStageInput<'a> {
-    arena: &'a LayoutNodeArena,
+    arena: &'a mut LayoutNodeArena,
     viewport: NodeSlotId,
     inputs: crate::painting::record::RecordingInputs<'a>,
 }
-
-// SAFETY: DEBT: The recording's own inputs are already shareable - its fonts and image frames
-// are `Arc`-backed handles over atomically reference-counted resources, and its text rows now
-// name an `Arc<libgfx_rust::font::FrozenFontList>` rather than a raw `Gfx::FontCascadeList`.
-// What is not shareable is the document-owned arena this borrows: its columns are `Cell` and
-// `RefCell`. The FFI caller freezes the arena for this synchronous stage run. Replace this
-// boundary with immutable paint rows before moving recording to another thread.
-unsafe impl Sync for RecordingStageInput<'_> {}
 
 struct RecordingStageOutput {
     recording: crate::painting::record::RecordingResult,
@@ -1211,23 +1205,22 @@ struct RecordingStageOutput {
 }
 
 const _: () = {
-    const fn assert_sync<T: Sync>() {}
     const fn assert_send<T: Send>() {}
-    assert_sync::<RecordingStageInput<'static>>();
+    assert_send::<RecordingStageInput<'static>>();
     assert_send::<RecordingStageOutput>();
 };
 
 /// The host-free display-list recording stage. Host callbacks require a `MainThread` capability,
 /// which this function neither receives nor stores in its input.
-fn record_display_list_stage(
-    stage: RecordingStageInput<'_>,
-    scratch: &mut crate::painting::record::scratch::RecordingScratch,
-) -> RecordingStageOutput {
+fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOutput {
     let RecordingStageInput {
         arena,
         viewport,
         mut inputs,
     } = stage;
+    let arena: &LayoutNodeArena = arena;
+    let mut scratch = arena.recording_scratch().take_for_run();
+    let scratch = &mut *scratch;
     let paint_state = arena.paint_state().borrow();
     // The root background paints the union of the viewport and the root's overflow, so it
     // is the one output a viewport move can change. Drop its caches before recording
@@ -1313,12 +1306,12 @@ fn record_display_list_stage(
 /// fonts for enabled overlays must be live `Gfx::Font`s.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_record_display_list(
-    arena: *mut c_void,
+    arena_handle: *mut c_void,
     viewport: NodeSlotId,
     inputs: crate::painting::host::FfiRecordingInputs,
 ) -> bool {
-    crate::layout::main_side_census::note_rendering_update(arena);
-    let arena = unsafe { arena_from_handle(arena) };
+    crate::layout::main_side_census::note_rendering_update(arena_handle);
+    let arena = unsafe { arena_from_handle(arena_handle) };
     {
         let mut paint_state = arena.paint_state().borrow_mut();
         debug_assert!(
@@ -1355,14 +1348,16 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
         recording_from_scratch,
     } = {
         let input = RecordingStageInput {
-            arena,
+            // SAFETY: No borrow of the arena outlives this point, so the stage holds it alone.
+            arena: unsafe { arena_from_handle_mut(arena_handle) },
             viewport,
             inputs: recording_inputs,
         };
-        let mut scratch = arena.recording_scratch().take_for_run();
         // SAFETY: The arena and its scratch belong to this thread, which waits for the stage.
-        unsafe { crate::stage_thread::run_stage(|| record_display_list_stage(input, &mut scratch)) }
+        unsafe { crate::stage_thread::run_stage(|| record_display_list_stage(input)) }
     };
+    // SAFETY: The stage has returned the arena.
+    let arena = unsafe { arena_from_handle(arena_handle) };
     let mut paint_state = arena.paint_state().borrow_mut();
     if paint_state.trace_recordings && recording.output.capture_log_for_verification.is_some() {
         paint_state.pending_recording_trace = Some(crate::painting::paint_state::PendingRecordingTrace {

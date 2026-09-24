@@ -825,6 +825,21 @@ pub(crate) struct StaleWalkFacts {
     pub(crate) next_dom_sibling: Option<StyleNodeID>,
 }
 
+/// The arena's link to the style engine it mirrors.
+///
+/// DEBT: This is the one column of the arena that is sendable by assertion rather than by
+/// construction. The engine is not `Send`: its catalog caches are `Rc` and it names its host by
+/// pointer. A stage reaches it through the arena only while the document thread, which owns it,
+/// waits for the stage: the tree build walks the style mirror and pins the records it stamps, and
+/// layout and recording look up SVG references and published styles by identity. The link goes
+/// once those reads are published into the arena or the engine's read side is `Sync`.
+#[derive(Clone, Copy)]
+struct StyleEngineLink(*mut c_void);
+
+// SAFETY: See the DEBT above: the engine is only reached through the link while its owning thread
+// waits for the stage that holds the arena, and the handoff orders those accesses.
+unsafe impl Send for StyleEngineLink {}
+
 pub(crate) struct LayoutNodeArena {
     chunks: Vec<Box<Chunk>>,
     chunks_by_address: Vec<ChunkAddress>,
@@ -888,7 +903,7 @@ pub(crate) struct LayoutNodeArena {
     bound_viewport_row: Cell<NodeSlotId>,
     /// The style engine whose mirror the arena's rows are built from, or null before the document
     /// registers it.
-    style_engine: Cell<*mut c_void>,
+    style_engine: Cell<StyleEngineLink>,
     /// Whether the host listens for box presence. The callback itself is in the host tables,
     /// which only the main thread reaches; this says whether a change is worth handing back.
     host_hears_box_presence: Cell<bool>,
@@ -1032,7 +1047,7 @@ impl LayoutNodeArena {
             shadow_including_parent_elements: RefCell::new(Vec::new()),
             anchor_name_elements: RefCell::new(HashMap::default()),
             bound_viewport_row: Cell::new(NodeSlotId::INVALID),
-            style_engine: Cell::new(std::ptr::null_mut()),
+            style_engine: Cell::new(StyleEngineLink(std::ptr::null_mut())),
             host_hears_box_presence: Cell::new(false),
             host_handbacks: RefCell::new(HostHandbacks::default()),
             host_handback_spans: Cell::new(0),
@@ -1321,7 +1336,7 @@ impl LayoutNodeArena {
             rows_with_image_observers,
             paintable_row_resets,
             arena_pinned_style_records,
-            style_engine: self.style_engine.get(),
+            style_engine: self.style_engine.get().0,
         }
     }
 
@@ -1931,7 +1946,7 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn set_style_engine(&self, style_engine: *mut c_void) {
-        self.style_engine.set(style_engine);
+        self.style_engine.set(StyleEngineLink(style_engine));
         if !style_engine.is_null() {
             // SAFETY: The registered style engine outlives this arena's live nodes.
             unsafe { &mut *style_engine.cast::<StyleEngine>() }
@@ -2101,7 +2116,7 @@ impl LayoutNodeArena {
     }
 
     fn style_engine(&self) -> *mut c_void {
-        let style_engine = self.style_engine.get();
+        let style_engine = self.style_engine.get().0;
         assert!(!style_engine.is_null(), "layout node arena has no style record host");
         style_engine
     }
@@ -2301,7 +2316,7 @@ impl LayoutNodeArena {
     pub(crate) fn element_construction_facts(&self, style_node: Option<StyleNodeID>) -> u32 {
         match style_node {
             Some(style_node) => {
-                let style_engine = self.style_engine.get();
+                let style_engine = self.style_engine.get().0;
                 if style_engine.is_null() {
                     return 0;
                 }
@@ -2319,7 +2334,7 @@ impl LayoutNodeArena {
     pub(crate) fn element_box_kind(&self, style_node: Option<StyleNodeID>) -> ElementBoxKind {
         match style_node {
             Some(style_node) if style_node.element_index().is_some() => {
-                let style_engine = self.style_engine.get();
+                let style_engine = self.style_engine.get().0;
                 if style_engine.is_null() {
                     return ElementBoxKind::FromDisplay;
                 }
@@ -3739,7 +3754,7 @@ impl LayoutNodeArena {
         }
         // A document being torn down drops its style record host before the last publication is
         // cleared. The engine it named is going with it, so there is nothing left to retain for.
-        let style_engine = self.style_engine.get();
+        let style_engine = self.style_engine.get().0;
         if style_engine.is_null() {
             return;
         }
@@ -7422,3 +7437,10 @@ mod tests {
         arena.free_subtree(second.slot).destroy_shells_and_invoke_callbacks();
     }
 }
+
+// Every column but the style engine link is sendable on its own terms, so a stage that holds the
+// arena exclusively may run on another thread.
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<LayoutNodeArena>();
+};
