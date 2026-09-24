@@ -23,6 +23,8 @@ use super::viewport_propagation::FfiViewportPropagationFacts;
 use crate::abort_on_panic;
 use crate::css::ffi_support::FfiUtf16View;
 use crate::css::style::tree::StyleNodeID;
+use crate::layout::used_values::FfiCssPixelPoint;
+use crate::painting::host::FfiRootBackgroundSource;
 use std::ffi::c_void;
 use std::time::Instant;
 
@@ -44,6 +46,9 @@ pub struct FfiLayoutUpdateHostCallbacks {
     pub document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
     pub needs_style_update_after_layout: unsafe extern "C" fn(*mut c_void) -> bool,
     pub prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
+    /// The root element and body boxes the root background is painted from, and whether the body's
+    /// background properties are the ones used.
+    pub root_background_source: unsafe extern "C" fn(*mut c_void) -> FfiRootBackgroundSource,
     /// Readies the document for a layout tree build, and answers with the document's style node,
     /// which the build walks from.
     pub prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
@@ -96,6 +101,22 @@ pub struct FfiLayoutCommitEffects {
     pub boxes_with_auto_content_visibility_collected: bool,
     pub boxes_with_auto_content_visibility: *const NodeSlotId,
     pub boxes_with_auto_content_visibility_count: usize,
+    /// The scroll offsets the commits' overflow measurement clamped, in the order it clamped them,
+    /// for the document to store.
+    pub clamped_scroll_offsets: *const FfiClampedScrollOffset,
+    pub clamped_scroll_offsets_count: usize,
+}
+
+/// A scroll offset a commit's overflow measurement brought back into the range its box now allows,
+/// named by the node the box is built for rather than by the box, which a later tree build in the
+/// same frame may free: an element by its style node, a pseudo-element by its generator's style node
+/// and its kind, and the document's viewport by no style node at all.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct FfiClampedScrollOffset {
+    pub style_node: u32,
+    pub generated_for: u8,
+    pub offset: FfiCssPixelPoint,
 }
 
 /// What one layout update was asked for.
@@ -129,6 +150,7 @@ pub(crate) struct LayoutUpdateHost {
     document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
     needs_style_update_after_layout: unsafe extern "C" fn(*mut c_void) -> bool,
     prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
+    root_background_source: unsafe extern "C" fn(*mut c_void) -> FfiRootBackgroundSource,
     prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
     finish_layout_tree_build: unsafe extern "C" fn(*mut c_void, *mut c_void, NodeSlotId) -> FfiLayoutTreeBuildOutcome,
     rebuild_list_owners_with_stale_item_counters: unsafe extern "C" fn(*mut c_void, *const u32, usize),
@@ -150,6 +172,7 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             document_facts: host.document_facts,
             needs_style_update_after_layout: host.needs_style_update_after_layout,
             prepare_for_rendering: host.prepare_for_rendering,
+            root_background_source: host.root_background_source,
             prepare_layout_tree_build: host.prepare_layout_tree_build,
             finish_layout_tree_build: host.finish_layout_tree_build,
             rebuild_list_owners_with_stale_item_counters: host.rebuild_list_owners_with_stale_item_counters,
@@ -190,6 +213,10 @@ impl LayoutUpdateHost {
 
     fn prepare_for_rendering(&self, _: &crate::stage::MainThread) {
         unsafe { (self.prepare_for_rendering)(self.context) }
+    }
+
+    fn root_background_source(&self, _: &crate::stage::MainThread) -> FfiRootBackgroundSource {
+        unsafe { (self.root_background_source)(self.context) }
     }
 
     fn prepare_layout_tree_build(&self, _: &crate::stage::MainThread) -> u32 {
@@ -335,12 +362,10 @@ enum FrameJoin {
     /// them, in commit order, and of the last pass's commit, then what derives from committed
     /// layout on the document side, then the container queries the commit made pending, which are
     /// the document's query container elements, then the facts after them. What derives from the
-    /// commit there is the rendering preparation, which hands the scroll offsets it clamps to the
-    /// document's elements and reads the root element's style, the selection states the document's
-    /// selection range recomputes, and, after a tree change, the viewport rect the document's
-    /// viewport client elements are told of. What derives from the commit without the document
-    /// thread, the frame does after the join, and what the document only reads once the frame is
-    /// over, the frame leaves in its messages.
+    /// commit there is the selection states the document's selection range recomputes, and, after
+    /// a tree change, the viewport rect the document's viewport client elements are told of. What
+    /// derives from the commit without the document thread, the frame does after the join, and what
+    /// the document only reads once the frame is over, the frame leaves in its messages.
     AfterLayoutCommit,
     /// Whether style or layout work is still pending once the loop has run out of rounds, after the
     /// marks a last build left, as the style join would have set them. A loop that stabilizes has
@@ -360,23 +385,27 @@ struct FrameInputs {
 }
 
 /// What a layout pass reads from the document ahead of it: the root and body styles the viewport
-/// takes over, and the replaced content enrolled for sync. The join the pass follows reads them,
-/// so the pass itself prepares the arena without the document thread.
+/// takes over, the replaced content enrolled for sync, and the boxes the root background is painted
+/// from, which the rendering preparation after the pass's commit reads. The join the pass follows
+/// reads them, so the pass itself prepares the arena, and its commit prepares for rendering,
+/// without the document thread.
 struct LayoutPassSources {
     propagation_facts: FfiViewportPropagationFacts,
     content: EnrolledContentSources,
+    root_background_source: FfiRootBackgroundSource,
 }
 
 impl LayoutPassSources {
     /// # Safety
     ///
     /// As for [`arena`], on the document thread.
-    unsafe fn read(main_thread: &crate::stage::MainThread, arena_handle: *mut c_void) -> Self {
+    unsafe fn read(main_thread: &crate::stage::MainThread, host: &LayoutUpdateHost, arena_handle: *mut c_void) -> Self {
         // SAFETY: Guaranteed by the caller.
         unsafe {
             Self {
                 propagation_facts: read_viewport_propagation_facts(main_thread, arena_handle),
                 content: read_enrolled_content_sources(main_thread, arena_handle),
+                root_background_source: host.root_background_source(main_thread),
             }
         }
     }
@@ -410,6 +439,8 @@ struct FrameMessages {
     /// the document may have any. The HTML event loop reads them so it does not have to traverse
     /// the whole tree every time.
     boxes_with_auto_content_visibility: Option<Vec<NodeSlotId>>,
+    /// The scroll offsets the rendering preparations after the commits clamped.
+    clamped_scroll_offsets: Vec<FfiClampedScrollOffset>,
 }
 
 impl FrameMessages {
@@ -426,6 +457,8 @@ impl FrameMessages {
                     boxes_with_auto_content_visibility_collected: boxes.is_some(),
                     boxes_with_auto_content_visibility: boxes.map_or(std::ptr::null(), <[NodeSlotId]>::as_ptr),
                     boxes_with_auto_content_visibility_count: boxes.map_or(0, <[NodeSlotId]>::len),
+                    clamped_scroll_offsets: self.clamped_scroll_offsets.as_ptr(),
+                    clamped_scroll_offsets_count: self.clamped_scroll_offsets.len(),
                 },
             );
         }
@@ -506,7 +539,7 @@ impl LayoutFrame<'_> {
         }
         RoundAfterStyle {
             // SAFETY: The frame runs for the update the arena is in.
-            pass_sources: Some(unsafe { LayoutPassSources::read(main_thread, self.inputs.arena_handle) }),
+            pass_sources: Some(unsafe { LayoutPassSources::read(main_thread, host, self.inputs.arena_handle) }),
             ..RoundAfterStyle::default()
         }
     }
@@ -539,9 +572,16 @@ impl LayoutFrame<'_> {
     }
 
     /// What derives from a layout commit and needs no document thread, once the AfterLayoutCommit
-    /// join has finished the commit: the searchable text is dropped, and after a tree change the
-    /// boxes with `content-visibility: auto` are collected again for the document's paint state.
-    fn note_layout_commit(&mut self, layout_tree_changed: bool, facts: &FfiLayoutUpdateDocumentFacts) {
+    /// join has finished the commit: the rendering preparation, the searchable text is dropped, and
+    /// after a tree change the boxes with `content-visibility: auto` are collected again for the
+    /// document's paint state.
+    fn note_layout_commit(
+        &mut self,
+        layout_tree_changed: bool,
+        facts: &FfiLayoutUpdateDocumentFacts,
+        root_background_source: FfiRootBackgroundSource,
+    ) {
+        self.prepare_for_rendering_after_commit(root_background_source);
         // SAFETY: The frame runs for the update the arena is in, and no borrow of it is held here.
         unsafe { super::text_queries::layout_arena_invalidate_searchable_text(self.inputs.arena_handle) };
         self.messages.layout_committed = true;
@@ -555,6 +595,32 @@ impl LayoutFrame<'_> {
             );
             self.messages.boxes_with_auto_content_visibility = Some(boxes);
         }
+    }
+
+    /// The rendering preparation a commit asks for: the root background source the pass sources
+    /// read is taken over, and the overflow the commit left unmeasured is measured. The scroll
+    /// offsets that measurement clamps are left for the document to store once the frame is over.
+    ///
+    /// The commit has the document update its accumulated visual contexts and record its display
+    /// list again, which covers everything else the preparation can ask for, so what it answers
+    /// with is not needed.
+    fn prepare_for_rendering_after_commit(&mut self, root_background_source: FfiRootBackgroundSource) {
+        let arena = self.arena();
+        let (background_source_changed, clamped) =
+            crate::painting::ffi::prepare_root_background_and_overflow(arena, root_background_source);
+        let clamped: Vec<_> = clamped
+            .into_iter()
+            .filter_map(|(slot, offset)| {
+                let (style_node, generated_for) = arena.bound_node_name(slot)?;
+                Some(FfiClampedScrollOffset {
+                    style_node: style_node.map_or(0, StyleNodeID::raw),
+                    generated_for,
+                    offset: offset.into(),
+                })
+            })
+            .collect();
+        let _ = crate::painting::ffi::finish_rendering_preparation(arena, background_source_changed, true);
+        self.messages.clamped_scroll_offsets.extend(clamped);
     }
 
     fn take_pass_sources(&mut self) -> LayoutPassSources {
@@ -636,7 +702,7 @@ impl LayoutFrame<'_> {
                     let outcome = host.finish_layout_tree_build(main_thread, walked);
                     // SAFETY: The frame runs for the update the arena is in.
                     let pass_sources =
-                        pass_follows.then(|| unsafe { LayoutPassSources::read(main_thread, arena_handle) });
+                        pass_follows.then(|| unsafe { LayoutPassSources::read(main_thread, host, arena_handle) });
                     (outcome, pass_sources)
                 });
                 self.arena().record_layout_tree_build(&outcome);
@@ -666,6 +732,7 @@ impl LayoutFrame<'_> {
             let LayoutPassSources {
                 propagation_facts,
                 content,
+                root_background_source,
             } = self.take_pass_sources();
             // SAFETY (for the three steps below): The frame runs for the update the arena is in,
             // the viewport box stays live between them, and no row was freed since the sources
@@ -703,7 +770,7 @@ impl LayoutFrame<'_> {
                     facts: host.document_facts(main_thread),
                 }
             });
-            self.note_layout_commit(true, &facts);
+            self.note_layout_commit(true, &facts, root_background_source);
             self.inputs.trace.layout(layout_started);
 
             if needs_style_update_after_layout {
@@ -781,7 +848,7 @@ impl LayoutFrame<'_> {
                     value: (
                         outcome,
                         // SAFETY: The frame runs for the update the arena is in.
-                        pass_follows.then(|| unsafe { LayoutPassSources::read(main_thread, arena_handle) }),
+                        pass_follows.then(|| unsafe { LayoutPassSources::read(main_thread, host, arena_handle) }),
                     ),
                     facts,
                 }
@@ -814,7 +881,11 @@ impl LayoutFrame<'_> {
         }
 
         let arena_handle = self.inputs.arena_handle;
-        let content = self.take_pass_sources().content;
+        let LayoutPassSources {
+            content,
+            root_background_source,
+            ..
+        } = self.take_pass_sources();
         // SAFETY (for the steps below): The frame runs for the update the arena is in, the
         // planned boundaries and the viewport box stay live across them, and no row was freed
         // since the sources were read.
@@ -862,7 +933,7 @@ impl LayoutFrame<'_> {
                 facts: host.document_facts(main_thread),
             }
         });
-        self.note_layout_commit(layout_tree_was_built_in_partial_branch, &facts);
+        self.note_layout_commit(layout_tree_was_built_in_partial_branch, &facts, root_background_source);
         if needs_style_update_after_layout || !layout_is_up_to_date(self.arena(), &facts) {
             return PartialRelayout::NeedsAnotherLayoutPass;
         }

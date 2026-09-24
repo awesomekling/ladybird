@@ -199,54 +199,16 @@ unsafe extern "C" fn layout_arena_prepare_for_rendering(
 ) -> FfiRenderingPreparationOutcome {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { arena_from_handle(arena) };
-    // The overflow recalculation is a pass of its own, and the document stores the scroll offsets
-    // it settled only once that pass is over. It measures all overflow left unmeasured, including
-    // the root's: the root background covers the viewport united with it, so a flip in its
-    // scrollability is seen here rather than while recording holds the paint state.
-    let prepare_background_and_overflow = || {
-        let background_source_changed = {
-            let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
-            arena
-                .paint_state()
-                .borrow_mut()
-                .update_root_background_source(arena, root_background_source)
-        };
-        let clamped = crate::painting::scrollable_overflow::measure_and_find_scroll_offsets_to_clamp(arena);
-        (background_source_changed, clamped)
-    };
     // SAFETY: The arena belongs to this thread, which waits for the stage.
-    let (background_source_changed, clamped) =
-        unsafe { crate::stage_thread::run_stage(prepare_background_and_overflow) };
-    crate::painting::scrollable_overflow::hand_over_clamped_scroll_offsets(arena, &main_thread, clamped);
-    // Enter the visual context update after the handover, so the handover is not inside a pass.
-    let refresh_sticky_constraints = || {
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
-        let changed = arena.scrollable_overflow.geometry_changed.replace(false);
-        let flipped = arena.scrollable_overflow.scrollability_changed.replace(false);
-        let mut visual_context_values_changed = false;
-        if changed && !flipped && !visual_context_update_pending {
-            let rows = arena.paintable_rows();
-            let mut state = arena.paint_state().borrow_mut();
-            let state = &mut state.visual_context;
-            if let Some(tree) = state.tree.as_mut() {
-                visual_context_values_changed = crate::painting::visual_context::refresh::refresh_sticky_constraints(
-                    &rows,
-                    &state.scroll_state,
-                    tree,
-                    &arena.visual_context_tree_inputs(),
-                );
-            }
-            state.needs_to_refresh_scroll_state = true;
-        }
-        (changed, flipped, visual_context_values_changed)
+    let (background_source_changed, clamped) = unsafe {
+        crate::stage_thread::run_stage(|| prepare_root_background_and_overflow(arena, root_background_source))
     };
+    crate::painting::scrollable_overflow::hand_over_clamped_scroll_offsets(arena, &main_thread, clamped);
     // SAFETY: As above.
-    let (changed, flipped, visual_context_values_changed) =
-        unsafe { crate::stage_thread::run_stage(refresh_sticky_constraints) };
-    FfiRenderingPreparationOutcome {
-        requires_display_list_recording: changed || background_source_changed,
-        requires_visual_context_update: flipped,
-        visual_context_values_changed,
+    unsafe {
+        crate::stage_thread::run_stage(|| {
+            finish_rendering_preparation(arena, background_source_changed, visual_context_update_pending)
+        })
     }
 }
 

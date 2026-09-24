@@ -33,6 +33,7 @@ WEB_API bool rust_background_color_can_be_compositor_animated(Layout::Node const
 WEB_API void const* retain_rust_main_visual_context_tree(DOM::Document const&);
 WEB_API Layout::RustFFI::FfiPhysicalOverflowDirections rust_physical_overflow_directions(Layout::Node const&);
 WEB_API void register_geometry_host(Layout::NodeArena&);
+WEB_API Layout::RustFFI::FfiRootBackgroundSource rust_root_background_source(DOM::Document const&);
 WEB_API Layout::RustFFI::FfiRenderingPreparationOutcome rust_prepare_for_rendering(DOM::Document&, bool visual_context_update_pending);
 WEB_API void rust_update_visual_viewport_transform(DOM::Document&);
 enum class ForceScrollStateRefresh {

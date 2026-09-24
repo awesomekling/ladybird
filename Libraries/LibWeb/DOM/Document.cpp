@@ -121,6 +121,7 @@
 #include <LibWeb/DOM/LiveNodeList.h>
 #include <LibWeb/DOM/MutationObserver.h>
 #include <LibWeb/DOM/MutationType.h>
+#include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/DOM/NodeIterator.h>
 #include <LibWeb/DOM/Position.h>
 #include <LibWeb/DOM/ProcessingInstruction.h>
@@ -228,6 +229,7 @@
 #include <LibWeb/Painting/HitTestDisplayList.h>
 #include <LibWeb/Painting/PaintableTypes.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
+#include <LibWeb/Painting/Scrolling.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWeb/ResizeObserver/ResizeObserver.h>
 #include <LibWeb/ResizeObserver/ResizeObserverEntry.h>
@@ -2119,9 +2121,6 @@ void Document::end_style_stabilization_epoch()
 void Document::after_layout_commit(LayoutTreeChanged layout_tree_changed)
 {
     // NB: Called during layout update.
-    set_needs_accumulated_visual_contexts_update(true);
-    prepare_for_rendering();
-
     // A tree update can replace layout nodes referenced by selection state.
     if (auto range = get_selection()->range())
         paint_state().recompute_selection_states(*this, *range);
@@ -2137,7 +2136,22 @@ void Document::apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffec
         paint_state().set_boxes_with_auto_content_visibility(Vector<Layout::RustFFI::NodeSlotId> {
             ReadonlySpan<Layout::RustFFI::NodeSlotId> { effects.boxes_with_auto_content_visibility, effects.boxes_with_auto_content_visibility_count } });
     }
+    // The frame's rendering preparation clamped these offsets to what the committed overflow allows. Storing one
+    // clamps it again, against the box its node has now.
+    auto& arena = layout_node_arena();
+    for (auto const& clamped : ReadonlySpan<Layout::RustFFI::FfiClampedScrollOffset> { effects.clamped_scroll_offsets, effects.clamped_scroll_offsets_count }) {
+        Layout::Node* box = nullptr;
+        if (clamped.generated_for != 0)
+            box = static_cast<Layout::Node*>(Layout::RustFFI::layout_arena_bound_pseudo_element_shell(arena.handle(), clamped.style_node, clamped.generated_for));
+        else if (clamped.style_node != 0)
+            box = NodeIdentity::of_style_node(CSS::StyleNodeID { clamped.style_node }).bound_layout_node(arena);
+        else
+            box = NodeIdentity::of_document().bound_layout_node(arena);
+        if (box)
+            Painting::set_scroll_offset(*box, clamped.offset);
+    }
     if (effects.layout_committed) {
+        set_needs_accumulated_visual_contexts_update(true);
         set_needs_to_record_display_list();
         schedule_scroll_container_resnap();
         m_document->set_needs_repaint();
