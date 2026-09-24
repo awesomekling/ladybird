@@ -11,6 +11,7 @@
 #include <LibWeb/Animations/Animation.h>
 #include <LibWeb/Animations/AnimationEffect.h>
 #include <LibWeb/Animations/KeyframeEffect.h>
+#include <LibWeb/CSS/CSSStyleProperties.h>
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/Invalidation/SlotInvalidator.h>
@@ -451,22 +452,59 @@ static void propagate_custom_property_environment_move(DOM::Document& document, 
 
 static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_demand_answer(DOM::Element&, bool& did_change_custom_properties);
 
+// The record of the element's presentational hints and inline style alone, over the initial values,
+// assigned to an element the engine refused a first record. Zero when the engine cannot compute it.
+static StyleRecordID assign_declared_only_first_record(DOM::Element& element)
+{
+    auto& document = element.document();
+    auto hints = StyleComputer::collect_presentational_hint_properties({ element });
+    Vector<Parser::ValueParserFFI::FfiDeclaredProperty> declarations;
+    declarations.ensure_capacity(hints.size());
+    for (auto const& hint : hints) {
+        declarations.unchecked_append({
+            .property_id = to_underlying(hint.property_id),
+            .important = hint.important == Important::Yes,
+            .value = hint.value->rust_style_value_data(),
+            .name = {},
+        });
+    }
+    auto inline_style = element.inline_style();
+    return StyleRecordID { StyleEngineFFI::style_engine_assign_declared_only_first_record(
+        document.style_computer().style_engine().rust_handle(),
+        element.style_node_id().value(),
+        document.style_node_id().value(),
+        element_box_type_adjustment_facts(element),
+        element.is_svg_element() ? StyleEngineFFI::FfiElementDeclarationKind::SvgPresentationAttribute : StyleEngineFFI::FfiElementDeclarationKind::PresentationalHint,
+        declarations.data(),
+        declarations.size(),
+        inline_style ? inline_style->declaration_block().handle() : nullptr) };
+}
+
 // The engine refused the row. Nothing else computes styles: the element keeps the record it has
-// installed, the refusal is reported to the style stage seal, and the row's input stays owed.
-static RequiredInvalidationAfterStyleChange refuse_style_row(DOM::Element& element)
+// installed, the refusal is reported to the style stage seal, and the row's input stays owed. An
+// element with no record is not left without one: it takes the record of its own declarations
+// alone until the engine answers it.
+static RequiredInvalidationAfterStyleChange refuse_style_row(DOM::Element& element, bool& did_change_custom_properties)
 {
     auto& style_engine = element.document().style_computer().style_engine();
     u8 row_kinds = 0;
     if (style_engine.frozen_longhand_input(element.style_node_id()).is_present)
         row_kinds |= 1 << 0;
-    if (!element.has_style()) {
+    if (!element.has_style())
         row_kinds |= 1 << 2;
-        dbgln("StyleEngine: refused the first style of <{}> (style node {})", element.local_name(), element.style_node_id().value());
-    }
     static constexpr u8 refused_host_entry = 1;
     style_engine.note_host_entry(element.style_node_id(), refused_host_entry, row_kinds);
     style_engine.note_refused_style_row(element.style_node_id());
-    return {};
+    if (element.has_style())
+        return {};
+    auto record = assign_declared_only_first_record(element);
+    dbgln("StyleEngine: refused the first style of <{}> (style node {}), {}", element.local_name(), element.style_node_id().value(),
+        record.value() ? "installed its declarations alone"sv : "left it without one"sv);
+    if (!record.value())
+        return {};
+    auto invalidation = element.apply_engine_computed_style_record(record, {}, false, did_change_custom_properties);
+    style_engine.acknowledge_engine_computed_record(element.style_node_id());
+    return invalidation;
 }
 
 // A row the engine did not settle in its transaction: ask it for the element's record now, the way
@@ -475,7 +513,7 @@ static RequiredInvalidationAfterStyleChange apply_engine_record_demand(DOM::Elem
 {
     auto invalidation = install_targeted_record_demand_answer(element, did_change_custom_properties);
     if (!invalidation.has_value())
-        return refuse_style_row(element);
+        return refuse_style_row(element, did_change_custom_properties);
     element.document().style_computer().style_engine().consume_recorded_element_style_input_change(element.style_node_id());
     return *invalidation;
 }
@@ -1320,7 +1358,7 @@ static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_updat
         return *invalidation;
     }
 
-    return refuse_style_row(element);
+    return refuse_style_row(element, did_change_custom_properties);
 }
 
 // A targeted style update has nothing to do when every source of style work in the document is settled: A full style
