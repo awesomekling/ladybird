@@ -2428,27 +2428,72 @@ pub(crate) unsafe fn prepare_root_layout(
 ) {
     assert!(!arena_handle.is_null(), "layout node arena handle is null");
     assert!(!root.is_invalid());
-    // SAFETY: The caller keeps the arena alive for this synchronous call. The host table is
-    // copied out so no arena borrow spans a host callback.
+    // SAFETY: The caller keeps the arena alive for this synchronous call.
+    let propagation_facts = unsafe { read_viewport_propagation_facts(main_thread, arena_handle) };
+    // The style rewrites enroll the affected boxes' text children for content sync, so the sync
+    // follows them, and both precede the pass, which caches decoded style.
+    // SAFETY: As above; the propagation borrows the arena only for its own call.
+    viewport_propagation::propagate_root_styles_to_viewport(
+        unsafe { LayoutNodeArena::from_handle(arena_handle) },
+        root,
+        &propagation_facts,
+        ShellStyleChangeNotice::Now(main_thread),
+    );
+    // SAFETY: As above.
+    unsafe { super::layout_node_arena::sync_enrolled_content_for_layout(main_thread, arena_handle) };
+}
+
+/// The root and body styles the viewport takes over, as the document answers them now.
+///
+/// # Safety
+///
+/// `arena_handle` must be a live handle with a registered layout host, used on the document
+/// thread.
+pub(crate) unsafe fn read_viewport_propagation_facts(
+    main_thread: &crate::stage::MainThread,
+    arena_handle: *mut c_void,
+) -> viewport_propagation::FfiViewportPropagationFacts {
     let host = LayoutHost::of(main_thread);
     seal::note_host_call(
+        // SAFETY: Guaranteed by the caller.
         unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_pass_is_running(),
         "viewport_propagation_facts",
     );
     crate::layout::tree_build_seal::note_host_call("viewport_propagation_facts");
     // SAFETY: The document answers from its elements' style records without entering the arena.
-    let propagation_facts = host.viewport_propagation_facts(main_thread);
+    host.viewport_propagation_facts(main_thread)
+}
+
+/// The arena half ahead of a root layout, from what the document answered for it beforehand:
+/// propagates the root and body styles to the viewport and syncs enrolled content. It needs no
+/// host, and the shells whose style it changes hear of it when the pass's commit pays its
+/// handbacks, which must be followed by `end_layout_pass_preparation_handbacks`.
+///
+/// # Safety
+///
+/// `arena_handle` must be a live handle whose owner waits for this call, `root` its live viewport
+/// box, and nothing may have freed a row since `content` was read.
+pub(crate) unsafe fn prepare_root_layout_from_sources(
+    arena_handle: *mut c_void,
+    root: NodeSlotId,
+    propagation_facts: &viewport_propagation::FfiViewportPropagationFacts,
+    content: super::layout_node_arena::EnrolledContentSources,
+) {
+    assert!(!arena_handle.is_null(), "layout node arena handle is null");
+    assert!(!root.is_invalid());
+    // SAFETY: Guaranteed by the caller; the propagation borrows the arena only for its own call.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+    arena.begin_layout_pass_preparation_handbacks();
+    viewport_propagation::propagate_root_styles_to_viewport(
+        arena,
+        root,
+        propagation_facts,
+        ShellStyleChangeNotice::Handback,
+    );
     // The style rewrites enroll the affected boxes' text children for content sync, so the sync
     // follows them, and both precede the pass, which caches decoded style.
-    // SAFETY: As above; the propagation borrows the arena only for its own call.
-    viewport_propagation::propagate_root_styles_to_viewport(
-        main_thread,
-        unsafe { LayoutNodeArena::from_handle(arena_handle) },
-        root,
-        &propagation_facts,
-    );
     // SAFETY: As above.
-    unsafe { super::layout_node_arena::sync_enrolled_content_for_layout(main_thread, arena_handle) };
+    unsafe { super::layout_node_arena::apply_enrolled_content_sources(arena_handle, content) };
 }
 
 /// Computes the fragments of a root layout without the host, on the stage thread.

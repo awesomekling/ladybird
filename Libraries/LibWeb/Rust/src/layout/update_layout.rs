@@ -12,13 +12,14 @@
 use super::LayoutNodeArena;
 use super::formatting_context::{
     commit_root_layout, commit_subtree_layout, compute_root_layout, compute_subtree_layout_fragments,
-    prepare_root_layout,
+    prepare_root_layout_from_sources, read_viewport_propagation_facts,
 };
-use super::layout_node_arena::sync_enrolled_content_for_layout;
+use super::layout_node_arena::{EnrolledContentSources, apply_enrolled_content_sources, read_enrolled_content_sources};
 use super::node_data::NodeSlotId;
 use super::node_facts;
 use super::partial_relayout::FfiPartialRelayoutHostFacts;
 use super::tree_builder::FfiLayoutTreeBuildOutcome;
+use super::viewport_propagation::FfiViewportPropagationFacts;
 use crate::abort_on_panic;
 use crate::css::ffi_support::FfiUtf16View;
 use std::ffi::c_void;
@@ -262,18 +263,17 @@ unsafe fn arena<'a>(arena_handle: *mut c_void) -> &'a LayoutNodeArena {
 #[derive(Clone, Copy)]
 enum FrameJoin {
     /// Style, then the list item renumbers and top layer changes it leaves, then the facts after
-    /// them. Style is the document's own loop over its elements.
+    /// them, and the sources of the round's layout pass when no tree build comes first. Style is
+    /// the document's own loop over its elements.
     Style,
     /// The layout tree build: the builder reads the DOM, and runs its walk as a stage of its own.
     /// A partial relayout's build also reconciles the stale list item counters and answers with
     /// the facts after it, since the build can resize this document's viewport through its
-    /// embedding document.
+    /// embedding document, and with the sources of the pass that follows.
     BuildLayoutTree,
-    /// The list item counters a build left stale live in the document's element sets.
+    /// The list item counters a build left stale live in the document's element sets. Once they
+    /// are reconciled, the join answers with the sources of the pass that follows.
     ReconcileStaleListItemCounters,
-    /// The inputs a layout pass reads from the host: the root and body styles the viewport takes
-    /// over, and the text and replaced content enrolled for sync.
-    LayoutInputs,
     /// A pass's commit pays the host its handbacks and delivers commit messages the document
     /// applies at once.
     LayoutCommit,
@@ -294,6 +294,29 @@ struct FrameInputs {
     reason_is_inspect_devtools_layout_data: bool,
     is_template_contents_document: bool,
     trace: UpdateLayoutTrace,
+}
+
+/// What a layout pass reads from the document ahead of it: the root and body styles the viewport
+/// takes over, and the replaced content enrolled for sync. The join the pass follows reads them,
+/// so the pass itself prepares the arena without the document thread.
+struct LayoutPassSources {
+    propagation_facts: FfiViewportPropagationFacts,
+    content: EnrolledContentSources,
+}
+
+impl LayoutPassSources {
+    /// # Safety
+    ///
+    /// As for [`arena`], on the document thread.
+    unsafe fn read(main_thread: &crate::stage::MainThread, arena_handle: *mut c_void) -> Self {
+        // SAFETY: Guaranteed by the caller.
+        unsafe {
+            Self {
+                propagation_facts: read_viewport_propagation_facts(main_thread, arena_handle),
+                content: read_enrolled_content_sources(main_thread, arena_handle),
+            }
+        }
+    }
 }
 
 /// What a finished layout frame leaves for the document thread to apply.
@@ -325,6 +348,8 @@ struct LayoutFrame<'a> {
     inputs: FrameInputs,
     joins: &'a crate::stage_thread::MainJoins<'a>,
     messages: FrameMessages,
+    /// The sources the last join read for the layout pass that follows it.
+    pass_sources: Option<LayoutPassSources>,
 }
 
 /// The document facts together with what a join answered.
@@ -348,6 +373,39 @@ impl LayoutFrame<'_> {
         unsafe { arena(self.inputs.arena_handle) }
     }
 
+    /// Whether a round with these facts lays out at all.
+    fn round_lays_out(&self, facts: &FfiLayoutUpdateDocumentFacts) -> bool {
+        let force_devtools_layout_data_collection =
+            facts.should_collect_devtools_layout_data && self.inputs.reason_is_inspect_devtools_layout_data;
+        !layout_is_up_to_date(self.arena(), facts) || force_devtools_layout_data_collection
+    }
+
+    fn needs_layout_tree_rebuild(&self, facts: &FfiLayoutUpdateDocumentFacts) -> bool {
+        self.arena().layout_root().is_invalid()
+            || facts.document_needs_layout_tree_build
+            || self.arena().needs_full_layout_tree_update()
+    }
+
+    /// Reads the sources of the round's layout pass on the document thread when the pass follows
+    /// the style join directly, without a tree build.
+    fn read_pass_sources_after_style(
+        &self,
+        main_thread: &crate::stage::MainThread,
+        facts: &FfiLayoutUpdateDocumentFacts,
+    ) -> Option<LayoutPassSources> {
+        let pass_follows_style = self.round_lays_out(facts)
+            && !self.inputs.is_template_contents_document
+            && !self.needs_layout_tree_rebuild(facts);
+        // SAFETY: The frame runs for the update the arena is in.
+        pass_follows_style.then(|| unsafe { LayoutPassSources::read(main_thread, self.inputs.arena_handle) })
+    }
+
+    fn take_pass_sources(&mut self) -> LayoutPassSources {
+        self.pass_sources
+            .take()
+            .expect("the join ahead of a layout pass reads its sources")
+    }
+
     fn run(mut self) -> FrameMessages {
         // Size-query dependencies point from a descendant to an ancestor query container. They are
         // therefore acyclic, and a coherent style/layout pass can settle at least one more level of
@@ -360,22 +418,25 @@ impl LayoutFrame<'_> {
             layout_pass += 1;
 
             let Joined {
-                value: element_count,
+                value: (element_count, pass_sources),
                 facts,
             } = self.join(FrameJoin::Style, |main_thread, host| {
                 host.update_style(main_thread);
                 host.process_pending_list_item_renumbers(main_thread);
                 host.process_pending_top_layer_layout_changes(main_thread);
+                let facts = host.document_facts(main_thread);
                 Joined {
-                    value: host.connected_element_count(main_thread),
-                    facts: host.document_facts(main_thread),
+                    value: (
+                        host.connected_element_count(main_thread),
+                        self.read_pass_sources_after_style(main_thread, &facts),
+                    ),
+                    facts,
                 }
             });
             connected_element_count = element_count;
-            let force_devtools_layout_data_collection =
-                facts.should_collect_devtools_layout_data && self.inputs.reason_is_inspect_devtools_layout_data;
+            self.pass_sources = pass_sources;
 
-            if layout_is_up_to_date(self.arena(), &facts) && !force_devtools_layout_data_collection {
+            if !self.round_lays_out(&facts) {
                 self.messages.prepare_for_rendering = true;
                 return self.messages;
             }
@@ -387,9 +448,7 @@ impl LayoutFrame<'_> {
                 return self.messages;
             }
 
-            let mut needs_layout_tree_rebuild = self.arena().layout_root().is_invalid()
-                || facts.document_needs_layout_tree_build
-                || self.arena().needs_full_layout_tree_update();
+            let mut needs_layout_tree_rebuild = self.needs_layout_tree_rebuild(&facts);
 
             let mut facts = facts;
             match self.try_partial_relayout(
@@ -421,21 +480,29 @@ impl LayoutFrame<'_> {
                 self.arena().set_needs_full_layout_tree_update(false);
                 self.inputs.trace.tree_build(layout_started);
 
-                if self.join(FrameJoin::ReconcileStaleListItemCounters, |main_thread, host| {
-                    host.reconcile_stale_list_item_counters_after_tree_build(main_thread)
-                }) {
+                let arena_handle = self.inputs.arena_handle;
+                let pass_sources = self.join(FrameJoin::ReconcileStaleListItemCounters, |main_thread, host| {
+                    // SAFETY: The frame runs for the update the arena is in.
+                    (!host.reconcile_stale_list_item_counters_after_tree_build(main_thread))
+                        .then(|| unsafe { LayoutPassSources::read(main_thread, arena_handle) })
+                });
+                let Some(pass_sources) = pass_sources else {
                     continue;
-                }
+                };
+                self.pass_sources = Some(pass_sources);
             }
 
             let layout_root = self.arena().layout_root();
             assert!(!layout_root.is_invalid(), "a full layout pass needs a layout root");
             let arena_handle = self.inputs.arena_handle;
+            let LayoutPassSources {
+                propagation_facts,
+                content,
+            } = self.take_pass_sources();
             // SAFETY (for the three steps below): The frame runs for the update the arena is in,
-            // and the viewport box stays live between them.
-            self.join(FrameJoin::LayoutInputs, |main_thread, _| unsafe {
-                prepare_root_layout(main_thread, arena_handle, layout_root);
-            });
+            // the viewport box stays live between them, and no row was freed since the sources
+            // were read.
+            unsafe { prepare_root_layout_from_sources(arena_handle, layout_root, &propagation_facts, content) };
             let output = unsafe {
                 compute_root_layout(
                     arena_handle,
@@ -448,6 +515,7 @@ impl LayoutFrame<'_> {
             };
             self.join(FrameJoin::LayoutCommit, |main_thread, _| unsafe {
                 commit_root_layout(main_thread, arena_handle, layout_root, &output);
+                arena(arena_handle).end_layout_pass_preparation_handbacks(main_thread);
             });
             drop(output);
 
@@ -500,7 +568,7 @@ impl LayoutFrame<'_> {
     /// are pending (consuming `needs_layout_tree_rebuild`), so an ineligible update continues to
     /// the full layout path without rebuilding again; `facts` then holds the facts after the build.
     fn try_partial_relayout(
-        &self,
+        &mut self,
         facts: &mut FfiLayoutUpdateDocumentFacts,
         registered_partial_relayout_roots: &mut Vec<NodeSlotId>,
         needs_layout_tree_rebuild: &mut bool,
@@ -520,19 +588,24 @@ impl LayoutFrame<'_> {
         let mut layout_tree_was_built_in_partial_branch = false;
         if *needs_layout_tree_rebuild {
             let tree_build_started = self.inputs.trace.now();
+            let arena_handle = self.inputs.arena_handle;
             let Joined {
-                value: (outcome, counters_were_stale),
+                value: (outcome, counters_were_stale, pass_sources),
                 facts: facts_after_build,
             } = self.join(FrameJoin::BuildLayoutTree, |main_thread, host| {
                 let outcome = host.build_layout_tree(main_thread);
-                // SAFETY: The frame runs for the update the arena is in.
-                unsafe { arena(self.inputs.arena_handle) }.record_layout_tree_build(&outcome);
+                // SAFETY (for both uses): The frame runs for the update the arena is in.
+                unsafe { arena(arena_handle) }.record_layout_tree_build(&outcome);
+                let counters_were_stale = host.reconcile_stale_list_item_counters_after_tree_build(main_thread);
+                let facts = host.document_facts(main_thread);
+                let pass_follows = !counters_were_stale && !outcome.needs_another_build_pass;
                 Joined {
                     value: (
                         outcome,
-                        host.reconcile_stale_list_item_counters_after_tree_build(main_thread),
+                        counters_were_stale,
+                        pass_follows.then(|| unsafe { LayoutPassSources::read(main_thread, arena_handle) }),
                     ),
-                    facts: host.document_facts(main_thread),
+                    facts,
                 }
             });
             *facts = facts_after_build;
@@ -540,6 +613,7 @@ impl LayoutFrame<'_> {
             if counters_were_stale || outcome.needs_another_build_pass {
                 return PartialRelayout::NeedsAnotherLayoutPass;
             }
+            self.pass_sources = pass_sources;
             layout_tree_was_built_in_partial_branch = true;
 
             // The build invalidates what deferred child list insertions reach, which can register
@@ -561,11 +635,11 @@ impl LayoutFrame<'_> {
         }
 
         let arena_handle = self.inputs.arena_handle;
-        // SAFETY (for the steps below): The frame runs for the update the arena is in, and the
-        // planned boundaries and the viewport box stay live across them.
-        self.join(FrameJoin::LayoutInputs, |main_thread, _| unsafe {
-            sync_enrolled_content_for_layout(main_thread, arena_handle);
-        });
+        let content = self.take_pass_sources().content;
+        // SAFETY (for the steps below): The frame runs for the update the arena is in, the
+        // planned boundaries and the viewport box stay live across them, and no row was freed
+        // since the sources were read.
+        unsafe { apply_enrolled_content_sources(arena_handle, content) };
         for &root in &partial_relayout_roots {
             let output = unsafe {
                 compute_subtree_layout_fragments(
@@ -639,6 +713,7 @@ unsafe fn update_layout(
                 inputs,
                 joins,
                 messages: FrameMessages::default(),
+                pass_sources: None,
             }
             .run()
         })

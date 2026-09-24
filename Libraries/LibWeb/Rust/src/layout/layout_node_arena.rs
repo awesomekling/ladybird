@@ -658,11 +658,12 @@ pub(crate) struct FreedSubtree {
 }
 
 /// Who hears that a shell's style changed: the host at once, which only the main thread can ask,
-/// or the tree build's handbacks, which its entry pays once the walk is over.
+/// or the handbacks of the span the change is made in (a tree build's, or a layout pass's), which
+/// a main-thread payer pays once that work is over.
 #[derive(Clone, Copy)]
 pub(crate) enum ShellStyleChangeNotice<'a> {
     Now(&'a crate::stage::MainThread<'a>),
-    AfterTreeBuild,
+    Handback,
 }
 
 /// One thing the arena owes the host: a node's box presence, or an object of a row's that the host
@@ -2520,7 +2521,7 @@ impl LayoutNodeArena {
             ShellStyleChangeNotice::Now(main_thread) => {
                 self.tell_shell_of_style_change(main_thread, slot, shell, attach_resources);
             }
-            ShellStyleChangeNotice::AfterTreeBuild => self.hand_back(HostHandback::ShellStyleChanged {
+            ShellStyleChangeNotice::Handback => self.hand_back(HostHandback::ShellStyleChanged {
                 slot,
                 shell,
                 attach_resources,
@@ -3139,6 +3140,23 @@ impl LayoutNodeArena {
     /// Closes the span [`Self::begin_paying_host_handbacks`] opened, and pays what is owed.
     pub(crate) fn finish_paying_host_handbacks(&self, main_thread: &crate::stage::MainThread) {
         self.pay_host_handbacks(main_thread);
+        self.close_host_handback_span();
+    }
+
+    /// Opens the span of a layout pass's preparation off the document thread. What it owes is paid
+    /// with the handbacks of the pass's commit, which is followed by
+    /// [`Self::end_layout_pass_preparation_handbacks`].
+    pub(crate) fn begin_layout_pass_preparation_handbacks(&self) {
+        self.open_host_handback_span();
+    }
+
+    /// Closes the span [`Self::begin_layout_pass_preparation_handbacks`] opened, once the pass's
+    /// commit has paid what it owed.
+    pub(crate) fn end_layout_pass_preparation_handbacks(&self, _: &crate::stage::MainThread) {
+        assert!(
+            self.host_handbacks.borrow().handbacks.is_empty(),
+            "a layout pass's commit left its preparation's handbacks unpaid"
+        );
         self.close_host_handback_span();
     }
 
@@ -5192,7 +5210,7 @@ impl LayoutNodeArena {
             .published_document_style
             .take()
             .expect("a build that builds the viewport is handed the document's style");
-        self.apply_reinherited_style_record(viewport, derived, ShellStyleChangeNotice::AfterTreeBuild);
+        self.apply_reinherited_style_record(viewport, derived, ShellStyleChangeNotice::Handback);
     }
 
     /// Releases the document's style if the build did not build a viewport to take it.
@@ -6104,13 +6122,86 @@ pub unsafe extern "C" fn layout_arena_layout_is_up_to_date(
 ///
 /// `arena` must be a live handle with a registered layout host, used on the document thread.
 pub(crate) unsafe fn sync_enrolled_content_for_layout(main_thread: &crate::stage::MainThread, arena: *mut c_void) {
+    // SAFETY: Guaranteed by the caller.
+    unsafe {
+        let sources = read_enrolled_content_sources(main_thread, arena);
+        apply_enrolled_content_sources(arena, sources);
+    }
+}
+
+/// What the host answers for the content enrolled for sync: the replaced-content facts of each
+/// enrolled node that still has a shell. Text content is published to the arena and needs no host.
+#[derive(Default)]
+pub(crate) struct EnrolledContentSources {
+    /// Nothing is synced when this is read inside a running pass.
+    pass_was_running: bool,
+    /// The enrolled replaced nodes the facts were read for, whether or not they are still live.
+    enrolled_replaced_node_count: usize,
+    replaced_content_facts: Vec<(NodeSlotId, FfiReplacedContentFacts)>,
+}
+
+/// The host half of the enrolled content sync. It reads the replaced-content facts of the nodes
+/// enrolled now, so [`apply_enrolled_content_sources`] needs no host and can run on a stage.
+///
+/// # Safety
+///
+/// As for [`sync_enrolled_content_for_layout`].
+pub(crate) unsafe fn read_enrolled_content_sources(
+    main_thread: &crate::stage::MainThread,
+    arena: *mut c_void,
+) -> EnrolledContentSources {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY (for every derive below): the caller keeps the arena alive for this call and
     // serializes all access on the document thread; no shared borrow outlives a callback.
     if unsafe { &*arena.cast::<LayoutNodeArena>() }.layout_pass_is_running() {
-        return;
+        return EnrolledContentSources {
+            pass_was_running: true,
+            ..EnrolledContentSources::default()
+        };
     }
     let host = LayoutHost::of(main_thread);
+    let enrolled_replaced_nodes = unsafe { &*arena.cast::<LayoutNodeArena>() }
+        .nodes_enrolled_for_replaced_content_facts_sync
+        .borrow()
+        .clone();
+    let mut replaced_content_facts = Vec::with_capacity(enrolled_replaced_nodes.len());
+    for &node in &enrolled_replaced_nodes {
+        let shell = unsafe { &*arena.cast::<LayoutNodeArena>() }.shell_if_live(main_thread, node);
+        if shell.is_null() {
+            continue;
+        }
+        let mut facts = FfiReplacedContentFacts::default();
+        super::seal::note_host_call(
+            unsafe { &*arena.cast::<LayoutNodeArena>() }.layout_pass_is_running(),
+            "build_replaced_content_facts",
+        );
+        super::tree_build_seal::note_host_call("build_replaced_content_facts");
+        // SAFETY: The callback receives a live shell and a valid out-pointer.
+        unsafe { host.build_replaced_content_facts(main_thread, shell, &raw mut facts) };
+        replaced_content_facts.push((node, facts));
+    }
+    EnrolledContentSources {
+        pass_was_running: false,
+        enrolled_replaced_node_count: enrolled_replaced_nodes.len(),
+        replaced_content_facts,
+    }
+}
+
+/// The arena half of the enrolled content sync: refreshes the text content of every enrolled text
+/// node and stores the replaced-content facts `sources` read. Nodes enrolled after `sources` was
+/// read stay enrolled for the next sync.
+///
+/// # Safety
+///
+/// `arena` must be a live handle whose owner waits for this call or makes it itself, and nothing
+/// may have freed a row since `sources` was read from it.
+pub(crate) unsafe fn apply_enrolled_content_sources(arena: *mut c_void, sources: EnrolledContentSources) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    if sources.pass_was_running {
+        return;
+    }
+    // SAFETY (for every derive below): the caller keeps the arena alive for this call and
+    // serializes all access to it; no shared borrow outlives the text sync.
     let enrolled_text_nodes = unsafe { &*arena.cast::<LayoutNodeArena>() }.pending_text_nodes_for_content_sync();
     for node in enrolled_text_nodes {
         if !unsafe { &*arena.cast::<LayoutNodeArena>() }.slot_is_live(node) {
@@ -6121,29 +6212,13 @@ pub(crate) unsafe fn sync_enrolled_content_for_layout(main_thread: &crate::stage
         if parent.is_invalid() {
             continue;
         }
-        // SAFETY: The slot is live, and no arena borrow survives the source callback.
+        // SAFETY: The slot is live, and no arena borrow survives the sync.
         unsafe { super::rendered_text::ensure_text_content(arena.cast(), node) };
     }
 
-    let enrolled_replaced_nodes = unsafe { &*arena.cast::<LayoutNodeArena>() }
-        .nodes_enrolled_for_replaced_content_facts_sync
-        .borrow()
-        .clone();
-    let mut live_replaced_nodes = Vec::with_capacity(enrolled_replaced_nodes.len());
-    for node in enrolled_replaced_nodes {
-        let shell = unsafe { &*arena.cast::<LayoutNodeArena>() }.shell_if_live(main_thread, node);
-        if shell.is_null() {
-            continue;
-        }
+    let mut live_replaced_nodes = Vec::with_capacity(sources.replaced_content_facts.len());
+    for (node, facts) in sources.replaced_content_facts {
         live_replaced_nodes.push(node);
-        let mut facts = FfiReplacedContentFacts::default();
-        super::seal::note_host_call(
-            unsafe { &*arena.cast::<LayoutNodeArena>() }.layout_pass_is_running(),
-            "build_replaced_content_facts",
-        );
-        super::tree_build_seal::note_host_call("build_replaced_content_facts");
-        // SAFETY: The callback receives a live shell and a valid out-pointer.
-        unsafe { host.build_replaced_content_facts(main_thread, shell, &raw mut facts) };
         // Changed facts invalidate cached formatting-context runs regardless of which
         // channel produced the change, including sources with no invalidation of their own.
         // SAFETY: As above; the shared borrows ended with their statements.
@@ -6151,9 +6226,11 @@ pub(crate) unsafe fn sync_enrolled_content_for_layout(main_thread: &crate::stage
             unsafe { &*arena.cast::<LayoutNodeArena>() }.bump_fragment_cache_epoch_of_self_and_ancestors(node);
         }
     }
-    *unsafe { &*arena.cast::<LayoutNodeArena>() }
-        .nodes_enrolled_for_replaced_content_facts_sync
-        .borrow_mut() = live_replaced_nodes;
+    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    let mut enrolled_replaced_nodes = arena.nodes_enrolled_for_replaced_content_facts_sync.borrow_mut();
+    let enrolled_since_read = enrolled_replaced_nodes.split_off(sources.enrolled_replaced_node_count);
+    *enrolled_replaced_nodes = live_replaced_nodes;
+    enrolled_replaced_nodes.extend(enrolled_since_read);
 }
 
 /// # Safety
