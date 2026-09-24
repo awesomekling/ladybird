@@ -1145,20 +1145,8 @@ pub struct RetainedState {
 /// Host-facing engine state: C++ ownership, journal intake and the record/replay adapters.
 /// Never reachable from an evaluation step.
 pub struct HostState {
-    /// A document action in the batch whose ancestor-dependent rows the host is installing.
-    /// Retried records must drive their values under that action too.
-    pub(super) document_environment_moved_for_retries: bool,
-    pub(super) root_font_inputs_changed_for_retries: bool,
-    pub(super) viewport_moved_for_retries: bool,
-    /// The nodes the record loop armed for a retry, in the order it processed them, which is
-    /// flat-tree order. A retry the host asks for settles the whole run of them that hangs off
-    /// the ancestor it has just applied, so the crossing happens once for the run rather than
-    /// once for each row in it.
-    pub(super) armed_retry_nodes: Vec<tree::StyleNodeID>,
     /// The style pass the host is installing wave by wave, between two of its waves.
     pub(super) suspended_style_pass: Option<Box<flush::StylePass>>,
-    /// What the last such call settled, which the host reads as one table.
-    pub(super) retried_record_rows: Vec<bridge::FfiRetriedRecordRow>,
     /// The font resolver the host installed. A step that misses the cache returns `NeedsInput`;
     /// the round outside the step resolves from the published table and the node is retried.
     /// This is not a host service: it reads no document, and carries no context that could.

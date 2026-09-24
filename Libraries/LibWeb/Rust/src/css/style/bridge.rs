@@ -114,10 +114,8 @@ pub enum FfiStyleDeltaGap {
     /// The engine computed the new record itself from the moved cascade winners; C++ applies it
     /// without running a style computation.
     Computed,
-    /// Retry a cold drive while applying the preorder batch, after its parent is authoritative.
-    RetryAfterAncestor,
     /// An unstyled descendant of a hidden ancestor needs no record in this batch.
-    SkippedHidden,
+    SkippedHidden = 4,
     /// The engine computed the new record over the ancestors the host installed before it, for a
     /// row tied to those ancestors. C++ applies it as a record that reads them as they now stand.
     RetriedAfterAncestors,
@@ -185,32 +183,6 @@ impl FfiRecordDemandAnswer {
             is_provisional: false,
             decline_cause: cause.as_ptr(),
             decline_cause_length: cause.len(),
-        }
-    }
-}
-
-/// One row of a retried batch: the node the engine settled, and what it settled for it.
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiRetriedRecordRow {
-    pub style_node: u32,
-    pub record: FfiEngineComputedRecord,
-}
-
-/// What one retry crossing settled, in flat-tree order. The host applies the rows in order and
-/// needs no further crossing for any node named here.
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiRetriedRecordBatch {
-    pub rows: *const FfiRetriedRecordRow,
-    pub count: usize,
-}
-
-impl Default for FfiRetriedRecordBatch {
-    fn default() -> Self {
-        Self {
-            rows: std::ptr::null(),
-            count: 0,
         }
     }
 }
@@ -3870,40 +3842,6 @@ pub unsafe extern "C" fn style_engine_answer_hypothetical_parent_custom_property
     })
 }
 
-/// Retry after the ancestor's style was installed, returning installation metadata together
-/// with the record instead of requiring a later query of the node.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_retry_engine_record_after_ancestor(
-    engine: *mut c_void,
-    node: u32,
-) -> FfiRetriedRecordBatch {
-    super::seal::note_engine_call("style_engine_retry_engine_record_after_ancestor");
-    abort_on_panic(|| {
-        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-        let Some(style_node) = StyleNodeID::from_raw(node) else {
-            return FfiRetriedRecordBatch::default();
-        };
-        engine.retry_engine_records_after_ancestor(style_node);
-        let rows = &engine.host.retried_record_rows;
-        let result = FfiRetriedRecordBatch {
-            rows: rows.as_ptr(),
-            count: rows.len(),
-        };
-        // The replay compares what the asked-for node settled, as it did when the crossing
-        // answered for that node alone; the rest of the table is this call's own business.
-        let asked = rows.iter().find(|row| row.style_node == node).map(|row| row.record);
-        engine.record_boundary_call(EventKind::RetryEngineRecordAfterAncestor, |payload| {
-            payload.write_u32(node);
-            payload.write_u64(asked.map_or(0, |record| record.style_record));
-            payload.write_bool(asked.is_some_and(|record| record.uses_substitution));
-        });
-        result
-    })
-}
-
 /// Settle the synthetic pseudo-element records of an element whose record C++ has just installed.
 /// A zero `style_record` leaves them to C++.
 ///
@@ -5127,12 +5065,16 @@ mod tests {
 
         let root = StyleNodeID::from_raw(nodes[0]).unwrap();
         let mut published = Vec::new();
-        let mut emission_count = 0;
         assert!(!engine.take_style_transaction(root, |_, _, answers| {
-            emission_count += 1;
             published.extend_from_slice(answers);
         }));
-        assert_eq!(emission_count, 1);
+        // The pass stops before a row whose ancestor only the host settles; its later waves
+        // publish the rest.
+        while engine.state.host.suspended_style_pass.is_some() {
+            engine.take_style_transaction(root, |_, _, answers| {
+                published.extend_from_slice(answers);
+            });
+        }
         assert_eq!(
             published.iter().map(|delta| delta.style_node).collect::<Vec<_>>(),
             nodes
@@ -5145,11 +5087,7 @@ mod tests {
         }));
         assert_eq!(
             published.iter().map(|delta| delta.gap).collect::<Vec<_>>(),
-            [
-                FfiStyleDeltaGap::Materialize,
-                FfiStyleDeltaGap::RetryAfterAncestor,
-                FfiStyleDeltaGap::RetryAfterAncestor,
-            ]
+            [FfiStyleDeltaGap::Materialize; 3]
         );
         assert_eq!(engine.counters().get(Counter::InitialBulkMatchLoads), 1);
         assert_eq!(engine.counters().get(Counter::InitialBulkMatchRows), 3);

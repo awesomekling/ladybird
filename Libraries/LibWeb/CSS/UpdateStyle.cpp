@@ -591,7 +591,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     continue;
             }
 
-            // The pseudo-element records a retry settled beside the element's record.
+            // The pseudo-element records a new demand settled beside the element's record.
             Optional<DOM::Element::EnginePseudoElementRecords> retried_pseudo_element_records;
             bool retried_unstyled_materialization = false;
             bool retried_after_installed_ancestors = false;
@@ -602,52 +602,27 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 retried_unstyled_materialization = reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedMaterialization && !element->has_style();
                 retried_after_installed_ancestors = reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedAfterAncestors;
                 reaction.gap = StyleEngineFFI::FfiStyleDeltaGap::Computed;
-            } else if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetryAfterAncestor
-                || (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize
-                    && reaction.reaction & (StyleEngine::RecomputeStyle | StyleEngine::RecomputeDescendantStyles | StyleEngine::AncestorBecameVisible | StyleEngine::InheritedStyle | StyleEngine::InheritedCustomProperties)
-                    && !element->has_associated_animations())) {
-                // The preceding row has installed and published this element's parent. Ask now,
-                // before applying this row, rather than deriving its descendants ahead of their
-                // own install boundaries.
-                ReadonlySpan<StyleEngineFFI::FfiRetriedRecordRow> retried_rows;
-                if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetryAfterAncestor)
-                    retried_rows = document.style_computer().style_engine().retry_engine_records_after_ancestor(reaction.style_node);
-                if (!retried_rows.is_empty() && retried_rows[0].style_node == reaction.style_node && retried_rows[0].record.style_record != 0) {
-                    retried_unstyled_materialization = reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize && !element->has_style();
-                    retried_after_installed_ancestors = reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetryAfterAncestor;
-                    auto const& retried = retried_rows[0].record;
-                    reaction.new_style_record = retried.style_record;
-                    reaction.uses_substitution = retried.uses_substitution;
-                    reaction.damage = StyleEngineFFI::FfiStyleDeltaDamage::Full;
-                    reaction.gap = StyleEngineFFI::FfiStyleDeltaGap::Computed;
-                    DOM::Element::EnginePseudoElementRecords pseudo_element_records {};
-                    for (size_t kind = 0; kind < array_size(retried.pseudo_records); ++kind) {
-                        if ((retried.pseudo_records_present >> kind) & 1)
-                            pseudo_element_records[kind] = StyleRecordID { retried.pseudo_records[kind] };
+            } else if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize
+                && reaction.reaction & (StyleEngine::RecomputeStyle | StyleEngine::RecomputeDescendantStyles | StyleEngine::AncestorBecameVisible | StyleEngine::InheritedStyle | StyleEngine::InheritedCustomProperties)
+                && !element->has_associated_animations()) {
+                // A size query can only be settled after layout publishes its first box. Keep this
+                // element's previous record through that layout pass; recording the pending effect
+                // schedules a new reaction.
+                auto container_effects = StyleEngineFFI::style_engine_take_container_effects(document.style_computer().style_engine().rust_handle(), reaction.style_node);
+                ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
+                bool awaits_layout_basis = false;
+                auto effect_count = StyleEngineFFI::style_engine_native_container_effect_count(container_effects.effects);
+                for (size_t effect_index = 0; effect_index < effect_count; ++effect_index) {
+                    auto effect = StyleEngineFFI::style_engine_native_container_effect(container_effects.effects, effect_index);
+                    if (effect.kind == StyleEngineFFI::FfiContainerEffectKind::NeedsEvaluationAfterLayout) {
+                        awaits_layout_basis = true;
+                        break;
                     }
-                    retried_pseudo_element_records = pseudo_element_records;
-                } else {
-                    // A size query can only be settled after layout publishes its first box.
-                    // Keep this element's previous record through
-                    // that layout pass; recording the pending effect schedules a new reaction.
-                    auto container_effects = StyleEngineFFI::style_engine_take_container_effects(document.style_computer().style_engine().rust_handle(), reaction.style_node);
-                    ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
-                    bool awaits_layout_basis = false;
-                    auto effect_count = StyleEngineFFI::style_engine_native_container_effect_count(container_effects.effects);
-                    for (size_t effect_index = 0; effect_index < effect_count; ++effect_index) {
-                        auto effect = StyleEngineFFI::style_engine_native_container_effect(container_effects.effects, effect_index);
-                        if (effect.kind == StyleEngineFFI::FfiContainerEffectKind::NeedsEvaluationAfterLayout) {
-                            awaits_layout_basis = true;
-                            break;
-                        }
-                    }
-                    if (document.is_running_update_layout() && container_effects.depends_on_size && reaction.old_style_record != 0
-                        && element->style_record_identity().value() == reaction.old_style_record && awaits_layout_basis) {
-                        StyleComputer::record_container_query_effects(DOM::AbstractElement { *element }, container_effects);
-                        continue;
-                    }
-                    if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetryAfterAncestor)
-                        reaction.gap = StyleEngineFFI::FfiStyleDeltaGap::Materialize;
+                }
+                if (document.is_running_update_layout() && container_effects.depends_on_size && reaction.old_style_record != 0
+                    && element->style_record_identity().value() == reaction.old_style_record && awaits_layout_basis) {
+                    StyleComputer::record_container_query_effects(DOM::AbstractElement { *element }, container_effects);
+                    continue;
                 }
             }
 
