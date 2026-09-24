@@ -496,6 +496,16 @@ pub(crate) trait PaintableRowsRead: Deref<Target = LayoutNodeArena> {
     fn with_hit_test_list<R>(&self, read: impl FnOnce(Option<&HitTestList>) -> R) -> R;
     /// The visual context tree, as it was when the rows were published.
     fn visual_context_tree(&self) -> Option<std::sync::Arc<VisualContextTree>>;
+
+    /// The line root whose committed side data holds an inline box's pieces, read from the same
+    /// generation as the rows.
+    fn inline_pieces_root(&self, inline_paintable: NodeSlotId) -> Option<NodeSlotId> {
+        if !self.paintable_row_is_populated(inline_paintable) {
+            return None;
+        }
+        let root = self.paintable_data(inline_paintable).containing_block;
+        (self.paintable_row_is_populated(root) && node_painting::has_lines(self, root)).then_some(root)
+    }
 }
 
 /// A row's committed side data, as a published generation or the live column holds it.
@@ -587,14 +597,6 @@ where
             self.arena.committed_side_data_mut(id).overflow_valid_across_recommits = false;
             self.arena.note_row_overflow_unmeasured(id);
         }
-    }
-
-    pub(crate) fn inline_pieces_root(&self, inline_paintable: NodeSlotId) -> Option<NodeSlotId> {
-        if !self.paintable_row_is_populated(inline_paintable) {
-            return None;
-        }
-        let root = self.paintable_data(inline_paintable).containing_block;
-        (self.paintable_row_is_populated(root) && node_painting::has_lines(self, root)).then_some(root)
     }
 
     /// A style repaint of a row also repaints the anonymous boxes it generated and, for an
