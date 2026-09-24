@@ -1044,10 +1044,7 @@ impl RetainedState {
                     counters,
                 )?;
                 let driven = if let FullDrive::AwaitsRegisteredContext(registered) = driven {
-                    let parent_environment = parent
-                        .map(|parent| self.computed_group_sets.custom_property_environment_identity(parent))
-                        .unwrap_or(Some(0))
-                        .or_refused()?;
+                    let parent_environment = parent.map_or(0, |parent| self.held_custom_property_environment(parent));
                     current_environment = self.engine_custom_property_environment(
                         node,
                         parent_environment,
@@ -3361,23 +3358,23 @@ impl RetainedState {
                 .map(|(index, value)| (index, value, self.program.written_value_checks(rule, index)))),
             WinnerSource::Element(kind) => {
                 // The host publishes an element's declarations complete and with the values they
-                // were written with; only a replayed recording carries none.
+                // were written with; only a replayed recording carries none, which the engine
+                // cannot read.
                 let (declared, _) = self.facts.element_declared_properties(node, kind);
                 let written = self.facts.element_written_declared_values(node, kind);
-                Ok(declared
-                    .iter()
-                    .rposition(|declared| {
-                        declared.property == winner.property
-                            && declared.important == winner.important
-                            && declared.value == winner.key.value
-                    })
-                    .and_then(|index| {
-                        Some((
-                            index,
-                            written.get(index)?,
-                            self.facts.element_written_value_checks(node, kind, index),
-                        ))
-                    }))
+                let Some(index) = declared.iter().rposition(|declared| {
+                    declared.property == winner.property
+                        && declared.important == winner.important
+                        && declared.value == winner.key.value
+                }) else {
+                    return Ok(None);
+                };
+                let value = written.get(index).ok_or(Counter::EngineComputedRecordBailWinner)?;
+                Ok(Some((
+                    index,
+                    value,
+                    self.facts.element_written_value_checks(node, kind, index),
+                )))
             }
             WinnerSource::ExactCascade => Err(Counter::EngineComputedRecordBailWinnerOperator),
         }
@@ -3689,16 +3686,19 @@ impl RetainedState {
             if winner.property < crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID {
                 continue;
             }
-            let written = match self.written_winner_value(node, &winner) {
-                Ok(written) => written,
+            // A winner's declaration is written in its source. One the engine cannot find again is
+            // invalid at computed-value time, and the property is left undeclared: it computes as
+            // `unset`.
+            let (index, value, checks) = match self.written_winner_value(node, &winner) {
+                Ok(Some(written)) => written,
+                Ok(None) => {
+                    debug_assert!(false, "a winner's declaration is written in its source");
+                    continue;
+                }
                 Err(counter) => {
                     counters.bump(counter);
-                    None
+                    return None;
                 }
-            };
-            let Some((index, value, checks)) = written else {
-                counters.bump(Counter::EngineComputedRecordBailWinnerSpelling);
-                return None;
             };
             // A longhand declared through a shorthand keeps the whole shorthand as its written
             // value; the store takes the longhand's own part of it.
@@ -3710,8 +3710,8 @@ impl RetainedState {
             let (value, borrowed) = match value.data() {
                 crate::css::style_value::StyleValueData::Shorthand { .. } => {
                     let Some(value) = shorthand_longhand_data(winner.property, value.data()) else {
-                        counters.bump(Counter::EngineComputedRecordBailWinnerSpelling);
-                        return None;
+                        debug_assert!(false, "a shorthand written for a longhand winner carries that longhand");
+                        continue;
                     };
                     (location, Some(value))
                 }
@@ -3751,8 +3751,8 @@ impl RetainedState {
                     let Some((shorthand, written)) =
                         self.shorthand_declaration_written_as(node, winner.source, original_shorthand_value.pointer())
                     else {
-                        counters.bump(Counter::EngineComputedRecordBailWinnerSpelling);
-                        return None;
+                        debug_assert!(false, "a pending longhand's shorthand is written in its source");
+                        continue;
                     };
                     let Some(inputs) = inputs else {
                         counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
