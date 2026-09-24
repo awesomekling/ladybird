@@ -265,7 +265,9 @@ impl RetainedState {
         // A pseudo-element asks about its originating element too. The element's new record may
         // have changed that container's type, name or style after the first verdict check.
         if self.container_verdicts_moved(node) {
-            if self.republish_winners_from_answer(node, counters).is_none() {
+            let republished = self.republish_winners_from_answer(node, counters);
+            debug_assert!(republished.is_some(), "a driven row without the facts to match it");
+            if republished.is_none() {
                 self.abandon_engine_computed_record(node, scratch, counters);
                 return Err(Unanswered::Refused);
             }
@@ -348,12 +350,11 @@ impl RetainedState {
             && !self.container_gates_unheld.contains(&node)
             && self.current_winner_groups().row_stamp(node) != Some(self.flush_stamp);
         if self.container_gates_unheld.contains(&node) || self.container_verdicts_moved(node) || stale_element_winners {
-            let Some(complete) = self.republish_winners_from_answer(node, counters) else {
-                counters.bump(if stale_element_winners {
-                    Counter::EngineComputedRecordBailWinner
-                } else {
-                    Counter::EngineComputedRecordBailContainerVerdict
-                });
+            // A published row has the fact row its winners are matched from.
+            let republished = self.republish_winners_from_answer(node, counters);
+            debug_assert!(republished.is_some(), "a driven row without the facts to match it");
+            let Some(complete) = republished else {
+                counters.bump(Counter::EngineComputedRecordBailWinner);
                 return Err(Unanswered::Refused);
             };
             cascade_winners_are_complete = complete;
