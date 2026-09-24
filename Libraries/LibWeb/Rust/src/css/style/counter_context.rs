@@ -59,7 +59,6 @@ impl StyleEngine {
             property,
             root_custom_property_name,
             written,
-            &mut self.counters,
         )
     }
 

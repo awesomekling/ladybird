@@ -3186,7 +3186,6 @@ unsafe fn sample_described_animation_effects(
     )
     .expect("the host's sampling declines no declaration");
     let substitution_marks = substitution.substitution_marks;
-    drop(substitution);
     let mut result = FfiHostAnimationSampleResult::with_outcome(Unchanged);
     result.substitution_marks = substitution_marks;
     // Effects whose keyframes declare nothing this element animates compose nothing at all, and
