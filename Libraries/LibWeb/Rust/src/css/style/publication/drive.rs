@@ -127,7 +127,7 @@ struct PendingFontDrive {
 }
 
 impl RetainedState {
-    fn container_unit_bases(
+    pub(crate) fn container_unit_bases(
         &self,
         node: StyleNodeID,
         mask: u8,
