@@ -10,8 +10,6 @@ use super::*;
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum FfiCommitMessageKind {
-    /// The node is a size query container whose content size changed.
-    ContentSizeChangedForContainerQueries,
     /// The node is a navigable container whose viewport committed at a new size.
     NavigableContainerViewportCommitted,
     /// The node is an inline box that reached atomic-inline layout without line box fragments.
@@ -73,7 +71,6 @@ impl CommitNotifications {
 
 fn commit_subtree(
     node: Node,
-    messages: &mut Vec<FfiCommitMessage>,
     paintables: &mut crate::painting::paintable_build::PaintableCommit<'_>,
     links_by_slot: &HashMap<u32, &FragmentLink>,
     pass_fragments: &fragment_tree::CompletedPassFragments,
@@ -127,13 +124,7 @@ fn commit_subtree(
             })
             && let Some(style_node) = paintables.arena().commit_message_style_node(node)
         {
-            messages.push(FfiCommitMessage {
-                style_node,
-                other_style_node: 0,
-                kind: FfiCommitMessageKind::ContentSizeChangedForContainerQueries,
-                pending_face: 0,
-                pending_face_has_been_retried: false,
-            });
+            paintables.arena().record_size_container_content_size_change(style_node);
         }
 
         if !reuses_committed_subtree && let Some(line_data) = &fragment.line_data {
@@ -164,7 +155,6 @@ fn commit_subtree(
         let next = paintables.arena().data(child).next_sibling.get();
         commit_subtree(
             child,
-            messages,
             &mut *paintables,
             links_by_slot,
             pass_fragments,
@@ -216,7 +206,6 @@ pub(crate) fn commit_replacing(
     let mut messages = paintables.arena().take_messages_reported_during_pass();
     commit_subtree(
         root,
-        &mut messages,
         &mut paintables,
         &links_by_slot,
         pass_fragments,

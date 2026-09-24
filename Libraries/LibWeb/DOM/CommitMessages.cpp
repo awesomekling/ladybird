@@ -6,7 +6,6 @@
 
 #include <AK/ScopeGuard.h>
 #include <LibGfx/FontCascadeList.h>
-#include <LibWeb/CSS/Invalidation/ContainerQueryInvalidator.h>
 #include <LibWeb/CSS/ScrollStateContainerQuery.h>
 #include <LibWeb/DOM/CommitMessages.h>
 #include <LibWeb/DOM/Document.h>
@@ -151,9 +150,6 @@ void CommitMessages::append(Layout::RustFFI::FfiCommitMessage const& message)
         ? NodeIdentity::of_document()
         : NodeIdentity::of_style_node(CSS::StyleNodeID { message.style_node });
     switch (message.kind) {
-    case Layout::RustFFI::FfiCommitMessageKind::ContentSizeChangedForContainerQueries:
-        m_messages.append(Message { .identity = identity, .kind = Kind::ContentSizeChangedForContainerQueries, .pseudo_element = {}, .custom_property_name = {} });
-        return;
     case Layout::RustFFI::FfiCommitMessageKind::NavigableContainerViewportCommitted:
         m_messages.append(Message { .identity = identity, .kind = Kind::NavigableContainerViewportCommitted, .pseudo_element = {}, .custom_property_name = {} });
         return;
@@ -219,11 +215,6 @@ void CommitMessages::apply(Message const& message)
         // A node that left the tree between the message and here has nothing left to tell.
         if (auto node = message.identity.resolve(m_document))
             node->set_box_presence(message.has_layout_box, message.has_committed_box);
-        return;
-    case Kind::ContentSizeChangedForContainerQueries:
-        // Only an element can be a query container; the viewport names the document, which is not.
-        if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
-            CSS::Invalidation::invalidate_descendant_styles_depending_on_size_container_query(*element);
         return;
     case Kind::HoverTargetAfterScroll:
         // A node that has left the tree since the hit test named it is nothing to hover, which is

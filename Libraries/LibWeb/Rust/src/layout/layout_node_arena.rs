@@ -2253,6 +2253,20 @@ impl LayoutNodeArena {
         unsafe { query(&*style_engine.cast::<StyleEngine>()) }
     }
 
+    /// The committed content box of the element `style_node` names changed along an axis its
+    /// container type queries; the style engine records the dependents that change moves.
+    pub(crate) fn record_size_container_content_size_change(&self, style_node: u32) {
+        if let Some(style_node) = StyleNodeID::from_raw(style_node) {
+            self.with_style_engine(|engine| engine.size_container_content_size_changed(style_node));
+        }
+    }
+
+    /// A full layout has committed a box for every container that had none when a style
+    /// computation asked about it; the style engine records the dependents of each.
+    pub(crate) fn evaluate_size_containers_needing_evaluation_after_layout(&self) {
+        self.with_style_engine(|engine| engine.evaluate_size_containers_needing_evaluation_after_layout());
+    }
+
     fn with_style_engine<T>(&self, callback: impl FnOnce(&mut StyleEngine) -> T) -> T {
         let style_engine = self.style_engine();
         unsafe { callback(&mut *style_engine.cast::<StyleEngine>()) }

@@ -61,7 +61,6 @@
 #include <LibWeb/CSS/FontFaceSet.h>
 #include <LibWeb/CSS/HypotheticalElement.h>
 #include <LibWeb/CSS/Invalidation/AdoptedStyleSheetInvalidator.h>
-#include <LibWeb/CSS/Invalidation/ContainerQueryInvalidator.h>
 #include <LibWeb/CSS/Invalidation/ElementStateInvalidator.h>
 #include <LibWeb/CSS/Invalidation/LinkInvalidator.h>
 #include <LibWeb/CSS/Invalidation/MediaQueryInvalidator.h>
@@ -766,6 +765,7 @@ Layout::NodeArena& Document::layout_node_arena()
 void Document::reset_style_invalidation_counters() const
 {
     m_style_invalidation_counters = {};
+    (void)CSS::StyleEngineFFI::style_engine_size_query_container_scan_visits(const_cast<CSS::StyleEngine&>(style_computer().style_engine()).rust_handle(), true);
     if (m_layout_node_arena)
         Layout::RustFFI::layout_arena_scrollable_overflow_recalculation_count(m_layout_node_arena->handle(), true);
     CSS::reset_longhand_wrappers_minted();
@@ -787,7 +787,7 @@ bool Document::is_clean_for_layout_geometry_read() const
         && !style_computer().style_engine().has_pending_transaction()
         && !m_needs_media_rule_evaluation
         && !m_needs_animated_style_update
-        && m_query_containers_needing_container_query_evaluation_after_layout.is_empty()
+        && !has_size_containers_needing_evaluation_after_layout()
         && m_elements_with_pending_top_layer_membership_change.is_empty()
         && !m_top_layer_needs_layout_zone_rebuild;
 }
@@ -1038,7 +1038,6 @@ void Document::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_document_observers_being_notified);
     for (auto& pending_scroll_event : m_pending_scroll_events)
         visitor.visit(pending_scroll_event.event_target);
-    visitor.visit(m_query_containers_needing_container_query_evaluation_after_layout);
     m_scroll_state_query_containers.visit_edges(visitor);
     visitor.visit(m_list_owners_pending_item_renumber);
 
@@ -2045,9 +2044,16 @@ void Document::record_partial_relayout_escape(PartialRelayoutEscapeReason reason
         Layout::RustFFI::layout_arena_record_partial_relayout_escape(m_layout_node_arena->handle());
 }
 
+// The style engine keeps the containers, and records their dependents once a full layout has
+// committed their boxes.
 void Document::set_needs_container_query_evaluation_after_layout(Element const& query_container)
 {
-    m_query_containers_needing_container_query_evaluation_after_layout.set(const_cast<Element&>(query_container));
+    CSS::StyleEngineFFI::style_engine_note_size_container_needs_evaluation_after_layout(style_computer().style_engine().rust_handle(), query_container.style_node_id().value());
+}
+
+bool Document::has_size_containers_needing_evaluation_after_layout() const
+{
+    return CSS::StyleEngineFFI::style_engine_has_size_containers_needing_evaluation_after_layout(style_computer().style_engine().rust_handle());
 }
 
 void Document::begin_style_stabilization_epoch()
@@ -2183,7 +2189,7 @@ void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutRe
         && layout_is_up_to_date()
         && !m_needs_media_rule_evaluation
         && !m_needs_animated_style_update
-        && m_query_containers_needing_container_query_evaluation_after_layout.is_empty()
+        && !has_size_containers_needing_evaluation_after_layout()
         && m_elements_with_pending_top_layer_membership_change.is_empty()
         && !m_top_layer_needs_layout_zone_rebuild
         && !style_computer().style_engine().css_transitions_may_observe_style_changes()
@@ -2248,7 +2254,7 @@ void Document::process_pending_list_item_renumbers()
 
 bool Document::needs_style_update_after_layout()
 {
-    return !m_query_containers_needing_container_query_evaluation_after_layout.is_empty()
+    return has_size_containers_needing_evaluation_after_layout()
         || m_needs_animated_style_update
         || style_computer().style_engine().has_pending_transaction();
 }

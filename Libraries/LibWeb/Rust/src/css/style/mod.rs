@@ -159,6 +159,7 @@ pub mod selector;
 mod shareable;
 mod shared_vector;
 mod sheet_occurrences;
+mod size_container_invalidation;
 mod specified_value;
 pub mod transaction;
 mod transaction_view;
@@ -828,6 +829,9 @@ pub struct RetainedState {
     /// transaction, so their gated rules' conditions could not be decided when they were.
     container_gates_unheld: HashSet<StyleNodeID>,
     container_input_nodes: HashSet<StyleNodeID>,
+    /// What the host learned about size container queries, which finds the elements a size
+    /// query container's new box moves.
+    size_container_queries: size_container_invalidation::SizeContainerQueryFacts,
     declaration_block_version: u32,
     /// Whether the last transaction taken planned nothing but derived child reactions.
     last_transaction_only_derived_child_reactions: bool,

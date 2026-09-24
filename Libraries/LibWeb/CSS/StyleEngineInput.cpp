@@ -305,6 +305,7 @@ void record_element_connected(DOM::Element& element)
     // yet: the engine keeps it, and installing the element's style gives it one.
     style_engine->set_element_custom_property_data(element.style_node_id(), nullptr);
     element.publish_style_recomputes_on_environment_move();
+    element.publish_size_container_query_facts();
     Layout::publish_table_spans(element);
     record_element_arrival_delta(element, *style_engine, tree_scope_of(element.root()));
     ensure_dom_order_parent_identity(element.parent(), *style_engine);
@@ -430,6 +431,7 @@ void record_subtree_connecting(DOM::Node& root)
                 style_engine.set_element_unique_node_id(identity, static_cast<u64>(element->unique_id().value()));
                 style_engine.set_element_custom_property_data(identity, nullptr);
                 element->publish_style_recomputes_on_environment_move();
+                element->publish_size_container_query_facts();
                 Layout::publish_table_spans(*element);
             } else {
                 auto identity = identities[next_shadow_root_identity++];
