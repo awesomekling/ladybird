@@ -679,6 +679,9 @@ pub mod style_reaction_applied_fact {
     pub const RECOMPUTE_DESCENDANT_STYLES: u32 = 1 << 3;
     pub const CHILDREN_EXPLICITLY_INHERIT: u32 = 1 << 4;
     pub const SHADOW_CHILDREN_EXPLICITLY_INHERIT: u32 = 1 << 5;
+    pub const ROW_WAS_UNSTYLED: u32 = 1 << 6;
+    pub const ROW_WAS_DISPLAY_NONE: u32 = 1 << 7;
+    pub const ROW_DISPLAY_CHANGED: u32 = 1 << 8;
 }
 
 /// The element facts the style computation's box-type transformation and element style

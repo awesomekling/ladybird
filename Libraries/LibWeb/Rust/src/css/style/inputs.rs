@@ -2157,9 +2157,7 @@ impl StyleEngineState {
                 latent_deferred_pseudo_element_style_inputs: Vec::new(),
                 deferred_element_style_inputs_are_pending: false,
                 externally_recorded_style_input_nodes: HashSet::default(),
-                held_style_record_displays: HashMap::default(),
                 held_style_records: HashMap::default(),
-                style_reaction_row_start: None,
                 deferred_element_style_input_memory: MemoryLease::new(MemoryCategory::NormalizationJournal),
                 initial_tree_batch_applied: false,
                 initial_tree_bulk_load_is_pending: false,
@@ -2437,22 +2435,8 @@ impl StyleEngineState {
     pub fn set_element_container_query_inputs(&mut self, node: StyleNodeID, style_record: u64) {
         self.retained.set_element_container_query_inputs(node, style_record);
         if style_record == 0 {
-            self.host.held_style_record_displays.remove(&node);
             self.host.held_style_records.remove(&node);
         } else {
-            let display = self
-                .retained
-                .computed_group_sets
-                .style_record_payloads(style_record)
-                .filter(|payloads| payloads.len() > crate::css::computed_value_types::STYLE_GROUP_INDEX_BOX)
-                .map(|payloads| {
-                    crate::css::computed_value_views::ComputedValuesView::new(
-                        crate::css::host_shared::SharedPayload::as_pointer_slice(payloads),
-                    )
-                    .box_values()
-                    .display
-                });
-            self.host.held_style_record_displays.insert(node, display);
             self.host.held_style_records.insert(node, style_record);
             // A `rem` resolves against the font metrics of the record the document element holds.
             if self.retained.computed_group_sets.adjustment_facts(node)
@@ -2922,7 +2906,6 @@ impl StyleEngineState {
             self.retained.layout_style_snapshots.retire(&retired_nodes);
             for &node in &retired_nodes {
                 self.retained.container_query_inputs.clear(node);
-                self.host.held_style_record_displays.remove(&node);
                 self.host.held_style_records.remove(&node);
                 // An identity can be minted again for another element, so a retained environment
                 // must not outlive the element that installed it.

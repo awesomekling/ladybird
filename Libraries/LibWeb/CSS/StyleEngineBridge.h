@@ -223,6 +223,10 @@ public:
         RecomputeDescendants = 1 << 3,
         ChildrenExplicitlyInherit = 1 << 4,
         ShadowChildrenExplicitlyInherit = 1 << 5,
+        // What the element held as the application began, against what it holds now.
+        RowWasUnstyled = 1 << 6,
+        RowWasDisplayNone = 1 << 7,
+        RowDisplayChanged = 1 << 8,
     };
     void record_container_query_input_change(StyleNodeID);
     // Records every element whose style a size query or container-relative unit decided against the container.

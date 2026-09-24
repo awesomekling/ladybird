@@ -397,6 +397,34 @@ static RequiredInvalidationAfterStyleChange apply_engine_record_demand(DOM::Elem
     return *invalidation;
 }
 
+// What an element held as a style row began, which the engine derives the children's reactions
+// from with what the row leaves it holding.
+struct StyleRowStart {
+    bool had_style { false };
+    Optional<Display> display;
+};
+
+static StyleRowStart style_row_start(DOM::Element& element)
+{
+    StyleRowStart start { element.has_style(), {} };
+    if (auto const* box_values = element.style_group<ComputedValues::BoxValues>())
+        start.display = display_from_ffi_display(box_values->display);
+    return start;
+}
+
+static u32 style_row_start_facts(DOM::Element& element, StyleRowStart const& start)
+{
+    if (!start.had_style)
+        return StyleEngine::RowWasUnstyled;
+    u32 facts = 0;
+    if (start.display.has_value() && start.display->is_none())
+        facts |= StyleEngine::RowWasDisplayNone;
+    if (auto const* box_values = element.style_group<ComputedValues::BoxValues>(); box_values && start.display.has_value()
+        && display_from_ffi_display(box_values->display) != *start.display)
+        facts |= StyleEngine::RowDisplayChanged;
+    return facts;
+}
+
 // The debts the engine took as it published a computed element row, which the host settles as it
 // installs the row, or hands back.
 struct PublishedRowDebts {
@@ -583,8 +611,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     return !element->has_style();
                 return false;
             }();
-            if (!engine_derived_children)
-                document.style_computer().style_engine().begin_style_reaction(StyleNodeID { reaction.style_node });
+            auto const row_start = style_row_start(*element);
             DOM::begin_style_row_counter_style_invalidation(*element);
             // The environment the element held before the row, when the row moves it.
             RefPtr<CustomPropertyData const> old_custom_property_data;
@@ -880,7 +907,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             // from, or whose move the host compared itself, derives them here.
             if (engine_derived_children && !row_computed_damage_itself && element->style_record_identity().value() == reaction.new_style_record)
                 continue;
-            u32 facts = 0;
+            u32 facts = style_row_start_facts(*element, row_start);
             if (invalidation.is_none())
                 facts |= StyleEngine::InvalidationIsNone;
             if (invalidation.needs_layout_tree_rebuild())
@@ -1200,13 +1227,13 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
 
 // What a targeted materialization of one element found, reported to the engine the way a reaction
 // pass reports it, so the element's children get the same derived reactions either way.
-static void note_targeted_style_reaction_applied(DOM::Element& element, RequiredInvalidationAfterStyleChange const& invalidation, bool did_change_custom_properties, bool descendant_style_recompute_needed)
+static void note_targeted_style_reaction_applied(DOM::Element& element, StyleRowStart const& row_start, RequiredInvalidationAfterStyleChange const& invalidation, bool did_change_custom_properties, bool descendant_style_recompute_needed)
 {
     auto& style_engine = element.document().style_computer().style_engine();
     u8 reaction = StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle;
     if (descendant_style_recompute_needed)
         reaction |= StyleEngine::RecomputeDescendantStyles;
-    u32 facts = 0;
+    u32 facts = style_row_start_facts(element, row_start);
     if (did_change_custom_properties)
         facts |= StyleEngine::DidChangeCustomProperties;
     if (invalidation.is_none())
@@ -1222,7 +1249,7 @@ static void note_targeted_style_reaction_applied(DOM::Element& element, Required
     style_engine.note_style_reaction_applied(element.style_node_id(), reaction, invalidation.inherited_style_groups_changed(), facts);
 }
 
-static void apply_targeted_style_invalidation(DOM::Element& element, RequiredInvalidationAfterStyleChange const& invalidation, RequiredInvalidationAfterStyleChange const& counter_style_invalidation, bool did_change_custom_properties, bool descendant_style_recompute_needed)
+static void apply_targeted_style_invalidation(DOM::Element& element, StyleRowStart const& row_start, RequiredInvalidationAfterStyleChange const& invalidation, RequiredInvalidationAfterStyleChange const& counter_style_invalidation, bool did_change_custom_properties, bool descendant_style_recompute_needed)
 {
     if (!invalidation.is_none() || did_change_custom_properties)
         Invalidation::invalidate_assigned_slottables_after_slot_style_change(element);
@@ -1230,7 +1257,7 @@ static void apply_targeted_style_invalidation(DOM::Element& element, RequiredInv
     auto effects = invalidation;
     effects |= counter_style_invalidation;
     apply_element_style_invalidation_after_style_change(element, effects);
-    note_targeted_style_reaction_applied(element, invalidation, did_change_custom_properties, descendant_style_recompute_needed);
+    note_targeted_style_reaction_applied(element, row_start, invalidation, did_change_custom_properties, descendant_style_recompute_needed);
     apply_document_style_invalidation_after_style_change(element.document(), effects);
 }
 
@@ -1554,11 +1581,11 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
     for (size_t i = *topmost_element_to_recompute + 1; i > 0; --i) {
         auto& element = inheritance_chain[i - 1];
         bool did_change_custom_properties = false;
-        element->document().style_computer().style_engine().begin_style_reaction(element->style_node_id());
+        auto const row_start = style_row_start(*element);
         DOM::begin_style_row_counter_style_invalidation(*element);
         auto invalidation = materialize_style_for_targeted_update(element, did_change_custom_properties);
         auto const counter_style_invalidation = DOM::end_style_row_counter_style_invalidation(*element);
-        apply_targeted_style_invalidation(element, invalidation, counter_style_invalidation, did_change_custom_properties, descendant_style_recompute_needed);
+        apply_targeted_style_invalidation(element, row_start, invalidation, counter_style_invalidation, did_change_custom_properties, descendant_style_recompute_needed);
 
         descendant_style_recompute_needed |= invalidation.recompute_descendant_styles;
 
