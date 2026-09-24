@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<style>
+    @property --local {
+        syntax: "<length>";
+        inherits: false;
+        initial-value: 0px;
+    }
+    .origin {
+        --x: 1px;
+        --local: 1px;
+    }
+    .origin.moved {
+        --x: 2px;
+        --local: 2px;
+    }
+    .origin.moved .item {
+        color: rgb(0, 128, 0);
+    }
+</style>
+<div id="origin" class="origin"></div>
+<script src="../../include.js"></script>
+<script>
+    test(() => {
+        const origin = document.getElementById("origin");
+        let html = "";
+        for (let i = 0; i < 3000; ++i)
+            html += `<div class="item" style="width: ${i}px">x</div>`;
+        origin.innerHTML = html;
+        document.body.offsetWidth;
+
+        // The origin's custom properties move in the same style change that gives each item a
+        // row of its own. Enough records are interned afterwards for the engine to reclaim the
+        // ones nothing holds any more.
+        origin.classList.add("moved");
+        document.body.offsetWidth;
+        for (const height of ["7px", "8px"]) {
+            for (const item of origin.children)
+                item.style.height = height;
+            document.body.offsetWidth;
+        }
+
+        const first = origin.firstElementChild;
+        const last = origin.lastElementChild;
+        println(`first: ${getComputedStyle(first).color} ${getComputedStyle(first).getPropertyValue("--x")} ${getComputedStyle(first).height}`);
+        println(`last: ${getComputedStyle(last).color} ${getComputedStyle(last).getPropertyValue("--x")} ${getComputedStyle(last).height}`);
+    });
+</script>
