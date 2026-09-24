@@ -6139,21 +6139,6 @@ pub unsafe extern "C" fn layout_arena_layout_is_up_to_date(
     unsafe { LayoutNodeArena::from_handle(arena) }.layout_is_up_to_date(document_needs_layout_tree_build)
 }
 
-/// Refreshes the text content and replaced-content facts of every node enrolled since the last
-/// sync, ahead of a pass that caches them. A pass already on the stack owns those caches, so a
-/// request nested inside one is a no-op.
-///
-/// # Safety
-///
-/// `arena` must be a live handle with a registered layout host, used on the document thread.
-pub(crate) unsafe fn sync_enrolled_content_for_layout(main_thread: &crate::stage::MainThread, arena: *mut c_void) {
-    // SAFETY: Guaranteed by the caller.
-    unsafe {
-        let sources = read_enrolled_content_sources(main_thread, arena);
-        apply_enrolled_content_sources(arena, sources);
-    }
-}
-
 /// What the host answers for the content enrolled for sync: the replaced-content facts of each
 /// enrolled node that still has a shell. Text content is published to the arena and needs no host.
 #[derive(Default)]
@@ -6170,7 +6155,7 @@ pub(crate) struct EnrolledContentSources {
 ///
 /// # Safety
 ///
-/// As for [`sync_enrolled_content_for_layout`].
+/// `arena` must be a live handle with a registered layout host, used on the document thread.
 pub(crate) unsafe fn read_enrolled_content_sources(
     main_thread: &crate::stage::MainThread,
     arena: *mut c_void,

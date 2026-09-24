@@ -115,7 +115,6 @@ macro_rules! ffi_entry {
     };
 }
 
-ffi_entry!(crate::layout::formatting_context::MainThreadFfiEntry);
 ffi_entry!(crate::layout::ArenaMainThreadFfiEntry);
 ffi_entry!(crate::layout::UpdateMainThreadFfiEntry);
 ffi_entry!(crate::layout::TreeBuildMainThreadFfiEntry);

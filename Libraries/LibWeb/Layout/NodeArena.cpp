@@ -59,9 +59,4 @@ bool destroy_layout_subtree(Node& node)
     return RustFFI::layout_arena_detach_and_free_subtree(node.arena_handle(), Node::slot_id(&node));
 }
 
-void NodeArena::sync_enrolled_content_for_layout()
-{
-    RustFFI::layout_arena_sync_enrolled_content_for_layout(m_handle);
-}
-
 }

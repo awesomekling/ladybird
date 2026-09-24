@@ -369,13 +369,3 @@ unsafe extern "C" fn layout_arena_for_each_pending_rebuilt_subtree_root(
         unsafe { visit(context, arena.node_shell(&main_thread, root)) };
     }
 }
-
-/// # Safety
-///
-/// `arena` must be a live handle with a registered layout host, used on the document thread.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_sync_enrolled_content_for_layout(arena: *mut c_void) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: Guaranteed by the entry point's contract.
-    unsafe { sync_enrolled_content_for_layout(&main_thread, arena) }
-}
