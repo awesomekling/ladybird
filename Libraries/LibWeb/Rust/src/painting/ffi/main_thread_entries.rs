@@ -30,9 +30,9 @@ unsafe extern "C" fn layout_arena_scrolling_box_for_scroll_step(
     viewport_wheel_overflow_y: u8,
 ) -> *mut c_void {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    let arena = unsafe { arena_from_handle(arena) };
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     let scrolling_box = crate::painting::scroll_chain::scrolling_box_for_scroll_step(
-        &arena.paintable_rows(),
+        &paintable_rows,
         target,
         viewport,
         delta.into(),
@@ -40,9 +40,9 @@ unsafe extern "C" fn layout_arena_scrolling_box_for_scroll_step(
             x: viewport_wheel_overflow_x,
             y: viewport_wheel_overflow_y,
         },
-        &scroll_offset_reader(arena),
+        &scroll_offset_reader(&paintable_rows),
     );
-    arena.shell_if_live(&main_thread, scrolling_box)
+    paintable_rows.shell_if_live(&main_thread, scrolling_box)
 }
 
 /// # Safety
@@ -61,9 +61,9 @@ unsafe extern "C" fn layout_arena_for_each_wheel_scrollable_box_in_containing_bl
     push_scrollable_box: unsafe extern "C" fn(*mut c_void, *mut c_void, f64, f64),
 ) {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    let arena = unsafe { arena_from_handle(arena) };
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     crate::painting::scroll_chain::for_each_wheel_scrollable_box_in_containing_block_chain(
-        &arena.paintable_rows(),
+        &paintable_rows,
         start,
         wheel_delta_x,
         wheel_delta_y,
@@ -71,13 +71,13 @@ unsafe extern "C" fn layout_arena_for_each_wheel_scrollable_box_in_containing_bl
             x: viewport_wheel_overflow_x,
             y: viewport_wheel_overflow_y,
         },
-        &scroll_offset_reader(arena),
+        &scroll_offset_reader(&paintable_rows),
         |node, accepted_delta_x, accepted_delta_y| {
             // SAFETY: The C++ callback appends the shell and deltas to a caller-owned collection.
             unsafe {
                 push_scrollable_box(
                     context,
-                    arena.node_shell(&main_thread, node),
+                    paintable_rows.node_shell(&main_thread, node),
                     accepted_delta_x,
                     accepted_delta_y,
                 );
@@ -97,16 +97,16 @@ unsafe extern "C" fn layout_arena_first_wheel_scrollable_box_in_containing_block
     viewport_wheel_overflow_y: u8,
 ) -> *mut c_void {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    let arena = unsafe { arena_from_handle(arena) };
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     let scrollable_box = crate::painting::scroll_chain::first_wheel_scrollable_box_in_containing_block_chain(
-        &arena.paintable_rows(),
+        &paintable_rows,
         start,
         ViewportWheelOverflow {
             x: viewport_wheel_overflow_x,
             y: viewport_wheel_overflow_y,
         },
     );
-    arena.shell_if_live(&main_thread, scrollable_box)
+    paintable_rows.shell_if_live(&main_thread, scrollable_box)
 }
 
 /// # Safety
@@ -252,10 +252,10 @@ unsafe extern "C" fn layout_arena_for_each_snap_area(
     push_snap_area: unsafe extern "C" fn(*mut c_void, *const crate::painting::host::FfiSnapAreaGeometry, *mut c_void),
 ) {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::scroll_snap::for_each_snap_area(&arena.paintable_rows(), snap_container, |slot, area| {
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
+    crate::painting::scroll_snap::for_each_snap_area(&paintable_rows, snap_container, |slot, area| {
         // SAFETY: The C++ callback copies the geometry into a caller-owned collection.
-        unsafe { push_snap_area(context, &raw const area, arena.node_shell(&main_thread, slot)) };
+        unsafe { push_snap_area(context, &raw const area, paintable_rows.node_shell(&main_thread, slot)) };
     });
 }
 
@@ -346,9 +346,8 @@ unsafe extern "C" fn layout_arena_text_caret_rect_for_position(
         owner_paintable: NodeSlotId::INVALID,
         nearest_self_painting_inline: NodeSlotId::INVALID,
     };
-    let arena = unsafe { arena_from_handle(arena) };
-    let paintable_rows = arena.paintable_rows();
-    let fragments = arena.text_fragments(primary);
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
+    let fragments = paintable_rows.text_fragments(primary);
     let node_slots = fragments.as_slice();
     let Some(answer) =
         crate::painting::caret::caret_rect_for_position(&paintable_rows, node_slots, offset, affinity_is_downstream)
@@ -357,7 +356,7 @@ unsafe extern "C" fn layout_arena_text_caret_rect_for_position(
     };
     result.found = true;
     result.rect = answer.rect.into();
-    result.style_source = arena.shell_if_live(&main_thread, answer.style_source);
+    result.style_source = paintable_rows.shell_if_live(&main_thread, answer.style_source);
     result.owner_paintable = answer.owner;
     result.nearest_self_painting_inline =
         crate::painting::fragment_ownership::nearest_self_painting_inline_box(&paintable_rows, answer.node)
@@ -383,14 +382,13 @@ unsafe extern "C" fn layout_arena_atomic_inline_caret_rect_for_position(
         owner_paintable: NodeSlotId::INVALID,
         nearest_self_painting_inline: NodeSlotId::INVALID,
     };
-    let arena = unsafe { arena_from_handle(arena) };
-    let paintable_rows = arena.paintable_rows();
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     let Some(answer) = crate::painting::caret::caret_rect_for_atomic_inline(&paintable_rows, primary, after) else {
         return result;
     };
     result.found = true;
     result.rect = answer.rect.into();
-    result.style_source = arena.shell_if_live(&main_thread, answer.style_source);
+    result.style_source = paintable_rows.shell_if_live(&main_thread, answer.style_source);
     result.owner_paintable = answer.owner;
     result.nearest_self_painting_inline =
         crate::painting::fragment_ownership::nearest_self_painting_inline_box(&paintable_rows, answer.node)
