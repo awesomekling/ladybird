@@ -142,9 +142,6 @@ public:
     // The store of an environment the engine resolved, with one strong reference transferred, and
     // the environment it was resolved over; null for one C++ published.
     [[nodiscard]] void const* borrow_engine_custom_property_environment(u64 identity, u64& parent_identity) const;
-    // Moves a node's record to the environment its inherited custom-property data was refreshed
-    // to; the new record's identity, or zero when nothing moved.
-    [[nodiscard]] StyleRecordID republish_record_environment(StyleNodeID, u64 environment, void const* store);
     [[nodiscard]] StyleEngineFFI::FfiRecordDemandAnswer answer_record_demand(StyleNodeID, Optional<u8> pseudo_kind, bool exclude_inline_style, bool targeted, bool read_only = false);
     [[nodiscard]] StyleEngineFFI::FfiEngineComputedRecord settle_pseudo_records_after_host_record(StyleNodeID, bool old_is_list_item);
     void prepare_root_font_resolution(u64 font_environment_generation);
