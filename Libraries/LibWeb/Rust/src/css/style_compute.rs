@@ -3096,7 +3096,11 @@ fn check_sample_custom_property_environments(
     if same_store(host.store, engine_environments.store)
         && same_store(host.base_store, engine_environments.base_store)
         && same_store(host.inheritance_store, engine_environments.inheritance_store)
-        && host.element_declares_own == engine_environments.element_declares_own
+        // The host tells a base it inherits by its object, and cannot recognize a projection the
+        // engine built of the parent's environment as the parent's; the engine asks the element's
+        // cascade, which is also where a sample over an engine base reads importance from.
+        && (host.element_declares_own == engine_environments.element_declares_own
+            || (engine_environments.base_is_engine && !engine_environments.element_declares_own))
         && host.base_is_engine == engine_environments.base_is_engine
     {
         engine_sample_check::note_agreed("custom property environments");
