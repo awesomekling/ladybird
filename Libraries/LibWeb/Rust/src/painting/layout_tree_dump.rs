@@ -213,10 +213,11 @@ fn push_box_model_axis(output: &mut Vec<u8>, edges: [crate::css::css_pixels::Css
 }
 
 fn push_box_model(output: &mut Vec<u8>, arena: &LayoutNodeArena, slot: NodeSlotId) {
-    let margin: FfiPixelBox = paintable_geometry::committed_margin(arena, slot);
-    let border = paintable_geometry::committed_border(arena, slot);
-    let padding = paintable_geometry::committed_padding(arena, slot);
-    let content_size = paintable_geometry::committed_content_size(&arena.paintable_rows(), slot);
+    let paintable_rows = arena.paintable_rows();
+    let margin: FfiPixelBox = paintable_geometry::committed_margin(&paintable_rows, slot);
+    let border = paintable_geometry::committed_border(&paintable_rows, slot);
+    let padding = paintable_geometry::committed_padding(&paintable_rows, slot);
+    let content_size = paintable_geometry::committed_content_size(&paintable_rows, slot);
     output.extend_from_slice(b" [");
     push_box_model_axis(
         output,
@@ -347,7 +348,9 @@ fn push_box_suffix(
     has_committed_box: bool,
     palette: &DumpPalette,
 ) {
-    if has_committed_box && let Some(transform) = paintable_geometry::committed_svg_viewport_transform(arena, slot) {
+    if has_committed_box
+        && let Some(transform) = paintable_geometry::committed_svg_viewport_transform(&arena.paintable_rows(), slot)
+    {
         output.extend_from_slice(b" viewport-transform=");
         push_affine_transform(output, transform);
     }
