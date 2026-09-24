@@ -554,17 +554,23 @@ impl RetainedState {
                         )?;
                         let mut substituted = false;
                         let inheritance_environment = self.held_inheritance_environment(node, Some(kind));
-                        let final_store = self
-                            .cascaded_store_for_state(
-                                node,
-                                state.or_refused()?,
-                                Some(kind),
-                                environment,
-                                inheritance_environment,
-                                &mut substituted,
-                                counters,
-                            )
-                            .or_refused()?;
+                        // Registered declarations are the rules' own: a kind without rules has
+                        // an empty store, which declares none.
+                        debug_assert!(state.is_some(), "a pseudo-element's registered declarations have rules");
+                        let final_store = match state {
+                            Some(state) => self
+                                .cascaded_store_for_state(
+                                    node,
+                                    state,
+                                    Some(kind),
+                                    environment,
+                                    inheritance_environment,
+                                    &mut substituted,
+                                    counters,
+                                )
+                                .or_refused()?,
+                            None => WinnerStore::default(),
+                        };
                         scratch.store_capacity_bytes += final_store.capacity_bytes();
                         store = std::sync::Arc::new(final_store);
                         pseudo_uses_substitution |= substituted;
