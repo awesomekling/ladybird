@@ -18,7 +18,7 @@ use super::layout_node_arena::{EnrolledContentSources, apply_enrolled_content_so
 use super::node_data::NodeSlotId;
 use super::node_facts;
 use super::partial_relayout::FfiPartialRelayoutHostFacts;
-use super::tree_builder::FfiLayoutTreeBuildOutcome;
+use super::tree_builder::{FfiLayoutTreeBuildOutcome, LayoutTreeBuildWalk, walk_layout_tree_build};
 use super::viewport_propagation::FfiViewportPropagationFacts;
 use crate::abort_on_panic;
 use crate::css::ffi_support::FfiUtf16View;
@@ -43,8 +43,13 @@ pub struct FfiLayoutUpdateHostCallbacks {
     pub document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
     pub needs_style_update_after_layout: unsafe extern "C" fn(*mut c_void) -> bool,
     pub prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
-    /// Builds or updates the layout tree and installs its viewport as the document's layout root.
-    pub build_layout_tree: unsafe extern "C" fn(*mut c_void) -> FfiLayoutTreeBuildOutcome,
+    /// Readies the document for a layout tree build, and answers with the document's style node,
+    /// which the build walks from.
+    pub prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
+    /// Pays the host half of the tree build walk the second argument holds, then installs the
+    /// build's viewport as the document's layout root in place of the third.
+    pub finish_layout_tree_build:
+        unsafe extern "C" fn(*mut c_void, *mut c_void, NodeSlotId) -> FfiLayoutTreeBuildOutcome,
     /// True when stale list-item counters marked more of the tree for a rebuild.
     pub reconcile_stale_list_item_counters_after_tree_build: unsafe extern "C" fn(*mut c_void) -> bool,
     /// Refreshes what derives from committed layout; the flag says whether the tree changed.
@@ -103,7 +108,8 @@ pub(crate) struct LayoutUpdateHost {
     document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
     needs_style_update_after_layout: unsafe extern "C" fn(*mut c_void) -> bool,
     prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
-    build_layout_tree: unsafe extern "C" fn(*mut c_void) -> FfiLayoutTreeBuildOutcome,
+    prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
+    finish_layout_tree_build: unsafe extern "C" fn(*mut c_void, *mut c_void, NodeSlotId) -> FfiLayoutTreeBuildOutcome,
     reconcile_stale_list_item_counters_after_tree_build: unsafe extern "C" fn(*mut c_void) -> bool,
     after_layout_commit: unsafe extern "C" fn(*mut c_void, bool),
     note_full_layouts_performed: unsafe extern "C" fn(*mut c_void, u64),
@@ -122,7 +128,8 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             document_facts: host.document_facts,
             needs_style_update_after_layout: host.needs_style_update_after_layout,
             prepare_for_rendering: host.prepare_for_rendering,
-            build_layout_tree: host.build_layout_tree,
+            prepare_layout_tree_build: host.prepare_layout_tree_build,
+            finish_layout_tree_build: host.finish_layout_tree_build,
             reconcile_stale_list_item_counters_after_tree_build: host
                 .reconcile_stale_list_item_counters_after_tree_build,
             after_layout_commit: host.after_layout_commit,
@@ -163,8 +170,21 @@ impl LayoutUpdateHost {
         unsafe { (self.prepare_for_rendering)(self.context) }
     }
 
-    fn build_layout_tree(&self, _: &crate::stage::MainThread) -> FfiLayoutTreeBuildOutcome {
-        unsafe { (self.build_layout_tree)(self.context) }
+    fn prepare_layout_tree_build(&self, _: &crate::stage::MainThread) -> u32 {
+        unsafe { (self.prepare_layout_tree_build)(self.context) }
+    }
+
+    fn finish_layout_tree_build(
+        &self,
+        _: &crate::stage::MainThread,
+        walked: WalkedLayoutTreeBuild,
+    ) -> FfiLayoutTreeBuildOutcome {
+        let mut walk = Some(walked.walk);
+        let outcome = unsafe {
+            (self.finish_layout_tree_build)(self.context, (&raw mut walk).cast(), walked.replaced_layout_root)
+        };
+        assert!(walk.is_none(), "the host pays the layout tree build walk it is handed");
+        outcome
     }
 
     fn reconcile_stale_list_item_counters_after_tree_build(&self, _: &crate::stage::MainThread) -> bool {
@@ -263,10 +283,13 @@ unsafe fn arena<'a>(arena_handle: *mut c_void) -> &'a LayoutNodeArena {
 #[derive(Clone, Copy)]
 enum FrameJoin {
     /// Style, then the list item renumbers and top layer changes it leaves, then the facts after
-    /// them, and the sources of the round's layout pass when no tree build comes first. Style is
-    /// the document's own loop over its elements.
+    /// them. When the round lays out, the join readies what comes next: the tree build, or the
+    /// sources of the layout pass when no tree build comes first. Style is the document's own
+    /// loop over its elements.
     Style,
-    /// The layout tree build: the builder reads the DOM, and runs its walk as a stage of its own.
+    /// The host half of a layout tree build whose walk the frame has run: what the walk let go of
+    /// and found out, the shells and style resources of its new rows, and the retirement of the
+    /// tree a new viewport replaced, all of which are the document's C++ and GC-side objects.
     /// Unless the build asks for another pass, the join then reconciles the list item counters
     /// the build left stale, which live in the document's element sets, and answers with the
     /// sources of the pass that follows. A partial relayout's build also answers with the facts
@@ -320,6 +343,19 @@ impl LayoutPassSources {
     }
 }
 
+/// A tree build walk the frame has run, and the layout root the build may have replaced.
+struct WalkedLayoutTreeBuild {
+    walk: LayoutTreeBuildWalk,
+    replaced_layout_root: NodeSlotId,
+}
+
+/// What the style join readied for the rest of its round.
+#[derive(Default)]
+struct RoundAfterStyle {
+    pass_sources: Option<LayoutPassSources>,
+    tree_build_document_style_node: Option<u32>,
+}
+
 /// What a finished layout frame leaves for the document thread to apply.
 #[must_use]
 #[derive(Default)]
@@ -351,6 +387,8 @@ struct LayoutFrame<'a> {
     messages: FrameMessages,
     /// The sources the last join read for the layout pass that follows it.
     pass_sources: Option<LayoutPassSources>,
+    /// The document style node of the tree build the style join readied.
+    tree_build_document_style_node: Option<u32>,
 }
 
 /// The document facts together with what a join answered.
@@ -387,18 +425,44 @@ impl LayoutFrame<'_> {
             || self.arena().needs_full_layout_tree_update()
     }
 
-    /// Reads the sources of the round's layout pass on the document thread when the pass follows
-    /// the style join directly, without a tree build.
-    fn read_pass_sources_after_style(
+    /// Readies what follows the style join on the document thread when the round lays out: the
+    /// tree build when one comes first, and otherwise the sources of the layout pass.
+    fn ready_round_after_style(
         &self,
         main_thread: &crate::stage::MainThread,
+        host: &LayoutUpdateHost,
         facts: &FfiLayoutUpdateDocumentFacts,
-    ) -> Option<LayoutPassSources> {
-        let pass_follows_style = self.round_lays_out(facts)
-            && !self.inputs.is_template_contents_document
-            && !self.needs_layout_tree_rebuild(facts);
-        // SAFETY: The frame runs for the update the arena is in.
-        pass_follows_style.then(|| unsafe { LayoutPassSources::read(main_thread, self.inputs.arena_handle) })
+    ) -> RoundAfterStyle {
+        if !self.round_lays_out(facts) || self.inputs.is_template_contents_document {
+            return RoundAfterStyle::default();
+        }
+        if self.needs_layout_tree_rebuild(facts) {
+            return RoundAfterStyle {
+                tree_build_document_style_node: Some(host.prepare_layout_tree_build(main_thread)),
+                ..RoundAfterStyle::default()
+            };
+        }
+        RoundAfterStyle {
+            // SAFETY: The frame runs for the update the arena is in.
+            pass_sources: Some(unsafe { LayoutPassSources::read(main_thread, self.inputs.arena_handle) }),
+            ..RoundAfterStyle::default()
+        }
+    }
+
+    /// Walks the tree build the style join readied, in the frame. Its host half is left to the
+    /// BuildLayoutTree join.
+    fn walk_layout_tree_build(&mut self) -> WalkedLayoutTreeBuild {
+        let document_style_node = self
+            .tree_build_document_style_node
+            .take()
+            .expect("the style join readies the tree build");
+        let replaced_layout_root = self.arena().layout_root();
+        WalkedLayoutTreeBuild {
+            // SAFETY: The frame runs for the update the arena is in, and the style join published
+            // the document's style for the build.
+            walk: unsafe { walk_layout_tree_build(self.inputs.arena_handle, document_style_node) },
+            replaced_layout_root,
+        }
     }
 
     fn take_pass_sources(&mut self) -> LayoutPassSources {
@@ -419,7 +483,7 @@ impl LayoutFrame<'_> {
             layout_pass += 1;
 
             let Joined {
-                value: (element_count, pass_sources),
+                value: (element_count, round_after_style),
                 facts,
             } = self.join(FrameJoin::Style, |main_thread, host| {
                 host.update_style(main_thread);
@@ -429,13 +493,14 @@ impl LayoutFrame<'_> {
                 Joined {
                     value: (
                         host.connected_element_count(main_thread),
-                        self.read_pass_sources_after_style(main_thread, &facts),
+                        self.ready_round_after_style(main_thread, host, &facts),
                     ),
                     facts,
                 }
             });
             connected_element_count = element_count;
-            self.pass_sources = pass_sources;
+            self.pass_sources = round_after_style.pass_sources;
+            self.tree_build_document_style_node = round_after_style.tree_build_document_style_node;
 
             if !self.round_lays_out(&facts) {
                 self.messages.prepare_for_rendering = true;
@@ -467,8 +532,9 @@ impl LayoutFrame<'_> {
 
             if needs_layout_tree_rebuild {
                 let arena_handle = self.inputs.arena_handle;
+                let walked = self.walk_layout_tree_build();
                 let pass_sources = self.join(FrameJoin::BuildLayoutTree, |main_thread, host| {
-                    let outcome = host.build_layout_tree(main_thread);
+                    let outcome = host.finish_layout_tree_build(main_thread, walked);
                     // SAFETY: The frame runs for the update the arena is in.
                     let arena = unsafe { arena(arena_handle) };
                     arena.record_layout_tree_build(&outcome);
@@ -596,11 +662,12 @@ impl LayoutFrame<'_> {
         if *needs_layout_tree_rebuild {
             let tree_build_started = self.inputs.trace.now();
             let arena_handle = self.inputs.arena_handle;
+            let walked = self.walk_layout_tree_build();
             let Joined {
                 value: (outcome, counters_were_stale, pass_sources),
                 facts: facts_after_build,
             } = self.join(FrameJoin::BuildLayoutTree, |main_thread, host| {
-                let outcome = host.build_layout_tree(main_thread);
+                let outcome = host.finish_layout_tree_build(main_thread, walked);
                 // SAFETY (for both uses): The frame runs for the update the arena is in.
                 unsafe { arena(arena_handle) }.record_layout_tree_build(&outcome);
                 let counters_were_stale = host.reconcile_stale_list_item_counters_after_tree_build(main_thread);
@@ -730,6 +797,7 @@ unsafe fn update_layout(
                 joins,
                 messages: FrameMessages::default(),
                 pass_sources: None,
+                tree_build_document_style_node: None,
             }
             .run()
         })

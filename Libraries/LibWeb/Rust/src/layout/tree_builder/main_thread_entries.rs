@@ -57,38 +57,36 @@ unsafe extern "C" fn rust_detach_remaining_layout_rows_for_removal(arena: *mut c
     }
 }
 
-/// Builds or incrementally updates a document's layout tree and applies table fixup.
+/// Pays the host half of a finished layout tree build walk, which `walk` holds and this takes:
+/// what the walk let go of, what it found out, and the shells and style resources its new rows are
+/// owed. Answers with the build's outcome.
 ///
 /// # Safety
 ///
-/// The callback table, arena, and document must remain valid for the duration of the call, which
-/// must be made on the document thread.
+/// The callback table and arena must remain valid for the duration of the call, which must be made
+/// on the document thread, and `walk` must point to an `Option<LayoutTreeBuildWalk>` holding the
+/// walk of this arena.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn rust_build_layout_tree(
+unsafe extern "C" fn rust_pay_layout_tree_build(
     callbacks: *const FfiDomTreeBuilderCallbacks,
     arena: *mut c_void,
-    document: *mut c_void,
-    document_style_node: u32,
+    walk: *mut c_void,
 ) -> FfiLayoutTreeBuildOutcome {
-    assert!(!document.is_null());
+    assert!(!callbacks.is_null());
+    assert!(!walk.is_null());
     // SAFETY: The entry point's contract puts this call on the document thread.
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: Guaranteed by the entry point's contract.
-    let host = unsafe { dom_tree_builder_host(callbacks, arena) };
-    let TreeBuildStageOutput {
+    let callbacks = host_callbacks::TreeBuilderHostCallbacks::new(unsafe { &*callbacks });
+    let host = dom_tree_builder_host(arena);
+    // SAFETY: Guaranteed by the entry point's contract.
+    let LayoutTreeBuildWalk(TreeBuildStageOutput {
         outcome,
         reports,
         handbacks,
-    } = {
-        // DEBT: The walk's handbacks carry the host's shell objects, which it only queues. They
-        // leave its output once owed shells and handbacks become a commit message.
-        struct WalkOutput(TreeBuildStageOutput);
-        // SAFETY: The shell pointers are opaque to the walk and are paid on this thread.
-        unsafe impl Send for WalkOutput {}
-        // SAFETY: The builder host, the arena and the style mirror belong to this thread, which
-        // waits for the walk.
-        unsafe { crate::stage_thread::run_stage(|| WalkOutput(run_tree_build_stage(&host, document_style_node))) }.0
-    };
+    }) = unsafe { &mut *walk.cast::<Option<LayoutTreeBuildWalk>>() }
+        .take()
+        .expect("a layout tree build walk is paid once");
 
     let layout_host = host.layout();
     let arena = layout_host.arena();
@@ -114,10 +112,7 @@ unsafe extern "C" fn rust_build_layout_tree(
             } => {
                 // SAFETY: The row is live, and every row a build owes style resources for is a
                 // NodeWithStyle.
-                unsafe {
-                    host.callbacks
-                        .attach_style_resources(&main_thread, row, owns_content_replacement_image);
-                };
+                unsafe { callbacks.attach_style_resources(&main_thread, row, owns_content_replacement_image) };
             }
             OwedToHost::GeneratedImage {
                 generator,
@@ -128,7 +123,7 @@ unsafe extern "C" fn rust_build_layout_tree(
                 // SAFETY: The row is a live image box, and the pseudo-element box it was built in
                 // outlives it.
                 unsafe {
-                    host.callbacks.attach_generated_image(
+                    callbacks.attach_generated_image(
                         &main_thread,
                         row,
                         generator.raw(),

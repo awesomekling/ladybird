@@ -86,7 +86,7 @@ pub(crate) struct TreeBuilderContext {
 impl TreeBuilderState {
     /// Holds the record the element's box is built from for the rest of the build, so that a
     /// restyle later in the same build cannot take it away from a box that names it.
-    fn pin_style_record_for_build(&mut self, host: &DomTreeBuilderHost<'_>, element: StyleNodeID) {
+    fn pin_style_record_for_build(&mut self, host: &DomTreeBuilderHost, element: StyleNodeID) {
         let record = host
             .layout()
             .arena()
@@ -823,11 +823,7 @@ pub(crate) struct LayoutNodeReuse {
 /// Settles which of the narrower rebuilds the node's marks asked for the build can actually take.
 /// Neither is available unless every mark the node collected permits it, because a rebuild that
 /// only updates the pseudo-elements leaves the child list alone, and the other way round.
-fn resolve_layout_node_reuse(
-    host: &DomTreeBuilderHost<'_>,
-    kind: PrincipalNodeKind,
-    style_node: u32,
-) -> LayoutNodeReuse {
+fn resolve_layout_node_reuse(host: &DomTreeBuilderHost, kind: PrincipalNodeKind, style_node: u32) -> LayoutNodeReuse {
     let layout = host.layout();
     // One borrow of the style store answers both tests; each walks the child list several times.
     let (reasons, insert_children, update_pseudo_elements) = layout.arena().with_style_store(|engine| {
@@ -1473,8 +1469,9 @@ pub(crate) fn principal_node_entry_decision(
     })
 }
 
-struct DomTreeBuilderHost<'a> {
-    callbacks: host_callbacks::TreeBuilderHostCallbacks<'a>,
+/// What the walk reads: the arena and the style mirror it holds. The host callbacks the build owes
+/// calls to once the walk is over are not part of it.
+struct DomTreeBuilderHost {
     arena: *mut LayoutNodeArena,
 }
 
@@ -1544,7 +1541,7 @@ fn raw_style_node(style_node: Option<StyleNodeID>) -> u32 {
     style_node.map_or(0, StyleNodeID::raw)
 }
 
-impl DomTreeBuilderHost<'_> {
+impl DomTreeBuilderHost {
     /// The first node in the DOM child sequence the style mirror holds for `style_node`, or 0.
     fn first_dom_child(&self, style_node: u32) -> u32 {
         raw_style_node(self.layout().arena().first_dom_child(StyleNodeID::from_raw(style_node)))
@@ -1685,7 +1682,7 @@ impl DomTreeBuilderHost<'_> {
 /// Only an element ever hides a subtree, and the mirror's flat tree steps straight from a node to
 /// the element above it, so every ancestor the walk reaches has a published record to ask. No
 /// record at all means the style update pass skipped a display:none subtree.
-fn has_unrendered_flat_tree_ancestor(host: &DomTreeBuilderHost<'_>, style_node: u32) -> bool {
+fn has_unrendered_flat_tree_ancestor(host: &DomTreeBuilderHost, style_node: u32) -> bool {
     let layout = host.layout();
     let arena = layout.arena();
     let mut ancestor = arena.flat_tree_parent(StyleNodeID::from_raw(style_node));
@@ -1701,24 +1698,16 @@ fn has_unrendered_flat_tree_ancestor(host: &DomTreeBuilderHost<'_>, style_node: 
     false
 }
 
-unsafe fn dom_tree_builder_host<'a>(
-    callbacks: *const FfiDomTreeBuilderCallbacks,
-    arena: *mut c_void,
-) -> DomTreeBuilderHost<'a> {
-    assert!(!callbacks.is_null());
+fn dom_tree_builder_host(arena: *mut c_void) -> DomTreeBuilderHost {
     assert!(!arena.is_null());
-    // SAFETY: Each exported entry point requires the callback table to remain live for the duration of its call.
-    DomTreeBuilderHost {
-        callbacks: host_callbacks::TreeBuilderHostCallbacks::new(unsafe { &*callbacks }),
-        arena: arena.cast(),
-    }
+    DomTreeBuilderHost { arena: arena.cast() }
 }
 
 /// How many nodes the node projects as a slot, and whether the walk lays out its own DOM children.
 ///
 /// A slot lays out its children only as fallback content, when nothing is assigned to it. Both
 /// answers come from the style mirror, which holds a slot's whole assigned-node list.
-fn dom_child_layout_plan(host: &DomTreeBuilderHost<'_>, style_node: u32) -> (usize, bool) {
+fn dom_child_layout_plan(host: &DomTreeBuilderHost, style_node: u32) -> (usize, bool) {
     let assigned_node_count = host.assigned_node_count(style_node);
     (
         assigned_node_count,
@@ -1728,7 +1717,7 @@ fn dom_child_layout_plan(host: &DomTreeBuilderHost<'_>, style_node: u32) -> (usi
 
 /// Updates every direct DOM child in tree order.
 fn update_layout_tree_for_dom_children(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     state: &mut TreeBuilderState,
     parent: u32,
     context: &mut TreeBuilderContext,
@@ -1746,7 +1735,7 @@ fn update_layout_tree_for_dom_children(
 
 /// Updates every shadow-root child in tree order and clears the root's update flags.
 fn update_layout_tree_for_shadow_root_children(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     state: &mut TreeBuilderState,
     shadow_root_style_node: u32,
     context: &mut TreeBuilderContext,
@@ -1771,7 +1760,7 @@ fn update_layout_tree_for_shadow_root_children(
 
 /// Updates a slot's assigned nodes in flat-tree order.
 fn update_layout_tree_for_assigned_slottables(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     state: &mut TreeBuilderState,
     slot_style_node: u32,
     context: &mut TreeBuilderContext,
@@ -1793,7 +1782,7 @@ fn update_layout_tree_for_assigned_slottables(
 
 /// Applies SVG `<switch>` child selection and updates its rendered child.
 fn update_layout_tree_for_svg_switch_children(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     state: &mut TreeBuilderState,
     switch_element: u32,
     context: &mut TreeBuilderContext,
@@ -1846,7 +1835,7 @@ fn update_layout_tree_for_svg_switch_children(
 ///
 /// The callback table, element, and context must remain valid for the duration of the call.
 unsafe fn update_layout_tree_for_display_contents(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     state: &mut TreeBuilderState,
     style_node: u32,
     context: &mut TreeBuilderContext,
@@ -1966,7 +1955,7 @@ fn report_svg_resource_reference(state: &mut TreeBuilderState, resource: u32, gr
 }
 
 fn update_svg_resource(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     state: &mut TreeBuilderState,
     resource: u32,
     graphics_element: u32,
@@ -1998,7 +1987,7 @@ fn update_svg_resource(
 /// The chain is walked here rather than asked of the document: a pattern publishes its `href`'s
 /// fragment as an id atom, and the mirror's id index answers what that atom names. Only the
 /// document scope is searched, which is where `SVGPatternElement::linked_pattern` searches.
-fn svg_pattern_content_element(host: &DomTreeBuilderHost<'_>, pattern: u32) -> Option<StyleNodeID> {
+fn svg_pattern_content_element(host: &DomTreeBuilderHost, pattern: u32) -> Option<StyleNodeID> {
     let layout = host.layout();
     let arena = layout.arena();
     let mut current = StyleNodeID::from_raw(pattern)?;
@@ -2027,7 +2016,7 @@ fn svg_pattern_content_element(host: &DomTreeBuilderHost<'_>, pattern: u32) -> O
 /// referrer's scope order, and then the element type the C++ cast requires. A reference to an
 /// element of any other type names nothing at all.
 fn svg_style_reference_element(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     referrer: StyleNodeID,
     atom: u32,
     required_element_fact: u32,
@@ -2037,7 +2026,7 @@ fn svg_style_reference_element(
 }
 
 fn update_svg_pattern(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     state: &mut TreeBuilderState,
     pattern: u32,
     content_element: u32,
@@ -2079,7 +2068,7 @@ struct PrincipalDescendantUpdate {
 ///
 /// The callback table, DOM node, layout node, and context must remain valid for the duration of the call.
 unsafe fn update_principal_node_descendants(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     state: &mut TreeBuilderState,
     layout_node: LayoutNode,
     context: &mut TreeBuilderContext,
@@ -2391,10 +2380,10 @@ unsafe fn update_principal_node_descendants(
     });
 }
 
-struct PrincipalNodeUpdate<'host, 'callbacks, 'state, 'context> {
+struct PrincipalNodeUpdate<'host, 'state, 'context> {
     kind: PrincipalNodeKind,
     reuse: LayoutNodeReuse,
-    host: &'host DomTreeBuilderHost<'callbacks>,
+    host: &'host DomTreeBuilderHost,
     state: &'state mut TreeBuilderState,
     old_layout_node: LayoutNode,
     style_node: u32,
@@ -2456,7 +2445,7 @@ fn pseudo_element_box_of_element_box(layout: &TreeBuilderHost, node: LayoutNode,
 }
 
 fn construct_principal_layout_node(
-    update: &mut PrincipalNodeUpdate<'_, '_, '_, '_>,
+    update: &mut PrincipalNodeUpdate<'_, '_, '_>,
     should_create_layout_node: bool,
 ) -> PrincipalBoxConstruction {
     let host = update.host;
@@ -2661,7 +2650,7 @@ fn transfer_fragments_to_replacement_box(
 }
 
 fn update_principal_node_after_entry(
-    update: &mut PrincipalNodeUpdate<'_, '_, '_, '_>,
+    update: &mut PrincipalNodeUpdate<'_, '_, '_>,
     entry_facts: PrincipalNodeEntryFacts,
     entry_decision: PrincipalNodeEntryDecision,
 ) {
@@ -2896,7 +2885,7 @@ fn update_principal_node_after_entry(
 
 /// Updates the node an identity names, and its layout-tree subtree.
 fn update_layout_tree(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     state: &mut TreeBuilderState,
     style_node: u32,
     context: &mut TreeBuilderContext,
@@ -2915,7 +2904,7 @@ fn update_layout_tree(
 }
 
 fn update_layout_tree_from(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     state: &mut TreeBuilderState,
     style_node: u32,
     context: &mut TreeBuilderContext,
@@ -3015,11 +3004,37 @@ struct TreeBuildStageOutput {
     handbacks: super::layout_node_arena::HostHandbacks,
 }
 
+/// A finished layout tree build walk whose host half has not run yet: what it owes the host, and
+/// what it found out for the document. The document thread pays it with
+/// `rust_pay_layout_tree_build`, which answers with the build's outcome.
+#[must_use]
+pub(crate) struct LayoutTreeBuildWalk(TreeBuildStageOutput);
+
+// SAFETY: The shell pointers the walk's handbacks carry are opaque to it, and only the document
+// thread, which pays them, dereferences them.
+unsafe impl Send for LayoutTreeBuildWalk {}
+
+/// Runs the layout tree build walk of the document `document_style_node` names, as a stage. The
+/// host half is left to `rust_pay_layout_tree_build`.
+///
+/// # Safety
+///
+/// `arena_handle` must be a live handle whose owner waits for this call or makes it itself, with
+/// the document's style published for a build that may create the viewport.
+pub(crate) unsafe fn walk_layout_tree_build(
+    arena_handle: *mut c_void,
+    document_style_node: u32,
+) -> LayoutTreeBuildWalk {
+    let host = dom_tree_builder_host(arena_handle);
+    // SAFETY: The arena and the style mirror belong to the owner, which waits for the walk.
+    unsafe { crate::stage_thread::run_stage(|| LayoutTreeBuildWalk(run_tree_build_stage(&host, document_style_node))) }
+}
+
 /// The layout tree build stage: the walk that turns the style mirror's flat tree into layout
 /// rows. It reads the mirror and the arena, and it is not handed the main-thread capability, so
 /// nothing it calls can reach the host; what it owes the host it queues on the arena for its
 /// entry to pay once it returns.
-fn run_tree_build_stage(host: &DomTreeBuilderHost<'_>, document_style_node: u32) -> TreeBuildStageOutput {
+fn run_tree_build_stage(host: &DomTreeBuilderHost, document_style_node: u32) -> TreeBuildStageOutput {
     super::tree_build_seal::begin_build();
     host.layout().arena().begin_tree_build_handbacks();
     let mut state = TreeBuilderState::default();
@@ -3342,7 +3357,7 @@ fn published_pseudo_kind(pseudo_element: FfiPseudoElement) -> Option<u8> {
 /// from before its record went away, and the box has to be given up - so only a kind with neither
 /// is passed over entirely.
 fn pseudo_element_may_need_a_box(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     style_node: u32,
     published_pseudo_records: u32,
     pseudo_element: FfiPseudoElement,
@@ -3366,7 +3381,7 @@ fn pseudo_element_may_need_a_box(
 /// Resolves the CSS counters set of the element `style_node` names, or of one of its pseudo-elements,
 /// now that its box is in the layout tree.
 fn resolve_counters(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     style_node: u32,
     pseudo_element: FfiPseudoElement,
 ) -> crate::layout::counters::CounterOwner {
@@ -3469,7 +3484,7 @@ fn generated_content_item(
 /// Everything the build needs to decide a pseudo-element's box, read from the style mirror and the
 /// arena by identity rather than from the element the pseudo-element hangs off.
 fn published_pseudo_element_facts(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     element: StyleNodeID,
     pseudo_element: FfiPseudoElement,
 ) -> PseudoElementFacts {
@@ -3695,7 +3710,7 @@ fn stamp_pseudo_element_box_row(
 }
 
 fn create_pseudo_element(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     state: &mut TreeBuilderState,
     style_node: u32,
     published_pseudo_records: u32,
@@ -4688,7 +4703,7 @@ fn rebuildable_container_element(host: &TreeBuilderHost, container: LayoutNode) 
 }
 
 fn insertion_parent_for_block_node(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     state: &mut TreeBuilderState,
     parent: LayoutNode,
     node: LayoutNode,
@@ -4802,7 +4817,7 @@ fn insertion_parent_for_block_node(
 }
 
 fn insert_child_in_dom_order(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     parent: LayoutNode,
     child: UnplacedLayoutNode,
     style_node: u32,
@@ -4868,7 +4883,7 @@ fn insert_child_in_dom_order(
 }
 
 fn insert_node_into_inline_or_block_ancestor(
-    host: &DomTreeBuilderHost<'_>,
+    host: &DomTreeBuilderHost,
     state: &mut TreeBuilderState,
     nearest_insertion_ancestor: LayoutNode,
     node: UnplacedLayoutNode,
@@ -5044,7 +5059,7 @@ fn find_first_letter_in_layout_text(host: &TreeBuilderHost, node: LayoutNode) ->
     target
 }
 
-fn create_first_letter_boxes(host: &DomTreeBuilderHost<'_>, style_node: u32, target: FfiFirstLetterTarget) {
+fn create_first_letter_boxes(host: &DomTreeBuilderHost, style_node: u32, target: FfiFirstLetterTarget) {
     let layout_host = host.layout();
     let generator = StyleNodeID::from_raw(style_node).expect("a first letter names the element it styles");
     let text_layout_node = target.text_layout_node;
@@ -5146,7 +5161,7 @@ fn is_marker_content(data: &NodeData) -> bool {
 }
 
 // https://drafts.csswg.org/css-pseudo-4/#first-letter-application
-fn find_first_letter_in_block(host: &DomTreeBuilderHost<'_>, block: LayoutNode) -> FfiFirstLetterTarget {
+fn find_first_letter_in_block(host: &DomTreeBuilderHost, block: LayoutNode) -> FfiFirstLetterTarget {
     let layout_host = host.layout();
     // NB: This walks a block container's inline descendants looking for the first-letter text. If the block has block
     //     children instead of inline, recurses into each in-flow block child in turn.
