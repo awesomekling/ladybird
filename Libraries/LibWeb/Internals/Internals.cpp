@@ -292,7 +292,14 @@ void Internals::send_mismatched_visual_context_tree_update_to_compositor()
 
     // Send a bare visual-context-tree update carrying that new structural epoch *without* re-recording the display list —
     // deliberately reproducing the peer inconsistency behind issue #10368.
-    navigable->compositor_context().update_visual_context_tree(document_paint_state.visual_context_tree(document), {});
+    Compositor::CompositorFrame frame;
+    frame.context_id = navigable->compositor_context().id();
+    frame.visual_context_tree_update = Compositor::CompositorFrame::VisualContextTreeUpdate {
+        .visual_context_tree = document_paint_state.visual_context_tree(document),
+        .resource_transaction = {},
+    };
+    if (auto frame_sink = navigable->compositor_context().prepare_to_submit_frame(frame))
+        frame_sink->submit(move(frame));
 }
 
 // https://web-platform-tests.org/writing-tests/reftests.html#components-of-a-reftest
