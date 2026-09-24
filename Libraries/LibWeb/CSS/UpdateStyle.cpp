@@ -152,6 +152,9 @@ void StyleEffectDrain::apply(DOM::Document& document)
                 auto container_effects = StyleEngineFFI::style_engine_take_container_effects(document.style_computer().style_engine().rust_handle(), row.style_node.value());
                 ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
                 StyleComputer::record_container_query_effects(DOM::AbstractElement { *element }, container_effects);
+            },
+            [&](AnimationPlan const& row) {
+                document.style_computer().apply_settled_animation_plan(DOM::AbstractElement { *element }, row.plan);
             });
     }
     m_effects.clear();
@@ -679,7 +682,13 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         engine_record_comparison = DOM::Element::EngineRecordComparison::AfterSample;
                     apply_engine_computed_records(pseudo_element_records, false, &pseudo_element_damages);
                     DOM::AbstractElement settled { *element };
-                    if (animation_plan.has_value()) {
+                    // A row the pass sampled over the stack its plan leaves leaves the plan to the
+                    // drain once the composition installs; the host's own sample reads the
+                    // animations the plan applies.
+                    Optional<StyleComputer::SettledAnimationPlan> plan_after_pass_sample;
+                    if (animation_plan.has_value() && row_sampled_in_pass.present) {
+                        plan_after_pass_sample = move(*animation_plan);
+                    } else if (animation_plan.has_value()) {
                         document.style_computer().apply_settled_animation_plan(settled, *animation_plan);
                         row_effects.append(StyleEffectDrain::AnimationNames { StyleNodeID { reaction.style_node } });
                     }
@@ -719,6 +728,13 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     auto const row_sample_invalidation = compares_after_sample ? SampleInvalidation::AppliedByCaller : SampleInvalidation::Applied;
                     bool const installed_pass_sample = row_sampled_in_pass.present && settled.has_style()
                         && install_composition_sampled_in_pass(settled, row_sampled_in_pass, row_sample_invalidation);
+                    if (plan_after_pass_sample.has_value()) {
+                        if (installed_pass_sample)
+                            row_effects.append(StyleEffectDrain::AnimationPlan { StyleNodeID { reaction.style_node }, plan_after_pass_sample.release_value() });
+                        else
+                            document.style_computer().apply_settled_animation_plan(settled, *plan_after_pass_sample);
+                        row_effects.append(StyleEffectDrain::AnimationNames { StyleNodeID { reaction.style_node } });
+                    }
                     if (!installed_pass_sample && settled.has_style() && (has_animation_effects || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
                         sample_animations_for_installed_record(settled, row_sample_invalidation);
                     if (compares_after_sample)
