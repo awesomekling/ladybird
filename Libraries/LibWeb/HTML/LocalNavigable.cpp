@@ -6669,9 +6669,19 @@ bool LocalNavigable::record_display_list_and_scroll_state(PaintConfig paint_conf
     return true;
 }
 
+static constexpr u64 keyboard_scroll_epoch_placeholder = NumericLimits<u64>::max();
+
 // Records the active document's display list if it is out of date, and returns the frame that brings the compositor
 // context up to date with it.
 Optional<Compositor::CompositorFrame> LocalNavigable::record_compositor_frame(PaintConfig paint_config)
+{
+    auto pending_frame = begin_compositor_frame(paint_config, Painting::RecordingRun::Now);
+    if (!pending_frame.has_value())
+        return {};
+    return finish_compositor_frame(*pending_frame);
+}
+
+Optional<LocalNavigable::PendingCompositorFrame> LocalNavigable::begin_compositor_frame(PaintConfig paint_config, Painting::RecordingRun run)
 {
     // Per-navigable state is stamped here rather than where PaintConfig is built, so no call site (the headless
     // screenshot path above all) can leave it behind; kept in the config so a change compares unequal below.
@@ -6705,10 +6715,33 @@ Optional<Compositor::CompositorFrame> LocalNavigable::record_compositor_frame(Pa
     // Keyboard eligibility reads the DOM and the layout tree as this frame paints them, so it is taken before the
     // recording starts: with an overlapping render stage, tasks can change both while the recording runs. The epoch of
     // the display list it goes with is only known after the recording, so a placeholder marks where it goes.
-    static constexpr u64 keyboard_scroll_epoch_placeholder = NumericLimits<u64>::max();
     auto keyboard_scroll_state = is_top_level_traversable()
         ? page().take_keyboard_scroll_state_for_compositor(keyboard_scroll_epoch_placeholder)
         : Compositing::KeyboardScrollState {};
+
+    PendingCompositorFrame pending_frame {
+        .document = *document,
+        .paint_config = paint_config,
+        .keyboard_scroll_state = move(keyboard_scroll_state),
+        .recording = {},
+    };
+    if (should_record_display_list) {
+        auto recording = document->begin_display_list_recording(paint_config, m_display_list_resource_storage, Painting::PaintCommandCacheMode::ReadWrite, run);
+        if (!recording.has_value())
+            return {};
+        pending_frame.recording = make<Painting::PendingDisplayListRecording>(recording.release_value());
+        // NB: What asks for another recording once this one is prepared asks for the next one.
+        m_needs_to_record_display_list = false;
+    }
+    return pending_frame;
+}
+
+Optional<Compositor::CompositorFrame> LocalNavigable::finish_compositor_frame(PendingCompositorFrame& pending_frame)
+{
+    auto document = pending_frame.document;
+    auto const& paint_config = pending_frame.paint_config;
+    auto& keyboard_scroll_state = pending_frame.keyboard_scroll_state;
+    bool const should_record_display_list = pending_frame.recording != nullptr;
 
     RefPtr<Compositing::DisplayList> display_list;
     Compositing::DisplayListResourceSet display_list_command_resources;
@@ -6718,9 +6751,7 @@ Optional<Compositor::CompositorFrame> LocalNavigable::record_compositor_frame(Pa
     auto& document_paint_state = document->paint_state();
     bool compositor_display_list_is_unchanged = false;
     if (should_record_display_list) {
-        display_list = document->record_display_list(paint_config, m_display_list_resource_storage, Painting::PaintCommandCacheMode::ReadWrite);
-        if (!display_list)
-            return {};
+        display_list = document->finish_display_list_recording(*pending_frame.recording);
         VERIFY(document->has_committed_viewport_box());
         compositor_display_list_is_unchanged = m_compositor_display_list == display_list;
         if (!compositor_display_list_is_unchanged) {
@@ -6763,11 +6794,9 @@ Optional<Compositor::CompositorFrame> LocalNavigable::record_compositor_frame(Pa
         m_compositor_display_list = display_list;
         m_compositor_display_list_command_resources = move(display_list_command_resources);
         m_compositor_display_list_resources = move(display_list_resources);
-        m_needs_to_record_display_list = false;
         m_compositor_display_list_paint_config = paint_config;
     } else {
         if (compositor_display_list_is_unchanged) {
-            m_needs_to_record_display_list = false;
             m_compositor_display_list_paint_config = paint_config;
             if (m_display_list_resource_storage.has_resources_added_since_last_retain())
                 m_display_list_resource_storage.retain_only(m_compositor_display_list_resources);
@@ -6817,11 +6846,18 @@ void LocalNavigable::submit_compositor_frame(Compositor::CompositorFrame&& frame
 
 void LocalNavigable::paint_next_frame()
 {
+    auto pending_frame = begin_painting_next_frame(Painting::RecordingRun::Now);
+    if (pending_frame.has_value())
+        finish_painting_next_frame(*pending_frame);
+}
+
+Optional<LocalNavigable::PendingCompositorFrame> LocalNavigable::begin_painting_next_frame(Painting::RecordingRun run)
+{
     if (has_been_destroyed())
-        return;
+        return {};
     if (!has_compositor_context()) {
         m_needs_repaint = false;
-        return;
+        return {};
     }
 
     PaintConfig paint_config { .paint_overlay = true, .should_show_caret_hit_test_debug_overlay = m_should_show_caret_hit_test_debug_overlay };
@@ -6829,12 +6865,17 @@ void LocalNavigable::paint_next_frame()
         // Nested navigables paint transparent bitmaps for their parent compositor context.
         auto parent = this->parent();
         if (!parent || !as<LocalNavigable>(*parent).has_compositor_context())
-            return;
+            return {};
     }
 
     m_needs_repaint = false;
 
-    auto frame = record_compositor_frame(paint_config);
+    return begin_compositor_frame(paint_config, run);
+}
+
+void LocalNavigable::finish_painting_next_frame(PendingCompositorFrame& pending_frame)
+{
+    auto frame = finish_compositor_frame(pending_frame);
     if (!frame.has_value())
         return;
     frame->present_viewport_rect = page().css_to_device_rect(this->viewport_rect()).to_type<int>();

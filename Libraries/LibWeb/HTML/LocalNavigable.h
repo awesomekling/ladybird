@@ -291,6 +291,17 @@ public:
     bool record_display_list_and_scroll_state(PaintConfig);
     void paint_next_frame();
     bool paint_next_frame_if_needed(DOM::UpdateLayoutReason);
+
+    // A frame whose display list the render side records while the main thread goes on: paint_next_frame() in two
+    // halves. Whoever holds a pending frame keeps its navigable and document alive.
+    struct PendingCompositorFrame {
+        GC::Ref<DOM::Document> document;
+        PaintConfig paint_config;
+        Compositor::KeyboardScrollState keyboard_scroll_state;
+        OwnPtr<Painting::PendingDisplayListRecording> recording;
+    };
+    Optional<PendingCompositorFrame> begin_painting_next_frame(Painting::RecordingRun);
+    void finish_painting_next_frame(PendingCompositorFrame&);
     void render_screenshot(Gfx::PaintingSurface&, PaintConfig, Function<void()>&& callback);
     Compositing::DisplayListResourceStorage& display_list_resource_storage() { return m_display_list_resource_storage; }
     Compositing::DisplayListResourceStorage const& display_list_resource_storage() const { return m_display_list_resource_storage; }
@@ -426,6 +437,8 @@ private:
     void clear_parent_compositor_context();
     void destroy_compositor_context();
     Optional<Compositor::CompositorFrame> record_compositor_frame(PaintConfig);
+    Optional<PendingCompositorFrame> begin_compositor_frame(PaintConfig, Painting::RecordingRun);
+    Optional<Compositor::CompositorFrame> finish_compositor_frame(PendingCompositorFrame&);
     void submit_compositor_frame(Compositor::CompositorFrame&&);
 
     void start_download_for_response(GC::Ref<Fetch::Infrastructure::Response>, URL::URL const& download_url, ByteString suggested_filename, GC::Ptr<Fetch::Infrastructure::FetchController>);

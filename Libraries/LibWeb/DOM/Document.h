@@ -1434,6 +1434,9 @@ public:
     void request_frame_for_journalled_repaint(Badge<InvalidationJournal>);
 
     RefPtr<Compositing::DisplayList> record_display_list(HTML::PaintConfig, Compositing::DisplayListResourceStorage&, Painting::PaintCommandCacheMode);
+    // record_display_list() in two halves, for a recording the render side runs in a submitted frame.
+    Optional<Painting::PendingDisplayListRecording> begin_display_list_recording(HTML::PaintConfig, Compositing::DisplayListResourceStorage&, Painting::PaintCommandCacheMode, Painting::RecordingRun);
+    NonnullRefPtr<Compositing::DisplayList> finish_display_list_recording(Painting::PendingDisplayListRecording&);
     Painting::HitTestDisplayList const* hit_test_display_list() const { return m_hit_test_display_list.ptr(); }
     Painting::HitTestDisplayList const* ensure_hit_test_display_list();
     Optional<Painting::HitTestResult> hit_test(CSSPixelPoint);
@@ -2075,6 +2078,7 @@ private:
     HashTable<GC::Ref<Element>> m_list_owners_pending_item_renumber;
     CSS::SheetSetStyleCacheRegistry m_sheet_set_style_cache_registry;
     RefPtr<Painting::HitTestDisplayList> m_hit_test_display_list;
+    u64 m_hit_test_display_list_invalidations { 0 };
     // The previous recording's list, retained so cached per-paintable item ranges can be spliced into
     // the next recording. Rotated only by cache-read-write recordings; survives display list invalidation.
     Optional<CSSPixelRect> m_caret_hit_test_debug_rect;

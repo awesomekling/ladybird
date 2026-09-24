@@ -10241,6 +10241,7 @@ Vector<Layout::RustFFI::NodeSlotId> Document::collect_scroll_snap_containers()
 void Document::set_needs_to_record_display_list()
 {
     m_hit_test_display_list = nullptr;
+    ++m_hit_test_display_list_invalidations;
     set_needs_to_record_display_list_keeping_hit_test_display_list();
 }
 
@@ -10251,6 +10252,14 @@ void Document::set_needs_to_record_display_list_keeping_hit_test_display_list()
 }
 
 RefPtr<Compositing::DisplayList> Document::record_display_list(HTML::PaintConfig config, Compositing::DisplayListResourceStorage& resource_storage, Painting::PaintCommandCacheMode cache_mode)
+{
+    auto recording = begin_display_list_recording(config, resource_storage, cache_mode, Painting::RecordingRun::Now);
+    if (!recording.has_value())
+        return nullptr;
+    return finish_display_list_recording(*recording);
+}
+
+Optional<Painting::PendingDisplayListRecording> Document::begin_display_list_recording(HTML::PaintConfig config, Painting::DisplayListResourceStorage& resource_storage, Painting::PaintCommandCacheMode cache_mode, Painting::RecordingRun run)
 {
     update_paint_and_hit_testing_properties_if_needed();
     VERIFY(has_committed_viewport_box());
@@ -10290,16 +10299,28 @@ RefPtr<Compositing::DisplayList> Document::record_display_list(HTML::PaintConfig
     if (config.should_show_caret_hit_test_debug_overlay)
         overlay_inputs.caret_debug_rect = m_caret_hit_test_debug_rect;
 
-    auto display_list = Painting::record_rust_display_list(*this, *placeholder_display_list, resource_storage, cache_mode, config, overlay_inputs);
-    if (!display_list)
-        return nullptr;
+    auto recording = Painting::begin_rust_display_list_recording(*this, *placeholder_display_list, resource_storage, cache_mode, config, overlay_inputs, run);
+    if (!recording.has_value())
+        return {};
+    recording->visual_context_tree = move(visual_context_tree);
+    recording->hit_test_display_list_invalidations = m_hit_test_display_list_invalidations;
+    return recording;
+}
+
+NonnullRefPtr<Painting::DisplayList> Document::finish_display_list_recording(Painting::PendingDisplayListRecording& recording)
+{
+    VERIFY(recording.document.ptr() == this);
+    auto display_list = Painting::finish_rust_display_list_recording(recording);
+    auto& document_paint_state = paint_state();
 
     bool const recording_returned_the_paint_command_cache_source = display_list == document_paint_state.display_list_used_as_paint_command_cache_source();
-    if (!recording_returned_the_paint_command_cache_source || !m_hit_test_display_list || !m_hit_test_display_list->is_current())
-        m_hit_test_display_list = Painting::HitTestDisplayList::create_from_rust_recording(visual_context_tree.structural_epoch(), layout_node_arena(), *m_chrome_widget_registry);
+    // NB: A hit-test list invalidated after the recording was prepared stays invalidated.
+    if (recording.hit_test_display_list_invalidations == m_hit_test_display_list_invalidations
+        && (!recording_returned_the_paint_command_cache_source || !m_hit_test_display_list || !m_hit_test_display_list->is_current()))
+        m_hit_test_display_list = Painting::HitTestDisplayList::create_from_rust_recording(recording.visual_context_tree.structural_epoch(), layout_node_arena(), *m_chrome_widget_registry);
 
-    if (cache_mode == Painting::PaintCommandCacheMode::ReadWrite && !recording_returned_the_paint_command_cache_source) {
-        document_paint_state.set_display_list_used_as_paint_command_cache_source(display_list, resource_storage.collect_referenced_resources(*display_list));
+    if (recording.cache_mode == Painting::PaintCommandCacheMode::ReadWrite && !recording_returned_the_paint_command_cache_source) {
+        document_paint_state.set_display_list_used_as_paint_command_cache_source(display_list, recording.resource_storage.collect_referenced_resources(*display_list));
     }
 
     return display_list;
