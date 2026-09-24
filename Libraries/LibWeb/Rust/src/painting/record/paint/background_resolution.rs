@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-use crate::painting::record::trace::Observer;
-
 use crate::css::computed_value_views::{ComputedValuesView, LengthPercentageRef};
 use crate::css::css_enums;
 use crate::css::css_pixels::CssPixels;
@@ -18,8 +16,7 @@ use crate::painting::paintable_geometry::{
     absolute_border_box_rect, absolute_padding_box_rect, committed_border_box_edges, committed_padding,
     committed_uses_collapsing_borders_model,
 };
-use crate::painting::paintable_rows::PaintableRowsRead;
-use crate::painting::record::PaintRecorder;
+use crate::painting::paintable_rows::{PaintableRowsRead, PaintableRowsRef};
 use crate::painting::record::paint::background::{BackgroundBox, background_box_for};
 use crate::painting::record::paint::replaced::{SizeWithAspectRatio, run_default_sizing_algorithm};
 use crate::painting::style_queries;
@@ -27,6 +24,14 @@ use crate::painting::visual_context::node_values::{
     border_radii_data, mix_blend_mode_to_compositing_and_blending_operator,
 };
 use libgfx_rust::CompositingAndBlendingOperator;
+
+/// What resolving a box's background and mask layers reads besides the box's own rows.
+#[derive(Clone, Copy)]
+pub(crate) struct LayerResolutionContext<'a> {
+    pub layout_arena: &'a PaintableRowsRef<'a>,
+    pub root_background_source: FfiRootBackgroundSource,
+    pub css_viewport_rect: CssPixelRect,
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct LayerImageSource<'a> {
@@ -474,8 +479,8 @@ enum LayerType {
 /// Mirrors `resolve_layers()` in BackgroundPainting.cpp.
 /// https://drafts.fxtf.org/css-masking-1/#the-mask-image
 #[allow(clippy::too_many_arguments)]
-fn resolve_layers<'a, O: Observer>(
-    recorder: &PaintRecorder<'_, O>,
+fn resolve_layers<'a>(
+    context: LayerResolutionContext<'_>,
     paintable: NodeSlotId,
     layers: Vec<ComputedLayer<'a>>,
     background_color: libgfx_rust::Color,
@@ -489,10 +494,10 @@ fn resolve_layers<'a, O: Observer>(
         rect: border_rect,
         radii: border_radii,
     };
-    let padding = committed_padding(recorder.layout_arena, paintable);
+    let padding = committed_padding(context.layout_arena, paintable);
     // The padding box and content box are inset from the border box by the border widths that the border box
     // includes: half of each collapsed border in the collapsing borders model.
-    let border = committed_border_box_edges(recorder.layout_arena, paintable);
+    let border = committed_border_box_edges(context.layout_arena, paintable);
     let color_box = background_box_for(background_color_clip, border_box, padding, border);
     let layer_may_be_painted =
         |layer: &ComputedLayer<'_>| matches!(layer_type, LayerType::Mask) || layer.image.is_some();
@@ -530,7 +535,7 @@ fn resolve_layers<'a, O: Observer>(
             transparent_mask_layer(&mut resolved_layers);
             continue;
         };
-        let intrinsics = layer_image_intrinsics(recorder, &image);
+        let intrinsics = layer_image_intrinsics(context, &image);
         image.selected_image_value = intrinsics.selected_image_value;
         if !intrinsics.is_paintable {
             transparent_mask_layer(&mut resolved_layers);
@@ -543,15 +548,11 @@ fn resolve_layers<'a, O: Observer>(
         // If the background-attachment value for this layer is fixed, then this property has no effect: in this case
         // the background positioning area is the initial containing block.
         if layer.attachment == background_attachment::FIXED
-            && background_has_fixed_attachment(
-                recorder.layout_arena,
-                recorder.inputs.uncaptured.root_background_source,
-                paintable,
-            )
+            && background_has_fixed_attachment(context.layout_arena, context.root_background_source, paintable)
         {
             background_positioning_area = CssPixelRect::from_location_and_size(
                 crate::css::css_pixels::CssPixelPoint::default(),
-                recorder.inputs.css_viewport_rect.size(),
+                context.css_viewport_rect.size(),
             );
         }
 
@@ -715,18 +716,17 @@ struct LayerImageIntrinsics<'a> {
     selected_image_value: Option<&'a StyleValueData>,
 }
 
-pub(crate) fn committed_layer_image_paint_facts<O: Observer>(
-    recorder: &PaintRecorder<'_, O>,
+pub(crate) fn committed_layer_image_paint_facts(
+    layout_arena: &crate::layout::LayoutNodeArena,
     image: &LayerImageSource<'_>,
 ) -> crate::painting::layer_image_paint_facts::LayerImagePaintFacts {
-    recorder
-        .layout_arena
+    layout_arena
         .layer_image_paint_facts(image.facts_owner, image.list, image.computed_index)
         .unwrap_or_default()
 }
 
-fn layer_image_intrinsics<'a, O: Observer>(
-    recorder: &PaintRecorder<'_, O>,
+fn layer_image_intrinsics<'a>(
+    context: LayerResolutionContext<'_>,
     image: &LayerImageSource<'a>,
 ) -> LayerImageIntrinsics<'a> {
     match image.value {
@@ -742,7 +742,7 @@ fn layer_image_intrinsics<'a, O: Observer>(
             selected_image_value: None,
         },
         _ => {
-            let facts = committed_layer_image_paint_facts(recorder, image);
+            let facts = committed_layer_image_paint_facts(context.layout_arena, image);
             let selected_image_value = match (image.value, facts.image_set_selected_option_index) {
                 (StyleValueData::ImageSet { options }, Some(option_index)) => options
                     .as_slice()
@@ -760,8 +760,8 @@ fn layer_image_intrinsics<'a, O: Observer>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn resolve_background_layers<'a, O: Observer>(
-    recorder: &PaintRecorder<'_, O>,
+pub(crate) fn resolve_background_layers<'a>(
+    context: LayerResolutionContext<'_>,
     paintable: NodeSlotId,
     style: ComputedValuesView<'a>,
     layer_image_facts_owner: NodeSlotId,
@@ -772,7 +772,7 @@ pub(crate) fn resolve_background_layers<'a, O: Observer>(
 ) -> ResolvedBackground<'a> {
     let layers = computed_background_layers(style, layer_image_facts_owner);
     resolve_layers(
-        recorder,
+        context,
         paintable,
         layers,
         background_color,
@@ -783,15 +783,15 @@ pub(crate) fn resolve_background_layers<'a, O: Observer>(
     )
 }
 
-pub(crate) fn resolve_mask_layers<'a, O: Observer>(
-    recorder: &PaintRecorder<'_, O>,
+pub(crate) fn resolve_mask_layers<'a>(
+    context: LayerResolutionContext<'_>,
     paintable: NodeSlotId,
     style: ComputedValuesView<'a>,
     border_rect: CssPixelRect,
 ) -> ResolvedBackground<'a> {
     let layers = computed_mask_layers(style, paintable);
     resolve_layers(
-        recorder,
+        context,
         paintable,
         layers,
         libgfx_rust::Color(0),
@@ -837,25 +837,21 @@ pub(crate) fn root_background_canvas_rect(
     rect
 }
 
-pub(crate) fn resolve_background_for_paint<'a, O: Observer>(
-    recorder: &PaintRecorder<'a, O>,
+pub(crate) fn resolve_background_for_paint(
+    context: LayerResolutionContext<'_>,
     paintable: NodeSlotId,
-) -> Option<BackgroundPaintInputs<'a>> {
-    if !has_background_to_paint(
-        recorder.layout_arena,
-        paintable,
-        recorder.inputs.uncaptured.root_background_source,
-    ) {
+) -> Option<BackgroundPaintInputs<'_>> {
+    if !has_background_to_paint(context.layout_arena, paintable, context.root_background_source) {
         return None;
     }
     let source = background_paint_source_from_style_and_geometry(
-        recorder.layout_arena,
+        context.layout_arena,
         paintable,
-        recorder.inputs.uncaptured.root_background_source,
+        context.root_background_source,
     )?;
     let mut resolved = match source.layers_style_if_live {
         Some(layers_style) => resolve_background_layers(
-            recorder,
+            context,
             paintable,
             layers_style,
             source.layer_image_facts_owner,
@@ -877,8 +873,7 @@ pub(crate) fn resolve_background_for_paint<'a, O: Observer>(
         },
     };
     if source.is_root_element {
-        let canvas_rect =
-            root_background_canvas_rect(recorder.layout_arena, paintable, recorder.inputs.css_viewport_rect);
+        let canvas_rect = root_background_canvas_rect(context.layout_arena, paintable, context.css_viewport_rect);
         resolved.background_rect.unite(canvas_rect);
         resolved.color_box.rect.unite(canvas_rect);
     }

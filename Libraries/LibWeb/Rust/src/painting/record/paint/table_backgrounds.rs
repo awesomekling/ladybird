@@ -47,7 +47,7 @@ pub(crate) fn paint_table_part_background<O: Observer>(recorder: &mut PaintRecor
     };
     let part_rect = paintable_geometry::absolute_border_box_rect(layout_arena, paintable);
     let resolved = resolve_background_layers(
-        recorder,
+        recorder.layer_resolution_context(),
         paintable,
         style,
         paintable,

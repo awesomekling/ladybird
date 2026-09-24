@@ -67,7 +67,7 @@ pub(crate) fn paint_background<O: Observer>(recorder: &mut PaintRecorder<'_, O>,
         table_backgrounds::paint_table_part_background(recorder, paintable);
         return;
     }
-    let Some(inputs) = resolve_background_for_paint(recorder, paintable) else {
+    let Some(inputs) = resolve_background_for_paint(recorder.layer_resolution_context(), paintable) else {
         return;
     };
     paint_resolved_background(recorder, paintable, &inputs);
@@ -84,7 +84,7 @@ pub(crate) fn paint_background_within<O: Observer>(
         return;
     };
     let resolved = resolve_background_layers(
-        recorder,
+        recorder.layer_resolution_context(),
         paintable,
         style,
         paintable,
@@ -456,8 +456,10 @@ fn paint_image_layer<O: Observer>(
     let converter = recorder.converter;
     let image = layer.image.expect("an imageless layer never reaches the image paint");
     let facts_owner = image.facts_owner;
-    let facts =
-        crate::painting::record::paint::background_resolution::committed_layer_image_paint_facts(recorder, &image);
+    let facts = crate::painting::record::paint::background_resolution::committed_layer_image_paint_facts(
+        recorder.layout_arena,
+        &image,
+    );
     let mut image_rect = layer.image_rect;
     let mut background_positioning_area = layer.background_positioning_area;
 
