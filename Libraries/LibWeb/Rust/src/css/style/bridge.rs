@@ -3398,9 +3398,34 @@ pub unsafe extern "C" fn style_engine_take_settled_animation_definitions(
             super::animations::has_inclusive_ancestor_with_display_none_ignoring_animations(engine, start)
         })
     };
+    let engine_identity = std::ptr::from_ref(&*engine).addr();
     let plan = engine
         .settled_animation_definitions_being_applied()
         .expect("the plan was just taken");
+    if super::engine_sample_check::is_checking() && !in_display_none_subtree {
+        let slot = match pseudo_kind {
+            u8::MAX => super::animations::ELEMENT_ANIMATION_SLOT,
+            kind => kind + 1,
+        };
+        let mut expected = Vec::new();
+        for (name_index, definition) in plan.definitions().iter().enumerate() {
+            if definition.matched_existing_index != super::animations::NO_MATCHED_ANIMATION {
+                continue;
+            }
+            match super::animations::AnimationTimingRow::for_new_css_animation(
+                definition,
+                node,
+                slot,
+                name_index as u32,
+            ) {
+                Some(row) => expected.push((name_index as u32, row)),
+                None => super::engine_sample_check::note_declined("new animation timing: a materialized timeline"),
+            }
+        }
+        if !expected.is_empty() {
+            super::engine_sample_check::expect_new_animation_rows(engine_identity, node, slot, expected);
+        }
+    }
     FfiSettledAnimationDefinitions {
         definitions: plan.definitions().as_ptr().cast(),
         count: plan.definitions().len(),
