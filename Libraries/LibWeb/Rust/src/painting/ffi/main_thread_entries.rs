@@ -208,13 +208,11 @@ unsafe extern "C" fn layout_arena_prepare_for_rendering(
     };
     // The overflow recalculation is a pass of its own, and it hands the document the scroll
     // offsets it settled only once that pass is over. Enter the visual context update after it,
-    // so that handover is not inside a pass either.
+    // so that handover is not inside a pass either. It measures all overflow left unmeasured,
+    // including the root's: the root background covers the viewport united with it, so a flip
+    // in its scrollability is seen here rather than while recording holds the paint state.
     crate::painting::scrollable_overflow::update_scrollable_overflow(arena, &main_thread);
     let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
-    // The root background covers the viewport united with the root's scrollable overflow, which
-    // recording reads. Measure it here: measuring it lazily during recording could flip its
-    // scrollability while the paint state is borrowed, and the flip would miss this frame.
-    arena.ensure_scrollable_overflow(root_background_source.root_layout_node);
     let changed = arena.scrollable_overflow.geometry_changed.replace(false);
     let flipped = arena.scrollable_overflow.scrollability_changed.replace(false);
     let mut visual_context_values_changed = false;
