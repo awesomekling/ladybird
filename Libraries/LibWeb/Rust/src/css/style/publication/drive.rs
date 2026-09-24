@@ -19,12 +19,91 @@ pub(super) enum TransitionDriveGoal {
     DeferStep,
 }
 
+/// Why a row has no record. A suspended row is not refused: it waits on a request the host
+/// services between passes, and the same row resumes once that request is answered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::css::style) enum Unanswered {
+    Suspended(Suspension),
+    Refused,
+}
+
+/// What a suspended row waits on. The request itself stays where the host's service reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::css::style) enum Suspension {
+    /// The drive's font is not resolved yet; `FontDriveScratch::request` names it.
+    Font,
+    /// A `random()` base is not known yet; `RetainedState::random_base_requests` names it.
+    RandomBases,
+}
+
+/// A row's answer from the engine, or why there is none.
+pub(in crate::css::style) type Drive<T> = Result<T, Unanswered>;
+
+/// A missing value on the way to a record is the engine declining the row.
+pub(in crate::css::style) trait OrRefused<T> {
+    fn or_refused(self) -> Drive<T>;
+}
+
+impl<T> OrRefused<T> for Option<T> {
+    fn or_refused(self) -> Drive<T> {
+        self.ok_or(Unanswered::Refused)
+    }
+}
+
+/// A refusal counts under the cause the caller names; a suspension counts nowhere.
+pub(in crate::css::style) trait CountRefusal {
+    fn count_refusal(self, counters: &mut Counters, counter: Counter) -> Self;
+}
+
+impl<T> CountRefusal for Drive<T> {
+    fn count_refusal(self, counters: &mut Counters, counter: Counter) -> Self {
+        if let Err(Unanswered::Refused) = self {
+            counters.bump(counter);
+        }
+        self
+    }
+}
+
+/// A driven longhand table with the length context it was driven against, the longhand
+/// evaluations it took, and the font a full drive resolved.
+pub(super) type DrivenTable = (
+    ComputedLonghandTable,
+    crate::css::style_compute::FfiLengthResolutionContext,
+    u32,
+    Option<crate::css::table_group_builder::FfiFontGroupBuildInputs>,
+);
+
+/// What a partial drive answers besides a refusal.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the driven table moves by value, as it did in an `Option`"
+)]
+pub(super) enum PartialDrive {
+    Driven(DrivenTable),
+    /// An input the drive reads for properties it did not select moved with the selection: the
+    /// caller drives the record in full instead.
+    DriverInputMoved,
+}
+
+/// What a full drive answers besides a refusal or a suspension.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the driven table moves by value, as it did in an `Option`"
+)]
+pub(super) enum FullDrive {
+    Driven(DrivenTable),
+    /// The font phase is done and the registered custom properties resolve against this context
+    /// before the drive resumes; the caller resumes it with the final store.
+    AwaitsRegisteredContext(custom_property_cascade::RegisteredValueContext),
+    /// The root-input probe finished the font and line-height phases; the drive is left pending
+    /// for the root's own row.
+    RootInputs(RootFontInputs),
+}
+
 #[derive(Default)]
 pub(in crate::css::style) struct FontDriveScratch {
-    pub(super) root_inputs: Option<RootFontInputs>,
     pub(in crate::css::style) request: Option<font_resolution::FontRequest>,
     pending: Option<PendingFontDrive>,
-    pub(super) registered_context: Option<custom_property_cascade::RegisteredValueContext>,
 }
 
 impl FontDriveScratch {
@@ -38,6 +117,13 @@ impl FontDriveScratch {
         self.pending
             .as_ref()
             .is_some_and(|pending| pending.target == computed::ComputedStyleTarget::new(node, u8::MAX))
+    }
+
+    /// The font request a drive suspended on.
+    pub(in crate::css::style) fn take_suspended_request(&mut self) -> font_resolution::FontRequest {
+        self.request
+            .take()
+            .expect("a drive suspended on a font names its request")
     }
 
     pub(in crate::css::style) fn capacity_bytes(&self) -> u64 {
@@ -137,15 +223,9 @@ impl RetainedState {
         store: &WinnerStore,
         selected: &[u64],
         inputs: &bridge::FfiDocumentStyleComputationInputs,
-        driver_input_moved: &mut bool,
         explicitly_inherited_groups: &mut u32,
         counters: &mut Counters,
-    ) -> Option<(
-        ComputedLonghandTable,
-        crate::css::style_compute::FfiLengthResolutionContext,
-        u32,
-        Option<crate::css::table_group_builder::FfiFontGroupBuildInputs>,
-    )> {
+    ) -> Drive<PartialDrive> {
         let random_base_values = store.drive_random_base_values(self, node)?;
         let resource_contexts = store.drive_resource_contexts(self);
         let container_unit_mask = store.container_relative_length_unit_mask(self);
@@ -160,26 +240,26 @@ impl RetainedState {
 
         let Some(view) = self.computed_group_sets.base_style_record_view(old_style_record) else {
             counters.bump(Counter::EngineComputedRecordBailRecord);
-            return None;
+            return Err(Unanswered::Refused);
         };
         // The font and writing mode for this drive come from the underlying style.
         let payloads = view.payloads;
         let Some(old_table) = (unsafe { view.longhand_table.as_ref() }) else {
             counters.bump(Counter::EngineComputedRecordBailRecordTable);
-            return None;
+            return Err(Unanswered::Refused);
         };
         let snapshot = match self.record_inheritance_parent(node) {
             None => None,
             Some(parent) => match self.computed_group_sets.assigned_style_record(parent) {
                 Some(record) => {
-                    let view = self.computed_group_sets.style_record_view(record.raw())?;
+                    let view = self.computed_group_sets.style_record_view(record.raw()).or_refused()?;
                     Some(parent_snapshot_for_style_record(self, record.raw(), unsafe {
                         view.animated_overlay.as_ref()
                     }))
                 }
                 None => {
                     counters.bump(Counter::EngineComputedRecordBailRecordParent);
-                    return None;
+                    return Err(Unanswered::Refused);
                 }
             },
         };
@@ -300,7 +380,7 @@ impl RetainedState {
         // the row is whoever can supply what the context lacked.
         if results.unsupported_native_computation {
             counters.bump(Counter::EngineComputedRecordBailDriveUnsupportedValue);
-            return None;
+            return Err(Unanswered::Refused);
         }
         // An `inherit` of a non-inherited property reads the half of the parent's style a child
         // normally cannot see. The value itself is computed here; what C++ does beside it is one
@@ -309,14 +389,13 @@ impl RetainedState {
             && !self.parent_record_answers_explicit_inheritance(self.tree.flat_tree_parent(node))
         {
             counters.bump(Counter::EngineComputedRecordBailDrive);
-            return None;
+            return Err(Unanswered::Refused);
         }
         *explicitly_inherited_groups |= results.explicitly_inherited_non_inherited_style_groups;
         // An input the drive reads for properties it did not select moved with the selection: the
         // caller drives the record in full instead.
         if table.display_before_box_type_transformation() != old_table.display_before_box_type_transformation() {
-            *driver_input_moved = true;
-            return None;
+            return Ok(PartialDrive::DriverInputMoved);
         }
         let old_values = old_table.value_pointers();
         for &property in property_computation_order_for_phase(LONGHAND_DRIVE_PHASE_REMAINING) {
@@ -341,8 +420,7 @@ impl RetainedState {
                 }
             };
             if !equal {
-                *driver_input_moved = true;
-                return None;
+                return Ok(PartialDrive::DriverInputMoved);
             }
             table.copy_slot_from(old_table, property);
         }
@@ -352,7 +430,12 @@ impl RetainedState {
             resolved_viewport_relative_length: std::ptr::null_mut(),
             ..length
         };
-        Some((table, length, results.longhand_evaluations, None))
+        Ok(PartialDrive::Driven((
+            table,
+            length,
+            results.longhand_evaluations,
+            None,
+        )))
     }
 
     /// Drive a record through every phase: the font phase against the parent's metrics, the
@@ -373,12 +456,7 @@ impl RetainedState {
         has_registered_declarations: bool,
         explicitly_inherited_groups: &mut u32,
         counters: &mut Counters,
-    ) -> Option<(
-        ComputedLonghandTable,
-        crate::css::style_compute::FfiLengthResolutionContext,
-        u32,
-        Option<crate::css::table_group_builder::FfiFontGroupBuildInputs>,
-    )> {
+    ) -> Drive<FullDrive> {
         let random_base_values = store.drive_random_base_values(self, subject.target.node())?;
         let resource_contexts = store.drive_resource_contexts(self);
         let container_unit_mask = store.container_relative_length_unit_mask(self);
@@ -407,7 +485,7 @@ impl RetainedState {
         let is_document_element = has(fact::IS_DOCUMENT_ELEMENT);
         if self.font_resolution.is_none() {
             counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
-            return None;
+            return Err(Unanswered::Refused);
         }
         // HACK: C++ answers a cascade that ends in `font-family: monospace` by re-running the
         //       font-size cascade over the whole ancestor chain against a 13px default instead of
@@ -430,7 +508,7 @@ impl RetainedState {
                 recascade_node.and_then(|node| self.monospace_recascaded_font_size(node))
             else {
                 counters.bump(Counter::EngineComputedRecordBailMonospaceQuirk);
-                return None;
+                return Err(Unanswered::Refused);
             };
             recascaded_font_size_reads_viewport = reads_viewport;
             Some(recascaded)
@@ -441,11 +519,11 @@ impl RetainedState {
             Some(old_style_record) => {
                 let Some(view) = self.computed_group_sets.base_style_record_view(old_style_record) else {
                     counters.bump(Counter::EngineComputedRecordBailRecord);
-                    return None;
+                    return Err(Unanswered::Refused);
                 };
                 let Some(old_table) = (unsafe { view.longhand_table.as_ref() }) else {
                     counters.bump(Counter::EngineComputedRecordBailRecordTable);
-                    return None;
+                    return Err(Unanswered::Refused);
                 };
                 // The parent of an AwaitSampledParent retry has finished its transition step.
                 // Drive this child's base from that published composition; its own transition
@@ -463,7 +541,7 @@ impl RetainedState {
                 {
                     counters.bump(Counter::EngineComputedRecordBailRecordOverlayDrive441);
                     counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-                    return None;
+                    return Err(Unanswered::Refused);
                 }
                 Some(old_table)
             }
@@ -481,11 +559,11 @@ impl RetainedState {
                     .or_else(|| self.computed_group_sets.assigned_style_record(parent))
                 else {
                     counters.bump(Counter::EngineComputedRecordBailRecordParent);
-                    return None;
+                    return Err(Unanswered::Refused);
                 };
                 let Some(parent_view) = self.computed_group_sets.style_record_view(parent_record.raw()) else {
                     counters.bump(Counter::EngineComputedRecordBailRecordParent);
-                    return None;
+                    return Err(Unanswered::Refused);
                 };
                 Some(parent_view)
             }
@@ -547,7 +625,7 @@ impl RetainedState {
             Some(parent_view) => {
                 let Some(parent_table) = (unsafe { parent_view.longhand_table.as_ref() }) else {
                     counters.bump(Counter::EngineComputedRecordBailRecordParent);
-                    return None;
+                    return Err(Unanswered::Refused);
                 };
                 Some(crate::css::style_compute::ParentSnapshot::new(
                     parent_table,
@@ -585,7 +663,7 @@ impl RetainedState {
             Some(old_style_record) => {
                 let Some(view) = self.computed_group_sets.style_record_view(old_style_record.raw()) else {
                     counters.bump(Counter::EngineComputedRecordBailRecord);
-                    return None;
+                    return Err(Unanswered::Refused);
                 };
                 Some(view.payloads[STYLE_GROUP_INDEX_INHERITED_BOX])
             }
@@ -793,7 +871,7 @@ impl RetainedState {
             }
             _ => {
                 counters.bump(Counter::EngineComputedRecordBailFontPhase);
-                return None;
+                return Err(Unanswered::Refused);
             }
         };
         let font_size_raw = CssPixels::nearest_value_for(font_size).raw_value();
@@ -813,7 +891,7 @@ impl RetainedState {
             }
             _ => {
                 counters.bump(Counter::EngineComputedRecordBailFontPhase);
-                return None;
+                return Err(Unanswered::Refused);
             }
         };
         let font_optical_sizing = match value_of(&table, prop::FONT_OPTICAL_SIZING) {
@@ -875,11 +953,11 @@ impl RetainedState {
                 effective_color_scheme,
                 resolved_viewport_relative_length,
             });
-            return None;
+            return Err(Unanswered::Suspended(Suspension::Font));
         };
         if resolved.font_cascade_list.is_none() {
             counters.bump(Counter::EngineComputedRecordBailFontPhase);
-            return None;
+            return Err(Unanswered::Refused);
         }
         let own_metrics = |line_height: f64| FfiFontMetrics {
             font_size,
@@ -931,10 +1009,10 @@ impl RetainedState {
         };
         let Some(line_height_before_adjustments) = line_height_used(&table) else {
             counters.bump(Counter::EngineComputedRecordBailFontPhase);
-            return None;
+            return Err(Unanswered::Refused);
         };
         if goal == FontDriveGoal::RootInputs {
-            font_scratch.root_inputs = Some(RootFontInputs {
+            let root_inputs = RootFontInputs {
                 metrics: [
                     font_size.to_bits(),
                     drive_font_metric(resolved.x_height).to_bits(),
@@ -943,7 +1021,7 @@ impl RetainedState {
                     line_height_before_adjustments.to_bits(),
                 ],
                 depends_on_viewport: results.font_metrics_depend_on_viewport_metrics,
-            });
+            };
             font_scratch.pending = Some(PendingFontDrive {
                 target: subject.target,
                 root_font_complete: true,
@@ -954,7 +1032,7 @@ impl RetainedState {
                 effective_color_scheme,
                 resolved_viewport_relative_length,
             });
-            return None;
+            return Ok(FullDrive::RootInputs(root_inputs));
         }
         if !registered_finalization_ready {
             drive(
@@ -989,13 +1067,13 @@ impl RetainedState {
             )
         };
         if has_registered_declarations && !registered_finalization_ready {
-            font_scratch.registered_context = Some(custom_property_cascade::RegisteredValueContext {
+            let registered_context = custom_property_cascade::RegisteredValueContext {
                 length: FfiLengthResolutionContext {
                     resolved_viewport_relative_length: std::ptr::null_mut(),
                     ..remaining_length
                 },
                 color_scheme: effective_color_scheme as u8,
-            });
+            };
             font_scratch.pending = Some(PendingFontDrive {
                 target: subject.target,
                 root_font_complete: true,
@@ -1006,7 +1084,7 @@ impl RetainedState {
                 effective_color_scheme,
                 resolved_viewport_relative_length,
             });
-            return None;
+            return Ok(FullDrive::AwaitsRegisteredContext(registered_context));
         }
         let input_line_height_metrics = if has(fact::CHECK_INPUT_LINE_HEIGHT) {
             FfiInputLineHeightMetrics {
@@ -1034,7 +1112,7 @@ impl RetainedState {
         // the row is whoever can supply what the context lacked.
         if results.unsupported_native_computation {
             counters.bump(Counter::EngineComputedRecordBailDriveUnsupportedValue);
-            return None;
+            return Err(Unanswered::Refused);
         }
         // An `inherit` of a non-inherited property reads the half of the parent's style a child
         // normally cannot see. The value itself is computed here; what C++ does beside it is one
@@ -1043,12 +1121,12 @@ impl RetainedState {
             && !self.parent_record_answers_explicit_inheritance(subject.parent)
         {
             counters.bump(Counter::EngineComputedRecordBailDrive);
-            return None;
+            return Err(Unanswered::Refused);
         }
         *explicitly_inherited_groups |= results.explicitly_inherited_non_inherited_style_groups;
         let Some(line_height_used_after) = line_height_used(&table) else {
             counters.bump(Counter::EngineComputedRecordBailFontPhase);
-            return None;
+            return Err(Unanswered::Refused);
         };
         let keyword_code = |property: u16, map: fn(u16) -> Option<u8>| match value_of(&table, property) {
             Some(StyleValueData::Keyword { keyword }) => map(*keyword).unwrap_or(0),
@@ -1081,7 +1159,12 @@ impl RetainedState {
             resolved_viewport_relative_length: std::ptr::null_mut(),
             ..remaining_length
         };
-        Some((table, length, results.longhand_evaluations, Some(font)))
+        Ok(FullDrive::Driven((
+            table,
+            length,
+            results.longhand_evaluations,
+            Some(font),
+        )))
     }
 }
 

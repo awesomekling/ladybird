@@ -364,7 +364,7 @@ impl WinnerStore {
         &self,
         engine: &mut RetainedState,
         node: StyleNodeID,
-    ) -> Option<Vec<crate::css::style_compute::FfiRandomBaseValue>> {
+    ) -> Drive<Vec<crate::css::style_compute::FfiRandomBaseValue>> {
         let view = self.view(engine);
         let mut sharings = Vec::new();
         for declaration in &self.declarations {
@@ -384,7 +384,7 @@ impl RetainedState {
         &mut self,
         node: StyleNodeID,
         sharings: &[*const StyleValueData],
-    ) -> Option<Vec<crate::css::style_compute::FfiRandomBaseValue>> {
+    ) -> Drive<Vec<crate::css::style_compute::FfiRandomBaseValue>> {
         let mut bases = Vec::with_capacity(sharings.len());
         let mut missing = false;
         for &source in sharings {
@@ -412,6 +412,9 @@ impl RetainedState {
                 missing = true;
             }
         }
-        (!missing).then_some(bases)
+        if missing {
+            return Err(Unanswered::Suspended(Suspension::RandomBases));
+        }
+        Ok(bases)
     }
 }
