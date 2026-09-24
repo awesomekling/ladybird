@@ -12,24 +12,17 @@
 //! reports each callback site once; `abort` makes the first callback fatal. Reports and census
 //! totals go to stderr or to the file named by `LIBWEB_SEAL_STYLE_STAGE_LOG`.
 //!
-//! `longhand_input_freeze` says that preparing one row's longhand transaction read live host
-//! state, and its reasons say which. A row that reads none is frozen from the engine's own
-//! retained state; the working set the row fills is created from the Rust longhand table and
-//! dropped inside the row, so building it is not a read of anything the host already held.
-//!
-//! `longhand_result_apply` says that applying one row's results reached the host: a GC object, a
-//! DOM node, or state the document exposes. A row that writes only the computation's own working
-//! set - created and dropped inside the stage - is not counted, because moving that row's
-//! application after the batch would change nothing. The working set itself is still a crossing,
-//! and `longhand_input_freeze` still counts it for every row.
+//! `engine_call` counts the engine entry points the host calls while an update runs, apart from
+//! taking the style transaction itself. Nothing computes styles on the host any more, but the
+//! host still walks the transaction's answers and asks the engine about each row it applies;
+//! each such call is a round trip a single sealed pass would have to absorb. The count is only
+//! reported: none of these calls is a violation.
 //!
 //! A font cache miss is no longer a host service. The installed resolver answers from the
 //! document's published `@font-face` table and the process-wide font services, reads no document
 //! and holds no pointer to one, so `between_pass_batch resolve_font` is a stage-local computation
 //! the stage's own thread performs. It is still counted, because it is a round *between* passes
-//! that a single sealed pass would have to absorb. Callbacks that prepare C++ longhand state or
-//! report computed results are
-//! crossings of the future thread boundary until they become published inputs or commit messages.
+//! that a single sealed pass would have to absorb.
 //!
 //! UTF-16 fly-string releases are deferred by the complete-update scope and drained after it.
 //! CSSOM rule-mutation notifications and rule-compilation visitors run outside a style update.
@@ -73,14 +66,9 @@ thread_local! {
     static REPORTED: RefCell<HashSet<&'static str>> = RefCell::new(HashSet::new());
     static REPORTED_REFUSALS: RefCell<HashSet<(&'static str, bool)>> = RefCell::new(HashSet::new());
     static COUNTS: RefCell<HashMap<&'static str, Counts>> = RefCell::new(HashMap::new());
-    static STAGE_INTERLEAVES: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
-    static LONGHAND_INPUT_FREEZE_REASONS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
     static BETWEEN_PASS_BATCHES: RefCell<HashMap<&'static str, (u64, u64)>> = RefCell::new(HashMap::new());
-    static HOST_DRIVEN_ROWS: Cell<u64> = const { Cell::new(0) };
-    static HOST_SAMPLED_ANIMATION_ROWS: Cell<u64> = const { Cell::new(0) };
-    static HOST_DRIVEN_ROW_KINDS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
-    static HOST_ENTRY_CAUSES: RefCell<HashMap<HostEntryKey, HostEntryCounts>> = RefCell::new(HashMap::new());
-    static CURRENT_HOST_ENTRY: RefCell<Option<HostEntryKey>> = const { RefCell::new(None) };
+    static HOST_ENTRY_CAUSES: RefCell<HashMap<HostEntryKey, u64>> = RefCell::new(HashMap::new());
+    static ENGINE_CALLS: RefCell<HashMap<&'static str, u64>> = RefCell::new(HashMap::new());
 }
 
 /// What one host entry is: the reason the engine sent this element to the host, which way in it
@@ -111,12 +99,6 @@ impl HostEntryKind {
     }
 }
 
-#[derive(Clone, Copy, Default)]
-pub(crate) struct HostEntryCounts {
-    entries: u64,
-    applied: u64,
-}
-
 /// Record one host entry under the reason the engine declined the element, so the census ranks
 /// what reaches the host rather than what the engine attempted. An attempt that declines for a
 /// class the host then skips costs nothing; only an entry does.
@@ -142,11 +124,19 @@ pub(crate) fn note_host_entry(cause: &'static str, kind: HostEntryKind, cold: bo
     }
     let key = HostEntryKey { cause, kind, cold };
     HOST_ENTRY_CAUSES.with(|causes| {
-        causes.borrow_mut().entry(key).or_default().entries += 1;
+        *causes.borrow_mut().entry(key).or_default() += 1;
     });
-    if kind == HostEntryKind::Row {
-        CURRENT_HOST_ENTRY.with(|current| *current.borrow_mut() = Some(key));
+}
+
+/// Record one engine entry point the host called. Only calls made while an update runs are
+/// counted, and none is fatal: the census ranks the round trips left between host and engine.
+pub(crate) fn note_engine_call(entry: &'static str) {
+    if mode() == Mode::Off || UPDATE_DEPTH.with(|depth| depth.get() == 0) {
+        return;
     }
+    ENGINE_CALLS.with(|calls| {
+        *calls.borrow_mut().entry(entry).or_default() += 1;
+    });
 }
 
 /// Report how often the engine declined to compute a record itself, by the reason it recorded.
@@ -273,76 +263,29 @@ pub(crate) fn flush_census() {
             counts.calls, counts.during_style
         ));
     }
-    let host_driven_rows = HOST_DRIVEN_ROWS.with(|rows| rows.replace(0));
-    if host_driven_rows != 0 {
-        write_report(&format!("STYLE SEAL COUNT: host_driven_rows: {host_driven_rows}\n"));
-    }
-    let sampled = HOST_SAMPLED_ANIMATION_ROWS.with(|rows| rows.replace(0));
-    let host_entries = host_driven_rows + sampled;
-    CURRENT_HOST_ENTRY.with(|current| *current.borrow_mut() = None);
     let mut causes = HOST_ENTRY_CAUSES.with(|causes| {
         std::mem::take(&mut *causes.borrow_mut())
             .into_iter()
             .collect::<Vec<_>>()
     });
-    causes.sort_unstable_by(|(first, left), (second, right)| {
-        right.entries.cmp(&left.entries).then_with(|| first.cmp(second))
-    });
-    let attributed: u64 = causes.iter().map(|(_, counts)| counts.entries).sum();
-    for (key, counts) in &causes {
+    causes.sort_unstable_by(|(first, left), (second, right)| right.cmp(left).then_with(|| first.cmp(second)));
+    for (key, entries) in &causes {
         write_report(&format!(
-            "STYLE SEAL COUNT: host_entries cause={} kind={} cold={}: {} (applied {})\n",
+            "STYLE SEAL COUNT: host_entries cause={} kind={} cold={}: {entries}\n",
             key.cause,
             key.kind.name(),
             u8::from(key.cold),
-            counts.entries,
-            counts.applied
         ));
     }
-    if attributed != host_entries {
-        // Log-only: every host entry is meant to pass through a note, so a
-        // difference means a way in that the census does not know about.
-        write_report(&format!(
-            "STYLE SEAL COUNT: host_entries unattributed: {}\n",
-            host_entries as i64 - attributed as i64
-        ));
+    let mut engine_calls =
+        ENGINE_CALLS.with(|calls| std::mem::take(&mut *calls.borrow_mut()).into_iter().collect::<Vec<_>>());
+    engine_calls.sort_unstable_by(|(first, left), (second, right)| right.cmp(left).then_with(|| first.cmp(second)));
+    let total_engine_calls: u64 = engine_calls.iter().map(|(_, calls)| calls).sum();
+    for (entry, calls) in engine_calls {
+        write_report(&format!("STYLE SEAL COUNT: engine_call={entry} during_style={calls}\n"));
     }
-    if host_entries != 0 {
-        write_report(&format!(
-            "STYLE SEAL COUNT: host_entries: {host_entries} (rows {host_driven_rows} + sampled {sampled})\n"
-        ));
-    }
-    if sampled != 0 {
-        write_report(&format!("STYLE SEAL COUNT: host_sampled_animation_rows: {sampled}\n"));
-    }
-    let mut row_kinds = HOST_DRIVEN_ROW_KINDS.with(|counts| {
-        std::mem::take(&mut *counts.borrow_mut())
-            .into_iter()
-            .collect::<Vec<_>>()
-    });
-    row_kinds.sort_unstable_by_key(|(kind, _)| *kind);
-    for (kind, count) in row_kinds {
-        write_report(&format!("STYLE SEAL COUNT: host_driven_rows kind={kind}: {count}\n"));
-    }
-    let mut interleaves = STAGE_INTERLEAVES.with(|interleaves| {
-        std::mem::take(&mut *interleaves.borrow_mut())
-            .into_iter()
-            .collect::<Vec<_>>()
-    });
-    interleaves.sort_unstable_by_key(|(name, _)| *name);
-    for (name, count) in interleaves {
-        write_report(&format!("STYLE SEAL COUNT: stage_interleave {name}: {count}\n"));
-    }
-    let mut freeze_reasons = LONGHAND_INPUT_FREEZE_REASONS.with(|counts| {
-        std::mem::take(&mut *counts.borrow_mut())
-            .into_iter()
-            .collect::<Vec<_>>()
-    });
-    freeze_reasons.sort_unstable_by_key(|(reason, _)| *reason);
-    for (reason, count) in freeze_reasons {
-        write_report(&format!(
-            "STYLE SEAL COUNT: longhand_input_freeze reason={reason}: {count}\n"
-        ));
+    if total_engine_calls != 0 {
+        write_report(&format!("STYLE SEAL COUNT: engine_calls: {total_engine_calls}\n"));
     }
     let mut batches = BETWEEN_PASS_BATCHES.with(|batches| {
         std::mem::take(&mut *batches.borrow_mut())
