@@ -172,7 +172,9 @@ static bool rust_painting_timing_enabled()
     return enabled;
 }
 
-static Layout::RustFFI::FfiRootBackgroundSource rust_root_background_source(DOM::Document const& document)
+}
+
+Layout::RustFFI::FfiRootBackgroundSource rust_root_background_source(DOM::Document const& document)
 {
     Layout::RustFFI::FfiRootBackgroundSource source {};
     source.root_layout_node = Compositing::RustFFI::NodeSlotId { Compositing::RustFFI::INVALID_NODE_SLOT_INDEX };
@@ -185,6 +187,8 @@ static Layout::RustFFI::FfiRootBackgroundSource rust_root_background_source(DOM:
         source.body_layout_node = Layout::Node::slot_id(body->unsafe_layout_node());
     return source;
 }
+
+namespace {
 
 // The render side draws into a viewport it never asks about: this is published before every pass
 // that reads it, and a pass reads what was published rather than the document.

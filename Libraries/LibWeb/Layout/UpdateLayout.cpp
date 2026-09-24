@@ -18,6 +18,7 @@
 #include <LibWeb/Layout/TreeBuilder.h>
 #include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Page/Page.h>
+#include <LibWeb/Painting/PaintingRustBridge.h>
 
 namespace Web::DOM {
 
@@ -57,6 +58,7 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
             }; },
         .needs_style_update_after_layout = [](void* context) -> bool { return static_cast<Document*>(context)->needs_style_update_after_layout(); },
         .prepare_for_rendering = [](void* context) { static_cast<Document*>(context)->prepare_for_rendering(); },
+        .root_background_source = [](void* context) { return Painting::rust_root_background_source(*static_cast<Document*>(context)); },
         .prepare_layout_tree_build = [](void* context) -> u32 { return static_cast<Document*>(context)->prepare_layout_tree_build(); },
         .finish_layout_tree_build = [](void* context, void* walk, Layout::RustFFI::NodeSlotId replaced_root) -> Layout::RustFFI::FfiLayoutTreeBuildOutcome { return static_cast<Document*>(context)->finish_layout_tree_build(walk, replaced_root); },
         .rebuild_list_owners_with_stale_item_counters = [](void* context, u32 const* list_owners, size_t count) {

@@ -537,6 +537,64 @@ pub struct FfiRenderingPreparationOutcome {
     pub visual_context_values_changed: bool,
 }
 
+/// The render half of preparing for rendering ahead of the scroll offset handover: the root
+/// background source is updated, and the overflow left unmeasured is measured, which answers with
+/// whether the source changed and the scroll offsets the document is to store in place of the ones
+/// the measured boxes now store out of range.
+///
+/// The overflow recalculation is a pass of its own, and the document stores the scroll offsets it
+/// settled only once that pass is over. It measures all overflow left unmeasured, including the
+/// root's: the root background covers the viewport united with it, so a flip in its scrollability
+/// is seen here rather than while recording holds the paint state.
+pub(crate) fn prepare_root_background_and_overflow(
+    arena: &LayoutNodeArena,
+    root_background_source: crate::painting::host::FfiRootBackgroundSource,
+) -> (bool, Vec<(NodeSlotId, CssPixelPoint)>) {
+    let background_source_changed = {
+        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
+        arena
+            .paint_state()
+            .borrow_mut()
+            .update_root_background_source(arena, root_background_source)
+    };
+    let clamped = crate::painting::scrollable_overflow::measure_and_find_scroll_offsets_to_clamp(arena);
+    (background_source_changed, clamped)
+}
+
+/// The render half of preparing for rendering after the scroll offset handover: takes what the
+/// overflow measurement changed, and refreshes the sticky constraints the changed geometry moves
+/// unless a visual context update is pending anyway. It is a visual context update of its own, which
+/// starts after the handover so the handover is not inside a pass.
+pub(crate) fn finish_rendering_preparation(
+    arena: &LayoutNodeArena,
+    background_source_changed: bool,
+    visual_context_update_pending: bool,
+) -> FfiRenderingPreparationOutcome {
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
+    let changed = arena.scrollable_overflow.geometry_changed.replace(false);
+    let flipped = arena.scrollable_overflow.scrollability_changed.replace(false);
+    let mut visual_context_values_changed = false;
+    if changed && !flipped && !visual_context_update_pending {
+        let rows = arena.paintable_rows();
+        let mut state = arena.paint_state().borrow_mut();
+        let state = &mut state.visual_context;
+        if let Some(tree) = state.tree.as_mut() {
+            visual_context_values_changed = crate::painting::visual_context::refresh::refresh_sticky_constraints(
+                &rows,
+                &state.scroll_state,
+                tree,
+                &arena.visual_context_tree_inputs(),
+            );
+        }
+        state.needs_to_refresh_scroll_state = true;
+    }
+    FfiRenderingPreparationOutcome {
+        requires_display_list_recording: changed || background_source_changed,
+        requires_visual_context_update: flipped,
+        visual_context_values_changed,
+    }
+}
+
 /// # Safety
 ///
 /// `arena` must be a live arena used on the document thread.

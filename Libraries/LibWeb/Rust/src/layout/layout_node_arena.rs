@@ -1674,6 +1674,20 @@ impl LayoutNodeArena {
         None
     }
 
+    /// The node `id` is bound to, when it is that node's row: its style node and the kind of the
+    /// pseudo-element it was generated for, or no style node for the document's viewport.
+    pub(crate) fn bound_node_name(&self, id: NodeSlotId) -> Option<(Option<StyleNodeID>, u8)> {
+        let (bound_row, name) = match self.bound_node_of(id)? {
+            BoundNode::Identity(style_node) => (self.bound_row(style_node), (Some(style_node), 0)),
+            BoundNode::PseudoElement(generator, generated_for) => (
+                self.bound_pseudo_element_row(generator, generated_for),
+                (Some(generator), generated_for),
+            ),
+            BoundNode::Document => (self.bound_viewport_row(), (None, 0)),
+        };
+        (bound_row == id).then_some(name)
+    }
+
     /// Runs `callback` on the row entry `node` is bound through.
     fn with_bound_row_entry_of<R>(&self, node: BoundNode, callback: impl FnOnce(&mut NodeSlotId) -> R) -> R {
         let style_node = match node {
