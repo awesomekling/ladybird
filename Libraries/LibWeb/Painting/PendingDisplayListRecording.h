@@ -37,6 +37,8 @@ struct PendingDisplayListRecording {
     DisplayListResourceStorage& resource_storage;
     AccumulatedVisualContextTree visual_context_tree;
     PaintCommandCacheMode cache_mode;
+    // How the render side runs this recording: InSubmittedFrame only if it went to the frame in flight.
+    RecordingRun run { RecordingRun::Now };
     Optional<Color> surface_clear_color;
     DevicePixelRect device_viewport_rect;
     BlockingWheelEventRegionState wheel_event_region_state;

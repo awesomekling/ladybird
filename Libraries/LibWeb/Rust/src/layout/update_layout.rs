@@ -31,7 +31,6 @@ use crate::layout::used_values::FfiCssPixelPoint;
 use crate::painting::host::FfiRootBackgroundSource;
 use crate::painting::paintable_data::FfiSelectionSnapshot;
 use crate::painting::selection::SelectionSnapshot;
-use std::cell::Cell;
 use std::ffi::c_void;
 use std::time::Instant;
 
@@ -1050,19 +1049,13 @@ fn layout_update_host(main_thread: &crate::stage::MainThread) -> LayoutUpdateHos
 pub enum FfiLayoutFrameState {
     /// No layout update is running for the document.
     Idle,
-    /// The document's frame runs beside the document thread, which spins its event loop meanwhile.
-    /// What reads or rewrites what the frame reads waits for it, and a mark the document thread
-    /// makes waits for the next frame.
+    /// The document's frame is in flight beside the document thread, which runs its event loop
+    /// meanwhile. What reads or rewrites what the frame owns waits for it, and a mark the document
+    /// thread makes waits for the next frame.
     InFlight,
     /// The document thread runs as part of the frame: in one of its joins, or running the frame
     /// itself. What it marks is what the frame reads next, so it goes through at once.
     MainInsideJoin,
-}
-
-thread_local! {
-    // On the document thread, the arena whose layout frame it has handed to a stage run that has not
-    // returned yet.
-    static HANDED_OFF_FRAME_ARENA: Cell<*mut c_void> = const { Cell::new(std::ptr::null_mut()) };
 }
 
 /// Where the layout frame of the document `arena_handle` belongs to stands.
@@ -1071,15 +1064,9 @@ thread_local! {
 ///
 /// As for [`arena`], on the document thread.
 unsafe fn frame_state(arena_handle: *mut c_void) -> FfiLayoutFrameState {
-    if crate::stage_thread::runs_beside_an_overlapping_stage() {
-        // Only an overlapping stage runs beside this thread, and a layout update other than the one
-        // handed off to it began and ended in work this thread has since returned from. So no other
-        // document is in one, and the arena is not read, which would wait for the stage.
-        return if HANDED_OFF_FRAME_ARENA.with(Cell::get) == arena_handle {
-            FfiLayoutFrameState::InFlight
-        } else {
-            FfiLayoutFrameState::Idle
-        };
+    // A frame in flight owns the arena, so this is asked without reading it.
+    if crate::stage_thread::frame_in_flight_owns(arena_handle) {
+        return FfiLayoutFrameState::InFlight;
     }
     // SAFETY: Guaranteed by the caller.
     if unsafe { arena(arena_handle) }.update_layout_is_running() {
@@ -1120,10 +1107,9 @@ unsafe fn update_layout(
     // SAFETY: The frame reaches the arena and the document through the handle only while the
     // document thread waits for it, or through the joins it runs on that thread.
     let inputs = unsafe { crate::stage_thread::CallerWaits::new(inputs) };
-    let previously_handed_off = HANDED_OFF_FRAME_ARENA.with(|slot| slot.replace(arena_handle));
     // SAFETY: As above, for the work the frame's joins hand the document thread.
     unsafe {
-        crate::stage_thread::run_overlappable_stage_with_joins("layout", main_thread, move |joins| {
+        crate::stage_thread::run_stage_with_joins(main_thread, move |joins| {
             let frame = LayoutFrame {
                 inputs: inputs.into_inner(),
                 joins,
@@ -1143,7 +1129,6 @@ unsafe fn update_layout(
             });
         });
     }
-    HANDED_OFF_FRAME_ARENA.with(|slot| slot.set(previously_handed_off));
 }
 
 /// Where the layout frame of the document stands, seen from the document thread. Asking does not
@@ -1168,10 +1153,7 @@ pub unsafe extern "C" fn layout_arena_frame_state(arena: *mut c_void) -> FfiLayo
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_join_frame_in_flight(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    if unsafe { frame_state(arena) } == FfiLayoutFrameState::InFlight {
-        crate::stage_thread::join_overlapping_stage();
-    }
+    crate::stage_thread::join_frame_in_flight(arena);
 }
 
 /// # Safety

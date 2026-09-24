@@ -649,14 +649,17 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
     // thread before the recording starts; the recording only looks the renders up.
     Layout::RustFFI::layout_arena_resolve_painted_vector_images(arena, &inputs, vector_image_callbacks(publish_context));
     auto rust_timer = Core::ElapsedTimer::start_new(Core::TimerType::Precise);
-    VERIFY(run == RecordingRun::Now);
-    if (!Layout::RustFFI::layout_arena_record_display_list(arena, viewport_row_slot(document), inputs))
+    auto ffi_run = run == RecordingRun::InSubmittedFrame ? Layout::RustFFI::FfiRecordingRun::InSubmittedFrame : Layout::RustFFI::FfiRecordingRun::Now;
+    if (!Layout::RustFFI::layout_arena_record_display_list(arena, viewport_row_slot(document), inputs, ffi_run))
         return {};
+    // NB: The render side may still record in place, if the frame scheduler does not submit recordings.
+    auto const submitted = Layout::RustFFI::layout_arena_frame_state(arena) == Layout::RustFFI::FfiLayoutFrameState::InFlight;
     return PendingDisplayListRecording {
         .document = document,
         .resource_storage = resource_storage,
         .visual_context_tree = document.paint_state().visual_context_tree(document),
         .cache_mode = cache_mode,
+        .run = submitted ? RecordingRun::InSubmittedFrame : RecordingRun::Now,
         .surface_clear_color = placeholder_display_list.surface_clear_color(),
         .device_viewport_rect = device_viewport_rect,
         .wheel_event_region_state = wheel_event_region_state,

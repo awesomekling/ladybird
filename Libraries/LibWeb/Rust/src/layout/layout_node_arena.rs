@@ -5516,7 +5516,7 @@ impl LayoutNodeArena {
     #[track_caller]
     pub(crate) unsafe fn from_handle<'a>(arena: *mut c_void) -> &'a Self {
         assert!(!arena.is_null(), "layout node arena handle is null");
-        crate::stage_thread::join_overlapping_stage();
+        crate::stage_thread::join_frame_in_flight(arena);
         // SAFETY: Layout passes borrow the document's arena synchronously,
         // and the document keeps it alive for the duration of the pass.
         super::main_side_census::note_arena_access(std::panic::Location::caller(), arena);
@@ -5526,7 +5526,7 @@ impl LayoutNodeArena {
     #[track_caller]
     pub(crate) unsafe fn from_handle_mut<'a>(arena: *mut c_void) -> &'a mut Self {
         assert!(!arena.is_null(), "layout node arena handle is null");
-        crate::stage_thread::join_overlapping_stage();
+        crate::stage_thread::join_frame_in_flight(arena);
         super::main_side_census::note_arena_access(std::panic::Location::caller(), arena);
         // SAFETY: The caller guarantees exclusive access to the arena for the
         // duration of the returned borrow.

@@ -21,6 +21,7 @@
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/EventLoop/FrameCompletion.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/HTMLMediaElement.h>
 #include <LibWeb/HTML/LocalTraversableNavigable.h>
 #include <LibWeb/HTML/NavigableContainer.h>
@@ -37,6 +38,7 @@
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
+#include <LibWeb/Painting/PendingDisplayListRecording.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWeb/Platform/Timer.h>
 #include <LibWebCommon/Page/QueuedInputEvent.h>
@@ -47,6 +49,7 @@ GC_DEFINE_ALLOCATOR(EventLoop);
 
 EventLoop::EventLoop(Type type)
     : m_type(type)
+    , m_frame_scheduler(make<FrameScheduler>(*this))
 {
     m_task_queue = GC::Heap::the().allocate<TaskQueue>(*this);
 
@@ -160,6 +163,7 @@ void EventLoop::visit_edges(Visitor& visitor)
     visitor.visit(m_system_event_loop_timer);
     visitor.visit(m_idle_period_timer);
     visitor.visit(m_finished_frame_consumer);
+    m_frame_scheduler->visit_edges(visitor);
 }
 
 void EventLoop::schedule()
@@ -255,6 +259,10 @@ void EventLoop::process()
     auto reached_step_1_tasks = move(m_reached_step_1_tasks);
     for (auto& reached_step_1_task : reached_step_1_tasks)
         reached_step_1_task->function()();
+
+    // A frame the render side has finished is taken in here, and the rest of its rendering update runs, before the
+    // next task.
+    m_frame_scheduler->run_at_step_1();
 
     // 2. If the event loop has a task queue with at least one runnable task, then:
     if (m_task_queue->has_runnable_tasks()) {
@@ -470,6 +478,10 @@ bool EventLoop::rendering_opportunity(HighResolutionTime::DOMHighResTimeStamp fr
     if (m_running_rendering_task)
         return false;
 
+    // A rendering update whose frame has not been taken in, or whose tail has not run, keeps the opportunity too.
+    if (m_frame_scheduler->holds_rendering_update())
+        return false;
+
     m_rendering_update_requested = false;
 
     if (m_rendering_task_queued)
@@ -629,99 +641,29 @@ static GC::RootVector<GC::Ref<Page>> pages_of_local_roots()
     return pages;
 }
 
-// Under LIBWEB_STAGE_THREAD=overlap, the main thread spins this event loop while an overlapping render stage runs, so
-// that tasks run concurrently with it.
-static void install_stage_overlap_host_if_wanted()
-{
-    if (!Layout::RustFFI::rust_stage_thread_wants_overlap_host())
-        return;
-    // Set once, before the first overlapping stage is handed to the stage thread that reads it.
-    static Core::WeakEventLoopReference* s_main_event_loop = nullptr;
-    s_main_event_loop = &Core::EventLoop::current_weak().leak_ref();
-    Layout::RustFFI::rust_stage_thread_set_overlap_host({
-        .spin_until = [](bool (*done)(void*), void* context) {
-            auto& event_loop = main_thread_event_loop();
-            // Only a rendering update with no script on the stack lets other tasks run; a stage started anywhere else
-            // is one its caller needs the result of right away, as script reading layout does.
-            if (!event_loop.running_rendering_task() || !Bindings::main_thread_vm().execution_context_stack().is_empty())
-                return;
-            // Each overlapping stage counts as a frame submitted here and consumed when the spin returns. A stage
-            // started by a task that runs inside another one's spin is counted with the outer one.
-            bool const counts_as_a_frame = !EventLoop::a_frame_is_in_flight();
-            if (counts_as_a_frame)
-                event_loop.did_submit_frame();
-            event_loop.spin_until(GC::create_function(GC::Heap::the(), [done, context] { return done(context); }));
-            if (counts_as_a_frame)
-                event_loop.did_consume_frame_commit(0); },
-        .wake = [] {
-            if (auto event_loop = s_main_event_loop->take(); event_loop.is_alive())
-                event_loop->wake(); },
-    });
-}
-
 // https://html.spec.whatwg.org/multipage/webappapis.html#update-the-rendering
 void EventLoop::update_the_rendering()
 {
-    install_stage_overlap_host_if_wanted();
     VERIFY(!m_running_rendering_task);
+    // The previous rendering update's frame and tail come first.
+    m_frame_scheduler->begin_main_half(m_running_synchronous_rendering_update);
     m_running_rendering_task = true;
     for (auto const& page : pages_of_local_roots())
         page->client().will_begin_rendering_update();
-    auto update_start_time = HighResolutionTime::unsafe_shared_current_time();
+    m_rendering_update_start_time = HighResolutionTime::unsafe_shared_current_time();
     auto update_start_nanoseconds = MonotonicTime::now().nanoseconds();
     auto frames_submitted_before_update = m_rendering_scheduler_counters.frames_submitted;
     ++m_rendering_scheduler_counters.updates_run;
-    ScopeGuard const guard = [this, update_start_time, update_start_nanoseconds, frames_submitted_before_update] {
-        auto update_end_time = HighResolutionTime::unsafe_shared_current_time();
-        m_rendering_scheduler_counters.update_microseconds += static_cast<u64>((update_end_time - update_start_time) * 1000.0);
-        // FIXME: Once the frame scheduler submits frames from here, the main half ends at the submission, and the
-        //        consume halves are timed where the frame is consumed.
+    bool frame_in_flight = false;
+    ScopeGuard const guard = [this, &frame_in_flight, update_start_nanoseconds, frames_submitted_before_update] {
+        // The main half ends here, with the submission of the frame if there is one.
         m_rendering_scheduler_counters.main_half_nanoseconds += MonotonicTime::now().nanoseconds() - update_start_nanoseconds;
         if (m_rendering_scheduler_counters.frames_submitted == frames_submitted_before_update)
             did_run_frame_in_lockstep(FrameLockstepReason::JoinsLeft);
         m_running_rendering_task = false;
-
-        for (auto const& page : pages_of_local_roots())
-            page->client().did_finish_rendering_update();
-
-        auto const& current = m_rendering_scheduler_counters;
-        auto const& previous = m_rendering_scheduler_counters_at_last_update;
-        [[maybe_unused]] auto lockstep_frames = [](RenderingSchedulerCounters const& counters) {
-            u64 frames = 0;
-            for (auto count : counters.frames_lockstep)
-                frames += count;
-            return frames;
-        };
-        dbgln_if(RENDERING_SCHEDULER_DEBUG,
-            "[RenderSched] update #{} duration={:.1f}ms gap={:.1f}ms paints={} tasks={} ({:.1f}ms) "
-            "[postmsg {} ({:.1f}ms), timer {} ({:.1f}ms), net {} ({:.1f}ms), dom {} ({:.1f}ms)] "
-            "requests={} coalesced={} during_update={} "
-            "frames submitted={} consumed={} lockstep={} dropped={} in_flight={:.1f}ms overlap_tasks={:.1f}ms main_half={:.1f}ms",
-            current.updates_run, update_end_time - update_start_time,
-            m_last_rendering_update_end_time > 0 ? update_start_time - m_last_rendering_update_end_time : 0.0,
-            current.paints - previous.paints,
-            current.tasks_between_updates - previous.tasks_between_updates,
-            static_cast<double>(current.task_microseconds_between_updates - previous.task_microseconds_between_updates) / 1000.0,
-            current.posted_message_tasks_between_updates - previous.posted_message_tasks_between_updates,
-            static_cast<double>(current.posted_message_task_microseconds_between_updates - previous.posted_message_task_microseconds_between_updates) / 1000.0,
-            current.timer_tasks_between_updates - previous.timer_tasks_between_updates,
-            static_cast<double>(current.timer_task_microseconds_between_updates - previous.timer_task_microseconds_between_updates) / 1000.0,
-            current.networking_tasks_between_updates - previous.networking_tasks_between_updates,
-            static_cast<double>(current.networking_task_microseconds_between_updates - previous.networking_task_microseconds_between_updates) / 1000.0,
-            current.dom_manipulation_tasks_between_updates - previous.dom_manipulation_tasks_between_updates,
-            static_cast<double>(current.dom_manipulation_task_microseconds_between_updates - previous.dom_manipulation_task_microseconds_between_updates) / 1000.0,
-            current.update_requests - previous.update_requests,
-            current.coalesced_update_requests - previous.coalesced_update_requests,
-            current.update_requests_while_rendering - previous.update_requests_while_rendering,
-            current.frames_submitted - previous.frames_submitted,
-            current.frames_consumed - previous.frames_consumed,
-            lockstep_frames(current) - lockstep_frames(previous),
-            current.frames_dropped - previous.frames_dropped,
-            static_cast<double>(current.frame_in_flight_nanoseconds - previous.frame_in_flight_nanoseconds) / 1'000'000.0,
-            static_cast<double>(current.overlap_task_nanoseconds - previous.overlap_task_nanoseconds) / 1'000'000.0,
-            static_cast<double>(current.main_half_nanoseconds - previous.main_half_nanoseconds) / 1'000'000.0);
-        m_rendering_scheduler_counters_at_last_update = current;
-        m_last_rendering_update_end_time = update_end_time;
+        // A rendering update whose frame is in flight ends once its tail has run.
+        if (!frame_in_flight)
+            end_rendering_update();
     };
 
     process_input_events();
@@ -1014,6 +956,30 @@ void EventLoop::update_the_rendering()
             navigable->page().process_screenshot_requests();
     }
 
+    Vector<GC::Ref<DOM::Document>> docs_for_tail;
+    docs_for_tail.ensure_capacity(docs.size());
+    for (auto& document : docs)
+        docs_for_tail.unchecked_append(*document);
+    frame_in_flight = m_frame_scheduler->submit(docs_for_tail);
+    if (frame_in_flight)
+        return;
+
+    finish_rendering_update_steps(docs_for_tail);
+}
+
+void EventLoop::run_rendering_update_tail(Badge<FrameScheduler>, ReadonlySpan<GC::Ref<LocalNavigable>> painted_local_roots, ReadonlySpan<GC::Ref<DOM::Document>> docs)
+{
+    // 22. (continued) The screenshots of the tab as this frame shows it.
+    for (auto navigable : painted_local_roots) {
+        if (!navigable->has_been_destroyed())
+            navigable->page().process_screenshot_requests();
+    }
+    finish_rendering_update_steps(docs);
+    end_rendering_update();
+}
+
+void EventLoop::finish_rendering_update_steps(ReadonlySpan<GC::Ref<DOM::Document>> docs)
+{
     // AD-HOC: Any scroll or layout of a document between a navigable container and its local root moves the rect the
     //         UI process routes input over the container's content navigable by. Report the rects of the containers
     //         in docs, whose layout is up to date along with that of every document above them.
@@ -1038,6 +1004,55 @@ void EventLoop::update_the_rendering()
             || document->has_pending_style_sheet_requests()
             || !document->layout_is_up_to_date());
     }
+}
+
+void EventLoop::end_rendering_update()
+{
+    auto update_start_time = m_rendering_update_start_time;
+    auto update_end_time = HighResolutionTime::unsafe_shared_current_time();
+    m_rendering_scheduler_counters.update_microseconds += static_cast<u64>((update_end_time - update_start_time) * 1000.0);
+
+    for (auto const& page : pages_of_local_roots())
+        page->client().did_finish_rendering_update();
+
+    auto const& current = m_rendering_scheduler_counters;
+    auto const& previous = m_rendering_scheduler_counters_at_last_update;
+    [[maybe_unused]] auto lockstep_frames = [](RenderingSchedulerCounters const& counters) {
+        u64 frames = 0;
+        for (auto count : counters.frames_lockstep)
+            frames += count;
+        return frames;
+    };
+    dbgln_if(RENDERING_SCHEDULER_DEBUG,
+        "[RenderSched] update #{} duration={:.1f}ms gap={:.1f}ms paints={} tasks={} ({:.1f}ms) "
+        "[postmsg {} ({:.1f}ms), timer {} ({:.1f}ms), net {} ({:.1f}ms), dom {} ({:.1f}ms)] "
+        "requests={} coalesced={} during_update={} "
+        "frames submitted={} consumed={} lockstep={} dropped={} in_flight={:.1f}ms overlap_tasks={:.1f}ms main_half={:.1f}ms",
+        current.updates_run, update_end_time - update_start_time,
+        m_last_rendering_update_end_time > 0 ? update_start_time - m_last_rendering_update_end_time : 0.0,
+        current.paints - previous.paints,
+        current.tasks_between_updates - previous.tasks_between_updates,
+        static_cast<double>(current.task_microseconds_between_updates - previous.task_microseconds_between_updates) / 1000.0,
+        current.posted_message_tasks_between_updates - previous.posted_message_tasks_between_updates,
+        static_cast<double>(current.posted_message_task_microseconds_between_updates - previous.posted_message_task_microseconds_between_updates) / 1000.0,
+        current.timer_tasks_between_updates - previous.timer_tasks_between_updates,
+        static_cast<double>(current.timer_task_microseconds_between_updates - previous.timer_task_microseconds_between_updates) / 1000.0,
+        current.networking_tasks_between_updates - previous.networking_tasks_between_updates,
+        static_cast<double>(current.networking_task_microseconds_between_updates - previous.networking_task_microseconds_between_updates) / 1000.0,
+        current.dom_manipulation_tasks_between_updates - previous.dom_manipulation_tasks_between_updates,
+        static_cast<double>(current.dom_manipulation_task_microseconds_between_updates - previous.dom_manipulation_task_microseconds_between_updates) / 1000.0,
+        current.update_requests - previous.update_requests,
+        current.coalesced_update_requests - previous.coalesced_update_requests,
+        current.update_requests_while_rendering - previous.update_requests_while_rendering,
+        current.frames_submitted - previous.frames_submitted,
+        current.frames_consumed - previous.frames_consumed,
+        lockstep_frames(current) - lockstep_frames(previous),
+        current.frames_dropped - previous.frames_dropped,
+        static_cast<double>(current.frame_in_flight_nanoseconds - previous.frame_in_flight_nanoseconds) / 1'000'000.0,
+        static_cast<double>(current.overlap_task_nanoseconds - previous.overlap_task_nanoseconds) / 1'000'000.0,
+        static_cast<double>(current.main_half_nanoseconds - previous.main_half_nanoseconds) / 1'000'000.0);
+    m_rendering_scheduler_counters_at_last_update = current;
+    m_last_rendering_update_end_time = update_end_time;
 }
 
 void run_when_event_loop_reaches_step_1(GC::Ref<GC::Function<void()>> steps)
