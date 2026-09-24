@@ -3220,7 +3220,17 @@ impl StyleEngineState {
         counters: &mut Counters,
     ) -> bool {
         if self.host.suspended_style_pass.is_some() {
-            return self.continue_style_pass(emit, counters);
+            // A wave reads the facts its pass matched against. Once the tree, its features or
+            // the rule program moved since, the rows the pass did not reach are owed to the
+            // transaction that takes those changes instead.
+            if !self.facts.has_dirty_staging()
+                && self.host.tree_staging.is_empty()
+                && !self.host.program_staging.is_dirty()
+                && self.host.sheet_rule_replacement.is_none()
+            {
+                return self.continue_style_pass(emit, counters);
+            }
+            self.abandon_suspended_style_pass();
         }
         let mut clock = TransactionClock::new();
         self.install_witness_effects();
