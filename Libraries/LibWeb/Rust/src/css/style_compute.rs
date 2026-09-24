@@ -3301,6 +3301,8 @@ fn plan_effect_stack(
     // The definitions that give the animation they claim another rule or another simple timing,
     // by the place they give it, and whether its row is retimed.
     let mut changed = Vec::new();
+    // The definitions that play or pause the animation they claim, and whether they play it.
+    let mut played = Vec::new();
     let mut starting = Vec::new();
     for (index, definition) in definitions.iter().enumerate() {
         if definition.matched_existing_index == NO_MATCHED_ANIMATION {
@@ -3312,13 +3314,19 @@ fn plan_effect_stack(
             .get(matched)
             .ok_or("a claimed animation the host did not publish")?;
         let computed = AppliedAnimationDefinition::from_definition(definition);
+        // A play state change plays or pauses the animation after the rest of the definition is
+        // applied.
+        if let Some(running) = computed.changed_play_state(published) {
+            played.push((index as u32, running));
+        }
+        let computed = computed.with_play_state_of(published);
         if !computed.would_change_nothing(published) {
             if computed.change_is_only_keyframes(published) {
                 changed.push((index as u32, definition, false));
             } else if computed.change_is_only_simple_timing(published) {
                 changed.push((index as u32, definition, true));
             } else {
-                return Err("a plan that plays, pauses or moves the timeline of an animation");
+                return Err("a plan that moves the timeline of an animation");
             }
         }
         new_indices[matched] = i32::try_from(index).map_err(|_| "a definition index")?;
@@ -3335,6 +3343,13 @@ fn plan_effect_stack(
             *row = row
                 .retimed_for_definition(definition)
                 .ok_or("a timing the engine cannot restamp")?;
+        }
+        if let Some(&(_, running)) = played.iter().find(|(played, _)| *played == index) {
+            let timeline_time = animations::row_timeline_time(row, engine.animation_timeline_samples())
+                .ok_or("a timeline with no sample")?;
+            *row = row
+                .with_css_play_state(running, timeline_time)
+                .ok_or("a play or pause the engine cannot settle")?;
         }
     }
     // A plan starts nothing in a `display: none` subtree.

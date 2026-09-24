@@ -520,7 +520,11 @@ void Animatable::publish_animation_timing_rows()
     auto append_row = [&](KeyframeEffect& keyframe_effect, Animation& animation, u32 extra_flags) {
         auto row = animation.style_timing_row(linear_points);
         row.effect_identity = keyframe_effect.animation_preparation_identity();
-        words.append(row.flags | extra_flags | listed_by_owning_element(animation));
+        auto const* css_animation = as_if<CSS::CSSAnimation>(animation);
+        auto const play_state_overridden = css_animation && css_animation->script_overrode_play_state()
+            ? Animation::StyleTimingRow::css_play_state_overridden_by_script
+            : 0;
+        words.append(row.flags | extra_flags | listed_by_owning_element(animation) | play_state_overridden);
         words.append(row.timeline_identity);
         words.append(bit_cast<u32>(row.easing_interval_count));
         words.append(static_cast<u32>(row.effect_identity));

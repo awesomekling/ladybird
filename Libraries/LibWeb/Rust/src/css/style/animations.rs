@@ -141,6 +141,26 @@ impl AppliedAnimationDefinition {
         without_the_keyframes.would_change_nothing(published)
     }
 
+    /// The `animation-play-state` this definition asks for, where it is not the one `published`
+    /// asked for: `Some(true)` for `running`. `None` where the two ask for the same.
+    #[must_use]
+    pub(crate) fn changed_play_state(&self, published: &Self) -> Option<bool> {
+        let play_state = |row: &Self| (row.words[APPLIED_DEFINITION_FLAGS_WORD] >> 16) & 0xff;
+        // `animation_play_state::PAUSED` is 0.
+        (play_state(self) != play_state(published)).then(|| play_state(self) != 0)
+    }
+
+    /// This definition with the play state `published` asked for, which is what is left to compare
+    /// once the play state change is taken apart.
+    #[must_use]
+    pub(crate) fn with_play_state_of(&self, published: &Self) -> Self {
+        const PLAY_STATE_MASK: u64 = 0xff << 16;
+        let mut row = *self;
+        row.words[APPLIED_DEFINITION_FLAGS_WORD] = (row.words[APPLIED_DEFINITION_FLAGS_WORD] & !PLAY_STATE_MASK)
+            | (published.words[APPLIED_DEFINITION_FLAGS_WORD] & PLAY_STATE_MASK);
+        row
+    }
+
     /// Whether applying `self` to an animation that last had `published` applied would change only
     /// what its effect is sampled from and how far a given time is along it, and move no time.
     ///
@@ -399,6 +419,7 @@ pub(crate) mod timing_row_flag {
     pub(crate) const START_DELAY_IS_PERCENTAGE: u32 = 1 << 4;
     pub(crate) const END_DELAY_IS_PERCENTAGE: u32 = 1 << 5;
     pub(crate) const ITERATION_DURATION_IS_PERCENTAGE: u32 = 1 << 6;
+    pub(crate) const HAS_PENDING_PLAYBACK_RATE: u32 = 1 << 7;
     pub(crate) const HAS_PENDING_PLAY_TASK: u32 = 1 << 8;
     pub(crate) const HAS_PENDING_PAUSE_TASK: u32 = 1 << 9;
     pub(crate) const HAS_TIMELINE: u32 = 1 << 12;
@@ -429,6 +450,9 @@ pub(crate) mod timing_row_flag {
     /// The owning element currently lists this CSS animation at the place its class-specific key
     /// names.
     pub(crate) const LISTED_BY_OWNING_ELEMENT: u32 = 1 << 29;
+    /// Script played or paused this CSS animation, so a change to `animation-play-state` no longer
+    /// plays or pauses it.
+    pub(crate) const CSS_PLAY_STATE_OVERRIDDEN_BY_SCRIPT: u32 = 1 << 30;
 }
 
 /// `Animations::AnimationClass`, in declaration order, which is also the inter-class composite
@@ -479,6 +503,7 @@ const TIME_START_DELAY: usize = 2;
 const TIME_END_DELAY: usize = 3;
 const TIME_ITERATION_DURATION: usize = 4;
 const TIME_PLAYBACK_RATE: usize = 5;
+const TIME_PENDING_PLAYBACK_RATE: usize = 6;
 const TIME_ITERATION_COUNT: usize = 7;
 const TIME_ITERATION_START: usize = 8;
 const TIME_EASING_X1: usize = 9;
@@ -679,6 +704,119 @@ impl AnimationTimingRow {
             | (flag::PLAYBACK_DIRECTION_MASK << flag::PLAYBACK_DIRECTION_SHIFT));
         retimed.flags |= (fill_mode << flag::FILL_MODE_SHIFT) | (direction << flag::PLAYBACK_DIRECTION_SHIFT);
         Some(retimed)
+    }
+
+    /// This row once a definition that changes `animation-play-state` is applied: what
+    /// `CSSAnimation::apply_css_properties` does to an animation script has not played or paused,
+    /// which is to play it when the definition says `running` and it is not running, and to pause
+    /// it when the definition says `paused` and it is not paused. `timeline_time` is the time of
+    /// the row's timeline the host reads.
+    ///
+    /// `None` for a row whose play or pause this cannot settle: one on a progress-based or
+    /// non-monotonic timeline, one whose times are percentages, and one the host would fail to
+    /// rewind or pause over an infinite effect end.
+    #[must_use]
+    pub(crate) fn with_css_play_state(&self, running: bool, timeline_time: Option<TimeValue>) -> Option<Self> {
+        use timing_row_flag as flag;
+
+        if self.has(flag::CSS_PLAY_STATE_OVERRIDDEN_BY_SCRIPT) {
+            return Some(*self);
+        }
+        if self.has(flag::UNDECIDABLE)
+            || self.has(flag::TIMELINE_IS_PROGRESS_BASED)
+            || (self.has(flag::HAS_TIMELINE) && !self.has(flag::TIMELINE_IS_MONOTONICALLY_INCREASING))
+            || self.flags
+                & (flag::START_TIME_IS_PERCENTAGE
+                    | flag::HOLD_TIME_IS_PERCENTAGE
+                    | flag::START_DELAY_IS_PERCENTAGE
+                    | flag::ITERATION_DURATION_IS_PERCENTAGE
+                    | flag::END_DELAY_IS_PERCENTAGE)
+                != 0
+        {
+            return None;
+        }
+        let playback_rate = self.times[TIME_PLAYBACK_RATE];
+        // https://www.w3.org/TR/web-animations-1/#animation-current-time
+        let current_time = if self.has(flag::HAS_HOLD_TIME) {
+            Some(self.times[TIME_HOLD])
+        } else if !self.has(flag::HAS_TIMELINE) || !self.has(flag::HAS_START_TIME) {
+            None
+        } else {
+            timeline_time.map(|time| (time.value - self.times[TIME_START]) * playback_rate)
+        };
+        // https://www.w3.org/TR/web-animations-1/#associated-effect-end
+        let iteration_duration = self.times[TIME_ITERATION_DURATION];
+        let iteration_count = self.times[TIME_ITERATION_COUNT];
+        let active_duration = match iteration_duration == 0.0 || iteration_count == 0.0 {
+            true => 0.0,
+            false => iteration_duration * iteration_count,
+        };
+        let effect_end = (self.times[TIME_START_DELAY] + active_duration + self.times[TIME_END_DELAY]).max(0.0);
+        let effective_playback_rate = match self.has(flag::HAS_PENDING_PLAYBACK_RATE) {
+            true => self.times[TIME_PENDING_PLAYBACK_RATE],
+            false => playback_rate,
+        };
+        let has_start_time = self.has(flag::HAS_START_TIME);
+        let pending_play = self.has(flag::HAS_PENDING_PLAY_TASK);
+        let pending_pause = self.has(flag::HAS_PENDING_PAUSE_TASK);
+        // https://www.w3.org/TR/web-animations-1/#play-states
+        let is_paused = pending_pause || (!has_start_time && !pending_play);
+        let is_idle = current_time.is_none() && !has_start_time && !pending_play && !pending_pause;
+        let is_finished = current_time.is_some_and(|time| {
+            (effective_playback_rate > 0.0 && time >= effect_end) || (effective_playback_rate < 0.0 && time <= 0.0)
+        });
+        let is_running = !is_idle && !is_paused && !is_finished;
+
+        let mut row = *self;
+        let set_hold_time = |row: &mut Self, time: f64| {
+            row.flags |= flag::HAS_HOLD_TIME;
+            row.times[TIME_HOLD] = time;
+        };
+        if running {
+            if is_running {
+                return Some(row);
+            }
+            // https://drafts.csswg.org/web-animations-2/#play-an-animation, with the auto-rewind
+            // flag set and no finite timeline.
+            let aborted_pause = pending_pause;
+            if effective_playback_rate > 0.0 && current_time.is_none_or(|time| time < 0.0 || time >= effect_end) {
+                set_hold_time(&mut row, 0.0);
+            } else if effective_playback_rate < 0.0 && current_time.is_none_or(|time| time <= 0.0 || time > effect_end)
+            {
+                if effect_end.is_infinite() {
+                    return None;
+                }
+                set_hold_time(&mut row, effect_end);
+            } else if effective_playback_rate == 0.0 && current_time.is_none() {
+                set_hold_time(&mut row, 0.0);
+            }
+            if row.has(flag::HAS_HOLD_TIME) {
+                row.flags &= !flag::HAS_START_TIME;
+            }
+            row.flags &= !(flag::HAS_PENDING_PLAY_TASK | flag::HAS_PENDING_PAUSE_TASK);
+            if !row.has(flag::HAS_HOLD_TIME) && !aborted_pause && !row.has(flag::HAS_PENDING_PLAYBACK_RATE) {
+                return Some(row);
+            }
+            // Updating the finished state with a pending play task moves no time.
+            row.flags |= flag::HAS_PENDING_PLAY_TASK;
+            return Some(row);
+        }
+        // https://www.w3.org/TR/web-animations-1/#pausing-an-animation-section
+        if pending_pause || is_paused {
+            return Some(row);
+        }
+        if current_time.is_none() {
+            let seek_time = match playback_rate >= 0.0 {
+                true => 0.0,
+                false if effect_end.is_infinite() => return None,
+                false => effect_end,
+            };
+            set_hold_time(&mut row, seek_time);
+        }
+        // Updating the finished state with a pending pause task moves no time.
+        row.flags &= !flag::HAS_PENDING_PLAY_TASK;
+        row.flags |= flag::HAS_PENDING_PAUSE_TASK;
+        Some(row)
     }
 
     /// Whether the animation holds its current time, which no timeline's time then moves.
@@ -2407,6 +2545,79 @@ mod tests {
             match_existing_animations(&[name("a"), name("a")], &[name("a"), name("a")]),
             vec![0, 1]
         );
+    }
+
+    /// A CSS animation on the document timeline: 1000ms long, started at `start` or holding
+    /// `hold`.
+    fn document_timeline_row(start: Option<f64>, hold: Option<f64>, extra_flags: u32) -> AnimationTimingRow {
+        use timing_row_flag as flag;
+        let mut row = AnimationTimingRow {
+            flags: flag::HAS_TIMELINE | flag::TIMELINE_IS_MONOTONICALLY_INCREASING | extra_flags,
+            ..Default::default()
+        };
+        row.times[TIME_ITERATION_DURATION] = 1000.0;
+        row.times[TIME_ITERATION_COUNT] = 1.0;
+        row.times[TIME_PLAYBACK_RATE] = 1.0;
+        if let Some(start) = start {
+            row.flags |= flag::HAS_START_TIME;
+            row.times[TIME_START] = start;
+        }
+        if let Some(hold) = hold {
+            row.flags |= flag::HAS_HOLD_TIME;
+            row.times[TIME_HOLD] = hold;
+        }
+        row
+    }
+
+    fn time(value: f64) -> Option<TimeValue> {
+        Some(TimeValue {
+            is_percentage: false,
+            value,
+        })
+    }
+
+    #[test]
+    fn pausing_a_running_animation_keeps_its_time_until_the_pause_task() {
+        use timing_row_flag as flag;
+        let running = document_timeline_row(Some(100.0), None, 0);
+        let paused = running.with_css_play_state(false, time(400.0)).unwrap();
+        assert!(paused.has(flag::HAS_PENDING_PAUSE_TASK));
+        assert!(paused.has(flag::HAS_START_TIME) && !paused.has(flag::HAS_HOLD_TIME));
+        // Playing a running animation does nothing.
+        assert_eq!(running.with_css_play_state(true, time(400.0)).unwrap(), running);
+    }
+
+    #[test]
+    fn playing_a_paused_animation_keeps_its_hold_time_or_rewinds_a_finished_one() {
+        use timing_row_flag as flag;
+        let paused = document_timeline_row(None, Some(300.0), 0);
+        let played = paused.with_css_play_state(true, time(400.0)).unwrap();
+        assert!(played.has(flag::HAS_PENDING_PLAY_TASK) && !played.has(flag::HAS_PENDING_PAUSE_TASK));
+        assert_eq!(played.times[TIME_HOLD], 300.0);
+        // Pausing a paused animation does nothing.
+        assert_eq!(paused.with_css_play_state(false, time(400.0)).unwrap(), paused);
+        // A paused animation held at its end rewinds to zero.
+        let at_end = document_timeline_row(None, Some(1000.0), 0);
+        assert_eq!(
+            at_end.with_css_play_state(true, time(400.0)).unwrap().times[TIME_HOLD],
+            0.0
+        );
+    }
+
+    #[test]
+    fn playing_an_animation_with_a_pending_pause_aborts_the_pause() {
+        use timing_row_flag as flag;
+        let pausing = document_timeline_row(Some(100.0), None, flag::HAS_PENDING_PAUSE_TASK);
+        let played = pausing.with_css_play_state(true, time(400.0)).unwrap();
+        assert!(played.has(flag::HAS_PENDING_PLAY_TASK) && !played.has(flag::HAS_PENDING_PAUSE_TASK));
+        assert!(played.has(flag::HAS_START_TIME) && !played.has(flag::HAS_HOLD_TIME));
+    }
+
+    #[test]
+    fn a_play_state_script_overrode_is_left_alone() {
+        use timing_row_flag as flag;
+        let running = document_timeline_row(Some(100.0), None, flag::CSS_PLAY_STATE_OVERRIDDEN_BY_SCRIPT);
+        assert_eq!(running.with_css_play_state(false, time(400.0)).unwrap(), running);
     }
 
     #[test]
