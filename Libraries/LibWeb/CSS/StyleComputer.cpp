@@ -729,6 +729,13 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
     auto result = ComputedValuesFFI::rust_sample_animation_effects(&input);
 
     auto& element = const_cast<DOM::Element&>(abstract_element.element());
+    // The engine resolved the container units itself, and left what they read of the element's
+    // containers as it does for a record it computes.
+    if (result.noted_container_effects) {
+        auto container_effects = StyleEngineFFI::style_engine_take_container_effects(m_style_engine.rust_handle(), element.style_node_id().value());
+        ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
+        record_container_query_effects(abstract_element, container_effects);
+    }
     if (result.substitution_marks & ComputedValuesFFI::SUBSTITUTION_MARK_VAR)
         element.set_style_uses_var_css_function();
     if (result.substitution_marks & ComputedValuesFFI::SUBSTITUTION_MARK_ATTR)

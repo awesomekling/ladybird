@@ -58,6 +58,22 @@ impl RetainedState {
         })
     }
 
+    /// Keep what the container units a sample over `style_record` resolved read of the element's
+    /// containers for the host, as a record the engine computes does. Whether there was a record to
+    /// read them over.
+    pub(crate) fn note_sampled_container_unit_effects(
+        &mut self,
+        node: StyleNodeID,
+        style_record: u64,
+        mask: u8,
+    ) -> bool {
+        let Some(record) = computed::FinalStyleRecordID::from_raw(style_record) else {
+            return false;
+        };
+        self.note_container_unit_effects_for_host(node, record, mask);
+        true
+    }
+
     /// The three length-resolution contexts a sample of the element's animations computes keyframe
     /// values in, over the record the element holds: the font context, which reads the element's
     /// inheritance parent; the line-height context, which reads the element's own font and the
