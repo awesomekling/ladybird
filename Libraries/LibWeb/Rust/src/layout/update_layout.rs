@@ -1191,7 +1191,13 @@ pub unsafe extern "C" fn layout_arena_clear_layout_update_host_callbacks(arena: 
 pub unsafe extern "C" fn layout_arena_begin_update_layout(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.begin_update_layout();
+    let arena_ref = unsafe { LayoutNodeArena::from_handle(arena) };
+    // The borrow above has joined a frame in flight that owns the arena; a layout update never runs under one.
+    assert!(
+        !crate::stage_thread::frame_in_flight_owns(arena),
+        "update_layout nested in a frame in flight"
+    );
+    arena_ref.begin_update_layout();
 }
 
 /// # Safety

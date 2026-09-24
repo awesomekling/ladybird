@@ -102,6 +102,9 @@ public:
     // events) waits for the next rendering update or layout update to apply it.
     void consume_commit();
 
+    // Called before a document's render state goes away: the frame in flight must not own it anymore.
+    void retire_frames_for(DOM::Document&);
+
     void visit_edges(JS::Cell::Visitor&);
 
 private:

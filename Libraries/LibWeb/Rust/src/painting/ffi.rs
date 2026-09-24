@@ -1391,6 +1391,14 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
     let arena = unsafe { arena_from_handle(arena_handle) };
     {
         let mut paint_state = arena.paint_state().borrow_mut();
+        // With the frame scheduler, a recording left unpublished is a frame the scheduler dropped, which it never
+        // does, so that is checked in every build.
+        if crate::stage_thread::submits("recording") {
+            assert!(
+                paint_state.pending_recording.is_none(),
+                "a frame was dropped: its recording was not published before the next one started"
+            );
+        }
         debug_assert!(
             paint_state.pending_recording.is_none(),
             "a recording must be published before the next one starts"

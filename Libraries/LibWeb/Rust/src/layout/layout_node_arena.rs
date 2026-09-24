@@ -5596,6 +5596,8 @@ pub unsafe extern "C" fn layout_arena_note_style_image_resources_attached(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_destroy(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
+    // A frame in flight owns the arena until it is taken back.
+    crate::stage_thread::join_frame_in_flight(arena);
     // SAFETY: The handle came from layout_arena_create and ownership is
     // transferred back exactly once by the C++ RAII wrapper.
     let handle = unsafe { Box::from_raw(arena.cast::<super::ArenaHandle>()) };

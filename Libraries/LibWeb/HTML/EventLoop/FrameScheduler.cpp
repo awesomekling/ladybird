@@ -77,7 +77,16 @@ void FrameScheduler::add_to_ticket(LocalNavigable& navigable, LocalNavigable::Pe
 {
     VERIFY(m_state == State::MainHalf);
     VERIFY(m_ticket);
+    // A second frame for the same navigable in one ticket would drop the first one.
+    VERIFY(!m_ticket->navigables.first_matching([&](auto const& entry) { return entry.navigable.ptr() == &navigable; }).has_value());
     m_ticket->navigables.append({ navigable, move(frame) });
+}
+
+void FrameScheduler::retire_frames_for(DOM::Document& document)
+{
+    // FIXME: Retire the document's frame (discard its presentation work) instead of taking it in.
+    if (m_ticket && m_ticket->navigables.first_matching([&](auto const& entry) { return entry.frame.document.ptr() == &document; }).has_value())
+        Layout::RustFFI::rust_stage_thread_join_frame_in_flight();
 }
 
 bool FrameScheduler::submit(Vector<GC::Ref<DOM::Document>> documents)
