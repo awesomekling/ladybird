@@ -130,6 +130,10 @@ void StyleEffectDrain::apply(DOM::Document& document)
             document.style_computer().style_engine().restore_row_debts(row->style_node, row->explicit_inheritance_debt, row->row_effect_debt);
             continue;
         }
+        if (auto const* row = effect.get_pointer<AcknowledgeRecord>()) {
+            document.style_computer().style_engine().acknowledge_engine_computed_record(row->style_node);
+            continue;
+        }
         auto element = document.style_computer().element_for_style_node(effect.visit([](auto const& row) { return row.style_node; }));
         if (!element)
             continue;
@@ -165,6 +169,9 @@ void StyleEffectDrain::apply(DOM::Document& document)
                 element->apply_display_none_change(true, false);
             },
             [&](RestoreRowDebts const&) {
+                VERIFY_NOT_REACHED();
+            },
+            [&](AcknowledgeRecord const&) {
                 VERIFY_NOT_REACHED();
             });
     }
@@ -606,7 +613,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             // The engine settled the element's record, and the pseudo-element records beside it:
             // C++ installs them.
             auto engine_record_comparison = DOM::Element::EngineRecordComparison::AtInstallation;
-            auto apply_engine_computed_records = [&](DOM::Element::EnginePseudoElementRecords const& pseudo_element_records, bool acknowledge, DOM::Element::EnginePseudoElementDamages const* pseudo_element_damages = nullptr) {
+            auto apply_engine_computed_records = [&](DOM::Element::EnginePseudoElementRecords const& pseudo_element_records, DOM::Element::EnginePseudoElementDamages const* pseudo_element_damages = nullptr) {
                 auto& style_engine = document.style_computer().style_engine();
                 document.style_computer().pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(DOM::AbstractElement { *element });
                 // A first record answers the element's recorded arrival; nothing is left for a
@@ -631,8 +638,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 // What the row's container conditions read of its containers, recorded as the host
                 // records it for a row it computes.
                 row_effects.append(StyleEffectDrain::ContainerQueryEffects { StyleNodeID { reaction.style_node } });
-                if (acknowledge)
-                    style_engine.acknowledge_engine_computed_record(StyleNodeID { reaction.style_node });
             };
             if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::None) {
                 VERIFY(!needs_regular_style_recompute);
@@ -642,7 +647,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 // The engine swapped the element's inherited groups for its parent's: the record
                 // installs as an engine record. The engine refuses the swap to an element that
                 // animates, declares transitions, or inherits from an animating parent.
-                apply_engine_computed_records({}, false);
+                apply_engine_computed_records({});
             } else if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Computed) {
                 // The engine computed the new record from this element's moved cascade winners,
                 // from its parent's moved inherited style or display, or from its moved
@@ -731,7 +736,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         && (animation_plan.has_value() || element->has_relevant_animations() || element->has_associated_animations()
                             || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
                         engine_record_comparison = DOM::Element::EngineRecordComparison::AfterSample;
-                    apply_engine_computed_records(pseudo_element_records, false, &pseudo_element_damages);
+                    apply_engine_computed_records(pseudo_element_records, &pseudo_element_damages);
                     DOM::AbstractElement settled { *element };
                     // A row the pass sampled over the stack its plan leaves leaves the plan to the
                     // drain once the composition installs; the host's own sample reads the
@@ -835,7 +840,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     }
                     if (element->has_associated_animations() || installed_pseudo_animation_plan)
                         sample_animations_for_installed_pseudos(*element);
-                    document.style_computer().style_engine().acknowledge_engine_computed_record(StyleNodeID { reaction.style_node });
+                    row_effects.append(StyleEffectDrain::AcknowledgeRecord { StyleNodeID { reaction.style_node } });
                     if (explicit_inheritance_debt != 0)
                         row_effects.append(StyleEffectDrain::ExplicitInheritance { StyleNodeID { reaction.style_node }, explicit_inheritance_debt });
                 }
