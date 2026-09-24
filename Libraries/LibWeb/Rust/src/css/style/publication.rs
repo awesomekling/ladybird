@@ -225,6 +225,13 @@ impl RetainedState {
         delta
     }
 
+    /// Whether a document hosts this engine. The host installs its font resolver when it creates the engine, and
+    /// publishes the document's inputs and every table a record is computed against before it asks for any row. An
+    /// engine no document hosts, such as a unit test's or a replay's, computes no records.
+    pub(super) fn computes_records(&self) -> bool {
+        self.font_resolution.is_some()
+    }
+
     /// The step itself, which decides the substituted-record facts rather than writing them.
     #[allow(clippy::too_many_arguments)]
     fn decide_engine_computed_record_delta(
@@ -236,6 +243,10 @@ impl RetainedState {
         scratch: &mut EngineComputedRecordScratch,
         counters: &mut Counters,
     ) -> Drive<RecordDelta> {
+        if !self.computes_records() {
+            counters.bump(Counter::EngineComputedRecordBailUnhosted);
+            return Err(Unanswered::Refused);
+        }
         let pending_element = scratch.pending_element.take();
         if pending_element.is_none() {
             scratch.pseudo_deltas.clear();
@@ -415,9 +426,8 @@ impl RetainedState {
         // record the element already holds does not: it is what the row asks for when nothing the
         // record was computed from has moved, and the overlay on it is the host's either way.
         let animations_bind_the_record = facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0;
-        let has_registered_declarations = self
-            .document_style_computation_inputs
-            .is_some_and(|inputs| self.declares_registered_custom_property(node, None, &inputs));
+        let has_registered_declarations =
+            self.declares_registered_custom_property(node, None, &self.document_style_computation_inputs);
         let Some(old_style_record) = self.computed_group_sets.assigned_style_record(node) else {
             return self.engine_cold_record(node, (generation, state), scratch, goal, counters);
         };
@@ -468,10 +478,7 @@ impl RetainedState {
                 self.winner_groups.semantic_delta(Some(state), state)
             }
         };
-        let Some(mut inputs) = self.document_style_computation_inputs else {
-            counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
-            return Err(Unanswered::Refused);
-        };
+        let mut inputs = self.document_style_computation_inputs;
         if let Some((root, root_inputs)) = scratch.root_element_inputs
             && root == node
         {
@@ -1603,12 +1610,13 @@ impl RetainedState {
         goal: FontDriveGoal,
         counters: &mut Counters,
     ) -> Drive<ElementAnswer> {
+        if !self.computes_records() {
+            counters.bump(Counter::EngineComputedRecordBailUnhosted);
+            return Err(Unanswered::Refused);
+        }
         let target = computed::ComputedStyleTarget::new(node, u8::MAX);
         let (_, state) = cascade_state;
-        let Some(mut inputs) = self.document_style_computation_inputs else {
-            counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
-            return Err(Unanswered::Refused);
-        };
+        let mut inputs = self.document_style_computation_inputs;
         if let Some((root, root_inputs)) = scratch.root_element_inputs
             && root == node
         {
@@ -2178,9 +2186,7 @@ impl RetainedState {
         if !self.font_family_winner_is_monospace(state) {
             return 0;
         }
-        let Some(inputs) = self.document_style_computation_inputs else {
-            return i32::MIN;
-        };
+        let inputs = self.document_style_computation_inputs;
         match self.monospace_recascaded_font_size(computed::ComputedStyleTarget::new(node, u8::MAX), &inputs) {
             drive::MonospaceRecascade::Size(size, _) => size,
             // The drive this key is for waits for the same font, and takes the key again after.
@@ -2601,7 +2607,6 @@ impl RetainedState {
             && !self.node_declares_custom_properties(node)
             && self.state_container_unit_mask(node, cascade_state.1) == 0
             && let Some(old_style_record) = self.computed_group_sets.assigned_style_record(node)
-            && let Some(inputs) = self.document_style_computation_inputs
             && let Some(parent) = self.tree.flat_tree_parent(node)
             && let Some(parent_record) = self.computed_group_sets.assigned_style_record(parent)
             && let Some(environment) = self.computed_group_sets.custom_property_environment_identity(parent)
@@ -2619,8 +2624,8 @@ impl RetainedState {
                     facts,
                     pseudo_styles,
                     environment,
-                    font_environment_generation: inputs.font_environment_generation,
-                    root_font_inputs: RootFontInputs::from_document(&inputs),
+                    font_environment_generation: self.document_style_computation_inputs.font_environment_generation,
+                    root_font_inputs: RootFontInputs::from_document(&self.document_style_computation_inputs),
                     tree_counting_key: self.state_tree_counting_key(node, cascade_state.1),
                 });
             if let Some((old_record, record)) = self.assign_cached_cold_record(
@@ -2923,10 +2928,7 @@ impl RetainedState {
         let Some(root_inputs) = self.root_font_inputs_from_record(record) else {
             return;
         };
-        let Some(inputs) = self.document_style_computation_inputs.as_mut() else {
-            return;
-        };
-        root_inputs.apply_to(inputs);
+        root_inputs.apply_to(&mut self.document_style_computation_inputs);
     }
 
     fn element_drive_subject(&self, node: StyleNodeID) -> DriveSubject {
@@ -2990,7 +2992,7 @@ impl RetainedState {
             .unwrap_or(0);
         let registration_generation = self
             .document_style_computation_inputs
-            .map_or(0, |inputs| inputs.custom_property_registration_generation);
+            .custom_property_registration_generation;
         let key = (
             node,
             cascade_state.0,
@@ -3233,9 +3235,7 @@ impl RetainedState {
         if target.is_pseudo() || !is_base_record {
             return;
         }
-        let Some(inputs) = self.document_style_computation_inputs else {
-            return;
-        };
+        let inputs = self.document_style_computation_inputs;
         let node = target.node();
         let facts = self.computed_group_sets.adjustment_facts(node);
         if self.node_declares_custom_properties(node) {
@@ -3728,10 +3728,6 @@ impl RetainedState {
                 crate::css::style_value::StyleValueData::Unresolved { .. } => {
                     *substituted = true;
                     let value = value.clone_retained();
-                    let Some(inputs) = inputs else {
-                        counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
-                        return None;
-                    };
                     let value = self.substitute_written_value(
                         node,
                         pseudo_kind,
@@ -3761,10 +3757,6 @@ impl RetainedState {
                     else {
                         debug_assert!(false, "a pending longhand's shorthand is written in its source");
                         continue;
-                    };
-                    let Some(inputs) = inputs else {
-                        counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
-                        return None;
                     };
                     let resolved = self.substitute_written_value(
                         node,
@@ -4824,10 +4816,7 @@ impl StyleEngineState {
         counters: &mut Counters,
     ) -> Option<computed::FinalStyleRecordID> {
         use crate::css::style_value::{RetainedStyleValueData, StyleValueData, retain_style_value};
-        let Some(inputs) = self.document_style_computation_inputs else {
-            counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
-            return None;
-        };
+        let inputs = self.document_style_computation_inputs;
         let retained = |value: *const StyleValueData| unsafe {
             RetainedStyleValueData::from_retained_pointer(retain_style_value(value))
         };
@@ -6419,10 +6408,7 @@ impl StyleEngineState {
         scratch: &mut EngineComputedRecordScratch,
         counters: &mut Counters,
     ) {
-        let Some(inputs) = self.document_style_computation_inputs else {
-            counters.bump(Counter::RootFontInputsUnprovenFallbacks);
-            return;
-        };
+        let inputs = self.document_style_computation_inputs;
         scratch.root_element_inputs = Some((node, RootFontInputs::from_document(&inputs)));
         let probe = |state: &mut Self, scratch: &mut EngineComputedRecordScratch, counters: &mut Counters| {
             state.engine_computed_element_record_delta(
@@ -6454,7 +6440,7 @@ impl StyleEngineState {
         };
         if let Some(root_inputs) = prepared {
             scratch.root_font_inputs_changed = RootFontInputs::from_document(&inputs) != root_inputs;
-            root_inputs.apply_to(self.document_style_computation_inputs.as_mut().unwrap());
+            root_inputs.apply_to(&mut self.document_style_computation_inputs);
             counters.bump(Counter::RootFontInputsPrepared);
         } else {
             // NB: Preserve the current host root-metric route. Unproven font inputs do not
@@ -6515,10 +6501,12 @@ impl StyleEngineState {
         pass_facts: DriveOverInstalledAncestors,
         counters: &mut Counters,
     ) -> RetriedEngineRecord {
-        if let Some(inputs) = self.retained.document_style_computation_inputs
-            && let Some(resolver) = &mut self.retained.font_resolution
-        {
-            resolver.prepare(inputs.font_environment_generation);
+        let font_environment_generation = self
+            .retained
+            .document_style_computation_inputs
+            .font_environment_generation;
+        if let Some(resolver) = &mut self.retained.font_resolution {
+            resolver.prepare(font_environment_generation);
         }
         counters.bump(Counter::RetryAfterAncestorCalls);
         let started_at = std::time::Instant::now();

@@ -121,7 +121,7 @@ impl RetainedState {
     ) -> Option<crate::css::animation::FfiAnimationLengthResolutionContext> {
         use crate::css::animation::{FfiAnimationFontMetrics, FfiAnimationLengthResolutionContext};
 
-        let inputs = self.document_style_computation_inputs?;
+        let inputs = self.document_style_computation_inputs;
         let view = self.computed_group_sets.style_record_view(style_record)?;
         let values = crate::css::computed_value_views::ComputedValuesView::new(
             crate::css::host_shared::SharedPayload::as_pointer_slice(view.payloads),

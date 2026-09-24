@@ -1756,7 +1756,7 @@ impl super::StyleEngine {
 
         // Colors resolve against the element's font metrics as they stood when the overlay was last
         // published, or against the animated font where the overlay rebuilds the font group.
-        let inputs = self.document_style_computation_inputs()?;
+        let inputs = self.document_style_computation_inputs();
         let font_inputs = (groups & (1 << STYLE_GROUP_INDEX_FONT) != 0).then(&mut *font);
         let values = ComputedValuesView::new(SharedPayload::as_pointer_slice(view.payloads));
         let font_metrics = match &font_inputs {

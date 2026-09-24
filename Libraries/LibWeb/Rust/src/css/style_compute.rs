@@ -3240,10 +3240,7 @@ unsafe fn sample_described_animation_effects(
         })
         .collect::<Vec<_>>();
     // The document's side of the environment is the one the host published with the style update.
-    let Some(document) = engine.document_style_computation_inputs() else {
-        unsafe { anim::release_resolved_animation_declarations(resolved.storage) };
-        return result;
-    };
+    let document = engine.document_style_computation_inputs();
     let document_base_url = engine.document_base_url();
     let environment = FfiStyleComputationEnvironment {
         box_type_input: unsafe { std::mem::zeroed() },

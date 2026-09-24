@@ -330,7 +330,7 @@ impl RetainedState {
         registry: *const c_void,
         name: &[u16],
     ) -> Option<*const c_void> {
-        let inputs = self.document_style_computation_inputs?;
+        let inputs = self.document_style_computation_inputs;
         let store_ref = unsafe { store.cast::<CustomPropertyStore>().as_ref() }?;
         let registry_ref = unsafe { registry.cast::<CustomPropertyRegistry>().as_ref() }?;
         let Some((name_raw, declared)) = store_ref.get_named(name) else {
@@ -1066,9 +1066,7 @@ impl RetainedState {
         if environment == 0 || environment & custom_property_environments::ENGINE_ENVIRONMENT_IDENTITY_BIT != 0 {
             return;
         }
-        let Some(inputs) = self.document_style_computation_inputs else {
-            return;
-        };
+        let inputs = self.document_style_computation_inputs;
         if !self.node_declares_custom_properties(node) {
             return;
         }
@@ -1611,10 +1609,7 @@ impl RetainedState {
         root_custom_property_name: &[u16],
         written: &RetainedStyleValueData,
     ) -> RetainedStyleValueData {
-        let guaranteed_invalid = || RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid);
-        let Some(inputs) = self.document_style_computation_inputs else {
-            return guaranteed_invalid();
-        };
+        let inputs = self.document_style_computation_inputs;
         let functions = match written.data() {
             StyleValueData::Unresolved {
                 presence_dashed_function: true,
