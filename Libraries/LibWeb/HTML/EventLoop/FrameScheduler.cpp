@@ -80,16 +80,13 @@ void FrameScheduler::add_to_ticket(LocalNavigable& navigable, LocalNavigable::Pe
     VERIFY(!m_ticket->navigables.first_matching([&](auto const& entry) { return entry.navigable.ptr() == &navigable; }).has_value());
     // The render side may already be recording this frame.
     hold_for_frame_in_flight(*frame.document);
-    m_ticket->navigables.append({ navigable, move(frame) });
-}
-
-void FrameScheduler::retire_frames_for(DOM::Document& document)
-{
-    // FIXME: Retire the document's frame (discard its presentation work) instead of taking it in.
-    if (m_ticket && m_ticket->navigables.first_matching([&](auto const& entry) { return entry.frame.document.ptr() == &document; }).has_value()) {
-        auto location = SourceLocation::current();
-        Layout::RustFFI::rust_stage_thread_join_frame_in_flight(reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
+    // Retiring the navigable's compositor context before consume-commit waits for the frame and takes it in.
+    Optional<u64> held_compositor_context;
+    if (navigable.has_compositor_context()) {
+        held_compositor_context = navigable.compositor_context().id().value();
+        Layout::RustFFI::rust_frame_hold_compositor_context(*held_compositor_context);
     }
+    m_ticket->navigables.append({ navigable, move(frame), held_compositor_context });
 }
 
 bool FrameScheduler::submit(Vector<GC::Ref<DOM::Document>> documents)
@@ -144,9 +141,11 @@ void FrameScheduler::commit()
     //     resources it references. The canvases it shows were flushed before the recording was prepared, and the next
     //     flush waits for the next rendering update.
     auto navigables = move(m_ticket->navigables);
-    for (auto& [navigable, frame] : navigables) {
+    for (auto& [navigable, frame, held_compositor_context] : navigables) {
         // FIXME: A navigable destroyed while its frame was in flight retires the frame instead of finishing it.
         navigable->finish_painting_next_frame(frame);
+        if (held_compositor_context.has_value())
+            Layout::RustFFI::rust_frame_release_compositor_context(*held_compositor_context);
         m_event_loop.note_frame_painted({});
         if (navigable->is_local_root())
             m_ticket->painted_local_roots.append(navigable);
@@ -207,11 +206,11 @@ void FrameScheduler::visit_edges(JS::Cell::Visitor& visitor)
 {
     if (!m_ticket)
         return;
-    for (auto& [navigable, frame] : m_ticket->navigables) {
-        visitor.visit(navigable);
-        visitor.visit(frame.document);
-        if (frame.recording)
-            visitor.visit(frame.recording->document);
+    for (auto& submitted : m_ticket->navigables) {
+        visitor.visit(submitted.navigable);
+        visitor.visit(submitted.frame.document);
+        if (submitted.frame.recording)
+            visitor.visit(submitted.frame.recording->document);
     }
     visitor.visit(m_ticket->documents);
     visitor.visit(m_ticket->painted_local_roots);

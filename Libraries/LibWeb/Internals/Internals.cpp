@@ -1661,12 +1661,23 @@ GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
     object->define_direct_property("finishedFrameConsumerCalls"_utf16_fly_string, JS::Value(counters.finished_frame_consumer_calls), JS::default_attributes);
     object->define_direct_property("frameCompletionsPosted"_utf16_fly_string, JS::Value(HTML::FrameCompletion::the().posted_count()), JS::default_attributes);
     object->define_direct_property("frameCompletionsDelivered"_utf16_fly_string, JS::Value(HTML::FrameCompletion::the().delivered_count()), JS::default_attributes);
+
+    // Retirement is counted apart from frames dropped: a retired frame was made for render state
+    // that was destroyed while it ran.
+    auto retirement = Layout::RustFFI::rust_frame_retirement_counters();
+    object->define_direct_property("documentsDestroyed"_utf16_fly_string, JS::Value(retirement.documents_destroyed), JS::default_attributes);
+    object->define_direct_property("documentsBecameInactive"_utf16_fly_string, JS::Value(retirement.documents_became_inactive), JS::default_attributes);
+    object->define_direct_property("documentsFinalized"_utf16_fly_string, JS::Value(retirement.documents_finalized), JS::default_attributes);
+    object->define_direct_property("compositorContextsRetired"_utf16_fly_string, JS::Value(retirement.compositor_contexts_retired), JS::default_attributes);
+    object->define_direct_property("framesWaitedForByRetirement"_utf16_fly_string, JS::Value(retirement.frames_waited_for), JS::default_attributes);
+    object->define_direct_property("framesRetired"_utf16_fly_string, JS::Value(retirement.frames_retired), JS::default_attributes);
     return object;
 }
 
 void Internals::reset_rendering_scheduler_counters()
 {
     HTML::main_thread_event_loop().reset_rendering_scheduler_counters();
+    Layout::RustFFI::rust_reset_frame_retirement_counters();
 }
 
 bool Internals::hold_next_recording_frame()
