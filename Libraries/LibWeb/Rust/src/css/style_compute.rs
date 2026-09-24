@@ -3102,11 +3102,15 @@ fn prepare_engine_sample(
     let pseudo = (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT).then_some(input.pseudo_kind);
     let slot = animation_slot(input.pseudo_kind);
     // The host samples over the records it holds. Where the engine has assigned the element one it
-    // has not installed yet, the sample reads the element's and its parent's as the host holds them.
+    // has not installed yet, the sample reads the element's and its parent's as the host holds them:
+    // a pseudo-element's own is the one the host samples over, and its parent is its originating
+    // element.
     let parent_record = if engine.assigned_style_record_of(node, pseudo) == Some(input.style_record) {
         engine.assigned_inheritance_parent_record(node, pseudo)
+    } else if pseudo.is_some() {
+        engine.held_style_record(node)
     } else {
-        if pseudo.is_some() || engine.held_style_record(node) != Some(input.style_record) {
+        if engine.held_style_record(node) != Some(input.style_record) {
             return Err("a record the engine has moved past".into());
         }
         engine
