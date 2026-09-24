@@ -82,6 +82,14 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
         .apply_layout_commit_effects = [](void* context, Layout::RustFFI::FfiLayoutCommitEffects const* effects) { static_cast<Document*>(context)->apply_layout_commit_effects(*effects); },
         .note_full_layouts_performed = [](void* context, u64 count) { static_cast<Document*>(context)->style_invalidation_counters().relayouts_performed += count; },
         .record_stabilization_bound_failure = [](void* context) { ++static_cast<Document*>(context)->m_style_invalidation_counters.style_stabilization_bound_failures; },
+        .attach_style_resources = [](void* context, Layout::RustFFI::NodeSlotId slot, bool owns_content_replacement_image) {
+            auto& document = *static_cast<Document*>(context);
+            if (Layout::attach_owed_style_resources(document, slot, owns_content_replacement_image))
+                document.m_owed_image_provider_arrived_with_image = true; },
+        .attach_generated_image = [](void* context, Layout::RustFFI::NodeSlotId slot, u32 style_node, Layout::RustFFI::FfiPseudoElement pseudo_element, Layout::RustFFI::FfiGeneratedContentItem item, Layout::RustFFI::NodeSlotId pseudo_element_box) {
+            auto& document = *static_cast<Document*>(context);
+            if (Layout::attach_owed_generated_image(document, slot, style_node, pseudo_element, item, pseudo_element_box))
+                document.m_owed_image_provider_arrived_with_image = true; },
     };
 }
 
@@ -94,14 +102,25 @@ void Document::update_layout(UpdateLayoutReason reason, ThrottledAnimationSampli
 {
     JoinScope join_scope { *this, reason };
 
-    update_style_and_layout_once(reason, animation_sampling_scope);
+    // An image box that owns its image's provider is handed it once the frame that built the box is over, and the
+    // frame lays it out without an image. If the image was already there, the box lays out again with it before the
+    // read goes on. Only a pass that builds another such box can leave one behind again, so this settles.
+    auto update_style_and_layout = [&] {
+        update_style_and_layout_once(reason, animation_sampling_scope);
+        while (exchange(m_owed_image_provider_arrived_with_image, false)) {
+            join_scope.note_extra_pass();
+            update_style_and_layout_once(reason, animation_sampling_scope);
+        }
+    };
+
+    update_style_and_layout();
 
     // AD-HOC: A scroll-state() query against a container that has not been snapshotted yet reads no state. Like other
     //         engines, take such a container's first snapshot as soon as its layout is known, so that the style it
     //         decides is right before the next rendering update. Later changes of its state wait for that update.
     while (layout_is_up_to_date() && m_scroll_state_query_containers.snapshot_post_layout_state(*this, CSS::ScrollStateQueryContainers::Snapshot::NewContainersOnly)) {
         join_scope.note_extra_pass();
-        update_style_and_layout_once(reason, animation_sampling_scope);
+        update_style_and_layout();
     }
 }
 

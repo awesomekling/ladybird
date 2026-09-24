@@ -22,9 +22,10 @@
 //! gate in `abort`, and nothing the walk can reach is able to call the host. The walk is not handed
 //! the main-thread capability, and every host call the arena and the tree builder can make takes
 //! it: the tree builder's callbacks, the shell factory, and paying what the arena owes the host.
-//! What the build owes the host - the shells whose construction tells the host something, a box's
-//! style resources, a generated image's provider, what the build found out, and what it let go of -
-//! it queues, and its entry pays once the walk has returned.
+//! What the build owes the host - the shells whose construction tells the host something, what the
+//! build found out, and what it let go of - it queues, and its entry pays once the walk has
+//! returned. A box's style resources and a generated image's provider wait longer: the frame the
+//! build runs in carries them out, and the host attaches them once it is over.
 //!
 //! What the build lets go of is the arena's handbacks: the boxes nodes gained or lost, the shells,
 //! owned image providers and image observer sets of the rows it freed, the resets of rows whose

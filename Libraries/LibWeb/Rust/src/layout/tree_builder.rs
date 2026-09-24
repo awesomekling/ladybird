@@ -13,7 +13,7 @@ use crate::css::style::bridge::{ElementBoxKind, element_adjustment_fact};
 use crate::css::style::layout_style::{AnonymousStyleKind, AnonymousStyleOverrides};
 use crate::css::style::tree::StyleNodeID;
 use crate::css::style::tree::layout_tree_update_reuse_reason;
-use crate::layout::layout_node_arena::{LayoutNodeArena, OwedToHost, StaleWalkFacts, prepare_subtree_for_detach};
+use crate::layout::layout_node_arena::{LayoutNodeArena, StaleWalkFacts, prepare_subtree_for_detach};
 use crate::layout::node_data::{
     GENERATED_FOR_AFTER, GENERATED_FOR_BACKDROP, GENERATED_FOR_BEFORE, GENERATED_FOR_FIRST_LETTER,
     GENERATED_FOR_MARKER, NodeData, NodeFlag, NodeKind, NodeSlotId,
@@ -113,21 +113,6 @@ pub(crate) enum StaleSubtreeClearScope {
     Inclusive,
     InclusiveBoundedToRoot,
     DescendantsBoundedToRoot,
-}
-
-#[repr(C)]
-pub struct FfiDomTreeBuilderCallbacks {
-    pub builder: *mut c_void,
-    /// Attaches the image resources a box's style asks for. Principal and pseudo-element boxes
-    /// both go through this; nothing about it depends on which the box is. The flag says the box
-    /// replaces its element's contents with a single image, which it owns the provider for.
-    pub attach_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId, bool),
-    /// Gives an image a pseudo-element's generated content names the provider it renders, and
-    /// attaches its box's style resources. The arguments are the image's row, the element the
-    /// pseudo-element is generated for, the pseudo-element, the content item, and the
-    /// pseudo-element's own box.
-    pub attach_generated_image:
-        unsafe extern "C" fn(*mut c_void, NodeSlotId, u32, FfiPseudoElement, FfiGeneratedContentItem, NodeSlotId),
 }
 
 /// What the build knows about a node when it enters it: what its marks ask for, and what layout
@@ -1469,71 +1454,9 @@ pub(crate) fn principal_node_entry_decision(
     })
 }
 
-/// What the walk reads: the arena and the style mirror it holds. The host callbacks the build owes
-/// calls to once the walk is over are not part of it.
+/// What the walk reads: the arena and the style mirror it holds.
 struct DomTreeBuilderHost {
     arena: *mut LayoutNodeArena,
-}
-
-/// The host callbacks a tree build owes calls to once its walk is over. The table is held behind
-/// fields nothing outside this module can read, and every call takes the main-thread capability,
-/// which the walk is never handed: a walk that tried to call into the host would not compile.
-mod host_callbacks {
-    use super::{FfiDomTreeBuilderCallbacks, FfiGeneratedContentItem, FfiPseudoElement, NodeSlotId};
-    use crate::stage::MainThread;
-
-    pub(super) struct TreeBuilderHostCallbacks<'a> {
-        table: &'a FfiDomTreeBuilderCallbacks,
-    }
-
-    impl<'a> TreeBuilderHostCallbacks<'a> {
-        pub(super) fn new(table: &'a FfiDomTreeBuilderCallbacks) -> Self {
-            Self { table }
-        }
-
-        /// # Safety
-        ///
-        /// `row` must be a live NodeWithStyle.
-        pub(super) unsafe fn attach_style_resources(
-            &self,
-            _: &MainThread,
-            row: NodeSlotId,
-            owns_content_replacement_image: bool,
-        ) {
-            super::super::tree_build_seal::note_host_call("attach_style_resources");
-            // SAFETY: The builder remains live for the entry's call, and the caller vouches for
-            // the row.
-            unsafe { (self.table.attach_style_resources)(self.table.builder, row, owns_content_replacement_image) };
-        }
-
-        /// # Safety
-        ///
-        /// `row` must be a live image box and `pseudo_element_box` the live box of the
-        /// pseudo-element whose generated content it is.
-        pub(super) unsafe fn attach_generated_image(
-            &self,
-            _: &MainThread,
-            row: NodeSlotId,
-            generator: u32,
-            pseudo_element: FfiPseudoElement,
-            item: FfiGeneratedContentItem,
-            pseudo_element_box: NodeSlotId,
-        ) {
-            super::super::tree_build_seal::note_host_call("attach_generated_image");
-            // SAFETY: The builder remains live for the entry's call, and the caller vouches for
-            // the rows.
-            unsafe {
-                (self.table.attach_generated_image)(
-                    self.table.builder,
-                    row,
-                    generator,
-                    pseudo_element,
-                    item,
-                    pseudo_element_box,
-                );
-            };
-        }
-    }
 }
 
 /// The raw form the walk carries an identity in: 0 for no node at all.

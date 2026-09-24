@@ -49,18 +49,6 @@
 
 namespace Web::Layout {
 
-class LayoutTreeBuildBridge {
-public:
-    RustFFI::FfiLayoutTreeBuildOutcome pay(DOM::Document&, void* walk);
-
-    static void detach_top_layer_element_layout_subtree(DOM::Element&);
-
-private:
-    RustFFI::FfiDomTreeBuilderCallbacks make_ffi_dom_tree_builder_callbacks();
-
-    GC::Ptr<DOM::Document> m_document;
-};
-
 class GeneratedContentImageProvider final
     : public ImageProvider {
 public:
@@ -217,56 +205,48 @@ static NodeWithStyle* pseudo_element_build_node(DOM::Document& document, RustFFI
     return &as<NodeWithStyle>(*layout_node);
 }
 
-void LayoutTreeBuildBridge::detach_top_layer_element_layout_subtree(DOM::Element& element)
+bool attach_owed_style_resources(DOM::Document& document, RustFFI::NodeSlotId slot, bool owns_content_replacement_image)
 {
-    RustFFI::rust_detach_top_layer_element_layout_subtree(
-        element.document().layout_node_arena().handle(), element.style_node_id().value());
+    auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_node_shell_if_live(document.layout_node_arena().handle(), slot));
+    VERIFY(layout_node);
+    // A box that replaces its element's contents with a single image owns the provider that
+    // answers for it. The image is named by the same style record the box was stamped from,
+    // and it loads before the resources the rest of that style asks for, as it did when the
+    // box was built around it.
+    bool image_was_available = false;
+    if (owns_content_replacement_image) {
+        auto& image_box = as<Box>(*layout_node);
+        attach_content_replacement_image(image_box);
+        image_was_available = image_box.image_provider().is_image_available();
+        if (image_was_available)
+            image_box.set_needs_layout_update(DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
+    }
+    as<NodeWithStyle>(*layout_node).attach_style_resources();
+    return image_was_available;
 }
 
-RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_builder_callbacks()
+bool attach_owed_generated_image(DOM::Document& document, RustFFI::NodeSlotId slot, u32 style_node, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiGeneratedContentItem item, RustFFI::NodeSlotId pseudo_element_box_slot)
 {
-    return {
-        .builder = this,
-        .attach_style_resources = [](void* builder_pointer, Compositing::RustFFI::NodeSlotId slot, bool owns_content_replacement_image) {
-            VERIFY(builder_pointer);
-            auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
-            auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_node_shell_if_live(builder.m_document->layout_node_arena().handle(), slot));
-            VERIFY(layout_node);
-            // A box that replaces its element's contents with a single image owns the provider that
-            // answers for it. The image is named by the same style record the box was stamped from,
-            // and it loads before the resources the rest of that style asks for, as it did when the
-            // box was built around it.
-            if (owns_content_replacement_image)
-                attach_content_replacement_image(as<Box>(*layout_node));
-            as<NodeWithStyle>(*layout_node).attach_style_resources(); },
-        .attach_generated_image = [](void* builder_pointer, RustFFI::NodeSlotId slot, u32 style_node, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiGeneratedContentItem item, RustFFI::NodeSlotId pseudo_element_box_slot) {
-            VERIFY(builder_pointer);
-            auto& builder = *static_cast<LayoutTreeBuildBridge*>(builder_pointer);
-            auto& document = *builder.m_document;
-            auto& element = as<DOM::Element>(dom_node_for_style_node(document, style_node));
-            auto& image_box = as<Box>(*pseudo_element_build_node(document, slot));
-            // The marker a list-item pseudo-element nests takes its content's style from itself.
-            auto& style_box = item.nested_marker.index != RustFFI::INVALID_NODE_SLOT_INDEX
-                ? *pseudo_element_build_node(document, item.nested_marker)
-                : *pseudo_element_build_node(document, pseudo_element_box_slot);
-            auto image = [&] -> NonnullRefPtr<CSS::AbstractImageStyleValue const> {
-                if (item.kind == RustFFI::FfiGeneratedContentItemKind::ListStyleImage)
-                    return *style_box.list_style_image();
-                auto const* payloads = DOM::AbstractElement { element, css_pseudo_element(ffi_pseudo) }.style_record_payloads();
-                VERIFY(payloads);
-                auto content = CSS::style_group_from_payloads<CSS::ComputedValues::ContentValues>(payloads)->computed_content_value();
-                return content->as_content().content().values()[item.content_index]->as_abstract_image();
-            }();
-            attach_owned_image_provider(image_box, const_cast<CSS::AbstractImageStyleValue&>(*image));
-            image_box.attach_style_resources(); },
-    };
-}
-
-RustFFI::FfiLayoutTreeBuildOutcome LayoutTreeBuildBridge::pay(DOM::Document& document, void* walk)
-{
-    m_document = &document;
-    auto callbacks = make_ffi_dom_tree_builder_callbacks();
-    return RustFFI::rust_pay_layout_tree_build(&callbacks, document.layout_node_arena().handle(), walk);
+    auto& element = as<DOM::Element>(dom_node_for_style_node(document, style_node));
+    auto& image_box = as<Box>(*pseudo_element_build_node(document, slot));
+    // The marker a list-item pseudo-element nests takes its content's style from itself.
+    auto& style_box = item.nested_marker.index != RustFFI::INVALID_NODE_SLOT_INDEX
+        ? *pseudo_element_build_node(document, item.nested_marker)
+        : *pseudo_element_build_node(document, pseudo_element_box_slot);
+    auto image = [&] -> NonnullRefPtr<CSS::AbstractImageStyleValue const> {
+        if (item.kind == RustFFI::FfiGeneratedContentItemKind::ListStyleImage)
+            return *style_box.list_style_image();
+        auto const* payloads = DOM::AbstractElement { element, css_pseudo_element(ffi_pseudo) }.style_record_payloads();
+        VERIFY(payloads);
+        auto content = CSS::style_group_from_payloads<CSS::ComputedValues::ContentValues>(payloads)->computed_content_value();
+        return content->as_content().content().values()[item.content_index]->as_abstract_image();
+    }();
+    attach_owned_image_provider(image_box, const_cast<CSS::AbstractImageStyleValue&>(*image));
+    bool image_was_available = image_box.image_provider().is_image_available();
+    if (image_was_available)
+        image_box.set_needs_layout_update(DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
+    image_box.attach_style_resources();
+    return image_was_available;
 }
 
 u32 prepare_layout_tree_build(DOM::Document& document)
@@ -284,13 +264,13 @@ u32 prepare_layout_tree_build(DOM::Document& document)
 
 RustFFI::FfiLayoutTreeBuildOutcome pay_layout_tree_build(DOM::Document& document, void* walk)
 {
-    LayoutTreeBuildBridge bridge;
-    return bridge.pay(document, walk);
+    return RustFFI::rust_pay_layout_tree_build(document.layout_node_arena().handle(), walk);
 }
 
 void detach_top_layer_element_layout_subtree(DOM::Element& element)
 {
-    LayoutTreeBuildBridge::detach_top_layer_element_layout_subtree(element);
+    RustFFI::rust_detach_top_layer_element_layout_subtree(
+        element.document().layout_node_arena().handle(), element.style_node_id().value());
 }
 
 // https://drafts.csswg.org/css-tables-3/#fixup-algorithm
