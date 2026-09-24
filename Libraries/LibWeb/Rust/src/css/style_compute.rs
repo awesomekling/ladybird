@@ -3347,9 +3347,19 @@ fn prepare_engine_sample(
 
     let pseudo = (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT).then_some(input.pseudo_kind);
     let slot = animation_slot(input.pseudo_kind);
-    if engine.assigned_style_record_of(node, pseudo) != Some(input.style_record) {
-        return Err("a record the engine has moved past".into());
-    }
+    // The host samples over the records it holds. Where the engine has assigned the element one it
+    // has not installed yet, the sample reads the element's and its parent's as the host holds them.
+    let parent_record = if engine.assigned_style_record_of(node, pseudo) == Some(input.style_record) {
+        engine.assigned_inheritance_parent_record(node, pseudo)
+    } else {
+        if pseudo.is_some() || engine.held_style_record(node) != Some(input.style_record) {
+            return Err("a record the engine has moved past".into());
+        }
+        engine
+            .tree()
+            .inheritance_parent(node)
+            .and_then(|parent| engine.held_style_record(parent))
+    };
     let selected = animations::select_sampled_effects(
         engine.element_animation_timing_rows(node, slot),
         engine.element_animation_timing_row_linear_points(node, slot),
@@ -3365,7 +3375,7 @@ fn prepare_engine_sample(
     );
     let horizontal = {
         let contexts = engine
-            .animation_sample_length_contexts_over_root(node, pseudo, input.style_record, 0, root)
+            .animation_sample_length_contexts_over_root(node, pseudo, input.style_record, parent_record, 0, root)
             .ok_or("length contexts")?;
         contexts.remaining.subject_inline_axis_is_horizontal
     };
@@ -3374,17 +3384,17 @@ fn prepare_engine_sample(
     let axis_masks = [0u8, 1 << 0, 1 << 1, (1 << 0) | (1 << 1)];
     let mut length_contexts = [None; 4];
     for (index, mask) in axis_masks.into_iter().enumerate() {
-        length_contexts[index] =
-            engine.animation_sample_length_contexts_over_root(node, pseudo, input.style_record, mask, root);
+        length_contexts[index] = engine.animation_sample_length_contexts_over_root(
+            node,
+            pseudo,
+            input.style_record,
+            parent_record,
+            mask,
+            root,
+        );
     }
     let length_contexts = length_contexts.map(|contexts| contexts.expect("the record has a view"));
-    let parent = match pseudo {
-        Some(_) => Some(node),
-        None => engine.tree().inheritance_parent(node),
-    };
-    let inheritance_parent_style_record = parent
-        .and_then(|parent| engine.assigned_style_record_of(parent, None))
-        .unwrap_or(0);
+    let inheritance_parent_style_record = parent_record.unwrap_or(0);
     let mut run = Box::new(EngineSampleRun {
         identities: Vec::with_capacity(selected.len()),
         generations: Vec::with_capacity(selected.len()),
