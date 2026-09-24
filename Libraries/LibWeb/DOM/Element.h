@@ -576,11 +576,27 @@ public:
     bool style_depends_on_viewport_metrics() const { return m_style_depends_on_viewport_metrics; }
     void set_style_depends_on_viewport_metrics();
     bool style_uses_inherit_css_function() const { return m_style_uses_inherit_css_function; }
-    void set_style_uses_inherit_css_function() { m_style_uses_inherit_css_function = true; }
+    void set_style_uses_inherit_css_function()
+    {
+        if (m_style_uses_inherit_css_function)
+            return;
+        m_style_uses_inherit_css_function = true;
+        publish_style_recomputes_on_environment_move();
+    }
     bool style_depends_on_size_container_query() const { return m_style_depends_on_size_container_query; }
     void set_style_depends_on_size_container_query() { m_style_depends_on_size_container_query = true; }
     bool style_depends_on_style_container_query() const { return m_style_depends_on_style_container_query; }
-    void set_style_depends_on_style_container_query() { m_style_depends_on_style_container_query = true; }
+    void set_style_depends_on_style_container_query()
+    {
+        if (m_style_depends_on_style_container_query)
+            return;
+        m_style_depends_on_style_container_query = true;
+        publish_style_recomputes_on_environment_move();
+    }
+    // Tell the style engine that a moved custom-property environment computes this element again,
+    // when its style reads the environment other than through var(): through if(), inherit(), a
+    // custom function or a style container query.
+    void publish_style_recomputes_on_environment_move() const;
     // Set on the element a container query selected as its query container, so a change on it knows
     // whether anything under it was ever asking. Neither is ever cleared: a dependent that stops
     // asking republishes nothing, and answering "maybe" costs the scan the element used to pay

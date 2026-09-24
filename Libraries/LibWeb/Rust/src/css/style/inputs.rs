@@ -201,6 +201,16 @@ impl RetainedState {
             .map_or(std::ptr::null(), RetainedCustomPropertyData::data)
     }
 
+    /// Note that the element's style reads what a moved custom-property environment can change other
+    /// than through `var()`, so a move computes it again rather than handing it the moved one.
+    pub(crate) fn note_element_recomputes_on_environment_move(&mut self, node: StyleNodeID) {
+        self.environment_move_recompute_nodes.insert(node);
+    }
+
+    pub(crate) fn element_recomputes_on_environment_move(&self, node: StyleNodeID) -> bool {
+        self.environment_move_recompute_nodes.contains(&node)
+    }
+
     pub fn set_sampled_composition_identity(&mut self, node: StyleNodeID, record: u64) {
         self.computed_group_sets.set_sampled_composition_identity(node, record);
     }
@@ -1859,6 +1869,7 @@ impl StyleEngineState {
                 element_custom_property_data: HashMap::default(),
                 pseudo_element_custom_property_data: HashMap::default(),
                 sampled_custom_property_environments: HashMap::default(),
+                environment_move_recompute_nodes: HashSet::default(),
                 font_resolution: None,
                 font_face_snapshot: None,
                 font_cascade_memo: None,
@@ -2758,6 +2769,7 @@ impl StyleEngineState {
                     self.host.retired_custom_property_data.push(data);
                 }
                 self.retained.sampled_custom_property_environments.remove(&node);
+                self.retained.environment_move_recompute_nodes.remove(&node);
             }
             if !self.retained.pseudo_element_custom_property_data.is_empty() {
                 let retired: HashSet<StyleNodeID> = retired_nodes.iter().copied().collect();

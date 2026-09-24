@@ -2124,6 +2124,7 @@ void Element::set_style_uses_if_css_function()
         return;
     m_style_uses_if_css_function = true;
     document().add_element_with_viewport_dependent_style(*this);
+    publish_style_recomputes_on_environment_move();
 }
 
 void Element::set_style_uses_custom_function()
@@ -2132,6 +2133,7 @@ void Element::set_style_uses_custom_function()
         return;
     m_style_uses_custom_function = true;
     document().add_element_with_viewport_dependent_style(*this);
+    publish_style_recomputes_on_environment_move();
 }
 
 void Element::set_style_depends_on_viewport_metrics()
@@ -2341,7 +2343,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     if (custom_condition_usage & 1)
         set_style_uses_if_css_function();
     if (custom_condition_usage & 2)
-        m_style_uses_inherit_css_function = true;
+        set_style_uses_inherit_css_function();
     if (custom_condition_usage & 4)
         set_style_uses_custom_function();
 
@@ -5365,6 +5367,17 @@ void Element::install_custom_property_data(Optional<CSS::PseudoElement> pseudo_e
     //        behavior whereas Firefox includes the properties in getComputedStyle.
     if (auto existing_pseudo_element = get_pseudo_element(pseudo_element.value()); existing_pseudo_element.has_value())
         as<ElementReferencePseudoElement>(*existing_pseudo_element).referenced_element()->set_custom_property_data({}, move(data));
+}
+
+void Element::publish_style_recomputes_on_environment_move() const
+{
+    auto style_node = style_node_id();
+    if (style_node == 0)
+        return;
+    if (!m_style_uses_if_css_function && !m_style_uses_inherit_css_function && !m_style_uses_custom_function && !m_style_depends_on_style_container_query)
+        return;
+    auto& style_engine = const_cast<CSS::StyleEngine&>(document().style_computer().style_engine());
+    CSS::StyleEngineFFI::style_engine_note_element_recomputes_on_environment_move(style_engine.rust_handle(), style_node.value());
 }
 
 RefPtr<CSS::CustomPropertyData const> Element::custom_property_data(Optional<CSS::PseudoElement> pseudo_element) const
