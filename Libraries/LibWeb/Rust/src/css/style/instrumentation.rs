@@ -190,7 +190,6 @@ define_counters! {
     EngineCustomPropertyEnvironmentsResolved => "engineCustomPropertyEnvironmentsResolved",
     EngineCustomPropertyEnvironmentMemoHits => "engineCustomPropertyEnvironmentMemoHits",
     EngineCustomPropertyEnvironmentBails => "engineCustomPropertyEnvironmentBails",
-    EngineComputedRecordBailFontPhase => "engineComputedRecordBailFontPhase",
     EngineComputedRecordBailRootFontInputs => "engineComputedRecordBailRootFontInputs",
     EngineComputedRecordBailRecordParent => "engineComputedRecordBailRecordParent",
     EngineComputedRecordBailDrive => "engineComputedRecordBailDrive",
