@@ -618,13 +618,10 @@ impl RetainedState {
                         // moves to the new environment like any record, and the host applies the plan
                         // and samples the element's effects over it after installing it.
                         if !self.computed_group_sets.node_has_animation_overlay(node) {
-                            let Some(delta) = self
+                            let delta = self
                                 .computed_group_sets
                                 .republish_engine_record_with_environment(node, environment)
-                            else {
-                                counters.bump(Counter::EngineComputedRecordBailAssemble);
-                                return Err(Unanswered::Refused);
-                            };
+                                .expect("an assigned record without an overlay moves to any environment");
                             self.note_engine_computed_record(node, delta, (generation, state), 0, 0, counters);
                             if let Some(plan) = css_animation_plan {
                                 self.nodes_owing_animation_definitions.insert((node, u8::MAX), plan);
@@ -632,13 +629,12 @@ impl RetainedState {
                             self.nodes_owing_an_animation_sample.insert(node);
                             return Ok(ElementAnswer::Delta(delta));
                         }
-                        let Some(assembly) = self
+                        // An element's overlay is always in its slot: a record composed over a
+                        // base is only ever assigned through one.
+                        let assembly = self
                             .computed_group_sets
                             .republish_animated_base_with_environment(node, environment)
-                        else {
-                            counters.bump(Counter::EngineComputedRecordBailAssemble);
-                            return Err(Unanswered::Refused);
-                        };
+                            .expect("an assigned record with an overlay holds its slot");
                         self.batch_pinned_compositions.push((
                             node,
                             assembly.pinned_composition.expect("a warm composition was retained"),
@@ -651,14 +647,12 @@ impl RetainedState {
                         self.nodes_owing_an_animation_sample.insert(node);
                         return Ok(ElementAnswer::Delta(delta));
                     }
+                    // Where animations do not bind the record, it holds no overlay.
                     if let Some(environment) = environment {
-                        let Some(delta) = self
+                        let delta = self
                             .computed_group_sets
                             .republish_engine_record_with_environment(node, environment)
-                        else {
-                            counters.bump(Counter::EngineComputedRecordBailAssemble);
-                            return Err(Unanswered::Refused);
-                        };
+                            .expect("an assigned record without an overlay moves to any environment");
                         counters.bump(Counter::EngineComputedRecordUnchangedWinners);
                         self.note_engine_computed_record(node, delta, (generation, state), 0, 0, counters);
                         return Ok(ElementAnswer::Delta(delta));
@@ -856,10 +850,12 @@ impl RetainedState {
             })
         {
             self.note_node_substitution(node, scratch, state, current_environment);
+            // The cohort is keyed by the node's own assigned record and taken only without an
+            // overlay, and its record was published this flush.
             let delta = self
                 .computed_group_sets
                 .assign_engine_computed_record(node, old_style_record, new_style_record)
-                .or_refused()?;
+                .expect("a cohort record moves any node holding the cohort's old record");
             if delta.0 == delta.1 {
                 counters.bump(Counter::ComputedWinnerPropagationStops);
             }
@@ -3746,10 +3742,6 @@ impl RetainedState {
             let Some(winner) = self.winner_groups.resolved_winner(winner) else {
                 continue;
             };
-            if winner.key.animation_relevance != 0 {
-                counters.bump(Counter::EngineComputedRecordBailWinnerAnimated);
-                return None;
-            }
             // A pseudo-element's cascade keeps the properties its kind supports.
             if let Some(kind) = pseudo_kind
                 && !crate::css::property_metadata::pseudo_element_supports_property(kind, winner.property)
@@ -4475,11 +4467,9 @@ impl RetainedState {
                     continue;
                 };
                 let resolved_winner = self.winner_groups.resolved_winner(maintained_winner);
-                if exact_key.animation_relevance != 0
-                    || resolved_winner.is_some_and(|winner| {
-                        winner.key == exact_key || verifier.winner_is_written_with_substitution(target.node(), &winner)
-                    })
-                {
+                if resolved_winner.is_some_and(|winner| {
+                    winner.key == exact_key || verifier.winner_is_written_with_substitution(target.node(), &winner)
+                }) {
                     continue;
                 }
                 if matches!(
@@ -6277,7 +6267,6 @@ mod tests {
                 value: declaration.value,
                 operator: declaration.operator,
                 continuation: cascade::CascadeContinuationID::default(),
-                animation_relevance: 0,
                 important: false,
             },
             priority: CascadePriority::exact_output_placeholder(),

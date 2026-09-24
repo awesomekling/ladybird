@@ -232,8 +232,6 @@ pub struct SpecifiedWinnerKey {
     /// Where a `revert` or `revert-layer` resumes. Changing the ceiling changes the meaning of the
     /// same written value.
     pub continuation: CascadeContinuationID,
-    /// Animation and transition relevance for this property.
-    pub animation_relevance: u32,
     /// Whether the declaration overrides an animation at this cascade level.
     pub important: bool,
 }
@@ -2876,7 +2874,6 @@ mod tests {
             value: SpecifiedValueID(value),
             operator: CascadeOperator::Declared,
             continuation: CascadeContinuationID::default(),
-            animation_relevance: 0,
             important: false,
         }
     }

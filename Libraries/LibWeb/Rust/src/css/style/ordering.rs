@@ -322,7 +322,6 @@ impl RetainedState {
             value: declared.value,
             operator: declared.operator,
             continuation: cascade::CascadeContinuationID::default(),
-            animation_relevance: 0,
             important: declared.important,
         }
     }
