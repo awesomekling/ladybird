@@ -76,6 +76,9 @@ public:
         // names. An animation the element has stopped listing keeps the place it was last given, so
         // without this the key alone cannot say which animation really holds it.
         static constexpr u32 listed_by_owning_element = 1u << 29;
+        // Script played or paused this CSS animation, so a change to `animation-play-state` no longer
+        // plays or pauses it.
+        static constexpr u32 css_play_state_overridden_by_script = 1u << 30;
 
         // How many words of the buffer a published row occupies. Mirrored by `TIMING_ROW_WORDS` in
         // `Rust/src/css/style/animations.rs`; keep the two in step.

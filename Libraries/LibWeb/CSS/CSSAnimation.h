@@ -50,6 +50,7 @@ public:
 
     Optional<CSS::AnimationPlayState> last_css_animation_play_state() const { return m_last_css_animation_play_state; }
     void set_last_css_animation_play_state(CSS::AnimationPlayState state) { m_last_css_animation_play_state = state; }
+    bool script_overrode_play_state() const { return m_script_overrode_play_state; }
 
     // The definition the last plan applied, which is what the next plan's definition is compared
     // against to decide whether applying it would change anything at all.
