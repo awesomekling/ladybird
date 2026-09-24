@@ -51,7 +51,7 @@ namespace Web::Layout {
 
 class LayoutTreeBuildBridge {
 public:
-    RustFFI::FfiLayoutTreeBuildOutcome build(DOM::Node&);
+    RustFFI::FfiLayoutTreeBuildOutcome pay(DOM::Document&, void* walk);
 
     static void detach_top_layer_element_layout_subtree(DOM::Element&);
 
@@ -262,11 +262,15 @@ RustFFI::FfiDomTreeBuilderCallbacks LayoutTreeBuildBridge::make_ffi_dom_tree_bui
     };
 }
 
-RustFFI::FfiLayoutTreeBuildOutcome LayoutTreeBuildBridge::build(DOM::Node& dom_node)
+RustFFI::FfiLayoutTreeBuildOutcome LayoutTreeBuildBridge::pay(DOM::Document& document, void* walk)
 {
-    m_document = &dom_node.document();
+    m_document = &document;
     auto callbacks = make_ffi_dom_tree_builder_callbacks();
-    auto& document = dom_node.document();
+    return RustFFI::rust_pay_layout_tree_build(&callbacks, document.layout_node_arena().handle(), walk);
+}
+
+u32 prepare_layout_tree_build(DOM::Document& document)
+{
     auto* arena = document.layout_node_arena().handle();
     // The viewport's style is the document's, which the style computer makes on demand rather than
     // publishing, so a build that may build the viewport is handed it before it starts.
@@ -275,13 +279,13 @@ RustFFI::FfiLayoutTreeBuildOutcome LayoutTreeBuildBridge::build(DOM::Node& dom_n
         auto document_style = style_computer.intern_anonymous_layout_style(*style_computer.create_document_style());
         RustFFI::layout_arena_publish_document_style_record(arena, document_style.value());
     }
-    return RustFFI::rust_build_layout_tree(&callbacks, arena, &dom_node, document.style_node_id().value());
+    return document.style_node_id().value();
 }
 
-RustFFI::FfiLayoutTreeBuildOutcome build_layout_tree(DOM::Node& dom_node)
+RustFFI::FfiLayoutTreeBuildOutcome pay_layout_tree_build(DOM::Document& document, void* walk)
 {
     LayoutTreeBuildBridge bridge;
-    return bridge.build(dom_node);
+    return bridge.pay(document, walk);
 }
 
 void detach_top_layer_element_layout_subtree(DOM::Element& element)

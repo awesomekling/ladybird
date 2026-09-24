@@ -1724,12 +1724,16 @@ Compositing::RustFFI::NodeSlotId Document::layout_root_slot() const
     return Layout::RustFFI::layout_arena_layout_root(m_layout_node_arena->handle());
 }
 
+u32 Document::prepare_layout_tree_build()
+{
+    return Layout::prepare_layout_tree_build(*this);
+}
+
 // The build records the root it placed in the arena itself, so what is left for the document is to
 // retire the tree that was replaced and give the new one a paint state.
-Layout::RustFFI::FfiLayoutTreeBuildOutcome Document::build_layout_tree()
+Layout::RustFFI::FfiLayoutTreeBuildOutcome Document::finish_layout_tree_build(void* walk, Layout::RustFFI::NodeSlotId replaced_root)
 {
-    auto replaced_root = layout_root_slot();
-    auto outcome = Layout::build_layout_tree(*this);
+    auto outcome = Layout::pay_layout_tree_build(*this, walk);
     if (replaced_root.index == outcome.viewport.index)
         return outcome;
     if (auto* replaced_layout_root = layout_node_arena().node_if_live(replaced_root)) {
