@@ -198,18 +198,13 @@ unsafe extern "C" fn layout_arena_prepare_for_rendering(
     visual_context_update_pending: bool,
 ) -> FfiRenderingPreparationOutcome {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    let arena = unsafe { arena_from_handle(arena) };
-    // SAFETY: The arena belongs to this thread, which waits for the stage.
-    let (background_source_changed, clamped) = unsafe {
-        crate::stage_thread::run_stage(|| prepare_root_background_and_overflow(arena, root_background_source))
-    };
+    let arena = unsafe { arena_from_handle_mut(arena) };
+    let (background_source_changed, clamped) =
+        arena.run_stage(|arena| prepare_root_background_and_overflow(arena, root_background_source));
     crate::painting::scrollable_overflow::hand_over_clamped_scroll_offsets(arena, &main_thread, clamped);
-    // SAFETY: As above.
-    unsafe {
-        crate::stage_thread::run_stage(|| {
-            finish_rendering_preparation(arena, background_source_changed, visual_context_update_pending)
-        })
-    }
+    arena.run_stage(|arena| {
+        finish_rendering_preparation(arena, background_source_changed, visual_context_update_pending)
+    })
 }
 
 /// # Safety

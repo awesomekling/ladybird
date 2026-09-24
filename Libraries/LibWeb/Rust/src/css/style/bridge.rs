@@ -4324,20 +4324,26 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     engine.document_style_computation_inputs = computation_inputs;
     engine.clear_ffi_style_transaction_output();
     let mut output = FfiStyleTransactionOutput::default();
-    let transaction = || {
-        engine.take_style_transaction(root, |transaction_version, program_version, answers| {
-            assert!(
-                output.answers.is_empty(),
-                "a style transaction emitted more than one batch"
-            );
-            output.transaction_version = transaction_version.0;
-            output.program_version = program_version.0;
-            output.answers.extend_from_slice(answers);
-        })
-    };
-    // SAFETY: The engine and the output are the calling thread's, and nothing else reaches them
-    // while it waits. The transaction's inputs were frozen above.
-    output.scoped = unsafe { crate::stage_thread::run_stage(transaction) };
+    let emitted = &mut output;
+    // SAFETY: The engine is the calling thread's, and nothing else reaches it while that thread
+    // waits. The transaction's inputs were frozen above. DEBT: the engine is not `Send` (its
+    // prefix caches are shared through `Rc`, it names the layout arena by pointer, and its font
+    // resolutions hold host font cascade lists), so the compiler cannot check this stage yet.
+    let engine_on_stage = unsafe { crate::stage_thread::CallerWaits::new(&mut *engine) };
+    let scoped = crate::stage_thread::run_stage(move || {
+        engine_on_stage
+            .into_inner()
+            .take_style_transaction(root, |transaction_version, program_version, answers| {
+                assert!(
+                    emitted.answers.is_empty(),
+                    "a style transaction emitted more than one batch"
+                );
+                emitted.transaction_version = transaction_version.0;
+                emitted.program_version = program_version.0;
+                emitted.answers.extend_from_slice(answers);
+            })
+    });
+    output.scoped = scoped;
     engine.host.retired_custom_property_data.clear();
     output.reclaimed_style_atoms = std::mem::take(&mut engine.host.reclaimed_style_atoms)
         .into_iter()

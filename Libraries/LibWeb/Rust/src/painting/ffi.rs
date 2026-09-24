@@ -36,12 +36,6 @@ pub(crate) unsafe fn arena_from_handle<'a>(arena: *mut c_void) -> &'a LayoutNode
     unsafe { LayoutNodeArena::from_handle(arena) }
 }
 
-/// SAFETY: Same as [`arena_from_handle`], but for helper calls made after an FFI entry point has
-/// already entered a render-owned pass. These are render-side accesses, not C++ re-entry.
-unsafe fn arena_from_handle_inside_render_pass<'a>(arena: *mut c_void) -> &'a LayoutNodeArena {
-    unsafe { LayoutNodeArena::from_handle(arena) }
-}
-
 /// SAFETY: `arena` must be a live handle from `layout_arena_create`, exclusively borrowed for
 /// this call on the document thread. No C++ callback may re-enter the arena during the borrow.
 #[track_caller]
@@ -912,7 +906,7 @@ fn apply_walk_assignments(
 }
 
 fn fresh_visual_context_tree_build(
-    arena: *mut c_void,
+    arena: &mut crate::layout::LayoutNodeArena,
     viewport: NodeSlotId,
     inputs: crate::painting::host::FfiVisualContextTreeInputs,
     state: &mut crate::painting::visual_context::VisualContextState,
@@ -922,7 +916,7 @@ fn fresh_visual_context_tree_build(
         IncrementalUpdateResult, debug_assert_every_live_node_is_owned, update_visual_context_tree,
     };
     let fresh_tree = {
-        let arena = unsafe { arena_from_handle_inside_render_pass(arena) };
+        let arena = &*arena;
         let paintable_rows = arena.paintable_rows();
         let mut fresh_tree = crate::painting::visual_context::build::create_fresh_tree_with_viewport_nodes(
             &paintable_rows,
@@ -933,7 +927,7 @@ fn fresh_visual_context_tree_build(
         fresh_tree
     };
     {
-        let arena = unsafe { arena_from_handle_mut(arena) };
+        let arena = &mut *arena;
         let mut paintable_rows = arena.paintable_rows_mut();
         paintable_rows.drop_all_visual_context_records();
         fresh_tree.viewport_assignment.apply(&mut paintable_rows);
@@ -942,7 +936,7 @@ fn fresh_visual_context_tree_build(
     state.dirty_boxes.clear();
     state.build_count += 1;
     let mut outcome = {
-        let arena = unsafe { arena_from_handle_inside_render_pass(arena) };
+        let arena = &*arena;
         let paintable_rows = arena.paintable_rows();
         match update_visual_context_tree(
             &paintable_rows,
@@ -957,7 +951,7 @@ fn fresh_visual_context_tree_build(
             }
         }
     };
-    let arena = unsafe { arena_from_handle_mut(arena) };
+    let arena = &mut *arena;
     outcome.mask_node_owners_changed = true;
     // Everything records again; pushing that first keeps the per-row pushes below free.
     arena.push_all_paint_damage();
@@ -1004,29 +998,27 @@ pub unsafe extern "C" fn layout_arena_update_accumulated_visual_contexts(
     arena: *mut c_void,
     viewport: NodeSlotId,
 ) -> crate::painting::host::FfiVisualContextUpdateOutcome {
-    let arena_ref = unsafe { arena_from_handle(arena) };
-    if !arena_ref.paintable_row_is_populated(viewport) {
+    let arena = unsafe { arena_from_handle_mut(arena) };
+    if !arena.paintable_row_is_populated(viewport) {
         return crate::painting::host::FfiVisualContextUpdateOutcome::default();
     }
-    // SAFETY: The arena belongs to this thread, which waits for the stage.
-    unsafe { crate::stage_thread::run_stage(|| update_accumulated_visual_contexts_stage(arena, viewport)) }
+    arena.run_stage(|arena| update_accumulated_visual_contexts_stage(arena, viewport))
 }
 
 /// The visual context update, run on the render stage right before the rows it leaves are
 /// published.
 fn update_accumulated_visual_contexts_stage(
-    arena: *mut c_void,
+    arena: &mut crate::layout::LayoutNodeArena,
     viewport: NodeSlotId,
 ) -> crate::painting::host::FfiVisualContextUpdateOutcome {
     use crate::painting::visual_context::dirty::{VisualContextGlobalRebuildReason, VisualContextUpdateScope};
     use crate::painting::visual_context::incremental::{
         IncrementalUpdateResult, debug_assert_every_live_node_is_owned, update_visual_context_tree,
     };
-    unsafe { arena_from_handle_mut(arena) }.release_published_paintable_rows();
-    let arena_ref = unsafe { arena_from_handle(arena) };
+    arena.release_published_paintable_rows();
     let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
-    let inputs = arena_ref.visual_context_tree_inputs();
-    let mut state = std::mem::take(&mut arena_ref.paint_state().borrow_mut().visual_context);
+    let inputs = arena.visual_context_tree_inputs();
+    let mut state = std::mem::take(&mut arena.paint_state().borrow_mut().visual_context);
     state.release_quarantined_slots_while_no_handle_is_retained();
 
     let mut reason = state.dirty_boxes.global_reason;
@@ -1050,21 +1042,20 @@ fn update_accumulated_visual_contexts_stage(
             break;
         }
         let result = {
-            let paintable_rows = arena_ref.paintable_rows();
+            let paintable_rows = arena.paintable_rows();
             update_visual_context_tree(&paintable_rows, viewport, inputs, scope, &mut state)
         };
         match result {
             IncrementalUpdateResult::Applied(mut outcome) => {
-                let arena_mut = unsafe { arena_from_handle_mut(arena) };
-                apply_walk_assignments(arena_mut, viewport, &mut outcome, &mut state);
-                arena_mut.resort_stacking_context_entries_flagged_for_resort();
-                crate::painting::fragment_ownership::assign_fragment_ownership_for_pending_line_roots(arena_mut);
+                apply_walk_assignments(arena, viewport, &mut outcome, &mut state);
+                arena.resort_stacking_context_entries_flagged_for_resort();
+                crate::painting::fragment_ownership::assign_fragment_ownership_for_pending_line_roots(arena);
                 let performed_full_build = scope == VisualContextUpdateScope::EveryBox;
                 if performed_full_build {
                     state.build_count += 1;
                     state.last_full_build_reason = reason;
                     debug_assert_every_live_node_is_owned(
-                        &arena_mut.paintable_rows(),
+                        &arena.paintable_rows(),
                         state.tree.as_deref().expect("an applied walk keeps the tree"),
                         viewport,
                     );
@@ -1076,8 +1067,8 @@ fn update_accumulated_visual_contexts_stage(
                 state.dirty_boxes.clear();
                 state.last_tree_inputs = Some(inputs);
                 let structural_epoch = state.structural_epoch();
-                arena_mut.paint_state().borrow_mut().visual_context = state;
-                arena_mut.publish_paintable_rows();
+                arena.paint_state().borrow_mut().visual_context = state;
+                arena.publish_paintable_rows();
                 return crate::painting::host::FfiVisualContextUpdateOutcome {
                     performed_full_build,
                     structural_epoch_changed,
@@ -1098,9 +1089,8 @@ fn update_accumulated_visual_contexts_stage(
     state.last_full_build_reason = reason;
     let outcome = fresh_visual_context_tree_build(arena, viewport, inputs, &mut state);
     state.last_tree_inputs = Some(inputs);
-    let arena_ref = unsafe { arena_from_handle_inside_render_pass(arena) };
-    arena_ref.paint_state().borrow_mut().visual_context = state;
-    unsafe { arena_from_handle_mut(arena) }.publish_paintable_rows();
+    arena.paint_state().borrow_mut().visual_context = state;
+    arena.publish_paintable_rows();
     outcome
 }
 
@@ -1141,8 +1131,8 @@ pub unsafe extern "C" fn layout_arena_scroll_snapport_rect(
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_update_visual_viewport_transform(arena: *mut c_void) -> bool {
-    let arena = unsafe { arena_from_handle(arena) };
-    let update = || {
+    let arena = unsafe { arena_from_handle_mut(arena) };
+    arena.run_stage(|arena| {
         let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
         let mut paint_state = arena.paint_state().borrow_mut();
         let Some(tree) = &mut paint_state.visual_context.tree else {
@@ -1153,9 +1143,7 @@ pub unsafe extern "C" fn layout_arena_update_visual_viewport_transform(arena: *m
             crate::painting::visual_context::node_values::visual_viewport_transform_data(&inputs),
         );
         true
-    };
-    // SAFETY: The arena belongs to this thread, which waits for the stage.
-    unsafe { crate::stage_thread::run_stage(update) }
+    })
 }
 
 /// # Safety
@@ -1209,8 +1197,8 @@ pub unsafe extern "C" fn layout_arena_refresh_scroll_state(
     sink: *mut c_void,
     publish: unsafe extern "C" fn(*mut c_void, *const libgfx_rust::FloatPoint, usize),
 ) -> bool {
-    let arena = unsafe { arena_from_handle(arena) };
-    let refresh = || {
+    let arena = unsafe { arena_from_handle_mut(arena) };
+    let refresh = arena.run_stage(|arena| {
         let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollStateRefresh);
         let paintable_rows = arena.paintable_rows();
         let mut paint_state = arena.paint_state().borrow_mut();
@@ -1228,9 +1216,8 @@ pub unsafe extern "C" fn layout_arena_refresh_scroll_state(
             tree.resolve_sticky_offsets_in_place(&mut snapshot);
         }
         Some(snapshot)
-    };
-    // SAFETY: The arena belongs to this thread, which waits for the stage.
-    let Some(snapshot) = (unsafe { crate::stage_thread::run_stage(refresh) }) else {
+    });
+    let Some(snapshot) = refresh else {
         return false;
     };
     // SAFETY: The C++ sink copies the offsets synchronously.
@@ -1400,7 +1387,7 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
             viewport,
             inputs: recording_inputs,
         };
-        // SAFETY: The arena and its scratch belong to this thread, which waits for the stage.
+        // SAFETY: The stage holds the arena alone; under overlap, only diagnostics rely on that.
         unsafe { crate::stage_thread::run_overlappable_stage("recording", || record_display_list_stage(input)) }
     };
     // SAFETY: The stage has returned the arena.
@@ -1433,8 +1420,11 @@ pub unsafe extern "C" fn rust_run_compositor_frame_handoff_stage(
     handoff: unsafe extern "C" fn(*mut c_void),
     context: *mut c_void,
 ) {
-    // SAFETY: Guaranteed by the caller; the calling thread waits for the stage.
-    unsafe { crate::stage_thread::run_overlappable_stage("handoff", || handoff(context)) }
+    // SAFETY: Guaranteed by the caller: `handoff` may be called with `context` from any thread, and
+    // the frame is reachable only through `context`.
+    let context = unsafe { crate::stage_thread::CallerWaits::new(context) };
+    // SAFETY: As above; under overlap, only diagnostics rely on the caller waiting.
+    unsafe { crate::stage_thread::run_overlappable_stage("handoff", move || handoff(context.into_inner())) }
 }
 
 /// # Safety

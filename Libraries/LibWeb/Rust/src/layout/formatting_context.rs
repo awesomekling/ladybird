@@ -2559,8 +2559,7 @@ pub(crate) unsafe fn compute_root_layout(
         document_in_quirks_mode,
         should_collect_devtools_layout_data,
     };
-    // SAFETY: The arena and its scratch belong to the waiting owner.
-    unsafe { crate::stage_thread::run_stage(move || run_root_layout_stage(input, scratch)) }
+    crate::stage_thread::run_stage(move || run_root_layout_stage(input, scratch))
 }
 
 /// Commits a computed root layout to the arena without the host. The host half, which pays what
@@ -2859,8 +2858,7 @@ pub(crate) unsafe fn compute_subtree_layout_fragments(
         document_in_quirks_mode,
         should_collect_devtools_layout_data: false,
     };
-    // SAFETY: The arena and its scratch belong to the waiting owner.
-    unsafe { crate::stage_thread::run_stage(move || compute_subtree_layout_stage(input, scratch)) }
+    crate::stage_thread::run_stage(move || compute_subtree_layout_stage(input, scratch))
 }
 
 /// Commits a computed partial relayout boundary to the arena without the host, leaving the host

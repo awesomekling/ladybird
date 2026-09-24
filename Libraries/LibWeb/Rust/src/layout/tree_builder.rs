@@ -3035,9 +3035,13 @@ pub(crate) unsafe fn walk_layout_tree_build(
     arena_handle: *mut c_void,
     document_style_node: u32,
 ) -> LayoutTreeBuildWalk {
-    let host = dom_tree_builder_host(arena_handle);
-    // SAFETY: The arena and the style mirror belong to the owner, which waits for the walk.
-    unsafe { crate::stage_thread::run_stage(|| LayoutTreeBuildWalk(run_tree_build_stage(&host, document_style_node))) }
+    // SAFETY: Guaranteed by the caller.
+    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena_handle) };
+    arena.run_stage(|arena| {
+        // The host is made on the stage's side from the arena the stage holds alone.
+        let host = dom_tree_builder_host(std::ptr::from_mut(arena).cast());
+        LayoutTreeBuildWalk(run_tree_build_stage(&host, document_style_node))
+    })
 }
 
 /// The layout tree build stage: the walk that turns the style mirror's flat tree into layout

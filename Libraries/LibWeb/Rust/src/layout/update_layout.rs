@@ -999,12 +999,14 @@ unsafe fn update_layout(
         // SAFETY: Guaranteed by the caller.
         trace: unsafe { UpdateLayoutTrace::new(inputs.reason_name) },
     };
-    // SAFETY: The frame reaches the arena and the document only while the document thread waits
-    // for it, or through the joins it runs on that thread.
+    // SAFETY: The frame reaches the arena and the document through the handle only while the
+    // document thread waits for it, or through the joins it runs on that thread.
+    let inputs = unsafe { crate::stage_thread::CallerWaits::new(inputs) };
+    // SAFETY: As above, for the work the frame's joins hand the document thread.
     let messages = unsafe {
-        crate::stage_thread::run_overlappable_stage_with_joins("layout", main_thread, |joins| {
+        crate::stage_thread::run_overlappable_stage_with_joins("layout", main_thread, move |joins| {
             LayoutFrame {
-                inputs,
+                inputs: inputs.into_inner(),
                 joins,
                 messages: FrameMessages::default(),
                 pass_sources: None,
