@@ -1173,14 +1173,14 @@ impl RetainedState {
                 }
             }
         }
-        if full_drive {
+        // A partial delta that reaches the font group reaches every value the font feeds, so it
+        // is driven in full, as a partial drive whose driver inputs moved is below.
+        let mut driver_input_moved = !full_drive && groups_to_rebuild & (1 << STYLE_GROUP_INDEX_FONT) != 0;
+        if full_drive || driver_input_moved {
             groups_to_rebuild = (1 << crate::css::table_group_builder::group_index::COUNT) - 1;
-        } else if groups_to_rebuild & (1 << STYLE_GROUP_INDEX_FONT) != 0 {
-            counters.bump(Counter::EngineComputedRecordBailFontPhase);
-            return Err(Unanswered::Refused);
         }
 
-        if goal == FontDriveGoal::RootInputs && !full_drive {
+        if goal == FontDriveGoal::RootInputs && !full_drive && !driver_input_moved {
             // NB: No font property moved, but borrowing the retained font still needs the
             //     proof that only the named rule flips changed the computation's inputs.
             return Ok(ElementAnswer::RootInputs(
@@ -1227,7 +1227,7 @@ impl RetainedState {
         self.note_node_substitution(node, scratch, state, substitution_environment);
         // A hidden record can name animations. Its driven base leaves a complete plan for the host
         // to apply before sampling the installed record, which only names that resolve can make.
-        if full_drive
+        if (full_drive || driver_input_moved)
             && old_record_is_hidden
             && self
                 .computed_group_sets
@@ -1240,9 +1240,8 @@ impl RetainedState {
             counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
             return Err(Unanswered::Refused);
         }
-        let mut driver_input_moved = false;
         let mut explicitly_inherited_groups = 0;
-        let partial = if full_drive {
+        let partial = if full_drive || driver_input_moved {
             None
         } else {
             match self.engine_driven_table(
