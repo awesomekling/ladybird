@@ -2988,7 +2988,7 @@ impl RetainedState {
                 Some(answer) => answer.cascade_winners_are_complete,
                 None => {
                     let Some(complete) = self.republish_winners_from_answer(node, counters) else {
-                        return 0;
+                        return Err(Unanswered::Refused);
                     };
                     complete
                 }
