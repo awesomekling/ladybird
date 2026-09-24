@@ -37,9 +37,6 @@ public:
 
     virtual CSS::StyleRecordID style_record_identity() const = 0;
     virtual void update_animated_properties(Badge<Web::Animations::KeyframeEffect> const&, DOM::AbstractElement, Web::Animations::KeyframeEffect&, Web::Animations::AnimationUpdateContext&) = 0;
-
-    virtual RefPtr<CSS::CustomPropertyData const> custom_property_data() const = 0;
-    virtual void set_custom_property_data(RefPtr<CSS::CustomPropertyData const> value) = 0;
 };
 
 class WEB_API SyntheticPseudoElement : public PseudoElement {
@@ -65,9 +62,6 @@ public:
     void clear_computed_style(RefPtr<CSS::ComputedValues const> style_to_preserve_for_detachment = nullptr);
     void refresh_computed_style(CSS::StyleRecordID);
 
-    RefPtr<CSS::CustomPropertyData const> custom_property_data() const override;
-    void set_custom_property_data(RefPtr<CSS::CustomPropertyData const> value) override;
-
     // The offset lives in the layout node arena, keyed by the generator's identity and this
     // pseudo-element's kind, so a box bound to the pseudo-element reads it without asking here.
     CSSPixelPoint scroll_offset() const;
@@ -76,8 +70,6 @@ public:
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
 private:
-    struct CustomPropertyDataStorage;
-
     void replace_style_record(CSS::StyleRecordID);
 
     // A pseudo-element has no identity of its own: its box is the row bound to its generator's
@@ -87,7 +79,6 @@ private:
     // The authoritative StyleEngine record. C++ compatibility consumers borrow the record-owned
     // computed-values view rather than retaining one complete style per pseudo-element.
     CSS::StyleRecordID m_style_record_identity;
-    OwnPtr<CustomPropertyDataStorage> m_custom_property_data;
 };
 
 // https://drafts.csswg.org/css-view-transitions/#pseudo-element-tree
@@ -122,9 +113,6 @@ class WEB_API ElementReferencePseudoElement : public PseudoElement {
 
     virtual CSS::StyleRecordID style_record_identity() const override;
     void update_animated_properties(Badge<Web::Animations::KeyframeEffect> const&, DOM::AbstractElement, Web::Animations::KeyframeEffect&, Web::Animations::AnimationUpdateContext&) override;
-
-    RefPtr<CSS::CustomPropertyData const> custom_property_data() const override;
-    void set_custom_property_data(RefPtr<CSS::CustomPropertyData const> value) override;
 
     GC::Ref<Element> const& referenced_element() const { return m_referenced_element; }
 

@@ -168,6 +168,39 @@ impl RetainedState {
             .map(RetainedCustomPropertyData::data)
     }
 
+    /// Keep the custom-property environment one of an element's synthetic pseudo-elements now holds;
+    /// a null `data` is one holding none.
+    ///
+    /// # Safety
+    /// `data` must be null or a live `Web::CSS::CustomPropertyData`.
+    pub(crate) unsafe fn set_pseudo_element_custom_property_data(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: u8,
+        data: *const std::ffi::c_void,
+    ) {
+        if data.is_null() {
+            self.pseudo_element_custom_property_data.remove(&(node, pseudo));
+            return;
+        }
+        if self
+            .pseudo_element_custom_property_data
+            .get(&(node, pseudo))
+            .is_some_and(|existing| existing.data() == data)
+        {
+            return;
+        }
+        self.pseudo_element_custom_property_data
+            .insert((node, pseudo), unsafe { RetainedCustomPropertyData::retain(data) });
+    }
+
+    /// The environment one of an element's synthetic pseudo-elements holds, null for none.
+    pub(crate) fn pseudo_element_custom_property_data(&self, node: StyleNodeID, pseudo: u8) -> *const std::ffi::c_void {
+        self.pseudo_element_custom_property_data
+            .get(&(node, pseudo))
+            .map_or(std::ptr::null(), RetainedCustomPropertyData::data)
+    }
+
     pub fn set_sampled_composition_identity(&mut self, node: StyleNodeID, record: u64) {
         self.computed_group_sets.set_sampled_composition_identity(node, record);
     }
@@ -1800,6 +1833,7 @@ impl StyleEngineState {
                 custom_property_registry,
                 frozen_longhand_inputs: HashMap::default(),
                 element_custom_property_data: HashMap::default(),
+                pseudo_element_custom_property_data: HashMap::default(),
                 sampled_custom_property_environments: HashMap::default(),
                 font_resolution: None,
                 font_face_snapshot: None,
@@ -2700,6 +2734,21 @@ impl StyleEngineState {
                     self.host.retired_custom_property_data.push(data);
                 }
                 self.retained.sampled_custom_property_environments.remove(&node);
+            }
+            if !self.retained.pseudo_element_custom_property_data.is_empty() {
+                let retired: HashSet<StyleNodeID> = retired_nodes.iter().copied().collect();
+                let keys: Vec<_> = self
+                    .retained
+                    .pseudo_element_custom_property_data
+                    .keys()
+                    .filter(|(node, _)| retired.contains(node))
+                    .copied()
+                    .collect();
+                for key in keys {
+                    if let Some(data) = self.retained.pseudo_element_custom_property_data.remove(&key) {
+                        self.host.retired_custom_property_data.push(data);
+                    }
+                }
             }
             self.retained
                 .tree

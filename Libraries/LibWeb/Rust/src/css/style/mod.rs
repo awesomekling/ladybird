@@ -892,6 +892,9 @@ pub struct RetainedState {
     /// copy: the host reads an element's environment from here. `None` records an element holding
     /// none; a missing entry records an element the engine was never told about.
     element_custom_property_data: HashMap<StyleNodeID, Option<inputs::RetainedCustomPropertyData>>,
+    /// The custom-property environment each of an element's synthetic pseudo-elements holds, by the
+    /// pseudo-element's kind. The host reads it from here; a missing entry is one holding none.
+    pseudo_element_custom_property_data: HashMap<(StyleNodeID, u8), inputs::RetainedCustomPropertyData>,
     /// The environment each element's animations sampled custom properties into, over the one its
     /// own declarations resolve to. Its own values substitute under it.
     sampled_custom_property_environments: HashMap<StyleNodeID, u64>,
