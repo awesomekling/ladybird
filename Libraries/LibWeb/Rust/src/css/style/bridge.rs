@@ -3096,87 +3096,99 @@ pub unsafe extern "C" fn style_engine_style_record_dependency_flags(engine: *con
     engine.style_record_dependency_flags(style_record).unwrap_or(0)
 }
 
-/// Whether the winners the node's records were computed from substitute `attr()`: an attribute
-/// change reaches such records.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_node_record_reads_attributes(engine: *const c_void, node: u32) -> bool {
-    super::seal::note_engine_call("style_engine_node_record_reads_attributes");
-    let engine = unsafe { &*engine.cast::<StyleEngine>() };
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return false;
-    };
-    // A pseudo-element's winners read its originating element's attributes.
-    let groups = engine.current_winner_groups();
-    let element_reads = match groups.token_for(super::cascade::WinnerGroupKey::current(node, engine.program.version()))
-    {
-        super::partial_view::Lookup::Known((_, state)) => engine.state_reads_attributes(node, state),
-        _ => false,
-    };
-    element_reads
-        || engine.retained.custom_declarations_read_attributes(node, None)
-        || groups.pseudo_states(node).any(|(pseudo, _, state, _)| {
-            engine.state_reads_attributes(node, state)
-                || u8::try_from(pseudo.kind.0)
-                    .ok()
-                    .is_some_and(|kind| engine.retained.custom_declarations_read_attributes(node, Some(kind)))
-        })
+/// What the winners the node's records were computed from read, beyond their cascade, one bit per
+/// kind: see [`node_record_reads`].
+pub mod node_record_reads {
+    pub const IF_FUNCTION: u8 = 1 << 0;
+    pub const INHERIT_FUNCTION: u8 = 1 << 1;
+    pub const CUSTOM_FUNCTION: u8 = 1 << 2;
+    /// An `attr()` substitution: an attribute change reaches such records.
+    pub const ATTRIBUTES: u8 = 1 << 3;
+    /// A sibling-position read from a retained winner.
+    pub const TREE_COUNTING: u8 = 1 << 4;
 }
 
-/// Whether an element or its pseudo-element reads its sibling position from a retained winner.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_node_record_uses_tree_counting(engine: *const c_void, node: u32) -> bool {
-    super::seal::note_engine_call("style_engine_node_record_uses_tree_counting");
-    let engine = unsafe { &*engine.cast::<StyleEngine>() };
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return false;
-    };
-    let groups = engine.current_winner_groups();
-    let element_reads = match groups.token_for(super::cascade::WinnerGroupKey::current(node, engine.program.version()))
-    {
-        super::partial_view::Lookup::Known((_, state)) => engine.retained.state_has_written_tree_counting(node, state),
-        _ => false,
-    };
-    element_reads
-        || engine.retained.nodes_with_tree_counting_records.contains(&node)
-        || groups.pseudo_states(node).any(|(_, version, state, priority_current)| {
-            version == engine.program.version()
-                && priority_current
-                && engine.retained.state_has_written_tree_counting(node, state)
-        })
+impl StyleEngine {
+    /// Whether the winners the node's records were computed from substitute `attr()`.
+    fn node_record_reads_attributes(&self, node: StyleNodeID) -> bool {
+        // A pseudo-element's winners read its originating element's attributes.
+        let groups = self.current_winner_groups();
+        let element_reads =
+            match groups.token_for(super::cascade::WinnerGroupKey::current(node, self.program.version())) {
+                super::partial_view::Lookup::Known((_, state)) => self.state_reads_attributes(node, state),
+                _ => false,
+            };
+        element_reads
+            || self.retained.custom_declarations_read_attributes(node, None)
+            || groups.pseudo_states(node).any(|(pseudo, _, state, _)| {
+                self.state_reads_attributes(node, state)
+                    || u8::try_from(pseudo.kind.0)
+                        .ok()
+                        .is_some_and(|kind| self.retained.custom_declarations_read_attributes(node, Some(kind)))
+            })
+    }
+
+    /// Whether an element or its pseudo-element reads its sibling position from a retained winner.
+    fn node_record_uses_tree_counting(&self, node: StyleNodeID) -> bool {
+        let groups = self.current_winner_groups();
+        let element_reads =
+            match groups.token_for(super::cascade::WinnerGroupKey::current(node, self.program.version())) {
+                super::partial_view::Lookup::Known((_, state)) => {
+                    self.retained.state_has_written_tree_counting(node, state)
+                }
+                _ => false,
+            };
+        element_reads
+            || self.retained.nodes_with_tree_counting_records.contains(&node)
+            || groups.pseudo_states(node).any(|(_, version, state, priority_current)| {
+                version == self.program.version()
+                    && priority_current
+                    && self.retained.state_has_written_tree_counting(node, state)
+            })
+    }
+
+    /// Which `if()`, `inherit()`, and custom-function substitutions the node's custom and ordinary
+    /// declarations read, including pseudo-elements resolved with the originating element's
+    /// environment.
+    fn node_record_custom_condition_usage(&self, node: StyleNodeID) -> u8 {
+        let groups = self.current_winner_groups();
+        let mut usage = self.retained.custom_declarations_condition_usage(node, None);
+        if let super::partial_view::Lookup::Known((_, state)) =
+            groups.token_for(super::cascade::WinnerGroupKey::current(node, self.program.version()))
+        {
+            usage |= self.retained.state_custom_condition_usage(node, state);
+        }
+        for (pseudo, _, state, _) in groups.pseudo_states(node) {
+            usage |= self.retained.state_custom_condition_usage(node, state);
+            if let Ok(kind) = u8::try_from(pseudo.kind.0) {
+                usage |= self.retained.custom_declarations_condition_usage(node, Some(kind));
+            }
+        }
+        usage
+    }
 }
 
-/// Which `if()`, `inherit()`, and custom-function substitutions the node's custom and ordinary
-/// declarations read, including pseudo-elements resolved with the originating element's environment.
+/// What the winners the node's records were computed from read beyond their cascade, as
+/// `node_record_reads` bits, answered once for the row that installs them.
 ///
 /// # Safety
 /// `engine` must be live.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_node_record_custom_condition_usage(engine: *const c_void, node: u32) -> u8 {
-    super::seal::note_engine_call("style_engine_node_record_custom_condition_usage");
+pub unsafe extern "C" fn style_engine_node_record_reads(engine: *const c_void, node: u32) -> u8 {
+    super::seal::note_engine_call("style_engine_node_record_reads");
     let engine = unsafe { &*engine.cast::<StyleEngine>() };
     let Some(node) = StyleNodeID::from_raw(node) else {
         return 0;
     };
-    let groups = engine.current_winner_groups();
-    let mut usage = engine.retained.custom_declarations_condition_usage(node, None);
-    if let super::partial_view::Lookup::Known((_, state)) =
-        groups.token_for(super::cascade::WinnerGroupKey::current(node, engine.program.version()))
-    {
-        usage |= engine.retained.state_custom_condition_usage(node, state);
+    let mut reads = engine.node_record_custom_condition_usage(node)
+        & (node_record_reads::IF_FUNCTION | node_record_reads::INHERIT_FUNCTION | node_record_reads::CUSTOM_FUNCTION);
+    if engine.node_record_reads_attributes(node) {
+        reads |= node_record_reads::ATTRIBUTES;
     }
-    for (pseudo, _, state, _) in groups.pseudo_states(node) {
-        usage |= engine.retained.state_custom_condition_usage(node, state);
-        if let Ok(kind) = u8::try_from(pseudo.kind.0) {
-            usage |= engine.retained.custom_declarations_condition_usage(node, Some(kind));
-        }
+    if engine.node_record_uses_tree_counting(node) {
+        reads |= node_record_reads::TREE_COUNTING;
     }
-    usage
+    reads
 }
 
 /// The raw custom-property environment identity a style record was published with.

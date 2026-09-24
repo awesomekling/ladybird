@@ -107,8 +107,6 @@ public:
     [[nodiscard]] void const* style_record_payloads(StyleRecordID style_record) const;
     [[nodiscard]] StyleRecordDependencyFlag style_record_dependency_flags(StyleRecordID style_record) const;
     [[nodiscard]] u64 style_record_custom_property_environment(StyleRecordID style_record) const;
-    [[nodiscard]] bool node_record_reads_attributes(StyleNodeID) const;
-    [[nodiscard]] u8 node_record_custom_condition_usage(StyleNodeID) const;
     [[nodiscard]] bool animation_overlay_changed(StyleRecordID old_style_record, void const* animated_overlay) const;
     [[nodiscard]] StyleEngineFFI::FfiAnimationInvalidation compare_animation_overlay(StyleRecordID old_style_record, void const* animated_overlay, ReadonlySpan<void const*> payloads, bool is_document_element) const;
     // The animation definitions an engine-settled row left for the host, taken so that exactly one
@@ -201,6 +199,14 @@ public:
         SettledRowTransitionDebt = 3,
         SettledRowOwesAnAnimationPlan = 1 << 2,
         SettledRowOwesAnAnimationSample = 1 << 3,
+    };
+    // What the winners an element's records were computed from read beyond their cascade.
+    enum NodeRecordReads : u8 {
+        NodeRecordReadsIfFunction = 1 << 0,
+        NodeRecordReadsInheritFunction = 1 << 1,
+        NodeRecordReadsCustomFunction = 1 << 2,
+        NodeRecordReadsAttributes = 1 << 3,
+        NodeRecordReadsTreeCounting = 1 << 4,
     };
     // What applying a style reaction found, reported so the engine derives the children's reactions.
     enum StyleReactionAppliedFact : u32 {

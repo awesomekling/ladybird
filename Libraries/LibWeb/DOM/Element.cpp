@@ -2338,21 +2338,21 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     // reads the host's.
     if (uses_substitution)
         m_style_uses_var_css_function = true;
-    if (style_computer.style_engine().node_record_reads_attributes(style_node_id())) {
+    auto const record_reads = CSS::StyleEngineFFI::style_engine_node_record_reads(style_computer.style_engine().rust_handle(), style_node_id().value());
+    if (record_reads & CSS::StyleEngine::NodeRecordReadsAttributes) {
         m_style_uses_attr_css_function = true;
         if (associated_shadow_host_pseudo_element().has_value()) {
             if (auto host = root().parent_or_shadow_host_element())
                 host->set_style_uses_attr_css_function();
         }
     }
-    if (CSS::StyleEngineFFI::style_engine_node_record_uses_tree_counting(style_computer.style_engine().rust_handle(), style_node_id().value()))
+    if (record_reads & CSS::StyleEngine::NodeRecordReadsTreeCounting)
         set_style_uses_tree_counting_function();
-    auto const custom_condition_usage = style_computer.style_engine().node_record_custom_condition_usage(style_node_id());
-    if (custom_condition_usage & 1)
+    if (record_reads & CSS::StyleEngine::NodeRecordReadsIfFunction)
         set_style_uses_if_css_function();
-    if (custom_condition_usage & 2)
+    if (record_reads & CSS::StyleEngine::NodeRecordReadsInheritFunction)
         set_style_uses_inherit_css_function();
-    if (custom_condition_usage & 4)
+    if (record_reads & CSS::StyleEngine::NodeRecordReadsCustomFunction)
         set_style_uses_custom_function();
 
     // The environment the record was published with: what the element inherits, or what the

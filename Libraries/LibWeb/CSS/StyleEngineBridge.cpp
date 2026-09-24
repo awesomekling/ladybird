@@ -239,16 +239,6 @@ StyleRecordDependencyFlag StyleEngine::style_record_dependency_flags(StyleRecord
     return static_cast<StyleRecordDependencyFlag>(StyleEngineFFI::style_engine_style_record_dependency_flags(m_impl, style_record.value()));
 }
 
-bool StyleEngine::node_record_reads_attributes(StyleNodeID node) const
-{
-    return StyleEngineFFI::style_engine_node_record_reads_attributes(m_impl, node.value());
-}
-
-u8 StyleEngine::node_record_custom_condition_usage(StyleNodeID node) const
-{
-    return StyleEngineFFI::style_engine_node_record_custom_condition_usage(m_impl, node.value());
-}
-
 u64 StyleEngine::style_record_custom_property_environment(StyleRecordID style_record) const
 {
     return StyleEngineFFI::style_engine_style_record_custom_property_environment(m_impl, style_record.value());
