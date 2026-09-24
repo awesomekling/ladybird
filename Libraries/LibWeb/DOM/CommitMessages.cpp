@@ -173,9 +173,6 @@ void CommitMessages::append(Layout::RustFFI::FfiCommitMessage const& message)
     case Layout::RustFFI::FfiCommitMessageKind::TopLayerZoneRebuildNeeded:
         m_messages.append(Message { .identity = identity, .kind = Kind::TopLayerZoneRebuildNeeded, .pseudo_element = {}, .custom_property_name = {} });
         return;
-    case Layout::RustFFI::FfiCommitMessageKind::ListItemCounterValueRendered:
-        m_messages.append(Message { .identity = identity, .kind = Kind::ListItemCounterValueRendered, .pseudo_element = {}, .custom_property_name = {} });
-        return;
     case Layout::RustFFI::FfiCommitMessageKind::PendingFontFaceWanted:
         m_messages.append(Message {
             .identity = identity,
@@ -233,10 +230,6 @@ void CommitMessages::apply(Message const& message)
         // also what the hit test naming nothing means.
         if (auto navigable = m_document.navigable())
             navigable->event_handler().apply_hover_target_after_scroll({}, message.identity.resolve(m_document), message.hover_event_data);
-        return;
-    case Kind::ListItemCounterValueRendered:
-        if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
-            m_document.did_render_list_item_counter_value(*element);
         return;
     case Kind::NeedsLayoutTreeUpdate:
         if (auto node = message.identity.resolve(m_document))

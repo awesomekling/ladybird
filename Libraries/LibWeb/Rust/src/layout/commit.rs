@@ -26,9 +26,6 @@ pub enum FfiCommitMessageKind {
     /// The node is the element a pseudo-element box escaped its rebuild root under, so its layout
     /// tree has to be built again.
     LayoutTreeRebuildRequested,
-    /// The node is the element a pseudo-element was generated for, and the pseudo-element's content
-    /// or list marker shows the value of the `list-item` counter.
-    ListItemCounterValueRendered,
     /// A pass reached the web font face `pending_face` names while it waits on its load. A pass
     /// cannot start the load itself: the fetch, the font-display timer and the load-event delayer
     /// are all document state. This one is about the document itself.

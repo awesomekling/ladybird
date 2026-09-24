@@ -880,6 +880,30 @@ impl RetainedState {
             .set_text_is_in_user_agent_shadow_tree(node, value, &mut self.memory);
     }
 
+    /// Record whether the list owner's items were renumbered without its layout tree being rebuilt.
+    pub fn set_list_owner_has_stale_item_counters(&mut self, node: StyleNodeID, value: bool) {
+        self.tree
+            .set_list_owner_has_stale_item_counters(node, value, &mut self.memory);
+    }
+
+    /// Let go of the stale list owners `forget` answers yes for, which it is asked with the tree.
+    pub fn forget_list_owners_with_stale_item_counters(
+        &mut self,
+        mut forget: impl FnMut(&StyleNodeTree, StyleNodeID) -> bool,
+    ) {
+        let forgotten: Vec<StyleNodeID> = self
+            .tree
+            .list_owners_with_stale_item_counters()
+            .iter()
+            .copied()
+            .filter(|&owner| forget(&self.tree, owner))
+            .collect();
+        for owner in forgotten {
+            self.tree
+                .set_list_owner_has_stale_item_counters(owner, false, &mut self.memory);
+        }
+    }
+
     /// Fold one layout tree update mark into the node's, answering whether its own bit changed.
     pub fn merge_layout_tree_update_mark(&mut self, node: StyleNodeID, value: bool, reuse_reason: u8) -> bool {
         self.tree

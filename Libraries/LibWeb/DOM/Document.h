@@ -1302,7 +1302,6 @@ public:
     void forget_snapped_areas_of_scroll_container(Layout::Node const&);
 
     void schedule_list_item_renumber(Element& list_owner);
-    void did_render_list_item_counter_value(Element&);
 
     void schedule_scroll_container_resnap() { m_needs_scroll_container_resnap = true; }
     void cancel_scheduled_scroll_container_resnap() { m_needs_scroll_container_resnap = false; }
@@ -1640,7 +1639,6 @@ private:
     Layout::RustFFI::FfiLayoutUpdateHostCallbacks layout_update_host_callbacks();
 
     void process_pending_list_item_renumbers();
-    bool reconcile_stale_list_item_counters_after_tree_build();
     enum class LayoutTreeChanged : u8 {
         No,
         Yes,
@@ -2061,8 +2059,6 @@ private:
     bool m_may_have_dom_paint_facts { false };
 
     HashTable<GC::Ref<Element>> m_list_owners_pending_item_renumber;
-    HashTable<GC::Ref<Element>> m_list_owners_with_stale_item_counters;
-    bool m_stale_list_item_counter_rendered { false };
     CSS::SheetSetStyleCacheRegistry m_sheet_set_style_cache_registry;
     RefPtr<Painting::HitTestDisplayList> m_hit_test_display_list;
     // The previous recording's list, retained so cached per-paintable item ranges can be spliced into

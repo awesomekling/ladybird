@@ -68,7 +68,6 @@ private:
         BoxPresence,
         ContentSizeChangedForContainerQueries,
         HoverTargetAfterScroll,
-        ListItemCounterValueRendered,
         NavigableContainerViewportCommitted,
         NeedsLayoutTreeUpdate,
         SvgResourceReferenced,

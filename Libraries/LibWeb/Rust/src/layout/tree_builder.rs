@@ -3016,6 +3016,14 @@ const _: () = {
     assert_send::<LayoutTreeBuildWalk>();
 };
 
+impl LayoutTreeBuildWalk {
+    /// Whether the build asked for another build pass, which the outcome its host half answers
+    /// with says as well.
+    pub(crate) fn needs_another_build_pass(&self) -> bool {
+        self.0.outcome.needs_another_build_pass
+    }
+}
+
 /// Runs the layout tree build walk of the document `document_style_node` names, as a stage. The
 /// host half is left to `rust_pay_layout_tree_build`.
 ///
@@ -3398,20 +3406,17 @@ fn resolve_counters(
     owner
 }
 
-/// Tells the document the content of `owner` shows the `list-item` counter's value.
-fn report_list_item_counter_rendering(
-    state: &mut TreeBuilderState,
+/// Notes on the arena that the content of `owner` shows the `list-item` counter's value, which the
+/// reconciliation after the build reads.
+fn note_list_item_counter_rendering(
+    host: &DomTreeBuilderHost,
     owner: crate::layout::counters::CounterOwner,
     content: &crate::layout::generated_content::ResolvedContent,
 ) {
     if content.renders_list_item_counter_value {
-        state.reports.push(crate::layout::commit::FfiCommitMessage {
-            style_node: owner.element.raw(),
-            other_style_node: 0,
-            kind: crate::layout::commit::FfiCommitMessageKind::ListItemCounterValueRendered,
-            pending_face: 0,
-            pending_face_has_been_retried: false,
-        });
+        host.layout()
+            .arena()
+            .note_list_item_counter_value_rendered(owner.element);
     }
 }
 
@@ -3812,7 +3817,7 @@ fn create_pseudo_element(
             marker_slot,
             layout_node,
         );
-        report_list_item_counter_rendering(state, owner, &marker_content);
+        note_list_item_counter_rendering(host, owner, &marker_content);
         for item in marker_content.items {
             let content = if let crate::layout::generated_content::ContentItem::Text(text) = item {
                 create_generated_text_item(
@@ -3840,7 +3845,7 @@ fn create_pseudo_element(
         (layout_node_kind == NodeKind::ListItemMarkerBox).then_some((layout_node, facts.originating_list_box)),
         initial_quote_nesting_level,
     );
-    report_list_item_counter_rendering(state, owner, &resolved_content);
+    note_list_item_counter_rendering(host, owner, &resolved_content);
     state.quote_nesting_level = resolved_content.final_quote_nesting_level;
 
     if resolved_content.is_list && decision != FfiPseudoElementDecision::ContentReplacement {

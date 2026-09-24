@@ -677,6 +677,10 @@ pub struct StyleNodeTree {
     /// context's column handling reads. Every other element spans one of each, which is what the
     /// absence of an entry means.
     table_spans: HashMap<StyleNodeID, TableSpans>,
+    /// The list owners whose items were renumbered without a rebuild, because nothing they render
+    /// showed the `list-item` counter's value then. Their built counters are stale until a later
+    /// build either rebuilds them or finds one of them rendering that value.
+    list_owners_with_stale_item_counters: HashSet<StyleNodeID>,
     /// The layout tree update mark elements hold. Text nodes hold one too, in `text.marks`.
     marks: LayoutTreeUpdateMarks,
     connected_element_count: u32,
@@ -737,6 +741,7 @@ impl StyleNodeTree {
             unique_node_ids: Vec::new(),
             dom_paint_facts: HashMap::default(),
             table_spans: HashMap::default(),
+            list_owners_with_stale_item_counters: HashSet::default(),
             marks: LayoutTreeUpdateMarks::default(),
             connected_element_count: 0,
             pending_reuse: Vec::new(),
@@ -977,6 +982,8 @@ impl StyleNodeTree {
             self.set_unique_node_id_at(index, 0);
             self.dom_paint_facts.remove(&node);
             self.table_spans.remove(&node);
+            // An identity can be minted again for another element, which is no stale list owner.
+            self.list_owners_with_stale_item_counters.remove(&node);
             self.marks.clear(index as usize);
             self.parent[index as usize] = None;
             self.first_element_child[index as usize] = None;
@@ -1209,6 +1216,30 @@ impl StyleNodeTree {
         }
         let current = self.identity_capacity_bytes();
         self.record_capacity_change(memory, before, current);
+    }
+
+    // -- Stale list item counters ------------------------------------------------------------------
+
+    /// Record whether the list owner's items were renumbered without its layout tree being rebuilt.
+    pub fn set_list_owner_has_stale_item_counters(
+        &mut self,
+        node: StyleNodeID,
+        value: bool,
+        memory: &mut MemoryController,
+    ) {
+        let before = self.identity_capacity_bytes();
+        if value {
+            self.list_owners_with_stale_item_counters.insert(node);
+        } else {
+            self.list_owners_with_stale_item_counters.remove(&node);
+        }
+        let current = self.identity_capacity_bytes();
+        self.record_capacity_change(memory, before, current);
+    }
+
+    #[must_use]
+    pub fn list_owners_with_stale_item_counters(&self) -> &HashSet<StyleNodeID> {
+        &self.list_owners_with_stale_item_counters
     }
 
     /// The unique node id the document names the element by, or zero for anything else.
@@ -2117,6 +2148,7 @@ impl StyleNodeTree {
                 self.previous_sibling,
                 self.dom_paint_facts,
                 self.table_spans,
+                self.list_owners_with_stale_item_counters,
             ];
             cached [];
             nested [
