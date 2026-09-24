@@ -10,6 +10,7 @@
 #include <LibWeb/CSS/StyleEngineBridge.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/Node.h>
@@ -57,7 +58,13 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
         .prepare_for_rendering = [](void* context) { static_cast<Document*>(context)->prepare_for_rendering(); },
         .prepare_layout_tree_build = [](void* context) -> u32 { return static_cast<Document*>(context)->prepare_layout_tree_build(); },
         .finish_layout_tree_build = [](void* context, void* walk, Layout::RustFFI::NodeSlotId replaced_root) -> Layout::RustFFI::FfiLayoutTreeBuildOutcome { return static_cast<Document*>(context)->finish_layout_tree_build(walk, replaced_root); },
-        .reconcile_stale_list_item_counters_after_tree_build = [](void* context) -> bool { return static_cast<Document*>(context)->reconcile_stale_list_item_counters_after_tree_build(); },
+        .rebuild_list_owners_with_stale_item_counters = [](void* context, u32 const* list_owners, size_t count) {
+            auto& document = *static_cast<Document*>(context);
+            for (auto list_owner : ReadonlySpan<u32> { list_owners, count }) {
+                // An owner that has left the document since the frame named it renders nothing.
+                if (auto node = NodeIdentity::of_style_node(CSS::StyleNodeID { list_owner }).resolve(document))
+                    node->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::ListItemCounters);
+            } },
         .after_layout_commit = [](void* context, bool layout_tree_changed) { static_cast<Document*>(context)->after_layout_commit(layout_tree_changed ? LayoutTreeChanged::Yes : LayoutTreeChanged::No); },
         .note_full_layouts_performed = [](void* context, u64 count) { static_cast<Document*>(context)->style_invalidation_counters().relayouts_performed += count; },
         .evaluate_pending_container_queries = [](void* context) {

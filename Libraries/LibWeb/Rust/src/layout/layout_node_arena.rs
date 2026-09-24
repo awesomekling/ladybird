@@ -928,6 +928,9 @@ pub(crate) struct LayoutNodeArena {
     /// them.
     pending_rebuilt_subtree_roots: RefCell<Vec<NodeSlotId>>,
     pending_layout_tree_update_escaped_rebuild_roots: Cell<bool>,
+    /// Whether a layout tree build placed content showing the `list-item` counter's value inside a
+    /// list owner whose item counters are stale, since the reconciliation after the last build.
+    stale_list_item_counter_rendered: Cell<bool>,
     update_layout_running: Cell<bool>,
     /// Every box must be recreated by the next layout tree build; set when the tree is torn down
     /// or a build finds a box it cannot place among rebuilt roots, cleared by the full pass.
@@ -1058,6 +1061,7 @@ impl LayoutNodeArena {
             layout_root: Cell::new(NodeSlotId::INVALID),
             pending_rebuilt_subtree_roots: RefCell::new(Vec::new()),
             pending_layout_tree_update_escaped_rebuild_roots: Cell::new(false),
+            stale_list_item_counter_rendered: Cell::new(false),
             update_layout_running: Cell::new(false),
             needs_full_layout_tree_update: Cell::new(false),
             partial_layout_count: Cell::new(0),
@@ -2062,6 +2066,88 @@ impl LayoutNodeArena {
     pub(crate) fn clear_pending_rebuilt_subtree_roots(&self) {
         self.pending_rebuilt_subtree_roots.borrow_mut().clear();
         self.pending_layout_tree_update_escaped_rebuild_roots.set(false);
+    }
+
+    /// Records whether the list owner's items were renumbered without its layout tree being
+    /// rebuilt, which leaves the counters its build resolved stale.
+    pub(crate) fn set_list_owner_has_stale_item_counters(&self, list_owner: StyleNodeID, value: bool) {
+        self.with_style_engine(|engine| engine.set_list_owner_has_stale_item_counters(list_owner, value));
+    }
+
+    /// Content generated for `element` shows the `list-item` counter's value. Inside a list owner
+    /// whose item counters are stale, that value is stale as well.
+    pub(crate) fn note_list_item_counter_value_rendered(&self, element: StyleNodeID) {
+        if self.stale_list_item_counter_rendered.get() {
+            return;
+        }
+        let renders_stale_value = self.with_style_store(|engine| {
+            let tree = engine.tree();
+            let list_owners = tree.list_owners_with_stale_item_counters();
+            if list_owners.is_empty() {
+                return false;
+            }
+            // The element and its ancestor elements, up to the root of its tree.
+            let mut candidate = element;
+            loop {
+                if list_owners.contains(&candidate) {
+                    return true;
+                }
+                match tree.parent(candidate) {
+                    Some(parent) if tree.host_of(parent).is_none() && !tree.is_relation_only(parent) => {
+                        candidate = parent;
+                    }
+                    _ => return false,
+                }
+            }
+        });
+        if renders_stale_value {
+            self.stale_list_item_counter_rendered.set(true);
+        }
+    }
+
+    /// Settles the stale list owners after a layout tree build of the document `document` names,
+    /// and answers with the ones whose layout trees have to be built again. A rebuilt subtree has
+    /// re-resolved the counters of every stale owner inside it, and an owner that has left the
+    /// document renders nothing. When the build showed a stale counter value, every owner left is
+    /// rebuilt, and none of them stays stale.
+    pub(crate) fn reconcile_stale_list_item_counters_after_tree_build(
+        &self,
+        document: StyleNodeID,
+    ) -> Vec<StyleNodeID> {
+        let stale_value_rendered = self.stale_list_item_counter_rendered.replace(false);
+        if self.with_style_store(|engine| engine.tree().list_owners_with_stale_item_counters().is_empty()) {
+            return Vec::new();
+        }
+        let layout_root = self.layout_root();
+        let rebuilt_roots: Vec<StyleNodeID> = self
+            .pending_rebuilt_subtree_roots
+            .borrow()
+            .iter()
+            .filter(|&&root| self.node_is_dom_backed(root))
+            .filter_map(|&root| match root == layout_root {
+                true => Some(document),
+                false => self.node_style_node(root),
+            })
+            .collect();
+        self.with_style_engine(|engine| {
+            engine.forget_list_owners_with_stale_item_counters(|tree, list_owner| {
+                !tree.is_live(list_owner)
+                    || rebuilt_roots
+                        .iter()
+                        .any(|&root| tree.is_in_dom_subtree_of(list_owner, root, document))
+            });
+            if !stale_value_rendered {
+                return Vec::new();
+            }
+            let list_owners: Vec<StyleNodeID> = engine
+                .tree()
+                .list_owners_with_stale_item_counters()
+                .iter()
+                .copied()
+                .collect();
+            engine.forget_list_owners_with_stale_item_counters(|_, _| true);
+            list_owners
+        })
     }
 
     /// A document runs one layout update at a time; a nested request is a caller bug.
@@ -6123,6 +6209,21 @@ pub unsafe extern "C" fn layout_arena_layout_pass_is_running(arena: *mut c_void)
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
     unsafe { LayoutNodeArena::from_handle(arena) }.layout_pass_is_running()
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_list_owner_has_stale_item_counters(
+    arena: *mut c_void,
+    list_owner: u32,
+    value: bool,
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let list_owner = StyleNodeID::from_raw(list_owner).expect("a list owner has an identity");
+    // SAFETY: As above.
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_list_owner_has_stale_item_counters(list_owner, value);
 }
 
 #[unsafe(no_mangle)]

@@ -22,6 +22,7 @@ use super::tree_builder::{FfiLayoutTreeBuildOutcome, LayoutTreeBuildWalk, walk_l
 use super::viewport_propagation::FfiViewportPropagationFacts;
 use crate::abort_on_panic;
 use crate::css::ffi_support::FfiUtf16View;
+use crate::css::style::tree::StyleNodeID;
 use std::ffi::c_void;
 use std::time::Instant;
 
@@ -50,8 +51,9 @@ pub struct FfiLayoutUpdateHostCallbacks {
     /// build's viewport as the document's layout root in place of the third.
     pub finish_layout_tree_build:
         unsafe extern "C" fn(*mut c_void, *mut c_void, NodeSlotId) -> FfiLayoutTreeBuildOutcome,
-    /// True when stale list-item counters marked more of the tree for a rebuild.
-    pub reconcile_stale_list_item_counters_after_tree_build: unsafe extern "C" fn(*mut c_void) -> bool,
+    /// Marks the list owners the frame found showing stale list-item counters for a layout tree
+    /// rebuild, named by their style nodes.
+    pub rebuild_list_owners_with_stale_item_counters: unsafe extern "C" fn(*mut c_void, *const u32, usize),
     /// Refreshes what derives from committed layout; the flag says whether the tree changed.
     pub after_layout_commit: unsafe extern "C" fn(*mut c_void, bool),
     pub note_full_layouts_performed: unsafe extern "C" fn(*mut c_void, u64),
@@ -110,7 +112,7 @@ pub(crate) struct LayoutUpdateHost {
     prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
     prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
     finish_layout_tree_build: unsafe extern "C" fn(*mut c_void, *mut c_void, NodeSlotId) -> FfiLayoutTreeBuildOutcome,
-    reconcile_stale_list_item_counters_after_tree_build: unsafe extern "C" fn(*mut c_void) -> bool,
+    rebuild_list_owners_with_stale_item_counters: unsafe extern "C" fn(*mut c_void, *const u32, usize),
     after_layout_commit: unsafe extern "C" fn(*mut c_void, bool),
     note_full_layouts_performed: unsafe extern "C" fn(*mut c_void, u64),
     evaluate_pending_container_queries: unsafe extern "C" fn(*mut c_void),
@@ -130,8 +132,7 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             prepare_for_rendering: host.prepare_for_rendering,
             prepare_layout_tree_build: host.prepare_layout_tree_build,
             finish_layout_tree_build: host.finish_layout_tree_build,
-            reconcile_stale_list_item_counters_after_tree_build: host
-                .reconcile_stale_list_item_counters_after_tree_build,
+            rebuild_list_owners_with_stale_item_counters: host.rebuild_list_owners_with_stale_item_counters,
             after_layout_commit: host.after_layout_commit,
             note_full_layouts_performed: host.note_full_layouts_performed,
             evaluate_pending_container_queries: host.evaluate_pending_container_queries,
@@ -187,8 +188,14 @@ impl LayoutUpdateHost {
         outcome
     }
 
-    fn reconcile_stale_list_item_counters_after_tree_build(&self, _: &crate::stage::MainThread) -> bool {
-        unsafe { (self.reconcile_stale_list_item_counters_after_tree_build)(self.context) }
+    fn rebuild_list_owners_with_stale_item_counters(&self, _: &crate::stage::MainThread, list_owners: &[StyleNodeID]) {
+        if list_owners.is_empty() {
+            return;
+        }
+        let list_owners: Vec<u32> = list_owners.iter().map(|list_owner| list_owner.raw()).collect();
+        unsafe {
+            (self.rebuild_list_owners_with_stale_item_counters)(self.context, list_owners.as_ptr(), list_owners.len());
+        }
     }
 
     fn after_layout_commit(&self, _: &crate::stage::MainThread, layout_tree_changed: bool) {
@@ -282,19 +289,22 @@ unsafe fn arena<'a>(arena_handle: *mut c_void) -> &'a LayoutNodeArena {
 /// overlap with script.
 #[derive(Clone, Copy)]
 enum FrameJoin {
-    /// Style, then the list item renumbers and top layer changes it leaves, then the facts after
-    /// them. When the round lays out, the join readies what comes next: the tree build, or the
-    /// sources of the layout pass when no tree build comes first. Style is the document's own
-    /// loop over its elements.
+    /// The layout tree update marks of the list owners the last build found showing stale counters,
+    /// then style, then the list item renumbers and top layer changes it leaves, then the facts
+    /// after them. When the round lays out, the join readies what comes next: the tree build, or
+    /// the sources of the layout pass when no tree build comes first. Style is the document's own
+    /// loop over its elements, and a tree update mark is set on the DOM node, which widens it to
+    /// what the node's layout node and its document ask for.
     Style,
-    /// The host half of a layout tree build whose walk the frame has run: what the walk let go of
-    /// and found out, the shells and style resources of its new rows, and the retirement of the
-    /// tree a new viewport replaced, all of which are the document's C++ and GC-side objects.
-    /// Unless the build asks for another pass, the join then reconciles the list item counters
-    /// the build left stale, which live in the document's element sets, and answers with the
-    /// sources of the pass that follows. A partial relayout's build also answers with the facts
-    /// after it, since the build can resize this document's viewport through its embedding
-    /// document.
+    /// The host half of a layout tree build whose walk the frame has run, all of which is the
+    /// document's C++ and GC-side objects: the shells of the rows the walk freed and the box
+    /// presence it changed, the DOM nodes its commit messages resolve to, the shells, style
+    /// resources and generated image providers of its new rows, the retirement of the shells of
+    /// the tree a new viewport replaced, and the document paint state of the new one. When a pass
+    /// follows, the join answers with its sources, which the document reads from its root and body
+    /// elements' style and from the shells of replaced content. A partial relayout's build also
+    /// answers with the facts after it, since the build can resize this document's viewport
+    /// through its embedding document.
     BuildLayoutTree,
     /// The host half of a partial relayout boundary's commit when another boundary follows it:
     /// the host is paid its handbacks and delivered the commit messages the document applies at
@@ -304,8 +314,9 @@ enum FrameJoin {
     /// document side (selection, viewport clients, content-visibility, scroll snapping), then the
     /// container queries the commit made pending, then the facts after them.
     AfterLayoutCommit,
-    /// Whether style or layout work is still pending once the loop has run out of rounds. A loop
-    /// that stabilizes has these facts from the join that ended it already.
+    /// Whether style or layout work is still pending once the loop has run out of rounds, after the
+    /// marks a last build left, as the style join would have set them. A loop that stabilizes has
+    /// these facts from the join that ended it already.
     FinalFacts,
 }
 
@@ -343,9 +354,11 @@ impl LayoutPassSources {
     }
 }
 
-/// A tree build walk the frame has run, and the layout root the build may have replaced.
+/// A tree build walk the frame has run, the document it walked, and the layout root the build may
+/// have replaced.
 struct WalkedLayoutTreeBuild {
     walk: LayoutTreeBuildWalk,
+    document_style_node: StyleNodeID,
     replaced_layout_root: NodeSlotId,
 }
 
@@ -389,6 +402,9 @@ struct LayoutFrame<'a> {
     pass_sources: Option<LayoutPassSources>,
     /// The document style node of the tree build the style join readied.
     tree_build_document_style_node: Option<u32>,
+    /// The list owners the last build found showing stale counters, which the next join marks
+    /// for a layout tree rebuild.
+    list_owners_to_rebuild: Vec<StyleNodeID>,
 }
 
 /// The document facts together with what a join answered.
@@ -461,8 +477,19 @@ impl LayoutFrame<'_> {
             // SAFETY: The frame runs for the update the arena is in, and the style join published
             // the document's style for the build.
             walk: unsafe { walk_layout_tree_build(self.inputs.arena_handle, document_style_node) },
+            document_style_node: StyleNodeID::from_raw(document_style_node)
+                .expect("the document has a style node when it builds a layout tree"),
             replaced_layout_root,
         }
+    }
+
+    /// Settles the list owners with stale counters after a tree build, and holds on to the ones
+    /// the build found showing them for the next join to mark.
+    fn reconcile_stale_list_item_counters(&mut self, walked: &WalkedLayoutTreeBuild) {
+        debug_assert!(self.list_owners_to_rebuild.is_empty());
+        self.list_owners_to_rebuild = self
+            .arena()
+            .reconcile_stale_list_item_counters_after_tree_build(walked.document_style_node);
     }
 
     fn take_pass_sources(&mut self) -> LayoutPassSources {
@@ -482,10 +509,12 @@ impl LayoutFrame<'_> {
         while layout_pass < ORDINARY_STABILIZATION_ROUND_LIMIT + u64::from(connected_element_count) + 1 {
             layout_pass += 1;
 
+            let list_owners_to_rebuild = std::mem::take(&mut self.list_owners_to_rebuild);
             let Joined {
                 value: (element_count, round_after_style),
                 facts,
             } = self.join(FrameJoin::Style, |main_thread, host| {
+                host.rebuild_list_owners_with_stale_item_counters(main_thread, &list_owners_to_rebuild);
                 host.update_style(main_thread);
                 host.process_pending_list_item_renumbers(main_thread);
                 host.process_pending_top_layer_layout_changes(main_thread);
@@ -533,28 +562,33 @@ impl LayoutFrame<'_> {
             if needs_layout_tree_rebuild {
                 let arena_handle = self.inputs.arena_handle;
                 let walked = self.walk_layout_tree_build();
-                let pass_sources = self.join(FrameJoin::BuildLayoutTree, |main_thread, host| {
+                let needs_another_build_pass = walked.walk.needs_another_build_pass();
+                if !needs_another_build_pass {
+                    self.reconcile_stale_list_item_counters(&walked);
+                }
+                let pass_follows = !needs_another_build_pass && self.list_owners_to_rebuild.is_empty();
+                let (outcome, pass_sources) = self.join(FrameJoin::BuildLayoutTree, |main_thread, host| {
                     let outcome = host.finish_layout_tree_build(main_thread, walked);
                     // SAFETY: The frame runs for the update the arena is in.
-                    let arena = unsafe { arena(arena_handle) };
-                    arena.record_layout_tree_build(&outcome);
-                    if outcome.needs_another_build_pass {
-                        return None;
-                    }
-
-                    // The full layout below covers every boundary the build's invalidation
-                    // registered.
-                    drop(arena.take_partial_relayout_boundary_roots());
-
-                    // The reconciliation can mark the tree for another build, so it follows the
-                    // reset of the full tree update flag.
-                    arena.set_needs_full_layout_tree_update(false);
-                    self.inputs.trace.tree_build(layout_started);
-
-                    // SAFETY: As above.
-                    (!host.reconcile_stale_list_item_counters_after_tree_build(main_thread))
-                        .then(|| unsafe { LayoutPassSources::read(main_thread, arena_handle) })
+                    let pass_sources =
+                        pass_follows.then(|| unsafe { LayoutPassSources::read(main_thread, arena_handle) });
+                    (outcome, pass_sources)
                 });
+                self.arena().record_layout_tree_build(&outcome);
+                debug_assert_eq!(outcome.needs_another_build_pass, needs_another_build_pass);
+                debug_assert_eq!(outcome.needs_another_build_pass, needs_another_build_pass);
+                if needs_another_build_pass {
+                    continue;
+                }
+
+                // The full layout below covers every boundary the build's invalidation registered.
+                drop(self.arena().take_partial_relayout_boundary_roots());
+
+                // The list owners the reconciliation holds on to are marked for another build by
+                // the next style join, after the reset of the full tree update flag.
+                self.arena().set_needs_full_layout_tree_update(false);
+                self.inputs.trace.tree_build(layout_started);
+
                 let Some(pass_sources) = pass_sources else {
                     continue;
                 };
@@ -623,12 +657,16 @@ impl LayoutFrame<'_> {
             }
         }
 
+        let list_owners_to_rebuild = std::mem::take(&mut self.list_owners_to_rebuild);
         let Joined {
             value: needs_style_update_after_layout,
             facts,
-        } = self.join(FrameJoin::FinalFacts, |main_thread, host| Joined {
-            value: host.needs_style_update_after_layout(main_thread),
-            facts: host.document_facts(main_thread),
+        } = self.join(FrameJoin::FinalFacts, |main_thread, host| {
+            host.rebuild_list_owners_with_stale_item_counters(main_thread, &list_owners_to_rebuild);
+            Joined {
+                value: host.needs_style_update_after_layout(main_thread),
+                facts: host.document_facts(main_thread),
+            }
         });
         if needs_style_update_after_layout || !layout_is_up_to_date(self.arena(), &facts) {
             self.messages.stabilization_bound_failed = true;
@@ -663,28 +701,29 @@ impl LayoutFrame<'_> {
             let tree_build_started = self.inputs.trace.now();
             let arena_handle = self.inputs.arena_handle;
             let walked = self.walk_layout_tree_build();
+            let needs_another_build_pass = walked.walk.needs_another_build_pass();
+            self.reconcile_stale_list_item_counters(&walked);
+            let counters_were_stale = !self.list_owners_to_rebuild.is_empty();
+            let pass_follows = !counters_were_stale && !needs_another_build_pass;
             let Joined {
-                value: (outcome, counters_were_stale, pass_sources),
+                value: (outcome, pass_sources),
                 facts: facts_after_build,
             } = self.join(FrameJoin::BuildLayoutTree, |main_thread, host| {
                 let outcome = host.finish_layout_tree_build(main_thread, walked);
-                // SAFETY (for both uses): The frame runs for the update the arena is in.
-                unsafe { arena(arena_handle) }.record_layout_tree_build(&outcome);
-                let counters_were_stale = host.reconcile_stale_list_item_counters_after_tree_build(main_thread);
                 let facts = host.document_facts(main_thread);
-                let pass_follows = !counters_were_stale && !outcome.needs_another_build_pass;
                 Joined {
                     value: (
                         outcome,
-                        counters_were_stale,
+                        // SAFETY: The frame runs for the update the arena is in.
                         pass_follows.then(|| unsafe { LayoutPassSources::read(main_thread, arena_handle) }),
                     ),
                     facts,
                 }
             });
+            self.arena().record_layout_tree_build(&outcome);
             *facts = facts_after_build;
             *needs_layout_tree_rebuild = false;
-            if counters_were_stale || outcome.needs_another_build_pass {
+            if !pass_follows {
                 return PartialRelayout::NeedsAnotherLayoutPass;
             }
             self.pass_sources = pass_sources;
@@ -798,6 +837,7 @@ unsafe fn update_layout(
                 messages: FrameMessages::default(),
                 pass_sources: None,
                 tree_build_document_style_node: None,
+                list_owners_to_rebuild: Vec::new(),
             }
             .run()
         })

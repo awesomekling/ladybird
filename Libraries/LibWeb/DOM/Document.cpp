@@ -1039,7 +1039,6 @@ void Document::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_query_containers_needing_container_query_evaluation_after_layout);
     m_scroll_state_query_containers.visit_edges(visitor);
     visitor.visit(m_list_owners_pending_item_renumber);
-    visitor.visit(m_list_owners_with_stale_item_counters);
 
     visitor.visit(m_shared_resource_requests);
     for (auto& resource : m_css_image_resources)
@@ -2231,66 +2230,15 @@ void Document::process_pending_list_item_renumbers()
         return;
     auto pending = move(m_list_owners_pending_item_renumber);
     for (auto const& list_owner : pending) {
-        if (!list_owner->is_connected()) {
-            m_list_owners_with_stale_item_counters.remove(list_owner);
+        // An owner that has left the document gave up its identity, and its stale counters with it.
+        auto style_node = list_owner->style_node_id();
+        if (!list_owner->is_connected() || !style_node)
             continue;
-        }
-        if (list_owner->list_item_renumber_affects_rendered_content()) {
+        bool const rebuild = list_owner->list_item_renumber_affects_rendered_content();
+        if (rebuild)
             list_owner->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::ListItemCounters);
-            m_list_owners_with_stale_item_counters.remove(list_owner);
-        } else {
-            m_list_owners_with_stale_item_counters.set(list_owner);
-        }
+        Layout::RustFFI::layout_arena_set_list_owner_has_stale_item_counters(layout_node_arena().handle(), style_node.value(), !rebuild);
     }
-}
-
-void Document::did_render_list_item_counter_value(Element& element)
-{
-    if (m_stale_list_item_counter_rendered || m_list_owners_with_stale_item_counters.is_empty())
-        return;
-    for (GC::Ptr<Element> ancestor = element; ancestor; ancestor = ancestor->parent_element()) {
-        if (m_list_owners_with_stale_item_counters.contains(*ancestor)) {
-            m_stale_list_item_counter_rendered = true;
-            return;
-        }
-    }
-}
-
-bool Document::reconcile_stale_list_item_counters_after_tree_build()
-{
-    if (m_list_owners_with_stale_item_counters.is_empty()) {
-        m_stale_list_item_counter_rendered = false;
-        return false;
-    }
-
-    // A rebuilt subtree has re-resolved the counters sets of any stale owner inside it, and an owner that has left
-    // the document renders nothing.
-    HashTable<Node const*> rebuilt_dom_roots;
-    Layout::RustFFI::layout_arena_for_each_pending_rebuilt_subtree_root(
-        layout_node_arena().handle(), &rebuilt_dom_roots,
-        [](void* context, void* layout_node) {
-            if (auto const* dom_node = static_cast<Layout::Node const*>(layout_node)->dom_node())
-                static_cast<HashTable<Node const*>*>(context)->set(dom_node);
-        });
-    m_list_owners_with_stale_item_counters.remove_all_matching([&](GC::Ref<Element> const& list_owner) {
-        if (!list_owner->is_connected())
-            return true;
-        for (Node const* node = list_owner.ptr(); node; node = node->parent()) {
-            if (rebuilt_dom_roots.contains(node))
-                return true;
-        }
-        return false;
-    });
-
-    if (!m_stale_list_item_counter_rendered)
-        return false;
-    m_stale_list_item_counter_rendered = false;
-    if (m_list_owners_with_stale_item_counters.is_empty())
-        return false;
-    for (auto const& list_owner : m_list_owners_with_stale_item_counters)
-        list_owner->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::ListItemCounters);
-    m_list_owners_with_stale_item_counters.clear();
-    return true;
 }
 
 bool Document::needs_style_update_after_layout()
