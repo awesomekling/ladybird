@@ -441,8 +441,12 @@ static RequiredInvalidationAfterStyleChange apply_engine_record_demand(DOM::Elem
     return *invalidation;
 }
 
-static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Document& document, Vector<StyleEngine::PublishedStyleDelta> const& reactions)
+// `declined_rows` names the rows the previous wave declined, and returns the ones this wave declines.
+// `declined_a_row_again` says whether this wave declined one of the previous wave's again.
+static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Document& document, Vector<StyleEngine::PublishedStyleDelta> const& reactions, HashTable<StyleNodeID>& declined_rows, bool& declined_a_row_again)
 {
+    auto const rows_declined_by_previous_wave = move(declined_rows);
+    declined_rows.clear();
     // Reactions are applied in preorder, so every element's inheritance inputs are ready when it is
     // applied. What an applied element's change means for its (flat-tree) children is the
     // engine's to derive: it reads each application and plans the children as the next
@@ -690,6 +694,12 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     // The record names declarations or an environment an earlier row of this batch
                     // has since moved, and no fresh answer replaced it. The move schedules the next
                     // transaction, which asks for this element again.
+                    // A row the engine answered again over what the previous wave moved names what
+                    // the element's inputs are now: declining it twice would ask for it forever.
+                    ASSERT(!rows_declined_by_previous_wave.contains(StyleNodeID { reaction.style_node }));
+                    if (rows_declined_by_previous_wave.contains(StyleNodeID { reaction.style_node }))
+                        declined_a_row_again = true;
+                    declined_rows.set(StyleNodeID { reaction.style_node });
                     StyleEngineFFI::style_engine_native_container_effects_release(StyleEngineFFI::style_engine_take_container_effects(document.style_computer().style_engine().rust_handle(), reaction.style_node).effects);
                     for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
                         if (pseudo_element_records[kind].has_value())
@@ -999,6 +1009,7 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
     constexpr size_t max_style_update_passes = 8;
     size_t style_update_pass = 0;
     size_t style_reaction_pass = 0;
+    HashTable<StyleNodeID> declined_rows;
     while (!style_engine_reactions.is_empty()) {
         auto apply_started_at = MonotonicTime::now();
         ArmedScopeGuard record_apply_time = [&] {
@@ -1100,7 +1111,14 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
                 ++counters.style_engine_reaction_batch_runs;
                 counters.style_engine_reaction_elements += published_reaction_count;
             }
-            invalidation |= apply_style_engine_reactions(document, applicable_style_engine_reactions);
+            bool declined_a_row_again = false;
+            invalidation |= apply_style_engine_reactions(document, applicable_style_engine_reactions, declined_rows, declined_a_row_again);
+            // NB: A wave of derived reactions is not a pass of the style change, but one that declines
+            //     a row again makes no progress, and counts against the passes of the update.
+            if (declined_a_row_again && ++style_update_pass > max_style_update_passes) {
+                ++counters.style_update_pass_guard_hits;
+                break;
+            }
         }
 
         timing_counters.style_update_apply_microseconds += (MonotonicTime::now() - apply_started_at).to_truncated_microseconds();
