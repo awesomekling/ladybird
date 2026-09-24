@@ -2929,6 +2929,7 @@ pub const SUBSTITUTION_MARK_DASHED_FUNCTION: u8 = 1 << 4;
 /// One element's animation effects the host samples over its working set: the effects, in composite
 /// order, with the key each samples at, and what the sampling reads of the element.
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct FfiHostAnimationSample {
     pub style_engine: *mut c_void,
     pub style_node: u32,
@@ -3040,7 +3041,10 @@ pub unsafe extern "C" fn rust_sample_animation_effects(
         let Some(descriptions) = engine.take_element_animation_effect_descriptions(node, slot) else {
             return FfiHostAnimationSampleResult::with_outcome(FfiHostAnimationSampleOutcome::Cleared);
         };
-        let result = unsafe { sample_described_animation_effects(input, engine, node, &descriptions) };
+        let result = match input.samples_whole_stack && crate::css::style::engine_sample_check::is_checking() {
+            true => unsafe { sample_and_check_against_the_engine(input, engine, node, &descriptions) },
+            false => unsafe { sample_described_animation_effects(input, engine, node, &descriptions) },
+        };
         engine.restore_element_animation_effect_descriptions(node, slot, descriptions);
         result
     })
@@ -3250,6 +3254,277 @@ fn check_sampled_effect_selection(
             engine.element_animation_timing_rows(node, slot)
         )
     });
+}
+
+/// What the engine samples an element's animations from when it samples them itself: the effects it
+/// chose, the environments it holds and the length contexts it builds, with the overlay it composes
+/// into. The sampler reaches it through the callbacks of the input it is handed.
+struct EngineSampleRun {
+    identities: Vec<u64>,
+    generations: Vec<u64>,
+    current_keys: Vec<f64>,
+    overlay: *mut AnimatedOverlay,
+    /// The contexts for each pair of container axes a batch can ask a basis for.
+    length_contexts: [FfiAnimationLengthContexts; 4],
+    horizontal: bool,
+}
+
+unsafe extern "C" fn engine_sample_run_overlay(context: *mut c_void) -> *mut c_void {
+    unsafe { (*context.cast::<EngineSampleRun>()).overlay.cast() }
+}
+
+unsafe extern "C" fn engine_sample_run_length_contexts(
+    context: *mut c_void,
+    container_unit_mask: u8,
+    contexts: *mut FfiAnimationLengthContexts,
+) {
+    let run = unsafe { &*context.cast::<EngineSampleRun>() };
+    let (width, height) = container_relative_axes_needed(container_unit_mask, run.horizontal);
+    unsafe { *contexts = run.length_contexts[usize::from(width) | (usize::from(height) << 1)] };
+}
+
+/// The host's sample, observed: which overlay the host composed into.
+struct HostSampleCapture {
+    input: FfiHostAnimationSample,
+    overlay: *mut c_void,
+}
+
+unsafe extern "C" fn host_sample_capture_overlay(context: *mut c_void) -> *mut c_void {
+    let capture = unsafe { &mut *context.cast::<HostSampleCapture>() };
+    capture.overlay = unsafe {
+        (capture
+            .input
+            .prepare_overlay_for_mutation
+            .expect("the host makes its overlay writable"))(capture.input.callback_context)
+    };
+    capture.overlay
+}
+
+unsafe extern "C" fn host_sample_capture_length_contexts(
+    context: *mut c_void,
+    container_unit_mask: u8,
+    contexts: *mut FfiAnimationLengthContexts,
+) {
+    let capture = unsafe { &*context.cast::<HostSampleCapture>() };
+    unsafe {
+        (capture.input.length_contexts.expect("the host builds length contexts"))(
+            capture.input.callback_context,
+            container_unit_mask,
+            contexts,
+        );
+    }
+}
+
+/// Everything the engine needs to sample the element itself, or why it cannot.
+fn prepare_engine_sample(
+    input: &FfiHostAnimationSample,
+    engine: &mut crate::css::style::StyleEngine,
+    node: crate::css::style::tree::StyleNodeID,
+    descriptions: &[crate::css::style::animations::PublishedEffect],
+) -> Result<(Box<EngineSampleRun>, FfiHostAnimationSample), String> {
+    use crate::css::style::animations;
+
+    let pseudo = (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT).then_some(input.pseudo_kind);
+    let slot = animation_slot(input.pseudo_kind);
+    if engine.assigned_style_record_of(node, pseudo) != Some(input.style_record) {
+        return Err("a record the engine has moved past".into());
+    }
+    let selected = animations::select_sampled_effects(
+        engine.element_animation_timing_rows(node, slot),
+        engine.element_animation_timing_row_linear_points(node, slot),
+        engine.animation_timeline_samples(),
+    )
+    .ok_or("effect selection")?;
+    let environments = engine
+        .animation_sample_custom_property_environments(node, pseudo)
+        .map_err(|reason| format!("custom property environments: {reason}"))?;
+    let view = engine
+        .style_record_view(input.style_record)
+        .ok_or("a record with no view")?;
+    let (table, record_overlay) = (
+        view.longhand_table.cast::<c_void>().as_ptr(),
+        view.animated_overlay.cast::<AnimatedOverlay>().as_ptr(),
+    );
+    let horizontal = {
+        let contexts = engine
+            .animation_sample_length_contexts(node, pseudo, input.style_record, 0)
+            .ok_or("length contexts")?;
+        contexts.remaining.subject_inline_axis_is_horizontal
+    };
+    // One mask per pair of axes, `cqw` and `cqh`, in the order `engine_sample_run_length_contexts`
+    // indexes them.
+    let axis_masks = [0u8, 1 << 0, 1 << 1, (1 << 0) | (1 << 1)];
+    let mut length_contexts = [None; 4];
+    for (index, mask) in axis_masks.into_iter().enumerate() {
+        length_contexts[index] = engine.animation_sample_length_contexts(node, pseudo, input.style_record, mask);
+    }
+    let length_contexts = length_contexts.map(|contexts| contexts.expect("the record has a view"));
+    let parent = match pseudo {
+        Some(_) => Some(node),
+        None => engine.tree().inheritance_parent(node),
+    };
+    let inheritance_parent_style_record = parent
+        .and_then(|parent| engine.assigned_style_record_of(parent, None))
+        .unwrap_or(0);
+    let mut run = Box::new(EngineSampleRun {
+        identities: Vec::with_capacity(selected.len()),
+        generations: Vec::with_capacity(selected.len()),
+        current_keys: Vec::with_capacity(selected.len()),
+        overlay: match record_overlay.is_null() {
+            true => crate::css::animated_overlay::rust_animated_overlay_create(),
+            // What the record's composition inherited is where a sample starts from; the element's own
+            // animated values are the sample's to write again.
+            false => unsafe { crate::css::animated_overlay::rust_animated_overlay_clone_inherited(record_overlay) },
+        },
+        length_contexts,
+        horizontal,
+    });
+    for effect in selected {
+        let Some(description) = descriptions
+            .iter()
+            .find(|description| description.identity == effect.identity)
+        else {
+            continue;
+        };
+        run.identities.push(effect.identity);
+        run.generations.push(description.generation);
+        run.current_keys.push(effect.current_key);
+    }
+    let run_context = std::ptr::from_mut(&mut *run).cast();
+    let run_input = FfiHostAnimationSample {
+        identities: run.identities.as_ptr(),
+        generations: run.generations.as_ptr(),
+        current_keys: run.current_keys.as_ptr(),
+        effect_count: run.identities.len(),
+        // The run is checked, not checking.
+        samples_whole_stack: false,
+        longhand_table: table,
+        animated_overlay: run.overlay.cast(),
+        custom_property_store: environments.store,
+        base_custom_property_store: environments.base_store,
+        inheritance_custom_property_store: environments.inheritance_store,
+        element_declares_own_custom_properties: environments.element_declares_own,
+        base_custom_property_environment_is_engine: environments.base_is_engine,
+        inheritance_parent_style_record,
+        kept_length_contexts: std::ptr::null(),
+        callback_context: run_context,
+        prepare_overlay_for_mutation: Some(engine_sample_run_overlay),
+        length_contexts: Some(engine_sample_run_length_contexts),
+        ..*input
+    };
+    Ok((run, run_input))
+}
+
+/// An overlay's entries by property. Which property an entry animates is what finds it, so the
+/// order two samples wrote them in says nothing.
+fn describe_overlay(overlay: *const c_void) -> Vec<(u16, bool, bool, *const c_void)> {
+    let mut entries = unsafe { overlay.cast::<AnimatedOverlay>().as_ref() }.map_or_else(Vec::new, |overlay| {
+        overlay
+            .entries()
+            .iter()
+            .map(|entry| (entry.property, entry.inherited, entry.result_of_transition, entry.value))
+            .collect::<Vec<_>>()
+    });
+    entries.sort_by_key(|entry| entry.0);
+    entries
+}
+
+/// Whether two samples composed the same overlay, entry for entry.
+fn overlays_agree(host: *const c_void, engine: *const c_void) -> bool {
+    let (host, engine) = (describe_overlay(host), describe_overlay(engine));
+    host.len() == engine.len()
+        && host.iter().zip(&engine).all(|(host, engine)| {
+            host.0 == engine.0
+                && host.1 == engine.1
+                && host.2 == engine.2
+                && unsafe { crate::css::style_value::rust_style_value_equals(host.3.cast(), engine.3.cast()) }
+        })
+}
+
+/// Sample for the host, and check the sample against the one the engine takes from its own inputs.
+///
+/// # Safety
+/// As `sample_described_animation_effects`.
+unsafe fn sample_and_check_against_the_engine(
+    input: &FfiHostAnimationSample,
+    engine: &mut crate::css::style::StyleEngine,
+    node: crate::css::style::tree::StyleNodeID,
+    descriptions: &[crate::css::style::animations::PublishedEffect],
+) -> FfiHostAnimationSampleResult {
+    use crate::css::style::engine_sample_check;
+
+    // The engine samples first, from the overlay the element's record holds, which is the one the
+    // host is about to compose into.
+    let engine_sample = match prepare_engine_sample(input, engine, node, descriptions) {
+        Ok((run, run_input)) => {
+            let result = unsafe { sample_described_animation_effects(&run_input, engine, node, descriptions) };
+            Some((run, result))
+        }
+        Err(reason) => {
+            engine_sample_check::note_declined(&format!("whole sample: {reason}"));
+            None
+        }
+    };
+    let mut capture = Box::new(HostSampleCapture {
+        input: *input,
+        overlay: std::ptr::null_mut(),
+    });
+    let host_input = FfiHostAnimationSample {
+        callback_context: std::ptr::from_mut(&mut *capture).cast(),
+        prepare_overlay_for_mutation: Some(host_sample_capture_overlay),
+        length_contexts: Some(host_sample_capture_length_contexts),
+        ..*input
+    };
+    let result = unsafe { sample_described_animation_effects(&host_input, engine, node, descriptions) };
+    let Some((run, engine_result)) = engine_sample else {
+        return result;
+    };
+    let custom_properties = |result: &FfiHostAnimationSampleResult| {
+        (0..result.animated_custom_property_count)
+            .map(|index| unsafe { &*result.animated_custom_properties.add(index) })
+            .map(|property| (property.name_raw, property.value))
+            .collect::<Vec<_>>()
+    };
+    let (host_custom, engine_custom) = (custom_properties(&result), custom_properties(&engine_result));
+    let agrees = result.outcome == engine_result.outcome
+        && result.keyframes_inherited_non_inherited_style_groups
+            == engine_result.keyframes_inherited_non_inherited_style_groups
+        && result.depends_on_viewport_metrics == engine_result.depends_on_viewport_metrics
+        && result.font_metrics_depend_on_viewport_metrics == engine_result.font_metrics_depend_on_viewport_metrics
+        && result.uses_tree_counting_function == engine_result.uses_tree_counting_function
+        && result.substitution_marks == engine_result.substitution_marks
+        && host_custom.len() == engine_custom.len()
+        && host_custom.iter().zip(&engine_custom).all(|(host, engine)| {
+            host.0 == engine.0
+                && unsafe { crate::css::style_value::rust_style_value_equals(host.1.cast(), engine.1.cast()) }
+        })
+        && (result.outcome != FfiHostAnimationSampleOutcome::Evaluated
+            || overlays_agree(capture.overlay, run.overlay.cast()));
+    if agrees {
+        engine_sample_check::note_agreed("whole sample");
+    } else {
+        engine_sample_check::note_difference("whole sample", &|| {
+            format!(
+                "node {}: host {:?} {:?}, engine {:?} {:?}",
+                node.raw(),
+                result.outcome,
+                describe_overlay(capture.overlay)
+                    .iter()
+                    .map(|entry| entry.0)
+                    .collect::<Vec<_>>(),
+                engine_result.outcome,
+                describe_overlay(run.overlay.cast())
+                    .iter()
+                    .map(|entry| entry.0)
+                    .collect::<Vec<_>>(),
+            )
+        });
+    }
+    unsafe {
+        rust_release_animated_custom_property_results(engine_result.animated_custom_properties_storage);
+        crate::css::animated_overlay::rust_animated_overlay_free(run.overlay);
+    }
+    result
 }
 
 unsafe fn sample_described_animation_effects(
