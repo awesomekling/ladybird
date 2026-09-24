@@ -1519,6 +1519,12 @@ impl RetainedState {
                 pending.new_style_record,
                 pending.old_style_record,
             );
+            // The container-query projection took the derived record when it was noted; it
+            // follows the node back to the record it holds now, or to none.
+            match self.computed_group_sets.assigned_style_record(pending.node) {
+                Some(record) => self.set_element_container_query_inputs(pending.node, record.raw()),
+                None => self.container_query_inputs.clear(pending.node),
+            }
         }
         for (_, composition) in std::mem::take(&mut self.batch_pinned_compositions) {
             self.computed_group_sets.unpin_style_record(composition);
@@ -6186,6 +6192,63 @@ mod tests {
             engine.computed_group_sets.pseudo_style_record(first, 0),
             Some(first_pseudo)
         );
+    }
+
+    #[test]
+    fn discarded_first_record_leaves_no_container_query_inputs() {
+        let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
+        let mut raw_nodes = [0; 1];
+        engine.allocate_style_nodes(&mut raw_nodes);
+        let node = StyleNodeID::from_raw(raw_nodes[0]).unwrap();
+        let record = engine
+            .publish_computed_groups(
+                computed::ComputedStyleTarget::new(node, u8::MAX),
+                &[],
+                0,
+                0,
+                computed::ComputedMetadataInput {
+                    pseudo_element_styles: 0,
+                    dependency_flags: 0,
+                    counter_style_environment_identity: 0,
+                    animation_overlay_identity: 0,
+                    animated_overlay: HostShared::null(),
+                    animation_overlay_payloads: &[],
+                    longhand_table: HostShared::null(),
+                },
+            )
+            .style_record_identity;
+        engine
+            .engine_computed_records_pending
+            .entry(node)
+            .or_default()
+            .push(PendingEngineComputedRecord {
+                node,
+                pseudo_kind: u8::MAX,
+                old_style_record: computed::FinalStyleRecordID::NONE,
+                new_style_record: record,
+                cascade_state: None,
+                longhand_evaluations: 1,
+            });
+        // The projection noting the derived record takes it, as note_engine_computed_record does
+        // for a complete record.
+        engine.container_query_inputs.set(
+            node,
+            tree::ContainerQueryInputRow {
+                style_record: record.raw(),
+                names: Vec::new(),
+                is_size_container: true,
+                is_inline_size_container: false,
+                is_scroll_state_container: false,
+                writing_mode: 0,
+                direction: 0,
+            },
+        );
+
+        // The host never installed the node's first record, so the node goes back to none, and a
+        // container query must not read the discarded record through the projection.
+        engine.state.discard_engine_computed_records(&mut engine.counters);
+        assert_eq!(engine.computed_group_sets.assigned_style_record(node), None);
+        assert!(engine.container_query_inputs(node).is_none());
     }
 }
 
