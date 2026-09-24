@@ -649,8 +649,6 @@ pub unsafe extern "C" fn layout_arena_paintable_box_model(arena: *mut c_void, sl
     if !paintable_rows.paintable_row_is_populated(slot) {
         return FfiBoxModelMetrics::default();
     }
-    // FIXME: The committed fragment links are not copy-on-write yet, so these read the links as
-    //        they are now rather than as part of the committed snapshot.
     FfiBoxModelMetrics {
         margin: crate::painting::paintable_geometry::committed_margin(&paintable_rows, slot),
         padding: crate::painting::paintable_geometry::committed_padding(&paintable_rows, slot),
@@ -2157,8 +2155,8 @@ pub unsafe extern "C" fn layout_arena_inline_paintable_first_piece_position(
         return result;
     };
     let root_position = crate::painting::paintable_geometry::absolute_position(&paintable_rows, root);
-    let border_widths = crate::painting::paintable_geometry::committed_border(arena, inline_paintable);
-    let padding_widths = crate::painting::paintable_geometry::committed_padding(arena, inline_paintable);
+    let border_widths = crate::painting::paintable_geometry::committed_border(&paintable_rows, inline_paintable);
+    let padding_widths = crate::painting::paintable_geometry::committed_padding(&paintable_rows, inline_paintable);
     with_inline_pieces(&paintable_rows, inline_paintable, |piece, _data| {
         let border_rect = CssPixelRect::from(piece.border_box_rect);
         let rect = if piece.is_geometry_only_placeholder {
@@ -2456,11 +2454,11 @@ pub unsafe extern "C" fn layout_arena_paintable_grid_layout_json(
     context: *mut c_void,
     consume: unsafe extern "C" fn(*mut c_void, *const u8, usize),
 ) {
-    let arena = unsafe { arena_from_handle(arena) };
-    if !arena.paintable_row_is_populated(paintable) {
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
+    if !paintable_rows.paintable_row_is_populated(paintable) {
         return;
     }
-    if let Some(data) = crate::painting::paintable_geometry::committed_grid_layout_data(arena, paintable) {
+    if let Some(data) = crate::painting::paintable_geometry::committed_grid_layout_data(&paintable_rows, paintable) {
         let json = crate::painting::devtools_layout::serialize_grid_layout(&data, container_node_id);
         unsafe { consume(context, json.as_ptr(), json.len()) };
     }
@@ -2479,11 +2477,11 @@ pub unsafe extern "C" fn layout_arena_paintable_flex_layout_json(
     document_context: *mut c_void,
     resolve_node_id: unsafe extern "C" fn(*mut c_void, u32) -> i64,
 ) {
-    let arena = unsafe { arena_from_handle(arena) };
-    if !arena.paintable_row_is_populated(paintable) {
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
+    if !paintable_rows.paintable_row_is_populated(paintable) {
         return;
     }
-    if let Some(data) = crate::painting::paintable_geometry::committed_flex_layout_data(arena, paintable) {
+    if let Some(data) = crate::painting::paintable_geometry::committed_flex_layout_data(&paintable_rows, paintable) {
         // SAFETY: The host answers synchronously from the document the paintable belongs to.
         let json = crate::painting::devtools_layout::serialize_flex_layout(&data, container_node_id, |style_node| {
             let node_id = unsafe { resolve_node_id(document_context, style_node) };
@@ -2502,11 +2500,12 @@ pub unsafe extern "C" fn layout_arena_paintable_used_grid_tracks(
     paintable: NodeSlotId,
     columns: bool,
 ) -> *const c_void {
-    let arena = unsafe { arena_from_handle(arena) };
-    if !arena.paintable_row_is_populated(paintable) {
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
+    if !paintable_rows.paintable_row_is_populated(paintable) {
         return std::ptr::null();
     }
-    let Some(tracks) = crate::painting::paintable_geometry::committed_used_grid_tracks(arena, paintable) else {
+    let Some(tracks) = crate::painting::paintable_geometry::committed_used_grid_tracks(&paintable_rows, paintable)
+    else {
         return std::ptr::null();
     };
     let list = if columns { &tracks.columns } else { &tracks.rows };

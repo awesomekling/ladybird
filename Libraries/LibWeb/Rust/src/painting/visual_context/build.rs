@@ -50,7 +50,8 @@ pub(crate) fn svg_viewport_transform_of(
     layout_arena: &crate::layout::LayoutNodeArena,
     slot: NodeSlotId,
 ) -> Option<AffineTransform> {
-    crate::painting::paintable_geometry::committed_svg_viewport_transform(layout_arena, slot).map(Into::into)
+    crate::painting::paintable_geometry::committed_svg_viewport_transform(&layout_arena.paintable_rows(), slot)
+        .map(Into::into)
 }
 
 pub(crate) struct BoxFacts {

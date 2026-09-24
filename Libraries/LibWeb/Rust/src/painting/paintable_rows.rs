@@ -249,13 +249,28 @@ impl UniqueNodeIdColumn {
     }
 }
 
-#[derive(Default)]
-struct CommittedFragmentLinkSlot {
+/// The fragment link a layout slot committed. A link is shared, so a chunk a published generation
+/// still holds is copied one reference count per slot.
+#[derive(Clone, Default)]
+pub(crate) struct CommittedFragmentLinkSlot {
     layout_slot_generation: u8,
     geometry_epoch: u32,
     geometry_is_current: bool,
-    link: Option<Box<fragment_tree::FragmentLink>>,
+    link: Option<std::sync::Arc<fragment_tree::FragmentLink>>,
 }
+
+impl CommittedFragmentLinkSlot {
+    fn link_for(&self, layout_slot_generation: u8) -> Option<&fragment_tree::FragmentLink> {
+        (self.layout_slot_generation == layout_slot_generation)
+            .then_some(self.link.as_deref())
+            .flatten()
+    }
+}
+
+const _: () = {
+    const fn assert_send_and_sync<T: Send + Sync>() {}
+    assert_send_and_sync::<ColumnSnapshot<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK>>();
+};
 
 #[derive(Default)]
 pub(crate) struct PaintableRowStore {
@@ -266,6 +281,8 @@ pub(crate) struct PaintableRowStore {
     /// publish again when they are done. A row a main-side writer changes is published when the
     /// main side next reads the rows.
     published_rows: Option<ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>>,
+    /// The committed fragment links as published with `published_rows`, and released with them.
+    published_fragment_links: Option<ColumnSnapshot<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK>>,
     side_data: RefCell<Vec<PaintableSideData>>,
     row_reset_versions: Vec<u64>,
     pub(crate) row_paint_states: RefCell<Vec<RowPaintState>>,
@@ -277,7 +294,7 @@ pub(crate) struct PaintableRowStore {
     line_roots_needing_fragment_ownership: RefCell<Vec<NodeSlotId>>,
     absolute_rect_memo: RefCell<Vec<Option<(NodeSlotId, u64, crate::css::css_pixels::CssPixelRect)>>>,
     absolute_rect_memo_epoch: Cell<u64>,
-    committed_fragment_links: RefCell<Vec<CommittedFragmentLinkSlot>>,
+    committed_fragment_links: RefCell<CowColumn<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK>>,
     /// Whether the chrome listens for paintable row resets. The callback itself is in the host
     /// tables, which only the main thread reaches.
     chrome_state_listens: Cell<bool>,
@@ -305,6 +322,12 @@ impl Clone for PaintableRowsRef<'_> {
 pub(crate) trait PaintableRowsRead: Deref<Target = LayoutNodeArena> {
     fn paintable_data(&self, id: NodeSlotId) -> &PaintableData;
     fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool;
+    /// Reads the fragment link a populated row committed, from the same generation as its row.
+    fn with_committed_fragment_link<R>(
+        &self,
+        id: NodeSlotId,
+        read: impl FnOnce(Option<&fragment_tree::FragmentLink>) -> R,
+    ) -> R;
 }
 
 pub(crate) trait PaintableRowsWrite: PaintableRowsRead {
@@ -511,6 +534,14 @@ impl CommittedPaintableRows<'_> {
             .as_ref()
             .expect("committed rows are published before they are read")
     }
+
+    fn published_fragment_links(&self) -> &ColumnSnapshot<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK> {
+        self.arena
+            .paintable_rows
+            .published_fragment_links
+            .as_ref()
+            .expect("committed fragment links are published before they are read")
+    }
 }
 
 impl PaintableRowsRead for CommittedPaintableRows<'_> {
@@ -536,6 +567,19 @@ impl PaintableRowsRead for CommittedPaintableRows<'_> {
             return false;
         };
         data.slot_generation != 0 && data.slot_generation == id.generation()
+    }
+
+    fn with_committed_fragment_link<R>(
+        &self,
+        id: NodeSlotId,
+        read: impl FnOnce(Option<&fragment_tree::FragmentLink>) -> R,
+    ) -> R {
+        debug_assert!(self.paintable_row_is_populated(id));
+        read(
+            self.published_fragment_links()
+                .get(id.slot_index() as usize)
+                .and_then(|slot| slot.link.as_deref()),
+        )
     }
 }
 
@@ -573,6 +617,17 @@ impl PaintableRowsRead for MainSidePaintableRows<'_> {
             Self::DuringStage(rows) => rows.paintable_row_is_populated(id),
         }
     }
+
+    fn with_committed_fragment_link<R>(
+        &self,
+        id: NodeSlotId,
+        read: impl FnOnce(Option<&fragment_tree::FragmentLink>) -> R,
+    ) -> R {
+        match self {
+            Self::Committed(rows) => rows.with_committed_fragment_link(id, read),
+            Self::DuringStage(rows) => rows.with_committed_fragment_link(id, read),
+        }
+    }
 }
 
 impl<Arena> PaintableRowsRead for PaintableRows<Arena>
@@ -585,6 +640,14 @@ where
 
     fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool {
         PaintableRows::paintable_row_is_populated(self, id)
+    }
+
+    fn with_committed_fragment_link<R>(
+        &self,
+        id: NodeSlotId,
+        read: impl FnOnce(Option<&fragment_tree::FragmentLink>) -> R,
+    ) -> R {
+        self.arena.with_committed_fragment_link(id, read)
     }
 }
 
@@ -634,8 +697,7 @@ impl PaintableRowStore {
         self.committed_fragment_links
             .borrow()
             .get(layout_slot_index as usize)
-            .filter(|slot| slot.layout_slot_generation == layout_slot_generation)
-            .and_then(|slot| slot.link.as_deref().cloned())
+            .and_then(|slot| slot.link_for(layout_slot_generation).cloned())
     }
 
     pub(crate) fn with_committed_fragment_link<R>(
@@ -648,8 +710,7 @@ impl PaintableRowStore {
         read(
             slots
                 .get(layout_slot_index as usize)
-                .filter(|slot| slot.layout_slot_generation == layout_slot_generation)
-                .and_then(|slot| slot.link.as_deref()),
+                .and_then(|slot| slot.link_for(layout_slot_generation)),
         )
     }
 
@@ -661,23 +722,27 @@ impl PaintableRowStore {
         link: fragment_tree::FragmentLink,
     ) {
         let mut slots = self.committed_fragment_links.borrow_mut();
-        if slots.len() <= layout_slot_index as usize {
-            slots.resize_with(layout_slot_index as usize + 1, CommittedFragmentLinkSlot::default);
+        slots.grow_to(layout_slot_index as usize + 1);
+        let slot = slots
+            .get_mut(layout_slot_index as usize)
+            .expect("the column grew to hold the slot");
+        let geometry_is_current = geometry_epoch.is_some();
+        let geometry_epoch = geometry_epoch.unwrap_or_default();
+        // A link no published generation shares is overwritten in place.
+        if slot.layout_slot_generation == layout_slot_generation
+            && let Some(retained_link) = slot.link.as_mut().and_then(std::sync::Arc::get_mut)
+        {
+            *retained_link = link;
+            slot.geometry_epoch = geometry_epoch;
+            slot.geometry_is_current = geometry_is_current;
+            return;
         }
-        let slot = &mut slots[layout_slot_index as usize];
-        if slot.layout_slot_generation != layout_slot_generation {
-            *slot = CommittedFragmentLinkSlot {
-                layout_slot_generation,
-                link: Some(Box::new(link)),
-                ..Default::default()
-            };
-        } else if let Some(retained_link) = &mut slot.link {
-            **retained_link = link;
-        } else {
-            slot.link = Some(Box::new(link));
-        }
-        slot.geometry_epoch = geometry_epoch.unwrap_or_default();
-        slot.geometry_is_current = geometry_epoch.is_some();
+        *slot = CommittedFragmentLinkSlot {
+            layout_slot_generation,
+            geometry_epoch,
+            geometry_is_current,
+            link: Some(std::sync::Arc::new(link)),
+        };
     }
 
     pub(crate) fn take_committed_fragment_link(
@@ -690,13 +755,13 @@ impl PaintableRowStore {
             .get_mut(layout_slot_index as usize)
             .filter(|slot| slot.layout_slot_generation == layout_slot_generation)
             .and_then(|slot| slot.link.take())
-            .map(|link| *link)
+            .map(std::sync::Arc::unwrap_or_clone)
     }
 
-    pub(crate) fn reset_committed_fragment_link_slot(&self, layout_slot_index: u32) {
+    pub(crate) fn reset_committed_fragment_link_slot(&mut self, layout_slot_index: u32) {
         if let Some(slot) = self
             .committed_fragment_links
-            .borrow_mut()
+            .get_mut()
             .get_mut(layout_slot_index as usize)
         {
             *slot = CommittedFragmentLinkSlot::default();
@@ -1175,6 +1240,7 @@ impl LayoutNodeArena {
     /// Lets a writer that runs while nothing reads the published rows write their chunks in place.
     pub(crate) fn release_published_paintable_rows(&mut self) {
         self.paintable_rows.published_rows = None;
+        self.paintable_rows.published_fragment_links = None;
     }
 
     /// Hands the main side the rows as they are now, if a writer changed them since they were last
@@ -1184,6 +1250,20 @@ impl LayoutNodeArena {
         if store.published_rows.is_none() || store.rows.written_since_publish() {
             store.published_rows = Some(store.rows.publish());
         }
+        let links = store.committed_fragment_links.get_mut();
+        if store.published_fragment_links.is_none() || links.written_since_publish() {
+            store.published_fragment_links = Some(links.publish());
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn published_fragment_link_for_test(&self, id: NodeSlotId) -> Option<fragment_tree::FragmentLink> {
+        self.paintable_rows
+            .published_fragment_links
+            .as_ref()?
+            .get(id.slot_index() as usize)?
+            .link_for(id.generation())
+            .cloned()
     }
 
     /// The paintable rows as last published. Rows a main-side writer changed since are published

@@ -6,7 +6,6 @@
 
 use crate::css::css_pixels::CssPixels;
 use crate::css::css_pixels::{CssPixelPoint, CssPixelRect};
-use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
 use crate::layout::{
     formatting_context, grid_formatting_context, svg_formatting_context, table_formatting_context, used_values,
@@ -40,7 +39,7 @@ pub(crate) fn committed_content_size(arena: &impl PaintableRowsRead, slot: NodeS
     })
 }
 
-pub(crate) fn committed_margin(arena: &LayoutNodeArena, slot: NodeSlotId) -> FfiPixelBox {
+pub(crate) fn committed_margin(arena: &impl PaintableRowsRead, slot: NodeSlotId) -> FfiPixelBox {
     arena.with_committed_fragment_link(slot, |link| {
         link.map_or_else(FfiPixelBox::default, |link| FfiPixelBox {
             top: link.fragment.margin_top,
@@ -51,7 +50,7 @@ pub(crate) fn committed_margin(arena: &LayoutNodeArena, slot: NodeSlotId) -> Ffi
     })
 }
 
-pub(crate) fn committed_border(arena: &LayoutNodeArena, slot: NodeSlotId) -> FfiPixelBox {
+pub(crate) fn committed_border(arena: &impl PaintableRowsRead, slot: NodeSlotId) -> FfiPixelBox {
     arena.with_committed_fragment_link(slot, |link| {
         link.map_or_else(FfiPixelBox::default, |link| FfiPixelBox {
             top: link.fragment.border_top,
@@ -62,7 +61,7 @@ pub(crate) fn committed_border(arena: &LayoutNodeArena, slot: NodeSlotId) -> Ffi
     })
 }
 
-pub(crate) fn committed_padding(arena: &LayoutNodeArena, slot: NodeSlotId) -> FfiPixelBox {
+pub(crate) fn committed_padding(arena: &impl PaintableRowsRead, slot: NodeSlotId) -> FfiPixelBox {
     arena.with_committed_fragment_link(slot, |link| {
         link.map_or_else(FfiPixelBox::default, |link| FfiPixelBox {
             top: link.fragment.padding_top,
@@ -73,7 +72,7 @@ pub(crate) fn committed_padding(arena: &LayoutNodeArena, slot: NodeSlotId) -> Ff
     })
 }
 
-pub(crate) fn committed_inset(arena: &LayoutNodeArena, slot: NodeSlotId) -> FfiPixelBox {
+pub(crate) fn committed_inset(arena: &impl PaintableRowsRead, slot: NodeSlotId) -> FfiPixelBox {
     arena.with_committed_fragment_link(slot, |link| {
         link.map_or_else(FfiPixelBox::default, |link| FfiPixelBox {
             top: link.inset_top,
@@ -109,7 +108,7 @@ pub(crate) fn committed_table_column_range(arena: &impl PaintableRowsRead, slot:
 }
 
 pub(crate) fn committed_grid_layout_data(
-    arena: &LayoutNodeArena,
+    arena: &impl PaintableRowsRead,
     slot: NodeSlotId,
 ) -> Option<std::sync::Arc<grid_formatting_context::GridLayoutData>> {
     arena.with_committed_fragment_link(slot, |link| {
@@ -118,7 +117,7 @@ pub(crate) fn committed_grid_layout_data(
 }
 
 pub(crate) fn committed_flex_layout_data(
-    arena: &LayoutNodeArena,
+    arena: &impl PaintableRowsRead,
     slot: NodeSlotId,
 ) -> Option<std::sync::Arc<formatting_context::FlexLayoutData>> {
     arena.with_committed_fragment_link(slot, |link| {
@@ -127,7 +126,7 @@ pub(crate) fn committed_flex_layout_data(
 }
 
 pub(crate) fn committed_used_grid_tracks(
-    arena: &LayoutNodeArena,
+    arena: &impl PaintableRowsRead,
     slot: NodeSlotId,
 ) -> Option<std::sync::Arc<grid_formatting_context::OwnedUsedGridTracks>> {
     arena.with_committed_fragment_link(slot, |link| {
@@ -136,7 +135,7 @@ pub(crate) fn committed_used_grid_tracks(
 }
 
 pub(crate) fn committed_collapsed_table_borders(
-    arena: &LayoutNodeArena,
+    arena: &impl PaintableRowsRead,
     slot: NodeSlotId,
 ) -> Option<std::sync::Arc<table_formatting_context::OwnedCollapsedTableBorders>> {
     arena.with_committed_fragment_link(slot, |link| {
@@ -156,12 +155,12 @@ pub(crate) fn committed_svg_path(
     })
 }
 
-pub(crate) fn committed_containing_line_box_index(arena: &LayoutNodeArena, slot: NodeSlotId) -> Option<usize> {
+pub(crate) fn committed_containing_line_box_index(arena: &impl PaintableRowsRead, slot: NodeSlotId) -> Option<usize> {
     arena.with_committed_fragment_link(slot, |link| link.and_then(|link| link.containing_line_box_index))
 }
 
 pub(crate) fn committed_svg_viewport_transform(
-    arena: &LayoutNodeArena,
+    arena: &impl PaintableRowsRead,
     slot: NodeSlotId,
 ) -> Option<svg_formatting_context::FfiAffineTransform> {
     arena.with_committed_fragment_link(slot, |link| link.and_then(|link| link.fragment.svg.viewport_transform))

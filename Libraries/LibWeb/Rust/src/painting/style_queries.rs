@@ -630,7 +630,7 @@ pub(crate) fn is_floating(arena: &LayoutNodeArena, node: NodeSlotId) -> bool {
         .is_some_and(|data| node_facts::node_is_floating(data, arena.node_style_if_live(node)))
 }
 
-pub(crate) fn is_invisible_for_line_clamp(arena: &LayoutNodeArena, node: NodeSlotId) -> bool {
+pub(crate) fn is_invisible_for_line_clamp(arena: &impl PaintableRowsRead, node: NodeSlotId) -> bool {
     arena.with_committed_fragment_link(node, |link| {
         link.is_some_and(|link| link.fragment.is_invisible_for_line_clamp)
     })

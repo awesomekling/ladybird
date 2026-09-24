@@ -6944,6 +6944,38 @@ mod tests {
     }
 
     #[test]
+    fn committed_fragment_links_are_read_at_the_generation_published_with_the_rows() {
+        use crate::painting::paintable_rows::PaintableRowsRead;
+
+        let mut arena = LayoutNodeArena::new();
+        let node = arena.allocate_for_test().slot;
+        arena.populate_paintable_row(node);
+        let mut link = test_fragment_link(node);
+        link.inset_left = CssPixels::from_integer(10);
+        arena.set_committed_fragment_link(arena.data(node), link.clone(), None);
+        arena.publish_paintable_rows();
+        link.inset_left = CssPixels::from_integer(20);
+        arena.set_committed_fragment_link(arena.data(node), link, None);
+
+        let published_inset_left =
+            |arena: &LayoutNodeArena| arena.published_fragment_link_for_test(node).map(|link| link.inset_left);
+        assert_eq!(published_inset_left(&arena), Some(CssPixels::from_integer(10)));
+        assert_eq!(
+            arena
+                .paintable_rows()
+                .with_committed_fragment_link(node, |link| link.map(|link| link.inset_left)),
+            Some(CssPixels::from_integer(20))
+        );
+        assert_eq!(
+            arena
+                .committed_paintable_rows()
+                .with_committed_fragment_link(node, |link| link.map(|link| link.inset_left)),
+            Some(CssPixels::from_integer(20))
+        );
+        arena.free_subtree(node).destroy_shells_and_invoke_callbacks();
+    }
+
+    #[test]
     fn intrinsic_size_cache_validates_epoch_and_generation() {
         let mut arena = LayoutNodeArena::new();
         let caches = super::IntrinsicSizeCaches::default();

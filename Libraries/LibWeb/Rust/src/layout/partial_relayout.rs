@@ -531,7 +531,7 @@ impl LayoutNodeArena {
             return None;
         }
 
-        let padding = crate::painting::paintable_geometry::committed_padding(self, parent);
+        let padding = crate::painting::paintable_geometry::committed_padding(&self.paintable_rows(), parent);
         let content_size = crate::painting::paintable_geometry::committed_content_size(&self.paintable_rows(), parent);
         Some(AbsposLayoutInputs {
             containing_block: parent,
