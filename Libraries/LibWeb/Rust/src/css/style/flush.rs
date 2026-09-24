@@ -2808,12 +2808,30 @@ impl StyleEngineState {
                 } else {
                     reaction
                 };
+                // What the element's move damages is answered with the record, from the two
+                // records and the element's facts.
+                let record_damage = if new_style_record != 0
+                    && old_style_record != 0
+                    && old_style_record != new_style_record
+                    && self
+                        .retained
+                        .computed_group_sets
+                        .style_record_view(old_style_record)
+                        .is_some()
+                {
+                    self.retained
+                        .element_record_damage(node, false, old_style_record, new_style_record)
+                        | bridge::FfiStyleInvalidationField::EngineComputed as u32
+                } else {
+                    0
+                };
                 let style_delta = PublishedStyleDeltaRecord {
                     style_node: node.raw(),
                     match_answer: answer_cascade_input.map_or(0, |cascade_input| cascade_input.0),
                     old_style_record,
                     new_style_record,
                     damage,
+                    record_damage,
                     reaction: reaction
                         | if pseudo_inputs_may_have_changed {
                             transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED
@@ -2845,6 +2863,7 @@ impl StyleEngineState {
                             pseudo_kind: kind,
                             gap: FfiStyleDeltaGap::Computed,
                             uses_substitution: false,
+                            record_damage: 0,
                         });
                     }
                     record_deltas[published_index] = Some(node_deltas);
@@ -2877,6 +2896,7 @@ impl StyleEngineState {
                                 pseudo_kind: kind,
                                 gap: FfiStyleDeltaGap::Computed,
                                 uses_substitution: false,
+                                record_damage: 0,
                             });
                         }
                     }

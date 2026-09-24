@@ -338,7 +338,13 @@ public:
         AtInstallation,
         AfterSample,
     };
-    CSS::RequiredInvalidationAfterStyleChange apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const&, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison = EngineRecordComparison::AtInstallation);
+    // What the style engine answered a record's installation damages, for the move from the record
+    // it names. A move from any other record is compared at installation.
+    struct EngineRecordDamage {
+        CSS::StyleRecordID old_style_record;
+        u32 packed { 0 };
+    };
+    CSS::RequiredInvalidationAfterStyleChange apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const&, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison = EngineRecordComparison::AtInstallation, Optional<EngineRecordDamage> = {});
     // Compare the record an AfterSample installation left, now sampled, with the style the element
     // held before it, and apply the result to the element's layout node.
     CSS::RequiredInvalidationAfterStyleChange compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::ComputedValues const& style_before_installation, CSS::RequiredInvalidationAfterStyleChange installation_invalidation);

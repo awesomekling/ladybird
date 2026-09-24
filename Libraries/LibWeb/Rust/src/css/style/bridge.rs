@@ -94,6 +94,8 @@ pub enum FfiStyleInvalidationField {
     AnyComputedValueChanged = 1 << 20,
     CacheHit = 1 << 21,
     AffectsHitTesting = 1 << 22,
+    /// The word holds the damage the engine computed with its answer.
+    EngineComputed = 1 << 23,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -149,6 +151,10 @@ pub struct FfiStyleDelta {
     pub gap: FfiStyleDeltaGap,
     /// Substitution usage for an engine-computed element, including its pseudo-elements.
     pub uses_substitution: bool,
+    /// What moving the element from the old record to the new one damages, packed as an
+    /// `FfiStyleInvalidationField` word. Only a word with `EngineComputed` set holds an answer; the
+    /// host computes the damage of any other move itself.
+    pub record_damage: u32,
 }
 
 /// A retried engine record and the metadata needed to install it.

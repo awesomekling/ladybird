@@ -1587,20 +1587,23 @@ static bool record_damages_match(CSS::StyleComputer::ComputedStyleInvalidation c
         && x.non_inherited_property_inheritance_sources_changed == y.non_inherited_property_inheritance_sources_changed;
 }
 
-static CSS::StyleComputer::ComputedStyleInvalidation compute_required_invalidation_with_cache(CSS::StyleComputer& style_computer, CSS::ComputedValues const& old_computed_values, CSS::ComputedValues const& new_computed_values, ElementDependentInvalidationState const& old_state, DOM::AbstractElement& abstract_element, CSS::StyleEngine::StyleRecordDelta const& style_record_delta)
+static CSS::StyleComputer::ComputedStyleInvalidation compute_required_invalidation_with_cache(CSS::StyleComputer& style_computer, CSS::ComputedValues const& old_computed_values, CSS::ComputedValues const& new_computed_values, ElementDependentInvalidationState const& old_state, DOM::AbstractElement& abstract_element, CSS::StyleEngine::StyleRecordDelta const& style_record_delta, Optional<u32> answered_damage = {})
 {
     CSS::StyleComputer::ComputedStyleInvalidation result;
     if (style_record_is_unchanged(style_record_delta)) {
         ++abstract_element.document().style_invalidation_counters().style_record_property_diffs_skipped;
         return result;
     }
-    // The engine reads what the move damages from the two records and its own facts of the element.
-    auto packed = CSS::StyleEngineFFI::style_engine_element_record_damage(
-        style_computer.style_engine().rust_handle(),
-        abstract_element.element().style_node_id().value(),
-        abstract_element.pseudo_element().has_value(),
-        style_record_delta.old_style_record.value(),
-        style_record_delta.new_style_record.value());
+    // The engine reads what the move damages from the two records and its own facts of the element,
+    // and answers a record it computed with it.
+    auto packed = answered_damage.value_or_lazy_evaluated([&] {
+        return CSS::StyleEngineFFI::style_engine_element_record_damage(
+            style_computer.style_engine().rust_handle(),
+            abstract_element.element().style_node_id().value(),
+            abstract_element.pseudo_element().has_value(),
+            style_record_delta.old_style_record.value(),
+            style_record_delta.new_style_record.value());
+    });
     if (packed & to_underlying(CSS::StyleEngineFFI::FfiStyleInvalidationField::CacheHit))
         ++abstract_element.document().style_invalidation_counters().style_record_property_damage_cache_hits;
     result = decode_style_record_invalidation(packed);
@@ -2381,7 +2384,7 @@ void Element::republish_animation_name_registry()
     CSS::record_element_animation_names(*this, indexable_animation_names(*style));
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison comparison)
+CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison comparison, Optional<EngineRecordDamage> engine_record_damage)
 {
     VERIFY(parent());
     auto old_style_record = style_record_identity();
@@ -2472,7 +2475,10 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         // A record installed beneath a composition is a base the sample composes again. Comparing
         // it here would report every animated value as moved twice, once away and once back.
         if (comparison == EngineRecordComparison::AtInstallation) {
-            result = compute_required_invalidation_with_cache(style_computer, *old_computed_values, *new_computed_values, old_state, abstract_element, style_record_delta);
+            Optional<u32> answered_damage;
+            if (engine_record_damage.has_value() && engine_record_damage->old_style_record == old_style_record)
+                answered_damage = engine_record_damage->packed;
+            result = compute_required_invalidation_with_cache(style_computer, *old_computed_values, *new_computed_values, old_state, abstract_element, style_record_delta, answered_damage);
             if (result.any_computed_value_changed)
                 counters.element_computed_style_changes++;
         }

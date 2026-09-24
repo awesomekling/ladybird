@@ -2289,6 +2289,9 @@ fn read_style_transaction_outputs(
                     tag => return Err(format!("unknown style delta gap tag {tag}").into()),
                 },
                 uses_substitution: format_version >= 16 && payload.read_bool()?,
+                // The trace records no damage: a replay compares only what the engine publishes
+                // for the host to act on, and it computes the damage it answers with again.
+                record_damage: 0,
             });
         }
         emissions.push(StyleTransactionEmission {
@@ -3095,6 +3098,7 @@ mod tests {
                     pseudo_kind: u8::MAX,
                     gap: FfiStyleDeltaGap::Computed,
                     uses_substitution: true,
+                    record_damage: 0,
                 }],
             }],
             style_atoms_swept: false,

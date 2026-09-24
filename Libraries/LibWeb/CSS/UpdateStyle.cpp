@@ -187,6 +187,7 @@ static StyleEngine::PublishedStyleDelta make_materialize_gap_delta(StyleNodeID s
         .pseudo_kind = NumericLimits<u8>::max(),
         .gap = StyleEngineFFI::FfiStyleDeltaGap::Materialize,
         .uses_substitution = false,
+        .record_damage = 0,
     };
 }
 
@@ -712,7 +713,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 if (reaction.new_style_record == reaction.old_style_record && element->style_record_identity().value() != reaction.old_style_record
                     && StyleEngineFFI::style_engine_assigned_style_record(style_engine.rust_handle(), reaction.style_node, NumericLimits<u8>::max()) == element->style_record_identity().value())
                     new_style_record = element->style_record_identity();
-                invalidation = element->apply_engine_computed_style_record(new_style_record, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties, engine_record_comparison);
+                // The engine answered the record with what the move from the record it names damages.
+                Optional<DOM::Element::EngineRecordDamage> engine_record_damage;
+                if (reaction.record_damage & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::EngineComputed))
+                    engine_record_damage = DOM::Element::EngineRecordDamage { StyleRecordID { reaction.old_style_record }, reaction.record_damage };
+                invalidation = element->apply_engine_computed_style_record(new_style_record, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties, engine_record_comparison, engine_record_damage);
                 // What the row's container conditions read of its containers, recorded as the host
                 // records it for a row it computes.
                 auto container_effects = StyleEngineFFI::style_engine_take_container_effects(style_engine.rust_handle(), reaction.style_node);
@@ -750,6 +755,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         reaction.new_style_record = demand.record.style_record;
                         reaction.uses_substitution = demand.record.uses_substitution;
                         reaction.damage = StyleEngineFFI::FfiStyleDeltaDamage::Full;
+                        reaction.record_damage = 0;
                         DOM::Element::EnginePseudoElementRecords pseudo_element_records {};
                         for (size_t kind = 0; kind < array_size(demand.record.pseudo_records); ++kind) {
                             if ((demand.record.pseudo_records_present >> kind) & 1)
