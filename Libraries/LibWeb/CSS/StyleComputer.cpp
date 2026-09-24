@@ -620,11 +620,6 @@ void StyleComputer::collect_animations_into(DOM::AbstractElement abstract_elemen
         computed_properties.prepare_for_animated_post_compute_adjustments(Badge<StyleComputer> {});
         finalize_style(computed_properties, abstract_element, ComputedValuesFFI::FfiStyleFinalizationMode::AnimatedBoxType);
     }
-    // With the engine-sample check on, the engine sampled this element itself before the host did;
-    // compare what the two left.
-    ComputedValuesFFI::rust_check_sampled_style(m_style_engine.rust_handle(), abstract_element.element().style_node_id().value(),
-        pseudo_element_to_ffi(abstract_element.pseudo_element()), computed_properties.computed_longhand_table(),
-        computed_properties.animated_overlay(Badge<StyleComputer> {}));
 }
 
 void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract_element, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>> effects, ComputedStyleWorkingSet& computed_properties, ComputedValuesFFI::FfiAnimationLengthContexts const* stage_length_contexts) const

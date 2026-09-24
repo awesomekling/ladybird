@@ -3336,22 +3336,6 @@ pub unsafe extern "C" fn style_engine_build_animation_overlay_payloads(
             );
             inputs.assume_init()
         };
-        if super::engine_sample_check::is_checking() {
-            match engine.animated_font_group_inputs(node, table, overlay) {
-                None => super::engine_sample_check::note_declined("overlay font: not resolved yet"),
-                Some(engine_inputs) => {
-                    let host = super::engine_sample::describe_font_group_build_inputs(&inputs);
-                    let engine = super::engine_sample::describe_font_group_build_inputs(&engine_inputs);
-                    if host == engine {
-                        super::engine_sample_check::note_agreed("overlay font");
-                    } else {
-                        super::engine_sample_check::note_difference("overlay font", &|| {
-                            format!("node {}: host {host}, engine {engine}", node.raw())
-                        });
-                    }
-                }
-            }
-        }
         Some(inputs)
     };
     let Some(payloads) = (unsafe {
@@ -3519,34 +3503,9 @@ pub unsafe extern "C" fn style_engine_take_settled_animation_definitions(
             super::animations::has_inclusive_ancestor_with_display_none_ignoring_animations(engine, start)
         })
     };
-    let engine_identity = std::ptr::from_ref(&*engine).addr();
     let plan = engine
         .settled_animation_definitions_being_applied()
         .expect("the plan was just taken");
-    if super::engine_sample_check::is_checking() && !in_display_none_subtree {
-        let slot = match pseudo_kind {
-            u8::MAX => super::animations::ELEMENT_ANIMATION_SLOT,
-            kind => kind + 1,
-        };
-        let mut expected = Vec::new();
-        for (name_index, definition) in plan.definitions().iter().enumerate() {
-            if definition.matched_existing_index != super::animations::NO_MATCHED_ANIMATION {
-                continue;
-            }
-            match super::animations::AnimationTimingRow::for_new_css_animation(
-                definition,
-                node,
-                slot,
-                name_index as u32,
-            ) {
-                Some(row) => expected.push((name_index as u32, row)),
-                None => super::engine_sample_check::note_declined("new animation timing: a materialized timeline"),
-            }
-        }
-        if !expected.is_empty() {
-            super::engine_sample_check::expect_new_animation_rows(engine_identity, node, slot, expected);
-        }
-    }
     FfiSettledAnimationDefinitions {
         definitions: plan.definitions().as_ptr().cast(),
         count: plan.definitions().len(),

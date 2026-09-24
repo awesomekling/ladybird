@@ -2585,14 +2585,6 @@ impl StyleEngineState {
                     parent_inputs_moved.display = true;
                 }
                 let mut retry_after_ancestor = false;
-                if engine_sample_check::is_checking()
-                    && self
-                        .tree
-                        .flat_tree_parent(node)
-                        .is_some_and(|parent| self.retained.rows_sampled_in_pass.contains_key(&parent))
-                {
-                    engine_sample_check::note_taken("row over a parent sampled in the pass");
-                }
                 let awaits_sampled_parent = self.tree.flat_tree_parent(node).is_some_and(|parent| {
                     self.retained.engine_computed_records_pending.contains_key(&parent)
                         && (self.retained.computed_group_sets.adjustment_facts(parent)
