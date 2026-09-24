@@ -424,22 +424,6 @@ pub struct FfiStyleNodeSlice {
     pub count: usize,
 }
 
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiSourceSlotAssignmentView {
-    pub assignments: *const c_void,
-    pub count: usize,
-}
-
-impl Default for FfiSourceSlotAssignmentView {
-    fn default() -> Self {
-        Self {
-            assignments: std::ptr::null(),
-            count: 0,
-        }
-    }
-}
-
 impl Default for FfiStyleNodeSlice {
     fn default() -> Self {
         Self {
@@ -1102,27 +1086,6 @@ fn write_exact_cascade_publication(
 }
 
 impl StyleEngineState {
-    fn install_ffi_retained_cascade_assignments(
-        &mut self,
-        assignments: Vec<crate::css::cascaded_properties::FfiSourceSlotAssignment>,
-    ) -> FfiSourceSlotAssignmentView {
-        let bytes =
-            (assignments.capacity() * size_of::<crate::css::cascaded_properties::FfiSourceSlotAssignment>()) as u64;
-        self.host.ffi_retained_cascade_assignments = assignments;
-        self.host
-            .ffi_retained_cascade_assignments_memory
-            .resize_required_to(&mut self.retained.memory, bytes);
-        FfiSourceSlotAssignmentView {
-            assignments: self.host.ffi_retained_cascade_assignments.as_ptr().cast(),
-            count: self.host.ffi_retained_cascade_assignments.len(),
-        }
-    }
-
-    fn clear_ffi_retained_cascade_assignments(&mut self) {
-        self.host.ffi_retained_cascade_assignments = Vec::new();
-        self.host.ffi_retained_cascade_assignments_memory.shrink_to(0);
-    }
-
     fn install_ffi_style_node_query(&mut self, nodes: Vec<u32>) -> FfiStyleNodeSlice {
         let bytes = (nodes.capacity() * size_of::<u32>()) as u64;
         self.host.ffi_style_node_query = nodes;
@@ -2763,60 +2726,6 @@ pub unsafe extern "C" fn style_engine_publish_exact_cascade_state(
     publication
 }
 
-/// Seed the ordinary cascade store from a complete retained winner relation.
-///
-/// # Safety
-/// All pointers must be live and `blocks` must describe `block_count` entries. The returned
-/// assignment slice remains valid until the next mutable `style_engine_*` entry point or an
-/// explicit discard of the retained cascade assignments.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_materialize_retained_cascade_state(
-    engine: *mut c_void,
-    node: u32,
-    pseudo_kind: u8,
-    store: *mut c_void,
-    blocks: *const c_void,
-    block_count: usize,
-) -> FfiSourceSlotAssignmentView {
-    if engine.is_null() {
-        return FfiSourceSlotAssignmentView::default();
-    }
-    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    engine.clear_ffi_retained_cascade_assignments();
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return FfiSourceSlotAssignmentView::default();
-    };
-    if store.is_null() {
-        return FfiSourceSlotAssignmentView::default();
-    }
-    let blocks = if block_count == 0 {
-        &[]
-    } else {
-        unsafe {
-            std::slice::from_raw_parts(
-                blocks.cast::<crate::css::cascaded_properties::FfiCascadeBlock>(),
-                block_count,
-            )
-        }
-    };
-    let assignments = engine.materialize_retained_cascade_state(
-        super::computed::ComputedStyleTarget::new(node, pseudo_kind),
-        unsafe { &mut *store.cast::<crate::css::cascaded_properties::CascadedPropertyStore>() },
-        blocks,
-    );
-    engine.install_ffi_retained_cascade_assignments(assignments)
-}
-
-/// Discards the borrowed retained cascade source-slot assignments.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_discard_retained_cascade_assignments(engine: *mut c_void) {
-    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    engine.clear_ffi_retained_cascade_assignments();
-}
-
 #[cfg(feature = "style-recording")]
 pub unsafe fn replay_publish_exact_cascade_state(
     engine: *mut c_void,
@@ -3489,23 +3398,6 @@ pub unsafe extern "C" fn style_engine_animation_overlay_changed(
 ) -> bool {
     let engine = unsafe { &*engine.cast::<StyleEngine>() };
     engine.animation_overlay_changed(old_style_record, animated_overlay.cast())
-}
-
-/// The style groups that bake a color resolved from a style target's `currentColor`, or
-/// `u32::MAX` when the target holds no retained style to answer from.
-///
-/// # Safety
-/// `engine` must be live for this call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_current_color_dependent_group_mask(
-    engine: *const c_void,
-    node: u32,
-    pseudo_kind: u8,
-) -> u32 {
-    let engine = unsafe { &*engine.cast::<StyleEngine>() };
-    StyleNodeID::from_raw(node)
-        .and_then(|node| engine.current_color_dependent_group_mask(node, pseudo_kind))
-        .unwrap_or(u32::MAX)
 }
 
 /// What the host hands over to have an element's sampled animation overlay composed into the

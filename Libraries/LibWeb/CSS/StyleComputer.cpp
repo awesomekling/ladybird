@@ -41,7 +41,6 @@
 #include <LibWeb/CSS/CSSStyleProperties.h>
 #include <LibWeb/CSS/CSSStyleRule.h>
 #include <LibWeb/CSS/CSSTransition.h>
-#include <LibWeb/CSS/CascadedProperties.h>
 #include <LibWeb/CSS/ComputedStyleWorkingSet.h>
 #include <LibWeb/CSS/ContainerQuery.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
@@ -266,26 +265,6 @@ struct SubstitutionData {
     Vector<ComputedValuesFFI::FfiSubstitutionFunctionVisibility> function_visibilities;
 };
 
-static constexpr u8 substitution_uses_var = 1 << 0;
-static constexpr u8 substitution_uses_attr = 1 << 1;
-static constexpr u8 substitution_uses_if = 1 << 2;
-static constexpr u8 substitution_uses_inherit = 1 << 3;
-static constexpr u8 substitution_uses_custom_function = 1 << 4;
-
-class Fnv1a64 {
-public:
-    void add(u64 value)
-    {
-        m_hash ^= value;
-        m_hash *= 0x100000001b3ull;
-    }
-
-    u64 value() const { return m_hash; }
-
-private:
-    u64 m_hash { 0xcbf29ce484222325ull };
-};
-
 GC_DEFINE_ALLOCATOR(StyleComputer);
 
 // What a rule contributes, for the two rule types that carry a declaration block.
@@ -339,13 +318,6 @@ void StyleComputer::end_style_update() const
     m_style_update_ffi_media_environment.clear();
     m_style_update_media_environment.clear();
     m_style_update_document_environment.clear();
-}
-
-Parser::ValueParserFFI::FfiMediaEnvironment const* StyleComputer::cached_media_environment_for_style_update() const
-{
-    if (m_style_update_depth == 0)
-        return nullptr;
-    return m_style_update_ffi_media_environment.has_value() ? &*m_style_update_ffi_media_environment : nullptr;
 }
 
 Parser::ValueParserFFI::FfiMediaEnvironment const* StyleComputer::ensure_media_environment_for_style_update() const
@@ -703,11 +675,6 @@ Optional<Utf16String> StyleComputer::user_agent_style_sheet_source(Utf16View nam
         return Utf16String::from_utf8(svg_stylesheet_source);
     return {};
 }
-
-struct ResolvedScope {
-    GC::Ptr<DOM::Element const> root;
-    size_t proximity { NumericLimits<size_t>::max() };
-};
 
 void StyleComputer::for_each_property_expanding_shorthands(PropertyID property_id, StyleValue const& value, Function<void(PropertyID, StyleValue const&)> const& set_longhand_property)
 {
@@ -2141,39 +2108,6 @@ JsonArray StyleComputer::collect_devtools_applied_style_rules(DOM::AbstractEleme
     return entries;
 }
 
-enum class CascadeBlockKeyValueComparison : u8 {
-    ByIdentity,
-    ByValue,
-};
-
-struct CascadeBlockKey {
-    // Only presentational hints need individual values pinned in the key. Native declarations
-    // are identified by their source/version and inspected directly in Rust.
-    ReadonlySpan<StyleProperty> properties {};
-    Parser::ValueParserFFI::FfiDeclarationBlockDependencies dependencies {};
-    bool includes_custom_properties { false };
-    CascadeOrigin origin { CascadeOrigin::Author };
-    u32 author_context_index { 0 };
-    u32 layer_index { 0 };
-    bool is_inline_style { false };
-    bool bypass_pseudo_element_property_whitelist { false };
-    bool is_layered { false };
-    u64 source_identity { 0 };
-    u64 source_revision { 0 };
-    GC::Ptr<DOM::ShadowRoot const> source_shadow_root {};
-    u32 semantic_declaration_id { 0 };
-};
-
-// Serialize every declaration block the computation is allowed to read. A sharing key names a
-// freshly mapped presentational-hint value by identity and pins it for the transaction; a persistent
-// input record pins the same value but compares it by value, since mapping the same element's hint
-// again is allowed to produce a fresh object.
-struct CascadeBlockKeyDependencies {
-    bool reads_custom_properties { false };
-    bool inherits_custom_properties_explicitly { false };
-    bool reads_style_scope { false };
-};
-
 Vector<StyleProperty> StyleComputer::collect_presentational_hint_properties(DOM::AbstractElement abstract_element)
 {
     Vector<StyleProperty> properties;
@@ -2471,11 +2405,6 @@ static ComputedValuesFFI::FfiBoxTypeTransformationInput make_box_type_transforma
         parent_display.has_value() ? to_ffi_display(*parent_display) : ComputedValuesFFI::FfiDisplay {});
 }
 
-struct RetainedBoxTypeParentDisplay {
-    bool available { false };
-    Optional<Display> display;
-};
-
 static ComputedValuesFFI::FfiInputLineHeightMetrics input_line_height_metrics(ComputedStyleWorkingSet const& style, DOM::AbstractElement abstract_element, bool should_measure)
 {
     ComputedValuesFFI::FfiInputLineHeightMetrics line_height_metrics {};
@@ -2539,11 +2468,6 @@ NonnullRefPtr<ComputedValues const> StyleComputer::create_document_style() const
     };
     auto computed_values = CSS::ComputedValues::create(*computed_properties, document(), document().style_scope(), move(color_resolution_context));
     return computed_values;
-}
-
-StyleEngine::StyleRecordDelta StyleComputer::publish_computed_style_inputs(DOM::AbstractElement abstract_element, ComputedValues const& values) const
-{
-    return record_computed_style_inputs(Optional<DOM::AbstractElement> { abstract_element }, values, abstract_element.element().style_node_id());
 }
 
 StyleComputer::SampledAnimationOverlayPublication StyleComputer::publish_sampled_animation_overlay(DOM::AbstractElement abstract_element, ComputedStyleWorkingSet& style, StyleRecordID style_record, Function<void(StyleEngineFFI::FfiAnimationInvalidation const&)> const& before_publication) const
@@ -2651,95 +2575,6 @@ StyleEngine::StyleRecordDelta StyleComputer::record_computed_style_inputs(Option
     auto pseudo_kind = pseudo_element_to_ffi(abstract_element.has_value() ? abstract_element->pseudo_element() : Optional<CSS::PseudoElement> {});
     auto publication = const_cast<StyleComputer&>(*this).style_engine().publish_computed_groups(style_node_id, pseudo_kind, payloads, ComputedValues::inherited_style_group_count, custom_property_environment ? custom_property_environment->identity() : 0, false, counter_style_environment_identity, animation_overlay_identity, animated_properties ? animated_properties->overlay() : nullptr, animated_properties ? animation_overlay_payloads.span() : ReadonlySpan<void const*> {}, base.computed_longhand_table(), custom_property_environment ? custom_property_environment->rust_store() : nullptr);
     return publication;
-}
-
-NonnullRefPtr<ComputedValues const> StyleComputer::build_computed_values(ComputedStyleWorkingSet& computed_properties, DOM::AbstractElement abstract_element, StyleScope const& style_scope, ComputedValues const* previous_base, u32 groups_to_apply) const
-{
-    VERIFY(computation_context_cache_is_empty());
-    ScopeGuard clear_computation_context_cache = [&] { clear_computation_context_caches(); };
-
-    auto const& computation_context = get_computation_context_for_property(PropertyID::Color, computed_properties, abstract_element);
-    ColorResolutionContext color_resolution_context {
-        .color_scheme = computation_context.color_scheme,
-        .current_color = InitialValues::color(),
-        .current_color_style_value_data = computed_properties.effective_property_data(PropertyID::Color),
-        .calculation_resolution_context = { .length_resolution_context = computation_context.length_resolution_context },
-    };
-    // NB: Sharing group payloads with the parent costs almost nothing for groups that already
-    //     share the leaked defaults (a pointer compare each) and lets children reference their
-    //     parent's payloads for everything they inherit unchanged, including values that can
-    //     never match the process-wide defaults, like scope-resolved counter styles.
-    auto adopt_group_payloads = [&](ComputedValues const& style) {
-        if (auto parent = abstract_element.element_to_inherit_style_from(); parent.has_value()) {
-            if (auto parent_values = parent->computed_style())
-                style.adopt_identical_group_payloads(*parent_values);
-        }
-        // NB: Siblings computing the same style never see each other's payloads through the parent:
-        //     each one's non-default groups are fresh allocations that agree on every value. The last
-        //     style built is offered as a second donor, so a run of alike elements collapses onto one
-        //     set of payloads - and one style record - instead of minting per element.
-        if (m_last_built_computed_values && m_last_built_computed_values != &style)
-            style.adopt_identical_group_payloads(*m_last_built_computed_values);
-        m_last_built_computed_values = &style;
-    };
-
-    auto const inherit_parent = abstract_element.element_to_inherit_style_from();
-    auto inherit_parent_style = inherit_parent.has_value() ? inherit_parent->computed_style() : ComputedStyleRecordView {};
-    auto const* inherit_parent_values = inherit_parent_style ? &*inherit_parent_style : nullptr;
-
-    auto animated_properties = computed_properties.animated_properties_snapshot();
-    RefPtr<ComputedStyleWorkingSet> unanimated_properties;
-    auto* base_properties = &computed_properties;
-    if (animated_properties && !animated_properties->is_empty()) {
-        unanimated_properties = computed_properties.copy_without_animations();
-        base_properties = unanimated_properties.ptr();
-    }
-    bool can_rebuild_selected_groups = previous_base
-        && groups_to_apply != ComputedValues::all_style_groups;
-    auto base_values = can_rebuild_selected_groups
-        ? ComputedValues::create_over_base(*base_properties, document(), style_scope, color_resolution_context, *previous_base, groups_to_apply)
-        : ComputedValues::create(*base_properties, document(), style_scope, color_resolution_context, inherit_parent_values);
-    auto& counters = document().style_invalidation_counters();
-    if (can_rebuild_selected_groups)
-        counters.base_style_partial_builds++;
-    else
-        counters.base_style_full_builds++;
-    if (!animated_properties || animated_properties->is_empty()) {
-        adopt_group_payloads(*base_values);
-        return base_values;
-    }
-
-    auto animated_values = can_rebuild_selected_groups
-        ? ComputedValues::create_over_base(computed_properties, document(), style_scope, move(color_resolution_context), *base_values, groups_to_apply)
-        : ComputedValues::create(computed_properties, document(), style_scope, move(color_resolution_context), inherit_parent_values);
-    ComputedValues::Builder builder(*animated_values);
-    builder->set_base_values(move(base_values));
-    builder->set_animated_properties(animated_properties.ptr());
-    auto style = move(builder).build();
-    adopt_group_payloads(*style);
-    return style;
-}
-
-Optional<u32> StyleComputer::animated_overlay_style_groups(AnimatedProperties const& animated_properties, DOM::AbstractElement abstract_element) const
-{
-    u32 groups = 0;
-    for (auto const& entry : animated_properties.entries()) {
-        auto property_id = static_cast<PropertyID>(entry.property);
-        auto group = ComputedValues::style_group_of_property(property_id);
-        if (!group.has_value())
-            return {};
-        groups |= 1u << to_underlying(group.value());
-        if (property_id != PropertyID::Color)
-            continue;
-        auto style_node_id = abstract_element.element().style_node_id();
-        if (style_node_id == 0)
-            return {};
-        auto current_color_dependent_groups = m_style_engine.current_color_dependent_style_groups(style_node_id, pseudo_element_to_ffi(abstract_element.pseudo_element()));
-        if (!current_color_dependent_groups.has_value())
-            return {};
-        groups |= *current_color_dependent_groups;
-    }
-    return groups;
 }
 
 NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::reconstruct_computed_properties(ComputedValues const& computed_values) const

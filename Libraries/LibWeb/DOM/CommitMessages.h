@@ -50,8 +50,6 @@ public:
     // parent and only the render side knows where the escalation stops.
     void note_needs_layout_tree_update(NodeIdentity, SetNeedsLayoutTreeUpdateReason);
 
-    // Substitution dependencies produced by a finished style computation.
-    void note_style_substitution_usage(NodeIdentity, u8 usage);
     void note_style_query_custom_property_reference(NodeIdentity, Optional<CSS::PseudoElement>, Utf16FlyString);
     void note_style_container_query_dependencies(NodeIdentity, u8 dependencies);
     void note_style_query_container_usage(NodeIdentity, u8 usage);
@@ -74,7 +72,6 @@ private:
         NavigableContainerViewportCommitted,
         NeedsLayoutTreeUpdate,
         SvgResourceReferenced,
-        StyleSubstitutionUsage,
         StyleQueryCustomPropertyReference,
         StyleContainerQueryDependencies,
         StyleQueryContainerUsage,
@@ -92,7 +89,6 @@ private:
         Kind kind;
         bool has_layout_box { false };
         bool has_committed_box { false };
-        u8 style_substitution_usage { 0 };
         u8 style_container_query_dependencies { 0 };
         u8 style_query_container_usage { 0 };
         // Only the layout tree update trace reads this.

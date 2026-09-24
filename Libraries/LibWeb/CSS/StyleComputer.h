@@ -87,13 +87,11 @@ public:
 
     void set_viewport_rect(Badge<DOM::Document>, CSSPixelRect const& viewport_rect) { m_viewport_rect = viewport_rect; }
     [[nodiscard]] CSSPixelRect const& viewport_rect_for_style_environment() const { return m_viewport_rect; }
+    // Moves with the viewport rect the environment resolves viewport units against. The key a shared
+    // style record is looked up under names it.
+    void bump_viewport_environment_version() { ++m_viewport_environment_version; }
     [[nodiscard]] Length::FontMetrics const& root_element_font_metrics() const { return m_root_element_font_metrics; }
     [[nodiscard]] bool root_element_font_metrics_depend_on_viewport_metrics() const { return m_root_element_font_metrics_depend_on_viewport_metrics; }
-    // Moves with the viewport rect the environment resolves viewport units against. A style input
-    // record names it apart from the environment version, so that a computation that read no
-    // viewport metric survives a resize.
-    [[nodiscard]] u64 viewport_environment_version() const { return m_viewport_environment_version; }
-    void bump_viewport_environment_version() { ++m_viewport_environment_version; }
     // The environment as the sharing caches name it: the document's version and the viewport's.
     [[nodiscard]] u64 style_environment_version_for_sharing() const;
 
@@ -129,9 +127,6 @@ public:
         bool any_computed_value_changed { false };
     };
 
-    // Publish a computed style built outside the ordinary cascade path, such as an inherited-group
-    // swap, so StyleEngine's final node-to-style relation remains authoritative.
-    [[nodiscard]] StyleEngine::StyleRecordDelta publish_computed_style_inputs(DOM::AbstractElement, ComputedValues const&) const;
     // Has the engine compose a sampled overlay over the record it was sampled on, compares it with
     // that record, and publishes it. `before_publication` sees the comparison first.
     struct SampledAnimationOverlayPublication {
@@ -190,7 +185,6 @@ public:
     static NonnullRefPtr<StyleValue const> compute_font_weight(NonnullRefPtr<StyleValue const> const& absolutized_value, Optional<DOM::AbstractElement> const& inheritance_parent);
     static NonnullRefPtr<StyleValue const> compute_font_width(NonnullRefPtr<StyleValue const> const& absolutized_value);
 
-    [[nodiscard]] NonnullRefPtr<ComputedValues const> build_computed_values(ComputedStyleWorkingSet&, DOM::AbstractElement, StyleScope const&, ComputedValues const* previous_base = nullptr, u32 groups_to_apply = ComputedValues::all_style_groups) const;
     [[nodiscard]] NonnullRefPtr<ComputedStyleWorkingSet> reconstruct_computed_properties(ComputedValues const&) const;
     void apply_animated_properties_to_reconstruction(ComputedStyleWorkingSet&, ComputedValues const&) const;
     [[nodiscard]] NonnullRefPtr<ComputedStyleWorkingSet> reconstruct_computed_properties_for_animation(StyleRecordID) const;
@@ -212,10 +206,6 @@ private:
     virtual void visit_edges(Visitor&) override;
 
     [[nodiscard]] StyleEngine::StyleRecordDelta record_computed_style_inputs(Optional<DOM::AbstractElement>, ComputedValues const&, StyleNodeID style_node_id) const;
-    [[nodiscard]] Parser::ValueParserFFI::FfiMediaEnvironment const* cached_media_environment_for_style_update() const;
-
-private:
-    [[nodiscard]] Optional<u32> animated_overlay_style_groups(AnimatedProperties const&, DOM::AbstractElement) const;
 
     void collect_animation_effects_into(DOM::AbstractElement, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>, ComputedStyleWorkingSet&, ComputedValuesFFI::FfiAnimationLengthContexts const*) const;
     // Says whether publishing moved the element's custom-property environment. An element whose
@@ -282,15 +272,11 @@ private:
     mutable Optional<MediaEnvironmentSnapshot> m_style_update_media_environment;
     mutable Optional<Parser::ValueParserFFI::FfiMediaEnvironment> m_style_update_ffi_media_environment;
     mutable Optional<DocumentEnvironmentSnapshot> m_style_update_document_environment;
-    // A row's longhand evaluations are document-visible state, so they are added up while the
-    // update runs and handed to the document once it is over rather than one row at a time.
-    // The style most recently built, kept as a payload donor: a run of elements computing the same
-    // style shares group payloads through it, which no parent or previous-style adoption can do.
-    mutable RefPtr<ComputedValues const> m_last_built_computed_values;
 
-    u64 m_viewport_environment_version { 0 };
     // The environments the style engine resolved, by the identity it minted, materialized once.
     mutable HashMap<u64, NonnullRefPtr<CustomPropertyData const>> m_engine_custom_property_environments;
+
+    u64 m_viewport_environment_version { 0 };
 
     enum class ProvisionalTransitionAction : u8 {
         None,

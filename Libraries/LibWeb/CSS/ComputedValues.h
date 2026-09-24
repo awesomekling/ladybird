@@ -775,7 +775,6 @@ public:
     // warrants that every property outside `groups_to_apply` computes to the same value in the
     // given style as it did when `base` was built.
     static constexpr u32 all_style_groups = (1u << to_underlying(StyleGroupIndex::Count)) - 1;
-    static NonnullRefPtr<ComputedValues const> create_over_base(ComputedStyleWorkingSet const&, DOM::Document const&, StyleScope const&, ColorResolutionContext, ComputedValues const& base, u32 groups_to_apply);
 
     // The style group a longhand's computed value lives in, derived from the field descriptors the
     // group payloads build from, plus explicit bindings for the bespoke-built groups. A longhand
@@ -814,12 +813,6 @@ public:
     };
     static Statistics const& statistics() { return s_statistics; }
 
-    // Shares group payloads with `previous` wherever the values compare equal. This changes no
-    // observable value, only the identity of the backing payloads, so it is safe on an otherwise
-    // immutable ComputedValues. It makes pointer-based diffing hit on the next restyle and lets a
-    // restyled element keep sharing storage across style generations. Returns true when every
-    // group ends up sharing its payload with `previous`.
-    bool adopt_identical_group_payloads(ComputedValues const& previous) const;
     // The same question answered straight from two style records' group payload arrays, so a caller
     // that only wants the answer does not have to materialize a ComputedValues for either record.
     static bool layout_affecting_group_payloads_differ(void const* const* a, void const* const* b);
@@ -860,12 +853,6 @@ public:
     ReadonlyBytes property_importance_bitmap() const LIFETIME_BOUND { return m_property_important.bytes(); }
     ReadonlyBytes property_inheritance_bitmap() const LIFETIME_BOUND { return m_property_inherited.bytes(); }
 
-    // True when every inherited longhand took its value by inheritance and no other longhand did:
-    // the element's cascade declared nothing that survives into its inherited half, and nothing
-    // explicitly inherited a property that does not inherit on its own. Such an element's inherited
-    // half is, by construction, exactly what its parent's inherited half was when this style was
-    // computed.
-    bool property_inheritance_is_standard() const;
     bool depends_on_viewport_metrics() const { return m_depends_on_viewport_metrics; }
     bool font_metrics_depend_on_viewport_metrics() const { return m_font_metrics_depend_on_viewport_metrics; }
     bool in_display_none_subtree() const { return m_in_display_none_subtree; }
@@ -874,7 +861,6 @@ public:
     bool has_pseudo_element_style(PseudoElement pseudo_element) const { return m_pseudo_element_styles & (1ull << to_underlying(pseudo_element)); }
     u64 pseudo_element_style_mask() const { return m_pseudo_element_styles; }
     ReadonlySpan<ComputedValuesFFI::FfiTableInheritanceDependentValue const> inheritance_dependent_specified_values() const { return m_inheritance_dependent_specified_values; }
-    RefPtr<StyleValue const> raw_cascaded_font_size() const;
 
     // The drive's frozen computed longhand table (a Rust ComputedLonghandTable), or null when
     // this style holds only a borrowed span or no table at all.
@@ -1829,11 +1815,6 @@ public:
     void set_highlight_color_is_current_color(bool value) { m_values.m_highlight_color_is_current_color = value; }
     void set_pseudo_element_styles(u64 value) { m_values.m_pseudo_element_styles = value; }
     void set_computed_longhand_table(void const* table) { m_values.adopt_computed_longhand_table(table); }
-    void set_base_values(NonnullRefPtr<ComputedValues const> value)
-    {
-        m_values.m_base_values = move(value);
-        m_values.m_borrowed_base_values = nullptr;
-    }
     void set_animated_properties(AnimatedProperties const*);
 
     // Rust-built payloads arrive in StyleGroupIndex order carrying this reference.

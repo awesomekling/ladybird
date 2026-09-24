@@ -677,42 +677,6 @@ void const* style_group_default_payload(size_t group_index)
     return default_payloads[group_index];
 }
 
-bool ComputedValues::property_inheritance_is_standard() const
-{
-    static auto const standard_inheritance_bitmap = [] {
-        AK::FixedBitmap<number_of_longhand_properties> bitmap { false };
-        for (auto i = to_underlying(first_longhand_property_id); i <= to_underlying(last_longhand_property_id); ++i) {
-            auto property_id = static_cast<PropertyID>(i);
-            if (is_inherited_property(property_id))
-                bitmap.set(property_bitmap_index(property_id), true);
-        }
-        return bitmap;
-    }();
-    return m_property_inherited == standard_inheritance_bitmap;
-}
-
-bool ComputedValues::adopt_identical_group_payloads(ComputedValues const& previous) const
-{
-    bool all_shared = true;
-    auto adopt = [&]<typename T>(StyleStructRef<T> const& mine, StyleStructRef<T> const& theirs) {
-        if (mine.ptr_equals(theirs))
-            return;
-        if (mine == theirs) {
-            // StyleEngine retains the previously published payload independently, so adopting an
-            // equal canonical payload changes this projection without moving the shared record.
-            const_cast<StyleStructRef<T>&>(mine) = theirs;
-            return;
-        }
-        all_shared = false;
-    };
-#define LIBWEB_ADOPT_STYLE_GROUP(name, path, sharing_name, affects_layout) adopt(path, previous.path);
-    LIBWEB_ENUMERATE_COMPUTED_VALUE_STYLE_GROUPS(LIBWEB_ADOPT_STYLE_GROUP)
-#undef LIBWEB_ADOPT_STYLE_GROUP
-    if (all_shared)
-        adopt_identical_computed_longhand_table(previous);
-    return all_shared;
-}
-
 // The same canonicalization for the computed longhand table: when this style's table names
 // value-equal data throughout, take the previous style's table so the next publication interns
 // the same pointers and keeps the style-record identity, exactly like adopted group payloads do.
@@ -1476,11 +1440,6 @@ NonnullRefPtr<ComputedValues const> ComputedValues::create(ComputedStyleWorkingS
     return create_internal(computed_style, document, style_scope, move(color_resolution_context), inherit_parent, nullptr, all_style_groups);
 }
 
-NonnullRefPtr<ComputedValues const> ComputedValues::create_over_base(ComputedStyleWorkingSet const& computed_style, DOM::Document const& document, StyleScope const& style_scope, ColorResolutionContext color_resolution_context, ComputedValues const& base, u32 groups_to_apply)
-{
-    return create_internal(computed_style, document, style_scope, move(color_resolution_context), nullptr, &base, groups_to_apply);
-}
-
 NonnullRefPtr<ComputedValues const> ComputedValues::create_internal(ComputedStyleWorkingSet const& computed_style, DOM::Document const& document, StyleScope const& style_scope, ColorResolutionContext color_resolution_context, ComputedValues const* inherit_parent, ComputedValues const* base, u32 groups_to_apply)
 {
     // A group outside `groups_to_apply` keeps the base's payload: its build is skipped and it counts
@@ -1718,17 +1677,6 @@ RefPtr<StyleValue const> ComputedValues::color_style_value() const
         return style_value_from_handle(PropertyID::Color, handle);
     }
     return computed_style_value(PropertyID::Color);
-}
-
-RefPtr<StyleValue const> ComputedValues::raw_cascaded_font_size() const
-{
-    if (!m_computed_longhand_table)
-        return {};
-    auto const* data = ComputedValuesFFI::rust_computed_longhand_table_raw_cascaded_font_size(
-        static_cast<ComputedValuesFFI::ComputedLonghandTable const*>(m_computed_longhand_table));
-    if (!data)
-        return {};
-    return StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(static_cast<StyleValueFFI::StyleValueData const*>(data)));
 }
 
 RefPtr<StyleValue const> ComputedValues::background_color_style_value() const
