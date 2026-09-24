@@ -40,8 +40,8 @@ pub(super) struct ExactCascadeContext {
 /// for the values. The viewport-dependence bit matters even when today's metrics agree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) struct RootFontInputs {
-    metrics: [u64; 5],
-    depends_on_viewport: bool,
+    pub(super) metrics: [u64; 5],
+    pub(super) depends_on_viewport: bool,
 }
 
 /// An element's old and new style records.
@@ -2851,8 +2851,13 @@ impl RetainedState {
     }
 
     fn root_font_inputs_from_record(&self, record: computed::FinalStyleRecordID) -> Option<RootFontInputs> {
+        self.root_font_inputs_from_raw_record(record.raw())
+    }
+
+    /// The font metrics a `rem` resolves against when the document element holds `record`.
+    pub(super) fn root_font_inputs_from_raw_record(&self, record: u64) -> Option<RootFontInputs> {
         use crate::css::computed_value_types::STYLE_GROUP_INDEX_FONT;
-        let view = self.computed_group_sets.style_record_view(record.raw())?;
+        let view = self.computed_group_sets.style_record_view(record)?;
         let font = unsafe {
             view.payloads[STYLE_GROUP_INDEX_FONT]
                 .cast::<crate::css::computed_value_types::FontValues>()

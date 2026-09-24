@@ -1380,9 +1380,9 @@ impl RetainedState {
         &self.animation_timeline_samples
     }
 
-    /// Record the font metrics a `rem` resolves against. Published at every one of the host's
-    /// writes, since the host refreshes them while the document element is computed and a style
-    /// update can therefore cross one.
+    /// Record the font metrics a `rem` resolves against: the host's defaults before the document
+    /// element has style, and then the ones of each record the host installs on it, which a style
+    /// update can cross.
     pub fn set_root_element_font_metrics(&mut self, words: &[u64], depends_on_viewport_metrics: bool) {
         self.root_element_font_metrics =
             animations::RootElementFontMetrics::from_words(words, depends_on_viewport_metrics);
@@ -2204,6 +2204,15 @@ impl StyleEngineState {
                     .display
                 });
             self.host.held_style_record_displays.insert(node, display);
+            // A `rem` resolves against the font metrics of the record the document element holds.
+            if self.retained.computed_group_sets.adjustment_facts(node)
+                & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT
+                != 0
+                && let Some(inputs) = self.retained.root_font_inputs_from_raw_record(style_record)
+            {
+                self.retained
+                    .set_root_element_font_metrics(&inputs.metrics, inputs.depends_on_viewport);
+            }
         }
         if style_record == 0
             && self.retained.computed_group_sets.adjustment_facts(node)

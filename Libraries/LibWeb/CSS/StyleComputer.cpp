@@ -2021,9 +2021,10 @@ void StyleComputer::sweep_custom_property_environments() const
 
 void StyleComputer::update_root_element_font_metrics(ComputedValues const& values)
 {
-    set_root_element_font_metrics(
-        Length::FontMetrics { values.font_size(), values.font_list().first_available_font().pixel_metrics(), values.line_height() },
-        values.font_metrics_depend_on_viewport_metrics());
+    // NB: The style engine reads the metrics from the record the document element holds when it is
+    //     installed, so only the host's copy is refreshed here.
+    m_root_element_font_metrics = Length::FontMetrics { values.font_size(), values.font_list().first_available_font().pixel_metrics(), values.line_height() };
+    m_root_element_font_metrics_depend_on_viewport_metrics = values.font_metrics_depend_on_viewport_metrics();
 }
 
 void StyleComputer::set_root_element_font_metrics(Length::FontMetrics const& metrics, bool depends_on_viewport_metrics) const
