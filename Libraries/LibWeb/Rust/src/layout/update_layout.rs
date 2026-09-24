@@ -59,9 +59,8 @@ pub struct FfiLayoutUpdateHostCallbacks {
     /// Marks the list owners the frame found showing stale list-item counters for a layout tree
     /// rebuild, named by their style nodes.
     pub rebuild_list_owners_with_stale_item_counters: unsafe extern "C" fn(*mut c_void, *const u32, usize),
-    /// Refreshes what derives from committed layout on the document side; the flag says whether
-    /// the tree changed.
-    pub after_layout_commit: unsafe extern "C" fn(*mut c_void, bool),
+    /// Refreshes what derives from committed layout on the document side.
+    pub after_layout_commit: unsafe extern "C" fn(*mut c_void),
     /// Applies what the frame's layout commits leave for the document once the frame is over.
     pub apply_layout_commit_effects: unsafe extern "C" fn(*mut c_void, *const FfiLayoutCommitEffects),
     pub note_full_layouts_performed: unsafe extern "C" fn(*mut c_void, u64),
@@ -96,6 +95,9 @@ pub struct FfiLayoutCommitEffects {
     /// Whether a layout pass committed at all. A commit invalidates the document's display list and
     /// hit test list, asks for a repaint, and has the scroll containers resnap.
     pub layout_committed: bool,
+    /// Whether a commit changed the layout tree, so the document's viewport clients are told the
+    /// viewport rect for the new boxes to know whether they are visible.
+    pub layout_tree_changed: bool,
     /// Whether the boxes with `content-visibility: auto` were collected again, after a commit that
     /// changed the tree, and which ones they are.
     pub boxes_with_auto_content_visibility_collected: bool,
@@ -154,7 +156,7 @@ pub(crate) struct LayoutUpdateHost {
     prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
     finish_layout_tree_build: unsafe extern "C" fn(*mut c_void, *mut c_void, NodeSlotId) -> FfiLayoutTreeBuildOutcome,
     rebuild_list_owners_with_stale_item_counters: unsafe extern "C" fn(*mut c_void, *const u32, usize),
-    after_layout_commit: unsafe extern "C" fn(*mut c_void, bool),
+    after_layout_commit: unsafe extern "C" fn(*mut c_void),
     apply_layout_commit_effects: unsafe extern "C" fn(*mut c_void, *const FfiLayoutCommitEffects),
     note_full_layouts_performed: unsafe extern "C" fn(*mut c_void, u64),
     evaluate_pending_container_queries: unsafe extern "C" fn(*mut c_void),
@@ -246,8 +248,8 @@ impl LayoutUpdateHost {
         }
     }
 
-    fn after_layout_commit(&self, _: &crate::stage::MainThread, layout_tree_changed: bool) {
-        unsafe { (self.after_layout_commit)(self.context, layout_tree_changed) }
+    fn after_layout_commit(&self, _: &crate::stage::MainThread) {
+        unsafe { (self.after_layout_commit)(self.context) }
     }
 
     fn apply_layout_commit_effects(&self, _: &crate::stage::MainThread, effects: &FfiLayoutCommitEffects) {
@@ -362,10 +364,9 @@ enum FrameJoin {
     /// them, in commit order, and of the last pass's commit, then what derives from committed
     /// layout on the document side, then the container queries the commit made pending, which are
     /// the document's query container elements, then the facts after them. What derives from the
-    /// commit there is the selection states the document's selection range recomputes, and, after
-    /// a tree change, the viewport rect the document's viewport client elements are told of. What
-    /// derives from the commit without the document thread, the frame does after the join, and what
-    /// the document only reads once the frame is over, the frame leaves in its messages.
+    /// commit there is the selection states the document's selection range recomputes. What derives
+    /// from the commit without the document thread, the frame does after the join, and what the
+    /// document only reads once the frame is over, the frame leaves in its messages.
     AfterLayoutCommit,
     /// Whether style or layout work is still pending once the loop has run out of rounds, after the
     /// marks a last build left, as the style join would have set them. A loop that stabilizes has
@@ -435,6 +436,8 @@ struct FrameMessages {
     stabilization_bound_failed: bool,
     /// Whether a layout pass committed in the frame.
     layout_committed: bool,
+    /// Whether a commit in the frame changed the layout tree.
+    layout_tree_changed: bool,
     /// The boxes with `content-visibility: auto` the last commit that changed the tree left, when
     /// the document may have any. The HTML event loop reads them so it does not have to traverse
     /// the whole tree every time.
@@ -454,6 +457,7 @@ impl FrameMessages {
                 main_thread,
                 &FfiLayoutCommitEffects {
                     layout_committed: true,
+                    layout_tree_changed: self.layout_tree_changed,
                     boxes_with_auto_content_visibility_collected: boxes.is_some(),
                     boxes_with_auto_content_visibility: boxes.map_or(std::ptr::null(), <[NodeSlotId]>::as_ptr),
                     boxes_with_auto_content_visibility_count: boxes.map_or(0, <[NodeSlotId]>::len),
@@ -574,7 +578,7 @@ impl LayoutFrame<'_> {
     /// What derives from a layout commit and needs no document thread, once the AfterLayoutCommit
     /// join has finished the commit: the rendering preparation, the searchable text is dropped, and
     /// after a tree change the boxes with `content-visibility: auto` are collected again for the
-    /// document's paint state.
+    /// document's paint state, and the document's viewport clients are to be told the viewport rect.
     fn note_layout_commit(
         &mut self,
         layout_tree_changed: bool,
@@ -585,6 +589,7 @@ impl LayoutFrame<'_> {
         // SAFETY: The frame runs for the update the arena is in, and no borrow of it is held here.
         unsafe { super::text_queries::layout_arena_invalidate_searchable_text(self.inputs.arena_handle) };
         self.messages.layout_committed = true;
+        self.messages.layout_tree_changed |= layout_tree_changed;
         if layout_tree_changed && facts.may_have_content_visibility_auto_style {
             let mut boxes = Vec::new();
             let arena = self.arena();
@@ -763,7 +768,7 @@ impl LayoutFrame<'_> {
                     pending_commit.finish(main_thread);
                     arena(arena_handle).end_layout_pass_preparation_handbacks(main_thread);
                 }
-                host.after_layout_commit(main_thread, true);
+                host.after_layout_commit(main_thread);
                 host.evaluate_pending_container_queries(main_thread);
                 Joined {
                     value: host.needs_style_update_after_layout(main_thread),
@@ -927,7 +932,7 @@ impl LayoutFrame<'_> {
                 // SAFETY: The frame runs for the update the arena is in.
                 unsafe { pending_commit.finish(main_thread) };
             }
-            host.after_layout_commit(main_thread, layout_tree_was_built_in_partial_branch);
+            host.after_layout_commit(main_thread);
             Joined {
                 value: host.needs_style_update_after_layout(main_thread),
                 facts: host.document_facts(main_thread),
