@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style id="sheet">
+    @counter-style stars { system: cyclic; symbols: '*'; }
+    #list { display: list-item; list-style-type: stars; }
+    #generated::before { content: counter(c, stars); }
+</style>
+<div id="list"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+<div id="generated"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+<script>
+    // A counter style reaches the boxes built with it: the marker and the generated content rebuild.
+    // Their elements' children resolve no counter style, so the rebuild restyles none of them again.
+    test(() => {
+        internals.updateStyle();
+        document.body.offsetWidth;
+        const before = internals.getStyleInvalidationCounters();
+        document.getElementById("sheet").sheet.cssRules[0].symbols = "'+'";
+        internals.updateStyle();
+        const after = internals.getStyleInvalidationCounters();
+        const elements = document.getElementsByTagName("*").length;
+        println(`elements: ${elements}`);
+        println(`records computed: ${after.engineComputedStyleRecords - before.engineComputedStyleRecords}`);
+        println(`transactions: ${after.styleEngineTransactionSetups - before.styleEngineTransactionSetups}`);
+    });
+</script>
