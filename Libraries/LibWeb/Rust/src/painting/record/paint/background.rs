@@ -681,7 +681,7 @@ fn paint_image_layer<O: Observer>(
                 (dest_rect.width, dest_rect.height),
             );
             let color_scheme = recorder.image_color_scheme(facts_owner);
-            let display_list_id = recorder.resources.vector_image_display_list(
+            let Some(display_list_id) = recorder.resources.vector_image_display_list(
                 crate::painting::record::vector_images::VectorImageRenderRequest::new(
                     *image_identity,
                     color_scheme,
@@ -690,7 +690,10 @@ fn paint_image_layer<O: Observer>(
                     1.0,
                 ),
                 &recorder.inputs.vector_image_display_lists,
-            );
+            ) else {
+                recorder.missed_vector_image();
+                return;
+            };
             let group = recorder.recorder.begin_repeated_tile();
             recorder.recorder.paint_nested_display_list(
                 display_list_id,

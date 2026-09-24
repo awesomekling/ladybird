@@ -61,6 +61,9 @@ pub struct RecordingOutput {
     pub is_identical_to_published_frame: bool,
     // The SVG-as-image renders this frame paints, by the display list it paints each with.
     pub(crate) vector_images: std::collections::HashMap<DisplayListResourceId, vector_images::VectorImageRenderRequest>,
+    // The renders this frame painted as empty images because the main thread had not resolved
+    // them. Their producers record again in the next frame, which the main thread resolves them for.
+    pub(crate) missed_vector_images: std::collections::HashSet<vector_images::VectorImageRenderRequest>,
     pub(crate) capture_log_for_verification: Option<verify::CaptureLog>,
 }
 
@@ -142,6 +145,12 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
         self.live_producer = true;
     }
 
+    /// Paints an SVG-as-image render the main thread has not resolved as an empty image. The
+    /// producer records again in the next frame, which the render is resolved for.
+    pub(crate) fn missed_vector_image(&mut self) {
+        self.mark_live_producer();
+    }
+
     pub(crate) fn data(&self, paintable: NodeSlotId) -> &PaintableData {
         self.layout_arena.paintable_data(paintable)
     }
@@ -198,7 +207,7 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
     ) {
         use libgfx_rust::CompositingAndBlendingOperator;
         let geometry = vector_images::vector_image_render_geometry(dest_rect, accumulated_scale, has_active_view_box);
-        let display_list_id = self.resources.vector_image_display_list(
+        let Some(display_list_id) = self.resources.vector_image_display_list(
             vector_images::VectorImageRenderRequest::new(
                 image_identity,
                 color_scheme,
@@ -207,7 +216,10 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
                 geometry.raster_scale,
             ),
             &self.inputs.vector_image_display_lists,
-        );
+        ) else {
+            self.missed_vector_image();
+            return;
+        };
         if compositing_and_blending_operator != CompositingAndBlendingOperator::Normal {
             let dest_device_rect = libgfx_rust::enclosing_int_rect(dest_rect);
             if dest_device_rect.is_empty() {

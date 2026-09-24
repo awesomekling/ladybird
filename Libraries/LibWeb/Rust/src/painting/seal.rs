@@ -46,10 +46,10 @@
 //! handing the resource service a font is not a read of the document.
 //!
 //! **Nested vector images, rendered by the main thread.** `FfiVectorImageCallbacks` lays out and
-//! records an SVG-as-image document. The main thread calls it with no pass running: before the
-//! recording, for the renders the last recording painted, and between the recording and its
-//! publish, for the renders the recording missed. The recording and the publish only look renders
-//! up in the map those calls produce.
+//! records an SVG-as-image document. The main thread calls it with no pass running, before the
+//! recording, for the renders the last recording painted or missed and the ones predicted for
+//! first paints. The recording only looks renders up in the map those calls produce, and paints
+//! one it misses as an empty image until the next frame.
 //!
 //! **Result sinks of C++ to Rust queries.** A query that answers through a callback appending to
 //! a caller-owned collection runs with no pass in progress at all, so the predicate excludes

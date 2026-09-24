@@ -445,12 +445,6 @@ struct RecordingPublishContext {
     GC::Ref<DOM::Document const> document;
 };
 
-static u64 add_empty_display_list(RecordingPublishContext& context)
-{
-    auto const& document = *context.document;
-    return context.resource_storage.add_display_list(DisplayList::create(document.paint_state().visual_context_tree(document)), document.paint_state().visual_context_tree(document)).value();
-}
-
 static Layout::RustFFI::FfiRecordingPublishCallbacks recording_publish_callbacks(RecordingPublishContext& context)
 {
     return {
@@ -473,18 +467,19 @@ static Layout::RustFFI::FfiVectorImageCallbacks vector_image_callbacks(Recording
         .context = &context,
         .resolve_vector_image_display_list = [](void* context_pointer, Layout::RustFFI::FfiVectorImageRenderRequest const* request) -> u64 {
             auto& context = *static_cast<RecordingPublishContext*>(context_pointer);
+            auto const& document = *context.document;
+            auto empty_display_list = [&] {
+                return context.resource_storage.add_display_list(DisplayList::create(document.paint_state().visual_context_tree(document)), document.paint_state().visual_context_tree(document)).value();
+            };
             // The recording published the image and the scheme it renders with, so finding it is a
             // lookup rather than a walk back to the element that references it.
             auto const* svg_image_data = SVG::SVGDecodedImageData::with_vector_image_identity(request->image_identity);
             if (!svg_image_data)
-                return add_empty_display_list(context);
+                return empty_display_list();
             auto display_list = svg_image_data->record_display_list_at_scale({ request->css_width, request->css_height }, request->raster_scale, static_cast<CSS::PreferredColorScheme>(request->color_scheme), context.resource_storage);
             if (!display_list.has_value())
-                return add_empty_display_list(context);
+                return empty_display_list();
             return context.resource_storage.add_display_list(move(*display_list)).value();
-        },
-        .empty_display_list = [](void* context_pointer) -> u64 {
-            return add_empty_display_list(*static_cast<RecordingPublishContext*>(context_pointer));
         },
     };
 }
@@ -522,6 +517,11 @@ static OverlayLabelFonts overlay_label_fonts(float css_size, double device_pixel
     return fonts;
 }
 
+}
+
+bool last_recording_missed_vector_images(DOM::Document const& document)
+{
+    return Layout::RustFFI::layout_arena_last_recording_missed_vector_images(layout_arena_handle(document));
 }
 
 RefPtr<Compositing::DisplayList> record_rust_display_list(DOM::Document& document, Compositing::DisplayList const& placeholder_display_list, Compositing::DisplayListResourceStorage& resource_storage, PaintCommandCacheMode cache_mode, HTML::PaintConfig const& config, InspectorOverlayInputs const& overlay_inputs)
@@ -645,7 +645,6 @@ RefPtr<Compositing::DisplayList> record_rust_display_list(DOM::Document& documen
     auto rust_timer = Core::ElapsedTimer::start_new(Core::TimerType::Precise);
     if (!Layout::RustFFI::layout_arena_record_display_list(arena, viewport_row_slot(document), inputs))
         return nullptr;
-    Layout::RustFFI::layout_arena_resolve_missed_vector_images(arena, vector_image_callbacks(publish_context));
     Layout::RustFFI::layout_arena_publish_recording(arena, recording_publish_callbacks(publish_context));
     take_recording_trace_if_pending(document);
     if (Layout::RustFFI::layout_arena_last_recording_has_blocking_wheel_event_listeners(arena))

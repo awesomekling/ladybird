@@ -62,6 +62,7 @@ struct InspectorOverlayInputs {
 };
 
 WEB_API RefPtr<Compositing::DisplayList> record_rust_display_list(DOM::Document&, Compositing::DisplayList const& placeholder_display_list, Compositing::DisplayListResourceStorage&, PaintCommandCacheMode, HTML::PaintConfig const&, InspectorOverlayInputs const&);
+WEB_API bool last_recording_missed_vector_images(DOM::Document const&);
 WEB_API Utf16String serialize_painting_dump(DOM::Document const&, Compositing::AccumulatedVisualContextTree const&, Compositing::DisplayList const&, Compositing::DisplayListResourceStorage const&);
 
 WEB_API CSS::ColorResolutionContext gradient_stop_color_resolution_context(Layout::NodeWithStyle const&);

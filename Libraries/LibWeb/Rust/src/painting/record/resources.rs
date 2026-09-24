@@ -4,16 +4,14 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use crate::painting::display_list::builder::RecordedDisplayList;
 use crate::painting::display_list::commands::{
     DisplayListCommandType, DisplayListResourceId, ImageFrameResourceId, PaintNestedDisplayList, VideoSinkResourceId,
 };
-use crate::painting::record::vector_images::{
-    VECTOR_IMAGE_PLACEHOLDER_TAG, VectorImageDisplayLists, VectorImageRenderRequest,
-};
+use crate::painting::record::vector_images::{VectorImageDisplayLists, VectorImageRenderRequest};
 use libgfx_rust::font::{FontHandle, FontId};
 use libgfx_rust::image_frame::ImageFrameHandle;
 
@@ -22,14 +20,11 @@ pub(crate) struct RecordingResourceManifest {
     pub(crate) fonts: HashMap<FontId, FontHandle>,
     pub(crate) image_frames: HashMap<u64, ImageFrameHandle>,
     pub(crate) video_sinks: HashMap<u64, u64>,
-    // The SVG-as-image renders the recording painted with a resolved display list, by that list:
-    // the ones it recorded and the ones in output it copied from the published frame. A missed
-    // render joins once its publish patches it in. The main thread resolves these ahead of the
-    // next recording.
+    // The SVG-as-image renders the recording painted, by the display list it painted each with:
+    // the ones it recorded and the ones in output it copied from the published frame.
     pub(crate) painted_vector_images: HashMap<DisplayListResourceId, VectorImageRenderRequest>,
-    // The renders the recording's map lacked; each one's placeholder names its index here.
-    pub(crate) missed_vector_images: Vec<VectorImageRenderRequest>,
-    missed_vector_image_indices: HashMap<VectorImageRenderRequest, u32>,
+    // The renders the recording's map lacked, which it painted as empty images.
+    pub(crate) missed_vector_images: HashSet<VectorImageRenderRequest>,
 }
 
 impl RecordingResourceManifest {
@@ -48,23 +43,20 @@ impl RecordingResourceManifest {
         VideoSinkResourceId(resource_id)
     }
 
-    /// The display list of `request` from the map the main thread resolved, or a placeholder its
-    /// publish patches once the main thread has resolved the render.
+    /// The display list of `request` from the map the main thread resolved. A render the map lacks
+    /// is missed: the caller paints nothing for it, and the main thread resolves it ahead of the
+    /// next recording.
     pub(crate) fn vector_image_display_list(
         &mut self,
         request: VectorImageRenderRequest,
         resolved: &VectorImageDisplayLists,
-    ) -> DisplayListResourceId {
-        if let Some(display_list) = resolved.get(&request) {
-            self.painted_vector_images.insert(display_list, request);
-            return display_list;
-        }
-        let next_index = self.missed_vector_images.len() as u32;
-        let index = *self.missed_vector_image_indices.entry(request).or_insert_with(|| {
-            self.missed_vector_images.push(request);
-            next_index
-        });
-        DisplayListResourceId(VECTOR_IMAGE_PLACEHOLDER_TAG | u64::from(index))
+    ) -> Option<DisplayListResourceId> {
+        let Some(display_list) = resolved.get(&request) else {
+            self.missed_vector_images.insert(request);
+            return None;
+        };
+        self.painted_vector_images.insert(display_list, request);
+        Some(display_list)
     }
 
     /// Notes the SVG-as-image renders in `bytes` of `source`, whose renders are `source_vector_images`,
@@ -98,7 +90,6 @@ impl RecordingResourceManifest {
 mod tests {
     use super::*;
     use crate::css::css_pixels::CssPixels;
-    use crate::painting::record::vector_images::{is_vector_image_placeholder, vector_image_placeholder_index};
 
     fn request(image_identity: u64) -> VectorImageRenderRequest {
         VectorImageRenderRequest::new(
@@ -117,13 +108,11 @@ mod tests {
         let mut manifest = RecordingResourceManifest::default();
         assert_eq!(
             manifest.vector_image_display_list(request(1), &resolved),
-            DisplayListResourceId(42)
+            Some(DisplayListResourceId(42))
         );
-        let missed = manifest.vector_image_display_list(request(2), &resolved);
-        assert!(is_vector_image_placeholder(missed));
-        assert_eq!(vector_image_placeholder_index(missed), 0);
-        assert_eq!(manifest.vector_image_display_list(request(2), &resolved), missed);
-        assert_eq!(manifest.missed_vector_images, vec![request(2)]);
+        assert_eq!(manifest.vector_image_display_list(request(2), &resolved), None);
+        assert_eq!(manifest.vector_image_display_list(request(2), &resolved), None);
+        assert_eq!(manifest.missed_vector_images, HashSet::from([request(2)]));
         assert_eq!(
             manifest.painted_vector_images,
             HashMap::from([(DisplayListResourceId(42), request(1))])
