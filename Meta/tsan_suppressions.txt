@@ -1,0 +1,5 @@
+# ThreadSanitizer suppressions. Use with TSAN_OPTIONS=suppressions=<path to this file>.
+
+# The Rust standard library is not instrumented, so TSan sees the memcpy calls that move a message
+# into and out of a std::sync::mpsc channel but not the atomics that order them.
+race:std::sync::mpmc

@@ -28,6 +28,33 @@ use std::thread::ThreadId;
 
 type Job = Box<dyn FnOnce() + Send>;
 
+// This crate is not instrumented by ThreadSanitizer, so TSan cannot see the ordering the stage
+// thread's channels provide between the calling thread and the stage thread. Tell it explicitly,
+// or every access a stage makes to the calling thread's state would be reported as a race.
+#[cfg(feature = "thread-sanitizer")]
+mod tsan {
+    unsafe extern "C" {
+        fn __tsan_acquire(address: *mut std::ffi::c_void);
+        fn __tsan_release(address: *mut std::ffi::c_void);
+    }
+
+    pub(super) fn release(token: &super::StageThread) {
+        // SAFETY: The TSan runtime only uses the address as a synchronization key.
+        unsafe { __tsan_release(std::ptr::from_ref(token).cast_mut().cast()) }
+    }
+
+    pub(super) fn acquire(token: &super::StageThread) {
+        // SAFETY: The TSan runtime only uses the address as a synchronization key.
+        unsafe { __tsan_acquire(std::ptr::from_ref(token).cast_mut().cast()) }
+    }
+}
+
+#[cfg(not(feature = "thread-sanitizer"))]
+mod tsan {
+    pub(super) fn release(_: &super::StageThread) {}
+    pub(super) fn acquire(_: &super::StageThread) {}
+}
+
 struct StageThread {
     jobs: Sender<Job>,
     id: ThreadId,
@@ -127,17 +154,20 @@ unsafe fn run_stage_on<R: Send>(thread: &StageThread, stage: impl FnOnce() -> R)
     // state along and hands it back with its result.
     let style_update = take_style_update_scope();
     let job: Box<dyn FnOnce() + Send + '_> = Box::new(move || {
+        tsan::acquire(thread);
         WAITING_CALLER.with(|waiting| waiting.set(Some(caller)));
         install_style_update_scope(style_update);
         let outcome = std::panic::catch_unwind(AssertUnwindSafe(stage.into_inner()));
         let style_update = take_style_update_scope();
         WAITING_CALLER.with(|waiting| waiting.set(None));
+        tsan::release(thread);
         // The calling thread is waiting on this reply, so it cannot have gone away.
         let _ = reply.send((outcome, style_update));
     });
     // SAFETY: The job borrows from the calling thread's frame. It drops everything it captured
     // before it replies, and this function does not return before the reply arrives.
     let job = unsafe { std::mem::transmute::<Box<dyn FnOnce() + Send + '_>, Job>(job) };
+    tsan::release(thread);
     if thread.jobs.send(job).is_err() {
         // The stage thread only goes away if the process is going away.
         std::process::abort();
@@ -145,6 +175,7 @@ unsafe fn run_stage_on<R: Send>(thread: &StageThread, stage: impl FnOnce() -> R)
     let Ok((outcome, style_update)) = result.recv() else {
         std::process::abort();
     };
+    tsan::acquire(thread);
     install_style_update_scope(style_update);
     match outcome {
         Ok(value) => value,
