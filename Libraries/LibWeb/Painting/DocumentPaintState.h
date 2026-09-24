@@ -18,6 +18,10 @@
 
 namespace Web::Painting {
 
+// Reads the nodes a selection range reaches into `nodes`, for the render side to stamp the selection states of the rows
+// they are bound to from the snapshot. The snapshot points into `nodes`.
+WEB_API Layout::RustFFI::FfiSelectionSnapshot read_selection_snapshot(DOM::Range&, Vector<Layout::RustFFI::FfiSelectionSnapshotNode>& nodes);
+
 struct BlockingWheelEventRegionState {
     bool has_blocking_wheel_event_listeners { false };
     bool has_blocking_wheel_event_region_covering_viewport { false };
@@ -56,7 +60,7 @@ public:
     void append_recording_trace(String trace) { m_recording_traces.append(move(trace)); }
     Vector<String> take_recording_traces() { return exchange(m_recording_traces, {}); }
 
-    void recompute_selection_states(DOM::Document&, DOM::Range&);
+    void recompute_selection_states(DOM::Range&);
     void reset_selection_states(DOM::Document&);
 
     void invalidate_all_cached_paint(DOM::Document&);

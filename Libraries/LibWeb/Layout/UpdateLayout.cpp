@@ -11,6 +11,7 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/NodeIdentity.h>
+#include <LibWeb/DOM/Range.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/Node.h>
@@ -18,7 +19,9 @@
 #include <LibWeb/Layout/TreeBuilder.h>
 #include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Page/Page.h>
+#include <LibWeb/Painting/DocumentPaintState.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
+#include <LibWeb/Selection/Selection.h>
 
 namespace Web::DOM {
 
@@ -68,7 +71,15 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
                 if (auto node = NodeIdentity::of_style_node(CSS::StyleNodeID { list_owner }).resolve(document))
                     node->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::ListItemCounters);
             } },
-        .after_layout_commit = [](void* context) { static_cast<Document*>(context)->after_layout_commit(); },
+        .read_selection = [](void* context, void* sink, void (*receive)(void*, Layout::RustFFI::FfiSelectionSnapshot const*)) {
+            auto& document = *static_cast<Document*>(context);
+            auto selection = document.get_selection();
+            auto range = selection ? selection->range() : nullptr;
+            if (!range)
+                return;
+            Vector<Layout::RustFFI::FfiSelectionSnapshotNode> nodes;
+            auto snapshot = Painting::read_selection_snapshot(*range, nodes);
+            receive(sink, &snapshot); },
         .apply_layout_commit_effects = [](void* context, Layout::RustFFI::FfiLayoutCommitEffects const* effects) { static_cast<Document*>(context)->apply_layout_commit_effects(*effects); },
         .note_full_layouts_performed = [](void* context, u64 count) { static_cast<Document*>(context)->style_invalidation_counters().relayouts_performed += count; },
         .evaluate_pending_container_queries = [](void* context) {

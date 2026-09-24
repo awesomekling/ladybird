@@ -6,6 +6,7 @@
 
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/EventTarget.h>
+#include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/DOM/Range.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/LocalNavigable.h>
@@ -164,98 +165,67 @@ void DocumentPaintState::reset_selection_states(DOM::Document& document)
     Layout::RustFFI::layout_arena_selection_clear(m_layout_node_arena->handle(), viewport_row_slot(document));
 }
 
-void DocumentPaintState::recompute_selection_states(DOM::Document& document, DOM::Range& range)
+void DocumentPaintState::recompute_selection_states(DOM::Range& range)
 {
-    Vector<Layout::RustFFI::FfiSelectionEntry> entries;
-    auto set_selection_state = [&](DOM::Node& container, SelectionState state) {
-        if (is<DOM::Text>(container)) {
-            if (auto* layout_node = container.unsafe_layout_node()) {
-                entries.append({
-                    .is_text_node_entry = true,
-                    .layout_node = Layout::Node::slot_id(layout_node),
-                    .state = to_underlying(state),
-                });
-            }
-            return;
-        }
-        if (auto* layout_node = container.unsafe_layout_node()) {
-            if (has_committed_box(*layout_node)) {
-                entries.append({
-                    .is_text_node_entry = false,
-                    .layout_node = Layout::Node::slot_id(layout_node),
-                    .state = to_underlying(state),
-                });
-            }
-        }
-    };
-    auto apply_entries = [&] {
-        Layout::RustFFI::layout_arena_selection_apply(m_layout_node_arena->handle(), viewport_row_slot(document), entries.data(), entries.size(), range.start_offset(), range.end_offset());
-    };
+    Vector<Layout::RustFFI::FfiSelectionSnapshotNode> nodes;
+    auto snapshot = read_selection_snapshot(range, nodes);
+    Layout::RustFFI::layout_arena_selection_apply_snapshot(m_layout_node_arena->handle(), &snapshot);
+}
 
-    // https://drafts.csswg.org/css-ui/#valdef-user-select-none
-    // "The content of the element must be excluded from selection by [...] the selection methods of the Selection API
-    // and the like." We honor this by leaving such nodes at SelectionState::None — even when they fall inside the
-    // range. So, the selection highlight skips them.
-    auto is_excluded_from_selection = [](DOM::Node const& node) {
-        if (node.is_inert())
-            return true;
-        auto const* layout = node.unsafe_layout_node();
-        return layout && layout->user_select_used_value() == CSS::UserSelect::None;
+// The nodes are the ones the selection states are stamped for, and what excludes them from selection is read here;
+// whether a node has a box to stamp is left to the rows it is bound to, which a layout commit may since have rebuilt.
+Layout::RustFFI::FfiSelectionSnapshot read_selection_snapshot(DOM::Range& range, Vector<Layout::RustFFI::FfiSelectionSnapshotNode>& nodes)
+{
+    auto add_node = [&](DOM::Node& node, Layout::RustFFI::FfiSelectionSnapshotRole role) {
+        // Only a node with an identity can have a box.
+        auto identity = DOM::NodeIdentity::of(node);
+        if (!identity)
+            return;
+        nodes.append({
+            .style_node = identity.style_node().value(),
+            .is_document = node.is_document(),
+            .is_text = is<DOM::Text>(node),
+            .is_inert = node.is_inert(),
+            .user_select_is_none = node.user_select_used_value() == CSS::UserSelect::None,
+            .role = role,
+        });
     };
 
     auto start_container = range.start_container();
     auto end_container = range.end_container();
+    add_node(*start_container, Layout::RustFFI::FfiSelectionSnapshotRole::StartContainer);
 
-    // 2. If the selection starts and ends in the same node:
-    if (start_container == end_container) {
-        // 1. If the selection starts and ends at the same offset, return.
-        if (range.start_offset() == range.end_offset()) {
-            // NOTE: A zero-length selection should not be visible.
-            apply_entries();
-            return;
+    // The nodes between the containers are not read when the start container settles the selection by itself: an
+    // empty selection, or one inside a text node that nothing excludes from selection, covers nothing between them.
+    auto is_settled_by_start_container = start_container == end_container
+        && (range.start_offset() == range.end_offset()
+            || (is<DOM::Text>(*start_container) && !start_container->is_inert() && start_container->user_select_used_value() != CSS::UserSelect::None));
+    if (!is_settled_by_start_container) {
+        auto* start_at = start_container->child_at_index(range.start_offset());
+        // If the start container has no child at that index, we need to start on the node right after the start container.
+        if (!start_at) {
+            if (auto* last_child = start_container->last_child()) {
+                start_at = last_child->next_in_pre_order();
+            } else {
+                start_at = start_container->next_in_pre_order();
+            }
         }
 
-        // 2. If it's a text node, mark it as StartAndEnd and return.
-        if (is<DOM::Text>(*start_container) && !is_excluded_from_selection(*start_container)) {
-            set_selection_state(*start_container, SelectionState::StartAndEnd);
-            apply_entries();
-            return;
-        }
+        DOM::Node* stop_at = end_container->child_at_index(range.end_offset());
+        // Only stop at the end container if it has no children that may need to be included.
+        for (auto* node = start_at; node && (node != stop_at && !(node == end_container.ptr() && !end_container->has_children())); node = node->next_in_pre_order(end_container.ptr()))
+            add_node(*node, Layout::RustFFI::FfiSelectionSnapshotRole::Covered);
     }
 
-    // 3. Mark the selection start node as Start (if text) or Full (if anything else).
-    if (!is_excluded_from_selection(*start_container) && start_container->unsafe_layout_node()) {
-        if (is<DOM::Text>(*start_container))
-            set_selection_state(*start_container, SelectionState::Start);
-        else
-            set_selection_state(*start_container, SelectionState::Full);
-    }
+    add_node(*end_container, Layout::RustFFI::FfiSelectionSnapshotRole::EndContainer);
 
-    // 4. Mark the nodes between the start and end of the selection as Full.
-    auto* start_at = start_container->child_at_index(range.start_offset());
-    // If the start container has no child at that index, we need to start on the node right after the start container.
-    if (!start_at) {
-        if (auto* last_child = start_container->last_child()) {
-            start_at = last_child->next_in_pre_order();
-        } else {
-            start_at = start_container->next_in_pre_order();
-        }
-    }
-
-    DOM::Node* stop_at = end_container->child_at_index(range.end_offset());
-    // Only stop at the end container if it has no children that may need to be included.
-    for (auto* node = start_at; node && (node != stop_at && !(node == end_container.ptr() && !end_container->has_children())); node = node->next_in_pre_order(end_container.ptr())) {
-        if (is_excluded_from_selection(*node))
-            continue;
-        set_selection_state(*node, SelectionState::Full);
-    }
-
-    // 5. Mark the selection end node as End if it is a text node.
-    if (!is_excluded_from_selection(*end_container) && is<DOM::Text>(*end_container) && end_container->unsafe_layout_node()) {
-        set_selection_state(*end_container, SelectionState::End);
-    }
-
-    apply_entries();
+    return {
+        .nodes = nodes.data(),
+        .node_count = nodes.size(),
+        .start_offset = range.start_offset(),
+        .end_offset = range.end_offset(),
+        .starts_and_ends_in_one_container = start_container == end_container,
+    };
 }
 
 }

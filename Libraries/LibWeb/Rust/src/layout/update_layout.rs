@@ -25,6 +25,8 @@ use crate::css::ffi_support::FfiUtf16View;
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::used_values::FfiCssPixelPoint;
 use crate::painting::host::FfiRootBackgroundSource;
+use crate::painting::paintable_data::FfiSelectionSnapshot;
+use crate::painting::selection::SelectionSnapshot;
 use std::ffi::c_void;
 use std::time::Instant;
 
@@ -59,8 +61,10 @@ pub struct FfiLayoutUpdateHostCallbacks {
     /// Marks the list owners the frame found showing stale list-item counters for a layout tree
     /// rebuild, named by their style nodes.
     pub rebuild_list_owners_with_stale_item_counters: unsafe extern "C" fn(*mut c_void, *const u32, usize),
-    /// Refreshes what derives from committed layout on the document side.
-    pub after_layout_commit: unsafe extern "C" fn(*mut c_void),
+    /// Reads the document's selection range, when it has one, into a snapshot the third argument
+    /// receives with the second as its context. The snapshot is valid for that call.
+    pub read_selection:
+        unsafe extern "C" fn(*mut c_void, *mut c_void, unsafe extern "C" fn(*mut c_void, *const FfiSelectionSnapshot)),
     /// Applies what the frame's layout commits leave for the document once the frame is over.
     pub apply_layout_commit_effects: unsafe extern "C" fn(*mut c_void, *const FfiLayoutCommitEffects),
     pub note_full_layouts_performed: unsafe extern "C" fn(*mut c_void, u64),
@@ -156,7 +160,8 @@ pub(crate) struct LayoutUpdateHost {
     prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
     finish_layout_tree_build: unsafe extern "C" fn(*mut c_void, *mut c_void, NodeSlotId) -> FfiLayoutTreeBuildOutcome,
     rebuild_list_owners_with_stale_item_counters: unsafe extern "C" fn(*mut c_void, *const u32, usize),
-    after_layout_commit: unsafe extern "C" fn(*mut c_void),
+    read_selection:
+        unsafe extern "C" fn(*mut c_void, *mut c_void, unsafe extern "C" fn(*mut c_void, *const FfiSelectionSnapshot)),
     apply_layout_commit_effects: unsafe extern "C" fn(*mut c_void, *const FfiLayoutCommitEffects),
     note_full_layouts_performed: unsafe extern "C" fn(*mut c_void, u64),
     evaluate_pending_container_queries: unsafe extern "C" fn(*mut c_void),
@@ -178,7 +183,7 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             prepare_layout_tree_build: host.prepare_layout_tree_build,
             finish_layout_tree_build: host.finish_layout_tree_build,
             rebuild_list_owners_with_stale_item_counters: host.rebuild_list_owners_with_stale_item_counters,
-            after_layout_commit: host.after_layout_commit,
+            read_selection: host.read_selection,
             apply_layout_commit_effects: host.apply_layout_commit_effects,
             note_full_layouts_performed: host.note_full_layouts_performed,
             evaluate_pending_container_queries: host.evaluate_pending_container_queries,
@@ -248,8 +253,15 @@ impl LayoutUpdateHost {
         }
     }
 
-    fn after_layout_commit(&self, _: &crate::stage::MainThread) {
-        unsafe { (self.after_layout_commit)(self.context) }
+    fn read_selection(&self, _: &crate::stage::MainThread) -> Option<SelectionSnapshot> {
+        unsafe extern "C" fn receive(sink: *mut c_void, snapshot: *const FfiSelectionSnapshot) {
+            // SAFETY: The sink is the option below, and the host hands over a snapshot that is valid
+            // for this call.
+            unsafe { *sink.cast::<Option<SelectionSnapshot>>() = Some(SelectionSnapshot::from_ffi(&*snapshot)) };
+        }
+        let mut selection: Option<SelectionSnapshot> = None;
+        unsafe { (self.read_selection)(self.context, (&raw mut selection).cast(), receive) };
+        selection
     }
 
     fn apply_layout_commit_effects(&self, _: &crate::stage::MainThread, effects: &FfiLayoutCommitEffects) {
@@ -361,12 +373,10 @@ enum FrameJoin {
     /// through its embedding document.
     BuildLayoutTree,
     /// The host halves of the partial relayout boundaries' commits the frame settled ahead of
-    /// them, in commit order, and of the last pass's commit, then what derives from committed
-    /// layout on the document side, then the container queries the commit made pending, which are
-    /// the document's query container elements, then the facts after them. What derives from the
-    /// commit there is the selection states the document's selection range recomputes. What derives
-    /// from the commit without the document thread, the frame does after the join, and what the
-    /// document only reads once the frame is over, the frame leaves in its messages.
+    /// them, in commit order, and of the last pass's commit, then the container queries the commit
+    /// made pending, which are the document's query container elements, then the facts after them.
+    /// What derives from the commit, the frame does after the join, and what the document only
+    /// reads once the frame is over, the frame leaves in its messages.
     AfterLayoutCommit,
     /// Whether style or layout work is still pending once the loop has run out of rounds, after the
     /// marks a last build left, as the style join would have set them. A loop that stabilizes has
@@ -425,6 +435,7 @@ struct WalkedLayoutTreeBuild {
 struct RoundAfterStyle {
     pass_sources: Option<LayoutPassSources>,
     tree_build_document_style_node: Option<u32>,
+    selection: Option<SelectionSnapshot>,
 }
 
 /// What a finished layout frame leaves for the document thread to apply.
@@ -488,6 +499,8 @@ struct LayoutFrame<'a> {
     /// The list owners the last build found showing stale counters, which the next join marks
     /// for a layout tree rebuild.
     list_owners_to_rebuild: Vec<StyleNodeID>,
+    /// The document's selection as the style join of the round read it, if it has one.
+    selection: Option<SelectionSnapshot>,
 }
 
 /// The document facts together with what a join answered.
@@ -535,15 +548,21 @@ impl LayoutFrame<'_> {
         if !self.round_lays_out(facts) || self.inputs.is_template_contents_document {
             return RoundAfterStyle::default();
         }
+        // The commits of the round stamp the selection states of the boxes they build from the
+        // selection as it is now, as nothing on the document thread changes the tree until the
+        // frame is over.
+        let selection = host.read_selection(main_thread);
         if self.needs_layout_tree_rebuild(facts) {
             return RoundAfterStyle {
                 tree_build_document_style_node: Some(host.prepare_layout_tree_build(main_thread)),
+                selection,
                 ..RoundAfterStyle::default()
             };
         }
         RoundAfterStyle {
             // SAFETY: The frame runs for the update the arena is in.
             pass_sources: Some(unsafe { LayoutPassSources::read(main_thread, host, self.inputs.arena_handle) }),
+            selection,
             ..RoundAfterStyle::default()
         }
     }
@@ -575,10 +594,11 @@ impl LayoutFrame<'_> {
             .reconcile_stale_list_item_counters_after_tree_build(walked.document_style_node);
     }
 
-    /// What derives from a layout commit and needs no document thread, once the AfterLayoutCommit
-    /// join has finished the commit: the rendering preparation, the searchable text is dropped, and
-    /// after a tree change the boxes with `content-visibility: auto` are collected again for the
-    /// document's paint state, and the document's viewport clients are to be told the viewport rect.
+    /// What derives from a layout commit, once the AfterLayoutCommit join has finished it: the
+    /// rendering preparation, the selection states of the boxes it built are stamped again from the
+    /// round's selection, the searchable text is dropped, and after a tree change the boxes with
+    /// `content-visibility: auto` are collected again for the document's paint state, and the
+    /// document's viewport clients are to be told the viewport rect.
     fn note_layout_commit(
         &mut self,
         layout_tree_changed: bool,
@@ -586,6 +606,10 @@ impl LayoutFrame<'_> {
         root_background_source: FfiRootBackgroundSource,
     ) {
         self.prepare_for_rendering_after_commit(root_background_source);
+        if let Some(selection) = &self.selection {
+            // SAFETY: The frame runs for the update the arena is in, and no borrow of it is held here.
+            selection.apply(unsafe { LayoutNodeArena::from_handle_mut(self.inputs.arena_handle) });
+        }
         // SAFETY: The frame runs for the update the arena is in, and no borrow of it is held here.
         unsafe { super::text_queries::layout_arena_invalidate_searchable_text(self.inputs.arena_handle) };
         self.messages.layout_committed = true;
@@ -666,6 +690,7 @@ impl LayoutFrame<'_> {
             connected_element_count = element_count;
             self.pass_sources = round_after_style.pass_sources;
             self.tree_build_document_style_node = round_after_style.tree_build_document_style_node;
+            self.selection = round_after_style.selection;
 
             if !self.round_lays_out(&facts) {
                 self.messages.prepare_for_rendering = true;
@@ -768,7 +793,6 @@ impl LayoutFrame<'_> {
                     pending_commit.finish(main_thread);
                     arena(arena_handle).end_layout_pass_preparation_handbacks(main_thread);
                 }
-                host.after_layout_commit(main_thread);
                 host.evaluate_pending_container_queries(main_thread);
                 Joined {
                     value: host.needs_style_update_after_layout(main_thread),
@@ -932,7 +956,6 @@ impl LayoutFrame<'_> {
                 // SAFETY: The frame runs for the update the arena is in.
                 unsafe { pending_commit.finish(main_thread) };
             }
-            host.after_layout_commit(main_thread);
             Joined {
                 value: host.needs_style_update_after_layout(main_thread),
                 facts: host.document_facts(main_thread),
@@ -987,6 +1010,7 @@ unsafe fn update_layout(
                 pass_sources: None,
                 tree_build_document_style_node: None,
                 list_owners_to_rebuild: Vec::new(),
+                selection: None,
             }
             .run()
         })
