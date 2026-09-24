@@ -2891,7 +2891,14 @@ impl StyleEngineState {
             let Some(first_batched_index) = batching_start else {
                 continue;
             };
-            debug_assert!(ready_record.is_none());
+            // A record the scan stopped before it reached waits for the next round with the ones
+            // it parked, unless the wave stops before its row: every row after the cut is driven
+            // again in the wave that reaches it, and resuming a record there would restart the
+            // scan below the cut forever.
+            next_parked_records.extend(ready_record.take().into_iter().chain(resumed_records));
+            if let Some(cut) = cut_at {
+                next_parked_records.retain(|parked| parked.published_index < cut);
+            }
             next_parked_records.sort_unstable_by_key(|parked| parked.published_index);
             let requests = next_parked_records
                 .iter_mut()
