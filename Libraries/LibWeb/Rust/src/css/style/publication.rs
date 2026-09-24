@@ -345,13 +345,7 @@ impl RetainedState {
         }
         // The winners hold a gated rule where its container conditions held when they were
         // published; they answer for the node while every one decides as it did, over containers
-        // its settled ancestors published. One a declined ancestor may still move is the host's.
-        if (self.published_container_verdicts.contains_key(&node) || self.container_gates_unheld.contains(&node))
-            && self.container_ancestor_is_unsettled(node, scratch)
-        {
-            counters.bump(Counter::EngineComputedRecordBailContainerVerdict);
-            return Err(Unanswered::Refused);
-        }
+        // its settled ancestors published. The pass drives the node only once those are installed.
         // A row omitted from winner publication can still carry a retained selector answer.
         // Rebuild its winners before comparing them with the record's cascade state: otherwise
         // an empty delta can describe yesterday's answer after this flush flipped a rule.

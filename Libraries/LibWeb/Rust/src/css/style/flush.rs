@@ -2324,6 +2324,20 @@ impl StyleEngineState {
                     None
                 };
                 let resuming_font = pass.scratch.font_drive.is_pending_for(node);
+                // A gated rule's container conditions read the containers the row's ancestors
+                // publish. One this wave publishes and only the host settles publishes them when the
+                // host installs it: the wave stops here, and the next one decides the conditions over
+                // the installed containers.
+                if !skip_hidden
+                    && !resuming_font
+                    && (self.retained.published_container_verdicts.contains_key(&node)
+                        || self.retained.container_gates_unheld.contains(&node))
+                    && self.retained.container_ancestor_is_unsettled(node, &pass.scratch)
+                {
+                    pass.rows_after_installed_ancestors.insert(node);
+                    cut_at = Some(published_index);
+                    break;
+                }
                 // The immediate parent's own unresolved fact, which the direct inherited-group
                 // path reads without asking about the chain above it.
                 // A node whose winners hold gated rules is derived where their conditions are
@@ -2421,9 +2435,7 @@ impl StyleEngineState {
                     parent_inputs_moved.inherited_style = true;
                     parent_inputs_moved.display = true;
                 }
-                let mut retry_after_ancestor = (self.retained.published_container_verdicts.contains_key(&node)
-                    || self.retained.container_gates_unheld.contains(&node))
-                    && self.retained.container_ancestor_is_unsettled(node, &pass.scratch);
+                let mut retry_after_ancestor = false;
                 let awaits_sampled_parent = self.tree.flat_tree_parent(node).is_some_and(|parent| {
                     self.retained.engine_computed_records_pending.contains_key(&parent)
                         && (self.retained.computed_group_sets.adjustment_facts(parent)
@@ -2762,11 +2774,17 @@ impl StyleEngineState {
                             FfiStyleDeltaDamage::Full,
                             FfiStyleDeltaGap::None,
                         ),
+                        // A row a wave stopped before reads the ancestors the host installed before it,
+                        // as they now stand.
                         (None, Some((old_style_record, new_style_record))) => (
                             old_style_record.raw(),
                             new_style_record.raw(),
                             FfiStyleDeltaDamage::Full,
-                            FfiStyleDeltaGap::Computed,
+                            if pass.rows_after_installed_ancestors.contains(&node) {
+                                FfiStyleDeltaGap::RetriedAfterAncestors
+                            } else {
+                                FfiStyleDeltaGap::Computed
+                            },
                         ),
                         (None, None) => match &retried {
                             Some(retried) => (
@@ -2791,7 +2809,7 @@ impl StyleEngineState {
                 // The pseudo-element records the engine settled beside the element's record,
                 // which follow it for C++ to install with it.
                 let pseudo_rows: Vec<(u8, u64, u64)> = match (&retried, gap) {
-                    (_, FfiStyleDeltaGap::Computed) => pass
+                    (None, FfiStyleDeltaGap::Computed | FfiStyleDeltaGap::RetriedAfterAncestors) => pass
                         .scratch
                         .pseudo_deltas
                         .drain(..)
@@ -2836,10 +2854,10 @@ impl StyleEngineState {
                     inherited_style_groups,
                     pseudo_kind: u8::MAX,
                     gap,
-                    uses_substitution: match gap {
-                        FfiStyleDeltaGap::Computed => pass.scratch.element_uses_substitution,
-                        FfiStyleDeltaGap::RetriedAfterAncestors | FfiStyleDeltaGap::RetriedMaterialization => {
-                            self.retained.nodes_with_substituted_records.contains(&node)
+                    uses_substitution: match (&retried, gap) {
+                        (Some(_), _) => self.retained.nodes_with_substituted_records.contains(&node),
+                        (None, FfiStyleDeltaGap::Computed | FfiStyleDeltaGap::RetriedAfterAncestors) => {
+                            pass.scratch.element_uses_substitution
                         }
                         _ => false,
                     },
