@@ -4,12 +4,15 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/TemporaryChange.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Layout/TextNode.h>
+#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Painting/BoxViews.h>
 
 namespace Web::DOM {
@@ -36,6 +39,7 @@ InvalidationJournal::Entry& InvalidationJournal::entry_for(NodeIdentity identity
             .layer_image_paint_facts_update = {},
             .replaced_image_paint_facts_update = {},
             .video_paint_facts_update = {},
+            .pseudo_element_scroll_offsets = {},
         });
         return m_entries.size() - 1;
     });
@@ -155,6 +159,57 @@ void InvalidationJournal::note_paint_cache_invalidation(NodeIdentity identity, P
     drain_if_the_render_side_is_reading();
 }
 
+void InvalidationJournal::note_scroll_offset(NodeIdentity identity, bool offset_changed)
+{
+    entry_for(identity).needs_scroll_offset_publish = true;
+    m_scroll_state_is_stale |= offset_changed;
+    drain_if_the_render_side_is_reading();
+}
+
+void InvalidationJournal::note_pseudo_element_scroll_offset(NodeIdentity generator, CSS::PseudoElement type, CSSPixelPoint offset, bool offset_changed)
+{
+    auto& offsets = entry_for(generator).pseudo_element_scroll_offsets;
+    if (auto existing = offsets.find_if([&](auto const& pending) { return pending.type == type; }); existing != offsets.end())
+        existing->offset = offset;
+    else
+        offsets.append({ type, offset });
+    m_scroll_state_is_stale |= offset_changed;
+    drain_if_the_render_side_is_reading();
+}
+
+// The offsets are read from where the DOM side stores them now, except a pseudo-element's, which
+// the entry carries to the render side that stores it.
+//
+// The layout arena measures a box that holds a scroll offset eagerly after a full commit, so the
+// current box re-derives that fact whenever the stored offset changes. Layout need not be up to
+// date for that: the box is only annotated, not read, and a box that a pending layout tree rebuild
+// replaces is never consulted again, while its replacement derives the fact when it is constructed.
+// That is why the unchecked layout node accessor is the right one here.
+void InvalidationJournal::publish_scroll_offsets(Node& node, Entry const& entry)
+{
+    if (auto* document = as_if<Document>(node)) {
+        if (auto* layout_node = document->unsafe_layout_node())
+            layout_node->publish_scroll_offset();
+        return;
+    }
+    auto* element = as_if<Element>(node);
+    if (!element)
+        return;
+    for (auto const& [type, offset] : entry.pseudo_element_scroll_offsets) {
+        auto pseudo_element = element->get_synthetic_pseudo_element(type);
+        if (!pseudo_element.has_value())
+            continue;
+        pseudo_element->set_scroll_offset(offset);
+        if (auto* layout_node = pseudo_element->unsafe_layout_node())
+            layout_node->publish_scroll_offset();
+    }
+    if (entry.needs_scroll_offset_publish) {
+        Layout::publish_element_scroll_offset(*element);
+        if (auto* layout_node = element->unsafe_layout_node())
+            layout_node->publish_scroll_offset();
+    }
+}
+
 // A mark made from inside a layout update is one the render side is about to read, so it goes
 // through at once. Outside one, nothing reads what these marks change before the next drain.
 void InvalidationJournal::drain_if_the_render_side_is_reading()
@@ -165,8 +220,11 @@ void InvalidationJournal::drain_if_the_render_side_is_reading()
 
 void InvalidationJournal::drain()
 {
-    if (m_entries.is_empty())
+    // Publishing a pseudo-element's offset reads it back, and that read drains. The drain already
+    // running takes whatever such a read would have.
+    if (m_entries.is_empty() || m_draining)
         return;
+    TemporaryChange draining { m_draining, true };
 
     auto* publication_arena = m_document.layout_node_arena_if_created();
     if (publication_arena)
@@ -189,6 +247,8 @@ void InvalidationJournal::drain()
                 // and the mutation that took it out dirtied the parent it left.
                 node->apply_layout_tree_update_mark(entry.layout_tree_update_reason);
             }
+            if (node && (entry.needs_scroll_offset_publish || !entry.pseudo_element_scroll_offsets.is_empty()))
+                publish_scroll_offsets(*node, entry);
 
             if (!entry.needs_layout_update && !entry.needs_repaint && !entry.needs_subtree_repaint && !entry.has_dom_paint_facts && !entry.has_canvas_paint_facts && !entry.has_form_control_paint_facts && !entry.invalidate_paint_and_hit_test_cache && !entry.invalidate_propagated_text_decoration_caches && !entry.layer_image_paint_facts_update && !entry.replaced_image_paint_facts_update && !entry.video_paint_facts_update)
                 continue;
@@ -246,6 +306,9 @@ void InvalidationJournal::drain()
             }
         }
     }
+
+    if (exchange(m_scroll_state_is_stale, false))
+        m_document.invalidate_scroll_state();
 
     if (publication_arena)
         Layout::RustFFI::layout_arena_after_invalidation_journal_drain(publication_arena->handle());

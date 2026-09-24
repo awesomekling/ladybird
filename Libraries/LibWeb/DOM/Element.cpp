@@ -72,6 +72,7 @@
 #include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/ElementRareData.h>
 #include <LibWeb/DOM/HTMLCollection.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/DOM/MutationObserver.h>
 #include <LibWeb/DOM/MutationType.h>
 #include <LibWeb/DOM/NamedNodeMap.h>
@@ -5857,36 +5858,26 @@ void Element::set_last_relative_scroll_direction(u8 direction)
     ensure_element_rare_data().last_relative_scroll_direction = direction;
 }
 
-// The layout arena measures a box that holds a scroll offset eagerly after a full commit, so the
-// current box re-derives that fact whenever the stored offset changes. Layout need not be up to
-// date for that: the box is only annotated, not read, and a box that a pending layout tree rebuild
-// replaces is never consulted again, while its replacement derives the fact when it is constructed.
-// That is why the unchecked layout node accessor is the right one here.
 void Element::set_scroll_offset(Optional<CSS::PseudoElement> pseudo_element_type, CSSPixelPoint offset)
 {
-    // The document's scroll state mirrors these offsets, so it is invalidated here, next to the
-    // store, rather than by each caller.
+    // The render side reads these offsets, and the document's scroll state mirrors them, so the
+    // write is journalled here, next to the store, rather than by each caller. It reaches the render
+    // side at the next drain, which any read of a published offset forces first.
     if (pseudo_element_type.has_value()) {
         auto pseudo_element = get_synthetic_pseudo_element(*pseudo_element_type);
         if (!pseudo_element.has_value())
             return;
-        if (pseudo_element->scroll_offset() != offset)
-            document().invalidate_scroll_state();
-        pseudo_element->set_scroll_offset(offset);
-        if (auto* layout_node = pseudo_element->unsafe_layout_node())
-            layout_node->publish_scroll_offset();
+        auto offset_changed = pseudo_element->scroll_offset() != offset;
+        document().invalidation_journal().note_pseudo_element_scroll_offset(NodeIdentity::of(*this), *pseudo_element_type, offset, offset_changed);
         return;
     }
 
-    if (scroll_offset({}) != offset)
-        document().invalidate_scroll_state();
+    auto offset_changed = scroll_offset({}) != offset;
     if (!offset.is_zero())
         ensure_element_rare_data().scroll_offset = offset;
     else if (auto* rare_data = element_rare_data())
         rare_data->scroll_offset = {};
-    Layout::publish_element_scroll_offset(*this);
-    if (auto* layout_node = unsafe_layout_node())
-        layout_node->publish_scroll_offset();
+    document().invalidation_journal().note_scroll_offset(NodeIdentity::of(*this), offset_changed);
 }
 
 Optional<Element::Dir> Element::dir() const

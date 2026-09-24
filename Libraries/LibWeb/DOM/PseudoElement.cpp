@@ -65,6 +65,8 @@ CSSPixelPoint SyntheticPseudoElement::scroll_offset() const
 {
     if (!m_originating_element)
         return {};
+    // The render side stores the offset, so a write still in the journal lands before the read.
+    m_originating_element->document().drain_invalidation_journal();
     auto* arena = m_originating_element->document().layout_node_arena_if_created();
     if (!arena)
         return {};
