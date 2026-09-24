@@ -236,14 +236,37 @@ void const* StyleEngine::style_record_payloads(StyleRecordID style_record) const
     return StyleEngineFFI::style_engine_style_record_payloads(m_impl, style_record.value());
 }
 
+void const* StyleEngine::held_style_record_payloads(StyleRecordID style_record) const
+{
+    // A held record is live, so its payloads are the ones its view borrows.
+    if (!epoch_style_record_facts(style_record))
+        return style_record_payloads(style_record);
+    auto view = style_record_view(style_record);
+    return view.present ? view.payloads : nullptr;
+}
+
 StyleRecordDependencyFlag StyleEngine::style_record_dependency_flags(StyleRecordID style_record) const
 {
-    return static_cast<StyleRecordDependencyFlag>(StyleEngineFFI::style_engine_style_record_dependency_flags(m_impl, style_record.value()));
+    auto* facts = epoch_style_record_facts(style_record);
+    if (facts && facts->dependency_flags.has_value())
+        return static_cast<StyleRecordDependencyFlag>(*facts->dependency_flags);
+    if (facts && facts->view.has_value() && facts->view->present)
+        return static_cast<StyleRecordDependencyFlag>(facts->view->dependency_flags);
+    auto dependency_flags = StyleEngineFFI::style_engine_style_record_dependency_flags(m_impl, style_record.value());
+    if (facts)
+        facts->dependency_flags = dependency_flags;
+    return static_cast<StyleRecordDependencyFlag>(dependency_flags);
 }
 
 u64 StyleEngine::style_record_custom_property_environment(StyleRecordID style_record) const
 {
-    return StyleEngineFFI::style_engine_style_record_custom_property_environment(m_impl, style_record.value());
+    auto* facts = epoch_style_record_facts(style_record);
+    if (facts && facts->custom_property_environment.has_value())
+        return *facts->custom_property_environment;
+    auto environment = StyleEngineFFI::style_engine_style_record_custom_property_environment(m_impl, style_record.value());
+    if (facts)
+        facts->custom_property_environment = environment;
+    return environment;
 }
 
 bool StyleEngine::animation_overlay_changed(StyleRecordID old_style_record, void const* animated_overlay) const
@@ -268,7 +291,37 @@ StyleEngine::SettledAnimationDefinitions StyleEngine::take_settled_animation_def
 
 StyleEngine::StyleRecordView StyleEngine::style_record_view(StyleRecordID style_record) const
 {
-    return StyleEngineFFI::style_engine_style_record_view(m_impl, style_record.value());
+    auto* facts = epoch_style_record_facts(style_record);
+    if (facts && facts->view.has_value())
+        return *facts->view;
+    auto view = StyleEngineFFI::style_engine_style_record_view(m_impl, style_record.value());
+    if (facts)
+        facts->view = view;
+    return view;
+}
+
+StyleEngine::EpochStyleRecordFacts* StyleEngine::epoch_style_record_facts(StyleRecordID style_record) const
+{
+    // An animation overlay's slot can be replaced within an epoch; only a base record's identity
+    // is fixed.
+    constexpr u64 animation_overlay_tag = 1ull << 63;
+    if (m_style_record_view_epoch_depth == 0 || !style_record || (style_record.value() & animation_overlay_tag))
+        return nullptr;
+    return &m_epoch_style_record_facts.ensure(style_record.value());
+}
+
+void StyleEngine::begin_style_record_view_epoch()
+{
+    ++m_style_record_view_epoch_depth;
+    StyleEngineFFI::style_engine_begin_style_record_view_epoch(m_impl);
+}
+
+void StyleEngine::end_style_record_view_epoch()
+{
+    VERIFY(m_style_record_view_epoch_depth > 0);
+    StyleEngineFFI::style_engine_end_style_record_view_epoch(m_impl);
+    if (--m_style_record_view_epoch_depth == 0)
+        m_epoch_style_record_facts.clear();
 }
 
 double StyleEngine::ensure_random_base_value(StyleNodeID node, Utf16View name, bool element_shared)

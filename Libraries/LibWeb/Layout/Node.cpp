@@ -793,7 +793,7 @@ static Node const* scroll_snap_container_of(NodeWithStyle const& node)
 
 void NodeWithStyle::publish_style_record_to_node_data()
 {
-    auto const* payloads = document().style_computer().style_engine().style_record_payloads(m_style_record_identity);
+    auto const* payloads = document().style_computer().style_engine().held_style_record_payloads(m_style_record_identity);
     VERIFY(payloads);
     m_style_payloads = payloads;
     RustFFI::layout_arena_set_node_style(arena_handle(), slot_id(this), m_style_record_identity.value(), payloads);
