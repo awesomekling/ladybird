@@ -376,12 +376,6 @@ impl RetainedState {
             Counter::EnginePartialLonghandEvaluations,
             u64::from(results.longhand_evaluations),
         );
-        // A value the drive could not absolutize with this context leaves the table half meant;
-        // the row is whoever can supply what the context lacked.
-        if results.unsupported_native_computation {
-            counters.bump(Counter::EngineComputedRecordBailDriveUnsupportedValue);
-            return Err(Unanswered::Refused);
-        }
         // An `inherit` of a non-inherited property reads the half of the parent's style a child
         // normally cannot see. The value itself is computed here; what C++ does beside it is one
         // write on the parent, which the row leaves for the host to drain after the batch.
@@ -864,14 +858,15 @@ impl RetainedState {
             }
         };
         // The font size the element's own lengths resolve against is the C++ working set's, a
-        // CSSPixels value, not the computed value's double.
+        // CSSPixels value, not the computed value's double. The font phase computes font-size,
+        // font-weight, and font-width to these types: a value it cannot compute is `unset`.
         let font_size = match value_of(&table, prop::FONT_SIZE) {
             Some(StyleValueData::Length { value, unit }) if *unit == crate::css::style_compute::px_length_unit() => {
                 CssPixels::nearest_value_for(*value).to_double()
             }
             _ => {
-                counters.bump(Counter::EngineComputedRecordBailFontPhase);
-                return Err(Unanswered::Refused);
+                debug_assert!(false, "the font phase left font-size uncomputed");
+                CssPixels::from_raw(inputs.initial_font_size_raw).to_double()
             }
         };
         let font_size_raw = CssPixels::nearest_value_for(font_size).raw_value();
@@ -890,8 +885,8 @@ impl RetainedState {
                 (*weight, *width)
             }
             _ => {
-                counters.bump(Counter::EngineComputedRecordBailFontPhase);
-                return Err(Unanswered::Refused);
+                debug_assert!(false, "the font phase left font-weight or font-width uncomputed");
+                (400.0, 100.0)
             }
         };
         let font_optical_sizing = match value_of(&table, prop::FONT_OPTICAL_SIZING) {
@@ -997,20 +992,24 @@ impl RetainedState {
 
         // The used line height, as the C++ working set reads it from the computed value.
         let normal_line_height = f64::from(resolved.ascent.round() as i32 + resolved.descent.round() as i32);
-        let line_height_used = |table: &ComputedLonghandTable| -> Option<f64> {
-            match value_of(table, prop::LINE_HEIGHT)? {
-                StyleValueData::Keyword { keyword } if *keyword == keyword::NORMAL => Some(normal_line_height),
-                StyleValueData::Length { value, unit } if *unit == crate::css::style_compute::px_length_unit() => {
-                    Some(CssPixels::nearest_value_for(*value).to_double())
+        // The line-height phase computes line-height to one of these; a value it cannot compute
+        // is `unset`, so any other shape is read as `normal`.
+        let line_height_used = |table: &ComputedLonghandTable| -> f64 {
+            match value_of(table, prop::LINE_HEIGHT) {
+                Some(StyleValueData::Keyword { keyword }) if *keyword == keyword::NORMAL => normal_line_height,
+                Some(StyleValueData::Length { value, unit })
+                    if *unit == crate::css::style_compute::px_length_unit() =>
+                {
+                    CssPixels::nearest_value_for(*value).to_double()
                 }
-                StyleValueData::Number { value } => Some(CssPixels::nearest_value_for(value * font_size).to_double()),
-                _ => None,
+                Some(StyleValueData::Number { value }) => CssPixels::nearest_value_for(value * font_size).to_double(),
+                _ => {
+                    debug_assert!(false, "the line-height phase left line-height uncomputed");
+                    normal_line_height
+                }
             }
         };
-        let Some(line_height_before_adjustments) = line_height_used(&table) else {
-            counters.bump(Counter::EngineComputedRecordBailFontPhase);
-            return Err(Unanswered::Refused);
-        };
+        let line_height_before_adjustments = line_height_used(&table);
         if goal == FontDriveGoal::RootInputs {
             let root_inputs = RootFontInputs {
                 metrics: [
@@ -1108,12 +1107,6 @@ impl RetainedState {
             &raw const input_line_height_metrics,
             line_height_value,
         );
-        // A value the drive could not absolutize with this context leaves the table half meant;
-        // the row is whoever can supply what the context lacked.
-        if results.unsupported_native_computation {
-            counters.bump(Counter::EngineComputedRecordBailDriveUnsupportedValue);
-            return Err(Unanswered::Refused);
-        }
         // An `inherit` of a non-inherited property reads the half of the parent's style a child
         // normally cannot see. The value itself is computed here; what C++ does beside it is one
         // write on the parent, which the row leaves for the host to drain after the batch.
@@ -1124,10 +1117,7 @@ impl RetainedState {
             return Err(Unanswered::Refused);
         }
         *explicitly_inherited_groups |= results.explicitly_inherited_non_inherited_style_groups;
-        let Some(line_height_used_after) = line_height_used(&table) else {
-            counters.bump(Counter::EngineComputedRecordBailFontPhase);
-            return Err(Unanswered::Refused);
-        };
+        let line_height_used_after = line_height_used(&table);
         let keyword_code = |property: u16, map: fn(u16) -> Option<u8>| match value_of(&table, property) {
             Some(StyleValueData::Keyword { keyword }) => map(*keyword).unwrap_or(0),
             _ => 0,
