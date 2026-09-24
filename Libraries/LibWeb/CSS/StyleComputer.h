@@ -320,7 +320,4 @@ private:
     HashMap<u64, WeakPtr<StyleSheetState const>> m_style_engine_sheet_sources;
 };
 
-// Whether a custom property holds a different value under two inherited environments.
-bool custom_property_value_moved(Utf16FlyString const& name, CustomPropertyData const* old_data, CustomPropertyData const* new_data);
-
 }

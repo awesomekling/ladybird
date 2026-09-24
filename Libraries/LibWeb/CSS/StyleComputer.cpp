@@ -2491,23 +2491,6 @@ u64 StyleComputer::style_environment_version_for_sharing() const
     return document().style_environment_version() ^ (m_viewport_environment_version << 32);
 }
 
-// Whether a custom property holds a different value under two inherited environments. A var()
-// whose property holds the same value under both substitutes to the same thing. A registered
-// property that does not inherit still reaches a descendant that declares it `inherit`, so a move
-// of it counts like any other.
-bool custom_property_value_moved(Utf16FlyString const& name, CustomPropertyData const* old_data, CustomPropertyData const* new_data)
-{
-    auto const* old_property = old_data ? old_data->get(name) : nullptr;
-    auto const* new_property = new_data ? new_data->get(name) : nullptr;
-    if (!old_property && !new_property)
-        return false;
-    if (!old_property || !new_property)
-        return true;
-    if (old_property->value->rust_style_value_data() == new_property->value->rust_style_value_data())
-        return false;
-    return !old_property->value->equals(*new_property->value);
-}
-
 void StyleComputer::ensure_style_metadata_tables_installed()
 {
     static bool const installed = [] {
