@@ -75,7 +75,12 @@ public:
         u32 explicit_inheritance_debt { 0 };
         u8 row_effect_debt { 0 };
     };
-    using Effect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames, AnimationNames, ContainerQueryEffects, AnimationPlan, DisplayNoneAnimations, RestoreRowDebts>;
+    // The host installed the record the engine computed for a row: the engine commits the state it
+    // computed the record from. The node's element may be gone.
+    struct AcknowledgeRecord {
+        StyleNodeID style_node;
+    };
+    using Effect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames, AnimationNames, ContainerQueryEffects, AnimationPlan, DisplayNoneAnimations, RestoreRowDebts, AcknowledgeRecord>;
 
     void append(Effect effect) { m_effects.append(move(effect)); }
     void apply(DOM::Document&);
