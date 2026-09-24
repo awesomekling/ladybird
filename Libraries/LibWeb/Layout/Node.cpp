@@ -546,7 +546,10 @@ namespace Web::Layout {
 
 void NodeWithStyle::apply_style(CSS::StyleRecordID style_record_identity)
 {
-    release_pinned_style_record();
+    // The pin holds the record the node names. An animation-overlay record the engine no longer
+    // assigns lives by that pin alone, so a node that keeps its record keeps the pin.
+    if (style_record_identity != m_style_record_identity)
+        release_pinned_style_record();
     m_background_layers.clear();
     m_mask_layers.clear();
     m_border_image.clear();
