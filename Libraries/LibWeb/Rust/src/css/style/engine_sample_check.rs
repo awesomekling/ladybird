@@ -130,3 +130,52 @@ pub(crate) fn check_new_animation_rows(
         }
     }
 }
+
+/// What the engine's own sample of an element leaves for the overlay record: the table after the
+/// animated box-type finalization, and the overlay. The host publishes its own right after it
+/// samples, and the publication checks the two against each other.
+pub(crate) struct EngineSampledStyle {
+    pub(crate) table: *mut crate::css::computed_longhand_table::ComputedLonghandTable,
+    pub(crate) overlay: *mut crate::css::animated_overlay::AnimatedOverlay,
+}
+
+impl Drop for EngineSampledStyle {
+    fn drop(&mut self) {
+        unsafe {
+            crate::css::computed_longhand_table::rust_computed_longhand_table_release(self.table);
+            crate::css::animated_overlay::rust_animated_overlay_free(self.overlay);
+        }
+    }
+}
+
+type ExpectedStyles = HashMap<(usize, StyleNodeID, u8), EngineSampledStyle>;
+
+thread_local! {
+    static EXPECTED_SAMPLED_STYLES: RefCell<ExpectedStyles> = RefCell::new(HashMap::new());
+}
+
+/// Keep what the engine's sample of `(node, pseudo_kind)` composed for the publication that
+/// follows, or forget what an earlier sample left where the engine could not sample.
+pub(crate) fn expect_sampled_style(
+    engine: usize,
+    node: StyleNodeID,
+    pseudo_kind: u8,
+    style: Option<EngineSampledStyle>,
+) {
+    EXPECTED_SAMPLED_STYLES.with_borrow_mut(|expected| match style {
+        Some(style) => {
+            expected.insert((engine, node, pseudo_kind), style);
+        }
+        None => {
+            expected.remove(&(engine, node, pseudo_kind));
+        }
+    });
+}
+
+pub(crate) fn take_expected_sampled_style(
+    engine: usize,
+    node: StyleNodeID,
+    pseudo_kind: u8,
+) -> Option<EngineSampledStyle> {
+    EXPECTED_SAMPLED_STYLES.with_borrow_mut(|expected| expected.remove(&(engine, node, pseudo_kind)))
+}

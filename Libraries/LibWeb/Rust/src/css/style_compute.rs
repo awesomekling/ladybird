@@ -3264,6 +3264,9 @@ struct EngineSampleRun {
     generations: Vec<u64>,
     current_keys: Vec<f64>,
     overlay: *mut AnimatedOverlay,
+    /// The record the sample composes over.
+    record_table: *const ComputedLonghandTable,
+    record_overlay: *const AnimatedOverlay,
     /// The contexts for each pair of container axes a batch can ask a basis for.
     length_contexts: [FfiAnimationLengthContexts; 4],
     horizontal: bool,
@@ -3376,6 +3379,8 @@ fn prepare_engine_sample(
             // animated values are the sample's to write again.
             false => unsafe { crate::css::animated_overlay::rust_animated_overlay_clone_inherited(record_overlay) },
         },
+        record_table: table.cast(),
+        record_overlay,
         length_contexts,
         horizontal,
     });
@@ -3455,6 +3460,12 @@ unsafe fn sample_and_check_against_the_engine(
 
     // The engine samples first, from the overlay the element's record holds, which is the one the
     // host is about to compose into.
+    crate::css::style::engine_sample_check::expect_sampled_style(
+        std::ptr::from_ref(&*engine).addr(),
+        node,
+        input.pseudo_kind,
+        None,
+    );
     let engine_sample = match prepare_engine_sample(input, engine, node, descriptions) {
         Ok((run, run_input)) => {
             let result = unsafe { sample_described_animation_effects(&run_input, engine, node, descriptions) };
@@ -3520,11 +3531,176 @@ unsafe fn sample_and_check_against_the_engine(
             )
         });
     }
-    unsafe {
-        rust_release_animated_custom_property_results(engine_result.animated_custom_properties_storage);
-        crate::css::animated_overlay::rust_animated_overlay_free(run.overlay);
+    unsafe { rust_release_animated_custom_property_results(engine_result.animated_custom_properties_storage) };
+    let engine_identity = std::ptr::from_ref(&*engine).addr();
+    let pseudo = (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT).then_some(input.pseudo_kind);
+    match unsafe { finalize_engine_sample(engine, node, pseudo, run.record_table, run.record_overlay, run.overlay) } {
+        Ok(table) => crate::css::style::engine_sample_check::expect_sampled_style(
+            engine_identity,
+            node,
+            input.pseudo_kind,
+            Some(crate::css::style::engine_sample_check::EngineSampledStyle {
+                table,
+                overlay: run.overlay,
+            }),
+        ),
+        Err(reason) => {
+            engine_sample_check::note_declined(&format!("sampled style: {reason}"));
+            unsafe { crate::css::animated_overlay::rust_animated_overlay_free(run.overlay) };
+        }
     }
     result
+}
+
+/// Check the style the host's whole-stack sample of an element left in its working set - the
+/// finalized table and the overlay - against the one the engine's own sample of it left. The host
+/// calls this at the end of every such sample; it does nothing unless the check is on.
+///
+/// # Safety
+/// `engine`, `table` and `overlay` must be live, or `overlay` null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_check_sampled_style(
+    engine: *const c_void,
+    style_node: u32,
+    pseudo_kind: u8,
+    table: *const c_void,
+    overlay: *const c_void,
+) {
+    use crate::css::style::engine_sample_check;
+
+    if !engine_sample_check::is_checking() {
+        return;
+    }
+    let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
+        return;
+    };
+    let Some(expected) = engine_sample_check::take_expected_sampled_style(engine.addr(), node, pseudo_kind) else {
+        return;
+    };
+    let (table, expected_table) = (unsafe { &*table.cast::<ComputedLonghandTable>() }, unsafe {
+        &*expected.table
+    });
+    let table_agrees = ANIMATED_POST_COMPUTE_ADJUSTMENT_PROPERTIES.iter().all(|&property| {
+        let (host, engine) = (
+            table.effective_value(None, property, false).value,
+            expected_table.effective_value(None, property, false).value,
+        );
+        host == engine
+            || (!host.is_null()
+                && !engine.is_null()
+                && unsafe { crate::css::style_value::rust_style_value_equals(host.cast(), engine.cast()) })
+    });
+    let overlay_agrees = overlays_agree(overlay, expected.overlay.cast_const().cast());
+    if table_agrees && overlay_agrees {
+        engine_sample_check::note_agreed("sampled style");
+        return;
+    }
+    engine_sample_check::note_difference("sampled style", &|| {
+        format!(
+            "node {} pseudo {pseudo_kind}: table {table_agrees}, overlay {overlay_agrees}: host {:?}, engine {:?}",
+            node.raw(),
+            describe_overlay(overlay)
+                .iter()
+                .map(|entry| entry.0)
+                .collect::<Vec<_>>(),
+            describe_overlay(expected.overlay.cast_const().cast())
+                .iter()
+                .map(|entry| entry.0)
+                .collect::<Vec<_>>(),
+        )
+    });
+}
+
+/// The longhands the animated box-type, overflow and text-alignment adjustments write.
+const ANIMATED_POST_COMPUTE_ADJUSTMENT_PROPERTIES: [u16; 7] = [
+    crate::css::property_metadata::property_id::DISPLAY,
+    crate::css::property_metadata::property_id::POSITION,
+    crate::css::property_metadata::property_id::FLOAT,
+    crate::css::property_metadata::property_id::LINE_HEIGHT,
+    crate::css::property_metadata::property_id::OVERFLOW_X,
+    crate::css::property_metadata::property_id::OVERFLOW_Y,
+    crate::css::property_metadata::property_id::TEXT_ALIGN,
+];
+
+/// The table the engine's sample leaves after the animated box-type finalization the host runs
+/// after its own: a copy of the record's table finalized with the engine's box-type input, where an
+/// animated value, or one the record's composition held, feeds an adjustment, and otherwise the
+/// record's own table. `overlay` is finalized in place.
+///
+/// # Safety
+/// `record_table` and `overlay` must be live, and `record_overlay` live or null.
+unsafe fn finalize_engine_sample(
+    engine: &crate::css::style::StyleEngine,
+    node: crate::css::style::tree::StyleNodeID,
+    pseudo: Option<u8>,
+    record_table: *const ComputedLonghandTable,
+    record_overlay: *const AnimatedOverlay,
+    overlay: *mut AnimatedOverlay,
+) -> Result<*mut ComputedLonghandTable, &'static str> {
+    use crate::css::animated_overlay::rust_animated_overlay_contains;
+    use crate::css::computed_longhand_table::{
+        rust_computed_longhand_table_copy_from, rust_computed_longhand_table_create,
+        rust_computed_longhand_table_release, rust_computed_longhand_table_retain,
+    };
+
+    let contains_an_adjusted_property = |overlay: *const AnimatedOverlay| {
+        !overlay.is_null()
+            && ANIMATED_POST_COMPUTE_ADJUSTMENT_PROPERTIES
+                .iter()
+                .any(|&property| unsafe { rust_animated_overlay_contains(overlay, property) })
+    };
+    if !contains_an_adjusted_property(record_overlay) && !contains_an_adjusted_property(overlay) {
+        return Ok(unsafe { rust_computed_longhand_table_retain(record_table) }.cast_mut());
+    }
+    let parent_display = engine.box_type_parent_display_for_target(node, pseudo.is_some());
+    let box_type = rust_box_type_transformation_input(
+        engine.element_adjustment_facts(node),
+        match pseudo {
+            Some(_) => FfiStyleAdjustmentTarget::PseudoElement,
+            None => FfiStyleAdjustmentTarget::Element,
+        },
+        parent_display.is_some(),
+        parent_display.unwrap_or_else(|| unsafe { std::mem::zeroed() }),
+    );
+    let table = rust_computed_longhand_table_create();
+    unsafe { rust_computed_longhand_table_copy_from(table, record_table) };
+    let line_height_metrics = match box_type.check_input_line_height {
+        false => FfiInputLineHeightMetrics {
+            current_line_height: 0.0,
+            minimum_line_height: 0.0,
+        },
+        true => {
+            let font = crate::css::style::engine_sample::font_resolution_inputs(
+                unsafe { &*table },
+                unsafe { overlay.as_ref() },
+                engine.tree().tree_scope(node).0,
+                &engine.document_style_computation_inputs(),
+            );
+            let Some(resolved) = engine.resolved_font(font.request) else {
+                unsafe { rust_computed_longhand_table_release(table) };
+                return Err("an input's font nobody resolved yet");
+            };
+            FfiInputLineHeightMetrics {
+                current_line_height: crate::css::style::engine_sample::used_line_height(
+                    unsafe { &*table },
+                    unsafe { overlay.as_ref() },
+                    font.font_size,
+                    &resolved,
+                ),
+                minimum_line_height: f64::from(resolved.ascent.round() as i32 + resolved.descent.round() as i32),
+            }
+        }
+    };
+    finalize_computed_style(
+        FfiStyleFinalizationMode::AnimatedBoxType,
+        box_type,
+        false,
+        None,
+        unsafe { &mut *table },
+        unsafe { overlay.as_mut() },
+        Some(&line_height_metrics),
+    );
+    Ok(table)
 }
 
 unsafe fn sample_described_animation_effects(
