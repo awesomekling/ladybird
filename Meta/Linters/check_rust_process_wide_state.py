@@ -151,6 +151,7 @@ RENDER_STAGE_ALLOWED = {
             "stage_thread.rs:STAGE_THREAD",
             "stage_thread.rs:THREAD",
             "stage_thread.rs:WAITING_CALLER",
+            "stage_thread.rs:INCOMING",
         ],
     ),
     **render_stage_entries(
