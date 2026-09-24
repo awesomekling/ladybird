@@ -233,6 +233,41 @@ mod tests {
     }
 
     #[test]
+    fn inline_that_starts_storing_a_scroll_offset_is_measured_before_publication() {
+        use crate::css::css_pixels::{CssPixelRect, CssPixels};
+        use crate::layout::node_data::NodeKind;
+        use crate::painting::paintable_geometry;
+
+        let mut arena = LayoutNodeArena::new();
+        let node = arena.allocate_for_test().slot;
+        arena.data(node).kind.set(NodeKind::InlineNode);
+        arena.populate_paintable_row(node);
+        arena.scrollable_overflow.viewport.set(Some(node));
+        let rect = CssPixelRect::new(
+            CssPixels::from_integer(0),
+            CssPixels::from_integer(0),
+            CssPixels::from_integer(100),
+            CssPixels::from_integer(80),
+        );
+        arena
+            .paintable_rows_mut()
+            .paintable_data_mut(node)
+            .local_padding_box_union = rect.into();
+        arena.measure_scrollable_overflow_before_publication();
+        assert_eq!(
+            paintable_geometry::scrollable_overflow_rect(&arena.paintable_rows(), node),
+            None
+        );
+
+        arena.set_node_flag(node, NodeFlag::HasScrollOffset, true);
+        arena.measure_scrollable_overflow_before_publication();
+        assert_eq!(
+            paintable_geometry::scrollable_overflow_rect(&arena.paintable_rows(), node),
+            Some(rect)
+        );
+    }
+
+    #[test]
     fn overflow_is_measured_before_publication_while_geometry_is_borrowed() {
         use crate::css::css_pixels::{CssPixelRect, CssPixels};
         use crate::layout::node_data::NodeKind;
