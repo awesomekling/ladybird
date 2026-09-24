@@ -2366,6 +2366,12 @@ StyleComputer::SampledAnimationOverlayPublication StyleComputer::publish_sampled
         !abstract_element.pseudo_element().has_value() && element.is_document_element());
     if (before_publication)
         before_publication(invalidation);
+    // An element's layout node is built from its arena row on first use, and reads its style from
+    // the payloads of the record the row names. Publishing can replace that record and free its
+    // payloads before the element installs the new record, which is when the layout node would
+    // otherwise be built, so it is built while the record is still live.
+    if (!abstract_element.pseudo_element().has_value())
+        (void)element.unsafe_layout_node();
     auto animated_properties = style.animated_properties_snapshot();
     bool const publishes_overlay = animated_properties && !animated_properties->is_empty();
     auto publication = const_cast<StyleComputer&>(*this).style_engine().publish_animation_overlay(
