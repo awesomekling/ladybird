@@ -40,6 +40,12 @@ pub(crate) struct StylePass {
     /// host installs a wave, as it is between transactions.
     batch_answers_complete_but_for_custom_properties: HashMap<StyleNodeID, bool>,
     batch_custom_property_matches: HashMap<StyleNodeID, Vec<BatchCustomPropertyMatch>>,
+    /// Whether the batch scratch accounting still holds the published nodes' capacity, which it
+    /// does until the first wave is emitted.
+    published_nodes_are_charged: bool,
+    /// The nodes that joined the pass, or wait for a later wave or transaction, for a reaction a row
+    /// it settled derived for them.
+    joined_by_derivation: HashSet<StyleNodeID>,
 }
 
 impl StylePass {
@@ -2046,6 +2052,8 @@ impl StyleEngineState {
                 rows_after_installed_ancestors: HashSet::default(),
                 batch_answers_complete_but_for_custom_properties: HashMap::default(),
                 batch_custom_property_matches: HashMap::default(),
+                published_nodes_are_charged: true,
+                joined_by_derivation: HashSet::default(),
             };
             self.run_style_pass(
                 &mut pass,
@@ -2068,6 +2076,7 @@ impl StyleEngineState {
                 MemoryCategory::BatchScratch,
                 (pass.published_nodes.capacity() * size_of::<StyleNodeID>()) as u64,
             );
+            pass.published_nodes_are_charged = false;
             published_match_answers = std::mem::take(&mut pass.published_match_answers);
             // NB: A pass the host installs in waves keeps its scratch until its last wave; the
             //     batch scratch accounting above is released with the first one.
@@ -2127,7 +2136,6 @@ impl StyleEngineState {
     /// Settle the pass's rows from the first one the host has not been given, in the order the
     /// host applies them, until the first row that reads an ancestor only the host settles. That
     /// row, and every row after it, waits for the next wave.
-    #[allow(clippy::too_many_lines)]
     fn run_style_pass(
         &mut self,
         pass: &mut StylePass,
@@ -2136,6 +2144,149 @@ impl StyleEngineState {
         computation_scratch_memory: &mut MemoryLease,
         counters: &mut Counters,
     ) {
+        loop {
+            let derived_children = self.run_style_pass_round(
+                pass,
+                style_deltas,
+                style_delta_memory,
+                computation_scratch_memory,
+                counters,
+            );
+            if derived_children.is_empty() {
+                return;
+            }
+            // A wave that stops before a row leaves the children to the next transaction, as the
+            // host's application of their parents would.
+            if pass.next_index < pass.published_nodes.len() {
+                self.defer_derived_children(pass, derived_children);
+                return;
+            }
+            if !self.extend_style_pass(pass, derived_children, counters) {
+                return;
+            }
+        }
+    }
+
+    /// Leave reactions a row of the pass derived for its children to the next transaction.
+    fn defer_derived_children(&mut self, pass: &mut StylePass, derived_children: Vec<(StyleNodeID, u8, u8, bool)>) {
+        for (child, reaction, groups, display_moved) in derived_children {
+            // A later wave that joins the child between installed ancestors joins it for this
+            // reaction too.
+            pass.joined_by_derivation.insert(child);
+            self.record_derived_element_style_input(child, reaction, groups);
+            if display_moved {
+                self.retained.parent_inputs_moved_nodes.insert(child);
+            }
+        }
+    }
+
+    /// A row the pass settled derived reactions for children that are no row of the pass: they
+    /// join it as rows of their own, after every row there is, so their parents' records are in
+    /// place. A child with a row of the pass below it is the host's to close the batch over, and
+    /// stays with the host. Whether any child joined.
+    fn extend_style_pass(
+        &mut self,
+        pass: &mut StylePass,
+        mut derived_children: Vec<(StyleNodeID, u8, u8, bool)>,
+        counters: &mut Counters,
+    ) -> bool {
+        derived_children.sort_unstable_by_key(|&(child, _, _, _)| child);
+        let mut merged: Vec<(StyleNodeID, u8, u8, bool)> = Vec::with_capacity(derived_children.len());
+        for (child, reaction, groups, display_moved) in derived_children {
+            match merged.last_mut() {
+                Some(last) if last.0 == child => {
+                    last.1 |= reaction;
+                    last.2 |= groups;
+                    last.3 |= display_moved;
+                }
+                _ => merged.push((child, reaction, groups, display_moved)),
+            }
+        }
+        let rows: HashSet<StyleNodeID> = pass.published_nodes.iter().copied().collect();
+        let joining: HashSet<StyleNodeID> = merged
+            .iter()
+            .map(|&(child, _, _, _)| child)
+            .filter(|child| !rows.contains(child))
+            .collect();
+        // A child with a row of the pass below it: the host closes its batch over it.
+        let mut closed_over = HashSet::<StyleNodeID>::default();
+        for &row in &pass.published_nodes {
+            let mut ancestor = self.tree.flat_tree_parent(row);
+            while let Some(current) = ancestor {
+                if joining.contains(&current) {
+                    closed_over.insert(current);
+                }
+                ancestor = self.tree.flat_tree_parent(current);
+            }
+        }
+        let (joining, deferred): (Vec<_>, Vec<_>) = merged
+            .into_iter()
+            .partition(|(child, _, _, _)| joining.contains(child) && !closed_over.contains(child));
+        self.defer_derived_children(pass, deferred);
+        if joining.is_empty() {
+            return false;
+        }
+        let nodes: Vec<StyleNodeID> = joining.iter().map(|&(child, _, _, _)| child).collect();
+        std::mem::swap(
+            &mut pass.published_match_answers,
+            &mut self.retained.published_match_answers,
+        );
+        let completed = self.complete_published_match_answers_for_closure(&nodes, counters);
+        std::mem::swap(
+            &mut pass.published_match_answers,
+            &mut self.retained.published_match_answers,
+        );
+        if completed.is_err() {
+            self.defer_derived_children(pass, joining);
+            return false;
+        }
+        let published_node_capacity = pass.published_nodes.capacity();
+        for (child, reaction, groups, display_moved) in joining {
+            pass.joined_by_derivation.insert(child);
+            pass.published_nodes.push(child);
+            pass.previous_cascade_inputs.push(None);
+            match pass
+                .style_input_reactions
+                .binary_search_by_key(&child, |&(style_node, _, _)| style_node)
+            {
+                Ok(index) => {
+                    pass.style_input_reactions[index].1 |= reaction;
+                    pass.style_input_reactions[index].2 |= groups;
+                }
+                Err(index) => pass.style_input_reactions.insert(index, (child, reaction, groups)),
+            }
+            if display_moved {
+                pass.parent_inputs_moved_nodes.insert(child);
+            }
+        }
+        if pass.published_nodes_are_charged && pass.published_nodes.capacity() > published_node_capacity {
+            self.retained.memory.reserve_required(
+                MemoryCategory::BatchScratch,
+                ((pass.published_nodes.capacity() - published_node_capacity) * size_of::<StyleNodeID>()) as u64,
+            );
+        }
+        true
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn run_style_pass_round(
+        &mut self,
+        pass: &mut StylePass,
+        style_deltas: &mut Vec<PublishedStyleDeltaRecord>,
+        style_delta_memory: &mut MemoryLease,
+        computation_scratch_memory: &mut MemoryLease,
+        counters: &mut Counters,
+    ) -> Vec<(StyleNodeID, u8, u8, bool)> {
+        // Where each row of the pass stands, for a reaction a row derives for a child that is a row
+        // still to come.
+        let row_positions: HashMap<StyleNodeID, usize> = pass
+            .published_nodes
+            .iter()
+            .enumerate()
+            .map(|(index, &node)| (node, index))
+            .collect();
+        let mut derived_children = Vec::<(StyleNodeID, u8, u8, bool)>::new();
+        let mut derived = Vec::new();
         // What the chain above a node proves, read by its children in the same pass. A
         // published ancestor's change is exact for a descendant only when none of the
         // ancestors can move anything the descendant inherits, so the fold below is the
@@ -2871,13 +3022,18 @@ impl StyleEngineState {
                         (kind, old_pseudo_record, new_pseudo_record, pseudo_damage)
                     })
                     .collect();
-                let style_delta = PublishedStyleDeltaRecord {
+                let mut style_delta = PublishedStyleDeltaRecord {
                     style_node: node.raw(),
                     match_answer: answer_cascade_input.map_or(0, |cascade_input| cascade_input.0),
                     old_style_record,
                     new_style_record,
                     damage,
-                    record_damage,
+                    record_damage: record_damage
+                        | if pass.joined_by_derivation.contains(&node) {
+                            bridge::FfiStyleInvalidationField::JoinedByDerivation as u32
+                        } else {
+                            0
+                        },
                     reaction: reaction
                         | if pseudo_inputs_may_have_changed {
                             transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED
@@ -2895,6 +3051,118 @@ impl StyleEngineState {
                         _ => false,
                     },
                 };
+                // What the row's application moves for the children is the engine's to derive here,
+                // from the two records and their damage: a child that is a row still to come reads
+                // it before it settles, and one that is no row joins the pass. The host derives the
+                // children of a row whose effects it completes itself.
+                //
+                // The children read the row's move from what the element holds when the host
+                // applies it, which is no record when its style was cleared on entry to display:none
+                // while the engine kept the record.
+                let held_style_record = self.host.held_style_records.get(&node).copied().unwrap_or(0);
+                // A row whose custom-property environment moved moves its descendants' with it
+                // where the host installs it, and a child settled before that reads the environment
+                // it had: the children of such a row stay the host's too.
+                let environment_moved = held_style_record != 0
+                    && held_style_record != new_style_record
+                    && self
+                        .retained
+                        .computed_group_sets
+                        .style_record_custom_property_environment(held_style_record)
+                        != self
+                            .retained
+                            .computed_group_sets
+                            .style_record_custom_property_environment(new_style_record);
+                if !awaits_host
+                    && !environment_moved
+                    && new_style_record != 0
+                    && (held_style_record == 0 || held_style_record == old_style_record)
+                    && matches!(
+                        gap,
+                        FfiStyleDeltaGap::None
+                            | FfiStyleDeltaGap::Computed
+                            | FfiStyleDeltaGap::RetriedAfterAncestors
+                            | FfiStyleDeltaGap::RetriedMaterialization
+                    )
+                    && (old_style_record == 0 || old_style_record == new_style_record || record_damage != 0)
+                    && pseudo_rows
+                        .iter()
+                        .all(|&(_, old_pseudo_record, new_pseudo_record, pseudo_damage)| {
+                            pseudo_damage != 0 || old_pseudo_record == new_pseudo_record
+                        })
+                {
+                    let row_child_facts = child_reactions::EngineRowChildFacts {
+                        old_style_record: held_style_record,
+                        new_style_record,
+                        element_damage: record_damage,
+                        pseudo_damages: pseudo_rows
+                            .iter()
+                            .map(|&(kind, _, _, pseudo_damage)| (kind, pseudo_damage))
+                            .collect(),
+                        root_font_metrics_moved: held_style_record != 0
+                            && old_style_record != new_style_record
+                            && self.retained.computed_group_sets.adjustment_facts(node)
+                                & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT
+                                != 0
+                            && self.retained.root_font_inputs_from_raw_record(old_style_record)
+                                != self.retained.root_font_inputs_from_raw_record(new_style_record),
+                    };
+                    derived.clear();
+                    self.derive_engine_row_child_reactions(node, style_delta.reaction, &row_child_facts, &mut derived);
+                    for &(child, child_reaction, groups, display_moved) in &derived {
+                        let later_row = row_positions.get(&child).map(|&position| position > published_index);
+                        if child_reaction == 0 {
+                            if display_moved {
+                                if later_row == Some(true) {
+                                    pass.parent_inputs_moved_nodes.insert(child);
+                                } else {
+                                    self.retained.parent_inputs_moved_nodes.insert(child);
+                                }
+                            }
+                            continue;
+                        }
+                        match later_row {
+                            Some(true) => {
+                                match pass
+                                    .style_input_reactions
+                                    .binary_search_by_key(&child, |&(style_node, _, _)| style_node)
+                                {
+                                    Ok(index) => {
+                                        pass.style_input_reactions[index].1 |= child_reaction;
+                                        pass.style_input_reactions[index].2 |= groups;
+                                    }
+                                    Err(index) => pass.style_input_reactions.insert(
+                                        index,
+                                        (
+                                            child,
+                                            transaction::STYLE_REACTION_PUBLISHED_STYLE | child_reaction,
+                                            groups,
+                                        ),
+                                    ),
+                                }
+                                if display_moved {
+                                    pass.parent_inputs_moved_nodes.insert(child);
+                                }
+                            }
+                            // NB: Rows settle in tree order, so no child is a row settled before
+                            //     its parent; one would take its reaction in the next transaction.
+                            Some(false) => {
+                                pass.joined_by_derivation.insert(child);
+                                self.record_derived_element_style_input(child, child_reaction, groups);
+                                if display_moved {
+                                    self.retained.parent_inputs_moved_nodes.insert(child);
+                                }
+                            }
+                            None => derived_children.push((child, child_reaction, groups, display_moved)),
+                        }
+                    }
+                    style_delta.record_damage |= if held_style_record == 0 {
+                        bridge::FfiStyleInvalidationField::ChildrenDerivedOverNoRecord as u32
+                    } else {
+                        bridge::FfiStyleInvalidationField::ChildrenDerivedOverOldRecord as u32
+                    };
+                    self.retained.engine_row_child_facts.insert(node, row_child_facts);
+                }
                 if let Some(record_deltas) = &mut record_deltas {
                     let mut node_deltas = vec![style_delta];
                     for &(kind, old_pseudo_record, new_pseudo_record, pseudo_damage) in &pseudo_rows {
@@ -3018,6 +3286,7 @@ impl StyleEngineState {
             }
         }
         pass.next_index = cut_at.unwrap_or(pass.published_nodes.len());
+        derived_children
     }
 
     /// Take the next wave of the pass the host is installing: the rows up to the next one that
@@ -3293,6 +3562,7 @@ impl StyleEngineState {
         emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
         counters: &mut Counters,
     ) -> bool {
+        self.retained.engine_row_child_facts.clear();
         if self.host.suspended_style_pass.is_some() {
             // A wave reads the facts its pass matched against. Once the tree, its features or
             // the rule program moved since, the rows the pass did not reach are owed to the

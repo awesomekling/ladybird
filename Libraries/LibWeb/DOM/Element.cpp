@@ -1457,6 +1457,8 @@ static bool content_counter_styles_changed(DOM::AbstractElement const& abstract_
 struct StyleRowCounterStyleInvalidation {
     Element const* element { nullptr };
     CSS::RequiredInvalidationAfterStyleChange invalidation;
+    // Whether the row compared records itself instead of taking the damage the engine answered.
+    bool computed_damage_itself { false };
 };
 // Rows nest only where one reads the style of another element while it applies.
 static thread_local Array<StyleRowCounterStyleInvalidation, 32> s_style_row_counter_style_invalidations;
@@ -1472,6 +1474,19 @@ static StyleRowCounterStyleInvalidation* innermost_style_row_counter_style_inval
 
 void begin_style_row_counter_style_invalidation(Element const&);
 CSS::RequiredInvalidationAfterStyleChange end_style_row_counter_style_invalidation(Element const&);
+bool style_row_computed_damage_itself(Element const&);
+
+bool style_row_computed_damage_itself(Element const& element)
+{
+    auto const* row = innermost_style_row_counter_style_invalidation(element);
+    return row && row->computed_damage_itself;
+}
+
+static void note_style_row_computed_damage_itself(Element const& element)
+{
+    if (auto* row = innermost_style_row_counter_style_invalidation(element))
+        row->computed_damage_itself = true;
+}
 
 void begin_style_row_counter_style_invalidation(Element const& element)
 {
@@ -1729,6 +1744,8 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
                 damage.has_value() && damage->old_style_record == old_style_record && damage->originating_style_record == style_record_identity())
                 answered_damage = damage->packed;
         }
+        if (!answered_damage.has_value())
+            note_style_row_computed_damage_itself(*this);
         auto packed = answered_damage.value_or_lazy_evaluated([&] { return record_damage(false); });
         if (packed & to_underlying(CSS::StyleEngineFFI::FfiStyleInvalidationField::CacheHit))
             ++document().style_invalidation_counters().style_record_property_damage_cache_hits;
@@ -2419,6 +2436,8 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
             Optional<u32> answered_damage;
             if (engine_record_damage.has_value() && engine_record_damage->old_style_record == old_style_record)
                 answered_damage = engine_record_damage->packed;
+            else
+                note_style_row_computed_damage_itself(*this);
             result = compute_required_invalidation_with_cache(style_computer, *new_computed_values, old_state, abstract_element, style_record_delta, answered_damage);
             if (result.any_computed_value_changed)
                 counters.element_computed_style_changes++;

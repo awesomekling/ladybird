@@ -710,13 +710,17 @@ bool StyleEngine::take_diagnostic_style_transaction(StyleNodeID root, Function<v
             // A pseudo-element record is part of its element's reaction.
             if (reaction.pseudo_kind != NumericLimits<u8>::max())
                 continue;
+            // A row that joined the pass for a reaction another row derived for it is no row the
+            // transaction planned.
+            if (reaction.record_damage & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::JoinedByDerivation))
+                continue;
             reaction_nodes.append(StyleNodeID { reaction.style_node });
         }
     };
     take_reaction_nodes(transaction.reactions);
-    // A pass the host would install in waves reports every wave. Nothing is installed here, so
-    // nothing but the pass itself can be pending between them.
-    while (StyleEngineFFI::style_engine_has_pending_transaction(m_impl)) {
+    // A pass the host would install in waves reports every wave. The reactions its rows derived
+    // for children outside it wait for the next transaction, which is no part of this one.
+    while (StyleEngineFFI::style_engine_has_suspended_style_pass(m_impl)) {
         auto wave = take_style_transaction(root);
         if (wave.reactions.is_empty())
             break;

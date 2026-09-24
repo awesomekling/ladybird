@@ -2026,6 +2026,7 @@ impl StyleEngineState {
                 nodes_owing_a_transition_registration: HashMap::default(),
                 nodes_owing_explicit_inheritance: HashMap::default(),
                 children_explicitly_inherit_marks: HashSet::default(),
+                engine_row_child_facts: HashMap::default(),
                 batch_pinned_compositions: Vec::new(),
                 nodes_owing_an_animation_sample: HashSet::default(),
                 transition_baselines: HashMap::default(),
@@ -2883,6 +2884,7 @@ impl StyleEngineState {
             self.retained.nodes_owing_a_transition_registration.remove(&node);
             self.retained.nodes_owing_explicit_inheritance.remove(&node);
             self.retained.children_explicitly_inherit_marks.remove(&node);
+            self.retained.engine_row_child_facts.remove(&node);
             self.retained.nodes_owing_an_animation_sample.remove(&node);
             self.retained.release_transition_baselines_of(node);
             self.retained
