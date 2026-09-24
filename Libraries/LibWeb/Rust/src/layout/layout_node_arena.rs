@@ -1966,6 +1966,8 @@ impl LayoutNodeArena {
 
     /// The writer the main side's scroll offset writes are attributed to.
     pub(crate) const SCROLL_OFFSETS_WRITER: &str = "scroll offsets";
+    /// The writer the main side's selection state writes are attributed to.
+    pub(crate) const SELECTION_WRITER: &str = "selection state";
 
     /// The one door a main-side writer of render-owned state goes through. A write joins the
     /// frame in flight and lands after it, the way a main-side read of render state waits for it:

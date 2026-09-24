@@ -463,6 +463,7 @@ pub unsafe extern "C" fn layout_arena_selection_apply(
     range_end_offset: usize,
 ) {
     let arena = unsafe { arena_from_handle_mut(arena) };
+    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::SELECTION_WRITER);
     if !arena.paintable_row_is_populated(viewport) {
         return;
     }
@@ -482,6 +483,7 @@ pub unsafe extern "C" fn layout_arena_selection_apply(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_selection_clear(arena: *mut c_void, viewport: NodeSlotId) {
     let arena = unsafe { arena_from_handle_mut(arena) };
+    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::SELECTION_WRITER);
     if !arena.paintable_row_is_populated(viewport) {
         return;
     }
