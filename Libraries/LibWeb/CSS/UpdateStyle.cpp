@@ -56,6 +56,7 @@ namespace Web::DOM {
 
 void begin_style_row_counter_style_invalidation(Element const&);
 CSS::RequiredInvalidationAfterStyleChange end_style_row_counter_style_invalidation(Element const&);
+bool style_row_computed_damage_itself(Element const&);
 
 }
 
@@ -483,7 +484,19 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::Row);
             if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize)
                 StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::MaterializeGap);
-            document.style_computer().style_engine().begin_style_reaction(StyleNodeID { reaction.style_node });
+            // The engine derived the children's reactions from the row's move away from what the
+            // element holds, when nothing the host absorbed into the row asks for more.
+            bool const engine_derived_children = [&] {
+                if (reaction.reaction != published_reaction.reaction || reaction.inherited_style_groups != published_reaction.inherited_style_groups)
+                    return false;
+                if (reaction.record_damage & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::ChildrenDerivedOverOldRecord))
+                    return element->style_record_identity().value() == reaction.old_style_record;
+                if (reaction.record_damage & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::ChildrenDerivedOverNoRecord))
+                    return !element->has_style();
+                return false;
+            }();
+            if (!engine_derived_children)
+                document.style_computer().style_engine().begin_style_reaction(StyleNodeID { reaction.style_node });
             DOM::begin_style_row_counter_style_invalidation(*element);
             auto old_custom_property_data = element->custom_property_data({});
             auto const* previous_inherited_box_values = element->style_group<ComputedValues::InheritedBoxValues>();
@@ -735,14 +748,13 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 document.throttled_animation_visibility_changed();
             }
 
+            bool const row_computed_damage_itself = DOM::style_row_computed_damage_itself(*element);
             // A counter-style rebuild is the row's effect, not a move of style its children react to.
             auto effects = invalidation;
             effects |= DOM::end_style_row_counter_style_invalidation(*element);
             row_effects.append(StyleEffectDrain::ElementInvalidation { StyleNodeID { reaction.style_node }, effects });
             transaction_invalidation |= effects;
 
-            auto& style_engine = document.style_computer().style_engine();
-            u32 facts = 0;
             // The environment moved: the element's descendants take it here, and the ones that read
             // a moved name are recorded for their own computation. The engine derives no reactions
             // for the move.
@@ -750,6 +762,12 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::EnvironmentMove);
                 propagate_custom_property_environment_move(document, *element, old_custom_property_data);
             }
+            // The children of a row the engine derived them for have their reactions in the batch
+            // already. A row that installed another record than the one the engine derived them
+            // from, or whose move the host compared itself, derives them here.
+            if (engine_derived_children && !row_computed_damage_itself && element->style_record_identity().value() == reaction.new_style_record)
+                continue;
+            u32 facts = 0;
             if (invalidation.is_none())
                 facts |= StyleEngine::InvalidationIsNone;
             if (invalidation.needs_layout_tree_rebuild())
@@ -760,7 +778,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 facts |= StyleEngine::ChildrenExplicitlyInherit;
             if (auto shadow_root = element->shadow_root(); shadow_root && shadow_root->children_explicitly_inherited_non_inherited_style_groups() != 0)
                 facts |= StyleEngine::ShadowChildrenExplicitlyInherit;
-            style_engine.note_style_reaction_applied(reaction.style_node, reaction.reaction, invalidation.inherited_style_groups_changed(), facts);
+            document.style_computer().style_engine().note_style_reaction_applied(reaction.style_node, reaction.reaction, invalidation.inherited_style_groups_changed(), facts);
         }
     }
 

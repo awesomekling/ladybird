@@ -966,6 +966,9 @@ pub struct RetainedState {
     /// The nodes whose children, as the host marks them, explicitly inherit a non-inherited
     /// property: a change to the node's non-inherited groups reaches them.
     children_explicitly_inherit_marks: HashSet<StyleNodeID>,
+    /// What the engine settled for each row of the batch the host is applying, by node, from which
+    /// the engine derives what the row's application derives for the children.
+    engine_row_child_facts: HashMap<StyleNodeID, child_reactions::EngineRowChildFacts>,
     /// The compositions this batch derived beneath and keeps alive: the host's element still names
     /// one until the row that replaced it is applied, so the pin is dropped at acknowledgement.
     batch_pinned_compositions: Vec<(StyleNodeID, u64)>,

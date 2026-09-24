@@ -98,6 +98,15 @@ pub enum FfiStyleInvalidationField {
     EngineComputed = 1 << 23,
     /// Selection highlights, which text descendants paint, repaint.
     RepaintSelection = 1 << 24,
+    /// The row is no row the transaction planned: it joined the pass for a reaction a row the pass
+    /// settled derived for it.
+    JoinedByDerivation = 1 << 25,
+    /// The engine derived the children's reactions from the row's move away from the old record
+    /// it names: the host applying the row over that record derives nothing more.
+    ChildrenDerivedOverOldRecord = 1 << 26,
+    /// The engine derived the children's reactions from the row's move away from no record: the
+    /// host applying the row to an element without style derives nothing more.
+    ChildrenDerivedOverNoRecord = 1 << 27,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -4275,6 +4284,17 @@ pub unsafe extern "C" fn style_engine_note_children_explicitly_inherit(engine: *
     if let Some(node) = StyleNodeID::from_raw(node) {
         engine.note_children_explicitly_inherit(node);
     }
+}
+
+/// Whether the engine holds a style pass the host has taken only some waves of.
+///
+/// # Safety
+/// Engine must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_has_suspended_style_pass(engine: *const c_void) -> bool {
+    super::seal::note_engine_call("style_engine_has_suspended_style_pass");
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    engine.state.host.suspended_style_pass.is_some()
 }
 
 /// What the container conditions of an element's engine-answered row left for the host to record,

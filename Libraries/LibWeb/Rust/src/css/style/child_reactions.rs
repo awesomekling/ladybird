@@ -62,8 +62,17 @@ impl StyleEngineState {
         // The host begins every reaction it applies on the element it applies it to. Should it not,
         // nothing says what the element held before, and its children are told it was unstyled:
         // that owes them everything.
-        let before = match self.host.style_reaction_row_start.take() {
-            Some((row_node, before)) if row_node == node => before,
+        let start = self.host.style_reaction_row_start.take();
+        // A row whose children the engine derived is applied without beginning on it: the engine
+        // derived them over the record it names, and the host applied it over that.
+        let derived_over = self
+            .retained
+            .engine_row_child_facts
+            .get(&node)
+            .map(|row| row.old_style_record);
+        let before = match (start, derived_over) {
+            (Some((row_node, before)), _) if row_node == node => before,
+            (_, Some(old_style_record)) => (old_style_record != 0).then(|| self.record_display(old_style_record)),
             _ => {
                 debug_assert!(false, "style reaction applied to {node:?} without beginning on it");
                 super::seal::note_broken_assumption("StyleReactionAppliedWithoutBeginning");
@@ -101,6 +110,138 @@ impl StyleEngineState {
         facts: u32,
     ) {
         let row_facts = self.style_reaction_row_facts(node);
+        let mut derived = Vec::new();
+        self.derive_child_reactions(
+            node,
+            reaction,
+            inherited_style_groups_changed,
+            facts,
+            &row_facts,
+            &mut derived,
+        );
+        for child in derived {
+            self.record_derived_element_style_input(child.child, child.reaction, child.groups);
+            if child.parent_display_moved {
+                self.retained.parent_inputs_moved_nodes.insert(child.child);
+            }
+        }
+    }
+
+    /// The display a record generates, as the host's held-record mirror keeps it.
+    fn record_display(&self, style_record: u64) -> Option<crate::css::display::FfiDisplay> {
+        self.retained
+            .computed_group_sets
+            .style_record_payloads(style_record)
+            .filter(|payloads| payloads.len() > crate::css::computed_value_types::STYLE_GROUP_INDEX_BOX)
+            .map(|payloads| {
+                ComputedValuesView::new(SharedPayload::as_pointer_slice(payloads))
+                    .box_values()
+                    .display
+            })
+    }
+
+    /// What the engine says a settled row moved, for the children: the facts the host reports
+    /// with its application, derived from the two records and their damage instead.
+    fn engine_row_child_facts(&self, node: StyleNodeID, row: &EngineRowChildFacts) -> (u8, u32, StyleReactionRowFacts) {
+        let mut facts = 0;
+        // The host installs only the pseudo-elements it generates boxes for: ::backdrop only in
+        // the top layer.
+        let in_top_layer = self.retained.computed_group_sets.adjustment_facts(node)
+            & super::bridge::element_adjustment_fact::RENDERED_IN_TOP_LAYER
+            != 0;
+        let pseudo_damage = row
+            .pseudo_damages
+            .iter()
+            .filter(|&&(kind, _)| matches!(kind, 0 | 2 | 3 | 5 | 6) || (kind == 1 && in_top_layer))
+            .fold(0, |damage, &(_, pseudo_damage)| damage | pseudo_damage);
+        let (groups, is_none, rebuild, recompute_descendants) = if row.old_style_record == 0 {
+            // A first style is a full invalidation.
+            let pseudo = super::style_invalidation::unpack_invalidation(pseudo_damage);
+            (pseudo.inherited_groups, false, true, pseudo.recompute_descendants)
+        } else {
+            let element = if row.old_style_record == row.new_style_record {
+                0
+            } else {
+                row.element_damage
+            };
+            let mut invalidation = super::style_invalidation::unpack_invalidation(element);
+            invalidation.merge_packed(pseudo_damage);
+            if row.root_font_metrics_moved {
+                invalidation.recompute_descendants = true;
+            }
+            (
+                invalidation.inherited_groups,
+                invalidation.requires_nothing(),
+                invalidation.level >= 3,
+                invalidation.recompute_descendants,
+            )
+        };
+        if is_none {
+            facts |= fact::INVALIDATION_IS_NONE;
+        }
+        if rebuild {
+            facts |= fact::NEEDS_LAYOUT_TREE_REBUILD;
+        }
+        if recompute_descendants {
+            facts |= fact::RECOMPUTE_DESCENDANT_STYLES;
+        }
+        if self.retained.children_explicitly_inherit_marks.contains(&node) {
+            facts |= fact::CHILDREN_EXPLICITLY_INHERIT;
+        }
+        if self
+            .retained
+            .tree
+            .shadow_root_of(node)
+            .is_some_and(|root| self.retained.children_explicitly_inherit_marks.contains(&root))
+        {
+            facts |= fact::SHADOW_CHILDREN_EXPLICITLY_INHERIT;
+        }
+        let row_facts = if row.old_style_record == 0 {
+            StyleReactionRowFacts {
+                was_unstyled: true,
+                ..Default::default()
+            }
+        } else {
+            let before = self.record_display(row.old_style_record);
+            let now = self.record_display(row.new_style_record);
+            StyleReactionRowFacts {
+                was_unstyled: false,
+                was_display_none: before.is_some_and(|display| display.is_none()),
+                display_changed: matches!((before, now), (Some(before), Some(now)) if before != now),
+            }
+        };
+        (groups, facts, row_facts)
+    }
+
+    /// The reactions applying the row the engine settled for `node` derives for its children, as
+    /// (child, reaction, inherited style groups, parent display moved).
+    pub(super) fn derive_engine_row_child_reactions(
+        &self,
+        node: StyleNodeID,
+        reaction: u8,
+        row: &EngineRowChildFacts,
+        out: &mut Vec<(StyleNodeID, u8, u8, bool)>,
+    ) {
+        let (groups, facts, row_facts) = self.engine_row_child_facts(node, row);
+        let mut derived = Vec::new();
+        self.derive_child_reactions(node, reaction, groups, facts, &row_facts, &mut derived);
+        out.extend(
+            derived
+                .into_iter()
+                .map(|child| (child.child, child.reaction, child.groups, child.parent_display_moved)),
+        );
+    }
+
+    /// The reactions a reaction applied to `node` derives for its children.
+    fn derive_child_reactions(
+        &self,
+        node: StyleNodeID,
+        reaction: u8,
+        inherited_style_groups_changed: u8,
+        facts: u32,
+        row_facts: &StyleReactionRowFacts,
+        out: &mut Vec<DerivedChildReaction>,
+    ) {
         let has = |bit: u32| facts & bit != 0;
         let did_change_custom_properties = has(fact::DID_CHANGE_CUSTOM_PROPERTIES);
         let invalidation_is_none = has(fact::INVALIDATION_IS_NONE);
@@ -118,7 +259,12 @@ impl StyleEngineState {
                 if assigned.is_text() {
                     continue;
                 }
-                self.record_derived_element_style_input(assigned, reaction, 0);
+                out.push(DerivedChildReaction {
+                    child: assigned,
+                    reaction,
+                    groups: 0,
+                    parent_display_moved: false,
+                });
             }
         }
 
@@ -154,7 +300,12 @@ impl StyleEngineState {
                 while let Some(child) = next {
                     next = self.retained.tree.next_element_sibling(child);
                     if parent != node || self.retained.tree.assigned_slot_of(child).is_none() {
-                        self.record_derived_element_style_input(child, child_reaction, groups);
+                        out.push(DerivedChildReaction {
+                            child,
+                            reaction: child_reaction,
+                            groups,
+                            parent_display_moved: false,
+                        });
                     }
                 }
             }
@@ -198,10 +349,12 @@ impl StyleEngineState {
                     && (has(fact::CHILDREN_EXPLICITLY_INHERIT)
                         || self.node_explicitly_inherits_non_inherited_property(child)),
             );
-            self.record_derived_element_style_input(child, light_reaction, light_groups);
-            if display_changed {
-                self.retained.parent_inputs_moved_nodes.insert(child);
-            }
+            out.push(DerivedChildReaction {
+                child,
+                reaction: light_reaction,
+                groups: light_groups,
+                parent_display_moved: display_changed,
+            });
         }
         let mut next = self
             .tree
@@ -214,10 +367,32 @@ impl StyleEngineState {
                     && (has(fact::SHADOW_CHILDREN_EXPLICITLY_INHERIT)
                         || self.node_explicitly_inherits_non_inherited_property(child)),
             );
-            self.record_derived_element_style_input(child, shadow_reaction, shadow_groups);
-            if display_changed {
-                self.retained.parent_inputs_moved_nodes.insert(child);
-            }
+            out.push(DerivedChildReaction {
+                child,
+                reaction: shadow_reaction,
+                groups: shadow_groups,
+                parent_display_moved: display_changed,
+            });
         }
     }
+}
+
+/// One child reaction a parent's applied reaction derives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DerivedChildReaction {
+    child: StyleNodeID,
+    reaction: u8,
+    groups: u8,
+    /// The parent's display moved, which the child's box-type transformation reads.
+    parent_display_moved: bool,
+}
+
+/// What the engine settled for a row, kept until the host applies it.
+#[derive(Clone)]
+pub(super) struct EngineRowChildFacts {
+    pub(super) old_style_record: u64,
+    pub(super) new_style_record: u64,
+    pub(super) element_damage: u32,
+    pub(super) pseudo_damages: Vec<(u8, u32)>,
+    pub(super) root_font_metrics_moved: bool,
 }

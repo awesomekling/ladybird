@@ -27,15 +27,20 @@ const REBUILD_ROOT_BOX_PRESENCE_CHANGE: u8 = 3;
 const REBUILD_ROOT_PARENT: u8 = 4;
 const ALL_INHERITED_STYLE_GROUPS: u8 = (1 << 7) - 1;
 
+/// Unpack a packed invalidation word.
+pub(super) fn unpack_invalidation(packed: u32) -> StyleInvalidation {
+    StyleInvalidation::unpack(packed)
+}
+
 #[derive(Clone, Copy, Default)]
-struct StyleInvalidation {
-    level: u8,
+pub(super) struct StyleInvalidation {
+    pub(super) level: u8,
     visual_context: u8,
     rebuild_root: u8,
     rebuild_stacking_context: bool,
     resnap_scroll_container: bool,
-    recompute_descendants: bool,
-    inherited_groups: u8,
+    pub(super) recompute_descendants: bool,
+    pub(super) inherited_groups: u8,
     repaint_text_decorations: bool,
     non_inherited_inheritance_source: bool,
     any_computed_value_changed: bool,
@@ -46,6 +51,25 @@ struct StyleInvalidation {
 impl StyleInvalidation {
     fn is_none(self) -> bool {
         self.pack() == 0
+    }
+
+    /// Whether the invalidation asks for nothing, as the host's `is_none()` reads it: a computed
+    /// value that moved without any other consequence asks for nothing.
+    pub(super) fn requires_nothing(self) -> bool {
+        self.level == 0
+            && self.visual_context == 0
+            && !self.resnap_scroll_container
+            && !self.recompute_descendants
+            && self.inherited_groups == 0
+            && !self.changes_containing_block
+            && !self.repaint_selection
+            && !self.affects_hit_testing
+            && !self.repaint_text_decorations
+            && !self.non_inherited_inheritance_source
+    }
+
+    pub(super) fn merge_packed(&mut self, packed: u32) {
+        self.merge(Self::unpack(packed));
     }
 
     fn ensure_level(&mut self, level: u8) {
