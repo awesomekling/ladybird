@@ -2113,15 +2113,12 @@ void Document::end_style_stabilization_epoch()
     m_animations_created_in_stabilization_epoch.clear();
 }
 
-// Refreshes every structure derived from committed layout results, shared by the partial and
-// full layout paths so neither can forget one.
+// Refreshes what derives from committed layout results on the document side, shared by the partial and full layout
+// paths so neither can forget one. What needs none of the document's objects, the layout frame does itself, and what
+// is only read after the layout update comes back through apply_layout_commit_effects().
 void Document::after_layout_commit(LayoutTreeChanged layout_tree_changed)
 {
     // NB: Called during layout update.
-    Layout::RustFFI::layout_arena_invalidate_searchable_text(layout_node_arena().handle());
-
-    set_needs_to_record_display_list();
-
     set_needs_accumulated_visual_contexts_update(true);
     prepare_for_rendering();
 
@@ -2129,17 +2126,22 @@ void Document::after_layout_commit(LayoutTreeChanged layout_tree_changed)
     if (auto range = get_selection()->range())
         paint_state().recompute_selection_states(*this, *range);
 
-    if (layout_tree_changed == LayoutTreeChanged::Yes) {
-        // Broadcast the current viewport rect to any new committed boxes, so they know whether
-        // they're visible or not. If necessary, re-collect the content-visibility:auto set.
+    // Broadcast the current viewport rect to any new committed boxes, so they know whether they're visible or not.
+    if (layout_tree_changed == LayoutTreeChanged::Yes)
         inform_all_viewport_clients_about_the_current_viewport_rect();
-        if (m_may_have_content_visibility_auto_style)
-            collect_boxes_with_auto_content_visibility();
+}
+
+void Document::apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffects const& effects)
+{
+    if (effects.boxes_with_auto_content_visibility_collected) {
+        paint_state().set_boxes_with_auto_content_visibility(Vector<Layout::RustFFI::NodeSlotId> {
+            ReadonlySpan<Layout::RustFFI::NodeSlotId> { effects.boxes_with_auto_content_visibility, effects.boxes_with_auto_content_visibility_count } });
     }
-
-    schedule_scroll_container_resnap();
-
-    m_document->set_needs_repaint();
+    if (effects.layout_committed) {
+        set_needs_to_record_display_list();
+        schedule_scroll_container_resnap();
+        m_document->set_needs_repaint();
+    }
 }
 
 bool Document::is_clean_for_layout_geometry_read() const
@@ -2261,18 +2263,6 @@ bool Document::needs_style_update_after_layout()
     return !m_query_containers_needing_container_query_evaluation_after_layout.is_empty()
         || m_needs_animated_style_update
         || style_computer().style_engine().has_pending_transaction();
-}
-
-// Collect elements with content-visibility: auto. This is used in the HTML event loop to avoid traversing the whole tree every time.
-void Document::collect_boxes_with_auto_content_visibility()
-{
-    Vector<Compositing::RustFFI::NodeSlotId> boxes_with_auto_content_visibility;
-    Layout::RustFFI::layout_arena_collect_boxes_with_auto_content_visibility(
-        layout_node_arena().handle(), Layout::Node::slot_id(unsafe_layout_node()), &boxes_with_auto_content_visibility,
-        [](void* context, Compositing::RustFFI::NodeSlotId slot) {
-            static_cast<Vector<Compositing::RustFFI::NodeSlotId>*>(context)->append(slot);
-        });
-    paint_state().set_boxes_with_auto_content_visibility(move(boxes_with_auto_content_visibility));
 }
 
 void Document::clear_devtools_layout_inspection_data()

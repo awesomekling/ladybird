@@ -1634,7 +1634,6 @@ private:
     void process_pending_top_layer_layout_changes();
 
     void update_active_element();
-    void collect_boxes_with_auto_content_visibility();
     bool needs_style_update_after_layout();
     Layout::RustFFI::FfiLayoutUpdateHostCallbacks layout_update_host_callbacks();
 
@@ -1644,6 +1643,7 @@ private:
         Yes,
     };
     void after_layout_commit(LayoutTreeChanged);
+    void apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffects const&);
 
     void run_unloading_cleanup_steps();
 

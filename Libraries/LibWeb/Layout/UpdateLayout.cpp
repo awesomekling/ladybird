@@ -51,6 +51,7 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
                 .top_layer_work_pending = document.m_top_layer_needs_layout_zone_rebuild || !document.m_elements_with_pending_top_layer_membership_change.is_empty(),
                 .should_collect_devtools_layout_data = document.page().client().has_active_devtools_client(),
                 .document_in_quirks_mode = document.in_quirks_mode(),
+                .may_have_content_visibility_auto_style = document.m_may_have_content_visibility_auto_style,
                 .viewport_inline_size_raw = viewport_rect.width().raw_value(),
                 .viewport_block_size_raw = viewport_rect.height().raw_value(),
             }; },
@@ -66,6 +67,7 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
                     node->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::ListItemCounters);
             } },
         .after_layout_commit = [](void* context, bool layout_tree_changed) { static_cast<Document*>(context)->after_layout_commit(layout_tree_changed ? LayoutTreeChanged::Yes : LayoutTreeChanged::No); },
+        .apply_layout_commit_effects = [](void* context, Layout::RustFFI::FfiLayoutCommitEffects const* effects) { static_cast<Document*>(context)->apply_layout_commit_effects(*effects); },
         .note_full_layouts_performed = [](void* context, u64 count) { static_cast<Document*>(context)->style_invalidation_counters().relayouts_performed += count; },
         .evaluate_pending_container_queries = [](void* context) {
             auto& document = *static_cast<Document*>(context);
