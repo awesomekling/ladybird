@@ -2261,6 +2261,13 @@ void Document::drain_invalidation_journal() const
     m_invalidation_journal->drain();
 }
 
+void Document::join_frame_for_dom_tree_mutation() const
+{
+    // A document with no arena has no frame to be in flight.
+    if (m_layout_node_arena)
+        Layout::RustFFI::layout_arena_join_frame_for_dom_tree_mutation(m_layout_node_arena->handle());
+}
+
 void Document::apply_commit_messages()
 {
     m_commit_messages->apply();

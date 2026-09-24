@@ -1988,6 +1988,8 @@ impl LayoutNodeArena {
     pub(crate) const SELECTION_WRITER: &str = "selection state";
     /// The writer the rendering update's compositor animation choices are attributed to.
     pub(crate) const COMPOSITOR_ELIGIBILITY_WRITER: &str = "compositor animation eligibility";
+    /// The writer a DOM tree mutation's writes to the style mirror and the arena are attributed to.
+    pub(crate) const DOM_TREE_MUTATION_WRITER: &str = "DOM tree mutation";
 
     /// The one door a main-side writer of render-owned state goes through. A write joins the
     /// frame in flight and lands after it, the way a main-side read of render state waits for it:
@@ -5823,6 +5825,22 @@ pub unsafe extern "C" fn layout_arena_set_node_flag(arena: *mut c_void, id: Node
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
     unsafe { LayoutNodeArena::from_handle(arena) }.set_node_flag(id, flag, value);
+}
+
+/// Joins the frame in flight ahead of a DOM tree mutation. The mutation splices the style mirror
+/// and builds, frees and marks the arena's rows as it goes, in an order the retirement of the
+/// mutated nodes' style identities depends on, so none of it is journalled apart from the rest, and
+/// the whole mutation waits for the frame instead.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_join_frame_for_dom_tree_mutation(arena: *mut c_void) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the document thread.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
+    drop(arena.join_frame_for_main_side_write(LayoutNodeArena::DOM_TREE_MUTATION_WRITER));
 }
 
 /// Whether the box keeps content the compositor animates. Like the frames below, it is chosen by
