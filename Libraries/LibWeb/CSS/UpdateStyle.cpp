@@ -16,7 +16,6 @@
 #include <LibWeb/CSS/Invalidation/SlotInvalidator.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
-#include <LibWeb/CSS/StyleInputRecord.h>
 #include <LibWeb/CSS/StyleInvalidation.h>
 #include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/DOM/CommitMessages.h>
@@ -289,21 +288,6 @@ private:
     Vector<Utf16FlyString> m_none;
 };
 
-static bool sorted_names_intersect(ReadonlySpan<Utf16FlyString> a, ReadonlySpan<Utf16FlyString> b)
-{
-    size_t i = 0;
-    size_t j = 0;
-    while (i < a.size() && j < b.size()) {
-        if (a[i] == b[j])
-            return true;
-        if (a[i] < b[j])
-            ++i;
-        else
-            ++j;
-    }
-    return false;
-}
-
 // An element's custom properties moved. Every styled descendant holds the environment it inherits
 // by identity, so each takes the moved one here, directly, and only the descendants whose cascades
 // read a name that changed value are asked to compute again. The engine is told nothing: the walk
@@ -342,17 +326,10 @@ public:
     }
 
 private:
-    // Whether the element's cascades read a name that changed, through var(); an element whose
-    // computation reads past what any list of names can say is asked to compute again outright.
+    // Whether the element's cascades read a name that changed, through var(). The engine knows
+    // whether the element's record reads custom properties at all, and settles the reaction it gets.
     bool var_reads_a_changed_name(DOM::Element& element) const
     {
-        if (auto const* record = element.style_input_record()) {
-            if (!record->custom_property_reads_are_complete)
-                return true;
-            return sorted_names_intersect(record->custom_property_reads, changed_names());
-        }
-        // An element without a style input record has a record the engine computed: the engine
-        // knows whether that reads custom properties at all, and settles the reaction it gets.
         return m_style_engine.node_style_reads_custom_properties(element.style_node_id());
     }
 
@@ -855,14 +832,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 auto pseudo_element_inputs = (reaction.reaction & StyleEngine::PseudoInputsMayHaveChanged)
                     ? DOM::Element::PseudoElementInputs::Changed
                     : DOM::Element::PseudoElementInputs::Unchanged;
-                // A reaction the engine derived from an ancestor's application, rather than from a
-                // published match answer, changes nothing the element's style input record does not
-                // name: the element may answer with its own last style when the record still holds.
-                bool const is_derived_reaction = !has_published_style_reaction && reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Materialize;
-                document.style_computer().set_materializing_for_derived_reaction(is_derived_reaction);
-                ScopeGuard reset_derived_reaction = [&] {
-                    document.style_computer().set_materializing_for_derived_reaction(false);
-                };
                 invalidation = element->apply_style_engine_reaction(did_change_custom_properties, pseudo_element_inputs);
                 if (pseudo_element_inputs == DOM::Element::PseudoElementInputs::Changed)
                     sample_animations_for_installed_pseudos(*element);

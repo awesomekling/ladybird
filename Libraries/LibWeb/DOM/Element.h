@@ -20,7 +20,6 @@
 #include <LibWeb/Bindings/Element.h>
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/Selector.h>
-#include <LibWeb/CSS/StyleInputRecord.h>
 #include <LibWeb/CSS/StyleProperty.h>
 #include <LibWeb/DOM/ChildNode.h>
 #include <LibWeb/DOM/NonDocumentTypeChildNode.h>
@@ -546,12 +545,7 @@ public:
         CSS::PseudoElement pseudo_element;
         Vector<Utf16FlyString> references;
     };
-    [[nodiscard]] CSS::StyleInputRecord const* style_input_record() const { return m_style_input_record.ptr(); }
-    [[nodiscard]] CSS::StyleInputRecord* style_input_record() { return m_style_input_record.ptr(); }
-    void set_style_input_record(OwnPtr<CSS::StyleInputRecord>);
-    [[nodiscard]] OwnPtr<CSS::StyleInputRecord> take_style_input_record();
     void record_style_query_custom_property_reference(Optional<CSS::PseudoElement>, Utf16FlyString const&);
-    void finish_recording_style_dependencies();
     void finish_recording_container_query_dependencies();
     void apply_style_substitution_usage(u8 usage);
 
@@ -559,12 +553,6 @@ public:
     void set_style_uses_attr_css_function() { m_style_uses_attr_css_function = true; }
     bool style_uses_var_css_function() const { return m_style_uses_var_css_function; }
     void set_style_uses_var_css_function() { m_style_uses_var_css_function = true; }
-    // Whether a `var()` reference of one of this element's `@keyframes` values was substituted
-    // against its custom-property environment. Such a read belongs to no cascade declaration, so
-    // the style input record cannot name it: the record reports its reads as incomplete instead,
-    // and a moved environment above the element recomputes it whichever names moved.
-    [[nodiscard]] bool animation_uses_var_css_function() const { return m_animation_uses_var_css_function; }
-    void set_animation_uses_var_css_function() { m_animation_uses_var_css_function = true; }
     // A tree-counting function is answered from the element's position among its siblings, so what
     // has to be remembered is on the parent: a child list mutation there moves the answer.
     void set_style_uses_tree_counting_function()
@@ -942,7 +930,6 @@ private:
     u64 m_animation_style_generation { 0 };
     u64 m_animation_subtree_style_generation { 0 };
     RefPtr<CSS::CustomPropertyData const> m_custom_property_data;
-    OwnPtr<CSS::StyleInputRecord> m_style_input_record;
     PublishedCustomPropertyNames m_published_custom_property_names;
     Vector<CSS::StyleProperty> m_published_presentational_hint_properties;
 
@@ -964,7 +951,6 @@ private:
     // Authoritative dependency marks left by this element's latest style computation.
     bool m_style_uses_attr_css_function : 1 { false };
     bool m_style_uses_var_css_function : 1 { false };
-    bool m_animation_uses_var_css_function : 1 { false };
     bool m_style_uses_if_css_function : 1 { false };
     bool m_style_depends_on_viewport_metrics : 1 { false };
     bool m_style_uses_custom_function : 1 { false };

@@ -2129,16 +2129,6 @@ void Element::apply_computed_pseudo_element_styles_to_layout_nodes_if_needed(CSS
     });
 }
 
-void Element::set_style_input_record(OwnPtr<CSS::StyleInputRecord> record)
-{
-    m_style_input_record = move(record);
-}
-
-OwnPtr<CSS::StyleInputRecord> Element::take_style_input_record()
-{
-    return move(m_style_input_record);
-}
-
 void Element::record_style_query_custom_property_reference(Optional<CSS::PseudoElement> pseudo_element, Utf16FlyString const& name)
 {
     auto& rare_data = ensure_element_rare_data();
@@ -2187,28 +2177,8 @@ void Element::set_style_depends_on_viewport_metrics()
     document().add_element_with_viewport_dependent_style(*this);
 }
 
-void Element::finish_recording_style_dependencies()
-{
-    if (!m_style_input_record)
-        return;
-    m_style_input_record->style_uses_attr_css_function = m_style_uses_attr_css_function;
-    m_style_input_record->style_uses_var_css_function = m_style_uses_var_css_function;
-    m_style_input_record->style_uses_if_css_function = m_style_uses_if_css_function;
-    m_style_input_record->style_uses_custom_function = m_style_uses_custom_function;
-    m_style_input_record->style_uses_inherit_css_function = m_style_uses_inherit_css_function;
-    m_style_input_record->style_uses_tree_counting_function = m_style_uses_tree_counting_function;
-    m_style_input_record->style_depends_on_viewport_metrics = m_style_depends_on_viewport_metrics;
-    m_style_input_record->style_depends_on_size_container_query = m_style_depends_on_size_container_query;
-    m_style_input_record->style_depends_on_style_container_query = m_style_depends_on_style_container_query;
-    // A keyframe's `var()` reference is substituted against this element's environment without any
-    // declaration of its cascade naming it, so the record's list of reads cannot describe it.
-    if (m_animation_uses_var_css_function)
-        m_style_input_record->custom_property_reads_are_complete = false;
-}
-
 void Element::finish_recording_container_query_dependencies()
 {
-    finish_recording_style_dependencies();
     publish_custom_property_names();
 }
 
@@ -2224,7 +2194,6 @@ void Element::apply_style_substitution_usage(u8 usage)
         set_style_uses_inherit_css_function();
     if (usage & (1 << 4))
         set_style_uses_custom_function();
-    finish_recording_style_dependencies();
     publish_custom_property_names();
 }
 
@@ -2487,9 +2456,6 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
             if (result.any_computed_value_changed)
                 counters.element_computed_style_changes++;
         }
-        // The input record's declaration half described the cascade that produced the old record, so
-        // the next computation on this element derives a fresh one.
-        set_style_input_record(nullptr);
         set_computed_style({}, new_style_record);
         update_anchor_name_registry(&*old_computed_values, *new_computed_values);
         if (is_document_element()) {
@@ -2561,9 +2527,6 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_style_engine_reaction(b
     ScopeGuard record_recompute_time = [&] {
         counters.style_recompute_microseconds += (MonotonicTime::now() - recompute_started_at).to_microseconds();
     };
-    ScopeGuard finish_style_dependencies = [&] {
-        finish_recording_style_dependencies();
-    };
 
     CSS::StyleEngineMatchResult style_engine_matches;
     CSS::StyleEngineMatchResult* reusable_style_engine_matches = nullptr;
@@ -2605,7 +2568,6 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_style_engine_reaction(b
         || m_style_depends_on_size_container_query || m_style_depends_on_style_container_query;
     m_style_uses_attr_css_function = false;
     m_style_uses_var_css_function = false;
-    m_animation_uses_var_css_function = false;
     m_style_uses_if_css_function = false;
     m_style_uses_custom_function = false;
     m_style_uses_inherit_css_function = false;
@@ -2662,24 +2624,6 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_style_engine_reaction(b
         }
         return true;
     }();
-
-    // An exact StyleEngine input record can answer a recomputation with the very style the element
-    // already holds. Nothing derived from the originating style needs to be compared or published
-    // again in that case. Pseudo-element declarations are a separate cascade projected from the
-    // originating element's matches, so they still have to consume that shared match result.
-    // Only the inherited custom-property environment moved, and no cascade of the element or its
-    // pseudo-elements read a name it moved: every style stands, and the descendants react to the
-    // environment.
-    if (old_computed_values && style_record_is_unchanged(style_record_delta) && !root_font_metrics_changed
-        && pseudo_element_inputs == PseudoElementInputs::Unchanged
-        && !(m_rendered_in_top_layer && !computed_style(CSS::PseudoElement::Backdrop))
-        && style_computer.last_materialization_kept_pseudo_element_styles()) {
-        counters.element_style_noop_recomputations++;
-        publish_custom_property_names();
-        if (did_change_custom_properties)
-            invalidate_descendant_styles_depending_on_style_container_query();
-        return {};
-    }
 
     if (old_computed_values && style_record_is_unchanged(style_record_delta) && !did_change_custom_properties && !root_font_metrics_changed) {
         if (pseudo_styles_are_unchanged) {

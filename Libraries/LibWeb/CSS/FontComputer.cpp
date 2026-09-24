@@ -507,8 +507,6 @@ void FontComputer::clear_computed_font_cache(Utf16FlyString const& family_name)
 
 static void record_font_input_change(DOM::Element& element)
 {
-    if (auto* record = element.style_input_record())
-        record->font_environment_changed = true;
     constexpr u8 font_group = 1u << ComputedValues::FontValues::style_group_index;
     // Derived, not recorded: this is not C++ asking for a computation only it can do. The change
     // is to the published `@font-face` table, which the engine holds and versions, so the engine
