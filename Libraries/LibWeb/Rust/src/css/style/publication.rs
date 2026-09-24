@@ -1109,8 +1109,8 @@ impl RetainedState {
             && css_keyframes_are_engine_computable;
         // An element whose Web Animations hold no sampled overlay has the old record as its base.
         // Its new base is driven like any other record, and the host samples the effects over it.
-        // An effect on a custom property holds no overlay even while it runs, and children would
-        // derive before the sample, so an element with children cannot run one.
+        // An effect on a custom property holds no overlay even while it runs. A child derived in
+        // the same batch waits for the element and inherits the environment the effect sampled.
         let effect_base_without_an_overlay = animations_bind_the_record
             && !self.computed_group_sets.node_has_animation_overlay(node)
             && !self.css_defined_animations.node_runs_a_css_animation(node)
@@ -1119,12 +1119,6 @@ impl RetainedState {
                 .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
                 .is_empty()
             && !self.record_declares_transitions(old_style_record)
-            && (self.tree.flat_tree_children(node).all(|child| child.is_text())
-                || !self
-                    .animation_effect_descriptions
-                    .effects(node, animations::ELEMENT_ANIMATION_SLOT)
-                    .iter()
-                    .any(animations::PublishedEffect::declares_custom_properties))
             && !delta
                 .properties()
                 .iter()
@@ -1898,6 +1892,17 @@ impl RetainedState {
         // refresh this projection again when the host completes their composition.
         self.set_element_container_query_inputs(node, delta.1.raw());
         self.computed_group_sets.set_sampled_composition_identity(node, 0);
+        // An effect on a custom property holds no overlay, and the host samples it again over the
+        // new base without republishing values that stand. The element keeps the environment its
+        // animations sampled into while that is composed over the new base's, so a child derived
+        // after it inherits the animated values.
+        if let Some(base_environment) = self.computed_group_sets.custom_property_environment_identity(node) {
+            let environment = self.substitution_environment(node, base_environment);
+            if environment != base_environment {
+                self.computed_group_sets
+                    .set_node_custom_property_environment(node, environment);
+            }
+        }
         self.engine_computed_records_pending
             .entry(node)
             .or_default()
