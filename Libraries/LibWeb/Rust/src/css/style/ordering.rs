@@ -436,15 +436,7 @@ impl RetainedState {
         }
         if pseudo.is_none() {
             for kind in ElementDeclarationKind::ALL {
-                // Custom properties an inline style declares beside its longhands leave those
-                // longhands as complete as any; the environment they decide is computed apart.
                 let (declared_properties, _) = self.facts.element_declared_properties(node, kind);
-                if !self
-                    .facts
-                    .element_declarations_are_complete_but_for_custom_properties(node, kind)
-                {
-                    continue;
-                }
                 let mut priority_and_stratum_by_importance = [None; 2];
                 for &declared in declared_properties {
                     if !wants(declared.property) || !property_is_longhand(declared.property) {
@@ -649,10 +641,7 @@ impl RetainedState {
         for (match_index, entry) in all.iter().enumerate() {
             if compaction_blocked
                 && (!self.match_scope_is_complete_for(publish_winners_for, entry.rule, entry.tree_scope)
-                    || !self.container_gate_is_held(publish_winners_for, entry.rule, entry.pseudo_element.is_some())
-                    || !self
-                        .program
-                        .declarations_are_complete_but_for_custom_properties(entry.rule))
+                    || !self.container_gate_is_held(publish_winners_for, entry.rule, entry.pseudo_element.is_some()))
             {
                 continue;
             }
@@ -708,12 +697,6 @@ impl RetainedState {
         if let Some(node) = publish_winners_for {
             for kind in ElementDeclarationKind::ALL {
                 let (declared_properties, _) = self.facts.element_declared_properties(node, kind);
-                if !self
-                    .facts
-                    .element_declarations_are_complete_but_for_custom_properties(node, kind)
-                {
-                    continue;
-                }
                 let mut priorities = [None; 2];
                 for &declared in declared_properties {
                     if !property_is_longhand(declared.property) {
@@ -1482,9 +1465,6 @@ impl RetainedState {
             .filter(|entry| entry.pseudo_element == Some(pseudo))
             .any(|entry| {
                 !self.container_gate_is_held(Some(node), entry.rule, true)
-                    || !self
-                        .program
-                        .declarations_are_complete_but_for_custom_properties(entry.rule)
                     || !self.match_scope_is_complete_for(Some(node), entry.rule, entry.tree_scope)
             })
     }

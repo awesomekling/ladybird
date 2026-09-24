@@ -1597,7 +1597,6 @@ impl RetainedState {
         written_values: Vec<RetainedStyleValueData>,
         custom_declarations: Vec<CustomDeclaration>,
         custom_written_values: Vec<RetainedStyleValueData>,
-        declarations_are_complete: bool,
         counters: &mut Counters,
     ) {
         debug_assert!(custom_declarations.is_empty() || kind == ElementDeclarationKind::InlineStyle);
@@ -1615,14 +1614,13 @@ impl RetainedState {
             });
         }
         let (current_declared, current_declarations_are_complete) = self.facts.element_declared_properties(node, kind);
-        if current_declarations_are_complete == declarations_are_complete
-            && current_declared == declared
+        if current_declared == declared
             && (kind != ElementDeclarationKind::InlineStyle
                 || self.facts.element_custom_declarations(node) == custom_declarations.as_slice())
         {
             return;
         }
-        let repair_inputs = (declarations_are_complete && current_declarations_are_complete)
+        let repair_inputs = current_declarations_are_complete
             .then(|| {
                 let previous = self
                     .current_winner_groups()
@@ -1635,13 +1633,8 @@ impl RetainedState {
                 Some((previous, retained, current_declared.to_vec()))
             })
             .flatten();
-        self.facts.set_element_declared_properties(
-            node,
-            kind,
-            declared.to_vec(),
-            written_values,
-            declarations_are_complete,
-        );
+        self.facts
+            .set_element_declared_properties(node, kind, declared.to_vec(), written_values);
         if kind == ElementDeclarationKind::InlineStyle {
             self.facts
                 .set_element_custom_declarations(node, custom_declarations, custom_written_values);

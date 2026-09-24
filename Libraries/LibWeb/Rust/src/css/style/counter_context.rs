@@ -413,7 +413,6 @@ impl StyleEngine {
         written_values: Vec<RetainedStyleValueData>,
         custom_declarations: Vec<CustomDeclaration>,
         custom_written_values: Vec<RetainedStyleValueData>,
-        declarations_are_complete: bool,
     ) {
         self.state.set_element_declared_properties(
             node,
@@ -422,7 +421,6 @@ impl StyleEngine {
             written_values,
             custom_declarations,
             custom_written_values,
-            declarations_are_complete,
             &mut self.counters,
         );
     }
