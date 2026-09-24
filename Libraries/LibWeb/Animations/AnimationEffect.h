@@ -56,6 +56,19 @@ struct AnimationUpdateContext {
     AnimationUpdateContext();
     ~AnimationUpdateContext();
 
+    // While one is open, the first context publishes the document's animation environment, and
+    // every later one republishes only the timing rows of the elements it samples: what the host
+    // installs in the meantime moves the animations of those elements, and nothing else in it.
+    class BatchPublication {
+    public:
+        explicit BatchPublication(DOM::Document&);
+        ~BatchPublication();
+
+    private:
+        DOM::Document* m_previous_document { nullptr };
+        bool m_previous_published { false };
+    };
+
     // NOTE: This is lazily populated by KeyframeEffects as their respective animations are applied to an element.
     HashMap<DOM::AbstractElement, ElementData> elements;
 };

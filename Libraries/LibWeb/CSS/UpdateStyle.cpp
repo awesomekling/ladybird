@@ -1090,6 +1090,9 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
             document.style_computer().style_engine().end_cold_matching_batch();
     };
 
+    // No script runs while the host installs the batches of this update, so the timelines and
+    // every animation a batch does not install hold still: they are published once for all of them.
+    Animations::AnimationUpdateContext::BatchPublication animation_publication { document };
     RequiredInvalidationAfterStyleChange invalidation;
     constexpr size_t max_style_update_passes = 8;
     size_t style_update_pass = 0;

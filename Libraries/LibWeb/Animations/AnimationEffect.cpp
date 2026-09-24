@@ -55,6 +55,23 @@ AnimationUpdateContext::ElementData::~ElementData() = default;
 
 AnimationUpdateContext::AnimationUpdateContext() = default;
 
+static DOM::Document* s_document_with_open_batch_publication { nullptr };
+static bool s_open_batch_publication_published { false };
+
+AnimationUpdateContext::BatchPublication::BatchPublication(DOM::Document& document)
+    : m_previous_document(s_document_with_open_batch_publication)
+    , m_previous_published(s_open_batch_publication_published)
+{
+    s_document_with_open_batch_publication = &document;
+    s_open_batch_publication_published = false;
+}
+
+AnimationUpdateContext::BatchPublication::~BatchPublication()
+{
+    s_document_with_open_batch_publication = m_previous_document;
+    s_open_batch_publication_published = m_previous_published;
+}
+
 Bindings::FillMode css_fill_mode_to_bindings_fill_mode(CSS::AnimationFillMode mode)
 {
     switch (mode) {
@@ -838,7 +855,14 @@ AnimationUpdateContext::~AnimationUpdateContext()
     // before the stage reads.
     if (!elements.is_empty()) {
         auto& document = elements.begin()->key.element().document();
-        document.publish_animation_environment_for_style_update();
+        if (&document == s_document_with_open_batch_publication && s_open_batch_publication_published) {
+            for (auto& it : elements)
+                it.key.element().publish_animation_timing_rows();
+        } else {
+            document.publish_animation_environment_for_style_update();
+            if (&document == s_document_with_open_batch_publication)
+                s_open_batch_publication_published = true;
+        }
     }
 
     for (auto& it : elements) {
