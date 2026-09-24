@@ -3167,29 +3167,6 @@ pub unsafe extern "C" fn style_engine_style_record_custom_property_environment(
         .unwrap_or(0)
 }
 
-/// Computes the property-dependent damage between two final style records.
-///
-/// # Safety
-/// `engine` must be live and both style records must remain pinned or assigned.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_compare_style_records(
-    engine: *mut c_void,
-    old_style_record: u64,
-    new_style_record: u64,
-    font_lists_equal: bool,
-    element_folds_transform_into_layout: bool,
-    element_propagates_overflow_to_viewport: bool,
-) -> u32 {
-    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    engine.compare_style_records(
-        old_style_record,
-        new_style_record,
-        font_lists_equal,
-        element_folds_transform_into_layout,
-        element_propagates_overflow_to_viewport,
-    )
-}
-
 /// Computes what moving an element, or one of its pseudo-elements, from one final style record to
 /// another damages, from the records and the element's own facts. The counter styles its box was
 /// built with are the host's to compare.

@@ -254,11 +254,6 @@ u64 StyleEngine::style_record_custom_property_environment(StyleRecordID style_re
     return StyleEngineFFI::style_engine_style_record_custom_property_environment(m_impl, style_record.value());
 }
 
-u32 StyleEngine::compare_style_records(StyleRecordID old_style_record, StyleRecordID new_style_record, bool font_lists_equal, bool element_folds_transform_into_layout, bool element_propagates_overflow_to_viewport) const
-{
-    return StyleEngineFFI::style_engine_compare_style_records(m_impl, old_style_record.value(), new_style_record.value(), font_lists_equal, element_folds_transform_into_layout, element_propagates_overflow_to_viewport);
-}
-
 bool StyleEngine::animation_overlay_changed(StyleRecordID old_style_record, void const* animated_overlay) const
 {
     return StyleEngineFFI::style_engine_animation_overlay_changed(m_impl, old_style_record.value(), animated_overlay);

@@ -146,8 +146,6 @@
 #include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWeb/SVG/SVGAElement.h>
 #include <LibWeb/SVG/SVGElement.h>
-#include <LibWeb/SVG/SVGForeignObjectElement.h>
-#include <LibWeb/SVG/SVGGraphicsElement.h>
 #include <LibWeb/Selection/Selection.h>
 #include <LibWeb/StyleEngineRustFFI.h>
 #include <LibWeb/StyleValueRustFFI.h>
@@ -1488,17 +1486,6 @@ static bool style_record_is_unchanged(CSS::StyleEngine::StyleRecordDelta const& 
     return !!delta.old_style_record && delta.old_style_record == delta.new_style_record;
 }
 
-// SVG container layout unions each child's bounding box mapped by the child's own transform. An
-// outermost <svg> is laid out by its CSS parent (as is one re-rooted by foreignObject), so its
-// own transform stays paint-only like any CSS box.
-static bool element_folds_transform_into_svg_container_layout(DOM::Element const& element)
-{
-    if (!is<SVG::SVGGraphicsElement>(element))
-        return false;
-    auto parent = element.parent_element();
-    return parent && is<SVG::SVGElement>(*parent) && !is<SVG::SVGForeignObjectElement>(*parent);
-}
-
 // https://drafts.csswg.org/css-overflow-3/#overflow-propagation
 // https://drafts.csswg.org/css-writing-modes-4/#principal-flow
 // The root element and, for an html root, its first body child are the elements whose overflow, writing mode, and
@@ -1514,80 +1501,7 @@ bool Element::is_viewport_propagation_source() const
         && document_element->first_child_of_type<HTML::HTMLBodyElement>() == this;
 }
 
-static bool element_propagates_overflow_to_viewport(DOM::AbstractElement const& abstract_element)
-{
-    return !abstract_element.pseudo_element().has_value() && abstract_element.element().is_viewport_propagation_source();
-}
-
-// NB: The damage C++ computed for a record move before the style engine did, kept only to check the
-//     engine's answer while it replaces this one.
-static CSS::StyleComputer::ComputedStyleInvalidation host_record_damage(CSS::StyleComputer& style_computer, CSS::ComputedValues const& old_computed_values, CSS::ComputedValues const& new_computed_values, DOM::AbstractElement& abstract_element, CSS::StyleEngine::StyleRecordDelta const& style_record_delta)
-{
-    auto packed = style_computer.style_engine().compare_style_records(
-        style_record_delta.old_style_record,
-        style_record_delta.new_style_record,
-        old_computed_values.font_list().equals(new_computed_values.font_list()),
-        element_folds_transform_into_svg_container_layout(abstract_element.element()),
-        element_propagates_overflow_to_viewport(abstract_element));
-    auto result = decode_style_record_invalidation(packed);
-
-    // An SVG currentColor stroke stores its resolved color alongside the fact that it came from
-    // currentColor. A color-only change can therefore alter the visible stroke width and the SVG
-    // container bounds without changing the stroke longhand itself.
-    if (is<SVG::SVGGraphicsElement>(abstract_element.element())
-        && old_computed_values.color() != new_computed_values.color()) {
-        auto stroke_uses_current_color = [](CSS::ComputedValues const& computed_values) {
-            auto stroke = computed_values.stroke();
-            return stroke.has_value() && stroke->color_is_currentcolor();
-        };
-        if (stroke_uses_current_color(old_computed_values) || stroke_uses_current_color(new_computed_values))
-            result.invalidation.ensure_at_least(CSS::InvalidationLevel::Relayout);
-    }
-
-    // The table fixup algorithm needs an authored box's display from before box type
-    // transformation. A flex or grid item can therefore keep the same blockified display while
-    // changing whether it needs anonymous table wrappers. Generated pseudo-element boxes are
-    // anonymous, so fixup uses their adjusted display instead.
-    if (!abstract_element.pseudo_element().has_value()) {
-        auto is_table_fixup_child = [](CSS::Display const& display) {
-            return display.is_table_row_group()
-                || display.is_table_header_group()
-                || display.is_table_footer_group()
-                || display.is_table_column_group()
-                || display.is_table_caption();
-        };
-        auto old_display = old_computed_values.display_before_box_type_transformation();
-        auto new_display = new_computed_values.display_before_box_type_transformation();
-        if (is_table_fixup_child(old_display) != is_table_fixup_child(new_display)) {
-            result.any_computed_value_changed = true;
-            result.invalidation |= CSS::RequiredInvalidationAfterStyleChange::full();
-        }
-    }
-    return result;
-}
-
-static bool record_damages_match(CSS::StyleComputer::ComputedStyleInvalidation const& a, CSS::StyleComputer::ComputedStyleInvalidation const& b)
-{
-    auto const& x = a.invalidation;
-    auto const& y = b.invalidation;
-    return a.any_computed_value_changed == b.any_computed_value_changed
-        && x.needs_repaint() == y.needs_repaint()
-        && x.needs_relayout() == y.needs_relayout()
-        && x.needs_layout_tree_rebuild() == y.needs_layout_tree_rebuild()
-        && (!x.needs_layout_tree_rebuild() || x.layout_tree_rebuild_root() == y.layout_tree_rebuild_root())
-        && x.needs_stacking_context_tree_rebuild() == y.needs_stacking_context_tree_rebuild()
-        && x.accumulated_visual_contexts() == y.accumulated_visual_contexts()
-        && x.needs_scroll_container_resnap == y.needs_scroll_container_resnap
-        && x.recompute_descendant_styles == y.recompute_descendant_styles
-        && x.inherited_style_groups_changed() == y.inherited_style_groups_changed()
-        && x.changes_containing_block_establishment == y.changes_containing_block_establishment
-        && x.repaint_propagated_text_decorations == y.repaint_propagated_text_decorations
-        && x.repaint_selection == y.repaint_selection
-        && x.affects_hit_testing == y.affects_hit_testing
-        && x.non_inherited_property_inheritance_sources_changed == y.non_inherited_property_inheritance_sources_changed;
-}
-
-static CSS::StyleComputer::ComputedStyleInvalidation compute_required_invalidation_with_cache(CSS::StyleComputer& style_computer, CSS::ComputedValues const& old_computed_values, CSS::ComputedValues const& new_computed_values, ElementDependentInvalidationState const& old_state, DOM::AbstractElement& abstract_element, CSS::StyleEngine::StyleRecordDelta const& style_record_delta, Optional<u32> answered_damage = {})
+static CSS::StyleComputer::ComputedStyleInvalidation compute_required_invalidation_with_cache(CSS::StyleComputer& style_computer, CSS::ComputedValues const& new_computed_values, ElementDependentInvalidationState const& old_state, DOM::AbstractElement& abstract_element, CSS::StyleEngine::StyleRecordDelta const& style_record_delta, Optional<u32> answered_damage = {})
 {
     CSS::StyleComputer::ComputedStyleInvalidation result;
     if (style_record_is_unchanged(style_record_delta)) {
@@ -1607,14 +1521,6 @@ static CSS::StyleComputer::ComputedStyleInvalidation compute_required_invalidati
     if (packed & to_underlying(CSS::StyleEngineFFI::FfiStyleInvalidationField::CacheHit))
         ++abstract_element.document().style_invalidation_counters().style_record_property_damage_cache_hits;
     result = decode_style_record_invalidation(packed);
-    static bool const verify_style_record_damage = getenv("LIBWEB_VERIFY_STYLE_RECORD_DAMAGE") != nullptr;
-    if (verify_style_record_damage) {
-        auto host_result = host_record_damage(style_computer, old_computed_values, new_computed_values, abstract_element, style_record_delta);
-        if (!record_damages_match(result, host_result)) {
-            dbgln("StyleEngine: damage for <{}> (style node {}, pseudo {}) disagrees with the host's", abstract_element.element().local_name(), abstract_element.element().style_node_id().value(), abstract_element.pseudo_element().has_value());
-            VERIFY_NOT_REACHED();
-        }
-    }
 
     add_element_dependent_invalidation(result.invalidation, new_computed_values, old_state, abstract_element);
     return result;
@@ -1781,7 +1687,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
             }
         } else if (pseudo_element_values && new_pseudo_element_style) {
             DOM::AbstractElement abstract_element { *this, pseudo_element };
-            auto result = compute_required_invalidation_with_cache(style_computer, *pseudo_element_values, *new_pseudo_element_style, old_state, abstract_element, style_record_delta);
+            auto result = compute_required_invalidation_with_cache(style_computer, *new_pseudo_element_style, old_state, abstract_element, style_record_delta);
             // A display: contents pseudo-element has no principal layout node to receive its updated style. A
             // list-item pseudo-element also owns a generated marker whose layout state is not updated through the
             // originating element. Rebuild their layout subtrees when a style change otherwise requires relayout.
@@ -2478,7 +2384,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
             Optional<u32> answered_damage;
             if (engine_record_damage.has_value() && engine_record_damage->old_style_record == old_style_record)
                 answered_damage = engine_record_damage->packed;
-            result = compute_required_invalidation_with_cache(style_computer, *old_computed_values, *new_computed_values, old_state, abstract_element, style_record_delta, answered_damage);
+            result = compute_required_invalidation_with_cache(style_computer, *new_computed_values, old_state, abstract_element, style_record_delta, answered_damage);
             if (result.any_computed_value_changed)
                 counters.element_computed_style_changes++;
         }
@@ -2515,7 +2421,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     return result.invalidation;
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::ComputedValues const& style_before_installation, CSS::RequiredInvalidationAfterStyleChange invalidation)
+CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange invalidation)
 {
     auto& style_computer = document().style_computer();
     auto const style_record = style_record_identity();
@@ -2532,7 +2438,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style
             .old_style_record = style_record_before_installation,
             .new_style_record = style_record,
         };
-        auto result = compute_required_invalidation_with_cache(style_computer, style_before_installation, *new_computed_values, old_state, abstract_element, style_record_delta);
+        auto result = compute_required_invalidation_with_cache(style_computer, *new_computed_values, old_state, abstract_element, style_record_delta);
         if (result.any_computed_value_changed)
             document().style_invalidation_counters().element_computed_style_changes++;
         invalidation |= result.invalidation;

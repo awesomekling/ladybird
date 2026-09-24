@@ -842,7 +842,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     if (settled.has_style() && (has_animation_effects || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
                         sample_animations_for_installed_record(settled, compares_after_sample ? SampleInvalidation::AppliedByCaller : SampleInvalidation::Applied);
                     if (compares_after_sample)
-                        invalidation = element->compare_engine_computed_style_record_after_sample(old_style_record, *old_originating_style, invalidation);
+                        invalidation = element->compare_engine_computed_style_record_after_sample(old_style_record, invalidation);
                     // The step runs here rather than after the batch: a descendant applied later
                     // reads this element's after-change style, which is what the step decides
                     // against, and the C++ computation this row replaces runs it inside itself.
@@ -1322,7 +1322,7 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
     engine.acknowledge_engine_computed_record(element.style_node_id());
     if (samples_over_the_record) {
         sample_animations_for_installed_record(DOM::AbstractElement { element }, SampleInvalidation::AppliedByCaller);
-        invalidation = element.compare_engine_computed_style_record_after_sample(old_style_record, *old_style, invalidation);
+        invalidation = element.compare_engine_computed_style_record_after_sample(old_style_record, invalidation);
     }
     return invalidation;
 }
