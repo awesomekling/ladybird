@@ -86,9 +86,7 @@ fn journal_pending(handle: *mut c_void) -> bool {
 fn a_stage_is_running(handle: *mut c_void) -> bool {
     // SAFETY: Every caller holds a live handle from `layout_arena_create`, and this shared borrow
     // ends before the caller takes its own.
-    unsafe { &*handle.cast::<super::LayoutNodeArena>() }.layout_pass_is_running()
-        || super::tree_build_seal::build_is_running()
-        || crate::painting::seal::current_pass_name().is_some()
+    unsafe { &*handle.cast::<super::LayoutNodeArena>() }.a_stage_is_running()
 }
 
 /// Counts one passage from `call_site` through the arena `handle` names.

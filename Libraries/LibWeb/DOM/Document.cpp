@@ -7490,8 +7490,7 @@ static Painting::CompositorAnimationEffectState::BuildOutcome build_compositor_a
             || layout_node->transform_origin().z.to_px(CSSPixels { 0 }) != CSSPixels { 0 })
             return {};
     }
-    auto const* row = Painting::committed_row(*layout_node);
-    if (!row)
+    if (!Painting::has_committed_box(*layout_node))
         return {};
 
     auto const* key_frame_set = effect.key_frame_set();

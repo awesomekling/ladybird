@@ -351,10 +351,6 @@ where
         data
     }
 
-    pub(crate) fn paintable_data_ptr(&self, id: NodeSlotId) -> *const PaintableData {
-        self.paintable_data(id)
-    }
-
     pub(crate) fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool {
         if id.is_invalid() {
             return false;
@@ -540,6 +536,42 @@ impl PaintableRowsRead for CommittedPaintableRows<'_> {
             return false;
         };
         data.slot_generation != 0 && data.slot_generation == id.generation()
+    }
+}
+
+/// The paintable rows as a main-side read sees them, from [`crate::painting::ffi`]'s one door
+/// to them. The view holds the arena for as long as it lives, so every read through it agrees.
+pub(crate) enum MainSidePaintableRows<'a> {
+    /// A read between stages: the rows as last committed.
+    Committed(CommittedPaintableRows<'a>),
+    /// A host call made while a stage runs: the rows as that stage is writing them.
+    DuringStage(PaintableRowsRef<'a>),
+}
+
+impl Deref for MainSidePaintableRows<'_> {
+    type Target = LayoutNodeArena;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Committed(rows) => rows,
+            Self::DuringStage(rows) => rows,
+        }
+    }
+}
+
+impl PaintableRowsRead for MainSidePaintableRows<'_> {
+    fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
+        match self {
+            Self::Committed(rows) => rows.paintable_data(id),
+            Self::DuringStage(rows) => rows.paintable_data(id),
+        }
+    }
+
+    fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool {
+        match self {
+            Self::Committed(rows) => rows.paintable_row_is_populated(id),
+            Self::DuringStage(rows) => rows.paintable_row_is_populated(id),
+        }
     }
 }
 
