@@ -713,6 +713,8 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
                 rust,
                 "    abort_on_panic(|| {{\n        let engine = unsafe {{ {engine_borrow} }};"
             )?;
+            // The style seal counts every entry point the host calls while an update runs.
+            writeln!(rust, "        crate::css::style::seal::note_engine_call(\"{ffi}\");")?;
         }
         let native_receiver = if receiver == "const" {
             "&StyleEngine"

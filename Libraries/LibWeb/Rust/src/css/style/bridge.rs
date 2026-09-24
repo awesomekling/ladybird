@@ -3381,6 +3381,7 @@ pub unsafe extern "C" fn style_engine_take_settled_animation_definitions(
     node: u32,
     pseudo_kind: u8,
 ) -> FfiSettledAnimationDefinitions {
+    super::seal::note_engine_call("style_engine_take_settled_animation_definitions");
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     let Some(node) = StyleNodeID::from_raw(node) else {
         return FfiSettledAnimationDefinitions {
@@ -3654,6 +3655,7 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
     read_only: bool,
     parent_highlight: u64,
 ) -> FfiRecordDemandAnswer {
+    super::seal::note_engine_call("style_engine_answer_record_demand");
     abort_on_panic(|| {
         let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
         let Some(node) = StyleNodeID::from_raw(node) else {
@@ -3816,6 +3818,7 @@ pub unsafe extern "C" fn style_engine_retry_engine_record_after_ancestor(
     engine: *mut c_void,
     node: u32,
 ) -> FfiRetriedRecordBatch {
+    super::seal::note_engine_call("style_engine_retry_engine_record_after_ancestor");
     abort_on_panic(|| {
         let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
         let Some(style_node) = StyleNodeID::from_raw(node) else {
@@ -3850,6 +3853,7 @@ pub unsafe extern "C" fn style_engine_settle_pseudo_records_after_host_record(
     node: u32,
     old_is_list_item: bool,
 ) -> FfiEngineComputedRecord {
+    super::seal::note_engine_call("style_engine_settle_pseudo_records_after_host_record");
     abort_on_panic(|| {
         let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
         let Some(style_node) = StyleNodeID::from_raw(node) else {
@@ -4210,6 +4214,7 @@ pub unsafe extern "C" fn style_engine_take_container_effects(
     engine: *mut c_void,
     node: u32,
 ) -> FfiNativeContainerMatchResult {
+    super::seal::note_engine_call("style_engine_take_container_effects");
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     let Some(verdict) = StyleNodeID::from_raw(node).and_then(|node| engine.take_container_effects_for_host(node))
     else {
@@ -4443,6 +4448,7 @@ pub unsafe extern "C" fn style_engine_sort_style_deltas_for_direct_application(
 /// `engine` must be live, and `nodes` must name `count` readable entries.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_freeze_longhand_inputs(engine: *mut c_void, nodes: *const u32, count: usize) {
+    super::seal::note_engine_call("style_engine_freeze_longhand_inputs");
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     if count == 0 {
         engine.freeze_longhand_inputs(&[]);
