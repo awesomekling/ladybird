@@ -903,7 +903,7 @@ unsafe fn update_layout(
     // SAFETY: The frame reaches the arena and the document only while the document thread waits
     // for it, or through the joins it runs on that thread.
     let messages = unsafe {
-        crate::stage_thread::run_stage_with_joins(main_thread, |joins| {
+        crate::stage_thread::run_overlappable_stage_with_joins("layout", main_thread, |joins| {
             LayoutFrame {
                 inputs,
                 joins,

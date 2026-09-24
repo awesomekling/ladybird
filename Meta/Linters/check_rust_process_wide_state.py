@@ -152,6 +152,12 @@ RENDER_STAGE_ALLOWED = {
             "stage_thread.rs:THREAD",
             "stage_thread.rs:WAITING_CALLER",
             "stage_thread.rs:INCOMING",
+            "stage_thread.rs:MODE",
+            "stage_thread.rs:STAGES",
+            "stage_thread.rs:OVERLAP_HOST",
+            "stage_thread.rs:IN_FLIGHT",
+            "stage_thread.rs:RUNNING_JOIN_WORK",
+            "stage_thread.rs:FORCED_JOIN_SITES",
         ],
     ),
     **render_stage_entries(

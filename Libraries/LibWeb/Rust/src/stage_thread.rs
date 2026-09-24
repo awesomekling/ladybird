@@ -15,18 +15,28 @@
 //! thread-bound handles, stack assumptions) is exercised the way a render thread will exercise it.
 //! Without the variable, stages run on the calling thread.
 //!
-//! A stage run can also join its caller: [`run_stage_with_joins`] hands the stage a [`MainJoins`],
+//! A stage run can also join its caller: [`run_overlappable_stage_with_joins`] hands the stage a [`MainJoins`],
 //! through which it runs a piece of main-thread work on the waiting caller and continues with the
 //! result. The caller runs only the work it is handed, and the stage thread runs only the stages
 //! the caller starts from inside that work, so the two still take turns.
 //!
 //! There is one stage thread per process. A WebContent process runs every document it hosts on its
 //! one main thread, so a thread per process is also a thread per event loop.
+//!
+//! `LIBWEB_STAGE_THREAD=overlap` is a diagnostic mode for finding what stands in the way of a render
+//! thread that runs alongside the main thread. It runs every stage on the stage thread as lockstep
+//! does, but while one of the stages [`LIBWEB_STAGE_OVERLAP`](overlapping_stages) names runs, the
+//! caller does not simply wait: it spins its event loop, so tasks, timers and IPC messages run on
+//! the main thread concurrently with the stage. The first time main-thread code turns an arena
+//! handle into the arena meanwhile, it waits for the stage to finish (a forced join, logged once
+//! per call site). Everything main-thread code reaches past the arena races with the stage, which
+//! is what a ThreadSanitizer build of this mode is for.
 
 use crate::css::ffi_stats::{StyleUpdateScope, install_style_update_scope, take_style_update_scope};
 use crate::stage::MainThread;
 use std::any::Any;
 use std::cell::{Cell, RefCell};
+use std::ffi::c_void;
 use std::panic::AssertUnwindSafe;
 use std::sync::OnceLock;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -79,6 +89,66 @@ struct StageThread {
     id: ThreadId,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StageThreadMode {
+    Lockstep,
+    Overlap,
+}
+
+fn stage_thread_mode() -> Option<StageThreadMode> {
+    static MODE: OnceLock<Option<StageThreadMode>> = OnceLock::new();
+    *MODE.get_or_init(|| match std::env::var_os("LIBWEB_STAGE_THREAD") {
+        Some(mode) if mode == "lockstep" => Some(StageThreadMode::Lockstep),
+        Some(mode) if mode == "overlap" => Some(StageThreadMode::Overlap),
+        _ => None,
+    })
+}
+
+/// The stages that overlap the main thread under `LIBWEB_STAGE_THREAD=overlap`: a comma-separated
+/// list in `LIBWEB_STAGE_OVERLAP`, or the handoff and the recording when it is not set.
+fn overlapping_stages() -> &'static [String] {
+    static STAGES: OnceLock<Vec<String>> = OnceLock::new();
+    STAGES.get_or_init(|| {
+        std::env::var("LIBWEB_STAGE_OVERLAP")
+            .unwrap_or_else(|_| "handoff,recording".into())
+            .split(',')
+            .map(|stage| stage.trim().to_owned())
+            .filter(|stage| !stage.is_empty())
+            .collect()
+    })
+}
+
+/// How the main thread keeps its event loop going while an overlapping stage runs.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiStageOverlapHost {
+    /// Spins the main thread's event loop until `done(context)` returns true. Runs on the main thread.
+    pub spin_until: unsafe extern "C" fn(done: unsafe extern "C" fn(*mut c_void) -> bool, context: *mut c_void),
+    /// Wakes the main thread's event loop. Runs on any thread.
+    pub wake: unsafe extern "C" fn(),
+}
+
+static OVERLAP_HOST: OnceLock<FfiStageOverlapHost> = OnceLock::new();
+
+/// Whether the stages run under `LIBWEB_STAGE_THREAD=overlap`, and so want an overlap host.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_wants_overlap_host() -> bool {
+    stage_thread_mode() == Some(StageThreadMode::Overlap) && OVERLAP_HOST.get().is_none()
+}
+
+/// Installs the main thread's overlap host. The first host installed stays.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_set_overlap_host(host: FfiStageOverlapHost) {
+    let _ = OVERLAP_HOST.set(host);
+}
+
+fn wake_overlapping_caller() {
+    if let Some(host) = OVERLAP_HOST.get() {
+        // SAFETY: The host's wake may be called from any thread.
+        unsafe { (host.wake)() }
+    }
+}
+
 // The size Linux and macOS give a process's main thread, where the stages ran before.
 const STAGE_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
 
@@ -111,6 +181,96 @@ thread_local! {
     // On the stage thread, where the caller's messages arrive. A stage waiting for a join reads
     // them too, since the work it joined for can start stages of its own.
     static INCOMING: RefCell<Option<Receiver<StageMessage>>> = const { RefCell::new(None) };
+    // On the calling thread, the overlapping stage it spins its event loop for.
+    static IN_FLIGHT: Cell<*const InFlight<'static>> = const { Cell::new(std::ptr::null()) };
+    // On the calling thread, how deep it is in work a stage joined it for.
+    static RUNNING_JOIN_WORK: Cell<u32> = const { Cell::new(0) };
+    // On the calling thread, the call sites that forced a join already logged.
+    static FORCED_JOIN_SITES: RefCell<std::collections::HashSet<(&'static str, usize, u32)>> =
+        RefCell::new(std::collections::HashSet::new());
+}
+
+/// An overlapping stage the calling thread has handed off and not seen finish yet.
+struct InFlight<'main> {
+    label: &'static str,
+    thread: &'static StageThread,
+    from_stage: Receiver<CallerMessage>,
+    main_thread: Option<&'main MainThread<'main>>,
+    finished: Cell<Option<StyleUpdateScope>>,
+    done: Cell<bool>,
+}
+
+impl InFlight<'_> {
+    /// Handles one message from the stage, running the work a join hands over.
+    fn handle(&self, message: CallerMessage) {
+        match message {
+            CallerMessage::Finished(style_update) => {
+                self.finished.set(Some(style_update));
+                self.done.set(true);
+            }
+            CallerMessage::Join(work, style_update) => run_join_work(self.thread, self.main_thread, work, style_update),
+        }
+    }
+
+    /// Blocks until the stage has finished.
+    fn wait(&self) {
+        while !self.done.get() {
+            match self.from_stage.recv() {
+                Ok(message) => self.handle(message),
+                Err(_) => std::process::abort(),
+            }
+        }
+    }
+}
+
+fn run_join_work(
+    thread: &'static StageThread,
+    main_thread: Option<&MainThread<'_>>,
+    work: MainWork,
+    style_update: StyleUpdateScope,
+) {
+    tsan::acquire(thread);
+    install_style_update_scope(style_update);
+    let main_thread = main_thread.expect("only a stage started with joins joins its caller");
+    RUNNING_JOIN_WORK.with(|depth| depth.set(depth.get() + 1));
+    let outcome = work(main_thread);
+    RUNNING_JOIN_WORK.with(|depth| depth.set(depth.get() - 1));
+    let style_update = take_style_update_scope();
+    tsan::release(thread);
+    if thread
+        .jobs
+        .send(StageMessage::JoinFinished(Box::new(style_update), outcome))
+        .is_err()
+    {
+        std::process::abort();
+    }
+}
+
+/// Called where main-thread code reaches render-owned state: if an overlapping stage is running,
+/// waits for it to finish. Work a stage joined the main thread for belongs to the stage and does
+/// not wait. Logs each call site that forced a join once.
+#[track_caller]
+pub(crate) fn join_overlapping_stage() {
+    let in_flight = IN_FLIGHT.with(Cell::get);
+    if in_flight.is_null() || RUNNING_JOIN_WORK.with(Cell::get) != 0 {
+        return;
+    }
+    // SAFETY: The in-flight record lives in the frame of the stage run that spins below us, which
+    // clears it before it returns.
+    let in_flight = unsafe { &*in_flight };
+    if in_flight.done.get() {
+        return;
+    }
+    let location = std::panic::Location::caller();
+    let first_time = FORCED_JOIN_SITES.with(|sites| {
+        sites
+            .borrow_mut()
+            .insert((location.file(), location.line() as usize, location.column()))
+    });
+    if first_time {
+        eprintln!("STAGE OVERLAP: forced join of {} at {location}", in_flight.label);
+    }
+    in_flight.wait();
 }
 
 fn next_message() -> Option<StageMessage> {
@@ -129,12 +289,17 @@ pub(crate) fn acting_thread() -> ThreadId {
 fn stage_thread() -> Option<&'static StageThread> {
     static STAGE_THREAD: OnceLock<Option<StageThread>> = OnceLock::new();
     STAGE_THREAD
-        .get_or_init(|| {
-            std::env::var_os("LIBWEB_STAGE_THREAD")
-                .is_some_and(|mode| mode == "lockstep")
-                .then(StageThread::spawn)
-        })
+        .get_or_init(|| stage_thread_mode().map(|_| StageThread::spawn()))
         .as_ref()
+}
+
+/// Whether the stage `label` overlaps its caller rather than running in lockstep with it.
+fn overlaps(label: &'static str) -> bool {
+    stage_thread_mode() == Some(StageThreadMode::Overlap)
+        && OVERLAP_HOST.get().is_some()
+        && IN_FLIGHT.with(Cell::get).is_null()
+        && RUNNING_JOIN_WORK.with(Cell::get) == 0
+        && overlapping_stages().iter().any(|stage| stage == label)
 }
 
 /// Runs `stage` on the stage thread if there is one, and returns its result once it has finished;
@@ -152,7 +317,21 @@ fn stage_thread() -> Option<&'static StageThread> {
 pub(crate) unsafe fn run_stage<R: Send>(stage: impl FnOnce() -> R) -> R {
     match stage_thread() {
         // SAFETY: Guaranteed by the caller.
-        Some(thread) => unsafe { run_stage_on(thread, None, |_| stage()) },
+        Some(thread) => unsafe { run_stage_on(thread, None, false, "", |_| stage()) },
+        None => stage(),
+    }
+}
+
+/// Runs `stage` as [`run_stage`] does, but under `LIBWEB_STAGE_THREAD=overlap` the calling thread
+/// spins its event loop meanwhile if `LIBWEB_STAGE_OVERLAP` names `label`.
+///
+/// # Safety
+///
+/// As for [`run_stage`]; under overlap, only diagnostics rely on it.
+pub(crate) unsafe fn run_overlappable_stage<R: Send>(label: &'static str, stage: impl FnOnce() -> R) -> R {
+    match stage_thread() {
+        // SAFETY: Guaranteed by the caller.
+        Some(thread) => unsafe { run_stage_on(thread, None, overlaps(label), label, |_| stage()) },
         None => stage(),
     }
 }
@@ -164,21 +343,25 @@ pub(crate) unsafe fn run_stage<R: Send>(stage: impl FnOnce() -> R) -> R {
 /// A join is answered by the next reply the stage thread gets, which holds because one thread
 /// per process, the one its documents live on, starts the stages.
 ///
+/// Under `LIBWEB_STAGE_THREAD=overlap`, the stage overlaps its caller as in
+/// [`run_overlappable_stage`] if `LIBWEB_STAGE_OVERLAP` names `label`.
+///
 /// # Safety
 ///
 /// As for [`run_stage`], and the same holds for the work each join hands the calling thread.
-pub(crate) unsafe fn run_stage_with_joins<R: Send>(
+pub(crate) unsafe fn run_overlappable_stage_with_joins<R: Send>(
+    label: &'static str,
     main_thread: &MainThread<'_>,
     stage: impl FnOnce(&MainJoins<'_>) -> R,
 ) -> R {
     match stage_thread() {
         // SAFETY: Guaranteed by the caller.
-        Some(thread) => unsafe { run_stage_on(thread, Some(main_thread), stage) },
+        Some(thread) => unsafe { run_stage_on(thread, Some(main_thread), overlaps(label), label, stage) },
         None => stage(&MainJoins(JoinTarget::InPlace(Some(main_thread)))),
     }
 }
 
-/// How a stage started by [`run_stage_with_joins`] reaches the thread that waits for it.
+/// How a stage started by [`run_overlappable_stage_with_joins`] reaches the thread that waits for it.
 pub(crate) struct MainJoins<'main>(JoinTarget<'main>);
 
 enum JoinTarget<'main> {
@@ -219,6 +402,7 @@ impl MainJoins<'_> {
             // The caller waits for this stage, so it cannot have gone away.
             std::process::abort();
         }
+        wake_overlapping_caller();
         loop {
             match next_message() {
                 // The work started a stage of its own.
@@ -251,15 +435,20 @@ impl<F> CallerWaits<F> {
 
 /// # Safety
 ///
-/// As for [`run_stage_with_joins`]. A stage that joins needs `main_thread`.
+/// As for [`run_overlappable_stage_with_joins`]. A stage that joins needs `main_thread`. With `overlap`, the
+/// caller spins its event loop while the stage runs.
 unsafe fn run_stage_on<R: Send>(
     thread: &'static StageThread,
     main_thread: Option<&MainThread<'_>>,
+    overlap: bool,
+    label: &'static str,
     stage: impl FnOnce(&MainJoins<'_>) -> R,
 ) -> R {
     if std::thread::current().id() == thread.id {
         return stage(&MainJoins(JoinTarget::InPlace(main_thread)));
     }
+    // A stage started while another overlaps would queue behind it, and could not answer its joins.
+    join_overlapping_stage();
 
     let (to_caller, from_stage) = channel::<CallerMessage>();
     let mut outcome: Option<Result<R, Box<dyn Any + Send>>> = None;
@@ -286,6 +475,9 @@ unsafe fn run_stage_on<R: Send>(
         tsan::release(thread);
         // The calling thread is waiting on this reply, so it cannot have gone away.
         let _ = to_caller.send(CallerMessage::Finished(style_update));
+        if overlap {
+            wake_overlapping_caller();
+        }
     });
     // SAFETY: The job borrows from the calling thread's frame. It drops everything it captured
     // before it replies, and this function does not return before the reply arrives.
@@ -295,27 +487,44 @@ unsafe fn run_stage_on<R: Send>(
         // The stage thread only goes away if the process is going away.
         std::process::abort();
     }
-    let style_update = loop {
-        match from_stage.recv() {
-            Ok(CallerMessage::Finished(style_update)) => break style_update,
-            Ok(CallerMessage::Join(work, style_update)) => {
-                tsan::acquire(thread);
-                install_style_update_scope(style_update);
-                let main_thread = main_thread.expect("only a stage started with joins joins its caller");
-                let outcome = work(main_thread);
-                let style_update = take_style_update_scope();
-                tsan::release(thread);
-                if thread
-                    .jobs
-                    .send(StageMessage::JoinFinished(Box::new(style_update), outcome))
-                    .is_err()
-                {
-                    std::process::abort();
-                }
-            }
-            Err(_) => std::process::abort(),
-        }
+    let in_flight = InFlight {
+        label,
+        thread,
+        from_stage,
+        main_thread,
+        finished: Cell::new(None),
+        done: Cell::new(false),
     };
+    match OVERLAP_HOST.get().filter(|_| overlap) {
+        Some(host) => {
+            unsafe extern "C" fn stage_is_done(context: *mut c_void) -> bool {
+                // SAFETY: The context is the in-flight record below, which outlives the spin.
+                let in_flight = unsafe { &*context.cast::<InFlight<'_>>() };
+                while !in_flight.done.get() {
+                    match in_flight.from_stage.try_recv() {
+                        Ok(message) => in_flight.handle(message),
+                        Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => std::process::abort(),
+                    }
+                }
+                in_flight.done.get()
+            }
+            // SAFETY: The record is cleared again before it goes away; the lifetime is erased only
+            // for the thread-local.
+            let record = std::ptr::from_ref(&in_flight).cast::<InFlight<'static>>();
+            IN_FLIGHT.with(|slot| slot.set(record));
+            // SAFETY: The host spins on this thread, and the record outlives the spin.
+            unsafe { (host.spin_until)(stage_is_done, std::ptr::from_ref(&in_flight).cast_mut().cast()) };
+            // A spin that returns early (its event loop is exiting) still waits for the stage.
+            in_flight.wait();
+            IN_FLIGHT.with(|slot| slot.set(std::ptr::null()));
+        }
+        None => in_flight.wait(),
+    }
+    let style_update = in_flight
+        .finished
+        .take()
+        .expect("a finished stage hands back its style update");
     tsan::acquire(thread);
     install_style_update_scope(style_update);
     match outcome.expect("a finished stage leaves its outcome") {
@@ -332,7 +541,7 @@ unsafe fn run_stage_on<R: Send>(
 #[cfg(test)]
 pub(crate) unsafe fn run_stage_for_test<R: Send>(stage: impl FnOnce() -> R) -> R {
     // SAFETY: Guaranteed by the caller.
-    unsafe { run_stage_on(tests::test_thread(), None, |_| stage()) }
+    unsafe { run_stage_on(tests::test_thread(), None, false, "", |_| stage()) }
 }
 
 #[cfg(test)]
@@ -375,13 +584,13 @@ mod tests {
         let state = Cell::new(1);
         // SAFETY: `state` lives on this thread only.
         let (stage_thread, joined_on, nested_stage_ran_on) = unsafe {
-            run_stage_on(joining_test_thread(), Some(&main_thread), |joins| {
+            run_stage_on(joining_test_thread(), Some(&main_thread), false, "", |joins| {
                 state.set(state.get() + 1);
                 let (joined_on, nested_stage_ran_on) = joins.join(|_| {
                     state.set(state.get() * 10);
                     (
                         std::thread::current().id(),
-                        run_stage_on(joining_test_thread(), None, |_| std::thread::current().id()),
+                        run_stage_on(joining_test_thread(), None, false, "", |_| std::thread::current().id()),
                     )
                 });
                 (std::thread::current().id(), joined_on, nested_stage_ran_on)
@@ -399,9 +608,9 @@ mod tests {
         let caller = std::thread::current().id();
         // SAFETY: Nothing is captured that another thread can reach.
         let innermost = unsafe {
-            run_stage_on(joining_test_thread(), Some(&main_thread), |joins| {
+            run_stage_on(joining_test_thread(), Some(&main_thread), false, "", |joins| {
                 joins.join(|main_thread| {
-                    run_stage_on(joining_test_thread(), Some(main_thread), |joins| {
+                    run_stage_on(joining_test_thread(), Some(main_thread), false, "", |joins| {
                         joins.join(|_| std::thread::current().id())
                     })
                 })
@@ -415,7 +624,7 @@ mod tests {
         let main_thread = crate::stage::MainThread::for_test();
         // SAFETY: Nothing is captured.
         let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| unsafe {
-            run_stage_on(joining_test_thread(), Some(&main_thread), |joins| {
+            run_stage_on(joining_test_thread(), Some(&main_thread), false, "", |joins| {
                 joins.join(|_| -> () { panic!("join failed") })
             })
         }));

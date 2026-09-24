@@ -50,8 +50,10 @@ impl HostTables {
     /// # Safety
     ///
     /// `handle` must come from `layout_arena_create` and stay live for `'a`.
+    #[track_caller]
     pub(crate) unsafe fn from_handle<'a>(handle: *mut c_void) -> &'a Self {
         assert!(!handle.is_null(), "layout node arena handle is null");
+        crate::stage_thread::join_overlapping_stage();
         // SAFETY: Guaranteed by the caller. The projection does not borrow the arena beside it.
         unsafe { &*std::ptr::addr_of!((*handle.cast::<ArenaHandle>()).host_tables) }
     }
