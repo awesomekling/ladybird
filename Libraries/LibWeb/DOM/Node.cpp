@@ -2353,6 +2353,9 @@ bool Node::recompute_editable_subtree_flag()
 
 void Node::recompute_editable_subtree_flags_and_repaint()
 {
+    // The walk moves the construction facts the style mirror keeps of every element it reaches.
+    document().join_frame_for_dom_tree_mutation();
+
     // An <area> is never rendered, so its editability rides on the areas its image publishes
     // rather than on a row of its own. This walk is where that fact can flip without the map or
     // the image being touched, so it is also where the areas have to be published again.
