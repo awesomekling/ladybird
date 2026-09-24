@@ -5,52 +5,10 @@
  */
 
 use crate::layout::LayoutNodeArena;
-use crate::painting::display_list::commands::{DisplayListCommandType, DisplayListResourceId, PaintNestedDisplayList};
 use crate::painting::host::RecordingPublishHost;
 use crate::painting::paint_state::PendingRecording;
 use crate::painting::record::resources::RecordingResourceManifest;
-use crate::painting::record::vector_images::{
-    VectorImageDisplayLists, VectorImageRenderRequest, is_vector_image_placeholder, vector_image_placeholder_index,
-};
 use crate::painting::record::{RecordingOutput, RecordingResult};
-
-// Patches the placeholders of the renders a recording missed with the display lists the main
-// thread resolved for them since. Only a lookup: rendering an image is the main thread's.
-fn patch_vector_image_placeholders(
-    output: &mut RecordingOutput,
-    missed: &[VectorImageRenderRequest],
-    resolved: &VectorImageDisplayLists,
-) {
-    if missed.is_empty() {
-        return;
-    }
-    let resolved_ids: Vec<DisplayListResourceId> = missed
-        .iter()
-        .map(|request| resolved.resolved_or_empty(request))
-        .collect();
-    let display_list = std::sync::Arc::make_mut(&mut output.display_list);
-    let id_field_offset = std::mem::offset_of!(PaintNestedDisplayList, display_list_id);
-    let mut patch_offsets = Vec::new();
-    crate::painting::display_list::nested_records::for_each_command_including_nested(
-        &display_list.bytes,
-        &mut |command_type, payload_offset, payload| {
-            if command_type != DisplayListCommandType::PaintNestedDisplayList {
-                return;
-            }
-            let id =
-                crate::painting::display_list::builder::read_command::<PaintNestedDisplayList>(payload).display_list_id;
-            if is_vector_image_placeholder(id) {
-                patch_offsets.push((
-                    payload_offset + id_field_offset,
-                    resolved_ids[vector_image_placeholder_index(id)],
-                ));
-            }
-        },
-    );
-    for (offset, resolved_id) in patch_offsets {
-        display_list.bytes[offset..offset + std::mem::size_of::<u64>()].copy_from_slice(&resolved_id.0.to_ne_bytes());
-    }
-}
 
 pub(crate) fn publish_recording(
     arena: &LayoutNodeArena,
@@ -67,7 +25,7 @@ pub(crate) fn publish_recording(
         fonts,
         image_frames,
         video_sinks,
-        mut painted_vector_images,
+        painted_vector_images,
         missed_vector_images,
         ..
     } = resources;
@@ -84,22 +42,8 @@ pub(crate) fn publish_recording(
     for (resource_id, sink_handle) in video_sinks {
         publish.add_video_sink(main_thread, resource_id, sink_handle);
     }
-    let resolved = arena.paint_state().borrow().vector_image_display_lists.clone();
-    patch_vector_image_placeholders(&mut output, &missed_vector_images, &resolved);
-    let recording_from_scratch = recording_from_scratch.map(|mut recording_from_scratch| {
-        patch_vector_image_placeholders(
-            &mut recording_from_scratch.output,
-            &recording_from_scratch.resources.missed_vector_images,
-            &resolved,
-        );
-        recording_from_scratch
-    });
-    painted_vector_images.extend(
-        missed_vector_images
-            .iter()
-            .filter_map(|request| Some((resolved.get(request)?, *request))),
-    );
     output.vector_images = painted_vector_images;
+    output.missed_vector_images = missed_vector_images;
     if let Some(recording_from_scratch) = recording_from_scratch {
         crate::painting::record::verify::verify_assembled_recording_matches_fresh(
             &output,

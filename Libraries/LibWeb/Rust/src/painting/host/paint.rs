@@ -553,7 +553,6 @@ pub struct FfiSnapAreaGeometry {
 pub struct FfiVectorImageCallbacks {
     pub context: *mut c_void,
     pub resolve_vector_image_display_list: unsafe extern "C" fn(*mut c_void, *const FfiVectorImageRenderRequest) -> u64,
-    pub empty_display_list: unsafe extern "C" fn(*mut c_void) -> u64,
 }
 
 impl FfiVectorImageCallbacks {
@@ -566,12 +565,6 @@ impl FfiVectorImageCallbacks {
         // SAFETY: The C++ host records the image's display list synchronously and reads the
         // request only for the duration of the call.
         unsafe { (self.resolve_vector_image_display_list)(self.context, request) }
-    }
-
-    pub(crate) fn empty_display_list(&self, _: &crate::stage::MainThread) -> u64 {
-        crate::painting::seal::note_host_call("empty_display_list");
-        // SAFETY: The C++ host stores an empty display list synchronously.
-        unsafe { (self.empty_display_list)(self.context) }
     }
 }
 

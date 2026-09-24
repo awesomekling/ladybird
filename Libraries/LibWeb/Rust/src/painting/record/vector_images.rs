@@ -13,16 +13,6 @@ use crate::painting::host::FfiVectorImageRenderRequest;
 use libgfx_rust::{FloatRect, FloatSize, IntSize};
 use std::collections::HashMap;
 
-pub(crate) const VECTOR_IMAGE_PLACEHOLDER_TAG: u64 = 1 << 63;
-
-pub(crate) fn is_vector_image_placeholder(id: DisplayListResourceId) -> bool {
-    id.0 & VECTOR_IMAGE_PLACEHOLDER_TAG != 0
-}
-
-pub(crate) fn vector_image_placeholder_index(id: DisplayListResourceId) -> usize {
-    (id.0 & !VECTOR_IMAGE_PLACEHOLDER_TAG) as usize
-}
-
 /// The published half of a `color-scheme` declaration an SVG-as-image can answer with.
 pub(crate) fn declares_light_or_dark_color_scheme(schemes: &RetainedUtf16FlyStringList) -> bool {
     fn keyword_raws() -> (usize, usize) {
@@ -254,13 +244,10 @@ impl VectorImageRenderRequest {
 
 /// The display lists of the SVG-as-image renders a recording paints. Rendering one lays out and
 /// records another document, so the main thread resolves them and hands the recording this map;
-/// the recording and its publish only look renders up in it.
+/// the recording only looks renders up in it.
 #[derive(Clone, Default)]
 pub(crate) struct VectorImageDisplayLists {
     lists: HashMap<VectorImageRenderRequest, DisplayListResourceId>,
-    // The empty image a render resolves to when the map lacks it. The main thread resolves it
-    // alongside the renders a recording missed, the only time a publish can need it.
-    empty: Option<DisplayListResourceId>,
 }
 
 impl VectorImageDisplayLists {
@@ -268,33 +255,8 @@ impl VectorImageDisplayLists {
         self.lists.get(request).copied()
     }
 
-    pub(crate) fn contains(&self, request: &VectorImageRenderRequest) -> bool {
-        self.lists.contains_key(request)
-    }
-
     pub(crate) fn insert(&mut self, request: VectorImageRenderRequest, display_list: DisplayListResourceId) {
         self.lists.insert(request, display_list);
-    }
-
-    pub(crate) fn has_empty(&self) -> bool {
-        self.empty.is_some()
-    }
-
-    pub(crate) fn set_empty(&mut self, display_list: DisplayListResourceId) {
-        self.empty = Some(display_list);
-    }
-
-    /// The display list a publish patches a missed render with: its resolved render, or the empty
-    /// image when the main thread never resolved it.
-    pub(crate) fn resolved_or_empty(&self, request: &VectorImageRenderRequest) -> DisplayListResourceId {
-        if let Some(display_list) = self.get(request) {
-            return display_list;
-        }
-        if cfg!(debug_assertions) {
-            eprintln!("PAINT: SVG-as-image render {request:?} was never resolved; painting an empty image");
-        }
-        self.empty
-            .expect("the main thread resolves the empty image with the renders a recording missed")
     }
 }
 

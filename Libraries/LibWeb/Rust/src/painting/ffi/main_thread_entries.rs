@@ -271,7 +271,8 @@ unsafe extern "C" fn layout_arena_for_each_snap_area(
 }
 
 /// Resolves the SVG-as-image renders the next recording is predicted to paint into the map it
-/// looks them up in: the ones the last recording painted, and the first paints of image elements.
+/// looks them up in: the ones the last recording painted or missed, and the first paints of image
+/// elements and layers.
 /// Rendering an image lays out and records another document, so the main thread does it here,
 /// before the recording stage runs, rather than the stage asking for it.
 ///
@@ -290,9 +291,11 @@ unsafe extern "C" fn layout_arena_resolve_painted_vector_images(
     let mut painted = std::collections::HashSet::new();
     let prediction_inputs = {
         let paint_state = arena.paint_state().borrow();
-        // The renders the last recording painted, whether it recorded them or copied them.
+        // The renders the last recording painted, whether it recorded them or copied them, and the
+        // ones it missed, whose producers record again.
         if let Some(recording) = paint_state.last_recording.as_ref() {
             painted.extend(recording.vector_images.values().copied());
+            painted.extend(recording.missed_vector_images.iter().copied());
         }
         paint_state.visual_context.last_tree_inputs.map(|tree_inputs| {
             crate::painting::record::vector_images::FirstPaintPredictionInputs {
@@ -322,63 +325,21 @@ unsafe extern "C" fn layout_arena_resolve_painted_vector_images(
     arena.paint_state().borrow_mut().vector_image_display_lists = std::sync::Arc::new(resolved);
 }
 
-/// Resolves the SVG-as-image renders the pending recording found missing from its map, so its
-/// publish can patch them in. A recording misses the renders its last one did not paint.
+/// Whether the last recording painted an SVG-as-image render as an empty image because the main
+/// thread had not resolved it, so the host has to schedule the frame that paints it.
 ///
 /// # Safety
 ///
-/// As for `layout_arena_resolve_painted_vector_images`.
+/// `arena` must be a live handle from `layout_arena_create`.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_resolve_missed_vector_images(
-    arena: *mut c_void,
-    vector_images: crate::painting::host::FfiVectorImageCallbacks,
-) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+unsafe extern "C" fn layout_arena_last_recording_missed_vector_images(arena: *mut c_void) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    let (mut resolved, missed) = {
-        let paint_state = arena.paint_state().borrow();
-        let Some(pending) = paint_state.pending_recording.as_ref() else {
-            return;
-        };
-        let missed: Vec<_> = pending
-            .recording
-            .resources
-            .missed_vector_images
-            .iter()
-            .chain(
-                pending
-                    .recording_from_scratch
-                    .iter()
-                    .flat_map(|recording| recording.resources.missed_vector_images.iter()),
-            )
-            .copied()
-            .collect();
-        if missed.is_empty() {
-            return;
-        }
-        (
-            crate::painting::record::vector_images::VectorImageDisplayLists::clone(
-                &paint_state.vector_image_display_lists,
-            ),
-            missed,
-        )
-    };
-    if !resolved.has_empty() {
-        resolved.set_empty(crate::painting::display_list::commands::DisplayListResourceId(
-            vector_images.empty_display_list(&main_thread),
-        ));
-    }
-    for request in missed {
-        if resolved.contains(&request) {
-            continue;
-        }
-        let display_list = vector_images.resolve_vector_image_display_list(&main_thread, &request.to_ffi());
-        resolved.insert(
-            request,
-            crate::painting::display_list::commands::DisplayListResourceId(display_list),
-        );
-    }
-    arena.paint_state().borrow_mut().vector_image_display_lists = std::sync::Arc::new(resolved);
+    arena
+        .paint_state()
+        .borrow()
+        .last_recording
+        .as_ref()
+        .is_some_and(|recording| !recording.missed_vector_images.is_empty())
 }
 
 /// # Safety

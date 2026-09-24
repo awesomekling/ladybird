@@ -82,6 +82,7 @@
 #include <LibWeb/Painting/ChromeWidget.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
 #include <LibWeb/Painting/PaintableTypes.h>
+#include <LibWeb/Painting/PaintingRustBridge.h>
 #include <LibWeb/Painting/ScrollSnap.h>
 #include <LibWeb/Painting/Scrollbar.h>
 #include <LibWeb/Platform/Timer.h>
@@ -6790,6 +6791,10 @@ bool LocalNavigable::record_display_list_and_scroll_state(PaintConfig paint_conf
         }
         compositor_context().update_scroll_state(move(scroll_state_snapshot), move(keyboard_scroll_state));
     }
+    // The recording painted an SVG-as-image the main thread had not rendered yet as an empty image. It renders the
+    // image before the next recording, which paints it.
+    if (should_record_display_list && Painting::last_recording_missed_vector_images(*document))
+        document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::PaintCommands);
     return true;
 }
 

@@ -196,6 +196,7 @@ fn record_display_list_impl<O: Observer>(
         wheel_event_listener_state_generation: inputs.wheel_event_listener_state_generation,
         is_identical_to_published_frame: false,
         vector_images: Default::default(),
+        missed_vector_images: Default::default(),
         capture_log_for_verification: recorder.observer.finish(),
     };
     RecordingResult {
