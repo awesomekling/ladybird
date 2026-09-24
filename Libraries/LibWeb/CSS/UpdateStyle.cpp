@@ -412,19 +412,25 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
     // change asks for one. SVG resources and existing animations can still consume style while
     // hidden, so retain their inheritance prerequisites in this batch.
     HashTable<StyleNodeID> required_in_hidden_subtrees;
-    // The effects the batch's rows leave for the host. A row the engine settled can carry work
-    // the C++ computation would have done beside the record it computed; the host applies it once
-    // the whole batch is installed, in the order the batch applied the rows, which is flat-tree
-    // order. Nothing a later row in the batch computes may depend on one of these being applied.
+    // The effects the batch's rows leave for the host, as messages naming each row's element by
+    // style node. The host applies them once the whole batch is installed, in the order the batch
+    // applied the rows, which is flat-tree order. Nothing a later row in the batch computes may
+    // depend on one of these being applied.
+    // A row's invalidation marks render state (layout, the layout tree, visual contexts, resnap),
+    // which no row of the batch reads.
     // A row whose record read a non-inherited property straight from the parent, through an
     // explicit `inherit`, owes the parent the mark C++ writes beside such a computation. The
     // union is monotone and a parent applies before its children, so draining it after the batch
     // marks the parent no later than the C++ path does.
-    struct ExplicitInheritanceEffectRow {
+    struct ElementInvalidationEffect {
+        StyleNodeID style_node;
+        RequiredInvalidationAfterStyleChange invalidation;
+    };
+    struct ExplicitInheritanceEffect {
         StyleNodeID style_node;
         u32 style_groups;
     };
-    Vector<ExplicitInheritanceEffectRow> explicit_inheritance_effect_rows;
+    Vector<Variant<ElementInvalidationEffect, ExplicitInheritanceEffect>> row_effects;
     for (auto const& reaction : reactions) {
         auto element = document.style_computer().element_for_style_node(reaction.style_node);
         if (!element || (!element->is_svg_element() && !element->has_relevant_animations()))
@@ -731,7 +737,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                             auto step_invalidation = document.style_computer().run_transition_step_for_installed_record(
                                 settled, StyleRecordID { reaction.old_style_record });
                             if (!step_invalidation.is_none()) {
-                                apply_element_style_invalidation_after_style_change(*element, step_invalidation);
+                                row_effects.append(ElementInvalidationEffect { StyleNodeID { reaction.style_node }, step_invalidation });
                                 transaction_invalidation |= step_invalidation;
                             }
                         }
@@ -764,7 +770,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         sample_animations_for_installed_pseudos(*element);
                     document.style_computer().style_engine().acknowledge_engine_computed_record(StyleNodeID { reaction.style_node });
                     if (explicit_inheritance_debt != 0)
-                        explicit_inheritance_effect_rows.append({ StyleNodeID { reaction.style_node }, explicit_inheritance_debt });
+                        row_effects.append(ExplicitInheritanceEffect { StyleNodeID { reaction.style_node }, explicit_inheritance_debt });
                 }
             } else if (needs_regular_style_recompute || needs_inherited_style_recompute || needs_full_custom_property_recompute) {
                 invalidation = apply_engine_record_demand(*element, did_change_custom_properties);
@@ -782,7 +788,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 document.throttled_animation_visibility_changed();
             }
 
-            apply_element_style_invalidation_after_style_change(*element, invalidation);
+            row_effects.append(ElementInvalidationEffect { StyleNodeID { reaction.style_node }, invalidation });
             transaction_invalidation |= invalidation;
 
             auto& style_engine = document.style_computer().style_engine();
@@ -807,12 +813,19 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
     }
 
     // The batch is installed: drain what its rows left behind, in the order they were applied.
-    for (auto const& row : explicit_inheritance_effect_rows) {
-        auto element = document.style_computer().element_for_style_node(row.style_node);
-        if (!element || !element->is_connected() || &element->document() != &document)
-            continue;
-        if (auto* parent = element->parent())
-            parent->add_children_explicitly_inherited_non_inherited_style_groups(row.style_groups == NumericLimits<u32>::max() ? ComputedValues::all_style_groups : row.style_groups);
+    for (auto const& effect : row_effects) {
+        effect.visit(
+            [&](ElementInvalidationEffect const& row) {
+                if (auto element = document.style_computer().element_for_style_node(row.style_node))
+                    apply_element_style_invalidation_after_style_change(*element, row.invalidation);
+            },
+            [&](ExplicitInheritanceEffect const& row) {
+                auto element = document.style_computer().element_for_style_node(row.style_node);
+                if (!element || !element->is_connected() || &element->document() != &document)
+                    return;
+                if (auto* parent = element->parent())
+                    parent->add_children_explicitly_inherited_non_inherited_style_groups(row.style_groups == NumericLimits<u32>::max() ? ComputedValues::all_style_groups : row.style_groups);
+            });
     }
     return transaction_invalidation;
 }
