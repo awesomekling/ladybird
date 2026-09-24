@@ -12,9 +12,13 @@ use super::computed;
 use super::publication::drive_font_metric;
 use super::tree::StyleNodeID;
 use super::{RetainedState, bridge};
+use crate::css::animated_overlay::AnimatedOverlay;
+use crate::css::computed_longhand_table::ComputedLonghandTable;
 use crate::css::computed_value_types::{FontValues, STYLE_GROUP_INDEX_FONT, STYLE_GROUP_INDEX_INHERITED_BOX};
 use crate::css::computed_values::InheritedBoxValues;
 use crate::css::style_compute::{FfiAnimationLengthContexts, FfiFontMetrics, FfiLengthResolutionContext};
+use crate::css::style_value::StyleValueData;
+use crate::css::table_group_builder::FfiFontGroupBuildInputs;
 
 /// One record's font, as a length resolves against it.
 struct RecordFont {
@@ -182,4 +186,241 @@ impl RetainedState {
             remaining,
         })
     }
+}
+
+/// What resolving an element's font asks the document's font resolver, and the three values the
+/// font's metrics are then read beside, from a computed table and the overlay a sample composed over
+/// it. The drive asks with no overlay.
+pub(crate) struct FontResolutionInputs {
+    pub(crate) request: bridge::FfiFontResolutionRequest,
+    /// The font size the element's own lengths resolve against, which is the C++ working set's
+    /// `CSSPixels` value rather than the computed value's double.
+    pub(crate) font_size: f64,
+    pub(crate) font_weight: f64,
+    pub(crate) font_width: f64,
+}
+
+fn effective_data<'a>(
+    table: &'a ComputedLonghandTable,
+    overlay: Option<&'a AnimatedOverlay>,
+    property: u16,
+) -> Option<&'a StyleValueData> {
+    unsafe {
+        table
+            .effective_value(overlay, property, true)
+            .value
+            .cast::<StyleValueData>()
+            .as_ref()
+    }
+}
+
+/// The request the C++ font computer's resolution corresponds to for these values.
+pub(crate) fn font_resolution_inputs(
+    table: &ComputedLonghandTable,
+    overlay: Option<&AnimatedOverlay>,
+    tree_scope: u32,
+    inputs: &bridge::FfiDocumentStyleComputationInputs,
+) -> FontResolutionInputs {
+    use crate::css::css_pixels::CssPixels;
+    use crate::css::property_metadata::property_id as prop;
+    use crate::css::style_compute::keyword;
+
+    // The font phase computes font-size, font-weight, and font-width to these types: a value it
+    // cannot compute is `unset`.
+    let font_size = match effective_data(table, overlay, prop::FONT_SIZE) {
+        Some(StyleValueData::Length { value, unit }) if *unit == crate::css::style_compute::px_length_unit() => {
+            CssPixels::nearest_value_for(*value).to_double()
+        }
+        _ => {
+            debug_assert!(false, "the font phase left font-size uncomputed");
+            CssPixels::from_raw(inputs.initial_font_size_raw).to_double()
+        }
+    };
+    let font_slope = match effective_data(table, overlay, prop::FONT_STYLE) {
+        Some(StyleValueData::FontStyle { font_style, .. }) => match *font_style {
+            crate::css::css_enums::font_style_keyword::ITALIC => 1,
+            crate::css::css_enums::font_style_keyword::OBLIQUE => 2,
+            _ => 0,
+        },
+        _ => 0,
+    };
+    let (font_weight, font_width) = match (
+        effective_data(table, overlay, prop::FONT_WEIGHT),
+        effective_data(table, overlay, prop::FONT_WIDTH),
+    ) {
+        (Some(StyleValueData::Number { value: weight }), Some(StyleValueData::Percentage { value: width })) => {
+            (*weight, *width)
+        }
+        _ => {
+            debug_assert!(false, "the font phase left font-weight or font-width uncomputed");
+            (400.0, 100.0)
+        }
+    };
+    let font_optical_sizing = match effective_data(table, overlay, prop::FONT_OPTICAL_SIZING) {
+        Some(StyleValueData::Keyword { keyword }) => {
+            crate::css::css_enums::keyword_to_font_optical_sizing(*keyword).unwrap_or(0)
+        }
+        _ => 0,
+    };
+    // The resolver reads these beside the family, so the request names each one whose value is not
+    // the initial one and nothing for the rest. Read the computed values: a non-default setting can
+    // also come from inheritance.
+    let font_feature_values: [bridge::FfiHostHandle; bridge::FONT_RESOLUTION_FEATURE_INPUT_COUNT] = {
+        let features = [
+            (prop::FONT_FEATURE_SETTINGS, keyword::NORMAL),
+            (prop::FONT_VARIATION_SETTINGS, keyword::NORMAL),
+            (prop::FONT_VARIANT_CAPS, keyword::NORMAL),
+            (prop::FONT_VARIANT_EAST_ASIAN, keyword::NORMAL),
+            (prop::FONT_VARIANT_EMOJI, keyword::NORMAL),
+            (prop::FONT_VARIANT_LIGATURES, keyword::NORMAL),
+            (prop::FONT_VARIANT_NUMERIC, keyword::NORMAL),
+            (prop::FONT_VARIANT_POSITION, keyword::NORMAL),
+            (prop::FONT_VARIANT_ALTERNATES, keyword::NORMAL),
+            (prop::FONT_KERNING, keyword::AUTO),
+            (prop::TEXT_RENDERING, keyword::AUTO),
+        ];
+        std::array::from_fn(|index| {
+            let (property, default_keyword) = features[index];
+            let pointer = match effective_data(table, overlay, property) {
+                Some(StyleValueData::Keyword { keyword }) if *keyword == default_keyword => std::ptr::null(),
+                _ => table.effective_value(overlay, property, true).value,
+            };
+            bridge::FfiHostHandle::from_pointer(pointer.cast())
+        })
+    };
+    FontResolutionInputs {
+        request: bridge::FfiFontResolutionRequest {
+            font_family: bridge::FfiHostHandle::from_pointer(
+                table.effective_value(overlay, prop::FONT_FAMILY, true).value.cast(),
+            ),
+            tree_scope,
+            font_feature_values,
+            font_size_raw: CssPixels::nearest_value_for(font_size).raw_value(),
+            font_slope,
+            font_weight,
+            font_width,
+            font_optical_sizing,
+            font_environment_generation: inputs.font_environment_generation,
+        },
+        font_size,
+        font_weight,
+        font_width,
+    }
+}
+
+/// The used line height, as the C++ working set reads it from the computed value against the font
+/// it resolved.
+pub(crate) fn used_line_height(
+    table: &ComputedLonghandTable,
+    overlay: Option<&AnimatedOverlay>,
+    font_size: f64,
+    resolved: &bridge::FfiResolvedFont,
+) -> f64 {
+    use crate::css::css_pixels::CssPixels;
+    use crate::css::property_metadata::property_id as prop;
+    use crate::css::style_compute::keyword;
+
+    let normal_line_height = f64::from(resolved.ascent.round() as i32 + resolved.descent.round() as i32);
+    // The line-height phase computes line-height to one of these; a value it cannot compute is
+    // `unset`, so any other shape is read as `normal`.
+    match effective_data(table, overlay, prop::LINE_HEIGHT) {
+        Some(StyleValueData::Keyword { keyword }) if *keyword == keyword::NORMAL => normal_line_height,
+        Some(StyleValueData::Length { value, unit }) if *unit == crate::css::style_compute::px_length_unit() => {
+            CssPixels::nearest_value_for(*value).to_double()
+        }
+        Some(StyleValueData::Number { value }) => CssPixels::nearest_value_for(value * font_size).to_double(),
+        _ => {
+            debug_assert!(false, "the line-height phase left line-height uncomputed");
+            normal_line_height
+        }
+    }
+}
+
+/// What the font group of a record is built from, for an element whose font resolved to `resolved`.
+pub(crate) fn font_group_build_inputs(
+    table: &ComputedLonghandTable,
+    overlay: Option<&AnimatedOverlay>,
+    font: &FontResolutionInputs,
+    line_height_used: f64,
+    resolved: &bridge::FfiResolvedFont,
+) -> FfiFontGroupBuildInputs {
+    use crate::css::css_pixels::CssPixels;
+    use crate::css::property_metadata::property_id as prop;
+
+    let keyword_code = |property: u16, map: fn(u16) -> Option<u8>| match effective_data(table, overlay, property) {
+        Some(StyleValueData::Keyword { keyword }) => map(*keyword).unwrap_or(0),
+        _ => 0,
+    };
+    let math_depth = match effective_data(table, overlay, prop::MATH_DEPTH) {
+        Some(StyleValueData::Integer { value }) => *value,
+        _ => 0,
+    };
+    FfiFontGroupBuildInputs {
+        font_size_raw: font.request.font_size_raw,
+        line_height_used_raw: CssPixels::nearest_value_for(line_height_used).raw_value(),
+        font_variant_emoji: keyword_code(
+            prop::FONT_VARIANT_EMOJI,
+            crate::css::css_enums::keyword_to_font_variant_emoji,
+        ),
+        font_ascent: resolved.ascent,
+        font_descent: resolved.descent,
+        font_x_height: resolved.x_height,
+        font_zero_advance: resolved.zero_advance,
+        first_available_font: resolved.first_available_font.as_pointer(),
+        font_cascade_list: resolved.font_cascade_list.as_pointer(),
+        font_weight: font.font_weight,
+        font_width: font.font_width,
+        math_shift: keyword_code(prop::MATH_SHIFT, crate::css::css_enums::keyword_to_math_shift),
+        math_style: keyword_code(prop::MATH_STYLE, crate::css::css_enums::keyword_to_math_style),
+        math_depth,
+    }
+}
+
+impl RetainedState {
+    /// The inputs the font group of an element's overlay record is built from, resolved by the
+    /// engine over the record's table and the overlay a sample composed. `None` where the document's
+    /// font resolver has not resolved that font yet.
+    pub(crate) fn animated_font_group_inputs(
+        &self,
+        node: StyleNodeID,
+        table: &ComputedLonghandTable,
+        overlay: Option<&AnimatedOverlay>,
+    ) -> Option<FfiFontGroupBuildInputs> {
+        let font = font_resolution_inputs(
+            table,
+            overlay,
+            self.tree.tree_scope(node).0,
+            &self.document_style_computation_inputs,
+        );
+        let resolved = self.font_resolution.as_ref()?.lookup(font.request)?;
+        let line_height_used = used_line_height(table, overlay, font.font_size, &resolved);
+        Some(font_group_build_inputs(
+            table,
+            overlay,
+            &font,
+            line_height_used,
+            &resolved,
+        ))
+    }
+}
+
+/// A description of font group inputs two resolutions can be compared by.
+pub(crate) fn describe_font_group_build_inputs(inputs: &FfiFontGroupBuildInputs) -> String {
+    format!(
+        "size {} line height {} emoji {} ascent {} descent {} x-height {} zero {} first {:p} list {:p} weight {} width {} math {}/{}/{}",
+        inputs.font_size_raw,
+        inputs.line_height_used_raw,
+        inputs.font_variant_emoji,
+        inputs.font_ascent,
+        inputs.font_descent,
+        inputs.font_x_height,
+        inputs.font_zero_advance,
+        inputs.first_available_font,
+        inputs.font_cascade_list,
+        inputs.font_weight,
+        inputs.font_width,
+        inputs.math_shift,
+        inputs.math_style,
+        inputs.math_depth,
+    )
 }

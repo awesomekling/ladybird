@@ -3276,13 +3276,30 @@ pub unsafe extern "C" fn style_engine_build_animation_overlay_payloads(
     };
     let mut font = || {
         let mut inputs = std::mem::MaybeUninit::<crate::css::table_group_builder::FfiFontGroupBuildInputs>::uninit();
-        unsafe {
+        let inputs = unsafe {
             (input.font_group_inputs.expect("the host resolves the animated font"))(
                 input.callback_context,
                 inputs.as_mut_ptr().cast(),
             );
             inputs.assume_init()
+        };
+        if super::engine_sample_check::is_checking() {
+            match engine.animated_font_group_inputs(node, table, overlay) {
+                None => super::engine_sample_check::note_declined("overlay font: not resolved yet"),
+                Some(engine_inputs) => {
+                    let host = super::engine_sample::describe_font_group_build_inputs(&inputs);
+                    let engine = super::engine_sample::describe_font_group_build_inputs(&engine_inputs);
+                    if host == engine {
+                        super::engine_sample_check::note_agreed("overlay font");
+                    } else {
+                        super::engine_sample_check::note_difference("overlay font", &|| {
+                            format!("node {}: host {host}, engine {engine}", node.raw())
+                        });
+                    }
+                }
+            }
         }
+        inputs
     };
     let Some(payloads) = (unsafe {
         engine.build_animation_overlay_payloads(
