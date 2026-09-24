@@ -5,6 +5,7 @@
  */
 
 #include <AK/ScopeGuard.h>
+#include <LibGfx/FontCascadeList.h>
 #include <LibWeb/CSS/Invalidation/ContainerQueryInvalidator.h>
 #include <LibWeb/CSS/ScrollStateContainerQuery.h>
 #include <LibWeb/DOM/CommitMessages.h>
@@ -175,6 +176,16 @@ void CommitMessages::append(Layout::RustFFI::FfiCommitMessage const& message)
     case Layout::RustFFI::FfiCommitMessageKind::ListItemCounterValueRendered:
         m_messages.append(Message { .identity = identity, .kind = Kind::ListItemCounterValueRendered, .pseudo_element = {}, .custom_property_name = {} });
         return;
+    case Layout::RustFFI::FfiCommitMessageKind::PendingFontFaceWanted:
+        m_messages.append(Message {
+            .identity = identity,
+            .kind = Kind::PendingFontFaceWanted,
+            .pseudo_element = {},
+            .custom_property_name = {},
+            .pending_face = message.pending_face,
+            .pending_face_has_been_retried = message.pending_face_has_been_retried,
+        });
+        return;
     case Layout::RustFFI::FfiCommitMessageKind::SvgResourceReferenced:
         m_messages.append(Message {
             .identity = identity,
@@ -283,6 +294,9 @@ void CommitMessages::apply(Message const& message)
     case Kind::StyleViewportDependency:
         if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
             element->set_style_depends_on_viewport_metrics();
+        return;
+    case Kind::PendingFontFaceWanted:
+        Gfx::request_wanted_pending_face(message.pending_face, message.pending_face_has_been_retried);
         return;
     case Kind::TopLayerZoneRebuildNeeded:
         m_document.set_top_layer_needs_layout_zone_rebuild();

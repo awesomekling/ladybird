@@ -78,6 +78,7 @@ private:
         ScrollStateQueryContainerUsage,
         StyleQueryNeedsEvaluationAfterLayout,
         StyleViewportDependency,
+        PendingFontFaceWanted,
         TopLayerZoneRebuildNeeded,
         UnexpectedFragmentedInline,
     };
@@ -98,6 +99,9 @@ private:
         Optional<HoverEventData> hover_event_data {};
         Optional<CSS::PseudoElement> pseudo_element;
         Utf16FlyString custom_property_name;
+        // The web font face a PendingFontFaceWanted message names, and whether it was offered before.
+        u64 pending_face { 0 };
+        bool pending_face_has_been_retried { false };
     };
 
     void apply(Message const&);

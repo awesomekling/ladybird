@@ -59,8 +59,8 @@
 //! `Gfx::system_fallback_font_from_render_side`, a process-wide memo whose answer depends on the
 //! installed font set and nothing else. A face still on its `font-display` timeline is not
 //! resolved here at all: the frozen entry already carries which period it is in, and the pass
-//! leaves the face's number behind for `Gfx::request_wanted_pending_faces()` to request once the
-//! pass has ended.
+//! leaves the face's number behind. The layout update's end hands the numbers to the document as
+//! `PendingFontFaceWanted` commit messages, and applying one requests the face.
 //!
 //! A memo *miss* is the part that leaves the process: a renderer cannot match a code point itself
 //! and has to ask the UI process. That is a resource service the design permits, but only over a

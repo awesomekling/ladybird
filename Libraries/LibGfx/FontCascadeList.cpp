@@ -15,7 +15,7 @@
 extern "C" {
 void const* ladybird_gfx_frozen_font_list_build(void const* list);
 void ladybird_gfx_frozen_font_list_release(void const* frozen);
-size_t ladybird_gfx_request_wanted_pending_faces();
+bool ladybird_gfx_request_wanted_pending_face(u64 face_id, bool has_been_retried);
 }
 
 namespace Gfx {
@@ -60,9 +60,9 @@ RefPtr<FontCascadeList::PendingFace> FontCascadeList::PendingFace::with_id(u64 i
     return adopt_ref(*it->value);
 }
 
-void request_wanted_pending_faces()
+void request_wanted_pending_face(u64 face_id, bool has_been_retried)
 {
-    (void)ladybird_gfx_request_wanted_pending_faces();
+    (void)ladybird_gfx_request_wanted_pending_face(face_id, has_been_retried);
 }
 
 FontCascadeList::~FontCascadeList()

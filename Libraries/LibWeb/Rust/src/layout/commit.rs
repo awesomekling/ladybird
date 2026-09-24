@@ -29,6 +29,10 @@ pub enum FfiCommitMessageKind {
     /// The node is the element a pseudo-element was generated for, and the pseudo-element's content
     /// or list marker shows the value of the `list-item` counter.
     ListItemCounterValueRendered,
+    /// A pass reached the web font face `pending_face` names while it waits on its load. A pass
+    /// cannot start the load itself: the fetch, the font-display timer and the load-event delayer
+    /// are all document state. This one is about the document itself.
+    PendingFontFaceWanted,
 }
 
 /// One thing the render side has to tell the document. The node it is about is named by the style
@@ -40,6 +44,10 @@ pub struct FfiCommitMessage {
     /// A second node the message names, for the kinds that are about a pair. Zero otherwise.
     pub other_style_node: u32,
     pub kind: FfiCommitMessageKind,
+    /// The face a `PendingFontFaceWanted` message names, and whether the document has been offered
+    /// it once before without finding it. Zero and false otherwise.
+    pub pending_face: u64,
+    pub pending_face_has_been_retried: bool,
 }
 
 /// Host notifications contain no arena borrows. Dispatch them only after the
@@ -126,6 +134,8 @@ fn commit_subtree(
                 style_node,
                 other_style_node: 0,
                 kind: FfiCommitMessageKind::ContentSizeChangedForContainerQueries,
+                pending_face: 0,
+                pending_face_has_been_retried: false,
             });
         }
 
@@ -222,6 +232,8 @@ pub(crate) fn commit_replacing(
                 style_node,
                 other_style_node: 0,
                 kind: FfiCommitMessageKind::NavigableContainerViewportCommitted,
+                pending_face: 0,
+                pending_face_has_been_retried: false,
             });
         }
     }
