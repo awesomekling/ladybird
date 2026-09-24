@@ -13,6 +13,10 @@
 //! declines to answer; `abort` makes a difference fatal. Reports go to stderr, or are appended to
 //! the file named by `LIBWEB_ENGINE_SAMPLE_CHECK_LOG`.
 
+use super::animations::{AnimationSlot, AnimationTimingRow};
+use super::tree::StyleNodeID;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io::Write;
 use std::sync::OnceLock;
 
@@ -75,6 +79,54 @@ pub(crate) fn note_difference(input: &'static str, detail: &dyn Fn() -> String) 
             let detail = detail();
             report(&format!("engine-sample-check DIFFERS {input}: {detail}"));
             panic!("the engine's sample differs from the host's ({input}): {detail}");
+        }
+    }
+}
+
+/// The rows the engine expects the host to publish for the CSS animations a plan it handed over
+/// starts, by the engine, the element and the animation list, each with its place in the element's
+/// `animation-name` list.
+type ExpectedRows = HashMap<(usize, StyleNodeID, AnimationSlot), Vec<(u32, AnimationTimingRow)>>;
+
+thread_local! {
+    static EXPECTED_NEW_ANIMATION_ROWS: RefCell<ExpectedRows> = RefCell::new(HashMap::new());
+}
+
+/// Expect the host to publish these rows once it has created the animations a plan starts, which
+/// the next whole-stack sample of the list checks.
+pub(crate) fn expect_new_animation_rows(
+    engine: usize,
+    node: StyleNodeID,
+    slot: AnimationSlot,
+    rows: Vec<(u32, AnimationTimingRow)>,
+) {
+    EXPECTED_NEW_ANIMATION_ROWS.with_borrow_mut(|expected| expected.insert((engine, node, slot), rows));
+}
+
+/// Check the rows the host published for a list against the ones the engine expected it to
+/// publish for the animations it started.
+pub(crate) fn check_new_animation_rows(
+    engine: usize,
+    node: StyleNodeID,
+    slot: AnimationSlot,
+    published: &[AnimationTimingRow],
+) {
+    let Some(expected) = EXPECTED_NEW_ANIMATION_ROWS.with_borrow_mut(|expected| expected.remove(&(engine, node, slot)))
+    else {
+        return;
+    };
+    for (name_index, row) in expected {
+        let found = published
+            .iter()
+            .find(|published| published.is_listed_css_animation(node, slot, name_index));
+        match found {
+            Some(published) if row.predicts(published) => note_agreed("new animation timing"),
+            _ => note_difference("new animation timing", &|| {
+                format!(
+                    "node {} slot {slot} animation {name_index}: engine {row:?}, host {found:?}",
+                    node.raw()
+                )
+            }),
         }
     }
 }

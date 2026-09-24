@@ -3027,6 +3027,14 @@ pub unsafe extern "C" fn rust_sample_animation_effects(
         let node = crate::css::style::tree::StyleNodeID::from_raw(input.style_node)
             .expect("a sampled element has a style node");
         let slot = animation_slot(input.pseudo_kind);
+        if input.samples_whole_stack && crate::css::style::engine_sample_check::is_checking() {
+            crate::css::style::engine_sample_check::check_new_animation_rows(
+                std::ptr::from_ref(engine).addr(),
+                node,
+                slot,
+                engine.element_animation_timing_rows(node, slot),
+            );
+        }
         let Some(descriptions) = engine.take_element_animation_effect_descriptions(node, slot) else {
             return FfiHostAnimationSampleResult::with_outcome(FfiHostAnimationSampleOutcome::Cleared);
         };

@@ -315,7 +315,10 @@ pub(crate) mod timing_row_flag {
     pub(crate) const START_DELAY_IS_PERCENTAGE: u32 = 1 << 4;
     pub(crate) const END_DELAY_IS_PERCENTAGE: u32 = 1 << 5;
     pub(crate) const ITERATION_DURATION_IS_PERCENTAGE: u32 = 1 << 6;
+    pub(crate) const HAS_PENDING_PLAY_TASK: u32 = 1 << 8;
+    pub(crate) const HAS_PENDING_PAUSE_TASK: u32 = 1 << 9;
     pub(crate) const HAS_TIMELINE: u32 = 1 << 12;
+    pub(crate) const TIMELINE_IS_MONOTONICALLY_INCREASING: u32 = 1 << 13;
     pub(crate) const TIMELINE_IS_PROGRESS_BASED: u32 = 1 << 14;
     pub(crate) const FILL_MODE_SHIFT: u32 = 15;
     pub(crate) const FILL_MODE_MASK: u32 = 0b111;
@@ -339,6 +342,9 @@ pub(crate) mod timing_row_flag {
     /// The animation names an owning element, which is the first thing the class-specific composite
     /// order of a CSS animation or transition compares.
     pub(crate) const HAS_OWNING_ELEMENT: u32 = 1 << 28;
+    /// The owning element currently lists this CSS animation at the place its class-specific key
+    /// names.
+    pub(crate) const LISTED_BY_OWNING_ELEMENT: u32 = 1 << 29;
 }
 
 /// `Animations::AnimationClass`, in declaration order, which is also the inter-class composite
@@ -439,6 +445,131 @@ impl AnimationTimingRow {
             times: [0.0; TIMING_ROW_TIMES],
             synthesized_index: None,
         }
+    }
+
+    /// The row a CSS animation this definition is about to start would publish, built from the
+    /// definition alone.
+    ///
+    /// `CSSAnimation::apply_css_properties` settles the effect's timing from the definition and
+    /// then starts it, and a brand-new animation's current time is unresolved, so both "play an
+    /// animation" and "pause an animation" hold it at time zero and leave the rest to a task that
+    /// runs after this style update. The timeline's current time therefore never enters the
+    /// arithmetic.
+    ///
+    /// `None` for a definition whose row this cannot settle: a scroll or view timeline, which is
+    /// materialized from the element's surroundings. `animation-timeline: none` materializes no
+    /// timeline at all.
+    #[must_use]
+    pub(crate) fn for_new_css_animation(
+        definition: &crate::css::style_compute::FfiComputedAnimation,
+        owning_node: StyleNodeID,
+        owning_slot: AnimationSlot,
+        name_index: u32,
+    ) -> Option<Self> {
+        use crate::css::style_compute::FfiAnimationTimelineKind;
+        use timing_row_flag as flag;
+
+        // NB: `animation-duration: auto` - the initial value - has the intrinsic iteration duration
+        //     of the effect, which against a monotonic timeline is zero; the drive already computed
+        //     the definition's duration as zero for it.
+        let timeline_flags = match definition.timeline_kind {
+            FfiAnimationTimelineKind::Document => flag::HAS_TIMELINE | flag::TIMELINE_IS_MONOTONICALLY_INCREASING,
+            FfiAnimationTimelineKind::None => 0,
+            FfiAnimationTimelineKind::Scroll => return None,
+        };
+        // `Bindings::PlaybackDirection` and `Bindings::FillMode` are in IDL order, which is not the
+        // order the CSS keywords are in: a mirror of `css_animation_direction_to_playback_direction`
+        // and `css_fill_mode_to_bindings_fill_mode`.
+        let direction = match definition.direction {
+            0 => 2, // alternate
+            1 => 3, // alternate-reverse
+            2 => 0, // normal
+            3 => 1, // reverse
+            _ => return None,
+        };
+        let fill_mode = match definition.fill_mode {
+            0 => 2, // backwards
+            1 => 3, // both
+            2 => 1, // forwards
+            3 => 0, // none
+            _ => return None,
+        };
+        // A pending play or pause task settles nothing the phase or the active time is derived
+        // from, but the row the host publishes for this animation carries one, so this one does
+        // too. `animation_play_state::PAUSED` is 0.
+        let pending_task = match definition.play_state {
+            0 => flag::HAS_PENDING_PAUSE_TASK,
+            _ => flag::HAS_PENDING_PLAY_TASK,
+        };
+        let mut times = [0.0; TIMING_ROW_TIMES];
+        times[TIME_HOLD] = 0.0;
+        times[TIME_START_DELAY] = definition.delay;
+        times[TIME_ITERATION_DURATION] = definition.duration;
+        times[TIME_ITERATION_COUNT] = definition.iteration_count;
+        times[TIME_PLAYBACK_RATE] = 1.0;
+        Some(Self {
+            flags: flag::HAS_HOLD_TIME
+                | timeline_flags
+                | flag::HAS_OWNING_ELEMENT
+                // The plan starts this animation into the place the definition holds, so the
+                // element lists it there.
+                | flag::LISTED_BY_OWNING_ELEMENT
+                | pending_task
+                | (fill_mode << flag::FILL_MODE_SHIFT)
+                | (direction << flag::PLAYBACK_DIRECTION_SHIFT),
+            // The document timeline's identity is never asked for: the hold time settles the
+            // current time, so the row is sampled with no timeline time at all.
+            timeline: 0,
+            easing_interval_count: 0,
+            // The effect this animation would get has no identity until the host creates it.
+            effect_identity: 0,
+            composite_class: animation_class::CSS_ANIMATION_WITH_OWNING_ELEMENT,
+            composite_owning_slot: owning_slot,
+            composite_transition_property: 0,
+            composite_owning_node: owning_node.raw(),
+            // The host's class-specific composite order key for a CSS animation is its place in the
+            // `animation-name` list, which is the place the plan gives this definition.
+            composite_class_key: name_index,
+            // The global animation list orders two CSS animations only where their owning elements
+            // differ, and the host has not given this one its place in the list yet.
+            global_list_order: 0,
+            // A CSS animation's `animation-timing-function` is applied per keyframe, so the effect's
+            // own easing is always the identity `linear`.
+            first_linear_point: 0,
+            linear_point_count: 0,
+            times,
+            synthesized_index: None,
+        })
+    }
+
+    /// Whether this row, synthesized for a CSS animation about to start, says everything about its
+    /// timing that `published` - the row the host published once it created that animation - does.
+    /// The identities only the host can mint are not compared: the effect's, the timeline's, and
+    /// the animation's place in the global animation list.
+    #[must_use]
+    pub(crate) fn predicts(&self, published: &Self) -> bool {
+        Self {
+            timeline: 0,
+            effect_identity: 0,
+            global_list_order: 0,
+            synthesized_index: None,
+            ..*published
+        } == Self {
+            synthesized_index: None,
+            ..*self
+        }
+    }
+
+    /// The row the host published for the CSS animation `(node, slot)` lists at `name_index`, if
+    /// this is it.
+    #[must_use]
+    pub(crate) fn is_listed_css_animation(&self, node: StyleNodeID, slot: AnimationSlot, name_index: u32) -> bool {
+        self.composite_class == animation_class::CSS_ANIMATION_WITH_OWNING_ELEMENT
+            && self.has(timing_row_flag::HAS_OWNING_ELEMENT)
+            && self.has(timing_row_flag::LISTED_BY_OWNING_ELEMENT)
+            && self.composite_owning_node == node.raw()
+            && self.composite_owning_slot == slot
+            && self.composite_class_key == name_index
     }
 
     /// Whether the host could not describe this animation's timing at all.
