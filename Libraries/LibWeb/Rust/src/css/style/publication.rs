@@ -352,7 +352,6 @@ impl RetainedState {
         use crate::css::computed_value_types::{
             STYLE_GROUP_INDEX_ANCHOR, STYLE_GROUP_INDEX_FONT, STYLE_GROUP_INDEX_SURROUND,
         };
-        use crate::css::computed_values::computed_group_dependency_mask;
         use crate::css::property_metadata::{FIRST_LONGHAND_PROPERTY_ID, LONGHAND_WORD_COUNT};
 
         let target = computed::ComputedStyleTarget::new(node, u8::MAX);
@@ -1106,17 +1105,7 @@ impl RetainedState {
                 counters.bump(Counter::EngineComputedRecordBailProperty);
                 return Err(Unanswered::Refused);
             }
-            let groups = match computed_group_dependency_mask(property) {
-                Some(groups) => groups,
-                // A longhand the font group carries feeds no group of its own; the full drive
-                // it takes rebuilds every group.
-                None if full_drive && font_group_carries_longhand(property) => 0,
-                None => {
-                    counters.bump(Counter::EngineComputedRecordBailProperty);
-                    return Err(Unanswered::Refused);
-                }
-            };
-            groups_to_rebuild |= groups;
+            groups_to_rebuild |= longhand_group_dependency_mask(property);
             select(property);
             let bits = crate::css::style_compute::table_row_bits(property);
             let counterpart = if bits & crate::css::style_compute::LOGICAL_ALIAS_BIT != 0 {
@@ -1127,11 +1116,7 @@ impl RetainedState {
                 property
             };
             if counterpart != property {
-                let Some(groups) = computed_group_dependency_mask(counterpart) else {
-                    counters.bump(Counter::EngineComputedRecordBailProperty);
-                    return Err(Unanswered::Refused);
-                };
-                groups_to_rebuild |= groups;
+                groups_to_rebuild |= longhand_group_dependency_mask(counterpart);
                 select(counterpart);
             }
         }
@@ -1988,15 +1973,6 @@ impl RetainedState {
         {
             return Ok(ElementAnswer::Delta(delta));
         }
-        // A winner that reads an unavailable environment keeps the record in C++. Font-phase
-        // longhands feed no group of their own: the full drive resolves the font from them and
-        // rebuilds every group, rejecting values the font resolution does not pass on yet.
-        for property in self.winner_groups.semantic_delta_properties(None, state) {
-            if self.first_record_winner_needs_cpp(state, property) {
-                counters.bump(Counter::EngineComputedRecordBailProperty);
-                return Err(Unanswered::Refused);
-            }
-        }
         let provisional_registered =
             has_registered_declarations.then(|| self.provisional_registered_value_context(parent_record, &inputs));
         let mut environment = self
@@ -2046,12 +2022,6 @@ impl RetainedState {
                 store
             }
         };
-        // The written content may contain attr() or var(). Check its substituted spelling,
-        // which is now in the store, before deciding whether the content group can be built.
-        if !store.content_is_engine_computable(self) {
-            counters.bump(Counter::EngineComputedRecordBailProperty);
-            return Err(Unanswered::Refused);
-        }
         self.note_node_substitution(node, scratch, state, environment);
         let cache_key = (!has_registered_declarations
             && !reads_external_substitution
@@ -2371,40 +2341,6 @@ impl RetainedState {
                 .insert(node, explicitly_inherited_groups);
         }
         Some(delta)
-    }
-
-    /// Whether a first record's winner needs an input that the record drive cannot resolve.
-    /// Transition longhands are computed into the record and applied from it by the host.
-    /// Animation longhands also are when the engine can provide an animation plan. Font-phase
-    /// longhands without a group of their own are inputs of the font group the full drive builds.
-    fn first_record_winner_needs_cpp(&self, state: CascadeStateID, property: u16) -> bool {
-        use crate::css::property_metadata::property_id as prop;
-        // A `content` that names no counter reads no counter-style environment, and a first record
-        // that needs none is published without one. Counter functions retain their canonical
-        // values in the content group: publication stamps the registry identity for counter
-        // names, and the layout consumer resolves their representation against that registry.
-        if property == prop::CONTENT {
-            return !self
-                .winner_groups
-                .winner_in_state(state, prop::CONTENT)
-                .and_then(|winner| self.winner_groups.resolved_winner(winner))
-                .is_some_and(|winner| match self.specified_values.value(winner.key.value) {
-                    // The final content value is checked after substitution in the winner
-                    // store. Its unresolved spelling cannot decide computability yet.
-                    Lookup::Known(value) => {
-                        content_value_is_engine_computable(value) || matches!(value, StyleValueData::Unresolved { .. })
-                    }
-                    _ => false,
-                });
-        }
-        // A first style has no before-change style, so transition declarations start no step.
-        // Their computed values still enter the record's animation group for later changes.
-        if longhand_only_declares_a_css_transition(property) {
-            return false;
-        }
-        // An anchor name is one the host registers from whichever record it installs, a first
-        // record included: `Element::update_anchor_name_registry` runs on that install too.
-        computed_group_dependency_mask(property).is_none() && !font_group_carries_longhand(property)
     }
 
     /// What a record this node publishes must name, when what it computed reads the registry.
@@ -4262,11 +4198,7 @@ impl RetainedState {
                     && value_computes_with_container_inputs(data, resources_are_known))
                 || (value_computes_with_tree_counting_inputs(data, resources_are_known)
                     && self.element_tree_counting_inputs(node) != 0);
-            if !context_free
-                || (pseudo_kind.is_some()
-                    && winner.property == prop::CONTENT
-                    && !content_value_is_engine_computable(data))
-            {
+            if !context_free {
                 counters.bump(Counter::EngineComputedRecordBailValue);
                 return None;
             }
@@ -6214,33 +6146,6 @@ const PSEUDO_ELEMENT_ADJUSTMENT_FACTS: u32 = {
         | fact::HAS_ANIMATIONS
 };
 
-/// Whether the Rust drive produces canonical content values. Image URLs and gradients use
-/// the resource and length inputs checked by the winner store. Counter functions stay in
-/// the content group for the Rust layout consumer; publication carries the registry dependency.
-/// Overridable names need their scope's current registry published before the transaction.
-fn content_value_is_engine_computable(value: &StyleValueData) -> bool {
-    fn supported(value: &StyleValueData) -> bool {
-        match value {
-            StyleValueData::Keyword { .. } | StyleValueData::String { .. } => true,
-            StyleValueData::Counter { counter_style, .. } => {
-                matches!(counter_style.optional_data(), Some(StyleValueData::CounterStyle { .. }))
-            }
-            StyleValueData::ValueList { values, .. } => values
-                .as_slice()
-                .iter()
-                .all(|value| value.optional_data().is_none_or(supported)),
-            value => value.is_image(),
-        }
-    }
-    match value {
-        StyleValueData::Keyword { .. } => true,
-        StyleValueData::Content { content, alt_text } => {
-            content.optional_data().is_none_or(supported) && alt_text.optional_data().is_none_or(supported)
-        }
-        _ => false,
-    }
-}
-
 /// The value a shorthand value carries for one of its longhands, through nested shorthands.
 /// The `unset` keyword, which a declaration invalid at computed-value time computes as.
 fn unset_value() -> crate::css::style_value::RetainedStyleValueData {
@@ -6329,6 +6234,14 @@ enum AnimationNameScope {
 enum TransitionEffects {
     Refused,
     Allowed,
+}
+
+/// The computed style groups a longhand's winner feeds. A longhand bound to no group of its own is
+/// one the font group carries: the host checks the group bindings against every longhand's
+/// declared style group when it registers them.
+fn longhand_group_dependency_mask(property: u16) -> u32 {
+    use crate::css::computed_value_types::STYLE_GROUP_INDEX_FONT;
+    computed_group_dependency_mask(property).unwrap_or(1 << STYLE_GROUP_INDEX_FONT)
 }
 
 fn property_computes_in_remaining_phase(property: u16) -> bool {
