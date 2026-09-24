@@ -12,6 +12,7 @@
 #include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/FontResolution.h>
 #include <LibWeb/CSS/RustDeclarationBlock.h>
+#include <LibWeb/CSS/SharedCompiledStyleSheet.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineBridge.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
@@ -762,6 +763,10 @@ void collect_style_sheet_resource_context(StyleSheetState& sheet, Vector<Collect
         if (auto* imported = import->loaded_style_sheet())
             collect_style_sheet_resource_context(*imported, contexts);
     }
+    // A sheet whose rules are compiled from a shared snapshot has those rules name the snapshot's
+    // native sheet, which shares the sheet's base URL.
+    if (auto* shared = sheet.shared_compiled_style_sheet(); shared && &shared->contents() != &sheet)
+        collect_style_sheet_resource_context(shared->contents(), contexts);
 }
 
 Vector<CollectedStyleSheetResourceContext> collect_style_sheet_resource_contexts(DOM::Document& document)
