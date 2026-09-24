@@ -17,6 +17,7 @@ use std::ffi::c_void;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
+use super::publication::{Drive, OrRefused, Suspension, Unanswered};
 use super::*;
 use crate::css::cascaded_properties::{
     CallbackFreeParseOutcome, FfiCascadeResolutionContext, FfiCustomPropertyDriveInput,
@@ -641,16 +642,17 @@ impl RetainedState {
     /// The environment a node holds over its parent's as the parent holds it now: the parent's,
     /// inheritable, for a node declaring no custom property, and its own declarations resolved
     /// over it where the parent's moved. `None` where the node's may stand as it is, or where
-    /// the engine cannot tell what it declares.
+    /// the engine cannot tell what it declares; a suspension where resolving its declarations
+    /// waits on a request.
     pub(super) fn environment_over_current_parent(
         &mut self,
         node: StyleNodeID,
         parent_environment: u64,
         parent_moved: bool,
         inputs: &bridge::FfiDocumentStyleComputationInputs,
-    ) -> Option<u64> {
+    ) -> Result<Option<u64>, Suspension> {
         if !self.any_custom_property_is_declared() {
-            return Some(parent_environment);
+            return Ok(Some(parent_environment));
         }
         let declares = !self.facts.element_custom_declarations(node).is_empty()
             || self.try_for_each_element_match(node, |rule, _, _, _| {
@@ -661,12 +663,17 @@ impl RetainedState {
                 }
             }) != Some(ControlFlow::Continue(()));
         if !declares {
-            return self.inheritable_custom_property_environment(parent_environment, inputs);
+            return Ok(self.inheritable_custom_property_environment(parent_environment, inputs));
         }
         if !parent_moved {
-            return None;
+            return Ok(None);
         }
-        self.engine_custom_property_environment(node, parent_environment, inputs, None, &mut Counters::default())
+        match self.engine_custom_property_environment(node, parent_environment, inputs, None, &mut Counters::default())
+        {
+            Ok(environment) => Ok(Some(environment)),
+            Err(Unanswered::Refused) => Ok(None),
+            Err(Unanswered::Suspended(suspension)) => Err(suspension),
+        }
     }
 
     /// Whether a reaction on the node may move its custom-property environment, which its
@@ -1137,7 +1144,7 @@ impl RetainedState {
 
     /// The environment of a node the engine computes a record for: the one it inherits when its
     /// cascade declares no custom property, else what its declarations resolve to over that one.
-    /// `None` when the environment is C++'s to compute: a registered name, a substitution the
+    /// Refused when the environment is C++'s to compute: a registered name, a substitution the
     /// engine does not resolve, or an inherited environment the engine holds no store for.
     pub(super) fn engine_custom_property_environment(
         &mut self,
@@ -1146,7 +1153,7 @@ impl RetainedState {
         inputs: &bridge::FfiDocumentStyleComputationInputs,
         registered: Option<RegisteredValueContext>,
         counters: &mut Counters,
-    ) -> Option<u64> {
+    ) -> Drive<u64> {
         self.engine_custom_property_environment_of(node, None, parent_environment, inputs, registered, counters)
     }
 
@@ -1160,11 +1167,11 @@ impl RetainedState {
         inputs: &bridge::FfiDocumentStyleComputationInputs,
         registered: Option<RegisteredValueContext>,
         counters: &mut Counters,
-    ) -> Option<u64> {
+    ) -> Drive<u64> {
         if !self.any_custom_property_is_declared() {
-            return Some(parent_environment);
+            return Ok(parent_environment);
         }
-        let cascaded = self.cascaded_custom_declarations_of(node, pseudo)?;
+        let cascaded = self.cascaded_custom_declarations_of(node, pseudo).or_refused()?;
         self.engine_custom_property_environment_over(
             node,
             pseudo,
@@ -1191,16 +1198,18 @@ impl RetainedState {
         inputs: &bridge::FfiDocumentStyleComputationInputs,
         registered: Option<RegisteredValueContext>,
         counters: &mut Counters,
-    ) -> Option<u64> {
+    ) -> Drive<u64> {
         if !self.any_custom_property_is_declared() {
-            return Some(parent_environment);
+            return Ok(parent_environment);
         }
         // Keep the unfiltered parent for an explicit inherit; ordinary inheritance drops
         // non-inheriting registrations before layering this element's declarations.
         let inheritance_environment = parent_environment;
-        let parent_environment = self.inheritable_custom_property_environment(parent_environment, inputs)?;
+        let parent_environment = self
+            .inheritable_custom_property_environment(parent_environment, inputs)
+            .or_refused()?;
         if cascaded.is_empty() {
-            return Some(parent_environment);
+            return Ok(parent_environment);
         }
         let reads_functions = cascaded.iter().any(|(_, value)| {
             matches!(
@@ -1217,7 +1226,7 @@ impl RetainedState {
                 None => {
                     counters.bump(Counter::EngineComputedRecordBailCustomPropertyUnsupportedSubstitution);
                     counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-                    return None;
+                    return Err(Unanswered::Refused);
                 }
             }
         } else {
@@ -1226,7 +1235,7 @@ impl RetainedState {
         let registry = inputs.custom_property_registry;
         if registry.is_none() {
             counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-            return None;
+            return Err(Unanswered::Refused);
         }
         let registry_ref = unsafe { &*registry.as_pointer().cast::<CustomPropertyRegistry>() };
         let mut has_registered_declaration = false;
@@ -1238,13 +1247,13 @@ impl RetainedState {
             for (declared, _) in &cascaded {
                 let Some(name) = self.custom_property_environments.name(declared.name) else {
                     counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-                    return None;
+                    return Err(Unanswered::Refused);
                 };
                 if registry_ref.registration_facts(&name.text).is_some() {
                     has_registered_declaration = true;
                     if registered.is_none() {
                         counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-                        return None;
+                        return Err(Unanswered::Refused);
                     }
                 }
             }
@@ -1259,7 +1268,7 @@ impl RetainedState {
             identity => {
                 let Some(store) = self.custom_property_environments.store(identity) else {
                     counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-                    return None;
+                    return Err(Unanswered::Refused);
                 };
                 store
             }
@@ -1272,11 +1281,11 @@ impl RetainedState {
         for (declared, value) in &cascaded {
             let Some(name) = self.custom_property_environments.name(declared.name) else {
                 counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-                return None;
+                return Err(Unanswered::Refused);
             };
             if name.raw.raw() == 0 {
                 counters.bump(Counter::EngineCustomPropertyEnvironmentBails);
-                return None;
+                return Err(Unanswered::Refused);
             }
             reads_attributes |= matches!(
                 value.data(),
@@ -1300,7 +1309,7 @@ impl RetainedState {
             let written_values = cascaded.into_iter().map(|(_, written)| written).collect();
             self.custom_property_environments
                 .remember(key, parent_environment, written_values);
-            return Some(parent_environment);
+            return Ok(parent_environment);
         }
         // SAFETY: The parent store is live for as long as a record names its environment, and the
         // values are the program's interned values, live for the call.
@@ -1311,9 +1320,12 @@ impl RetainedState {
             registry_ref,
             &mut random_sources,
         );
-        let Some(random_bases) = self.random_base_values_for_sources(node, &random_sources) else {
-            unsafe { Arc::decrement_strong_count(cascaded_store.cast::<CustomPropertyStore>()) };
-            return None;
+        let random_bases = match self.random_base_values_for_sources(node, &random_sources) {
+            Ok(random_bases) => random_bases,
+            Err(unanswered) => {
+                unsafe { Arc::decrement_strong_count(cascaded_store.cast::<CustomPropertyStore>()) };
+                return Err(unanswered);
+            }
         };
         // An environment C++ resolved for an element alike in its declarations is C++'s own
         // identity, and the host installs no record under one it does not recognise as the
@@ -1338,7 +1350,7 @@ impl RetainedState {
         if let Some(identity) = memoized.filter(|_| !keeps_cpp_environment) {
             unsafe { Arc::decrement_strong_count(cascaded_store.cast::<CustomPropertyStore>()) };
             counters.bump(Counter::EngineCustomPropertyEnvironmentMemoHits);
-            return Some(identity);
+            return Ok(identity);
         }
         let finalization_environment = crate::css::style_compute::FfiStyleComputationEnvironment {
             box_type_input: crate::css::style_compute::rust_box_type_transformation_input(
@@ -1454,7 +1466,7 @@ impl RetainedState {
             self.custom_property_environments
                 .remember(key, identity, written_values);
         }
-        Some(identity)
+        Ok(identity)
     }
 
     /// What a written value with `var()` references substitutes to for a property under an

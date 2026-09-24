@@ -2352,75 +2352,76 @@ impl StyleEngineState {
                         counters.get(Counter::EngineComputedRecordBailContainerVerdict),
                         counters.get(Counter::EngineComputedRecordBailRecordParent),
                     );
-                    let engine_computed_delta = engine_computed_gate_passes
-                        .then(|| {
-                            // Unchanged winners stand for an unchanged record only when the reaction
-                            // is rules flipping for the node, every one of them known and declaring
-                            // nothing past its winners, or the node's answer is the one it had.
-                            let flipped_rules = selector_truth_changes.deltas_for(node);
-                            let answer_is_unchanged = answer_cascade_input.is_some()
-                                && answer_cascade_input == previous_cascade_inputs[published_index];
-                            let flipped: publication::FlippedRules = flipped_rules
-                                .iter()
-                                .map(|delta| {
-                                    self.retained
-                                        .programs
-                                        .entry(delta.entry)
-                                        .1
-                                        .pseudo_element
-                                        .map(|pseudo| pseudo.kind.0)
-                                })
-                                .collect();
-                            // No rule flipped for the node and nothing refreshed its answer: the
-                            // state it holds is its cascade, unless the environment moved, which
-                            // reaches values the winners do not name.
-                            let nothing_flipped = flipped_rules.is_empty() && !environment_changed;
-                            let winners_are_exact = !rule_declarations_edited
-                                && selector_truth_changes.refreshes_for(node).is_empty()
-                                && (answer_is_unchanged
-                                    || nothing_flipped
-                                    || (!flipped_rules.is_empty()
-                                        && flipped_rules.iter().all(|delta| {
-                                            self.retained.program.declarations_are_complete_for(delta.rule)
-                                        })));
-                            engine_computed_record_scratch.answer_or_declarations_moved = rule_declarations_edited
-                                || !flipped_rules.is_empty()
-                                || !selector_truth_changes.refreshes_for(node).is_empty();
-                            // The element's font environment moved: its record resolves a font
-                            // cascade out of the published `@font-face` table, and that table is
-                            // not the one the record holds.
-                            engine_computed_record_scratch.font_environment_moved = font_feature_values_moved
-                                || reaction & transaction::STYLE_REACTION_FONT_INPUTS_CHANGED != 0;
-                            // A descendant recompute stands for inputs no winner shows: the root's
-                            // font metrics, an ancestor's direction, writing mode or container type.
-                            // An ancestor becoming visible stands for a record whose style was cleared
-                            // on entry to display:none.
-                            engine_computed_record_scratch.recompute_in_full = reaction
-                                & (transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES
-                                    | transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE)
-                                != 0
-                                || (counter_styles_moved && self.node_reads_counter_styles(node))
-                                || (container_input_nodes.contains(&node)
-                                    && self.container_input_requires_full_drive(node))
-                                || tree_counting_input_nodes.contains(&node);
-                            engine_computed_record_scratch.ancestor_became_visible =
-                                reaction & transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE != 0;
-                            let delta = self.engine_computed_record_delta(
-                                node,
-                                answer_winners_are_complete,
-                                winners_are_exact.then_some(flipped),
-                                parent_inputs_moved,
-                                &mut engine_computed_record_scratch,
-                                counters,
-                            );
-                            engine_computed_record_scratch.recompute_in_full = false;
-                            engine_computed_record_scratch.ancestor_became_visible = false;
-                            delta
-                        })
-                        .flatten();
-                    if engine_computed_record_scratch.font_drive.request.is_some()
-                        || !self.random_base_requests.is_empty()
-                    {
+                    let engine_record_answer = engine_computed_gate_passes.then(|| {
+                        // Unchanged winners stand for an unchanged record only when the reaction
+                        // is rules flipping for the node, every one of them known and declaring
+                        // nothing past its winners, or the node's answer is the one it had.
+                        let flipped_rules = selector_truth_changes.deltas_for(node);
+                        let answer_is_unchanged = answer_cascade_input.is_some()
+                            && answer_cascade_input == previous_cascade_inputs[published_index];
+                        let flipped: publication::FlippedRules = flipped_rules
+                            .iter()
+                            .map(|delta| {
+                                self.retained
+                                    .programs
+                                    .entry(delta.entry)
+                                    .1
+                                    .pseudo_element
+                                    .map(|pseudo| pseudo.kind.0)
+                            })
+                            .collect();
+                        // No rule flipped for the node and nothing refreshed its answer: the
+                        // state it holds is its cascade, unless the environment moved, which
+                        // reaches values the winners do not name.
+                        let nothing_flipped = flipped_rules.is_empty() && !environment_changed;
+                        let winners_are_exact = !rule_declarations_edited
+                            && selector_truth_changes.refreshes_for(node).is_empty()
+                            && (answer_is_unchanged
+                                || nothing_flipped
+                                || (!flipped_rules.is_empty()
+                                    && flipped_rules
+                                        .iter()
+                                        .all(|delta| self.retained.program.declarations_are_complete_for(delta.rule))));
+                        engine_computed_record_scratch.answer_or_declarations_moved = rule_declarations_edited
+                            || !flipped_rules.is_empty()
+                            || !selector_truth_changes.refreshes_for(node).is_empty();
+                        // The element's font environment moved: its record resolves a font
+                        // cascade out of the published `@font-face` table, and that table is
+                        // not the one the record holds.
+                        engine_computed_record_scratch.font_environment_moved = font_feature_values_moved
+                            || reaction & transaction::STYLE_REACTION_FONT_INPUTS_CHANGED != 0;
+                        // A descendant recompute stands for inputs no winner shows: the root's
+                        // font metrics, an ancestor's direction, writing mode or container type.
+                        // An ancestor becoming visible stands for a record whose style was cleared
+                        // on entry to display:none.
+                        engine_computed_record_scratch.recompute_in_full = reaction
+                            & (transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES
+                                | transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE)
+                            != 0
+                            || (counter_styles_moved && self.node_reads_counter_styles(node))
+                            || (container_input_nodes.contains(&node)
+                                && self.container_input_requires_full_drive(node))
+                            || tree_counting_input_nodes.contains(&node);
+                        engine_computed_record_scratch.ancestor_became_visible =
+                            reaction & transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE != 0;
+                        let delta = self.engine_computed_record_delta(
+                            node,
+                            answer_winners_are_complete,
+                            winners_are_exact.then_some(flipped),
+                            parent_inputs_moved,
+                            &mut engine_computed_record_scratch,
+                            counters,
+                        );
+                        engine_computed_record_scratch.recompute_in_full = false;
+                        engine_computed_record_scratch.ancestor_became_visible = false;
+                        delta
+                    });
+                    let suspension = match engine_record_answer {
+                        Some(Err(publication::Unanswered::Suspended(suspension))) => Some(suspension),
+                        _ => None,
+                    };
+                    let engine_computed_delta = engine_record_answer.and_then(Result::ok);
+                    if let Some(suspension) = suspension {
                         let starts_batching = record_deltas.is_none();
                         if starts_batching {
                             record_deltas = Some((0..published_nodes.len()).map(|_| None).collect());
@@ -2435,7 +2436,7 @@ impl StyleEngineState {
                         // Establish the first canonical request before speculative siblings can
                         // observe or populate mutable host font-cascade state. Later passes can
                         // collect independent misses because this first request is then stable.
-                        if starts_batching || !self.random_base_requests.is_empty() {
+                        if starts_batching || suspension == publication::Suspension::RandomBases {
                             break;
                         }
                         continue;
