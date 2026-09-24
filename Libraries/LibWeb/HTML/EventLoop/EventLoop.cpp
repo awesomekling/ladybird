@@ -22,6 +22,7 @@
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/EventLoop/FrameCompletion.h>
+#include <LibWeb/HTML/EventLoop/FrameInFlightReferences.h>
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/HTMLMediaElement.h>
 #include <LibWeb/HTML/LocalTraversableNavigable.h>
@@ -52,6 +53,8 @@ EventLoop::EventLoop(Type type)
     : m_type(type)
     , m_frame_scheduler(make<FrameScheduler>(*this))
 {
+    if (m_type == Type::Window)
+        forbid_heap_access_on_the_stage_thread();
     m_task_queue = GC::Heap::the().allocate<TaskQueue>(*this);
 
     m_rendering_task_function = GC::create_function(GC::Heap::the(), [this] {
