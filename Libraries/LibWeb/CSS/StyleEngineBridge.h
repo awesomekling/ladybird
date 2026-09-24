@@ -210,9 +210,6 @@ public:
         RecomputeDescendants = 1 << 3,
         ChildrenExplicitlyInherit = 1 << 4,
         ShadowChildrenExplicitlyInherit = 1 << 5,
-        WasUnstyled = 1 << 6,
-        WasDisplayNone = 1 << 7,
-        DisplayChanged = 1 << 11,
     };
     void record_container_query_input_change(StyleNodeID);
     void record_element_style_input_change(StyleNodeID style_node, u8 reaction = PublishedStyle | RecomputeStyle, u8 inherited_style_groups = 0);
