@@ -4917,7 +4917,9 @@ impl StyleEngineState {
         let target_has_pending_facts = self.host.journal.inputs().any(|input| {
             matches!(input.key, InputKey::LocalFeature(changed, _) | InputKey::State(changed, _) if changed == node)
         });
-        if !self.tree.is_live(node)
+        // The host takes the pending transaction before it asks, so a demand never reads facts
+        // or a program with changes still staged. Should one, it is declined.
+        let transaction_is_pending = !self.tree.is_live(node)
             || !self.host.tree_staging.is_empty()
             || self.host.program_staging.is_dirty()
             || self.host.sheet_rule_replacement.is_some()
@@ -4927,8 +4929,12 @@ impl StyleEngineState {
                     || matches!(input.key, InputKey::TreeRelations(_))
                     || (!read_only
                         && matches!(input.key, InputKey::LocalFeature(changed, _) | InputKey::State(changed, _) if changed == node))
-            })
-        {
+            });
+        debug_assert!(
+            !transaction_is_pending,
+            "a record demand ahead of its pending transaction"
+        );
+        if transaction_is_pending {
             return Err("GateReaction");
         }
         let mut ancestor = self.tree.flat_tree_parent(node);
@@ -4948,6 +4954,10 @@ impl StyleEngineState {
             // installed them before it; what is still pending for one of them reaches the row
             // through the reaction that ancestor derives. A private observation of a
             // pseudo-element has no such later reaction.
+            debug_assert!(
+                !(pending && read_only && pseudo.is_some()),
+                "a private pseudo-element demand under an ancestor with pending input"
+            );
             if pending && read_only && pseudo.is_some() {
                 return Err("GateReaction");
             }
@@ -4958,10 +4968,16 @@ impl StyleEngineState {
             && pseudo.is_none()
             && (target_has_pending_facts || ancestors.iter().any(|(_, pending)| *pending));
 
-        if read_only
+        // A private observation of a row the host is still installing would read a record it has
+        // not taken yet; the host installs its batch before any such read.
+        let row_is_being_installed = read_only
             && (self.engine_computed_records_pending.contains_key(&node)
-                || self.batch_pinned_compositions.iter().any(|(owner, _)| *owner == node))
-        {
+                || self.batch_pinned_compositions.iter().any(|(owner, _)| *owner == node));
+        debug_assert!(
+            !row_is_being_installed,
+            "a private demand for a row the host is installing"
+        );
+        if row_is_being_installed {
             return Err("GateReaction");
         }
         let previous_container_inputs = read_only.then(|| self.container_query_inputs.get(node).cloned());
