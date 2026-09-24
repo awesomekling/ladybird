@@ -235,13 +235,10 @@ fn run_join_work(
     RUNNING_JOIN_WORK.with(|depth| depth.set(depth.get() + 1));
     let outcome = work(main_thread);
     RUNNING_JOIN_WORK.with(|depth| depth.set(depth.get() - 1));
-    let style_update = take_style_update_scope();
+    // The reply is built before the release, so its box is ordered before the stage reads it.
+    let reply = StageMessage::JoinFinished(Box::new(take_style_update_scope()), outcome);
     tsan::release(thread);
-    if thread
-        .jobs
-        .send(StageMessage::JoinFinished(Box::new(style_update), outcome))
-        .is_err()
-    {
+    if thread.jobs.send(reply).is_err() {
         std::process::abort();
     }
 }
@@ -394,11 +391,9 @@ impl MainJoins<'_> {
         // SAFETY: The work borrows from this frame. The caller replies only once it has run the
         // work and dropped it, and this function does not return before the reply arrives.
         let work = unsafe { std::mem::transmute::<JoinWork<'_>, MainWork>(work) };
+        let request = CallerMessage::Join(work, take_style_update_scope());
         tsan::release(thread);
-        if caller
-            .send(CallerMessage::Join(work, take_style_update_scope()))
-            .is_err()
-        {
+        if caller.send(request).is_err() {
             // The caller waits for this stage, so it cannot have gone away.
             std::process::abort();
         }
