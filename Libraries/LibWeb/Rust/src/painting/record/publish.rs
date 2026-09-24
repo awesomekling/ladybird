@@ -20,6 +20,7 @@ pub(crate) fn publish_recording(
         recording: RecordingResult { mut output, resources },
         recording_from_scratch,
         publishes_recording,
+        frame_generation: _,
     } = pending;
     let RecordingResourceManifest {
         fonts,

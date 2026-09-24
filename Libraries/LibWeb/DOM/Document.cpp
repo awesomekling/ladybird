@@ -940,9 +940,18 @@ Layout::RustFFI::FfiLayoutTreeBuildStats Document::layout_tree_build_stats() con
     return m_layout_node_arena ? Layout::RustFFI::layout_arena_layout_tree_build_stats(m_layout_node_arena->handle()) : Layout::RustFFI::FfiLayoutTreeBuildStats {};
 }
 
+// A frame in flight may hold the render state a document is about to tear down. Retiring it waits for
+// that frame, and nothing the frame made for the old render state is published.
+static void retire_render_state(Document& document, Layout::RustFFI::FfiRenderStateRetirement reason)
+{
+    if (auto* arena = document.layout_node_arena_if_created())
+        Layout::RustFFI::layout_arena_retire_render_state(arena->handle(), reason);
+}
+
 void Document::finalize()
 {
     stop_compositor_animation_timers();
+    retire_render_state(*this, Layout::RustFFI::FfiRenderStateRetirement::DocumentFinalized);
     if (m_layout_node_arena)
         Layout::RustFFI::layout_arena_clear_box_presence_host(m_layout_node_arena->handle());
     tear_down_layout_tree();
@@ -5806,6 +5815,7 @@ void Document::destroy()
 
     // AD-HOC: Destruction does not go through did_stop_being_active_document_in_navigable().
     //         Tear the layout tree down now instead of holding it until finalization.
+    retire_render_state(*this, Layout::RustFFI::FfiRenderStateRetirement::DocumentDestroyed);
     tear_down_layout_tree();
 
     // 7. Remove any tasks whose document is document from any task queue (without running those tasks).
@@ -6271,6 +6281,7 @@ bool Document::is_allowed_to_use_feature(PolicyControlledFeature feature) const
 void Document::did_stop_being_active_document_in_navigable()
 {
     stop_compositor_animation_timers();
+    retire_render_state(*this, Layout::RustFFI::FfiRenderStateRetirement::DocumentBecameInactive);
     tear_down_layout_tree();
 
     schedule_html_parser_end_check();

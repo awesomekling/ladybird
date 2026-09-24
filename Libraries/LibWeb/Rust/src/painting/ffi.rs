@@ -1351,6 +1351,7 @@ fn leave_pending_recording(
     viewport: NodeSlotId,
     should_paint_overlay: bool,
     publishes_recording: bool,
+    frame_generation: u64,
     output: RecordingStageOutput,
 ) {
     let RecordingStageOutput {
@@ -1368,6 +1369,7 @@ fn leave_pending_recording(
         recording,
         recording_from_scratch,
         publishes_recording,
+        frame_generation,
     });
 }
 
@@ -1429,6 +1431,10 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
     };
     let publishes_recording = recording_inputs.publishes_recording;
     let should_paint_overlay = recording_inputs.should_paint_overlay;
+    // The recording is made for the render state as it stands now. It is not published if the
+    // document retires that render state before the host takes the recording in.
+    // SAFETY: Guaranteed by the caller.
+    let frame_generation = unsafe { crate::layout::frame_retirement::frame_generation(arena_handle) };
     if run == FfiRecordingRun::InSubmittedFrame && crate::stage_thread::submits("recording") {
         // The recording outlives this call, so it takes copies of what the host lends.
         let input = RecordingStageInput {
@@ -1445,7 +1451,14 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
                 let output = record_display_list_stage(input);
                 // SAFETY: The stage has returned its borrow, and the frame still owns the arena.
                 let arena = &*(arena_address as *const LayoutNodeArena);
-                leave_pending_recording(arena, viewport, should_paint_overlay, publishes_recording, output);
+                leave_pending_recording(
+                    arena,
+                    viewport,
+                    should_paint_overlay,
+                    publishes_recording,
+                    frame_generation,
+                    output,
+                );
             });
         }
         return true;
@@ -1461,7 +1474,14 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
     };
     // SAFETY: The stage has returned the arena.
     let arena = unsafe { arena_from_handle(arena_handle) };
-    leave_pending_recording(arena, viewport, should_paint_overlay, publishes_recording, output);
+    leave_pending_recording(
+        arena,
+        viewport,
+        should_paint_overlay,
+        publishes_recording,
+        frame_generation,
+        output,
+    );
     true
 }
 

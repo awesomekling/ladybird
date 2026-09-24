@@ -34,6 +34,8 @@ public:
     struct SubmittedNavigable {
         GC::Ref<LocalNavigable> navigable;
         LocalNavigable::PendingCompositorFrame frame;
+        // The compositor context consume-commit hands the frame to, which the ticket holds until then.
+        Optional<u64> held_compositor_context;
     };
 
     // The navigables whose frames the render side records, in the order the rendering update paints them. Each one's
@@ -103,9 +105,6 @@ public:
     // frames. Runs no script: what the render side told the documents (their commit messages, which can dispatch
     // events) waits for the next rendering update or layout update to apply it.
     void consume_commit(EventLoop::FrameConsumeSite);
-
-    // Called before a document's render state goes away: the frame in flight must not own it anymore.
-    void retire_frames_for(DOM::Document&);
 
     EventLoop& event_loop() { return m_event_loop; }
 

@@ -42,6 +42,9 @@ pub(crate) struct HostTables {
     pub(super) invalidation_journal_pending: Cell<bool>,
     /// How the host names a node a layout trace mentions, set when tracing begins.
     pub(super) layout_trace_describe_node: Cell<Option<super::trace::DescribeNode>>,
+    /// The generation of the document's render state, which retiring it moves on. See
+    /// [`super::frame_retirement`].
+    pub(super) frame_generation: Cell<u64>,
 }
 
 impl HostTables {
@@ -54,6 +57,18 @@ impl HostTables {
     pub(crate) unsafe fn from_handle<'a>(handle: *mut c_void) -> &'a Self {
         assert!(!handle.is_null(), "layout node arena handle is null");
         crate::stage_thread::join_frame_in_flight(handle);
+        // SAFETY: Guaranteed by the caller. The projection does not borrow the arena beside it.
+        unsafe { &*std::ptr::addr_of!((*handle.cast::<ArenaHandle>()).host_tables) }
+    }
+
+    /// The host tables of the arena `handle` names, without waiting for a frame in flight. No stage
+    /// reaches the host tables, so the document thread may use them beside one.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::from_handle`], on the document thread.
+    pub(crate) unsafe fn beside_frame<'a>(handle: *mut c_void) -> &'a Self {
+        assert!(!handle.is_null(), "layout node arena handle is null");
         // SAFETY: Guaranteed by the caller. The projection does not borrow the arena beside it.
         unsafe { &*std::ptr::addr_of!((*handle.cast::<ArenaHandle>()).host_tables) }
     }

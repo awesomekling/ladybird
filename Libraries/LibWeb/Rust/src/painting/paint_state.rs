@@ -11,6 +11,8 @@ pub(crate) struct PendingRecording {
     pub(crate) recording: crate::painting::record::RecordingResult,
     pub(crate) recording_from_scratch: Option<crate::painting::record::RecordingResult>,
     pub(crate) publishes_recording: bool,
+    /// The generation of the arena's render state the recording was made for.
+    pub(crate) frame_generation: u64,
 }
 
 pub(crate) struct PendingRecordingTrace {

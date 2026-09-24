@@ -6534,6 +6534,9 @@ void LocalNavigable::clear_parent_compositor_context()
 
 void LocalNavigable::destroy_compositor_context()
 {
+    // A frame in flight may hand a frame to the context once it is taken in, so the context is retired first.
+    if (has_compositor_context())
+        Layout::RustFFI::rust_retire_compositor_context(compositor_context().id().value());
     clear_parent_compositor_context();
     m_compositor_context.clear();
 }
@@ -6552,6 +6555,9 @@ void LocalNavigable::repaint_after_compositor_process_reconnect()
     m_adopted_async_scroll_sequence = 0;
 
     if (has_compositor_context()) {
+        // What a frame in flight hands the context goes to the compositor process that went away, and the retained
+        // display list below is forgotten, so the frame is taken in first.
+        Layout::RustFFI::rust_retire_compositor_context(compositor_context().id().value());
         if (auto parent = this->parent()) {
             if (auto* local_parent = as_if<LocalNavigable>(*parent)) {
                 if (local_parent->has_compositor_context())
