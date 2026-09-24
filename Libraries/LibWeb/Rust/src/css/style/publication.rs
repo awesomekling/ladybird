@@ -16,7 +16,7 @@ use super::*;
 use crate::css::computed_longhand_table::ComputedLonghandTable;
 pub(crate) use drive::drive_font_metric;
 pub(super) use drive::{CountRefusal, Drive, OrRefused, Suspension, Unanswered};
-use drive::{FontDriveGoal, FullDrive, PartialDrive, TransitionDriveGoal, table_names_animations};
+use drive::{FontDriveGoal, FullDrive, PartialDrive, table_names_animations};
 
 /// Another element's published style that a first-time computation may build over: the element
 /// whose cascade state stands in for the previous one, and the record it must still hold.
@@ -425,16 +425,6 @@ impl RetainedState {
             .document_style_computation_inputs
             .is_some_and(|inputs| self.declares_registered_custom_property(node, None, &inputs));
         let Some(old_style_record) = self.computed_group_sets.assigned_style_record(node) else {
-            // A WAAPI target can install its first base and sample its existing effects over it.
-            // CSS animations still need a complete definition plan for the batch.
-            if animations_bind_the_record
-                && !scratch.targeted_record_demand
-                && self.css_defined_animations.node_runs_a_css_animation(node)
-            {
-                counters.bump(Counter::EngineComputedRecordBailWinnerElementPublication717);
-                counters.bump(Counter::EngineComputedRecordBailWinnerElement);
-                return Err(Unanswered::Refused);
-            }
             return self.engine_cold_record(node, (generation, state), scratch, goal, counters);
         };
         // The same of a record that holds an animation overlay. What the transitions its table
@@ -547,18 +537,25 @@ impl RetainedState {
         // A moved environment reaches every winner written with a substitution: such a record
         // is driven again in full under the new one.
         let environment_moved_under_substitutions = environment.is_some() && self.state_has_substitutions(node, state);
-        let mut redrives_a_standing_composition = false;
+        // A CSS animation planned against a `@keyframes` table that has since moved is planned
+        // again from the record's longhand table; a record holding none is driven again in full,
+        // which settles the plan from the table the drive computes.
+        if !record_may_stand_while_animating
+            && self
+                .computed_group_sets
+                .style_record_view(old_style_record.raw())
+                .is_none_or(|view| view.longhand_table.is_null())
+        {
+            scratch.recompute_in_full = true;
+        }
         if delta.is_empty() {
-            // A moved environment beneath transitions, beneath a composition the host cannot
-            // sample again over the new base, or beneath a CSS animation whose keyframes a shadow
-            // scope may define, leaves them to a record driven again in full.
+            // A moved environment beneath transitions, or beneath a composition the host cannot
+            // sample again over the new base, leaves them to a record driven again in full.
             if environment.is_some()
                 && animations_bind_the_record
                 && (self.record_declares_transitions(old_style_record)
                     || (self.computed_group_sets.node_has_animation_overlay(node)
-                        && !self.composition_resamples_over_a_new_base(old_style_record, facts))
-                    || (self.css_defined_animations.node_runs_a_css_animation(node)
-                        && !self.animation_keyframes().only_the_document_scope_defines_keyframes()))
+                        && !self.composition_resamples_over_a_new_base(old_style_record, facts)))
             {
                 scratch.recompute_in_full = true;
             }
@@ -568,7 +565,6 @@ impl RetainedState {
             if computed::ComputedGroupSets::record_is_animation_overlay(old_style_record.raw())
                 && self.composition_feeds_a_post_compute_adjustment(old_style_record)
             {
-                redrives_a_standing_composition = true;
                 scratch.recompute_in_full = true;
             }
             // A flipped rule that lost the cascade may leave this row's stamp old, but an exact
@@ -672,23 +668,15 @@ impl RetainedState {
                     // An animation overlay's record lives in a slot the next sample releases.
                     // Keep the composition alive through installation and sample it again. A
                     // stale CSS animation plan is decided from the unchanged longhand table.
-                    let css_animation_plan = if self.css_defined_animations.node_runs_a_css_animation(node)
-                        && !record_may_stand_while_animating
-                        && self.state_names_resolve_without_the_declaration_scope(node, state)
-                    {
-                        self.settled_animation_plan_from_record(
-                            node,
-                            old_style_record,
-                            self.animation_name_declaration_scope(node, state),
-                        )
-                    } else {
-                        None
-                    };
-                    if !record_may_stand_while_animating && css_animation_plan.is_none() {
-                        counters.bump(Counter::EngineComputedRecordBailRecordOverlayPublication937);
-                        counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-                        return Err(Unanswered::Refused);
-                    }
+                    let css_animation_plan = (!record_may_stand_while_animating)
+                        .then(|| {
+                            self.settled_animation_plan_from_record(
+                                node,
+                                old_style_record,
+                                self.animation_name_declaration_scope(node, state),
+                            )
+                        })
+                        .flatten();
                     if computed::ComputedGroupSets::record_is_animation_overlay(old_style_record.raw()) {
                         self.computed_group_sets.pin_style_record(old_style_record.raw());
                         self.batch_pinned_compositions.push((node, old_style_record.raw()));
@@ -725,168 +713,29 @@ impl RetainedState {
                 !property_computes_in_remaining_phase(property) || property_feeds_box_type_transformation(property)
             });
         // A moved animation declaration or a changed keyframes table leaves a plan for the host
-        // to apply before descendants continue. A leaf without an old overlay can also defer a
-        // transition decision beside it.
-        let moves_transition_declaration = delta
-            .properties()
-            .iter()
-            .any(|&property| longhand_only_declares_a_css_transition(property));
-        let owes_an_animation_plan = (delta
+        // to apply before descendants continue, beside any transition step the row also owes: the
+        // host applies the plan, samples the installed record, and then runs the step against the
+        // record the row moved away from, all where it applies the row.
+        let owes_an_animation_plan = delta
             .properties()
             .iter()
             .any(|&property| longhand_declares_a_css_animation(property))
             || (!record_may_stand_while_animating
                 && !self
                     .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
-                    .is_empty()))
-            && (!moves_transition_declaration
-                || (self.tree.flat_tree_children(node).next().is_none()
-                    && !self.computed_group_sets.node_has_animation_overlay(node)))
-            && self.state_names_resolve_without_the_declaration_scope(node, state);
-        // A changed ordinary winner can be driven beneath an animation overlay, but an
-        // independently edited @keyframes rule also requires a new CSS animation definition.
-        // That definition is absent from the winner delta, so the row settles a plan from the new
-        // longhands, and without one the old effect would be sampled over the new base.
-        if !delta.is_empty() && !record_may_stand_while_animating && !owes_an_animation_plan {
-            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-            return Err(Unanswered::Refused);
-        }
-        // A remaining-phase delta can derive the new base beneath an existing composition. The
-        // host samples the effect again after installing this base, including when the moved
-        // property is animated. A full drive still needs dependent-value closure.
-        // The sample composes the animated font and the groups it writes, and makes the box-type,
-        // overflow, and text-alignment adjustments, the same way over any freshly driven base.
-        // A transition decides against the before-change style a moved base leaves, which
-        // standing winners do not move. A record that runs CSS animations settles its plan
-        // from the new base, and its transitions are decided at installation against the
-        // composed record the row moves away from. An element whose effects have all gone still
-        // holds its last composition; the sample over the new base, with nothing left to
-        // compose, clears it.
-        let full_drive_beneath_a_composition = animations_bind_the_record
-            && requires_full_drive
-            && self.computed_group_sets.node_has_animation_overlay(node)
-            && (!self.record_declares_transitions(old_style_record)
-                || redrives_a_standing_composition
-                || self.css_defined_animations.node_runs_a_css_animation(node))
-            && self
-                .computed_group_sets
-                .style_record_view(old_style_record.raw())
-                .and_then(|view| unsafe { view.animated_overlay.as_ref() })
-                .is_some_and(|overlay| {
-                    overlay
-                        .entries()
-                        .iter()
-                        .all(|entry| !entry.result_of_transition || redrives_a_standing_composition)
-                });
-        // A full drive beneath a standing composition excludes keyframes on inherited properties.
-        // For a record, only the rules its own names run matter: its descendants hold records of
-        // their own, and a child derived in the same batch waits for the composition.
-        let css_keyframes_are_engine_computable =
-            self.animation_keyframes().every_keyframes_rule_is_engine_computable()
-                || self.warm_record_names_engine_computable_animations(node, state);
-        let full_css_drive_beneath_a_composition = full_drive_beneath_a_composition
-            && self.css_defined_animations.node_runs_a_css_animation(node)
-            && css_keyframes_are_engine_computable;
-        // An associated CSS animation with no sampled overlay can still retime or cancel. The
-        // new longhands decide its complete plan, and the host samples after installing the base.
-        let css_animation_plan_without_an_overlay = animations_bind_the_record
-            && !requires_full_drive
-            && owes_an_animation_plan
-            && !self.computed_group_sets.node_has_animation_overlay(node)
-            && !self.record_declares_transitions(old_style_record)
-            && delta
-                .properties()
-                .iter()
-                .all(|&property| longhand_declares_a_css_animation(property));
-        // With no sampled overlay, the old record is already the animation's base. The row can
-        // install a newly driven base and apply its complete CSS plan before sampling; a child
-        // derived in the same batch waits for that composition, and substitutes under the custom
-        // properties the sample publishes into the element's environment. A transition the record
-        // declares is decided at installation against the record the row moves away from, as
-        // beneath any other composition.
-        let css_base_without_an_overlay = animations_bind_the_record
-            && !self.computed_group_sets.node_has_animation_overlay(node)
-            && self.css_defined_animations.node_runs_a_css_animation(node)
-            && css_keyframes_are_engine_computable;
-        // An element whose Web Animations hold no sampled overlay has the old record as its base.
-        // Its new base is driven like any other record, and the host samples the effects over it.
-        // An effect on a custom property holds no overlay even while it runs. A child derived in
-        // the same batch waits for the element and inherits the environment the effect sampled.
-        let effect_base_without_an_overlay = animations_bind_the_record
-            && !self.computed_group_sets.node_has_animation_overlay(node)
-            && !self.css_defined_animations.node_runs_a_css_animation(node)
-            && self.state_has_no_animation_name(state)
-            && self
-                .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
-                .is_empty()
-            && !self.record_declares_transitions(old_style_record)
-            && !delta
-                .properties()
-                .iter()
-                .any(|&property| property_starts_animation(property));
-        // An element whose effects hold no sampled overlay, run no CSS animation, and whose record
-        // declares no transitions has its base as its record. It installs a newly driven base, and
-        // the host samples those effects over it, as for a CSS animation above; a child derived in
-        // the same batch waits for that composition, and substitutes under the custom properties
-        // the sample publishes. A name the new base declares starts an animation, so its plan must
-        // be one the engine can decide.
+                    .is_empty());
+        // An element's animations compose over the record the row derives. Its base is driven in
+        // full, from the winners and the parent as they are now, and the host samples every effect
+        // the element holds over it once installed: the sample composes the animated font and the
+        // groups it writes, and makes the box-type, overflow, and text-alignment adjustments, the
+        // same way over any freshly driven base. A record that runs or names CSS animations
+        // settles its complete plan from the new base, which the host applies before sampling. A
+        // transition is decided at installation against the composed record the row moves away
+        // from. An element whose effects have all gone still holds its last composition; the
+        // sample over the new base, with nothing left to compose, clears it. A child derived in the
+        // same batch waits for that composition.
+        let derived_beneath_a_composition = animations_bind_the_record;
         let names_an_animation = !self.state_has_no_animation_name(state);
-        let base_without_a_composition = animations_bind_the_record
-            && !self.computed_group_sets.node_has_animation_overlay(node)
-            && !self.record_holds_an_animation_overlay(old_style_record)
-            && self
-                .css_defined_animations
-                .applied_definitions(node, animations::ELEMENT_ANIMATION_SLOT)
-                .is_empty()
-            && (!names_an_animation || css_keyframes_are_engine_computable)
-            && self.effects_sample_over_a_new_base(node, TransitionEffects::Refused)
-            && !self.record_declares_transitions(old_style_record);
-        // A record that declares transitions can take a newly driven base beneath its composition
-        // in the same way; a child derived in the same batch waits for that composition. The
-        // transition decision itself is made below against the record the row moves away from.
-        // Its CSS animations take the plan the new base settles, as for a record with none.
-        let transitions_beneath_a_composition = animations_bind_the_record
-            && self.record_owes_a_transition_decision(old_style_record)
-            && (!self.css_defined_animations.node_runs_a_css_animation(node)
-                || (css_keyframes_are_engine_computable
-                    && self.state_names_resolve_without_the_declaration_scope(node, state)))
-            && self.effects_sample_over_a_new_base(node, TransitionEffects::Allowed)
-            && self
-                .computed_group_sets
-                .style_record_view(old_style_record.raw())
-                .is_some_and(|view| {
-                    unsafe { view.animated_overlay.as_ref() }.is_none_or(|overlay| {
-                        overlay.entries().iter().all(|entry| {
-                            !property_feeds_box_type_transformation(entry.property)
-                                && !property_feeds_post_compute_adjustment(entry.property)
-                        })
-                    })
-                });
-        let derived_beneath_a_composition = css_animation_plan_without_an_overlay
-            || transitions_beneath_a_composition
-            || css_base_without_an_overlay
-            || effect_base_without_an_overlay
-            || base_without_a_composition
-            || full_drive_beneath_a_composition
-                && (!self.css_defined_animations.node_runs_a_css_animation(node)
-                    || full_css_drive_beneath_a_composition
-                    // Standing winners leave the running CSS animations as they are, so the drive
-                    // owes them no new plan.
-                    || redrives_a_standing_composition)
-            || animations_bind_the_record
-                && !requires_full_drive
-                && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0
-                && (self.parent_holds_no_composition(node)
-                    || self.animation_base_inherits_from_current_parent(node, state, old_style_record))
-                && self.computed_group_sets.node_has_animation_overlay(node)
-                && (!self.css_defined_animations.node_runs_a_css_animation(node)
-                    || self.state_names_resolve_without_the_declaration_scope(node, state));
-        let animations_bind_the_record = animations_bind_the_record && !derived_beneath_a_composition;
-        if animations_bind_the_record {
-            counters.bump(Counter::EngineComputedRecordBailWinnerElementPublication1072);
-            counters.bump(Counter::EngineComputedRecordBailWinnerElement);
-            return Err(Unanswered::Refused);
-        }
         // A moved font-phase longhand reaches every value the font feeds, so the record is driven
         // through every phase and every group is rebuilt. A moved box-type transformation input
         // takes the same route, as does a record whose parent inputs moved or a record that read
@@ -952,8 +801,7 @@ impl RetainedState {
                 || delta
                     .properties()
                     .iter()
-                    .any(|&property| longhand_only_declares_a_css_transition(property)))
-            && (!self.record_holds_an_animation_overlay(old_style_record) || derived_beneath_a_composition);
+                    .any(|&property| longhand_only_declares_a_css_transition(property)));
         let owes_a_transition_registration = owes_a_transition_step.then(|| {
             !full_drive
                 && !record_declares_transitions
@@ -962,21 +810,6 @@ impl RetainedState {
                     .iter()
                     .all(|&property| longhand_only_declares_a_css_transition(property))
         });
-        let no_css_animation_to_plan = self.computed_group_sets.associated_pseudo_kind(node).is_none()
-            && self.state_has_no_animation_name(state)
-            && self
-                .element_css_defined_animations(node, animations::ELEMENT_ANIMATION_SLOT)
-                .is_empty();
-        // An existing overlay may carry a transition to retarget or cancel. The host samples the
-        // installed record before the step, so the step reads each running transition's current
-        // value from that composition and decides against the record the row moved away from. A
-        // record whose style was cleared on entry to display:none has no before-change style, so
-        // it owes no step at all.
-        let transition_goal = if full_drive && (owes_a_transition_step || scratch.ancestor_became_visible) {
-            TransitionDriveGoal::DeferStep
-        } else {
-            TransitionDriveGoal::RefuseDeclarations
-        };
         // Partial drives can share across parents whose inherited inputs agree. Keep the full
         // parent record in the key when a non-inherited property explicitly inherits, including
         // through substitution, or when a full drive may read more of the parent's style.
@@ -1003,30 +836,27 @@ impl RetainedState {
             self.substitution_attributes_key(node, None, state),
             tree_counting_key,
         );
-        if let Some(&(new_style_record, cohort_explicitly_inherited_groups)) = (container_unit_mask == 0
+        // The row takes another node's record whole, so its plan is decided from that record's
+        // own longhands rather than from a drive of this node's; a record holding none is no
+        // cohort for a row that owes a plan, which drives its own instead.
+        if let Some((new_style_record, cohort_explicitly_inherited_groups, animation_plan)) = (container_unit_mask == 0
             && self.state_custom_condition_usage(node, state) == 0
             && !self.computed_group_sets.node_has_animation_overlay(node)
             && !derived_beneath_a_composition
             && (!has_registered_declarations || !full_drive))
-            .then(|| scratch.cohorts.get(&cohort))
+            .then(|| scratch.cohorts.get(&cohort).copied())
             .flatten()
+            .and_then(|(record, groups)| match owes_an_animation_plan {
+                true => self
+                    .settled_animation_plan_from_record(
+                        node,
+                        record,
+                        self.animation_name_declaration_scope(node, state),
+                    )
+                    .map(|plan| (record, groups, Some(plan))),
+                false => Some((record, groups, None)),
+            })
         {
-            // The row takes another node's record whole, so its plan is decided from that record's
-            // own longhands rather than from a drive of this node's.
-            let animation_plan = match owes_an_animation_plan {
-                true => match self.settled_animation_plan_from_record(
-                    node,
-                    new_style_record,
-                    self.animation_name_declaration_scope(node, state),
-                ) {
-                    Some(plan) => Some(plan),
-                    None => {
-                        counters.bump(Counter::EngineComputedRecordBailProperty);
-                        return Err(Unanswered::Refused);
-                    }
-                },
-                false => None,
-            };
             self.note_node_substitution(node, scratch, state, current_environment);
             let delta = self
                 .computed_group_sets
@@ -1077,17 +907,15 @@ impl RetainedState {
             (inherited_box.writing_mode, inherited_box.direction)
         };
         for &property in delta.properties() {
-            // A content delta must carry the counter-style registry it reads. A delta that moves
-            // transition declarations owes the host the transition step, and one that moves
-            // animation declarations owes the animation plan; both leave the batch as row effects.
-            if property_starts_animation(property)
-                && !(owes_a_transition_step && longhand_only_declares_a_css_transition(property))
-                && !(owes_an_animation_plan && longhand_declares_a_css_animation(property))
-                && !(no_css_animation_to_plan && longhand_declares_a_css_animation(property))
-            {
-                counters.bump(Counter::EngineComputedRecordBailProperty);
-                return Err(Unanswered::Refused);
-            }
+            // A delta that moves transition declarations owes the host the transition step, and
+            // one that moves animation declarations owes the animation plan; both leave the batch
+            // as row effects.
+            debug_assert!(
+                !property_starts_animation(property)
+                    || (owes_a_transition_step && longhand_only_declares_a_css_transition(property))
+                    || (owes_an_animation_plan && longhand_declares_a_css_animation(property)),
+                "a moved animation longhand leaves the row no effect for the host"
+            );
             groups_to_rebuild |= longhand_group_dependency_mask(property);
             select(property);
             let bits = crate::css::style_compute::table_row_bits(property);
@@ -1195,21 +1023,6 @@ impl RetainedState {
             }
         };
         self.note_node_substitution(node, scratch, state, substitution_environment);
-        // A hidden record can name animations. Its driven base leaves a complete plan for the host
-        // to apply before sampling the installed record, which only names that resolve can make.
-        if (full_drive || driver_input_moved)
-            && old_record_is_hidden
-            && self
-                .computed_group_sets
-                .style_record_view(old_style_record.raw())
-                .and_then(|view| unsafe { view.longhand_table.as_ref() })
-                .is_some_and(table_names_animations)
-            && !self.state_names_resolve_without_the_declaration_scope(node, state)
-        {
-            counters.bump(Counter::EngineComputedRecordBailRecordOverlayDrive441);
-            counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-            return Err(Unanswered::Refused);
-        }
         let mut explicitly_inherited_groups = 0;
         let partial = if full_drive || driver_input_moved {
             None
@@ -1244,7 +1057,6 @@ impl RetainedState {
                     &inputs,
                     &mut scratch.font_drive,
                     goal,
-                    transition_goal,
                     has_registered_declarations,
                     &mut explicitly_inherited_groups,
                     counters,
@@ -1289,7 +1101,6 @@ impl RetainedState {
                         &inputs,
                         &mut scratch.font_drive,
                         goal,
-                        transition_goal,
                         false,
                         &mut explicitly_inherited_groups,
                         counters,
@@ -1311,12 +1122,9 @@ impl RetainedState {
         // A retained record from display:none contributes its base to the drive. Its animation
         // names must be planned from the new base before the host samples the installed record.
         let animation_plan = (owes_an_animation_plan
-            || full_css_drive_beneath_a_composition
-            || css_base_without_an_overlay
-            || (base_without_a_composition && names_an_animation)
-            || (old_record_is_hidden
-                && table_names_animations(&table)
-                && self.state_names_resolve_without_the_declaration_scope(node, state)))
+            || (derived_beneath_a_composition
+                && (names_an_animation || self.css_defined_animations.node_runs_a_css_animation(node)))
+            || (old_record_is_hidden && table_names_animations(&table)))
         .then(|| {
             self.settled_animation_plan(
                 node,
@@ -1405,7 +1213,7 @@ impl RetainedState {
         node: StyleNodeID,
         pseudo_kind: u8,
         table: &ComputedLonghandTable,
-        declaration_scope: AnimationNameScope,
+        declaration_scope: Option<tree::TreeScopeID>,
     ) -> animations::SettledAnimationPlan {
         crate::css::style_compute::build_settled_animation_plan(
             table,
@@ -1418,10 +1226,7 @@ impl RetainedState {
                 },
             ),
             self.animation_keyframes(),
-            match declaration_scope {
-                AnimationNameScope::Known(scope) => scope,
-                AnimationNameScope::Unknown => None,
-            },
+            declaration_scope,
             self.tree.tree_scope(node),
         )
     }
@@ -1432,7 +1237,7 @@ impl RetainedState {
         &self,
         node: StyleNodeID,
         style_record: computed::FinalStyleRecordID,
-        declaration_scope: AnimationNameScope,
+        declaration_scope: Option<tree::TreeScopeID>,
     ) -> Option<animations::SettledAnimationPlan> {
         let view = self.computed_group_sets.style_record_view(style_record.raw())?;
         // SAFETY: A record's table outlives the view the assignment below takes it from.
@@ -1443,43 +1248,42 @@ impl RetainedState {
     /// The tree scope the winning `animation-name` declaration was written in, where its
     /// `@keyframes` are looked for first. An author rule's is the one scope its sheet is attached
     /// to; the document's rules, the other origins' and the element's own declarations have none
-    /// of their own. A sheet several scopes adopt matched in the one its priority's encapsulation
-    /// context names among the element's contexts.
-    fn animation_name_declaration_scope(&self, node: StyleNodeID, state: CascadeStateID) -> AnimationNameScope {
-        let Some(winner) = self
+    /// of their own (`None`). A sheet several scopes adopt matched in the one its priority's
+    /// encapsulation context names among the element's contexts.
+    fn animation_name_declaration_scope(&self, node: StyleNodeID, state: CascadeStateID) -> Option<tree::TreeScopeID> {
+        let winner = self
             .winner_groups
             .winner_in_state(state, crate::css::property_metadata::property_id::ANIMATION_NAME)
-            .and_then(|winner| self.winner_groups.resolved_winner(winner))
-        else {
-            return AnimationNameScope::Unknown;
-        };
-        match winner.source {
+            .and_then(|winner| self.winner_groups.resolved_winner(winner))?;
+        let scope = match winner.source {
             cascade::WinnerSource::Rule(rule) => {
                 let sheet = self.program.rule_sheet(rule);
                 if self.program.sheet_origin(sheet) != crate::css::cascaded_properties::CascadeOrigin::Author {
-                    return AnimationNameScope::Known(None);
+                    return None;
                 }
                 let sheet_scopes = self.program.sheet_scopes(sheet);
-                let scope = match sheet_scopes.as_slice() {
+                match sheet_scopes.as_slice() {
                     &[scope] => scope,
-                    _ => match winner
-                        .priority
-                        .author_context_depth()
-                        .zip(self.author_contexts(node))
-                        .and_then(|(depth, contexts)| contexts.get(depth as usize).copied())
-                    {
-                        Some(scope) if sheet_scopes.contains(&scope) => scope,
-                        _ => return AnimationNameScope::Unknown,
-                    },
-                };
-                match scope {
-                    tree::TreeScopeID::DOCUMENT => AnimationNameScope::Known(None),
-                    scope => AnimationNameScope::Known(Some(scope)),
+                    _ => {
+                        let scope = winner
+                            .priority
+                            .author_context_depth()
+                            .zip(self.author_contexts(node))
+                            .and_then(|(depth, contexts)| contexts.get(depth as usize).copied())
+                            .filter(|scope| sheet_scopes.contains(scope));
+                        // The rule matched through one of the element's encapsulation contexts,
+                        // and its priority names which.
+                        debug_assert!(scope.is_some(), "an adopted rule matched outside its scopes");
+                        scope?
+                    }
                 }
             }
-            cascade::WinnerSource::Element(_) => AnimationNameScope::Known(None),
-            cascade::WinnerSource::ExactCascade => AnimationNameScope::Unknown,
-        }
+            cascade::WinnerSource::Element(_) => return None,
+            // A replayed exact cascade names no declaration; its names resolve from the element's
+            // own scope outward.
+            cascade::WinnerSource::ExactCascade => return None,
+        };
+        (scope != tree::TreeScopeID::DOCUMENT).then_some(scope)
     }
 
     /// The animation definitions the engine-computed record the host is about to install for this
@@ -1728,11 +1532,14 @@ impl RetainedState {
     ) -> Drive<ElementAnswer> {
         // A first record whose winners declare CSS animations owes the host the plan that starts
         // them, the way a warm row does: which animations to create or keep, their timing and the
-        // keyframe sets they run are decided here, and the host only creates the objects.
+        // keyframe sets they run are decided here, and the host only creates the objects. An
+        // element that already runs CSS animations without a record owes the complete plan too,
+        // which keeps, retimes or cancels them; the host samples them over the installed base.
         let owes_an_animation_plan = self
             .winner_groups
             .semantic_delta_properties(None, cascade_state.1)
-            .any(longhand_declares_a_css_animation);
+            .any(longhand_declares_a_css_animation)
+            || self.css_defined_animations.node_runs_a_css_animation(node);
         let delta = match self.engine_cold_record_impl(node, cascade_state, scratch, goal, counters)? {
             ElementAnswer::Delta(delta) => delta,
             probe @ ElementAnswer::RootInputs(_) => return Ok(probe),
@@ -1751,68 +1558,6 @@ impl RetainedState {
             self.nodes_owing_an_animation_sample.insert(node);
         }
         Ok(ElementAnswer::Delta(delta))
-    }
-
-    /// Check the names a later record runs. Its descendants already hold records of their own and
-    /// take an animated value through the overlay's invalidation, so every rule its names find is
-    /// one the engine can run.
-    fn warm_record_names_engine_computable_animations(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
-        self.state_names_only_keyframes(node, state, |_| true)
-    }
-
-    /// Whether every name the state runs resolves to the same `@keyframes` rule whatever scope the
-    /// winning `animation-name` declaration was written in, which the winner store does not record.
-    fn state_names_resolve_without_the_declaration_scope(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
-        self.animation_keyframes().only_the_document_scope_defines_keyframes()
-            || self.state_names_only_keyframes(node, state, |_| true)
-    }
-
-    fn state_names_only_keyframes(
-        &self,
-        node: StyleNodeID,
-        state: CascadeStateID,
-        accepts: impl Fn(&animations::PublishedKeyframesSet) -> bool,
-    ) -> bool {
-        let element_tree_scope = self.tree.tree_scope(node);
-        let Some(winner) = self
-            .winner_groups
-            .winner_in_state(state, crate::css::property_metadata::property_id::ANIMATION_NAME)
-            .and_then(|winner| self.winner_groups.resolved_winner(winner))
-        else {
-            return false;
-        };
-        let Lookup::Known(StyleValueData::ValueList { values, .. }) = self.specified_values.value(winner.key.value)
-        else {
-            return false;
-        };
-        let declaration_scope = self.animation_name_declaration_scope(node, state);
-        !values.as_slice().is_empty()
-            && values.as_slice().iter().all(|value| {
-                let name = match value.data() {
-                    StyleValueData::Keyword { keyword } if *keyword == crate::css::style_compute::keyword::NONE => {
-                        return true;
-                    }
-                    StyleValueData::CustomIdent { custom_ident } => custom_ident,
-                    StyleValueData::String { string, .. } => string,
-                    _ => return false,
-                };
-                // Another scope defining the name can answer for a declaration written in it, so
-                // the name resolves only where that scope is known or cannot matter.
-                match declaration_scope {
-                    AnimationNameScope::Known(declaration_scope) => self
-                        .animation_keyframes()
-                        .resolve_in_declaration_scope(declaration_scope, element_tree_scope, name)
-                        .is_none_or(&accepts),
-                    AnimationNameScope::Unknown => {
-                        self.animation_keyframes()
-                            .name_resolves_without_the_declaration_scope(element_tree_scope, name)
-                            && self
-                                .animation_keyframes()
-                                .resolve_in_declaration_scope(None, element_tree_scope, name)
-                                .is_none_or(&accepts)
-                    }
-                }
-            })
     }
 
     /// With no winning `animation-name`, timing and keyword longhands describe no CSS animation
@@ -2154,7 +1899,6 @@ impl RetainedState {
             &inputs,
             &mut scratch.font_drive,
             goal,
-            TransitionDriveGoal::RefuseDeclarations,
             has_registered_declarations,
             &mut explicitly_inherited_groups,
             counters,
@@ -2187,7 +1931,6 @@ impl RetainedState {
                 &inputs,
                 &mut scratch.font_drive,
                 goal,
-                TransitionDriveGoal::RefuseDeclarations,
                 false,
                 &mut explicitly_inherited_groups,
                 counters,
@@ -2489,9 +2232,7 @@ impl RetainedState {
             || (property_starts_animation(winner.property)
                 && !longhand_only_declares_a_css_transition(winner.property)
                 && !(longhand_declares_a_css_animation(winner.property)
-                    && (self.state_has_no_animation_name(state)
-                        || (kind != pseudo_kind::BACKDROP
-                            && self.state_names_resolve_without_the_declaration_scope(node, state)))))
+                    && (self.state_has_no_animation_name(state) || kind != pseudo_kind::BACKDROP)))
     }
 
     /// Whether a record holds a composition its animations made. The transitions its table
@@ -2534,18 +2275,6 @@ impl RetainedState {
                 })
     }
 
-    /// Whether the host can sample every effect the element holds over a newly driven base. Each
-    /// must be one the stage can describe. A sample composes the font and the groups it writes, and
-    /// makes the box-type, overflow and text-alignment adjustments, the same way over any base.
-    fn effects_sample_over_a_new_base(&self, node: StyleNodeID, transitions: TransitionEffects) -> bool {
-        self.animation_effect_descriptions
-            .effects(node, animations::ELEMENT_ANIMATION_SLOT)
-            .iter()
-            .all(|effect| {
-                transitions == TransitionEffects::Allowed || effect.flags & animations::effect_flag::IS_TRANSITION == 0
-            })
-    }
-
     /// The environment an element's own values substitute under: the one its animations sampled
     /// custom properties into, where the host composed it over `environment`, or `environment`.
     fn substitution_environment(&self, node: StyleNodeID, environment: u64) -> u64 {
@@ -2567,19 +2296,6 @@ impl RetainedState {
         } else {
             environment
         }
-    }
-
-    /// Whether the element's parent holds no sampled values for its base to miss: its inherited
-    /// groups are the parent's record as it stands. A parent derived beneath a composition in this
-    /// batch is sampled again once the host installs it, so it still holds one.
-    fn parent_holds_no_composition(&self, node: StyleNodeID) -> bool {
-        self.tree.flat_tree_parent(node).is_some_and(|parent| {
-            !self.computed_group_sets.node_has_animation_overlay(parent)
-                && !self
-                    .batch_pinned_compositions
-                    .iter()
-                    .any(|&(pinned, _)| pinned == parent)
-        })
     }
 
     /// A partial drive reuses the base groups beneath an element's own composition. They must
@@ -5199,7 +4915,6 @@ impl StyleEngineState {
                 &inputs,
                 &mut scratch.font_drive,
                 FontDriveGoal::Complete,
-                TransitionDriveGoal::RefuseDeclarations,
                 false,
                 &mut 0,
                 counters,
@@ -6175,20 +5890,6 @@ fn shorthand_longhand_value(
         }
     }
     None
-}
-
-/// Whether a longhand computes in the drive's remaining phase: after the font, line-height and
-/// color-scheme stages, whose outputs the engine does not derive itself yet.
-#[derive(Clone, Copy)]
-enum AnimationNameScope {
-    Known(Option<tree::TreeScopeID>),
-    Unknown,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum TransitionEffects {
-    Refused,
-    Allowed,
 }
 
 /// The computed style groups a longhand's winner feeds. A longhand bound to no group of its own is

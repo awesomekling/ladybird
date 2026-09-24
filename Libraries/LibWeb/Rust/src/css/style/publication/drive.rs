@@ -13,12 +13,6 @@ pub(super) enum FontDriveGoal {
     RootInputs,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum TransitionDriveGoal {
-    RefuseDeclarations,
-    DeferStep,
-}
-
 /// Why a row has no record. A suspended row is not refused: it waits on a request the host
 /// services between passes, and the same row resumes once that request is answered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -614,7 +608,6 @@ impl RetainedState {
         inputs: &bridge::FfiDocumentStyleComputationInputs,
         font_scratch: &mut FontDriveScratch,
         goal: FontDriveGoal,
-        transition_goal: TransitionDriveGoal,
         has_registered_declarations: bool,
         explicitly_inherited_groups: &mut u32,
         counters: &mut Counters,
@@ -685,24 +678,8 @@ impl RetainedState {
                     counters.bump(Counter::EngineComputedRecordBailRecordTable);
                     return Err(Unanswered::Refused);
                 };
-                // The parent of an AwaitSampledParent retry has finished its transition step.
-                // Drive this child's base from that published composition; its own transition
-                // step is already owed by the record delta and runs when the host installs it.
-                let defers_transition_after_sampled_parent = !subject.target.is_pseudo()
-                    && self
-                        .host_entry_causes
-                        .get(&subject.target.node())
-                        .is_some_and(|(cause, _)| *cause == "AwaitSampledParent")
-                    && parent
-                        .is_some_and(|parent| self.computed_group_sets.sampled_composition_identity(parent).is_some());
-                if transition_goal == TransitionDriveGoal::RefuseDeclarations
-                    && crate::css::style_compute::has_active_transition_properties(old_table)
-                    && !defers_transition_after_sampled_parent
-                {
-                    counters.bump(Counter::EngineComputedRecordBailRecordOverlayDrive441);
-                    counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-                    return Err(Unanswered::Refused);
-                }
+                // The transitions the old record declares are decided by the step the row owes
+                // the host, which runs against the record it moves away from once installed.
                 Some(old_table)
             }
             None => None,

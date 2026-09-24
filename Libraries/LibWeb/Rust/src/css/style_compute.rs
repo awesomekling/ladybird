@@ -5745,11 +5745,8 @@ fn build_computed_animation_list(
 /// The animation plan for a record the engine settled, built from the table the drive just filled
 /// the way a C++ computation builds its own, and owning what its definitions name.
 ///
-/// The scope chain `@keyframes` resolve in starts at the element's own scope here: the engine
-/// settles such a row only where no other scope but the document defines a name it runs
-/// (`name_resolves_without_the_declaration_scope`), so the scope the winning `animation-name`
-/// declaration was written in - which the engine's winner store does not record - cannot change the
-/// answer.
+/// The scope chain `@keyframes` resolve in starts at the scope the winning `animation-name`
+/// declaration was written in, then the element's own scope, then the document's.
 pub(crate) fn build_settled_animation_plan(
     table: &ComputedLonghandTable,
     existing_animation_names: &[crate::css::css_string::CssString],

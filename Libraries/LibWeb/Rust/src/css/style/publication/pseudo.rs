@@ -7,13 +7,6 @@
 use super::*;
 
 impl RetainedState {
-    fn note_pseudo_bail_site(&mut self, node: StyleNodeID, site: &'static str) {
-        if seal::is_reporting() {
-            let cold = self.computed_group_sets.assigned_style_record(node).is_none();
-            self.host_entry_causes.insert(node, (site, cold));
-        }
-    }
-
     /// A pseudo row can predate the current answer even when the element row is current. Rebuild
     /// its winners from that answer before deciding whether the engine can settle its record.
     fn refresh_stale_pseudo_winners(
@@ -197,16 +190,12 @@ impl RetainedState {
     }
 
     /// Whether the host applies a CSS animation plan the engine settles for a pseudo-element: its
-    /// state names animations whose `@keyframes` resolve without the host, or the pseudo-element
-    /// holds CSS animations the state no longer names, which an empty plan cancels.
+    /// state names animations, or the pseudo-element holds CSS animations the state no longer
+    /// names, which an empty plan cancels.
     fn pseudo_owes_css_animation_plan(&self, node: StyleNodeID, kind: u8, state: Option<CascadeStateID>) -> bool {
-        if kind == pseudo_kind::BACKDROP {
-            return false;
-        }
-        match state.filter(|&state| !self.state_has_no_animation_name(state)) {
-            Some(state) => self.state_names_resolve_without_the_declaration_scope(node, state),
-            None => !self.element_css_defined_animations(node, kind + 1).is_empty(),
-        }
+        kind != pseudo_kind::BACKDROP
+            && (state.is_some_and(|state| !self.state_has_no_animation_name(state))
+                || !self.element_css_defined_animations(node, kind + 1).is_empty())
     }
 
     /// `old_is_list_item` says whether the element was a list item when the old record it no
@@ -669,7 +658,6 @@ impl RetainedState {
                         &inputs,
                         &mut scratch.font_drive,
                         FontDriveGoal::Complete,
-                        TransitionDriveGoal::RefuseDeclarations,
                         has_registered_declarations,
                         &mut explicitly_inherited_groups,
                         counters,
@@ -706,7 +694,6 @@ impl RetainedState {
                             &inputs,
                             &mut scratch.font_drive,
                             FontDriveGoal::Complete,
-                            TransitionDriveGoal::RefuseDeclarations,
                             false,
                             &mut explicitly_inherited_groups,
                             counters,
@@ -773,9 +760,7 @@ impl RetainedState {
                     .style_record_view(new_style_record.raw())
                     .or_refused()?;
                 let table = unsafe { view.longhand_table.as_ref() }.or_refused()?;
-                let declaration_scope = state.map_or(AnimationNameScope::Unknown, |state| {
-                    self.animation_name_declaration_scope(node, state)
-                });
+                let declaration_scope = state.and_then(|state| self.animation_name_declaration_scope(node, state));
                 let plan = self.settled_animation_plan(node, kind, table, declaration_scope);
                 self.nodes_owing_animation_definitions.insert((node, kind), plan);
             }
@@ -1113,30 +1098,24 @@ impl RetainedState {
     ) -> Drive<RecordDelta> {
         use bridge::element_adjustment_fact as fact;
         let facts = self.computed_group_sets.adjustment_facts(node);
-        // The host samples the element's animations over the new base and runs its transition
-        // step against the record it held. A CSS animation needs a plan, which only C++ settles.
-        let animates = facts & fact::HAS_ANIMATIONS != 0;
-        if animates && self.css_defined_animations.node_runs_a_css_animation(node) {
-            self.note_pseudo_bail_site(node, "engineComputedRecordBailWinnerElement@pseudo.rs:1078");
-            counters.bump(Counter::EngineComputedRecordBailWinnerElement);
-            return Err(Unanswered::Refused);
-        }
-        // A record it already holds is replaced by a full drive. An animation overlay is the
-        // composition of the element's own effects, which the host samples again over the new
-        // base; transition declarations alone do not prevent driving the next base record, whose
-        // delta lets the host start a transition.
+        // A record it already holds is replaced by a full drive. The host samples the element's
+        // animations over the new base and runs its transition step against the record it held;
+        // transition declarations alone do not prevent driving the next base record, whose delta
+        // lets the host start a transition. An animation overlay is the composition of the
+        // element's own effects, which the sample makes again over the new base, or clears when
+        // they have all gone.
         let old_record = self.computed_group_sets.assigned_style_record(node);
-        if let Some(old) = old_record {
-            let Some(view) = self.computed_group_sets.style_record_view(old.raw()) else {
-                counters.bump(Counter::EngineComputedRecordBailRecord);
-                return Err(Unanswered::Refused);
-            };
-            if !view.animated_overlay.is_null() && !animates {
-                self.note_pseudo_bail_site(node, "engineComputedRecordBailRecordOverlay@pseudo.rs:1091");
-                counters.bump(Counter::EngineComputedRecordBailRecordOverlay);
-                return Err(Unanswered::Refused);
+        let holds_an_overlay = match old_record {
+            Some(old) => {
+                let Some(view) = self.computed_group_sets.style_record_view(old.raw()) else {
+                    counters.bump(Counter::EngineComputedRecordBailRecord);
+                    return Err(Unanswered::Refused);
+                };
+                !view.animated_overlay.is_null()
             }
-        }
+            None => false,
+        };
+        let animates = facts & fact::HAS_ANIMATIONS != 0 || holds_an_overlay;
         let kind = self.computed_group_sets.associated_pseudo_kind(node).or_refused()?;
         let host = self.tree.shadow_host_of(node).or_refused()?;
         let target = tree::PseudoElementTarget::new(tree::PseudoElementKind(u16::from(kind)));
@@ -1184,12 +1163,10 @@ impl RetainedState {
             winners.sort_unstable_by_key(|winner| winner.property);
         }
         let state = self.with_cascade_interning_counters(|groups| groups.intern_sorted(&winners, None), counters);
-        for property in self.winner_groups.semantic_delta_properties(None, state) {
-            if property_starts_animation(property) && !longhand_only_declares_a_css_transition(property) {
-                counters.bump(Counter::EngineComputedRecordBailProperty);
-                return Err(Unanswered::Refused);
-            }
-        }
+        // The CSS animations the element's winners name, or the ones it still runs, take the
+        // complete plan the drive's longhands settle, which the host applies before it samples.
+        let owes_an_animation_plan =
+            !self.state_has_no_animation_name(state) || self.css_defined_animations.node_runs_a_css_animation(node);
         let Some(mut inputs) = self.document_style_computation_inputs else {
             counters.bump(Counter::EngineComputedRecordBailNoEnvironment);
             return Err(Unanswered::Refused);
@@ -1258,7 +1235,6 @@ impl RetainedState {
             &inputs,
             &mut scratch.font_drive,
             FontDriveGoal::Complete,
-            TransitionDriveGoal::RefuseDeclarations,
             has_registered_declarations,
             &mut explicitly_inherited_groups,
             counters,
@@ -1292,7 +1268,6 @@ impl RetainedState {
                 &inputs,
                 &mut scratch.font_drive,
                 FontDriveGoal::Complete,
-                TransitionDriveGoal::RefuseDeclarations,
                 false,
                 &mut explicitly_inherited_groups,
                 counters,
@@ -1307,6 +1282,14 @@ impl RetainedState {
             }
         };
         let font = font.expect("a full drive resolves the font");
+        let animation_plan = owes_an_animation_plan.then(|| {
+            self.settled_animation_plan(
+                node,
+                u8::MAX,
+                &table,
+                self.animation_name_declaration_scope(node, state),
+            )
+        });
         // The transition step reads the composition the element held as its before-change style,
         // after the new base replaced it.
         let old_composition =
@@ -1341,7 +1324,10 @@ impl RetainedState {
             self.nodes_owing_explicit_inheritance
                 .insert(node, explicitly_inherited_groups);
         }
-        if animates {
+        if let Some(plan) = animation_plan {
+            self.nodes_owing_animation_definitions.insert((node, u8::MAX), plan);
+        }
+        if animates || owes_an_animation_plan {
             self.nodes_owing_an_animation_sample.insert(node);
         }
         counters.bump(Counter::EngineComputedRecordHostPseudoBackings);
