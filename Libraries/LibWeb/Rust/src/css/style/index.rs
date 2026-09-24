@@ -3345,13 +3345,13 @@ impl RuleDispatch {
 /// selected rows.
 type ElementDeclaredProperties = Box<[DeclaredProperty]>;
 
+#[derive(Default)]
 struct ElementDeclarationRow {
     by_kind: [Option<ElementDeclaredProperties>; ElementDeclarationKind::COUNT],
     /// The value each declaration was written with, parallel to `by_kind`, when the block's
     /// publication carried them; a consumer computing from the declarations reads the spelling.
     written_by_kind: [Option<Box<[RetainedStyleValueData]>>; ElementDeclarationKind::COUNT],
     written_checks_by_kind: [Box<[super::publication::WrittenValueChecks]>; ElementDeclarationKind::COUNT],
-    complete: [bool; ElementDeclarationKind::COUNT],
     /// The custom properties the inline style declares, in declaration order. Only the `style`
     /// attribute declares custom properties.
     custom_declarations: Option<Box<[CustomDeclaration]>>,
@@ -3363,22 +3363,8 @@ pub(super) struct HiddenInlineDeclarations {
     declared: Option<ElementDeclaredProperties>,
     written: Option<Box<[RetainedStyleValueData]>>,
     checks: Box<[super::publication::WrittenValueChecks]>,
-    complete: bool,
     custom: Option<Box<[CustomDeclaration]>>,
     custom_written: Option<Box<[RetainedStyleValueData]>>,
-}
-
-impl Default for ElementDeclarationRow {
-    fn default() -> Self {
-        Self {
-            by_kind: Default::default(),
-            written_by_kind: Default::default(),
-            written_checks_by_kind: Default::default(),
-            complete: [true; ElementDeclarationKind::COUNT],
-            custom_declarations: None,
-            custom_written_values: None,
-        }
-    }
 }
 
 impl ElementDeclarationRow {
@@ -3412,9 +3398,7 @@ impl ElementDeclarationRow {
     }
 
     fn is_empty(&self) -> bool {
-        self.by_kind.iter().all(Option::is_none)
-            && self.complete.iter().all(|&complete| complete)
-            && self.custom_declarations.is_none()
+        self.by_kind.iter().all(Option::is_none) && self.custom_declarations.is_none()
     }
 }
 
@@ -3440,21 +3424,8 @@ impl ElementDeclarationRows {
         };
         (
             row.by_kind[kind.index()].as_deref().unwrap_or(&[]),
-            row.complete[kind.index()]
-                && (kind != ElementDeclarationKind::InlineStyle || row.custom_declarations.is_none()),
+            kind != ElementDeclarationKind::InlineStyle || row.custom_declarations.is_none(),
         )
-    }
-
-    /// Whether the longhand declarations of one kind are all published, whatever custom
-    /// properties the inline style declares beside them.
-    fn complete_but_for_custom(&self, node: StyleNodeID, kind: ElementDeclarationKind) -> bool {
-        let Some(index) = node.element_index().map(|index| index as usize) else {
-            return true;
-        };
-        let Some(row) = self.rows.get(index).and_then(Option::as_ref) else {
-            return true;
-        };
-        row.complete[kind.index()]
     }
 
     /// The values the declarations of one kind were written with, parallel to `get`, or nothing
@@ -3475,10 +3446,9 @@ impl ElementDeclarationRows {
         kind: ElementDeclarationKind,
         declared: Vec<DeclaredProperty>,
         written_values: Vec<RetainedStyleValueData>,
-        declarations_are_complete: bool,
     ) {
         let index = node.element_index().expect("only elements carry element declarations") as usize;
-        if declared.is_empty() && declarations_are_complete {
+        if declared.is_empty() {
             self.remove_kind(node, kind);
             return;
         }
@@ -3493,7 +3463,6 @@ impl ElementDeclarationRows {
         row.written_by_kind[kind.index()] =
             (!declared.is_empty() && written_values.len() == declared.len()).then(|| written_values.into_boxed_slice());
         row.by_kind[kind.index()] = (!declared.is_empty()).then(|| declared.into_boxed_slice());
-        row.complete[kind.index()] = declarations_are_complete;
         let after = row.storage_bytes();
         self.payload_bytes = self.payload_bytes - before + after;
     }
@@ -3574,7 +3543,6 @@ impl ElementDeclarationRows {
         row.by_kind[kind.index()] = None;
         row.written_by_kind[kind.index()] = None;
         row.written_checks_by_kind[kind.index()] = Box::default();
-        row.complete[kind.index()] = true;
         if kind == ElementDeclarationKind::InlineStyle {
             if row.custom_declarations.take().is_some() {
                 self.rows_with_custom_declarations -= 1;
@@ -5079,11 +5047,10 @@ impl ElementFactStore {
         kind: ElementDeclarationKind,
         declared: Vec<DeclaredProperty>,
         written_values: Vec<RetainedStyleValueData>,
-        declarations_are_complete: bool,
     ) {
         self.memory_dirty = true;
         self.element_declared_properties
-            .set(node, kind, declared, written_values, declarations_are_complete);
+            .set(node, kind, declared, written_values);
     }
 
     /// Record the custom properties the node's inline style declares, with the values they were
@@ -5116,17 +5083,6 @@ impl ElementFactStore {
     #[must_use]
     pub fn any_element_declares_custom_properties(&self) -> bool {
         self.element_declared_properties.rows_with_custom_declarations != 0
-    }
-
-    /// Whether one kind of the node's element declarations is complete once the custom properties
-    /// the inline style declares are set aside.
-    #[must_use]
-    pub fn element_declarations_are_complete_but_for_custom_properties(
-        &self,
-        node: StyleNodeID,
-        kind: ElementDeclarationKind,
-    ) -> bool {
-        self.element_declared_properties.complete_but_for_custom(node, kind)
     }
 
     pub(super) fn element_written_value_checks(
@@ -5175,7 +5131,6 @@ impl ElementFactStore {
             declared: row.by_kind[kind].take(),
             written: row.written_by_kind[kind].take(),
             checks: std::mem::take(&mut row.written_checks_by_kind[kind]),
-            complete: std::mem::replace(&mut row.complete[kind], true),
             custom: row.custom_declarations.take(),
             custom_written: row.custom_written_values.take(),
         };
@@ -5202,7 +5157,6 @@ impl ElementFactStore {
         row.by_kind[kind] = hidden.declared;
         row.written_by_kind[kind] = hidden.written;
         row.written_checks_by_kind[kind] = hidden.checks;
-        row.complete[kind] = hidden.complete;
         row.custom_declarations = hidden.custom;
         row.custom_written_values = hidden.custom_written;
         if row.custom_declarations.is_some() {
@@ -6248,33 +6202,30 @@ mod tests {
             inline,
             vec![declared(1, false, 10), declared(2, true, 20)],
             Vec::new(),
-            true,
         );
-        facts.set_element_declared_properties(first, hints, vec![declared(3, false, 30)], Vec::new(), false);
-        facts.set_element_declared_properties(later, svg, vec![declared(4, false, 40)], Vec::new(), true);
-        facts.set_element_declared_properties(later, inline, Vec::new(), Vec::new(), false);
+        facts.set_element_declared_properties(first, hints, vec![declared(3, false, 30)], Vec::new());
+        facts.set_element_declared_properties(later, svg, vec![declared(4, false, 40)], Vec::new());
+        facts.set_element_declared_properties(later, inline, Vec::new(), Vec::new());
         assert_eq!(
             facts.element_declared_properties.get(first, inline),
             (&[declared(1, false, 10), declared(2, true, 20)][..], true)
         );
         assert_eq!(
             facts.element_declared_properties.get(first, hints),
-            (&[declared(3, false, 30)][..], false)
+            (&[declared(3, false, 30)][..], true)
         );
         assert_eq!(
             facts.element_declared_properties.get(later, svg),
             (&[declared(4, false, 40)][..], true)
         );
-        assert_eq!(facts.element_declared_properties.get(later, inline), (&[][..], false));
+        assert_eq!(facts.element_declared_properties.get(later, inline), (&[][..], true));
         assert_eq!(facts.element_declared_properties.rows.len(), 65);
-        facts.set_element_declared_properties(first, inline, Vec::new(), Vec::new(), true);
+        facts.set_element_declared_properties(first, inline, Vec::new(), Vec::new());
         assert!(facts.element_declared_properties.get(first, inline).0.is_empty());
         assert_eq!(
             facts.element_declared_properties.get(first, hints),
-            (&[declared(3, false, 30)][..], false)
+            (&[declared(3, false, 30)][..], true)
         );
-        facts.set_element_declared_properties(later, inline, Vec::new(), Vec::new(), true);
-        assert_eq!(facts.element_declared_properties.get(later, inline), (&[][..], true));
 
         // Declaration rows can exist without a resident selector-fact row. Retirement still has to
         // clear them before the dense identity is reused.

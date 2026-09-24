@@ -1942,7 +1942,6 @@ pub unsafe fn replay_set_element_declared_properties(
     kind: FfiElementDeclarationKind,
     declared: &[DeclaredProperty],
     custom_declarations: &[CustomDeclaration],
-    declarations_are_complete: bool,
 ) {
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     let node = StyleNodeID::from_raw(node).expect("recorded style node identities are nonzero");
@@ -1953,7 +1952,6 @@ pub unsafe fn replay_set_element_declared_properties(
         Vec::new(),
         custom_declarations.to_vec(),
         Vec::new(),
-        declarations_are_complete,
     );
 }
 
@@ -1967,7 +1965,6 @@ pub unsafe fn replay_set_rule_declared_properties(
     rule: u32,
     declared: &[DeclaredProperty],
     custom_declarations: &[CustomDeclaration],
-    declarations_are_complete: bool,
 ) {
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     engine.set_rule_declared_properties_with_written_values(
@@ -1976,7 +1973,6 @@ pub unsafe fn replay_set_rule_declared_properties(
         Vec::new(),
         custom_declarations.to_vec(),
         Vec::new(),
-        declarations_are_complete,
     );
 }
 
@@ -2533,7 +2529,6 @@ fn register_element_declared_properties(
     kind: FfiElementDeclarationKind,
     declarations: &[crate::css::declaration_block::DeclaredProperty],
     custom_properties: &[crate::css::declaration_block::CustomProperty],
-    declarations_are_complete: bool,
 ) -> bool {
     use crate::css::property_metadata::property_defines_a_css_transition;
     let has_transitions = declarations
@@ -2548,12 +2543,10 @@ fn register_element_declared_properties(
         written_values,
         custom_declarations.clone(),
         custom_written_values,
-        declarations_are_complete,
     );
     engine.record_boundary_call(EventKind::SetElementDeclaredProperties, |payload| {
         payload.write_u32(node.raw());
         payload.write_u8(kind as u8);
-        payload.write_bool(declarations_are_complete);
         write_declared_properties(&declared, payload);
         write_custom_declarations(&custom_declarations, payload);
     });
@@ -2583,7 +2576,6 @@ pub unsafe extern "C" fn style_engine_set_element_inline_style_properties(
         FfiElementDeclarationKind::InlineStyle,
         data.as_ref().map_or(&[], |data| data.properties.as_slice()),
         data.as_ref().map_or(&[], |data| data.custom_properties.as_slice()),
-        true,
     )
 }
 
@@ -2614,7 +2606,7 @@ pub unsafe extern "C" fn style_engine_set_element_presentational_hint_properties
         .iter()
         .map(|property| unsafe { declaration_from_view(property) })
         .collect::<Vec<_>>();
-    register_element_declared_properties(engine, node, kind, &declarations, &[], true)
+    register_element_declared_properties(engine, node, kind, &declarations, &[])
 }
 
 #[cfg(feature = "style-recording")]
@@ -3537,7 +3529,6 @@ pub(crate) fn publish_rule_declarations(
     if rule == 0 {
         return false;
     }
-    let declarations_are_complete = true;
     let mut has_transitions = false;
     let declared = data
         .properties
@@ -3563,11 +3554,9 @@ pub(crate) fn publish_rule_declarations(
         written_values,
         custom_declarations.clone(),
         custom_written_values,
-        declarations_are_complete,
     );
     engine.record_boundary_call(EventKind::SetRuleDeclaredProperties, |payload| {
         payload.write_u32(rule);
-        payload.write_bool(declarations_are_complete);
         write_declared_properties(&declared, payload);
         write_custom_declarations(&custom_declarations, payload);
     });

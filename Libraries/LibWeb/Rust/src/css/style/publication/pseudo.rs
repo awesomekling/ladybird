@@ -1220,10 +1220,7 @@ impl RetainedState {
     /// winner columns hold, and custom properties, which the engine resolves into the
     /// pseudo-element's own environment, including a container verdict held with its origin.
     pub(super) fn pseudo_winners_are_complete(&self, node: StyleNodeID) -> bool {
-        let rule_is_complete = |rule: RuleID| {
-            self.container_gate_is_held(Some(node), rule, true)
-                && self.program.declarations_are_complete_but_for_custom_properties(rule)
-        };
+        let rule_is_complete = |rule: RuleID| self.container_gate_is_held(Some(node), rule, true);
         if let Some((published, answer)) = Self::published_answer_lookup(
             &self.published_match_answers,
             self.batch_matching_traversal.as_deref(),

@@ -307,7 +307,6 @@ mod tests {
                 })
                 .collect(),
             written.into(),
-            true,
         );
         let owners = Arc::strong_count(&observer);
         let store = WinnerStore::new(

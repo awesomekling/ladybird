@@ -4675,9 +4675,6 @@ impl RetainedState {
             for entry in retained.iter() {
                 self.programs.get(entry.program).entries().get(entry.entry as usize)?;
                 if self.program.rule_is_gated_by_container_query(entry.rule)
-                    || !self
-                        .program
-                        .declarations_are_complete_but_for_custom_properties(entry.rule)
                     || !self.match_scope_is_complete_for(Some(node), entry.rule, entry.tree_scope)
                 {
                     return Some(false);
@@ -6162,11 +6159,10 @@ mod tests {
             vec![RetainedStyleValueData::from_owned(StyleValueData::Number {
                 value: 0.5,
             })],
-            true,
         );
         engine
             .facts
-            .set_element_declared_properties(second, kind, vec![declaration], Vec::new(), true);
+            .set_element_declared_properties(second, kind, vec![declaration], Vec::new());
         let winner = PropertyWinner {
             property: declaration.property,
             important: false,

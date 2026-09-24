@@ -1919,12 +1919,7 @@ impl StyleEngineState {
                     && !(reaction & DERIVABLE != 0 && style_input_nodes_for_cpp.contains(&root));
                 let can_prepare = (reaction_is_settleable
                     || (old_record.is_none() && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
-                    && !self.retained.computed_group_sets.node_answer_is_incomplete(root)
-                    && !selector_truth_changes.deltas_for(root).iter().any(|delta| {
-                        !self
-                            .program
-                            .declarations_are_complete_but_for_custom_properties(delta.rule)
-                    });
+                    && !self.retained.computed_group_sets.node_answer_is_incomplete(root);
                 if can_prepare {
                     let flipped_rules = selector_truth_changes.deltas_for(root);
                     let answer_is_unchanged =
@@ -2501,19 +2496,6 @@ impl StyleEngineState {
                     pass.rows_after_installed_ancestors.insert(node);
                     cut_at = Some(published_index);
                     break;
-                } else if pass.selector_truth_changes.deltas_for(node).iter().any(|delta| {
-                        !self
-                            .program
-                            .declarations_are_complete_but_for_custom_properties(delta.rule)
-                    })
-                        // An element standing for its host's pseudo-element takes the host's rules.
-                        && !self.backs_host_pseudo_element(node)
-                {
-                    // Custom declarations are resolved by the engine's environment computation.
-                    // Other declarations missing from the winner columns still require C++.
-                    counters.bump(Counter::EngineComputedRecordGateIncompleteAnswer);
-                    decline_cause = "GateIncompleteAnswer";
-                    false
                 } else {
                     match self
                         .tree

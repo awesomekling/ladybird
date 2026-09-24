@@ -722,9 +722,6 @@ impl RetainedState {
         if let Some(&complete) = self.batch_answers_complete_but_for_custom_properties.get(&node) {
             return complete;
         }
-        if !self.element_declarations_are_complete_but_for_custom_properties(node) {
-            return false;
-        }
         if let Some((published, answer)) = Self::published_answer_lookup(
             &self.published_match_answers,
             self.batch_matching_traversal.as_deref(),
@@ -755,9 +752,6 @@ impl RetainedState {
         published: &PublishedMatchAnswers,
         answer: &PublishedMatchAnswer,
     ) -> Option<bool> {
-        if !self.element_declarations_are_complete_but_for_custom_properties(node) {
-            return Some(false);
-        }
         if let Some(matches) = published.matches_for(answer) {
             return Some(matches.iter().all(|entry| {
                 self.match_is_complete_but_for_custom_properties(
@@ -770,13 +764,6 @@ impl RetainedState {
         }
         let matches = self.match_answers.answer(answer.cascade_input?)?;
         Some(self.retained_matches_are_complete_but_for_custom_properties(node, matches))
-    }
-
-    pub(super) fn element_declarations_are_complete_but_for_custom_properties(&self, node: StyleNodeID) -> bool {
-        ElementDeclarationKind::ALL.iter().all(|&kind| {
-            self.facts
-                .element_declarations_are_complete_but_for_custom_properties(node, kind)
-        })
     }
 
     fn retained_matches_are_complete_but_for_custom_properties(
@@ -796,7 +783,7 @@ impl RetainedState {
     }
 
     /// Whether the winners the cascade publishes hold a match: its scope is one they are
-    /// published for (`match_scope_is_complete_for`), no container query gates it, and its rule
+    /// published for (`match_scope_is_complete_for`) and no container query gates it. A rule
     /// declares nothing past its longhand winners but custom properties.
     pub(super) fn match_is_complete_but_for_custom_properties(
         &self,
@@ -807,7 +794,6 @@ impl RetainedState {
     ) -> bool {
         self.match_scope_is_complete_for(Some(node), rule, tree_scope)
             && self.container_gate_is_held(Some(node), rule, pseudo)
-            && self.program.declarations_are_complete_but_for_custom_properties(rule)
     }
 
     /// The custom properties the node's cascade decides, each with its winning declaration and

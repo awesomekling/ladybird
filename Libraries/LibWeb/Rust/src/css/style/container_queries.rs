@@ -199,15 +199,14 @@ impl RetainedState {
         };
         self.container_gates_unheld.remove(&node);
         let complete = self.cascade_winner_inventory_is_complete(&matches, Some(node));
-        let complete_but_for_custom_properties = self.element_declarations_are_complete_but_for_custom_properties(node)
-            && matches.iter().all(|entry| {
-                self.match_is_complete_but_for_custom_properties(
-                    node,
-                    entry.rule,
-                    entry.tree_scope,
-                    entry.pseudo_element.is_some(),
-                )
-            });
+        let complete_but_for_custom_properties = matches.iter().all(|entry| {
+            self.match_is_complete_but_for_custom_properties(
+                node,
+                entry.rule,
+                entry.tree_scope,
+                entry.pseudo_element.is_some(),
+            )
+        });
         let mut effects = AnswerEffects::default();
         let compact = self.matches_for_cascade(&mut effects, matches, true, Some(node), counters);
         self.remember_cascade_input_with_effects(&mut effects, node, &compact, counters);
