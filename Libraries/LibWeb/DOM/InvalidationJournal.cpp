@@ -5,10 +5,12 @@
  */
 
 #include <AK/TemporaryChange.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/DOM/Range.h>
+#include <LibWeb/DOM/Text.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/NodeArena.h>
@@ -355,6 +357,52 @@ void InvalidationJournal::publish_visual_context_marks()
         m_document.set_needs_accumulated_visual_contexts_update(true);
 }
 
+void InvalidationJournal::note_text_data(Text& text, bool whitespace_state_changed)
+{
+    // A text node outside the document's tree has no mirror row and no box to take its data.
+    auto identity = NodeIdentity::of(text);
+    if (!identity)
+        return;
+    auto& entry = entry_for(identity);
+    entry.needs_text_data_publish = true;
+    // A later change can flip the state back, which costs the drain no more than a tree update.
+    entry.text_whitespace_state_changed |= whitespace_state_changed;
+    drain_if_the_render_side_is_reading();
+}
+
+// The mirror holds the characters the layout tree build renders, and a text box that already
+// exists renders them again once its content is invalidated.
+static void publish_text_data(Text& text, bool whitespace_state_changed)
+{
+    CSS::record_text_data_changed(text);
+    if (auto* parent = text.parent()) {
+        if (auto* first_letter_owner = parent->first_letter_owner_for_layout_subtree_from(*parent))
+            first_letter_owner->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::CharacterDataReplaceData);
+    }
+    if (whitespace_state_changed)
+        CSS::record_text_whitespace_state_changed(text);
+    auto* text_layout_node = as_if<Layout::TextNode>(text.unsafe_layout_node());
+    if (text_layout_node && Layout::RustFFI::layout_arena_text_has_source_range(text_layout_node->arena_handle(), Layout::Node::slot_id(text_layout_node))) {
+        // First-letter source ranges are determined while building the layout tree.
+        if (auto* parent = text.parent())
+            parent->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::CharacterDataReplaceData);
+    } else if (text_layout_node) {
+        // NB: Since the text node's data has changed, we need to invalidate the text for rendering.
+        //     This ensures that the new text is reflected in layout, even if we don't end up doing a full layout
+        //     tree rebuild.
+        text_layout_node->invalidate_text_for_rendering();
+
+        // We also need to relayout.
+        text_layout_node->set_needs_layout_update(SetNeedsLayoutReason::CharacterDataReplaceData);
+
+        if (whitespace_state_changed)
+            text.set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::CharacterDataReplaceData);
+    } else if (whitespace_state_changed && text.is_connected()) {
+        if (auto* parent = text.parent())
+            parent->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::CharacterDataReplaceData);
+    }
+}
+
 // The offsets are read from where the DOM side stores them now, except a pseudo-element's, which
 // the entry carries to the render side that stores it.
 //
@@ -434,6 +482,10 @@ void InvalidationJournal::drain()
                 // A node that left the tree between the mark and here is on no path the build walks,
                 // and the mutation that took it out dirtied the parent it left.
                 node->apply_layout_tree_update_mark(entry.layout_tree_update_reason);
+            }
+            if (entry.needs_text_data_publish && node) {
+                if (auto* text = as_if<Text>(*node))
+                    publish_text_data(*text, entry.text_whitespace_state_changed);
             }
             if (entry.needs_editability_stamps_refresh && node)
                 refresh_editability_stamps(*node);

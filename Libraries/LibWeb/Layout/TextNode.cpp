@@ -78,8 +78,11 @@ GeneratedTextNode::GeneratedTextNode(DOM::Document& document, BindToPreparedAren
 
 GeneratedTextNode::~GeneratedTextNode() = default;
 
+// The rendered text is refreshed from the data the mirror holds, so data the journal still holds
+// goes through first.
 Utf16String TextNode::rendered_text_for_dom(bool collapse_whitespace) const
 {
+    document().drain_invalidation_journal();
     Utf16String text;
     RustFFI::layout_arena_collect_rendered_text(arena_handle(), slot_id(this), collapse_whitespace, &text,
         [](void* context, RustFFI::FfiRenderedTextView view) {
@@ -90,6 +93,7 @@ Utf16String TextNode::rendered_text_for_dom(bool collapse_whitespace) const
 
 RustFFI::FfiTextSourceRange TextNode::word_range_at(size_t dom_offset) const
 {
+    document().drain_invalidation_journal();
     return RustFFI::layout_arena_text_word_range(arena_handle(), slot_id(this), dom_offset);
 }
 
@@ -100,6 +104,7 @@ void TextNode::invalidate_text_for_rendering()
 
 Utf16View TextNode::text_for_rendering() const
 {
+    document().drain_invalidation_journal();
     auto view = RustFFI::layout_arena_text_for_rendering(arena_handle(), slot_id(this));
     return Utf16View { reinterpret_cast<char16_t const*>(view.text), view.length_in_code_units };
 }
