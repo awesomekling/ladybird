@@ -53,7 +53,11 @@ RefPtr<FontCascadeList::PendingFace> FontCascadeList::PendingFace::with_id(u64 i
     auto it = s_pending_faces_by_id->find(id);
     if (it == s_pending_faces_by_id->end())
         return nullptr;
-    return *it->value;
+    // NB: A face whose last reference is being dropped on another thread stays registered until its
+    //     destructor takes the mutex, so it must not be revived.
+    if (!it->value->try_ref())
+        return nullptr;
+    return adopt_ref(*it->value);
 }
 
 void request_wanted_pending_faces()
