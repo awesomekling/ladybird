@@ -2531,70 +2531,72 @@ impl StyleEngineState {
                     }
                 };
                 let bail_marks = seal::is_reporting().then(|| counters.record_bail_marks());
-                let engine_record_answer = engine_computed_gate_passes.then(|| {
-                    // Unchanged winners stand for an unchanged record only when the reaction
-                    // is rules flipping for the node, every one of them known and declaring
-                    // nothing past its winners, or the node's answer is the one it had.
-                    let flipped_rules = pass.selector_truth_changes.deltas_for(node);
-                    let answer_is_unchanged = answer_cascade_input.is_some()
-                        && answer_cascade_input == pass.previous_cascade_inputs[published_index];
-                    let flipped: publication::FlippedRules = flipped_rules
-                        .iter()
-                        .map(|delta| {
-                            self.retained
-                                .programs
-                                .entry(delta.entry)
-                                .1
-                                .pseudo_element
-                                .map(|pseudo| pseudo.kind.0)
-                        })
-                        .collect();
-                    // No rule flipped for the node and nothing refreshed its answer: the
-                    // state it holds is its cascade, unless the environment moved, which
-                    // reaches values the winners do not name.
-                    let nothing_flipped = flipped_rules.is_empty() && !pass.environment_changed;
-                    let winners_are_exact = !pass.rule_declarations_edited
-                        && pass.selector_truth_changes.refreshes_for(node).is_empty()
-                        && (answer_is_unchanged
-                            || nothing_flipped
-                            || (!flipped_rules.is_empty()
-                                && flipped_rules
-                                    .iter()
-                                    .all(|delta| self.retained.program.declarations_are_complete_for(delta.rule))));
-                    pass.scratch.answer_or_declarations_moved = pass.rule_declarations_edited
-                        || !flipped_rules.is_empty()
-                        || !pass.selector_truth_changes.refreshes_for(node).is_empty();
-                    // The element's font environment moved: its record resolves a font
-                    // cascade out of the published `@font-face` table, and that table is
-                    // not the one the record holds.
-                    pass.scratch.font_environment_moved = pass.font_feature_values_moved
-                        || reaction & transaction::STYLE_REACTION_FONT_INPUTS_CHANGED != 0;
-                    // A descendant recompute stands for inputs no winner shows: the root's
-                    // font metrics, an ancestor's direction, writing mode or container type.
-                    // An ancestor becoming visible stands for a record whose style was cleared
-                    // on entry to display:none.
-                    pass.scratch.recompute_in_full = reaction
-                        & (transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES
-                            | transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE)
-                        != 0
-                        || (pass.counter_styles_moved && self.node_reads_counter_styles(node))
-                        || (pass.container_input_nodes.contains(&node)
-                            && self.container_input_requires_full_drive(node))
-                        || pass.tree_counting_input_nodes.contains(&node);
-                    pass.scratch.ancestor_became_visible =
-                        reaction & transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE != 0;
-                    let delta = self.engine_computed_record_delta(
-                        node,
-                        answer_winners_are_complete,
-                        winners_are_exact.then_some(flipped),
-                        parent_inputs_moved,
-                        &mut pass.scratch,
-                        counters,
-                    );
-                    pass.scratch.recompute_in_full = false;
-                    pass.scratch.ancestor_became_visible = false;
-                    delta
-                });
+                // An engine no document hosts computes no records.
+                let engine_record_answer =
+                    (engine_computed_gate_passes && self.retained.computes_records()).then(|| {
+                        // Unchanged winners stand for an unchanged record only when the reaction
+                        // is rules flipping for the node, every one of them known and declaring
+                        // nothing past its winners, or the node's answer is the one it had.
+                        let flipped_rules = pass.selector_truth_changes.deltas_for(node);
+                        let answer_is_unchanged = answer_cascade_input.is_some()
+                            && answer_cascade_input == pass.previous_cascade_inputs[published_index];
+                        let flipped: publication::FlippedRules = flipped_rules
+                            .iter()
+                            .map(|delta| {
+                                self.retained
+                                    .programs
+                                    .entry(delta.entry)
+                                    .1
+                                    .pseudo_element
+                                    .map(|pseudo| pseudo.kind.0)
+                            })
+                            .collect();
+                        // No rule flipped for the node and nothing refreshed its answer: the
+                        // state it holds is its cascade, unless the environment moved, which
+                        // reaches values the winners do not name.
+                        let nothing_flipped = flipped_rules.is_empty() && !pass.environment_changed;
+                        let winners_are_exact = !pass.rule_declarations_edited
+                            && pass.selector_truth_changes.refreshes_for(node).is_empty()
+                            && (answer_is_unchanged
+                                || nothing_flipped
+                                || (!flipped_rules.is_empty()
+                                    && flipped_rules
+                                        .iter()
+                                        .all(|delta| self.retained.program.declarations_are_complete_for(delta.rule))));
+                        pass.scratch.answer_or_declarations_moved = pass.rule_declarations_edited
+                            || !flipped_rules.is_empty()
+                            || !pass.selector_truth_changes.refreshes_for(node).is_empty();
+                        // The element's font environment moved: its record resolves a font
+                        // cascade out of the published `@font-face` table, and that table is
+                        // not the one the record holds.
+                        pass.scratch.font_environment_moved = pass.font_feature_values_moved
+                            || reaction & transaction::STYLE_REACTION_FONT_INPUTS_CHANGED != 0;
+                        // A descendant recompute stands for inputs no winner shows: the root's
+                        // font metrics, an ancestor's direction, writing mode or container type.
+                        // An ancestor becoming visible stands for a record whose style was cleared
+                        // on entry to display:none.
+                        pass.scratch.recompute_in_full = reaction
+                            & (transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES
+                                | transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE)
+                            != 0
+                            || (pass.counter_styles_moved && self.node_reads_counter_styles(node))
+                            || (pass.container_input_nodes.contains(&node)
+                                && self.container_input_requires_full_drive(node))
+                            || pass.tree_counting_input_nodes.contains(&node);
+                        pass.scratch.ancestor_became_visible =
+                            reaction & transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE != 0;
+                        let delta = self.engine_computed_record_delta(
+                            node,
+                            answer_winners_are_complete,
+                            winners_are_exact.then_some(flipped),
+                            parent_inputs_moved,
+                            &mut pass.scratch,
+                            counters,
+                        );
+                        pass.scratch.recompute_in_full = false;
+                        pass.scratch.ancestor_became_visible = false;
+                        delta
+                    });
                 let suspension = match engine_record_answer {
                     Some(Err(publication::Unanswered::Suspended(suspension))) => Some(suspension),
                     _ => None,

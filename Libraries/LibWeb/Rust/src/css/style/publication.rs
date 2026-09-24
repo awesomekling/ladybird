@@ -15,7 +15,7 @@ use super::style_invalidation::property_feeds_post_compute_adjustment;
 use super::*;
 use crate::css::computed_longhand_table::ComputedLonghandTable;
 pub(crate) use drive::drive_font_metric;
-pub(super) use drive::{CountRefusal, Drive, OrRefused, Suspension, Unanswered};
+pub(super) use drive::{Drive, Suspension, Unanswered};
 use drive::{FontDriveGoal, FullDrive, PartialDrive, table_names_animations};
 
 /// Another element's published style that a first-time computation may build over: the element
@@ -234,6 +234,12 @@ impl RetainedState {
         self.font_resolution.is_some()
     }
 
+    /// A browser build's engine always has a document to host it.
+    #[cfg(not(any(test, feature = "style-replay")))]
+    pub(super) const fn computes_records(&self) -> bool {
+        true
+    }
+
     /// The step itself, which decides the substituted-record facts rather than writing them.
     #[allow(clippy::too_many_arguments)]
     fn decide_engine_computed_record_delta(
@@ -245,11 +251,7 @@ impl RetainedState {
         scratch: &mut EngineComputedRecordScratch,
         counters: &mut Counters,
     ) -> Drive<RecordDelta> {
-        #[cfg(any(test, feature = "style-replay"))]
-        if !self.computes_records() {
-            counters.bump(Counter::EngineComputedRecordBailUnhosted);
-            return Err(Unanswered::Refused);
-        }
+        debug_assert!(self.computes_records(), "only a hosted engine drives records");
         let pending_element = scratch.pending_element.take();
         if pending_element.is_none() {
             scratch.pseudo_deltas.clear();
@@ -279,12 +281,7 @@ impl RetainedState {
         // A pseudo-element asks about its originating element too. The element's new record may
         // have changed that container's type, name or style after the first verdict check.
         if self.container_verdicts_moved(node) {
-            let republished = self.republish_winners_from_answer(node, counters);
-            debug_assert!(republished.is_some(), "a driven row without the facts to match it");
-            if republished.is_none() {
-                self.abandon_engine_computed_record(node, scratch, counters);
-                return Err(Unanswered::Refused);
-            }
+            self.republish_driven_winners(node, counters);
             self.container_effects_for_host.remove(&node);
             // The republish published the verdicts it just evaluated; this notes their effects
             // for the host.
@@ -299,10 +296,8 @@ impl RetainedState {
         if let Err(unanswered) =
             self.engine_pseudo_records(node, old_style_record, delta.1, generation, scratch, counters)
         {
-            match unanswered {
-                Unanswered::Suspended(_) => scratch.pending_element = Some(delta),
-                Unanswered::Refused => self.abandon_engine_computed_record(node, scratch, counters),
-            }
+            let Unanswered::Suspended(_) = unanswered;
+            scratch.pending_element = Some(delta);
             return Err(unanswered);
         }
         if let Lookup::Known((_, state)) = self
@@ -368,13 +363,7 @@ impl RetainedState {
             || !matches!(self.current_winner_groups().token_for(winner_key), Lookup::Known(_));
         if self.container_gates_unheld.contains(&node) || self.container_verdicts_moved(node) || stale_element_winners {
             // A published row has the fact row its winners are matched from.
-            let republished = self.republish_winners_from_answer(node, counters);
-            debug_assert!(republished.is_some(), "a driven row without the facts to match it");
-            let Some(complete) = republished else {
-                counters.bump(Counter::EngineComputedRecordBailWinner);
-                return Err(Unanswered::Refused);
-            };
-            cascade_winners_are_complete = complete;
+            cascade_winners_are_complete = self.republish_driven_winners(node, counters);
         }
         // Verdicts that did not move stand, and a republish published the ones it just evaluated;
         // this notes their effects for the host.
@@ -385,10 +374,10 @@ impl RetainedState {
         );
         // A custom property the cascade declares is no winner the columns hold; the engine
         // computes the environment it decides itself.
-        if !cascade_winners_are_complete && !self.cascade_winners_are_complete_but_for_custom_properties(node) {
-            counters.bump(Counter::EngineComputedRecordBailIncompleteWinners);
-            return Err(Unanswered::Refused);
-        }
+        debug_assert!(
+            cascade_winners_are_complete || self.cascade_winners_are_complete_but_for_custom_properties(node),
+            "a driven row's winners are complete but for custom properties"
+        );
         // The winners the record was computed from, against the winners the node holds now: the
         // same comparison a C++ publication makes to select what it recomputes.
         let Lookup::Known((generation, state)) = self.current_winner_groups().token_for(winner_key) else {
@@ -488,9 +477,8 @@ impl RetainedState {
             let registered = self
                 .own_font_length_resolution_context(old_style_record, &inputs)
                 .map(|(length, color_scheme)| custom_property_cascade::RegisteredValueContext { length, color_scheme });
-            let environment = self
-                .engine_custom_property_environment(node, parent_environment, &inputs, registered, counters)
-                .count_refusal(counters, Counter::EngineComputedRecordBailCustomProperties)?;
+            let environment =
+                self.engine_custom_property_environment(node, parent_environment, &inputs, registered, counters)?;
             // A record an animation composed into was published with no environment of its own:
             // what the element's own declarations resolved to is on the style beneath it. Every
             // installed record is published with one; a record without is republished as moved.
@@ -1600,11 +1588,7 @@ impl RetainedState {
         goal: FontDriveGoal,
         counters: &mut Counters,
     ) -> Drive<ElementAnswer> {
-        #[cfg(any(test, feature = "style-replay"))]
-        if !self.computes_records() {
-            counters.bump(Counter::EngineComputedRecordBailUnhosted);
-            return Err(Unanswered::Refused);
-        }
+        debug_assert!(self.computes_records(), "only a hosted engine drives records");
         let target = computed::ComputedStyleTarget::new(node, u8::MAX);
         let (_, state) = cascade_state;
         let mut inputs = self.document_style_computation_inputs;
@@ -1675,9 +1659,13 @@ impl RetainedState {
         }
         let provisional_registered =
             has_registered_declarations.then(|| self.provisional_registered_value_context(parent_record, &inputs));
-        let mut environment = self
-            .engine_custom_property_environment(node, parent_environment, &inputs, provisional_registered, counters)
-            .count_refusal(counters, Counter::EngineComputedRecordBailCustomProperties)?;
+        let mut environment = self.engine_custom_property_environment(
+            node,
+            parent_environment,
+            &inputs,
+            provisional_registered,
+            counters,
+        )?;
         // A store with substituted values is the environment's as well as the state's, and one
         // that reads attributes or custom conditions is the element's alone.
         let reads_external_substitution =
@@ -2558,22 +2546,18 @@ impl RetainedState {
                         })
                 })
         }) && self.current_winner_groups().row_stamp(node) != Some(self.flush_stamp);
+        let winner_key = WinnerGroupKey::current(node, self.program.version());
         let republished_complete = if container_winners_are_stale
             || self.container_gates_unheld.contains(&node)
             || self.container_verdicts_moved(node)
+            || !matches!(self.current_winner_groups().token_for(winner_key), Lookup::Known(_))
         {
-            let Some(complete) = self.republish_winners_from_answer(node, counters) else {
-                return Err(Unanswered::Refused);
-            };
-            Some(complete)
+            Some(self.republish_driven_winners(node, counters))
         } else {
             None
         };
-        let Lookup::Known(cascade_state) = self
-            .current_winner_groups()
-            .token_for(WinnerGroupKey::current(node, self.program.version()))
-        else {
-            return Err(Unanswered::Refused);
+        let Lookup::Known(cascade_state) = self.current_winner_groups().token_for(winner_key) else {
+            unreachable!("the node's winners were republished from its answer");
         };
         // An armed row's answer may declare past its winners: a record computed from it is no
         // function of the winner state the cold record cache is keyed by.
@@ -2621,14 +2605,8 @@ impl RetainedState {
                     scratch.substitution_effects.push((node, true));
                 }
                 if let Err(unanswered) = pseudos_settled {
-                    // A pseudo-element the engine cannot settle sends the element to C++.
-                    match unanswered {
-                        Unanswered::Suspended(_) => scratch.pending_element = Some((old_record, record)),
-                        Unanswered::Refused => {
-                            counters.bump(Counter::RetryAfterAncestorPseudoAbandons);
-                            self.abandon_engine_computed_record(node, scratch, counters);
-                        }
-                    }
+                    let Unanswered::Suspended(_) = unanswered;
+                    scratch.pending_element = Some((old_record, record));
                     self.apply_substitution_effects(scratch);
                     return Err(unanswered);
                 }
@@ -2640,9 +2618,10 @@ impl RetainedState {
         // A row the flush armed drives its incomplete answer as the flush would have, over the
         // installed ancestor's final groups. A row introduced while the host applied the batch
         // was never offered an incomplete answer.
-        if !armed && !scratch.font_drive.is_pending() && self.computed_group_sets.node_answer_is_incomplete(node) {
-            return Err(Unanswered::Refused);
-        }
+        debug_assert!(
+            armed || scratch.font_drive.is_pending() || !self.computed_group_sets.node_answer_is_incomplete(node),
+            "an unarmed row's answer is complete but for custom properties"
+        );
         // A row this transaction published no answer for (one whose ancestor's environment moved,
         // say) has winners no answer here vouches for. A shadow host's answer is never retained
         // either, so rebuild the winners from an exact match: that answer says whether they are
@@ -2651,12 +2630,7 @@ impl RetainedState {
             Some(complete) => complete,
             None => match self.current_published_answer(node) {
                 Some(answer) => answer.cascade_winners_are_complete,
-                None => {
-                    let Some(complete) = self.republish_winners_from_answer(node, counters) else {
-                        return Err(Unanswered::Refused);
-                    };
-                    complete
-                }
+                None => self.republish_driven_winners(node, counters),
             },
         };
         let record = self.engine_computed_record_delta(
@@ -2784,42 +2758,6 @@ impl RetainedState {
             }
         }
         (publication.style_record_identity, swap_eligible)
-    }
-
-    /// A derivation that could not be completed: everything derived for `node` this flush goes
-    /// back to what the node held, and nothing in the flush may share it.
-    pub(super) fn abandon_engine_computed_record(
-        &mut self,
-        node: StyleNodeID,
-        scratch: &mut EngineComputedRecordScratch,
-        counters: &mut Counters,
-    ) {
-        self.nodes_owing_animation_definitions
-            .retain(|(owner, _), _| *owner != node);
-        for pending in self.engine_computed_records_pending.remove(&node).into_iter().flatten() {
-            let derived = pending.new_style_record;
-            if pending.pseudo_kind == u8::MAX {
-                let target = computed::ComputedStyleTarget::new(node, u8::MAX);
-                self.computed_group_sets.take_pending_cascade_state(target);
-                self.computed_group_sets
-                    .revert_engine_computed_record(node, derived, pending.old_style_record);
-                scratch.cohorts.retain(|_, (record, _)| *record != derived);
-                scratch.cold_cohorts.retain(|_, record| record.record != derived);
-                self.engine_cold_record_cache
-                    .retain(|_, record| record.record != derived);
-                self.engine_cold_record_donors.retain(|_, donors| {
-                    donors.retain(|donor| donor.record.record != derived);
-                    !donors.is_empty()
-                });
-            } else {
-                self.revert_engine_computed_pseudo_record(&pending, counters);
-                scratch.pseudo_cohorts.retain(|_, record| *record != derived);
-                self.engine_pseudo_record_cache.retain(|_, record| *record != derived);
-            }
-        }
-        scratch.pseudo_deltas.clear();
-        self.settle_computed_memory();
-        counters.bump(Counter::EngineComputedRecordsAbandoned);
     }
 
     /// Whether a node's record inherits from the parent it has now: each inherited group outside
@@ -4674,6 +4612,10 @@ impl StyleEngineState {
         counters: &mut Counters,
     ) -> Option<computed::FinalStyleRecordID> {
         use crate::css::style_value::{RetainedStyleValueData, StyleValueData, retain_style_value};
+        // An engine no document hosts computes no records.
+        if !self.computes_records() {
+            return None;
+        }
         let inputs = self.document_style_computation_inputs;
         let retained = |value: *const StyleValueData| unsafe {
             RetainedStyleValueData::from_retained_pointer(retain_style_value(value))
@@ -4731,7 +4673,6 @@ impl StyleEngineState {
                 Ok(FullDrive::AwaitsRegisteredContext(_) | FullDrive::RootInputs(_)) => {
                     unreachable!("a complete drive without registered declarations finishes")
                 }
-                Err(Unanswered::Refused) => return None,
                 Err(Unanswered::Suspended(Suspension::RandomBases)) => self.refill_random_base_requests(),
                 Err(Unanswered::Suspended(Suspension::Font)) => {
                     let request = scratch.font_drive.take_suspended_request();
@@ -5066,6 +5007,10 @@ impl StyleEngineState {
                 self.retained.published_match_answers.sort();
             }
 
+            // An engine no document hosts computes no records.
+            if !self.computes_records() {
+                return Ok(None);
+            }
             if let Some(kind) = pseudo {
                 let record = self.demand_pseudo_record(
                     node,
@@ -5074,13 +5019,12 @@ impl StyleEngineState {
                     targeted,
                     computed::FinalStyleRecordID::from_raw(parent_highlight),
                     counters,
-                )?;
+                );
                 Ok(record.map(|record| RetriedEngineRecord {
                     style_record: record.raw(),
                     ..RetriedEngineRecord::default()
                 }))
             } else {
-                let before = counters.record_bail_marks();
                 let mut scratch = EngineComputedRecordScratch {
                     recompute_in_full: targeted,
                     targeted_record_demand: targeted,
@@ -5109,9 +5053,7 @@ impl StyleEngineState {
                     }
                 };
                 let Ok((_, record)) = record else {
-                    return Err(counters
-                        .first_changed_record_bail(&before)
-                        .unwrap_or("ComputationBailUnnamed"));
+                    unreachable!("a demand refills what its drive suspends on");
                 };
                 let mut result = RetriedEngineRecord {
                     style_record: record.raw(),
@@ -6165,7 +6107,6 @@ mod tests {
         let mut raw_nodes = [0; 3];
         engine.allocate_style_nodes(&mut raw_nodes);
         let [first, second, third] = raw_nodes.map(|node| StyleNodeID::from_raw(node).unwrap());
-        let mut scratch = EngineComputedRecordScratch::default();
         let publish = |engine: &mut StyleEngine, node, pseudo_kind| {
             let record = engine
                 .publish_computed_groups(
@@ -6210,13 +6151,6 @@ mod tests {
         assert_eq!(engine.counters.get(Counter::EngineComputedLonghandEvaluations), 1);
         engine.acknowledge_engine_computed_record(first);
         assert_eq!(engine.counters.get(Counter::EngineComputedLonghandEvaluations), 3);
-
-        engine
-            .state
-            .abandon_engine_computed_record(third, &mut scratch, &mut engine.counters);
-        assert_eq!(engine.computed_group_sets.assigned_style_record(third), None);
-        assert_eq!(engine.computed_group_sets.pseudo_style_record(third, 0), None);
-        assert!(engine.engine_computed_records_pending.is_empty());
 
         // A later batch can use the same node, and discarding it leaves installed nodes alone.
         publish(&mut engine, third, u8::MAX);
@@ -6417,6 +6351,10 @@ impl StyleEngineState {
         pass_facts: DriveOverInstalledAncestors,
         counters: &mut Counters,
     ) -> RetriedEngineRecord {
+        // An engine no document hosts computes no records.
+        if !self.retained.computes_records() {
+            return RetriedEngineRecord::default();
+        }
         let font_environment_generation = self
             .retained
             .document_style_computation_inputs
@@ -6472,7 +6410,6 @@ impl StyleEngineState {
                     counters.bump(Counter::RetryAfterAncestorSettled);
                     return record;
                 }
-                Err(Unanswered::Refused) => return 0,
                 Err(Unanswered::Suspended(Suspension::RandomBases)) => {
                     self.refill_random_base_requests();
                     continue;

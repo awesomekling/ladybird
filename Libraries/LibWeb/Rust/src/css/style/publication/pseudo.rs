@@ -151,9 +151,11 @@ impl RetainedState {
         // NB: Root pseudos use the originating record's current font, independently of
         //     the document context used for the root's own remaining properties.
         if self.computed_group_sets.adjustment_facts(node) & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT != 0 {
-            self.root_font_inputs_from_record(new_element_record)
-                .or_refused()?
-                .apply_to(&mut inputs);
+            let root_font_inputs = self.root_font_inputs_from_record(new_element_record);
+            debug_assert!(root_font_inputs.is_some(), "an installed record has a view");
+            if let Some(root_font_inputs) = root_font_inputs {
+                root_font_inputs.apply_to(&mut inputs);
+            }
         }
         // Every installed record has a view. One without, or one holding no table, is read as a
         // list item, so its marker is considered rather than dropped.
@@ -385,16 +387,14 @@ impl RetainedState {
             let has_registered_declarations = self.declares_registered_custom_property(node, Some(kind), &inputs);
             let provisional_registered = has_registered_declarations
                 .then(|| self.provisional_registered_value_context(Some(new_element_record), &inputs));
-            let mut environment = self
-                .engine_custom_property_environment_of(
-                    node,
-                    Some(kind),
-                    element_environment,
-                    &inputs,
-                    provisional_registered,
-                    counters,
-                )
-                .count_refusal(counters, Counter::EngineComputedRecordBailCustomProperties)?;
+            let mut environment = self.engine_custom_property_environment_of(
+                node,
+                Some(kind),
+                element_environment,
+                &inputs,
+                provisional_registered,
+                counters,
+            )?;
             // A store substituting `attr()` holds the element's attributes, which no other
             // element shares.
             let reads_attributes = state.is_some_and(|state| self.state_reads_attributes(node, state));
@@ -795,8 +795,19 @@ impl RetainedState {
             .computed_group_sets
             .sampled_composition_identity_for_pseudo(node)
             .and_then(computed::FinalStyleRecordID::from_raw)
-            .or_else(|| self.computed_group_sets.assigned_style_record(node))
-            .or_refused()?;
+            .or_else(|| self.computed_group_sets.assigned_style_record(node));
+        // The host installed the element's record before it asked.
+        debug_assert!(
+            record.is_some(),
+            "the pseudo settle follows the element's installed record"
+        );
+        let Some(record) = record else {
+            return Ok(computed::FinalStyleRecordID::NONE);
+        };
+        // An engine no document hosts computes no records.
+        if !self.computes_records() {
+            return Ok(record);
+        }
         if !scratch.font_drive.is_pending() {
             // Every declaration the pseudo-elements' rules make has to be a winner the engine
             // holds, as it has for any record it derives. What the element's own declarations
@@ -806,12 +817,9 @@ impl RetainedState {
             let winners_are_complete = if self.holds_pseudo_match_answer(node) {
                 self.pseudo_winners_are_complete(node)
             } else {
-                self.republish_winners_from_answer(node, counters) == Some(true)
+                self.republish_driven_winners(node, counters)
             };
-            if !winners_are_complete {
-                counters.bump(Counter::EngineComputedRecordBailIncompleteWinners);
-                return Err(Unanswered::Refused);
-            }
+            debug_assert!(winners_are_complete, "a settled element's pseudo winners are complete");
         }
         let generation = self.winner_groups.generation();
         if let Err(unanswered) = self.settle_engine_pseudo_records(
@@ -1000,11 +1008,9 @@ impl RetainedState {
         let target = tree::PseudoElementTarget::new(tree::PseudoElementKind(u16::from(kind)));
         // The host's rules for the pseudo-element, cascaded as the element's own with its own
         // declarations, as C++ cascades them for it.
-        let Some(mut matches) = self.backing_element_rule_matches(host, target, backing_answer_is_complete, counters)
-        else {
-            counters.bump(Counter::EngineComputedRecordBailIncompleteWinners);
-            return Err(Unanswered::Refused);
-        };
+        let matches = self.backing_element_rule_matches(host, target, backing_answer_is_complete, counters);
+        debug_assert!(matches.is_some(), "a backed pseudo-element's host matches are complete");
+        let mut matches = matches.unwrap_or_default();
         // The pseudo-element's custom declarations cascade from these matches too: a shadow host
         // retains no answer to read them from.
         let custom_declarations =
@@ -1065,17 +1071,15 @@ impl RetainedState {
             self.declarations_name_a_registered_custom_property(&custom_declarations, &inputs);
         let provisional_registered =
             has_registered_declarations.then(|| self.provisional_registered_value_context(parent_record, &inputs));
-        let mut environment = self
-            .engine_custom_property_environment_over(
-                host,
-                Some(kind),
-                custom_declarations.clone(),
-                parent_environment,
-                &inputs,
-                provisional_registered,
-                counters,
-            )
-            .count_refusal(counters, Counter::EngineComputedRecordBailCustomProperties)?;
+        let mut environment = self.engine_custom_property_environment_over(
+            host,
+            Some(kind),
+            custom_declarations.clone(),
+            parent_environment,
+            &inputs,
+            provisional_registered,
+            counters,
+        )?;
         let mut substituted = false;
         let inheritance_environment = Some(parent_environment);
         let mut store = self.cascaded_store_for_state(
@@ -1264,18 +1268,18 @@ impl StyleEngineState {
         targeted: bool,
         highlight_parent: Option<computed::FinalStyleRecordID>,
         counters: &mut Counters,
-    ) -> Result<Option<computed::FinalStyleRecordID>, &'static str> {
+    ) -> Option<computed::FinalStyleRecordID> {
         let cssom_read = read_only && !targeted;
         // A kind the engine holds no rows for generates no box.
         if kind >= 20 {
-            return Ok(None);
+            return None;
         }
         let mask = self.pseudo_style_mask_or_rematch(node, counters);
         // The demand settled the originating element first; a pseudo-element without an
         // originating record generates no box.
         let Some(element) = self.computed_group_sets.assigned_style_record(node) else {
             debug_assert!(false, "a pseudo-element demand has an originating record");
-            return Ok(None);
+            return None;
         };
         let is_list_item = self
             .computed_group_sets
@@ -1297,12 +1301,12 @@ impl StyleEngineState {
                     .is_some())
         {
             self.drop_demand_pseudo_record(node, kind);
-            return Ok(None);
+            return None;
         }
-        if !self.pseudo_winners_are_complete(node) {
-            return Err("EngineComputedRecordBailIncompleteWinners");
-        }
-        let before = counters.record_bail_marks();
+        debug_assert!(
+            self.pseudo_winners_are_complete(node),
+            "a demanded pseudo-element's winners are complete"
+        );
         let mut scratch = EngineComputedRecordScratch::default();
         let generation = self.winner_groups.generation();
         loop {
@@ -1324,11 +1328,6 @@ impl StyleEngineState {
                 Err(Unanswered::Suspended(Suspension::Font)) => {
                     let request = scratch.font_drive.take_suspended_request();
                     self.refill_font_requests(vec![(Some(node), request)], counters);
-                }
-                Err(Unanswered::Refused) => {
-                    return Err(counters
-                        .first_changed_record_bail(&before)
-                        .unwrap_or("ComputationBailUnnamed"));
                 }
             }
         }
@@ -1355,7 +1354,7 @@ impl StyleEngineState {
             self.demand_pseudo_records.insert((node, kind), record);
         }
         self.settle_computed_memory();
-        Ok(record)
+        record
     }
 
     /// Settle the synthetic pseudo-elements of an element whose record C++ has just computed and

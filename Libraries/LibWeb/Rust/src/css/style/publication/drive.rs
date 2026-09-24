@@ -18,7 +18,6 @@ pub(super) enum FontDriveGoal {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::css::style) enum Unanswered {
     Suspended(Suspension),
-    Refused,
 }
 
 /// What a suspended row waits on. The request itself stays where the host's service reads it.
@@ -40,31 +39,6 @@ pub(super) enum MonospaceRecascade {
     /// A length in the ancestor chain resolves against the monospace font at the size reached so
     /// far, which the between-pass font service has not resolved yet.
     AwaitsFont(bridge::FfiFontResolutionRequest),
-}
-
-/// A missing value on the way to a record is the engine declining the row.
-pub(in crate::css::style) trait OrRefused<T> {
-    fn or_refused(self) -> Drive<T>;
-}
-
-impl<T> OrRefused<T> for Option<T> {
-    fn or_refused(self) -> Drive<T> {
-        self.ok_or(Unanswered::Refused)
-    }
-}
-
-/// A refusal counts under the cause the caller names; a suspension counts nowhere.
-pub(in crate::css::style) trait CountRefusal {
-    fn count_refusal(self, counters: &mut Counters, counter: Counter) -> Self;
-}
-
-impl<T> CountRefusal for Drive<T> {
-    fn count_refusal(self, counters: &mut Counters, counter: Counter) -> Self {
-        if let Err(Unanswered::Refused) = self {
-            counters.bump(counter);
-        }
-        self
-    }
 }
 
 /// A driven longhand table with the length context it was driven against, the longhand
@@ -595,11 +569,7 @@ impl RetainedState {
         } = subject;
         let has = |bit: u32| facts & bit != 0;
         let is_document_element = has(fact::IS_DOCUMENT_ELEMENT);
-        #[cfg(any(test, feature = "style-replay"))]
-        if !self.computes_records() {
-            counters.bump(Counter::EngineComputedRecordBailUnhosted);
-            return Err(Unanswered::Refused);
-        }
+        debug_assert!(self.computes_records(), "only a hosted engine drives records");
         // HACK: A cascade that ends in `font-family: monospace` re-runs the font-size cascade over
         //       the whole ancestor chain against a 13px default instead of the 16px one, which
         //       changes what a keyword size an ancestor declared means.

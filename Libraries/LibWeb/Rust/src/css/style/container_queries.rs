@@ -184,6 +184,19 @@ impl RetainedState {
     /// Publish new winners from the retained selector answer, matching from published facts when
     /// that answer has been evicted or its rule dispatch can no longer materialize it.
     pub(super) fn republish_winners_from_answer(&mut self, node: StyleNodeID, counters: &mut Counters) -> Option<bool> {
+        let matches = self.matches_to_republish(node, counters)?;
+        Some(self.republish_winners_from_matches(node, matches, counters))
+    }
+
+    /// Publish new winners for a row the engine drives. A driven row always has the facts it is
+    /// matched from; should it not, it cascades nothing.
+    pub(super) fn republish_driven_winners(&mut self, node: StyleNodeID, counters: &mut Counters) -> bool {
+        let matches = self.matches_to_republish(node, counters);
+        debug_assert!(matches.is_some(), "a driven row without the facts to match it");
+        self.republish_winners_from_matches(node, matches.unwrap_or_default(), counters)
+    }
+
+    fn matches_to_republish(&mut self, node: StyleNodeID, counters: &mut Counters) -> Option<Vec<RuleMatch>> {
         let retained_matches = self.current_answer_identity(node).and_then(|identity| {
             let answer = self.match_answers.answer(identity).cloned()?;
             for entry in answer.iter() {
@@ -193,10 +206,18 @@ impl RetainedState {
             self.append_catalog_answer(identity, node, None, &mut matches)?;
             Some(matches)
         });
-        let matches = match retained_matches {
-            Some(matches) => matches,
-            None => self.match_element_for_cascade(node, counters).ok()?,
-        };
+        match retained_matches {
+            Some(matches) => Some(matches),
+            None => self.match_element_for_cascade(node, counters).ok(),
+        }
+    }
+
+    fn republish_winners_from_matches(
+        &mut self,
+        node: StyleNodeID,
+        matches: Vec<RuleMatch>,
+        counters: &mut Counters,
+    ) -> bool {
         self.container_gates_unheld.remove(&node);
         let complete = self.cascade_winner_inventory_is_complete(&matches, Some(node));
         let complete_but_for_custom_properties = matches.iter().all(|entry| {
@@ -216,7 +237,7 @@ impl RetainedState {
         let answer_is_incomplete = !complete && !complete_but_for_custom_properties;
         self.computed_group_sets
             .set_node_answer_incomplete(node, answer_is_incomplete);
-        Some(complete)
+        complete
     }
 
     /// Re-evaluate pseudo winners after the element winner was compared in this flush. The
