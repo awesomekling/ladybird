@@ -59,7 +59,7 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
         .build_layout_tree = [](void* context) -> Layout::RustFFI::FfiLayoutTreeBuildOutcome { return static_cast<Document*>(context)->build_layout_tree(); },
         .reconcile_stale_list_item_counters_after_tree_build = [](void* context) -> bool { return static_cast<Document*>(context)->reconcile_stale_list_item_counters_after_tree_build(); },
         .after_layout_commit = [](void* context, bool layout_tree_changed) { static_cast<Document*>(context)->after_layout_commit(layout_tree_changed ? LayoutTreeChanged::Yes : LayoutTreeChanged::No); },
-        .note_full_layout_performed = [](void* context) { static_cast<Document*>(context)->style_invalidation_counters().relayouts_performed++; },
+        .note_full_layouts_performed = [](void* context, u64 count) { static_cast<Document*>(context)->style_invalidation_counters().relayouts_performed += count; },
         .evaluate_pending_container_queries = [](void* context) {
             auto& document = *static_cast<Document*>(context);
             if (document.m_query_containers_needing_container_query_evaluation_after_layout.is_empty())
