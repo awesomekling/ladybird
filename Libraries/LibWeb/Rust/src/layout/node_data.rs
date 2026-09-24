@@ -23,6 +23,11 @@ pub const GENERATED_FOR_LAST_SYNTHETIC: u8 = 8;
 // count so the style container array and the registered group indices line up.
 pub const STYLE_GROUP_COUNT: usize = 23;
 
+/// Where a row's computed style is: the group payload array of the style record pinned for the
+/// row, or null for a row with no style. A pinned record's array is never written while a stage
+/// runs, and the groups it names are immutable payloads, so the row shares it as a `HostShared`.
+pub(crate) type StylePayloadsRef = crate::css::host_shared::HostShared<c_void>;
+
 /// The host's name for a row's shell. A row, and whatever a stage hands back for one, holds this
 /// id rather than the host object; only the document thread turns it back into the object.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -238,7 +243,7 @@ pub(crate) struct NodeData {
     pub table_row_span: Cell<u16>,
     pub dom_paint_facts: Cell<u8>,
     pub ancestor_facts: Cell<u8>,
-    pub style: Cell<*const c_void>,
+    pub style: Cell<StylePayloadsRef>,
     pub shell: Cell<Option<ShellId>>,
 }
 
@@ -261,7 +266,7 @@ impl Default for NodeData {
             dom_paint_facts: Cell::new(0),
             ancestor_facts: Cell::new(0),
             fragment_cache_epoch: Cell::new(0),
-            style: Cell::new(std::ptr::null()),
+            style: Cell::new(StylePayloadsRef::null()),
             shell: Cell::new(None),
         }
     }
