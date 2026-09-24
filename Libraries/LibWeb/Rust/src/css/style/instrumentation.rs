@@ -183,9 +183,6 @@ define_counters! {
     EngineComputedRecordBailWinner => "engineComputedRecordBailWinner",
     EngineComputedRecordBailWinnerOperator => "engineComputedRecordBailWinnerOperator",
     EngineComputedRecordBailWinnerSpelling => "engineComputedRecordBailWinnerSpelling",
-    EngineComputedRecordBailWinnerElement => "engineComputedRecordBailWinnerElement",
-    EngineComputedRecordBailWinnerElementPublication717 => "engineComputedRecordBailWinnerElementPublication717",
-    EngineComputedRecordBailWinnerElementPublication1072 => "engineComputedRecordBailWinnerElementPublication1072",
     EngineComputedRecordBailWinnerAnimated => "engineComputedRecordBailWinnerAnimated",
     EngineComputedRecordBailNoEnvironment => "engineComputedRecordBailNoEnvironment",
     EngineComputedRecordBailCustomPropertyUnsupportedSubstitution => "engineComputedRecordBailCustomPropertyUnsupportedSubstitution",
@@ -217,9 +214,6 @@ define_counters! {
     EngineComputedRecordBailDriveTreeCounting => "engineComputedRecordBailDriveTreeCounting",
     EngineComputedRecordBailValue => "engineComputedRecordBailValue",
     EngineComputedRecordBailAssemble => "engineComputedRecordBailAssemble",
-    EngineComputedRecordBailRecordOverlayDrive441 => "engineComputedRecordBailRecordOverlayDrive441",
-    EngineComputedRecordBailRecordOverlay => "engineComputedRecordBailRecordOverlay",
-    EngineComputedRecordBailRecordOverlayPublication937 => "engineComputedRecordBailRecordOverlayPublication937",
     EngineComputedRecordBailRecordTable => "engineComputedRecordBailRecordTable",
     PrefixDeadDeltaBailMatched => "prefixDeadDeltaBailMatched",
     PrefixDeadDeltaBailOwnAdditions => "prefixDeadDeltaBailOwnAdditions",
@@ -429,27 +423,6 @@ impl Counters {
     #[must_use]
     pub fn first_changed_record_bail(&self, before: &[u64; RECORD_BAIL_COUNT]) -> Option<&'static str> {
         let moved = |index: usize| self.values[index] != before[index - RECORD_BAIL_FIRST];
-        for (counter, cause) in [
-            (
-                Counter::EngineComputedRecordBailWinnerElementPublication717,
-                "BailWinnerElement@publication.rs:717",
-            ),
-            (
-                Counter::EngineComputedRecordBailWinnerElementPublication1072,
-                "BailWinnerElement@publication.rs:1072",
-            ),
-            (
-                Counter::EngineComputedRecordBailRecordOverlayPublication937,
-                "BailRecordOverlay@publication.rs:937",
-            ),
-        ] {
-            if moved(counter as usize) {
-                return Some(cause);
-            }
-        }
-        if moved(Counter::EngineComputedRecordBailRecordOverlayDrive441 as usize) {
-            return Some("BailRecordOverlay@drive.rs:441");
-        }
         let named = |wanted: fn(&str) -> bool| {
             (RECORD_BAIL_FIRST..=RECORD_BAIL_LAST)
                 .find(|&index| moved(index) && wanted(COUNTER_NAMES[index]))

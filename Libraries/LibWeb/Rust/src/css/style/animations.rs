@@ -140,11 +140,6 @@ impl CssDefinedAnimations {
         self.rows.keys().any(|&(row_node, _)| row_node == node)
     }
 
-    #[must_use]
-    pub(crate) fn applied_definitions(&self, node: StyleNodeID, slot: AnimationSlot) -> &[AppliedAnimationDefinition] {
-        self.rows.get(&(node, slot)).map_or(&[][..], |row| &row.1[..])
-    }
-
     /// Give up the rows of identities that have been retired. An identity can be minted again for
     /// another element, so a row left behind would be read as that element's.
     pub(crate) fn retire(&mut self, nodes: &[StyleNodeID]) {
@@ -1282,11 +1277,6 @@ impl AnimationEffectDescriptions {
         self.rows.insert((node, slot), published.into_boxed_slice());
     }
 
-    #[must_use]
-    pub(crate) fn effects(&self, node: StyleNodeID, slot: AnimationSlot) -> &[PublishedEffect] {
-        self.rows.get(&(node, slot)).map_or(&[][..], |effects| &effects[..])
-    }
-
     /// Lend one list out, for a caller that samples the effects while it substitutes against the
     /// engine the list lives in. `restore` puts it back.
     pub(crate) fn take(&mut self, node: StyleNodeID, slot: AnimationSlot) -> Option<Box<[PublishedEffect]>> {
@@ -1454,12 +1444,6 @@ impl std::hash::Hash for KeyframesName {
 /// One `@keyframes` rule of a scope: the host's keyframe set, and what the rule declares.
 pub(crate) struct PublishedKeyframesSet {
     pub(crate) pointer: usize,
-    /// Whether the rule animates a value the element's descendants inherit. A record the engine
-    /// settles publishes the style beneath the animation and applies its plan once the whole batch
-    /// is installed; the descendants take the animated values through the overlay's invalidation.
-    /// The document-wide shortcut for a record driven beneath a standing composition excludes such
-    /// a rule; the names that record runs are then checked one by one.
-    pub(crate) declares_an_inherited_property: bool,
 }
 
 #[derive(Default)]
@@ -1473,19 +1457,6 @@ pub(crate) struct AnimationKeyframes {
     /// winning `animation-name` declaration to a shadow root by that identity, and the scope it
     /// names is where the declaration's `@keyframes` are looked for first.
     scope_by_shadow_root: HashMap<usize, TreeScopeID>,
-}
-
-/// Whether a rule animates a value an element's descendants inherit; see
-/// `declares_an_inherited_property`. A shorthand is read as one: `all` covers every inherited
-/// longhand, and the others are not worth expanding here.
-#[must_use]
-fn description_declares_an_inherited_property(description: &PublishedEffect) -> bool {
-    use crate::css::property_metadata::{property_is_inherited, property_is_shorthand};
-    // A custom property inherits.
-    !description.custom_declarations.is_empty()
-        || description.declarations.iter().any(|declaration| {
-            property_is_inherited(declaration.property_id) || property_is_shorthand(declaration.property_id)
-        })
 }
 
 impl AnimationKeyframes {
@@ -1533,14 +1504,12 @@ impl AnimationKeyframes {
             assert!(end <= name_units.len(), "@keyframes name lengths overrun their buffer");
             let name = KeyframesName(CssString::from_utf16(&name_units[offset..end]));
             offset = end;
-            let declares_an_inherited_property = description_declares_an_inherited_property(&description);
             sets.insert(
                 name,
                 PublishedKeyframesSet {
                     // The host names a set by its own pointer, which is what it publishes as the
                     // description's identity.
                     pointer: description.identity as usize,
-                    declares_an_inherited_property,
                 },
             );
         }
@@ -1550,48 +1519,6 @@ impl AnimationKeyframes {
     #[must_use]
     fn in_scope(&self, tree_scope: TreeScopeID, name: &KeyframesName) -> Option<&PublishedKeyframesSet> {
         self.scopes.get(&tree_scope)?.get(name)
-    }
-
-    /// Whether every `@keyframes` rule in the document is one a record driven beneath a standing
-    /// composition can account for: defined in the document's own scope, resolved without the
-    /// host, and animating nothing the element's descendants inherit.
-    #[must_use]
-    pub(crate) fn every_keyframes_rule_is_engine_computable(&self) -> bool {
-        self.only_the_document_scope_defines_keyframes()
-            && self
-                .scopes
-                .values()
-                .flat_map(HashMap::values)
-                .all(|set| !set.declares_an_inherited_property)
-    }
-
-    /// Whether every `@keyframes` the document defines is defined in the document's own scope.
-    ///
-    /// The chain `resolve` walks ends at the document scope, so where no other scope defines
-    /// anything the answer is the document's rule for the name whatever the first two links are:
-    /// neither the scope the winning `animation-name` declaration was written in nor the scope the
-    /// element is in can change it. That is what lets a record the engine settled carry an
-    /// animation plan at all, since the winner store the engine cascades from does not record
-    /// which shadow root a declaration was written in.
-    #[must_use]
-    pub(crate) fn only_the_document_scope_defines_keyframes(&self) -> bool {
-        self.scopes.keys().all(|&scope| scope == TreeScopeID::DOCUMENT)
-    }
-
-    /// Whether an animation of this name resolves the same whatever scope its `animation-name`
-    /// declaration was written in. Only the element's own scope and the document may define it:
-    /// `resolve` tries the declaration's scope first, and any other scope defining the name would
-    /// answer there.
-    #[must_use]
-    pub(crate) fn name_resolves_without_the_declaration_scope(
-        &self,
-        element_tree_scope: TreeScopeID,
-        name: &CssString,
-    ) -> bool {
-        let name = KeyframesName(name.clone());
-        self.scopes.iter().all(|(&scope, sets)| {
-            scope == TreeScopeID::DOCUMENT || scope == element_tree_scope || !sets.contains_key(&name)
-        })
     }
 
     /// The same lookup, for a declaration whose tree scope is already known. `None` is the scope of
