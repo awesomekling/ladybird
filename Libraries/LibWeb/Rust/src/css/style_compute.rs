@@ -3146,7 +3146,7 @@ unsafe fn sample_described_animation_effects(
                 input.base_custom_property_store,
                 input.inheritance_custom_property_store,
                 input.element_declares_own_custom_properties,
-                registry.as_deref(),
+                &registry,
             );
             if !input.base_custom_property_environment_is_engine {
                 return custom;

@@ -11348,7 +11348,16 @@ fn replay_ffi_reclaims_the_non_empty_recorded_atom_set() {
     let output =
         unsafe { bridge::style_engine_take_style_transaction(engine_pointer, nodes[0].raw(), computation_inputs) };
 
-    assert_eq!(engine.document_style_computation_inputs, computation_inputs);
+    // Inputs that name no registry name the empty one the engine froze.
+    assert_eq!(
+        engine.document_style_computation_inputs,
+        bridge::FfiDocumentStyleComputationInputs {
+            custom_property_registry: bridge::FfiHostHandle::from_pointer(
+                std::sync::Arc::as_ptr(&engine.custom_property_registry).cast()
+            ),
+            ..computation_inputs
+        }
+    );
 
     assert!(output.style_atoms_swept);
     assert_eq!(output.reclaimed_style_atom_count, 1);

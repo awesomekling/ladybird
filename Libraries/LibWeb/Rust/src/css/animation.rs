@@ -7044,13 +7044,13 @@ pub(crate) struct SelectedEffect<'a> {
 /// A registered name is carried too: the registration decides whether the name inherits, what its
 /// initial value is - the computed one the host publishes with the registration - and whether its
 /// specified value has to be computed against the registered syntax, which is what gives it a typed
-/// interpolation. The whole element still goes back to the host where the registry cannot be
-/// consulted at all, or where a registration arrived without a published initial value.
+/// interpolation. The whole element still goes back to the host where a registration arrived
+/// without a published initial value.
 pub(crate) struct AnimatedCustomProperties<'a> {
     base_store: *const std::ffi::c_void,
     inheritance_store: *const std::ffi::c_void,
     element_declares_own: bool,
-    registry: Option<&'a crate::css::custom_properties::CustomPropertyRegistry>,
+    registry: &'a crate::css::custom_properties::CustomPropertyRegistry,
     /// Set where the channel cannot answer for a minted name.
     refuses_a_name: bool,
     names: Vec<crate::css::retained_fly_string::RetainedUtf16FlyString>,
@@ -7080,14 +7080,14 @@ impl<'a> AnimatedCustomProperties<'a> {
         base_store: *const std::ffi::c_void,
         inheritance_store: *const std::ffi::c_void,
         element_declares_own: bool,
-        registry: Option<&'a crate::css::custom_properties::CustomPropertyRegistry>,
+        registry: &'a crate::css::custom_properties::CustomPropertyRegistry,
     ) -> Self {
         Self {
             base_store,
             inheritance_store,
             element_declares_own,
             registry,
-            refuses_a_name: registry.is_none(),
+            refuses_a_name: false,
             names: Vec::new(),
             name_units: Vec::new(),
             registrations: Vec::new(),
@@ -7123,7 +7123,7 @@ impl<'a> AnimatedCustomProperties<'a> {
             ak::Utf16StringUnits::Ascii(bytes) => bytes.iter().map(|&unit| u16::from(unit)).collect::<Vec<_>>(),
             ak::Utf16StringUnits::Utf16(units) => units.to_vec(),
         };
-        let registration = self.registry.and_then(|registry| registry.registration_facts(&units));
+        let registration = self.registry.registration_facts(&units);
         // A registration the host published without a computed initial value is one the channel
         // cannot answer the fallbacks from, so the element goes back to the host.
         self.refuses_a_name |= registration
@@ -7253,7 +7253,7 @@ impl<'a> AnimatedCustomProperties<'a> {
         // The host takes the viewport dependency of an animated element's style from the longhand
         // keyframe batch alone, so the one this reports is dropped here as it is there.
         crate::css::custom_properties::finalize_custom_property_value(
-            self.registry,
+            Some(self.registry),
             Self::store(self.inheritance_store),
             self.name_raw(name_id),
             &self.name_units[name_id as usize - 1],
