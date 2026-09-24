@@ -2966,6 +2966,10 @@ pub struct FfiHostAnimationSample {
     /// The element's three length-resolution contexts, with the container bases `unit_mask` asks
     /// for.
     pub length_contexts: Option<unsafe extern "C" fn(*mut c_void, u8, *mut FfiAnimationLengthContexts)>,
+    /// The document's layout arena, whose committed boxes a percentage translation resolves
+    /// against, or null before the document has one. The host passes it with every sample rather
+    /// than the engine holding it, so the engine names no document-thread state.
+    pub layout_arena: *mut c_void,
 }
 
 /// What sampling did to the working set's overlay.
@@ -3774,7 +3778,9 @@ unsafe fn sample_described_animation_effects(
     let current_color = table
         .effective_value(overlay, crate::css::property_metadata::property_id::COLOR, true)
         .value;
-    let transform_reference_box = engine.committed_transform_reference_box(node);
+    // SAFETY: The host passes its document's live layout arena, or null.
+    let transform_reference_box =
+        unsafe { crate::css::style::animations::committed_transform_reference_box(input.layout_arena, node) };
     let with_transform_reference_box = |mut context: anim::FfiAnimationContext| {
         if let Some((width, height)) = transform_reference_box {
             context.has_transform_reference_box = true;
