@@ -175,7 +175,6 @@ define_counters! {
     EngineComputedRecordBailUnchangedWinners => "engineComputedRecordBailUnchangedWinners",
     EngineComputedRecordBailIncompleteWinners => "engineComputedRecordBailIncompleteWinners",
     EngineComputedRecordBailContainerVerdict => "engineComputedRecordBailContainerVerdict",
-    EngineComputedRecordBailRecord => "engineComputedRecordBailRecord",
     EngineComputedRecordBailWinner => "engineComputedRecordBailWinner",
     EngineComputedRecordBailWinnerOperator => "engineComputedRecordBailWinnerOperator",
     EngineComputedRecordBailWinnerSpelling => "engineComputedRecordBailWinnerSpelling",
