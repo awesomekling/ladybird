@@ -2655,9 +2655,9 @@ impl StyleEngineState {
                     && !parent_inputs_moved.display
                     && !self.node_style_reads_custom_properties(node)
                 {
-                    // C++ only refreshes the inherited environment for a non-consumer. There
-                    // is no element record to recompute or compare against the parent's groups,
-                    // so the row owes no record and declines nothing.
+                    // The environment move already gave a non-consumer the moved environment and
+                    // the record over it. There is no element record to recompute or compare
+                    // against the parent's groups, so the row owes no record and declines nothing.
                     false
                 } else if awaits_sampled_parent || awaits_installed_parent {
                     // The parent's sample and transition step run when the host installs it.

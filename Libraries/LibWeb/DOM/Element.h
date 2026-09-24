@@ -526,11 +526,6 @@ public:
     // The environment an element holds is the one the style engine keeps for it.
     [[nodiscard]] RefPtr<CSS::CustomPropertyData const> custom_property_data(Optional<CSS::PseudoElement>) const;
 
-    [[nodiscard]] bool refresh_inherited_custom_property_data();
-    // Publish the environment a refresh moved the element's custom-property data to on its record,
-    // so the engine reads the environment the element holds.
-    void republish_style_record_environment();
-
     // What the element's last computation was allowed to read, so a later one can ask whether any of
     // it moved before deriving a style that would be identical. Retired by anything that moves what
     // a word of it names without moving the name, which is a write to a declaration the element

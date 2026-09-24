@@ -345,11 +345,6 @@ void StyleEngine::note_custom_property_name(StyleAtomID atom, Utf16FlyString con
     Utf16FlyString::unref_raw(raw);
 }
 
-StyleRecordID StyleEngine::republish_record_environment(StyleNodeID node, u64 environment, void const* store)
-{
-    return StyleRecordID { StyleEngineFFI::style_engine_republish_record_environment(m_impl, node.value(), environment, store) };
-}
-
 StyleEngineFFI::FfiRecordDemandAnswer StyleEngine::answer_record_demand(StyleNodeID node, Optional<u8> pseudo_kind, bool exclude_inline_style, bool targeted, bool read_only)
 {
     return StyleEngineFFI::style_engine_answer_record_demand(m_impl, node.value(), pseudo_kind.value_or(NumericLimits<u8>::max()), exclude_inline_style, targeted, read_only, 0);

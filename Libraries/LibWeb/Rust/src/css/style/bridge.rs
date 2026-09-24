@@ -3729,35 +3729,8 @@ pub(crate) fn publish_rule_declarations(
     });
     has_transitions
 }
-/// Moves a node's record to the custom-property environment C++ refreshed it to, keeping the
-/// store behind the environment, and returns the new record's identity; zero when the node holds
-/// no base record to move.
-///
-/// # Safety
-/// `engine` must be live, and `store` must be null or a live raw `Arc` pointer.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_republish_record_environment(
-    engine: *mut c_void,
-    node: u32,
-    environment: u64,
-    store: *const c_void,
-) -> u64 {
-    super::seal::note_engine_call("style_engine_republish_record_environment");
-    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return 0;
-    };
-    unsafe { engine.custom_property_environments.retain(environment, store) };
-    let result = engine.republish_record_environment(node, environment).unwrap_or(0);
-    engine.record_boundary_call(EventKind::RepublishRecordEnvironment, |payload| {
-        payload.write_u32(node.raw());
-        payload.write_u64(environment);
-        payload.write_u64(result);
-    });
-    result
-}
 
-/// Replays a record moved to a refreshed environment.
+/// Replays a record moved to a moved environment.
 ///
 /// # Safety
 /// `engine` must be live.

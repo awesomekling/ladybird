@@ -776,12 +776,10 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 invalidation = apply_engine_record_demand(*element, did_change_custom_properties);
                 if (reaction.reaction & StyleEngine::PseudoInputsMayHaveChanged)
                     sample_animations_for_installed_pseudos(*element);
-            } else if (needs_custom_property_recompute && element->refresh_inherited_custom_property_data()) {
-                StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::InheritedCustomPropertyRefresh);
-                did_change_custom_properties = true;
-                element->republish_style_record_environment();
-                element->invalidate_descendant_styles_depending_on_style_container_query();
             }
+            // A row that owes only a moved inherited environment on an element whose style reads none
+            // has nothing left for the host: the engine moved the element's environment, and the
+            // record over it, when its parent's moved.
 
             auto const* current_inherited_box_values = element->style_group<ComputedValues::InheritedBoxValues>();
             if (previous_visibility.has_value() && current_inherited_box_values
