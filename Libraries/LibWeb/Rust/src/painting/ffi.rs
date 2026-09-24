@@ -1378,6 +1378,22 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
     true
 }
 
+/// Runs `handoff(context)`, which hands a navigable's finished frame to its compositor frame sink,
+/// as a render stage: on the stage thread under `LIBWEB_STAGE_THREAD=lockstep`, here otherwise.
+///
+/// # Safety
+///
+/// `handoff` must be safe to call with `context` from any thread, and `context` must stay valid
+/// until this returns. The frame it hands over may only be reachable through `context`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_run_compositor_frame_handoff_stage(
+    handoff: unsafe extern "C" fn(*mut c_void),
+    context: *mut c_void,
+) {
+    // SAFETY: Guaranteed by the caller; the calling thread waits for the stage.
+    unsafe { crate::stage_thread::run_stage(|| handoff(context)) }
+}
+
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.

@@ -22,6 +22,7 @@
 #include <LibWeb/CSS/PseudoElement.h>
 #include <LibWeb/CSS/SerializationMode.h>
 #include <LibWeb/CSS/VisualViewport.h>
+#include <LibWeb/Compositor/CompositorFrame.h>
 #include <LibWeb/Compositor/CompositorHost.h>
 #include <LibWeb/ContentSecurityPolicy/BlockingAlgorithms.h>
 #include <LibWeb/ContentSecurityPolicy/Directives/DirectiveOperations.h>
@@ -6694,6 +6695,17 @@ bool LocalNavigable::force_dark_applies_to_active_document() const
 
 bool LocalNavigable::record_display_list_and_scroll_state(PaintConfig paint_config)
 {
+    auto frame = record_compositor_frame(paint_config);
+    if (!frame.has_value())
+        return false;
+    submit_compositor_frame(frame.release_value());
+    return true;
+}
+
+// Records the active document's display list if it is out of date, and returns the frame that brings the compositor
+// context up to date with it.
+Optional<Compositor::CompositorFrame> LocalNavigable::record_compositor_frame(PaintConfig paint_config)
+{
     // Per-navigable state is stamped here rather than where PaintConfig is built, so no call site (the headless
     // screenshot path above all) can leave it behind; kept in the config so a change compares unequal below.
     paint_config.force_dark_enabled = force_dark_applies_to_active_document();
@@ -6702,11 +6714,11 @@ bool LocalNavigable::record_display_list_and_scroll_state(PaintConfig paint_conf
     paint_config.should_show_line_box_borders = m_should_show_line_box_borders;
 
     if (!has_compositor_context())
-        return false;
+        return {};
 
     auto document = active_document();
     if (!document)
-        return false;
+        return {};
 
     adopt_pending_async_scroll_offsets();
     document->update_paint_and_hit_testing_properties_if_needed();
@@ -6733,7 +6745,7 @@ bool LocalNavigable::record_display_list_and_scroll_state(PaintConfig paint_conf
     if (should_record_display_list) {
         display_list = document->record_display_list(paint_config, m_display_list_resource_storage, Painting::PaintCommandCacheMode::ReadWrite);
         if (!display_list)
-            return false;
+            return {};
         VERIFY(document->has_committed_viewport_box());
         compositor_display_list_is_unchanged = m_compositor_display_list == display_list;
         if (!compositor_display_list_is_unchanged) {
@@ -6762,9 +6774,16 @@ bool LocalNavigable::record_display_list_and_scroll_state(PaintConfig paint_conf
     async_scrolling_metadata.keyboard_scroll_state = keyboard_scroll_state;
     published_display_list.set_async_scrolling_metadata(move(async_scrolling_metadata));
 
+    Compositor::CompositorFrame frame;
+    frame.context_id = compositor_context().id();
     if (should_record_display_list && !compositor_display_list_is_unchanged) {
         m_compositor_display_list_visual_context_tree_structural_epoch = display_list->compatible_visual_context_tree_structural_epoch();
-        compositor_context().update_display_list(*display_list, visual_context_tree.release_value(), move(resource_transaction), move(scroll_state_snapshot));
+        frame.display_list_update = Compositor::CompositorFrame::DisplayListUpdate {
+            .display_list = *display_list,
+            .visual_context_tree = visual_context_tree.release_value(),
+            .resource_transaction = move(resource_transaction),
+            .scroll_state_snapshot = move(scroll_state_snapshot),
+        };
         document_paint_state.did_update_visual_context_tree_in_compositor();
         m_display_list_resource_storage.retain_only(display_list_resources);
         m_compositor_display_list = display_list;
@@ -6784,18 +6803,42 @@ bool LocalNavigable::record_display_list_and_scroll_state(PaintConfig paint_conf
             VERIFY(updated_visual_context_tree.structural_epoch() == m_compositor_display_list_visual_context_tree_structural_epoch);
             auto updated_display_list_resources = compositor_display_list_resources(m_display_list_resource_storage, document_paint_state, m_compositor_display_list_command_resources, updated_visual_context_tree);
             auto updated_resource_transaction = m_display_list_resource_storage.create_transaction(m_compositor_display_list_resources, updated_display_list_resources);
-            compositor_context().update_visual_context_tree(updated_visual_context_tree, move(updated_resource_transaction));
+            frame.visual_context_tree_update = Compositor::CompositorFrame::VisualContextTreeUpdate {
+                .visual_context_tree = move(updated_visual_context_tree),
+                .resource_transaction = move(updated_resource_transaction),
+            };
             document_paint_state.did_update_visual_context_tree_in_compositor();
             m_display_list_resource_storage.retain_only(updated_display_list_resources);
             m_compositor_display_list_resources = move(updated_display_list_resources);
         }
-        compositor_context().update_scroll_state(move(scroll_state_snapshot), move(keyboard_scroll_state));
+        frame.scroll_state_update = Compositor::CompositorFrame::ScrollStateUpdate {
+            .scroll_state_snapshot = move(scroll_state_snapshot),
+            .keyboard_scroll_state = move(keyboard_scroll_state),
+        };
     }
     // The recording painted an SVG-as-image the main thread had not rendered yet as an empty image. It renders the
     // image before the next recording, which paints it.
     if (should_record_display_list && Painting::last_recording_missed_vector_images(*document))
         document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::PaintCommands);
-    return true;
+    return frame;
+}
+
+void LocalNavigable::submit_compositor_frame(Compositor::CompositorFrame&& frame)
+{
+    auto frame_sink = compositor_context().prepare_to_submit_frame(frame);
+    if (!frame_sink)
+        return;
+    // The frame owns what it sends, and the sink may be used from any thread, so the handoff runs as a render stage.
+    struct Handoff {
+        Compositor::CompositorFrameSink& frame_sink;
+        Compositor::CompositorFrame frame;
+    } handoff { *frame_sink, move(frame) };
+    Layout::RustFFI::rust_run_compositor_frame_handoff_stage(
+        [](void* context) {
+            auto& handoff = *static_cast<Handoff*>(context);
+            handoff.frame_sink.submit(move(handoff.frame));
+        },
+        &handoff);
 }
 
 void LocalNavigable::paint_next_frame()
@@ -6817,10 +6860,11 @@ void LocalNavigable::paint_next_frame()
 
     m_needs_repaint = false;
 
-    if (!record_display_list_and_scroll_state(paint_config))
+    auto frame = record_compositor_frame(paint_config);
+    if (!frame.has_value())
         return;
-    auto viewport_rect = page().css_to_device_rect(this->viewport_rect()).to_type<int>();
-    compositor_context().present_frame(viewport_rect);
+    frame->present_viewport_rect = page().css_to_device_rect(this->viewport_rect()).to_type<int>();
+    submit_compositor_frame(frame.release_value());
 }
 
 bool LocalNavigable::paint_next_frame_if_needed(DOM::UpdateLayoutReason layout_reason)

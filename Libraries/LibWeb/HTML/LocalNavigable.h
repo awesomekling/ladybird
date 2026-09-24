@@ -426,6 +426,8 @@ private:
     void scroll_offset_did_change();
     void clear_parent_compositor_context();
     void destroy_compositor_context();
+    Optional<Compositor::CompositorFrame> record_compositor_frame(PaintConfig);
+    void submit_compositor_frame(Compositor::CompositorFrame&&);
 
     void start_download_for_response(GC::Ref<Fetch::Infrastructure::Response>, URL::URL const& download_url, ByteString suggested_filename, GC::Ptr<Fetch::Infrastructure::FetchController>);
 

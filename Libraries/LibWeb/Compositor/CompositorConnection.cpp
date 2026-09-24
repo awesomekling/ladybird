@@ -8,6 +8,7 @@
 #include <LibWeb/Compositor/CompositorConnection.h>
 
 #include <AK/Debug.h>
+#include <AK/Mutex.h>
 #include <LibCore/AnonymousBuffer.h>
 #include <LibCore/EventLoop.h>
 #include <LibGfx/Bitmap.h>
@@ -21,9 +22,125 @@
 
 namespace Web::Compositor {
 
+// Posts frames straight to the connection's transport, which queues messages from any thread for its IO thread to
+// send. The rest of the connection stays with the thread that owns it.
+class CompositorConnectionFrameSink final : public Web::Compositor::CompositorFrameSink {
+public:
+    explicit CompositorConnectionFrameSink(IPC::Transport& transport)
+        : m_transport(&transport)
+    {
+    }
+
+    // Called by the connection once the compositor is lost or the connection goes away.
+    void detach()
+    {
+        MutexLocker locker(m_mutex);
+        m_transport = nullptr;
+    }
+
+    virtual void submit(Web::Compositor::CompositorFrame&&) override;
+
+private:
+    bool post(IPC::MessageBuffer&);
+    bool post_resource_additions_in_batches(Web::Compositor::CompositorContextId, Web::Painting::DisplayListResourceTransaction&);
+
+    // Held while a frame is posted, so that frames submitted from different threads do not interleave.
+    Mutex m_mutex;
+    IPC::Transport* m_transport { nullptr };
+};
+
+bool CompositorConnectionFrameSink::post(IPC::MessageBuffer& buffer)
+{
+    // A transport that failed to take a message is closed, and the connection learns of that on its own thread.
+    // Until then, drop the rest of this frame and every later one.
+    if (!m_transport->is_open() || buffer.transfer_message(*m_transport).is_error()) {
+        m_transport = nullptr;
+        return false;
+    }
+    return true;
+}
+
+// A font backed by raw font data carries the descriptor of its typeface's buffer, and an image frame the descriptor
+// of its shared bitmap. One IPC message holds at most IPC::MAX_MESSAGE_FD_COUNT of them, so a transaction's fonts and
+// image frames travel ahead of the display list, in messages of at most this many resources each.
+static constexpr size_t max_resources_per_message = 100;
+static_assert(max_resources_per_message <= IPC::MAX_MESSAGE_FD_COUNT);
+
+bool CompositorConnectionFrameSink::post_resource_additions_in_batches(Web::Compositor::CompositorContextId context_id, Web::Painting::DisplayListResourceTransaction& resource_transaction)
+{
+    auto fonts = move(resource_transaction.fonts);
+    auto image_frames = move(resource_transaction.image_frames);
+
+    // Moves up to `room` resources of one kind into `batch`, starting at `taken`, and returns how many it moved.
+    auto take = [](auto& resources, size_t& taken, size_t room, auto& batch) {
+        auto count = min(room, resources.size() - taken);
+        batch.ensure_capacity(count);
+        for (size_t i = 0; i < count; ++i)
+            batch.unchecked_append(move(resources[taken + i]));
+        taken += count;
+        return count;
+    };
+
+    size_t fonts_taken = 0;
+    size_t image_frames_taken = 0;
+    while (fonts_taken < fonts.size() || image_frames_taken < image_frames.size()) {
+        Web::Painting::DisplayListResourceTransaction batch;
+        auto room = max_resources_per_message;
+        room -= take(fonts, fonts_taken, room, batch.fonts);
+        room -= take(image_frames, image_frames_taken, room, batch.image_frames);
+        auto encoded_batch = MUST(Messages::CompositorWebContentServer::UpdateDisplayListResources::static_encode(context_id, batch));
+        if (!post(encoded_batch))
+            return false;
+    }
+    return true;
+}
+
+void CompositorConnectionFrameSink::submit(Web::Compositor::CompositorFrame&& frame)
+{
+    MutexLocker locker(m_mutex);
+    if (!m_transport)
+        return;
+
+    auto context_id = frame.context_id;
+    if (auto& update = frame.display_list_update; update.has_value()) {
+        if (!post_resource_additions_in_batches(context_id, update->resource_transaction))
+            return;
+        auto encoded_message = MUST(Messages::CompositorWebContentServer::UpdateDisplayList::static_encode(context_id, update->display_list, update->visual_context_tree, update->resource_transaction, update->scroll_state_snapshot));
+        if (!post(encoded_message))
+            return;
+    }
+    if (auto& update = frame.visual_context_tree_update; update.has_value()) {
+        if (!post_resource_additions_in_batches(context_id, update->resource_transaction))
+            return;
+        auto encoded_message = MUST(Messages::CompositorWebContentServer::UpdateVisualContextTree::static_encode(context_id, update->visual_context_tree, update->resource_transaction));
+        if (!post(encoded_message))
+            return;
+    }
+    if (auto& update = frame.scroll_state_update; update.has_value()) {
+        auto encoded_message = MUST(Messages::CompositorWebContentServer::UpdateScrollState::static_encode(context_id, update->scroll_state_snapshot, update->keyboard_scroll_state));
+        if (!post(encoded_message))
+            return;
+    }
+    if (frame.present_viewport_rect.has_value()) {
+        auto encoded_message = MUST(Messages::CompositorWebContentServer::PresentFrame::static_encode(context_id, *frame.present_viewport_rect));
+        post(encoded_message);
+    }
+}
+
 CompositorConnection::CompositorConnection(NonnullOwnPtr<IPC::Transport> transport)
     : IPC::ConnectionToServer<CompositorWebContentClientEndpoint, CompositorWebContentServerEndpoint>(*this, move(transport))
+    , m_frame_sink(adopt_ref(*new CompositorConnectionFrameSink(this->transport())))
 {
+}
+
+CompositorConnection::~CompositorConnection()
+{
+    m_frame_sink->detach();
+}
+
+NonnullRefPtr<Web::Compositor::CompositorFrameSink> CompositorConnection::frame_sink() const
+{
+    return m_frame_sink;
 }
 
 void CompositorConnection::die()
@@ -76,76 +193,6 @@ void CompositorConnection::destroy_context(Compositing::CompositorContextId cont
     if (!can_send_message_to_compositor())
         return;
     async_destroy_context(context_id);
-}
-
-// A font backed by raw font data carries the descriptor of its typeface's buffer, and an image frame the descriptor
-// of its shared bitmap. One IPC message holds at most IPC::MAX_MESSAGE_FD_COUNT of them, so a transaction's fonts and
-// image frames travel ahead of the display list, in messages of at most this many resources each.
-static constexpr size_t max_resources_per_message = 100;
-static_assert(max_resources_per_message <= IPC::MAX_MESSAGE_FD_COUNT);
-
-bool CompositorConnection::post_resource_additions_in_batches(Compositing::CompositorContextId context_id, Compositing::DisplayListResourceTransaction& resource_transaction)
-{
-    auto fonts = move(resource_transaction.fonts);
-    auto image_frames = move(resource_transaction.image_frames);
-
-    // Moves up to `room` resources of one kind into `batch`, starting at `taken`, and returns how many it moved.
-    auto take = [](auto& resources, size_t& taken, size_t room, auto& batch) {
-        auto count = min(room, resources.size() - taken);
-        batch.ensure_capacity(count);
-        for (size_t i = 0; i < count; ++i)
-            batch.unchecked_append(move(resources[taken + i]));
-        taken += count;
-        return count;
-    };
-
-    size_t fonts_taken = 0;
-    size_t image_frames_taken = 0;
-    while (fonts_taken < fonts.size() || image_frames_taken < image_frames.size()) {
-        Compositing::DisplayListResourceTransaction batch;
-        auto room = max_resources_per_message;
-        room -= take(fonts, fonts_taken, room, batch.fonts);
-        room -= take(image_frames, image_frames_taken, room, batch.image_frames);
-        auto encoded_batch = MUST(Messages::CompositorWebContentServer::UpdateDisplayListResources::static_encode(context_id, batch));
-        if (post_message(encoded_batch).is_error()) {
-            did_lose_compositor();
-            return false;
-        }
-    }
-    return true;
-}
-
-void CompositorConnection::update_display_list(Compositing::CompositorContextId context_id, NonnullRefPtr<Compositing::DisplayList> const& display_list, Compositing::AccumulatedVisualContextTree const& visual_context_tree, Compositing::DisplayListResourceTransaction resource_transaction, Compositing::ScrollStateSnapshot const& scroll_state_snapshot)
-{
-    if (!can_send_message_to_compositor())
-        return;
-
-    if (!post_resource_additions_in_batches(context_id, resource_transaction))
-        return;
-
-    auto encoded_message = MUST(Messages::CompositorWebContentServer::UpdateDisplayList::static_encode(context_id, display_list, visual_context_tree, resource_transaction, scroll_state_snapshot));
-    if (post_message(encoded_message).is_error())
-        did_lose_compositor();
-}
-
-void CompositorConnection::update_visual_context_tree(Compositing::CompositorContextId context_id, Compositing::AccumulatedVisualContextTree const& visual_context_tree, Compositing::DisplayListResourceTransaction resource_transaction)
-{
-    if (!can_send_message_to_compositor())
-        return;
-
-    if (!post_resource_additions_in_batches(context_id, resource_transaction))
-        return;
-
-    auto encoded_message = MUST(Messages::CompositorWebContentServer::UpdateVisualContextTree::static_encode(context_id, visual_context_tree, resource_transaction));
-    if (post_message(encoded_message).is_error())
-        did_lose_compositor();
-}
-
-void CompositorConnection::update_scroll_state(Compositing::CompositorContextId context_id, Compositing::ScrollStateSnapshot const& scroll_state_snapshot, Compositing::KeyboardScrollState const& keyboard_scroll_state)
-{
-    if (!can_send_message_to_compositor())
-        return;
-    async_update_scroll_state(context_id, scroll_state_snapshot, keyboard_scroll_state);
 }
 
 void CompositorConnection::add_video_sink(Media::VideoSinkHandle video_sink_handle)
@@ -396,14 +443,7 @@ void CompositorConnection::hurry_rendering_opportunity(Compositing::CompositorCo
     async_hurry_rendering_opportunity(context_id);
 }
 
-void CompositorConnection::present_frame(Compositing::CompositorContextId context_id, Gfx::IntRect viewport_rect)
-{
-    if (!can_send_message_to_compositor())
-        return;
-    async_present_frame(context_id, viewport_rect);
-}
-
-Optional<Compositing::CanvasId> CompositorConnection::create_webgl_context(Compositing::WebGL::WebGLVersion webgl_version, Gfx::IntSize size, bool depth, bool stencil, bool antialias, Vector<String>& out_supported_extensions)
+Optional<Web::Painting::CanvasId> CompositorConnection::create_webgl_context(Web::WebGL::WebGLVersion webgl_version, Gfx::IntSize size, bool depth, bool stencil, bool antialias, Vector<String>& out_supported_extensions)
 {
     if (!can_send_message_to_compositor())
         return {};
@@ -587,6 +627,7 @@ void CompositorConnection::did_lose_compositor()
     if (m_has_lost_compositor)
         return;
     m_has_lost_compositor = true;
+    m_frame_sink->detach();
 
     for (auto& entry : m_screenshots) {
         if (entry.value.callback)

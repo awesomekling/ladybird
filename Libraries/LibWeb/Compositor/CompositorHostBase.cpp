@@ -246,16 +246,11 @@ void CompositorHostBase::stop_presenting_to_client(Compositing::CompositorContex
         connection->stop_presenting_to_client(context_id);
 }
 
-void CompositorHostBase::update_display_list(Compositing::CompositorContextId context_id, NonnullRefPtr<Compositing::DisplayList> display_list, Compositing::AccumulatedVisualContextTree visual_context_tree, Compositing::DisplayListResourceTransaction&& resource_transaction, Compositing::ScrollStateSnapshot&& scroll_state_snapshot)
+RefPtr<Web::Compositor::CompositorFrameSink> CompositorHostBase::frame_sink()
 {
     if (auto* connection = compositor_connection())
-        connection->update_display_list(context_id, display_list, visual_context_tree, resource_transaction, scroll_state_snapshot);
-}
-
-void CompositorHostBase::update_visual_context_tree(Compositing::CompositorContextId context_id, Compositing::AccumulatedVisualContextTree visual_context_tree, Compositing::DisplayListResourceTransaction&& resource_transaction)
-{
-    if (auto* connection = compositor_connection())
-        connection->update_visual_context_tree(context_id, visual_context_tree, move(resource_transaction));
+        return connection->frame_sink();
+    return nullptr;
 }
 
 void CompositorHostBase::add_video_sink(Media::VideoSinkHandle video_sink_handle)
@@ -274,12 +269,6 @@ void CompositorHostBase::set_video_sink_ticking(Media::VideoSinkHandle video_sin
 {
     if (auto* connection = compositor_connection())
         connection->set_video_sink_ticking(video_sink_handle, should_tick);
-}
-
-void CompositorHostBase::update_scroll_state(Compositing::CompositorContextId context_id, Compositing::ScrollStateSnapshot&& scroll_state_snapshot, Compositing::KeyboardScrollState keyboard_scroll_state)
-{
-    if (auto* connection = compositor_connection())
-        connection->update_scroll_state(context_id, scroll_state_snapshot, keyboard_scroll_state);
 }
 
 void CompositorHostBase::invalidate_keyboard_scroll_state(Compositing::CompositorContextId context_id, u64 generation)
@@ -339,12 +328,6 @@ void CompositorHostBase::hurry_rendering_opportunity(Compositing::CompositorCont
 {
     if (auto* connection = compositor_connection())
         connection->hurry_rendering_opportunity(context_id);
-}
-
-void CompositorHostBase::present_frame(Compositing::CompositorContextId context_id, Gfx::IntRect viewport_rect)
-{
-    if (auto* connection = compositor_connection())
-        connection->present_frame(context_id, viewport_rect);
 }
 
 void CompositorHostBase::request_screenshot(Compositing::CompositorContextId context_id, NonnullRefPtr<Gfx::PaintingSurface> target_surface, Function<void()>&& callback)

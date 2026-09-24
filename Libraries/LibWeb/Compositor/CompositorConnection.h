@@ -33,6 +33,8 @@
 
 namespace Web::Compositor {
 
+class CompositorConnectionFrameSink;
+
 class WEB_API CompositorConnection final
     : public IPC::ConnectionToServer<CompositorWebContentClientEndpoint, CompositorWebContentServerEndpoint>
     , public CompositorWebContentClientEndpoint {
@@ -40,13 +42,15 @@ class WEB_API CompositorConnection final
 
 public:
     explicit CompositorConnection(NonnullOwnPtr<IPC::Transport>);
+    virtual ~CompositorConnection() override;
+
+    // Frames go to the compositor through this rather than through the connection, so that any thread can hand them
+    // over. The sink stops posting once the compositor is lost.
+    NonnullRefPtr<Web::Compositor::CompositorFrameSink> frame_sink() const;
 
     void set_parent_context(Compositing::CompositorContextId, Optional<Compositing::CompositorContextId>);
     void stop_presenting_to_client(Compositing::CompositorContextId);
     void destroy_context(Compositing::CompositorContextId);
-    void update_display_list(Compositing::CompositorContextId, NonnullRefPtr<Compositing::DisplayList> const&, Compositing::AccumulatedVisualContextTree const&, Compositing::DisplayListResourceTransaction, Compositing::ScrollStateSnapshot const&);
-    void update_visual_context_tree(Compositing::CompositorContextId, Compositing::AccumulatedVisualContextTree const&, Compositing::DisplayListResourceTransaction);
-    void update_scroll_state(Compositing::CompositorContextId, Compositing::ScrollStateSnapshot const&, Compositing::KeyboardScrollState const&);
     void add_video_sink(Media::VideoSinkHandle);
     void remove_video_sink(Media::VideoSinkHandle);
     void set_video_sink_ticking(Media::VideoSinkHandle, bool should_tick);
@@ -67,7 +71,6 @@ public:
     void viewport_size_updated(Compositing::CompositorContextId, Gfx::IntSize, Compositing::WindowResizingInProgress);
     bool request_rendering_opportunity(Compositing::CompositorContextId, double maximum_frames_per_second);
     void hurry_rendering_opportunity(Compositing::CompositorContextId);
-    void present_frame(Compositing::CompositorContextId, Gfx::IntRect viewport_rect);
     void request_screenshot(Compositing::CompositorContextId, NonnullRefPtr<Gfx::PaintingSurface>, Function<void()>&&);
 
     Optional<Compositing::CanvasId> create_webgl_context(Compositing::WebGL::WebGLVersion, Gfx::IntSize, bool depth, bool stencil, bool antialias, Vector<String>& out_supported_extensions);
@@ -108,9 +111,9 @@ private:
 
     bool can_send_message_to_compositor() const;
     void merge_async_scroll_updates(Compositing::CompositorContextId, Compositing::PendingAsyncScrollUpdates);
-    bool post_resource_additions_in_batches(Compositing::CompositorContextId, Compositing::DisplayListResourceTransaction&);
     Optional<PendingScreenshot> take_screenshot(Compositing::ScreenshotRequestId);
 
+    NonnullRefPtr<CompositorConnectionFrameSink> m_frame_sink;
     HashMap<Compositing::ScreenshotRequestId, PendingScreenshot> m_screenshots;
     // What the compositor process scrolled since the last rendering update adopted it, per context.
     HashMap<Compositing::CompositorContextId, Compositing::PendingAsyncScrollUpdates> m_pending_async_scroll_updates;
