@@ -1964,6 +1964,27 @@ impl LayoutNodeArena {
             || crate::painting::seal::current_pass_name().is_some()
     }
 
+    /// The writer the main side's scroll offset writes are attributed to.
+    pub(crate) const SCROLL_OFFSETS_WRITER: &str = "scroll offsets";
+
+    /// The one door a main-side writer of render-owned state goes through. A write joins the
+    /// frame in flight and lands after it, the way a main-side read of render state waits for it:
+    /// a frame never sees half of a write, and nothing writes under a frame that is reading. While
+    /// the stages run in lockstep, the main side runs only between frames, so there is nothing to
+    /// wait for, and the join checks that no stage is on the stack; a frame on its own thread is
+    /// waited for here. Every write made inside the returned scope is attributed to `writer`.
+    #[track_caller]
+    pub(crate) fn join_frame_for_main_side_write(
+        &self,
+        writer: &'static str,
+    ) -> crate::painting::published_immutable::WriterScope {
+        assert!(
+            !self.a_stage_is_running(),
+            "{writer} were written by the main side while a render stage was running"
+        );
+        crate::painting::published_immutable::enter_writer(writer)
+    }
+
     pub(crate) fn begin_active_layout_pass(&self) {
         let depth = self.active_layout_pass_depth.get();
         if depth == 0 {
@@ -5691,7 +5712,9 @@ pub unsafe extern "C" fn layout_arena_set_pseudo_element_scroll_offset(
         return;
     };
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle_mut(arena) }.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset);
+    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
+    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
+    arena.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset);
 }
 
 /// # Safety
@@ -5721,7 +5744,9 @@ pub unsafe extern "C" fn layout_arena_set_element_scroll_offset(
         return;
     };
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle_mut(arena) }.set_element_scroll_offset(element, offset);
+    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
+    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
+    arena.set_element_scroll_offset(element, offset);
 }
 
 #[unsafe(no_mangle)]
@@ -5859,7 +5884,9 @@ pub unsafe extern "C" fn layout_arena_move_pseudo_element_scroll_offsets(
         return;
     };
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle_mut(arena) }.move_pseudo_element_scroll_offsets(old_generator, new_generator);
+    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
+    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
+    arena.move_pseudo_element_scroll_offsets(old_generator, new_generator);
 }
 
 #[unsafe(no_mangle)]
@@ -6985,6 +7012,20 @@ mod tests {
             Some(CssPixels::from_integer(20))
         );
         arena.free_subtree(node).destroy_shells_and_invoke_callbacks();
+    }
+
+    #[test]
+    fn main_side_scroll_offset_write_joins_the_frame() {
+        let arena = LayoutNodeArena::new();
+        drop(arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER));
+        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::Recording);
+        let write = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            drop(arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER));
+        }));
+        assert!(
+            write.is_err(),
+            "a write made while a render stage runs must not pass the join"
+        );
     }
 
     #[test]
