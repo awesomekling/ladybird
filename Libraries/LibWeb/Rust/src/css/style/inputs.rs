@@ -2256,14 +2256,31 @@ impl StyleEngineState {
             | (u32::from(inherited_style_groups | pending_inherited_style_groups) << 8)
     }
 
-    /// Drop the style input an element owes: C++ computed the element's style, which answers it.
+    /// Drop the style input an element owes: a record computed for the element answers it. What
+    /// the input asks of the element's children is not answered by the element's own record: an
+    /// ancestor becoming visible reveals children that were never styled, and a descendant
+    /// recomputation reaches past the element. That part stays owed, so that the element's next
+    /// reaction carries it on to its children.
     pub fn consume_element_style_input(&mut self, node: StyleNodeID) {
         if let Ok(index) = self
             .host
             .deferred_element_style_inputs
             .binary_search_by_key(&InputKey::ElementStyleInput(node), |pending| pending.key)
         {
-            self.host.deferred_element_style_inputs.remove(index);
+            const CHILD_DIRECTED_REACTIONS: u8 = transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE
+                | transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES;
+            let pending = &mut self.host.deferred_element_style_inputs[index];
+            let InputValue::ElementStyleInput { reaction, .. } = pending.new else {
+                unreachable!();
+            };
+            if reaction & CHILD_DIRECTED_REACTIONS != 0 {
+                pending.new = InputValue::ElementStyleInput {
+                    reaction: reaction & CHILD_DIRECTED_REACTIONS,
+                    inherited_style_groups: 0,
+                };
+            } else {
+                self.host.deferred_element_style_inputs.remove(index);
+            }
         }
         self.host.externally_recorded_style_input_nodes.remove(&node);
     }

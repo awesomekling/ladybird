@@ -11913,6 +11913,69 @@ fn owed_element_style_inputs_fold_into_covering_reactions() {
 }
 
 #[test]
+fn a_record_computed_for_an_element_leaves_what_its_children_are_owed() {
+    use super::transaction::{
+        STYLE_REACTION_ANCESTOR_BECAME_VISIBLE, STYLE_REACTION_INHERITED_STYLE, STYLE_REACTION_PUBLISHED_STYLE,
+        STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES, STYLE_REACTION_RECOMPUTE_STYLE,
+    };
+    let owed_reaction = |engine: &StyleEngine, node: StyleNodeID| {
+        engine
+            .host
+            .deferred_element_style_inputs
+            .iter()
+            .find(|pending| pending.key == InputKey::ElementStyleInput(node))
+            .map(|pending| {
+                let InputValue::ElementStyleInput {
+                    reaction,
+                    inherited_style_groups,
+                } = pending.new
+                else {
+                    unreachable!();
+                };
+                (reaction, inherited_style_groups)
+            })
+    };
+    let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
+    let mut raw_nodes = [0; 1];
+    engine.allocate_style_nodes(&mut raw_nodes);
+    let node = StyleNodeID::from_raw(raw_nodes[0]).unwrap();
+
+    // The element's own record answers a recomputation of its own style.
+    engine.record_derived_element_style_input(
+        node,
+        STYLE_REACTION_RECOMPUTE_STYLE | STYLE_REACTION_INHERITED_STYLE,
+        0b0010,
+    );
+    engine.consume_element_style_input(node);
+    assert_eq!(owed_reaction(&engine, node), None);
+
+    // An ancestor that became visible reveals the element's children, which may never have been
+    // styled. Its own record does not reach them, so that stays owed to its next reaction.
+    engine.record_derived_element_style_input(
+        node,
+        STYLE_REACTION_ANCESTOR_BECAME_VISIBLE | STYLE_REACTION_PUBLISHED_STYLE | STYLE_REACTION_INHERITED_STYLE,
+        0b0010,
+    );
+    engine.consume_element_style_input(node);
+    assert_eq!(
+        owed_reaction(&engine, node),
+        Some((STYLE_REACTION_ANCESTOR_BECAME_VISIBLE, 0))
+    );
+    assert!(engine.has_deferred_element_style_inputs());
+
+    // So does a recomputation of the element's descendants.
+    engine.record_derived_element_style_input(node, STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES, 0);
+    engine.consume_element_style_input(node);
+    assert_eq!(
+        owed_reaction(&engine, node),
+        Some((
+            STYLE_REACTION_ANCESTOR_BECAME_VISIBLE | STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES,
+            0
+        ))
+    );
+}
+
+#[test]
 fn relational_routing_checks_an_absent_anchor_posting_once() {
     let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
     let mut raw = [0_u32; 128];
