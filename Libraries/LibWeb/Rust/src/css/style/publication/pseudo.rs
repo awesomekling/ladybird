@@ -792,23 +792,17 @@ impl RetainedState {
             .or_else(|| self.computed_group_sets.assigned_style_record(node))
             .or_refused()?;
         if !scratch.font_drive.is_pending() {
-            // A record the engine derived for the element itself carries its pseudo-elements,
-            // and an element standing for its host's pseudo-element is that pseudo-element.
-            if (self.engine_computed_records_pending.contains_key(&node)
-                && self
-                    .computed_group_sets
-                    .sampled_composition_identity_for_pseudo(node)
-                    .is_none())
-                || self.computed_group_sets.adjustment_facts(node)
-                    & bridge::element_adjustment_fact::IS_SHADOW_HOST_PSEUDO_ELEMENT
-                    != 0
-            {
-                return Err(Unanswered::Refused);
-            }
             // Every declaration the pseudo-elements' rules make has to be a winner the engine
             // holds, as it has for any record it derives. What the element's own declarations
-            // make is in the record C++ computed.
-            if !self.pseudo_winners_are_complete(node) {
+            // make is in the record C++ computed. An answer a settle of batched inputs released
+            // between the element's installation and this one is matched again, exactly: that
+            // answer publishes the winners and says whether they are complete.
+            let winners_are_complete = if self.holds_pseudo_match_answer(node) {
+                self.pseudo_winners_are_complete(node)
+            } else {
+                self.republish_winners_from_answer(node, counters) == Some(true)
+            };
+            if !winners_are_complete {
                 counters.bump(Counter::EngineComputedRecordBailIncompleteWinners);
                 return Err(Unanswered::Refused);
             }
@@ -1206,6 +1200,18 @@ impl RetainedState {
         Ok((old_record.unwrap_or(computed::FinalStyleRecordID::NONE), record))
     }
 
+    /// Whether the node holds a match answer its pseudo-elements' winners are proven from: the
+    /// one this transaction published, or the retained one.
+    fn holds_pseudo_match_answer(&self, node: StyleNodeID) -> bool {
+        Self::published_answer_lookup(
+            &self.published_match_answers,
+            self.batch_matching_traversal.as_deref(),
+            node,
+        )
+        .is_some_and(|(published, answer)| published.matches_for(answer).is_some())
+            || matches!(self.retained_match_answer(node), Lookup::Known(_))
+    }
+
     /// Whether every rule the node's answer matches for a pseudo-element declares only what the
     /// winner columns hold, and custom properties, which the engine resolves into the
     /// pseudo-element's own environment, including a container verdict held with its origin.
@@ -1396,6 +1402,39 @@ impl StyleEngineState {
         {
             resolver.prepare(inputs.font_environment_generation);
         }
+        let mut settled = RetriedEngineRecord::default();
+        // An element standing for its host's pseudo-element is that pseudo-element, and has none
+        // of its own.
+        if self.retained.backs_host_pseudo_element(node)
+            && let Some(record) = self.retained.computed_group_sets.assigned_style_record(node)
+        {
+            self.retained.drop_demand_pseudo_records(node);
+            counters.bump(Counter::EngineComputedRecordHostPseudoSettles);
+            settled.style_record = record.raw();
+            return (settled, false);
+        }
+        // A record the engine derived for the element itself carries its pseudo-elements, derived
+        // beside it; with no composition sampled over it, they are the answer.
+        if self
+            .retained
+            .computed_group_sets
+            .sampled_composition_identity_for_pseudo(node)
+            .is_none()
+            && let Some(pending) = self.retained.engine_computed_records_pending.get(&node)
+            && let Some(element) = pending.iter().find(|record| record.pseudo_kind == u8::MAX)
+        {
+            counters.bump(Counter::EngineComputedRecordHostPseudoSettles);
+            settled.style_record = element.new_style_record.raw();
+            for record in pending.iter().filter(|record| record.pseudo_kind != u8::MAX) {
+                let kind = usize::from(record.pseudo_kind);
+                if kind < bridge::RETRY_PSEUDO_RECORD_SLOTS {
+                    settled.pseudo_records_present |= 1 << kind;
+                    settled.pseudo_records[kind] = record.new_style_record.raw();
+                }
+            }
+            self.retained.drop_demand_pseudo_records(node);
+            return (settled, false);
+        }
         let mut scratch = EngineComputedRecordScratch::default();
         let mut suspended_memory = MemoryLease::new(MemoryCategory::BatchScratch);
         let record = loop {
@@ -1412,7 +1451,6 @@ impl StyleEngineState {
             suspended_memory.resize_required_to(&mut self.memory, scratch.font_drive.capacity_bytes());
             self.refill_font_requests(vec![(Some(node), request)], counters);
         };
-        let mut settled = RetriedEngineRecord::default();
         let Ok(record) = record else {
             counters.bump(Counter::EngineComputedRecordHostPseudoDeclines);
             return (settled, false);
