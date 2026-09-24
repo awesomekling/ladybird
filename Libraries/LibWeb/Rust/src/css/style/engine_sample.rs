@@ -607,11 +607,6 @@ impl RetainedState {
         &self,
         node: StyleNodeID,
     ) -> Result<SampleCustomPropertyEnvironments, &'static str> {
-        // The environment an earlier sample composed the element's animated custom properties into
-        // is the host's until the engine owns animation overlays.
-        if self.sampled_custom_property_environments.contains_key(&node) {
-            return Err("custom properties an earlier sample animated");
-        }
         let has_registrations = self.custom_property_registry_has_registrations()?;
         let store_of = |environment: u64| match environment {
             0 => Ok(std::ptr::null()),
@@ -620,11 +615,11 @@ impl RetainedState {
                 .store(environment)
                 .ok_or("an environment without a store"),
         };
-        let environment = self
-            .computed_group_sets
-            .custom_property_environment_identity(node)
-            .unwrap_or(0);
-        let store = store_of(environment)?;
+        let environment = self.element_base_custom_property_environment(node)?;
+        // What an earlier sample composed the element's animated custom properties into is the
+        // environment the element holds while it is composed over the one its record resolved.
+        let store = store_of(self.substitution_environment(node, environment))?;
+        let base_store = store_of(environment)?;
         let parent_environment = self
             .tree
             .inheritance_parent(node)
@@ -632,7 +627,7 @@ impl RetainedState {
             .unwrap_or(0);
         Ok(SampleCustomPropertyEnvironments {
             store,
-            base_store: store,
+            base_store,
             inheritance_store: store_of(parent_environment)?,
             // A parent passes on a projection of its environment where custom properties are
             // registered, so the element's own cascade says whether it declares its own.
@@ -668,11 +663,148 @@ impl Drop for EngineSampledStyle {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SettledRowPublication {
     pub(crate) style_record: u64,
+    /// The custom-property environment the sample moved the element to, where it moved it.
+    pub(crate) custom_properties: Option<SampledCustomPropertyEnvironment>,
     pub(crate) invalidation: bridge::FfiAnimationInvalidation,
     pub(crate) overlay_is_empty: bool,
     pub(crate) substitution_marks: u8,
     pub(crate) keyframes_inherited_non_inherited_style_groups: u32,
     pub(crate) uses_tree_counting_function: bool,
+}
+
+/// The environment an element's animations composed its animated custom properties into, which the
+/// engine minted over the environment its record was published with, for the host to view.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SampledCustomPropertyEnvironment {
+    /// The engine's identity for it; zero where the sample animated no custom property and the
+    /// element holds its record's environment again.
+    pub(crate) environment: u64,
+    /// Whether the element's own style reads custom properties, and so has to be computed again
+    /// under it; and whether a name its descendants inherit moved.
+    pub(crate) element_reads: bool,
+    pub(crate) inherited_names_moved: bool,
+}
+
+impl RetainedState {
+    /// The environment an element's own declarations resolved to: the one it holds, or, where that
+    /// is the one an earlier sample composed its animated custom properties into, the one beneath.
+    pub(crate) fn element_base_custom_property_environment(&self, node: StyleNodeID) -> Result<u64, &'static str> {
+        let environment = self
+            .computed_group_sets
+            .custom_property_environment_identity(node)
+            .unwrap_or(0);
+        if self.sampled_custom_property_environments.get(&node) != Some(&environment) {
+            return Ok(environment);
+        }
+        // One the host composed names its base when the element installs it.
+        self.custom_property_environments
+            .engine_environment(environment)
+            .map(|(_, base)| base)
+            .or_else(|| {
+                self.element_custom_property_animation_base(node)
+                    .map(|(base, _, _)| base)
+            })
+            .ok_or("a sampled environment with no base")
+    }
+
+    /// Compose what a sample animated of an element's custom properties into an environment of the
+    /// engine's own, over `base_environment`, the one the element's record was published with, and
+    /// make it the element's: the environment its own values substitute under and its children
+    /// inherit. `None` where that leaves the element's environment as it is.
+    pub(crate) fn publish_sampled_custom_properties(
+        &mut self,
+        node: StyleNodeID,
+        base_environment: u64,
+        animated: &[(
+            crate::css::retained_fly_string::RetainedUtf16FlyString,
+            crate::css::style_value::RetainedStyleValueData,
+        )],
+    ) -> Result<Option<SampledCustomPropertyEnvironment>, &'static str> {
+        use crate::css::custom_properties::CustomPropertyStore;
+
+        let base_store = match base_environment {
+            0 => std::ptr::null(),
+            environment => self
+                .custom_property_environments
+                .store(environment)
+                .ok_or("a base environment without a store")?,
+        };
+        let sampled = self.sampled_custom_property_environments.get(&node).copied();
+        // A sample that animates what the element's environment already holds, over the same base,
+        // moves nothing. A record computed again publishes its environment under a new identity even
+        // where it resolves as before, which moves nothing either: reacting to it would compute the
+        // element again, and so on without end. The host is only handed the environment again where
+        // it installed another one meanwhile.
+        if let Some(sampled) = sampled
+            && !animated.is_empty()
+            && self.sampled_environment_is_over(sampled, base_environment)
+            && self
+                .custom_property_environments
+                .store(sampled)
+                .is_some_and(|store| unsafe { CustomPropertyStore::composes_exactly(store, animated) })
+        {
+            self.computed_group_sets
+                .set_node_custom_property_environment(node, sampled);
+            if self.element_custom_property_data(node).1 == sampled {
+                return Ok(None);
+            }
+            return Ok(Some(SampledCustomPropertyEnvironment {
+                environment: sampled,
+                element_reads: false,
+                inherited_names_moved: false,
+            }));
+        }
+        if sampled.is_none() && animated.is_empty() {
+            return Ok(None);
+        }
+        let environment = match animated.is_empty() {
+            true => {
+                self.sampled_custom_property_environments.remove(&node);
+                0
+            }
+            false => {
+                let store = unsafe { CustomPropertyStore::animation_overlay_over(base_store, animated) };
+                let environment = unsafe {
+                    self.custom_property_environments
+                        .adopt_engine_environment(store, base_environment)
+                };
+                self.sampled_custom_property_environments.insert(node, environment);
+                environment
+            }
+        };
+        self.computed_group_sets.set_node_custom_property_environment(
+            node,
+            match environment {
+                0 => base_environment,
+                environment => environment,
+            },
+        );
+        // Taking the overlay away can expose any inherited value it covered.
+        let inherited_names_moved = animated.is_empty() || {
+            // SAFETY: The document owns the published registry for the length of the pass.
+            let registry = unsafe {
+                self.document_style_computation_inputs
+                    .custom_property_registry
+                    .as_pointer()
+                    .cast::<crate::css::custom_properties::CustomPropertyRegistry>()
+                    .as_ref()
+            };
+            animated.iter().any(|(name, _)| {
+                let text: Vec<u16> = match unsafe { ak::utf16_string_units(name.raw_word()) } {
+                    ak::Utf16StringUnits::Ascii(bytes) => bytes.iter().map(|&unit| u16::from(unit)).collect(),
+                    ak::Utf16StringUnits::Utf16(units) => units.to_vec(),
+                };
+                registry
+                    .and_then(|registry| registry.registration_facts(&text))
+                    .is_none_or(|registration| registration.inherits)
+            })
+        };
+        Ok(Some(SampledCustomPropertyEnvironment {
+            environment,
+            element_reads: self.node_style_reads_custom_properties(node),
+            inherited_names_moved,
+        }))
+    }
 }
 
 impl super::StyleEngineState {
@@ -697,6 +829,10 @@ impl super::StyleEngineState {
         let style_record = sample.style_record;
         let overlay = unsafe { &*sample.style.overlay };
         let table = unsafe { &*sample.style.table };
+        let base_environment = self.retained.element_base_custom_property_environment(node)?;
+        if base_environment != 0 && self.custom_property_environments.store(base_environment).is_none() {
+            return Err("a base environment without a store");
+        }
         let (used_color_scheme, display_before_box_type_transformation) = {
             let view = self
                 .computed_group_sets
@@ -802,8 +938,14 @@ impl super::StyleEngineState {
             self.retained.computed_group_sets.pin_style_record(style_record);
             self.retained.batch_pinned_compositions.push((node, style_record));
         }
+        let custom_properties = self.retained.publish_sampled_custom_properties(
+            node,
+            base_environment,
+            &sample.animated_custom_properties,
+        )?;
         let published = SettledRowPublication {
             style_record,
+            custom_properties,
             invalidation,
             overlay_is_empty,
             substitution_marks: sample.substitution_marks,

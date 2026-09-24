@@ -116,6 +116,28 @@ NonnullRefPtr<CustomPropertyData> CustomPropertyData::create_animation_overlay(
     return data;
 }
 
+NonnullRefPtr<CustomPropertyData> CustomPropertyData::view_animation_overlay(void const* store, u64 identity,
+    RefPtr<CustomPropertyData const> base, DOM::AbstractElement const& owner)
+{
+    OrderedHashMap<Utf16FlyString, StyleProperty> animated_values;
+    ComputedValuesFFI::rust_custom_property_store_for_each_own_entry(store, &animated_values, [](void* context, size_t name_raw, bool important, void const* data) {
+        auto& animated_values = *static_cast<OrderedHashMap<Utf16FlyString, StyleProperty>*>(context);
+        animated_values.set(Utf16FlyString::from_raw(name_raw), StyleProperty {
+                                                                    .important = important ? Important::Yes : Important::No,
+                                                                    .property_id = PropertyID::Custom,
+                                                                    .value = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(static_cast<StyleValueFFI::StyleValueData const*>(data))),
+                                                                });
+    });
+    auto declared_count = animated_values.size();
+    u8 ancestor_count = base ? base->m_ancestor_count + 1 : 0;
+    auto inheritance_parent = base;
+    auto data = adopt_ref(*new CustomPropertyData(move(animated_values), move(base), move(inheritance_parent), ancestor_count, declared_count,
+        ComputedValuesFFI::rust_custom_property_store_retain(store), identity));
+    data->m_animation_owner = owner.element().unique_id();
+    data->m_animation_pseudo_element = owner.pseudo_element();
+    return data;
+}
+
 bool CustomPropertyData::is_animation_overlay_for(DOM::AbstractElement const& element) const
 {
     return m_animation_owner.has_value() && *m_animation_owner == element.element().unique_id()

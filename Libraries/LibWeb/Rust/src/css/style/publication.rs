@@ -2274,26 +2274,36 @@ impl RetainedState {
     }
 
     /// The environment an element's own values substitute under: the one its animations sampled
-    /// custom properties into, where the host composed it over `environment`, or `environment`.
-    fn substitution_environment(&self, node: StyleNodeID, environment: u64) -> u64 {
-        let Some(&sampled) = self.sampled_custom_property_environments.get(&node) else {
-            return environment;
-        };
-        let Some(sampled_store) = self.custom_property_environments.store(sampled) else {
-            return environment;
-        };
-        let base_store = match environment {
-            0 => std::ptr::null(),
-            identity => match self.custom_property_environments.store(identity) {
-                Some(store) => store,
-                None => return environment,
-            },
-        };
-        if unsafe { crate::css::custom_properties::CustomPropertyStore::is_composed_over(sampled_store, base_store) } {
-            sampled
-        } else {
-            environment
+    /// custom properties into, where that is composed over `environment`, or `environment`.
+    pub(super) fn substitution_environment(&self, node: StyleNodeID, environment: u64) -> u64 {
+        match self.sampled_custom_property_environments.get(&node) {
+            Some(&sampled) if self.sampled_environment_is_over(sampled, environment) => sampled,
+            _ => environment,
         }
+    }
+
+    /// Whether `sampled`, an environment an element's animations composed custom properties into,
+    /// is composed over `environment`. One the engine minted over another identity still is where
+    /// the two resolve alike, as a record computed again publishes the same environment under a new
+    /// identity.
+    pub(super) fn sampled_environment_is_over(&self, sampled: u64, environment: u64) -> bool {
+        use crate::css::custom_properties::CustomPropertyStore;
+        let store_of = |identity: u64| match identity {
+            0 => Some(std::ptr::null()),
+            identity => self.custom_property_environments.store(identity),
+        };
+        let Some(base_store) = store_of(environment) else {
+            return false;
+        };
+        if let Some((_, sampled_base)) = self.custom_property_environments.engine_environment(sampled) {
+            return sampled_base == environment
+                || store_of(sampled_base).is_some_and(|sampled_base_store| unsafe {
+                    CustomPropertyStore::resolve_alike(sampled_base_store, base_store)
+                });
+        }
+        self.custom_property_environments
+            .store(sampled)
+            .is_some_and(|sampled_store| unsafe { CustomPropertyStore::is_composed_over(sampled_store, base_store) })
     }
 
     /// A partial drive reuses the base groups beneath an element's own composition. They must
