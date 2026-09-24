@@ -187,3 +187,76 @@ pub(crate) fn take_expected_sampled_style(
 ) -> Option<EngineSampledStyle> {
     EXPECTED_SAMPLED_STYLES.with_borrow_mut(|expected| expected.remove(&(engine, node, pseudo_kind)))
 }
+/// What the engine's sample of each row its pass settled composed, kept for the host's sample of
+/// the row once it installs it, by the engine and the element. The pass can run on another thread
+/// than the host's sample.
+/// Each with whether the host has taken the row's animation plan, before which a sample of the
+/// element is not the one the pass took the place of, and whether a sample since has been checked
+/// against it, which the check of the style that sample finalizes waits for.
+struct SettledRowSamples(HashMap<(usize, StyleNodeID), (crate::css::style_compute::SettledRowSample, bool, bool)>);
+
+// SAFETY: The samples own what they point to, and only the check reads them, under the lock.
+unsafe impl Send for SettledRowSamples {}
+
+static SETTLED_ROW_SAMPLES: std::sync::Mutex<Option<SettledRowSamples>> = std::sync::Mutex::new(None);
+
+/// Keep what the engine's sample of a row its pass settled composed, or forget an earlier one where
+/// the engine could not sample the row.
+pub(crate) fn expect_settled_row_sample(
+    engine: usize,
+    node: StyleNodeID,
+    sample: Option<crate::css::style_compute::SettledRowSample>,
+) {
+    let mut samples = SETTLED_ROW_SAMPLES.lock().expect("the check's lock is never poisoned");
+    let samples = &mut samples.get_or_insert_with(|| SettledRowSamples(HashMap::new())).0;
+    match sample {
+        Some(sample) => {
+            samples.insert((engine, node), (sample, false, false));
+        }
+        None => {
+            samples.remove(&(engine, node));
+        }
+    }
+}
+
+/// Check a sample of the element against what the engine's sample of its settled row composed,
+/// where `check` says the sample is one of the record the row settled; the check of the style that
+/// sample finalizes then takes it.
+pub(crate) fn with_settled_row_sample(
+    engine: usize,
+    node: StyleNodeID,
+    check: impl FnOnce(&crate::css::style_compute::SettledRowSample) -> bool,
+) {
+    let mut samples = SETTLED_ROW_SAMPLES.lock().expect("the check's lock is never poisoned");
+    let Some((sample, plan_taken, checked)) = samples.as_mut().and_then(|samples| samples.0.get_mut(&(engine, node)))
+    else {
+        return;
+    };
+    if *plan_taken && !*checked {
+        *checked = check(sample);
+    }
+}
+
+/// The host took the animation plan of the element's row, which it applies before it samples the
+/// element over the row.
+pub(crate) fn note_settled_row_plan_taken(engine: usize, node: StyleNodeID) {
+    if mode() == Mode::Off {
+        return;
+    }
+    let mut samples = SETTLED_ROW_SAMPLES.lock().expect("the check's lock is never poisoned");
+    if let Some((_, plan_taken, _)) = samples.as_mut().and_then(|samples| samples.0.get_mut(&(engine, node))) {
+        *plan_taken = true;
+    }
+}
+
+pub(crate) fn take_settled_row_sample(
+    engine: usize,
+    node: StyleNodeID,
+) -> Option<crate::css::style_compute::SettledRowSample> {
+    let mut samples = SETTLED_ROW_SAMPLES.lock().expect("the check's lock is never poisoned");
+    let samples = &mut samples.as_mut()?.0;
+    if !samples.get(&(engine, node))?.2 {
+        return None;
+    }
+    samples.remove(&(engine, node)).map(|(sample, _, _)| sample)
+}

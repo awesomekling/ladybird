@@ -58,6 +58,33 @@ impl RetainedState {
         })
     }
 
+    /// The definition the last plan applied to each CSS animation of one of an element's lists.
+    pub(crate) fn element_applied_animation_definitions(
+        &self,
+        node: StyleNodeID,
+        slot: super::animations::AnimationSlot,
+    ) -> &[super::animations::AppliedAnimationDefinition] {
+        self.css_defined_animations.definitions(node, slot)
+    }
+
+    /// The plan the row the pass settled for an element leaves for the host, while it is left.
+    pub(crate) fn element_settled_animation_plan(
+        &self,
+        node: StyleNodeID,
+    ) -> Option<&super::animations::SettledAnimationPlan> {
+        self.nodes_owing_animation_definitions.get(&(node, u8::MAX))
+    }
+
+    /// Lend out the published `@keyframes`, which a sample reads the rules of brand-new animations
+    /// from while it holds the engine, until `restore_animation_keyframes`.
+    pub(crate) fn take_animation_keyframes(&mut self) -> super::animations::AnimationKeyframes {
+        std::mem::take(&mut self.animation_keyframes)
+    }
+
+    pub(crate) fn restore_animation_keyframes(&mut self, keyframes: super::animations::AnimationKeyframes) {
+        self.animation_keyframes = keyframes;
+    }
+
     pub(crate) fn root_element_font_metrics(&self) -> super::animations::RootElementFontMetrics {
         self.root_element_font_metrics
     }
