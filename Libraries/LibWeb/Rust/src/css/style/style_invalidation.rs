@@ -746,7 +746,7 @@ impl RetainedState {
         ffi_result
     }
 
-    pub(crate) fn compare_style_records(
+    fn compare_style_records(
         &mut self,
         old_style_record: u64,
         new_style_record: u64,

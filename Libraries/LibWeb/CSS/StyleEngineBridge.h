@@ -109,7 +109,6 @@ public:
     [[nodiscard]] u64 style_record_custom_property_environment(StyleRecordID style_record) const;
     [[nodiscard]] bool node_record_reads_attributes(StyleNodeID) const;
     [[nodiscard]] u8 node_record_custom_condition_usage(StyleNodeID) const;
-    [[nodiscard]] u32 compare_style_records(StyleRecordID old_style_record, StyleRecordID new_style_record, bool font_lists_equal, bool element_folds_transform_into_layout, bool element_propagates_overflow_to_viewport) const;
     [[nodiscard]] bool animation_overlay_changed(StyleRecordID old_style_record, void const* animated_overlay) const;
     [[nodiscard]] StyleEngineFFI::FfiAnimationInvalidation compare_animation_overlay(StyleRecordID old_style_record, void const* animated_overlay, ReadonlySpan<void const*> payloads, bool is_document_element) const;
     // The animation definitions an engine-settled row left for the host, taken so that exactly one

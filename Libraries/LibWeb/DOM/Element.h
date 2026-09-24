@@ -347,7 +347,7 @@ public:
     CSS::RequiredInvalidationAfterStyleChange apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const&, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison = EngineRecordComparison::AtInstallation, Optional<EngineRecordDamage> = {});
     // Compare the record an AfterSample installation left, now sampled, with the style the element
     // held before it, and apply the result to the element's layout node.
-    CSS::RequiredInvalidationAfterStyleChange compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::ComputedValues const& style_before_installation, CSS::RequiredInvalidationAfterStyleChange installation_invalidation);
+    CSS::RequiredInvalidationAfterStyleChange compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange installation_invalidation);
     void apply_display_none_change(bool display_none_ignoring_animations_changed, bool became_display_none);
     // Republishes which animations this element references, for a record the engine settled whose
     // animation declarations moved.
