@@ -1891,12 +1891,7 @@ impl StyleEngineState {
                 diagnostic_plan_capture: None,
             },
             host: HostState {
-                document_environment_moved_for_retries: false,
-                root_font_inputs_changed_for_retries: false,
-                viewport_moved_for_retries: false,
-                armed_retry_nodes: Vec::new(),
                 suspended_style_pass: None,
-                retried_record_rows: Vec::new(),
                 font_resolver: None,
                 random_state: std::collections::hash_map::RandomState::new(),
                 random_serial: 0,

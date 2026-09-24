@@ -1063,14 +1063,6 @@ impl StyleEngine {
         self.state.acknowledge_engine_computed_record(node, &mut self.counters);
     }
 
-    /// Retry a record after C++ has installed earlier records in the same preorder batch. A record
-    /// rejected while the batch was planned may become computable once its inheritance parent is
-    /// authoritative.
-    #[inline]
-    pub(crate) fn retry_engine_records_after_ancestor(&mut self, node: StyleNodeID) {
-        self.state.retry_engine_records_after_ancestor(node, &mut self.counters);
-    }
-
     pub(crate) fn answer_record_demand(
         &mut self,
         node: StyleNodeID,

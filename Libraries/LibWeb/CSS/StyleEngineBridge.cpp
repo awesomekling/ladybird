@@ -363,12 +363,6 @@ StyleRecordID StyleEngine::republish_record_environment(StyleNodeID node, u64 en
     return StyleRecordID { StyleEngineFFI::style_engine_republish_record_environment(m_impl, node.value(), environment, store) };
 }
 
-ReadonlySpan<StyleEngineFFI::FfiRetriedRecordRow> StyleEngine::retry_engine_records_after_ancestor(StyleNodeID node)
-{
-    auto batch = StyleEngineFFI::style_engine_retry_engine_record_after_ancestor(m_impl, node.value());
-    return { batch.rows, batch.count };
-}
-
 StyleEngineFFI::FfiRecordDemandAnswer StyleEngine::answer_record_demand(StyleNodeID node, Optional<u8> pseudo_kind, bool exclude_inline_style, bool targeted, bool read_only)
 {
     return StyleEngineFFI::style_engine_answer_record_demand(m_impl, node.value(), pseudo_kind.value_or(NumericLimits<u8>::max()), exclude_inline_style, targeted, read_only, 0);

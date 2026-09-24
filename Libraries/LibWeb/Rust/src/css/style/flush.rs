@@ -1824,9 +1824,6 @@ impl StyleEngineState {
         // arrives in style-node identity order, which is not tree order, so a descendant is
         // routinely reached before the ancestor it inherits from and declines for an ancestor
         // that is in the same batch. Visit it in the order C++ applies the deltas in instead.
-        // Nothing an earlier batch armed is still waiting: the host either retried it or
-        // computed the row itself before this batch was planned.
-        self.host.armed_retry_nodes.clear();
         if published_nodes.len() > 1 {
             let ranks = self.tree.style_reaction_order_ranks(published_nodes.iter().copied());
             let mut order: Vec<u32> = (0..published_nodes.len() as u32).collect();
@@ -1872,7 +1869,6 @@ impl StyleEngineState {
             // A changed rule therefore moves the font input of every existing record, even when
             // no selector winner changed for the element.
             engine_computed_record_scratch.font_environment_moved = font_feature_values_moved;
-            self.host.document_environment_moved_for_retries = environment_changed;
             // The viewport the records were driven against, against the one they are driven against
             // now. A record that reads it cannot stand across the difference.
             if let Some(inputs) = self.retained.document_style_computation_inputs {
@@ -1969,8 +1965,6 @@ impl StyleEngineState {
                     engine_computed_record_scratch.capacity_bytes(),
                 );
             }
-            self.host.root_font_inputs_changed_for_retries = engine_computed_record_scratch.root_font_inputs_changed;
-            self.host.viewport_moved_for_retries = engine_computed_record_scratch.viewport_moved;
             // Each published node's pseudo-element inventory, read from the answer this transaction
             // publishes for it before that answer is installed, and kept with the node's record
             // columns for as long as that answer stands.
@@ -2710,7 +2704,16 @@ impl StyleEngineState {
                         &mut pass.published_match_answers,
                         &mut self.retained.published_match_answers,
                     );
-                    let retried = self.retry_engine_record_after_ancestor(node, armed, counters);
+                    let retried = self.drive_record_over_installed_ancestors(
+                        node,
+                        armed,
+                        publication::DriveOverInstalledAncestors {
+                            document_environment_moved: pass.scratch.document_environment_moved,
+                            root_font_inputs_changed: pass.scratch.root_font_inputs_changed,
+                            viewport_moved: pass.scratch.viewport_moved,
+                        },
+                        counters,
+                    );
                     std::mem::swap(
                         &mut pass.published_match_answers,
                         &mut self.retained.published_match_answers,

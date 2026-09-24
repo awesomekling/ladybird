@@ -2562,7 +2562,7 @@ impl RetainedState {
         Some((groups_to_rebuild, selected))
     }
 
-    fn retry_engine_record_after_ancestor_step(
+    fn drive_record_over_installed_ancestors_step(
         &mut self,
         node: StyleNodeID,
         armed: bool,
@@ -5757,9 +5757,17 @@ pub(super) struct DriveSubject {
     highlight_parent: Option<computed::FinalStyleRecordID>,
 }
 
-/// What a retry after an ancestor settles: the element's record, and the pseudo-element records
-/// the engine settled beside it, one slot per synthetic kind with a present bit each; a present
-/// slot holding zero is a removal.
+/// What a pass knows of its transaction that a row it drives over the installed ancestors reads.
+#[derive(Clone, Copy)]
+pub(super) struct DriveOverInstalledAncestors {
+    pub(super) document_environment_moved: bool,
+    pub(super) root_font_inputs_changed: bool,
+    pub(super) viewport_moved: bool,
+}
+
+/// What a demand or a drive over the installed ancestors settles: the element's record, and the
+/// pseudo-element records the engine settled beside it, one slot per synthetic kind with a present
+/// bit each; a present slot holding zero is a removal.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct RetriedEngineRecord {
     pub(crate) style_record: u64,
@@ -6555,63 +6563,14 @@ impl StyleEngineState {
         seal::note_host_entry(cause, kind, cold);
     }
 
-    /// Retry only the row the host is about to apply. Its parent has been installed and reported
-    /// by the preceding row, including its inherited environment and container inputs. A record
-    /// computed for an earlier retry is not installed until the host reaches that row, so deriving
-    /// its children in the same call would read facts the host has not yet published.
-    pub(crate) fn retry_engine_records_after_ancestor(&mut self, node: StyleNodeID, counters: &mut Counters) {
-        self.host.retried_record_rows.clear();
-        let armed = self
-            .host
-            .armed_retry_nodes
-            .iter()
-            .position(|&candidate| candidate == node);
-        // A row introduced while the host applies a batch was never part of the flush's
-        // record loop. Its retained answer can be offered now, after its parent was installed,
-        // whether or not this transaction published it anew.
-        // A row the engine already declined keeps the original host path. An element standing
-        // for its host's pseudo-element is offered too: its record cascades the host's matches.
-        if armed.is_none() && self.retained.host_entry_causes.contains_key(&node) {
-            return;
-        }
-        if let Some(index) = armed {
-            self.host.armed_retry_nodes.remove(index);
-        }
-        // A row declined for its uninstalled or unsampled parent retries with that parent
-        // installed and sampled. Whatever refuses it then is why it reaches the host.
-        let declined_for_parent =
-            self.retained.host_entry_causes.get(&node).is_some_and(|(cause, _)| {
-                matches!(*cause, "engineComputedRecordBailRecordParent" | "AwaitSampledParent")
-            });
-        let bail_marks =
-            ((armed.is_none() || declined_for_parent) && seal::is_reporting()).then(|| counters.record_bail_marks());
-        let retried = self.retry_engine_record_after_ancestor(node, armed.is_some(), counters);
-        if retried.style_record == 0 {
-            if let Some(bail_marks) = bail_marks {
-                let cause = counters
-                    .first_changed_record_bail(&bail_marks)
-                    .unwrap_or("InBatchRetryNoRecord");
-                let cold = self.retained.computed_group_sets.assigned_style_record(node).is_none();
-                self.retained.host_entry_causes.insert(node, (cause, cold));
-            }
-            return;
-        }
-        let uses_substitution = self.nodes_with_substituted_records.contains(&node);
-        self.host.retried_record_rows.push(bridge::FfiRetriedRecordRow {
-            style_node: node.raw(),
-            record: bridge::FfiEngineComputedRecord {
-                style_record: retried.style_record,
-                uses_substitution,
-                pseudo_records_present: retried.pseudo_records_present,
-                pseudo_records: retried.pseudo_records,
-            },
-        });
-    }
-
-    pub(crate) fn retry_engine_record_after_ancestor(
+    /// Drive a row the pass declined over the ancestors the host installed before it, as the
+    /// host would compute it where it applies the row. `armed` says the pass tied the row to those
+    /// ancestors, which lets it drive an answer that declares past its winners.
+    pub(super) fn drive_record_over_installed_ancestors(
         &mut self,
         node: StyleNodeID,
         armed: bool,
+        pass_facts: DriveOverInstalledAncestors,
         counters: &mut Counters,
     ) -> RetriedEngineRecord {
         if let Some(inputs) = self.retained.document_style_computation_inputs
@@ -6623,17 +6582,17 @@ impl StyleEngineState {
         let started_at = std::time::Instant::now();
         let mut scratch = EngineComputedRecordScratch {
             continuation: EngineComputedRecordContinuation {
-                root_font_inputs_changed: self.host.root_font_inputs_changed_for_retries,
+                root_font_inputs_changed: pass_facts.root_font_inputs_changed,
                 ..EngineComputedRecordContinuation::default()
             },
-            document_environment_moved: self.host.document_environment_moved_for_retries,
-            viewport_moved: self.host.viewport_moved_for_retries,
+            document_environment_moved: pass_facts.document_environment_moved,
+            viewport_moved: pass_facts.viewport_moved,
             ..EngineComputedRecordScratch::default()
         };
         let mut suspended_memory = MemoryLease::new(MemoryCategory::BatchScratch);
         self.retained.inheritance_parents_are_installed = true;
         let style_record =
-            self.retry_engine_record_after_ancestor_loop(node, armed, &mut scratch, &mut suspended_memory, counters);
+            self.drive_record_over_installed_ancestors_loop(node, armed, &mut scratch, &mut suspended_memory, counters);
         self.retained.inheritance_parents_are_installed = false;
         counters.add(
             Counter::RetryAfterAncestorMicroseconds,
@@ -6655,7 +6614,7 @@ impl StyleEngineState {
         retried
     }
 
-    fn retry_engine_record_after_ancestor_loop(
+    fn drive_record_over_installed_ancestors_loop(
         &mut self,
         node: StyleNodeID,
         armed: bool,
@@ -6664,7 +6623,7 @@ impl StyleEngineState {
         counters: &mut Counters,
     ) -> u64 {
         loop {
-            let request = match self.retry_engine_record_after_ancestor_step(node, armed, scratch, counters) {
+            let request = match self.drive_record_over_installed_ancestors_step(node, armed, scratch, counters) {
                 Ok(record) => {
                     counters.bump(Counter::RetryAfterAncestorSettled);
                     return record;
