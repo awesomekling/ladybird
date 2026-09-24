@@ -281,7 +281,7 @@ struct InlineLayoutDamage {
 /// surviving across layout passes on the node arena.
 #[derive(Default)]
 pub(crate) struct FcRunCacheArenaStore {
-    entries: RefCell<Vec<Option<std::rc::Rc<FcRunCacheEntry>>>>,
+    entries: RefCell<Vec<Option<std::sync::Arc<FcRunCacheEntry>>>>,
     inline_layout_damage: RefCell<Vec<InlineLayoutDamage>>,
     pending_sweep_slots: RefCell<Vec<u32>>,
     enrolled_for_sweep: RefCell<Vec<bool>>,
@@ -368,7 +368,7 @@ impl FcRunCacheArenaStore {
         slot: u32,
         validity: FcRunCacheValidity,
         key: &FcRunCacheKey,
-    ) -> Option<std::rc::Rc<FcRunCacheEntry>> {
+    ) -> Option<std::sync::Arc<FcRunCacheEntry>> {
         let entries = self.entries.borrow();
         let stored = entries.get(slot as usize)?;
         let entry = stored.as_ref()?;
@@ -390,7 +390,7 @@ impl FcRunCacheArenaStore {
         validity: FcRunCacheValidity,
         key: &FcRunCacheKey,
         structural_epoch_bumps: u32,
-    ) -> Option<std::rc::Rc<FcRunCacheEntry>> {
+    ) -> Option<std::sync::Arc<FcRunCacheEntry>> {
         if structural_epoch_bumps == 0 {
             return None;
         }
@@ -422,9 +422,9 @@ impl FcRunCacheArenaStore {
         if entries.len() <= slot as usize {
             entries.resize_with(slot as usize + 1, || None);
         }
-        match entries[slot as usize].as_mut().and_then(std::rc::Rc::get_mut) {
+        match entries[slot as usize].as_mut().and_then(std::sync::Arc::get_mut) {
             Some(stored) => *stored = entry,
-            None => entries[slot as usize] = Some(std::rc::Rc::new(entry)),
+            None => entries[slot as usize] = Some(std::sync::Arc::new(entry)),
         }
         drop(entries);
         // NB: Invalidation can occur between probing a run and storing its result.
@@ -471,8 +471,8 @@ pub(super) enum FcRunCacheAttempt {
         /// on its next probe (a fail-safe miss) instead of being baked into
         /// a forever-valid entry.
         validity: FcRunCacheValidity,
-        shadow_entry: Option<std::rc::Rc<FcRunCacheEntry>>,
-        structurally_damaged_entry: Option<std::rc::Rc<FcRunCacheEntry>>,
+        shadow_entry: Option<std::sync::Arc<FcRunCacheEntry>>,
+        structurally_damaged_entry: Option<std::sync::Arc<FcRunCacheEntry>>,
     },
 }
 
@@ -496,7 +496,7 @@ impl FcRunCacheAttempt {
         should_collect_devtools_layout_data: bool,
         callbacks: &LayoutPass<'_>,
         key: &FcRunCacheKey,
-    ) -> Result<Self, std::rc::Rc<FcRunCacheEntry>> {
+    ) -> Result<Self, std::sync::Arc<FcRunCacheEntry>> {
         let fc_type = key.fc_type;
         let input = &key.input;
         let mode = fc_run_cache_mode_from_environment();
