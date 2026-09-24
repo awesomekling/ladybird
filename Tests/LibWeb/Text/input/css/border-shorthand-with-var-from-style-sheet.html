@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    :root { --color: rgb(1 2 3); }
+    .border { border: 1px solid var(--color); }
+    .border-top { border-top: 2px dashed var(--color); }
+    .border-width { border-width: var(--width, 3px); border-style: solid; }
+</style>
+<div id="sheetBorder" class="border"></div>
+<div id="sheetBorderTop" class="border-top"></div>
+<div id="sheetBorderWidth" class="border-width"></div>
+<div id="inlineBorder" style="border: 1px solid var(--color)"></div>
+<script>
+    test(() => {
+        for (const element of [sheetBorder, sheetBorderTop, sheetBorderWidth, inlineBorder]) {
+            const style = getComputedStyle(element);
+            println(`${element.id}: ${style.borderTopWidth} ${style.borderTopStyle} ${style.borderTopColor}, ${style.borderLeftWidth} ${style.borderLeftStyle} ${style.borderLeftColor}`);
+        }
+    });
+</script>

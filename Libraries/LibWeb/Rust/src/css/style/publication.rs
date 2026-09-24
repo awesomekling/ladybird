@@ -4211,19 +4211,24 @@ impl RetainedState {
         if written.len() != declared.len() {
             return None;
         }
-        let shorthand = declared
-            .iter()
-            .zip(written)
-            .find(|(declared, written)| {
-                declared.property < crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID
-                    && std::ptr::eq(written.pointer(), written_value)
-            })
-            .map(|(declared, written)| {
-                let value = Self::underlying_shorthand_substitution(written.clone_retained());
-                (declared.property, value)
-            });
-        if shorthand.is_some() {
-            return shorthand;
+        let shorthand = declared.iter().zip(written).find(|(declared, written)| {
+            declared.property < crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID
+                && std::ptr::eq(written.pointer(), written_value)
+        });
+        if let Some((declared, written)) = shorthand {
+            // A shorthand nested in another one (`border-width` in `border`) is itself pending the
+            // outer shorthand's substitution; the substituted source parses under the outermost
+            // shorthand's grammar.
+            if let crate::css::style_value::StyleValueData::PendingSubstitution {
+                original_shorthand_value,
+            } = written.data()
+                && let Some(outer) =
+                    self.shorthand_declaration_written_as(node, source, original_shorthand_value.pointer())
+            {
+                return Some(outer);
+            }
+            let value = Self::underlying_shorthand_substitution(written.clone_retained());
+            return Some((declared.property, value));
         }
 
         // Inline declarations retain the expanded pending longhands without a separate
