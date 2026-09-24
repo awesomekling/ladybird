@@ -6,6 +6,8 @@
 
 use crate::css::css_pixels::CssPixels;
 use crate::css::retained_fly_string::{RetainedUtf16FlyString, RetainedUtf16FlyStringList};
+use crate::layout::LayoutNodeArena;
+use crate::layout::node_data::NodeSlotId;
 use crate::painting::display_list::commands::DisplayListResourceId;
 use crate::painting::host::FfiVectorImageRenderRequest;
 use libgfx_rust::{FloatRect, FloatSize, IntSize};
@@ -44,6 +46,91 @@ pub(crate) fn declares_light_or_dark_color_scheme(schemes: &RetainedUtf16FlyStri
         .as_slice()
         .iter()
         .any(|scheme| scheme.raw() == light || scheme.raw() == dark)
+}
+
+/// The scheme an SVG-as-image referenced by `owner` answers `prefers-color-scheme` with.
+/// Its used `color-scheme` counts only when the element or the document declared a scheme the
+/// image can answer with; otherwise, like Firefox, the preferred scheme wins.
+pub(crate) fn image_color_scheme(
+    layout_arena: &LayoutNodeArena,
+    owner: NodeSlotId,
+    document_declares_light_or_dark_color_scheme: bool,
+    image_color_scheme_fallback: u8,
+) -> u8 {
+    layout_arena
+        .node_style_if_live(owner)
+        .map_or(image_color_scheme_fallback, |style| {
+            let ui = style.inherited_ui();
+            if declares_light_or_dark_color_scheme(&ui.color_schemes) || document_declares_light_or_dark_color_scheme {
+                ui.color_scheme
+            } else {
+                image_color_scheme_fallback
+            }
+        })
+}
+
+/// The renders the next recording is predicted to need for the SVG-as-image elements it paints
+/// afresh, at the size each element's committed box gives and the scale of an untransformed box.
+/// The renders the last recording painted are resolved already, so this covers an element's
+/// first paint, and a render it predicts wrong is only a miss.
+pub(crate) fn predict_image_element_renders(
+    layout_arena: &LayoutNodeArena,
+    device_pixels_per_css_pixel: f64,
+    document_declares_light_or_dark_color_scheme: bool,
+    image_color_scheme_fallback: u8,
+) -> Vec<VectorImageRenderRequest> {
+    use crate::painting::image_content::ImageContent;
+    use crate::painting::replaced_paint_facts::{ImagePaintFacts, ReplacedPaintFacts};
+    let rows = layout_arena.paintable_rows();
+    let converter =
+        crate::painting::display_list::device_pixels::DevicePixelConverter::new(device_pixels_per_css_pixel);
+    let every_row_records = layout_arena.paint_damage_covers_everything();
+    let mut requests = Vec::new();
+    layout_arena.for_each_replaced_paint_facts(|row, facts| {
+        let ReplacedPaintFacts::Image(ImagePaintFacts {
+            natural,
+            content:
+                ImageContent::Vector {
+                    image_identity,
+                    has_active_view_box,
+                    ..
+                },
+        }) = facts
+        else {
+            return;
+        };
+        if !rows.paintable_row_is_populated(row)
+            || (!every_row_records && layout_arena.row_paint_state(row).damage().is_empty())
+        {
+            return;
+        }
+        let draw_rect =
+            crate::painting::record::paint::replaced::image_content_draw_rect(&rows, converter, row, natural);
+        if draw_rect.is_empty() {
+            return;
+        }
+        let geometry = vector_image_render_geometry(
+            draw_rect.to_float(),
+            FloatSize {
+                width: 1.0,
+                height: 1.0,
+            },
+            *has_active_view_box,
+        );
+        requests.push(VectorImageRenderRequest::new(
+            *image_identity,
+            image_color_scheme(
+                layout_arena,
+                row,
+                document_declares_light_or_dark_color_scheme,
+                image_color_scheme_fallback,
+            ),
+            geometry.css_width,
+            geometry.css_height,
+            geometry.raster_scale,
+        ));
+    });
+    requests
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
