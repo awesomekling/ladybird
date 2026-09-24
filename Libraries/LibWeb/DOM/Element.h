@@ -331,7 +331,7 @@ public:
     // The synthetic pseudo-element records the style engine settled beside an engine-computed record: a kind it
     // decided holds the record, or none when the pseudo-element is not generated; a kind it left alone is unchanged.
     using EnginePseudoElementRecords = Array<Optional<CSS::StyleRecordID>, to_underlying(CSS::PseudoElement::KnownPseudoElementCount)>;
-    void update_anchor_name_registry(CSS::ComputedValues const* old_computed_values, CSS::ComputedValues const& new_style);
+    void update_anchor_name_registry(ReadonlySpan<Utf16FlyString> old_anchor_names, CSS::ComputedValues const& new_style);
     // A record the host samples the element's animations over is compared once the sample has
     // composed it, against the style the element held before the record was installed.
     enum class EngineRecordComparison {
@@ -344,16 +344,12 @@ public:
         CSS::StyleRecordID old_style_record;
         u32 packed { 0 };
     };
-    // Whether an installation restyles the element's layout node itself, or leaves it to a caller that
-    // applies it with the invalidation the installation answers, once its batch is installed.
-    enum class LayoutNodeStyleApplication {
-        Now,
-        LeftToCaller,
-    };
-    CSS::RequiredInvalidationAfterStyleChange apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const&, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison = EngineRecordComparison::AtInstallation, Optional<EngineRecordDamage> = {}, LayoutNodeStyleApplication = LayoutNodeStyleApplication::Now);
+    // An installation given a drain leaves its render-side effects (the layout node restyle, the
+    // anchor name registry) there, for its batch to apply once the batch is installed.
+    CSS::RequiredInvalidationAfterStyleChange apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const&, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison = EngineRecordComparison::AtInstallation, Optional<EngineRecordDamage> = {}, CSS::StyleEffectDrain* = nullptr);
     // Compare the record an AfterSample installation left, now sampled, with the style the element
     // held before it, and apply the result to the element's layout node.
-    CSS::RequiredInvalidationAfterStyleChange compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange installation_invalidation, LayoutNodeStyleApplication = LayoutNodeStyleApplication::Now);
+    CSS::RequiredInvalidationAfterStyleChange compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange installation_invalidation, CSS::StyleEffectDrain* = nullptr);
     void apply_display_none_change(bool display_none_ignoring_animations_changed, bool became_display_none);
     // Republishes which animations this element references, for a record the engine settled whose
     // animation declarations moved.
@@ -362,7 +358,7 @@ public:
     // element inherits, or one the engine resolved over it. Nothing when it cannot be installed.
     [[nodiscard]] RefPtr<CSS::CustomPropertyData const> custom_property_environment_of_engine_record(CSS::StyleRecordID, bool& installable) const;
     CSS::RequiredInvalidationAfterStyleChange recompute_pseudo_element_styles();
-    CSS::RequiredInvalidationAfterStyleChange install_engine_pseudo_element_records_after_sample(bool& did_change_custom_properties, bool old_is_list_item, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const*, LayoutNodeStyleApplication = LayoutNodeStyleApplication::Now);
+    CSS::RequiredInvalidationAfterStyleChange install_engine_pseudo_element_records_after_sample(bool& did_change_custom_properties, bool old_is_list_item, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const*, CSS::StyleEffectDrain* = nullptr);
     void apply_computed_style_to_layout_node_if_needed(CSS::RequiredInvalidationAfterStyleChange const&);
 
     void set_needs_layout_tree_rebuild(SetNeedsLayoutTreeUpdateReason, CSS::LayoutTreeRebuildRoot);

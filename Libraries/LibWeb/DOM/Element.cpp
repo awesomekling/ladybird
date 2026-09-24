@@ -48,6 +48,7 @@
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/SelectorMatching.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEffectDrain.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleInvalidation.h>
 #include <LibWeb/CSS/StylePropertyMap.h>
@@ -1736,10 +1737,12 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
     return invalidation;
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::install_engine_pseudo_element_records_after_sample(bool& did_change_custom_properties, bool old_is_list_item, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const* records, LayoutNodeStyleApplication layout_node_style_application)
+CSS::RequiredInvalidationAfterStyleChange Element::install_engine_pseudo_element_records_after_sample(bool& did_change_custom_properties, bool old_is_list_item, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const* records, CSS::StyleEffectDrain* effect_drain)
 {
     auto invalidation = recompute_pseudo_element_styles(did_change_custom_properties, old_is_list_item, old_originating_style, records);
-    if (layout_node_style_application == LayoutNodeStyleApplication::Now)
+    if (effect_drain)
+        effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), invalidation });
+    else
         apply_computed_style_to_layout_node_if_needed(invalidation);
     return invalidation;
 }
@@ -2190,17 +2193,15 @@ RefPtr<CSS::CustomPropertyData const> Element::custom_property_environment_of_en
 // https://drafts.csswg.org/css-anchor-position-1/#determining
 // Update the anchor name registry when anchor-name changes.
 // FIXME: The tree root should be determined by the stylesheet origin, not the element's position in the tree.
-void Element::update_anchor_name_registry(CSS::ComputedValues const* old_computed_values, CSS::ComputedValues const& new_style)
+void Element::update_anchor_name_registry(ReadonlySpan<Utf16FlyString> old_anchor_names, CSS::ComputedValues const& new_style)
 {
     if (!is_connected())
         return;
     auto scope = anchor_name_scope_of(*this, root());
     bool element_had_registered_anchor_names = false;
-    if (old_computed_values) {
-        for (auto const& name : old_computed_values->anchor_names()) {
-            element_had_registered_anchor_names = true;
-            scope.names.unregister_name(name, *this, scope.host);
-        }
+    for (auto const& name : old_anchor_names) {
+        element_had_registered_anchor_names = true;
+        scope.names.unregister_name(name, *this, scope.host);
     }
     bool element_has_anchor_names = false;
     for (auto const& name : new_style.anchor_names()) {
@@ -2237,7 +2238,7 @@ void Element::republish_animation_name_registry()
     CSS::record_element_animation_names(*this, indexable_animation_names(*style));
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison comparison, Optional<EngineRecordDamage> engine_record_damage, LayoutNodeStyleApplication layout_node_style_application)
+CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison comparison, Optional<EngineRecordDamage> engine_record_damage, CSS::StyleEffectDrain* effect_drain)
 {
     VERIFY(parent());
     auto old_style_record = style_record_identity();
@@ -2287,7 +2288,10 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         // with the pseudo-element styles it still computes.
         install_custom_property_environment();
         set_computed_style({}, new_style_record);
-        update_anchor_name_registry(nullptr, *computed_style());
+        if (!effect_drain)
+            update_anchor_name_registry({}, *computed_style());
+        else if (!computed_style()->anchor_names().is_empty())
+            effect_drain->append(CSS::StyleEffectDrain::AnchorNames { style_node_id(), {} });
         if (is_document_element())
             style_computer.update_root_element_font_metrics(*computed_style());
         counters.element_computed_style_changes++;
@@ -2295,7 +2299,9 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         if (!CSS::deferring_engine_pseudo_installation())
             invalidation |= recompute_pseudo_element_styles(did_change_custom_properties, false, nullptr, &pseudo_element_records);
         publish_custom_property_names();
-        if (layout_node_style_application == LayoutNodeStyleApplication::Now)
+        if (effect_drain)
+            effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), invalidation });
+        else
             apply_computed_style_to_layout_node_if_needed(invalidation);
         return invalidation;
     }
@@ -2337,7 +2343,13 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
                 counters.element_computed_style_changes++;
         }
         set_computed_style({}, new_style_record);
-        update_anchor_name_registry(&*old_computed_values, *new_computed_values);
+        if (!effect_drain) {
+            update_anchor_name_registry(old_computed_values->anchor_names(), *new_computed_values);
+        } else if (!old_computed_values->anchor_names().is_empty() || !new_computed_values->anchor_names().is_empty()) {
+            Vector<Utf16FlyString> old_anchor_names;
+            old_anchor_names.append(old_computed_values->anchor_names().data(), old_computed_values->anchor_names().size());
+            effect_drain->append(CSS::StyleEffectDrain::AnchorNames { style_node_id(), move(old_anchor_names) });
+        }
         if (is_document_element()) {
             // Root-relative units read document-global font metrics rather than inherited style.
             // Every descendant must recompute when they move.
@@ -2364,12 +2376,16 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     publish_custom_property_names();
     if (new_style_record != old_style_record || did_change_custom_properties)
         invalidate_descendant_styles_depending_on_style_container_query();
-    if (comparison == EngineRecordComparison::AtInstallation && layout_node_style_application == LayoutNodeStyleApplication::Now)
-        apply_computed_style_to_layout_node_if_needed(result.invalidation);
+    if (comparison == EngineRecordComparison::AtInstallation) {
+        if (effect_drain)
+            effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), result.invalidation });
+        else
+            apply_computed_style_to_layout_node_if_needed(result.invalidation);
+    }
     return result.invalidation;
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange invalidation, LayoutNodeStyleApplication layout_node_style_application)
+CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange invalidation, CSS::StyleEffectDrain* effect_drain)
 {
     auto& style_computer = document().style_computer();
     auto const style_record = style_record_identity();
@@ -2391,7 +2407,9 @@ CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style
             document().style_invalidation_counters().element_computed_style_changes++;
         invalidation |= result.invalidation;
     }
-    if (layout_node_style_application == LayoutNodeStyleApplication::Now)
+    if (effect_drain)
+        effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), invalidation });
+    else
         apply_computed_style_to_layout_node_if_needed(invalidation);
     return invalidation;
 }

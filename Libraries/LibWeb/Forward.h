@@ -383,6 +383,7 @@ class Size;
 class ScrollbarColorStyleValue;
 class StringStyleValue;
 class StyleComputer;
+class StyleEffectDrain;
 class StylePropertyMap;
 class StylePropertyMapReadOnly;
 class StyleScope;
