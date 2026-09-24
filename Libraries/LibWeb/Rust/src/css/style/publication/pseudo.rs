@@ -24,9 +24,7 @@ impl RetainedState {
     ) {
         use pseudo_kind::{AFTER, BACKDROP, BEFORE, FIRST_LETTER, MARKER, SELECTION};
 
-        let Some(mask) = self.pseudo_style_mask(node) else {
-            return;
-        };
+        let mask = self.pseudo_style_mask_or_rematch(node, counters);
         let mut required = match selected_kind {
             Some(kind) => mask & (1_u64 << kind),
             None => {
@@ -259,10 +257,7 @@ impl RetainedState {
             });
         // The kinds the node's match answer has rules for: a winner row is published for each
         // the engine cascaded itself, and a kind with rules but no row is not decided.
-        let Some(kinds_with_rules) = self.pseudo_style_mask(node) else {
-            counters.bump(Counter::EngineComputedRecordBailPseudoMask);
-            return Err(Unanswered::Refused);
-        };
+        let kinds_with_rules = self.pseudo_style_mask_or_rematch(node, counters);
         // A marker's named counter style can move without changing any inherited group or
         // winner. Both retained and shared pseudo records must name the current registry.
         let mut pseudo_uses_substitution = scratch.pseudo_uses_substitution;
@@ -746,13 +741,25 @@ impl RetainedState {
         }
     }
 
+    /// The kinds the node's match answer has rules for, matching the element again when that answer was evicted. A
+    /// match that cannot complete for want of a fact generates no pseudo-element.
+    pub(super) fn pseudo_style_mask_or_rematch(&mut self, node: StyleNodeID, counters: &mut Counters) -> u64 {
+        if let Some(mask) = self.pseudo_style_mask(node) {
+            return mask;
+        }
+        match self.match_element_for_cascade(node, counters) {
+            Ok(matches) => matches.iter().fold(0, |mask, rule_match| {
+                mask | synthetic_pseudo_bit(rule_match.pseudo_element)
+            }),
+            Err(_) => {
+                debug_assert!(false, "an element's match reports missing facts");
+                0
+            }
+        }
+    }
+
     pub(super) fn pseudo_style_mask(&self, node: StyleNodeID) -> Option<u64> {
-        let bit = |pseudo: Option<tree::PseudoElementTarget>| {
-            pseudo
-                .map(|pseudo| pseudo.kind.0)
-                .filter(|&kind| kind <= bridge::LAST_SYNTHETIC_PSEUDO_ELEMENT_KIND)
-                .map_or(0, |kind| 1u64 << kind)
-        };
+        let bit = synthetic_pseudo_bit;
         if let Some((owner, answer)) = Self::published_answer_lookup(
             &self.published_match_answers,
             self.batch_matching_traversal.as_deref(),
@@ -1086,10 +1093,7 @@ impl RetainedState {
                 counters,
             )
             .or_refused()?;
-        let Some(pseudo_styles) = self.pseudo_style_mask(node) else {
-            counters.bump(Counter::EngineComputedRecordBailPseudoMask);
-            return Err(Unanswered::Refused);
-        };
+        let pseudo_styles = self.pseudo_style_mask_or_rematch(node, counters);
         let target = computed::ComputedStyleTarget::new(node, u8::MAX);
         let subject = DriveSubject {
             target,
@@ -1276,9 +1280,7 @@ impl StyleEngineState {
         if kind >= 20 {
             return Ok(None);
         }
-        let Some(mask) = self.pseudo_style_mask(node) else {
-            return Err("EngineComputedRecordBailPseudoMask");
-        };
+        let mask = self.pseudo_style_mask_or_rematch(node, counters);
         // The demand settled the originating element first; a pseudo-element without an
         // originating record generates no box.
         let Some(element) = self.computed_group_sets.assigned_style_record(node) else {
@@ -1478,4 +1480,11 @@ impl StyleEngineState {
         }
         (settled, scratch.pseudo_uses_substitution)
     }
+}
+
+fn synthetic_pseudo_bit(pseudo: Option<tree::PseudoElementTarget>) -> u64 {
+    pseudo
+        .map(|pseudo| pseudo.kind.0)
+        .filter(|&kind| kind <= bridge::LAST_SYNTHETIC_PSEUDO_ELEMENT_KIND)
+        .map_or(0, |kind| 1u64 << kind)
 }

@@ -165,7 +165,6 @@ define_counters! {
     EngineComputedRecordHostPseudoDeclines => "engineComputedRecordHostPseudoDeclines",
     EngineComputedRecordHostPseudoBackings => "engineComputedRecordHostPseudoBackings",
     EngineComputedRecordBailPseudoBackdrop => "engineComputedRecordBailPseudoBackdrop",
-    EngineComputedRecordBailPseudoMask => "engineComputedRecordBailPseudoMask",
     EngineComputedRecordGateAncestors => "engineComputedRecordGateAncestors",
     EngineComputedLonghandEvaluations => "engineComputedLonghandEvaluations",
     EngineComputedRecordBailStaleCascadeState => "engineComputedRecordBailStaleCascadeState",
