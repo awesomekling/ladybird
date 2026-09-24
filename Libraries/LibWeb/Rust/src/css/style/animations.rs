@@ -47,7 +47,20 @@ pub(crate) struct AppliedAnimationDefinition {
     words: [u64; APPLIED_DEFINITION_WORD_COUNT],
 }
 
+/// The word the flags sit in.
+const APPLIED_DEFINITION_FLAGS_WORD: usize = 3;
+/// `animation-duration: auto`, whose value is the effect's intrinsic duration rather than the
+/// definition's.
+const APPLIED_DEFINITION_DURATION_IS_AUTO: u64 = 1;
 const APPLIED_DEFINITION_TIMELINE_KIND_SHIFT: u32 = 40;
+/// The fields of the flags word a change to which moves no time: `animation-direction`,
+/// `animation-fill-mode` and `animation-composition`, each a byte. Everything else in that word -
+/// `duration_is_auto`, the play state and the timeline - is a change a retime cannot describe.
+const APPLIED_DEFINITION_RETIMABLE_FLAGS_MASK: u64 = (0xff << 8) | (0xff << 24) | (0xff << 32);
+const APPLIED_DEFINITION_KEYFRAME_SET_WORD: usize = 4;
+const APPLIED_DEFINITION_TIMING_FUNCTION_WORD: usize = 5;
+/// `AnimationTimelineSource::Kind::Scroll`.
+const APPLIED_DEFINITION_TIMELINE_KIND_SCROLL: u64 = 2;
 
 impl AppliedAnimationDefinition {
     #[must_use]
@@ -80,6 +93,71 @@ impl AppliedAnimationDefinition {
                 animation.timing_function as u64,
             ],
         }
+    }
+
+    /// Whether the timeline this definition asks for is one whose materialization the engine can
+    /// predict. A scroll timeline is rebuilt from the element's surroundings every time it is
+    /// applied, so a definition that names one is never called unchanged.
+    #[must_use]
+    fn timeline_is_decidable(&self) -> bool {
+        (self.words[APPLIED_DEFINITION_FLAGS_WORD] >> APPLIED_DEFINITION_TIMELINE_KIND_SHIFT) & 0xff
+            != APPLIED_DEFINITION_TIMELINE_KIND_SCROLL
+    }
+
+    /// Whether applying `self` to an animation that last had `published` applied would leave it
+    /// exactly as it is.
+    #[must_use]
+    pub(crate) fn would_change_nothing(&self, published: &Self) -> bool {
+        if !self.timeline_is_decidable() {
+            return false;
+        }
+        // An animation no plan has described yet publishes a null timing function, which no
+        // computed definition ever has.
+        if published.words[APPLIED_DEFINITION_TIMING_FUNCTION_WORD] == 0 {
+            return false;
+        }
+        (0..APPLIED_DEFINITION_WORD_COUNT)
+            .filter(|&index| index != APPLIED_DEFINITION_TIMING_FUNCTION_WORD)
+            .all(|index| self.words[index] == published.words[index])
+            && unsafe {
+                crate::css::style_value::rust_style_value_equals(
+                    self.words[APPLIED_DEFINITION_TIMING_FUNCTION_WORD] as *const _,
+                    published.words[APPLIED_DEFINITION_TIMING_FUNCTION_WORD] as *const _,
+                )
+            }
+    }
+
+    /// Whether applying `self` to an animation that last had `published` applied would leave its
+    /// timing exactly as it is and only give its effect another keyframe set, which moves no time,
+    /// changes no play state and creates nothing: `apply_css_properties` takes its early return.
+    #[must_use]
+    pub(crate) fn change_is_only_keyframes(&self, published: &Self) -> bool {
+        if self.words[APPLIED_DEFINITION_KEYFRAME_SET_WORD] == published.words[APPLIED_DEFINITION_KEYFRAME_SET_WORD] {
+            return false;
+        }
+        let mut without_the_keyframes = *self;
+        without_the_keyframes.words[APPLIED_DEFINITION_KEYFRAME_SET_WORD] =
+            published.words[APPLIED_DEFINITION_KEYFRAME_SET_WORD];
+        without_the_keyframes.would_change_nothing(published)
+    }
+
+    /// Whether applying `self` to an animation that last had `published` applied would change only
+    /// what its effect is sampled from and how far a given time is along it, and move no time.
+    ///
+    /// `apply_css_properties` hands such a definition to the effect's plain setters, none of which
+    /// notifies the animation, so the start time, the hold time and the pending tasks stay as they
+    /// are: the retimed row is the published row with the three specified times restamped and the
+    /// fill and direction fields replaced. A play-state change and an `auto` duration move time.
+    #[must_use]
+    pub(crate) fn change_is_only_simple_timing(&self, published: &Self) -> bool {
+        if !self.timeline_is_decidable() || published.words[APPLIED_DEFINITION_TIMING_FUNCTION_WORD] == 0 {
+            return false;
+        }
+        if self.words[APPLIED_DEFINITION_FLAGS_WORD] & APPLIED_DEFINITION_DURATION_IS_AUTO != 0 {
+            return false;
+        }
+        self.words[APPLIED_DEFINITION_FLAGS_WORD] & !APPLIED_DEFINITION_RETIMABLE_FLAGS_MASK
+            == published.words[APPLIED_DEFINITION_FLAGS_WORD] & !APPLIED_DEFINITION_RETIMABLE_FLAGS_MASK
     }
 }
 
@@ -131,6 +209,12 @@ impl CssDefinedAnimations {
     #[must_use]
     pub(crate) fn names(&self, node: StyleNodeID, slot: AnimationSlot) -> &[CssString] {
         self.rows.get(&(node, slot)).map_or(&[][..], |row| &row.0[..])
+    }
+
+    /// The definition the last plan applied to each animation of the list, in the list's order.
+    #[must_use]
+    pub(crate) fn definitions(&self, node: StyleNodeID, slot: AnimationSlot) -> &[AppliedAnimationDefinition] {
+        self.rows.get(&(node, slot)).map_or(&[][..], |row| &row.1[..])
     }
 
     /// Whether the element runs a CSS animation at all, in any of its lists. Only such an element
@@ -480,20 +564,8 @@ impl AnimationTimingRow {
         // `Bindings::PlaybackDirection` and `Bindings::FillMode` are in IDL order, which is not the
         // order the CSS keywords are in: a mirror of `css_animation_direction_to_playback_direction`
         // and `css_fill_mode_to_bindings_fill_mode`.
-        let direction = match definition.direction {
-            0 => 2, // alternate
-            1 => 3, // alternate-reverse
-            2 => 0, // normal
-            3 => 1, // reverse
-            _ => return None,
-        };
-        let fill_mode = match definition.fill_mode {
-            0 => 2, // backwards
-            1 => 3, // both
-            2 => 1, // forwards
-            3 => 0, // none
-            _ => return None,
-        };
+        let direction = css_playback_direction(definition.direction)?;
+        let fill_mode = css_fill_mode(definition.fill_mode)?;
         // A pending play or pause task settles nothing the phase or the active time is derived
         // from, but the row the host publishes for this animation carries one, so this one does
         // too. `animation_play_state::PAUSED` is 0.
@@ -572,10 +644,83 @@ impl AnimationTimingRow {
             && self.composite_class_key == name_index
     }
 
+    /// This row, standing for the `index`th animation a plan starts.
+    #[must_use]
+    pub(crate) fn with_synthesized_index(self, index: u32) -> Self {
+        Self {
+            synthesized_index: Some(index),
+            ..self
+        }
+    }
+
+    /// Which of a plan's starting animations this row stands for, for a row the engine synthesized
+    /// rather than read from the published list.
+    #[must_use]
+    pub(crate) fn synthesized_index(&self) -> Option<u32> {
+        self.synthesized_index
+    }
+
+    #[must_use]
+    pub(crate) fn effect_identity(&self) -> u64 {
+        self.effect_identity
+    }
+
+    /// The place in the element's `animation-name` list of the CSS animation this row describes,
+    /// for a row that is one of the animations `(node, slot)`'s own plan works on. `None` for every
+    /// other row: a transition, an animation script started, a CSS animation another element owns,
+    /// and one whose owning element has stopped listing it.
+    #[must_use]
+    pub(crate) fn owned_css_animation_index(&self, node: StyleNodeID, slot: AnimationSlot) -> Option<u32> {
+        if self.composite_class != animation_class::CSS_ANIMATION_WITH_OWNING_ELEMENT
+            || !self.has(timing_row_flag::HAS_OWNING_ELEMENT)
+            || !self.has(timing_row_flag::LISTED_BY_OWNING_ELEMENT)
+            || self.composite_owning_node != node.raw()
+            || self.composite_owning_slot != slot
+        {
+            return None;
+        }
+        Some(self.composite_class_key)
+    }
+
+    /// This row with the timing a definition that moves no time stamps on it: the three specified
+    /// times and the two flag fields `apply_css_properties` sets through the effect's plain setters.
+    /// `None` for a definition whose direction or fill mode is not one of the CSS keywords, and for
+    /// a row whose times are percentages of a progress-based timeline.
+    #[must_use]
+    pub(crate) fn retimed_for_definition(
+        &self,
+        definition: &crate::css::style_compute::FfiComputedAnimation,
+    ) -> Option<Self> {
+        use timing_row_flag as flag;
+
+        let direction = css_playback_direction(definition.direction)?;
+        let fill_mode = css_fill_mode(definition.fill_mode)?;
+        if self.flags
+            & (flag::START_DELAY_IS_PERCENTAGE | flag::ITERATION_DURATION_IS_PERCENTAGE | flag::END_DELAY_IS_PERCENTAGE)
+            != 0
+        {
+            return None;
+        }
+        let mut retimed = *self;
+        retimed.times[TIME_START_DELAY] = definition.delay;
+        retimed.times[TIME_ITERATION_DURATION] = definition.duration;
+        retimed.times[TIME_ITERATION_COUNT] = definition.iteration_count;
+        retimed.flags &= !((flag::FILL_MODE_MASK << flag::FILL_MODE_SHIFT)
+            | (flag::PLAYBACK_DIRECTION_MASK << flag::PLAYBACK_DIRECTION_SHIFT));
+        retimed.flags |= (fill_mode << flag::FILL_MODE_SHIFT) | (direction << flag::PLAYBACK_DIRECTION_SHIFT);
+        Some(retimed)
+    }
+
     /// Whether the host could not describe this animation's timing at all.
     #[must_use]
     pub(crate) fn is_undecidable(&self) -> bool {
         self.has(timing_row_flag::UNDECIDABLE)
+    }
+
+    /// Whether the animation holds its current time, which no timeline's time then moves.
+    #[must_use]
+    pub(crate) fn has_hold_time(&self) -> bool {
+        self.has(timing_row_flag::HAS_HOLD_TIME)
     }
 
     #[must_use]
@@ -829,6 +974,88 @@ pub(crate) fn row_current_key(
 pub(crate) struct RowSelectedEffect {
     pub(crate) identity: u64,
     pub(crate) current_key: f64,
+}
+
+/// `Bindings::PlaybackDirection` of an `animation-direction` keyword: the IDL order is not the
+/// order the CSS keywords are in. A mirror of `css_animation_direction_to_playback_direction`.
+fn css_playback_direction(direction: u8) -> Option<u32> {
+    match direction {
+        0 => Some(2), // alternate
+        1 => Some(3), // alternate-reverse
+        2 => Some(0), // normal
+        3 => Some(1), // reverse
+        _ => None,
+    }
+}
+
+/// `Bindings::FillMode` of an `animation-fill-mode` keyword. A mirror of
+/// `css_fill_mode_to_bindings_fill_mode`.
+fn css_fill_mode(fill_mode: u8) -> Option<u32> {
+    match fill_mode {
+        0 => Some(2), // backwards
+        1 => Some(3), // both
+        2 => Some(1), // forwards
+        3 => Some(0), // none
+        _ => None,
+    }
+}
+
+/// The rows an element would publish once a plan that cancels and renumbers its CSS animations
+/// has been applied: a cancelled animation drops out of the effect stack, one the plan moved takes
+/// its new place in it, and the composite order is redone over what is left.
+///
+/// `new_indices[j]` is the place `animation-name` order gives the element's `j`th CSS animation,
+/// or `NO_MATCHED_ANIMATION` for one no definition claimed and the plan therefore cancels.
+/// Everything else the element holds - its transitions, the animations script started - the plan
+/// does not touch. `None` where the published rows are not the list the plan is about.
+#[must_use]
+pub(crate) fn rows_after_cancel_and_renumber(
+    rows: &[AnimationTimingRow],
+    node: StyleNodeID,
+    slot: AnimationSlot,
+    new_indices: &[i32],
+) -> Option<Vec<AnimationTimingRow>> {
+    let mut planned = Vec::with_capacity(rows.len());
+    let mut was_found = vec![false; new_indices.len()];
+    for row in rows {
+        let Some(existing) = row.owned_css_animation_index(node, slot) else {
+            planned.push(*row);
+            continue;
+        };
+        let existing = existing as usize;
+        if *was_found.get(existing)? {
+            return None;
+        }
+        was_found[existing] = true;
+        let new_index = new_indices[existing];
+        if new_index == NO_MATCHED_ANIMATION {
+            continue;
+        }
+        let mut planned_row = *row;
+        planned_row.composite_class_key = new_index as u32;
+        planned.push(planned_row);
+    }
+    if was_found.iter().any(|found| !found) {
+        return None;
+    }
+    // The published list is already in composite order, so a stable sort keeps the relative order
+    // of the rows the order declines to tell apart.
+    planned.sort_by(composite_order);
+    Some(planned)
+}
+
+/// The rows an element would publish once a plan that also starts animations has been applied:
+/// the rows the plan leaves behind, with the ones synthesized for the animations it starts merged
+/// into the composite order.
+#[must_use]
+pub(crate) fn rows_with_synthesized(
+    planned: Vec<AnimationTimingRow>,
+    synthesized: &[AnimationTimingRow],
+) -> Vec<AnimationTimingRow> {
+    let mut rows = planned;
+    rows.extend_from_slice(synthesized);
+    rows.sort_by(composite_order);
+    rows
 }
 
 /// The effects of one of an element's animation lists that a sample composes, in the order it
@@ -1640,6 +1867,10 @@ pub(crate) struct AnimationKeyframes {
     /// winning `animation-name` declaration to a shadow root by that identity, and the scope it
     /// names is where the declaration's `@keyframes` are looked for first.
     scope_by_shadow_root: HashMap<usize, TreeScopeID>,
+    /// What each keyframe set a scope names declares, by the pointer that names it, with how many
+    /// scopes name it: the description a brand-new animation of the rule is sampled from, with the
+    /// two holes a rule keeps until an animation runs it left open.
+    descriptions: HashMap<usize, (PublishedEffect, u32)>,
 }
 
 impl AnimationKeyframes {
@@ -1668,6 +1899,16 @@ impl AnimationKeyframes {
             "a published @keyframes name must come with its keyframe set"
         );
         self.generation += 1;
+        if let Some(previous) = self.scopes.get(&tree_scope) {
+            for set in previous.values() {
+                if let std::collections::hash_map::Entry::Occupied(mut entry) = self.descriptions.entry(set.pointer) {
+                    entry.get_mut().1 -= 1;
+                    if entry.get().1 == 0 {
+                        entry.remove();
+                    }
+                }
+            }
+        }
         if name_lengths.is_empty() {
             self.scopes.remove(&tree_scope);
             // A scope that defines nothing and a scope with no row answer alike, so the identity
@@ -1681,22 +1922,36 @@ impl AnimationKeyframes {
         }
         let descriptions = unsafe { build_published_effects(published_buffers) };
         let mut sets = HashMap::with_capacity(name_lengths.len());
+        let mut published = HashMap::with_capacity(name_lengths.len());
         let mut offset = 0usize;
         for (&length, description) in name_lengths.iter().zip(descriptions) {
             let end = offset + length as usize;
             assert!(end <= name_units.len(), "@keyframes name lengths overrun their buffer");
             let name = KeyframesName(CssString::from_utf16(&name_units[offset..end]));
             offset = end;
-            sets.insert(
-                name,
-                PublishedKeyframesSet {
-                    // The host names a set by its own pointer, which is what it publishes as the
-                    // description's identity.
-                    pointer: description.identity as usize,
-                },
-            );
+            // The host names a set by its own pointer, which is what it publishes as the
+            // description's identity.
+            let pointer = description.identity as usize;
+            sets.insert(name, PublishedKeyframesSet { pointer });
+            published.insert(pointer, description);
+        }
+        for set in sets.values() {
+            match self.descriptions.entry(set.pointer) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => entry.get_mut().1 += 1,
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    if let Some(description) = published.remove(&set.pointer) {
+                        entry.insert((description, 1));
+                    }
+                }
+            }
         }
         self.scopes.insert(tree_scope, sets);
+    }
+
+    /// What the keyframe set the host names by `pointer` declares, for as long as a scope names it.
+    #[must_use]
+    pub(crate) fn description(&self, pointer: usize) -> Option<&PublishedEffect> {
+        self.descriptions.get(&pointer).map(|(description, _)| description)
     }
 
     #[must_use]

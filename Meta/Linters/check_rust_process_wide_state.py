@@ -80,6 +80,7 @@ RENDER_STAGE_ALLOWED = {
             "css/style/engine_sample_check.rs:EXPECTED_SAMPLED_STYLES",
             "css/style/engine_sample_check.rs:LOG",
             "css/style/engine_sample_check.rs:MODE",
+            "css/style/engine_sample_check.rs:SETTLED_ROW_SAMPLES",
             "css/style/seal.rs:MODE",
             "font_seal.rs:INSTALLED",
             "layout/main_side_census.rs:CENSUS",

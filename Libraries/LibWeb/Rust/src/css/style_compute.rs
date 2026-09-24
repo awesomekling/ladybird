@@ -3524,6 +3524,15 @@ unsafe fn sample_whole_effect_stack(
         result.noted_container_effects =
             engine.note_sampled_container_unit_effects(node, input.style_record, run.container_unit_mask.get());
     }
+    if pseudo.is_none() {
+        check_settled_row_sample(
+            engine,
+            node,
+            input.style_record,
+            &result,
+            run.overlay.cast_const().cast(),
+        );
+    }
     let Some((host, host_result)) = host_sample else {
         return result;
     };
@@ -3613,6 +3622,150 @@ pub(crate) struct SettledRowSample {
     pub(crate) style: crate::css::style::engine_sample_check::EngineSampledStyle,
 }
 
+/// Where one effect of a plan's stack is sampled from: the description the host published for an
+/// effect it holds, or the `@keyframes` rule a definition names, with what the animation running
+/// the rule fills its two holes with.
+enum PlannedEffectSource {
+    Described,
+    Rule {
+        keyframe_set: usize,
+        easing: crate::css::style::animations::PublishedEasing,
+        composite: u8,
+    },
+}
+
+/// One effect of the stack an element's animations make once a plan is applied, in composite
+/// order, with the key it samples at.
+struct PlannedEffect {
+    identity: u64,
+    current_key: f64,
+    source: PlannedEffectSource,
+}
+
+/// The effect stack an element's animations make once the plan its row leaves is applied: the
+/// animations the plan cancels drop out, the ones it keeps take their new places, the ones whose
+/// keyframes or simple timing it changes are sampled from the rule and the timing it gives them,
+/// and the ones it starts are sampled from their rules at time zero. Or why the engine cannot say,
+/// where applying the plan does more than that.
+fn plan_effect_stack(
+    engine: &crate::css::style::StyleEngineState,
+    node: crate::css::style::tree::StyleNodeID,
+    plan: &crate::css::style::animations::SettledAnimationPlan,
+) -> Result<Vec<PlannedEffect>, &'static str> {
+    use crate::css::style::animations::{
+        self, AnimationTimingRow, AppliedAnimationDefinition, NO_MATCHED_ANIMATION, PublishedEasing,
+    };
+
+    let slot = animations::ELEMENT_ANIMATION_SLOT;
+    let definitions = plan.definitions();
+    let applied = engine.element_applied_animation_definitions(node, slot);
+    let rule_source = |definition: &FfiComputedAnimation| -> Result<Option<PlannedEffectSource>, &'static str> {
+        // A name no scope defines has no keyframes, and its effect composes nothing.
+        if definition.keyframe_set.is_null() {
+            return Ok(None);
+        }
+        let easing = PublishedEasing::from_computed_timing_function(unsafe {
+            &*definition.timing_function.cast::<StyleValueData>()
+        })
+        .ok_or("an animation-timing-function the engine cannot describe")?;
+        Ok(Some(PlannedEffectSource::Rule {
+            keyframe_set: definition.keyframe_set as usize,
+            easing,
+            composite: definition.composition,
+        }))
+    };
+    let mut new_indices = vec![NO_MATCHED_ANIMATION; applied.len()];
+    // The definitions that give the animation they claim another rule or another simple timing,
+    // by the place they give it, and whether its row is retimed.
+    let mut changed = Vec::new();
+    let mut starting = Vec::new();
+    for (index, definition) in definitions.iter().enumerate() {
+        if definition.matched_existing_index == NO_MATCHED_ANIMATION {
+            starting.push((index as u32, definition));
+            continue;
+        }
+        let matched = usize::try_from(definition.matched_existing_index).map_err(|_| "a claimed animation")?;
+        let published = applied
+            .get(matched)
+            .ok_or("a claimed animation the host did not publish")?;
+        let computed = AppliedAnimationDefinition::from_definition(definition);
+        if !computed.would_change_nothing(published) {
+            if computed.change_is_only_keyframes(published) {
+                changed.push((index as u32, definition, false));
+            } else if computed.change_is_only_simple_timing(published) {
+                changed.push((index as u32, definition, true));
+            } else {
+                return Err("a plan that plays, pauses or moves the timeline of an animation");
+            }
+        }
+        new_indices[matched] = i32::try_from(index).map_err(|_| "a definition index")?;
+    }
+    let rows = engine.element_animation_timing_rows(node, slot);
+    let linear_points = engine.element_animation_timing_row_linear_points(node, slot);
+    let mut planned = animations::rows_after_cancel_and_renumber(rows, node, slot, &new_indices)
+        .ok_or("published rows that are not the list the plan is about")?;
+    for row in &mut planned {
+        let Some(index) = row.owned_css_animation_index(node, slot) else {
+            continue;
+        };
+        if let Some((_, definition, true)) = changed.iter().find(|(changed, _, _)| *changed == index) {
+            *row = row
+                .retimed_for_definition(definition)
+                .ok_or("a timing the engine cannot restamp")?;
+        }
+    }
+    // A plan starts nothing in a `display: none` subtree.
+    let mut synthesized = Vec::new();
+    if !plan.element_display_is_none() {
+        for (synthesized_index, &(name_index, definition)) in starting.iter().enumerate() {
+            let row = AnimationTimingRow::for_new_css_animation(definition, node, slot, name_index)
+                .ok_or("an animation on a scroll timeline")?;
+            synthesized.push(row.with_synthesized_index(synthesized_index as u32));
+        }
+    }
+    let rows = animations::rows_with_synthesized(planned, &synthesized);
+    let samples = engine.animation_timeline_samples();
+    let mut effects = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let timeline_time = match row.has_hold_time() {
+            true => None,
+            false => animations::row_timeline_time(row, samples).ok_or("a timeline with no sample")?,
+        };
+        let points = match row.synthesized_index() {
+            Some(_) => &[][..],
+            None => linear_points,
+        };
+        let Some(current_key) =
+            animations::row_current_key(row, points, timeline_time).ok_or("a row the engine cannot decide")?
+        else {
+            continue;
+        };
+        let source = match row.synthesized_index() {
+            Some(index) => rule_source(starting[index as usize].1)?,
+            None => match row
+                .owned_css_animation_index(node, slot)
+                .and_then(|index| changed.iter().find(|(changed, _, _)| *changed == index))
+            {
+                Some((_, definition, _)) => rule_source(definition)?,
+                None => Some(PlannedEffectSource::Described),
+            },
+        };
+        let Some(source) = source else {
+            continue;
+        };
+        effects.push(PlannedEffect {
+            identity: match source {
+                PlannedEffectSource::Described => row.effect_identity(),
+                // The effect a rule is sampled for has no description under its identity yet.
+                PlannedEffectSource::Rule { .. } => 0,
+            },
+            current_key,
+            source,
+        });
+    }
+    Ok(effects)
+}
+
 unsafe extern "C" fn settled_row_overlay(context: *mut c_void) -> *mut c_void {
     context
 }
@@ -3628,8 +3781,7 @@ pub(crate) fn sample_settled_row(
     layout_arena: crate::css::style::animations::LentLayoutArena,
 ) -> Result<SettledRowSample, String> {
     use crate::css::animated_overlay::{
-        rust_animated_overlay_clone, rust_animated_overlay_clone_inherited, rust_animated_overlay_create,
-        rust_animated_overlay_free,
+        rust_animated_overlay_clone_inherited, rust_animated_overlay_create, rust_animated_overlay_free,
     };
     use crate::css::cascaded_properties::NO_PSEUDO_ELEMENT;
 
@@ -3637,6 +3789,13 @@ pub(crate) fn sample_settled_row(
     let style_record = engine
         .assigned_style_record_of(node, None)
         .ok_or("a row without a record")?;
+    // A row that leaves an animation plan samples the stack the plan leaves.
+    let planned = match engine.element_settled_animation_plan(node) {
+        Some(plan) => {
+            Some(plan_effect_stack(engine, node, plan).map_err(|reason| format!("animation plan: {reason}"))?)
+        }
+        None => None,
+    };
     let environments = engine
         .settled_row_custom_property_environments(node)
         .map_err(|reason| format!("custom property environments: {reason}"))?;
@@ -3647,10 +3806,12 @@ pub(crate) fn sample_settled_row(
             view.animated_overlay.cast::<AnimatedOverlay>().as_ptr(),
         )
     };
-    // The host samples over the style it reconstructs from the record, overlay and all.
+    // What the record's composition inherited is where a sample starts from, as the host's
+    // animation update reconstructs it; the element's own animated values are the sample's to
+    // write again.
     let overlay = match record_overlay.is_null() {
         true => rust_animated_overlay_create(),
-        false => unsafe { rust_animated_overlay_clone(record_overlay) },
+        false => unsafe { rust_animated_overlay_clone_inherited(record_overlay) },
     };
     let input = FfiHostAnimationSample {
         style_engine: std::ptr::null_mut(),
@@ -3676,13 +3837,14 @@ pub(crate) fn sample_settled_row(
         length_contexts: None,
         layout_arena: layout_arena.as_ptr(),
     };
-    let sampled = match engine.take_element_animation_effect_descriptions(node, slot) {
+    let descriptions = engine.take_element_animation_effect_descriptions(node, slot);
+    let sampled = match (planned, descriptions) {
         // An element with no effect described clears what it composed.
-        None => Ok((
+        (None, None) => Ok((
             None,
             FfiHostAnimationSampleResult::with_outcome(FfiHostAnimationSampleOutcome::Cleared),
         )),
-        Some(descriptions) => {
+        (None, Some(descriptions)) => {
             let sampled = prepare_engine_sample(&input, engine, node, &descriptions, environments, root).map(
                 |(run, run_input)| {
                     let result = unsafe { sample_described_animation_effects(&run_input, engine, node, &descriptions) };
@@ -3690,6 +3852,76 @@ pub(crate) fn sample_settled_row(
                 },
             );
             engine.restore_element_animation_effect_descriptions(node, slot, descriptions);
+            sampled
+        }
+        (Some(planned), descriptions) => {
+            let keyframes = engine.take_animation_keyframes();
+            let described = descriptions.as_deref().unwrap_or(&[]);
+            let sampled = prepare_engine_sample(&input, engine, node, described, environments, root).and_then(
+                |(run, run_input)| {
+                    let mut selected = Vec::with_capacity(planned.len());
+                    let mut preparation_effects = Vec::with_capacity(planned.len());
+                    let mut selected_keys = Vec::with_capacity(planned.len());
+                    for effect in &planned {
+                        let (description, easing_from_animation, composite_from_animation) = match &effect.source {
+                            PlannedEffectSource::Described => {
+                                match described
+                                    .iter()
+                                    .find(|description| description.identity == effect.identity)
+                                {
+                                    Some(description) => (description, None, 0),
+                                    None => continue,
+                                }
+                            }
+                            PlannedEffectSource::Rule {
+                                keyframe_set,
+                                easing,
+                                composite,
+                            } => (
+                                keyframes
+                                    .description(*keyframe_set)
+                                    .ok_or("a @keyframes rule no scope publishes")?,
+                                Some(easing),
+                                *composite,
+                            ),
+                        };
+                        if description.keyframes.len() < 2 {
+                            continue;
+                        }
+                        selected.push(crate::css::animation::SelectedEffect {
+                            effect: description,
+                            current_key: effect.current_key,
+                            easing_from_animation,
+                            composite_from_animation,
+                        });
+                        preparation_effects.push(crate::css::animation::FfiAnimationPreparationEffect {
+                            identity: effect.identity,
+                            generation: description.generation,
+                        });
+                        selected_keys.push(effect.current_key);
+                    }
+                    // A preparation is cached under effect identities, and a rule's effect has none yet.
+                    let cacheable = planned
+                        .iter()
+                        .all(|effect| matches!(effect.source, PlannedEffectSource::Described));
+                    let result = unsafe {
+                        compose_selected_animation_effects(
+                            &run_input,
+                            engine,
+                            node,
+                            &selected,
+                            &preparation_effects,
+                            &selected_keys,
+                            cacheable,
+                        )
+                    };
+                    Ok((Some(run), result))
+                },
+            );
+            engine.restore_animation_keyframes(keyframes);
+            if let Some(descriptions) = descriptions {
+                engine.restore_element_animation_effect_descriptions(node, slot, descriptions);
+            }
             sampled
         }
     };
@@ -3738,6 +3970,53 @@ pub(crate) fn sample_settled_row(
     })
 }
 
+/// Check what a whole-stack sample reported against the engine's sample of the row its pass
+/// settled, where the host sampled the record the row settled.
+fn check_settled_row_sample(
+    engine: &crate::css::style::StyleEngineState,
+    node: crate::css::style::tree::StyleNodeID,
+    style_record: u64,
+    result: &FfiHostAnimationSampleResult,
+    overlay: *const c_void,
+) {
+    use crate::css::style::engine_sample_check;
+
+    let engine_identity = std::ptr::from_ref(engine).addr();
+    engine_sample_check::with_settled_row_sample(engine_identity, node, |settled| {
+        // A sample of the record the host holds before it installs the row is not the one the pass
+        // took the place of.
+        if settled.style_record != style_record {
+            return false;
+        }
+        let agrees = settled.keyframes_inherited_non_inherited_style_groups
+            == result.keyframes_inherited_non_inherited_style_groups
+            && settled.uses_tree_counting_function == result.uses_tree_counting_function
+            && settled.substitution_marks == result.substitution_marks
+            && result.animated_custom_property_count == 0;
+        if agrees {
+            engine_sample_check::note_agreed("settled row");
+        } else {
+            engine_sample_check::note_difference("settled row", &|| {
+                format!(
+                    "node {}: pass marks {} groups {}, host {:?} marks {} groups {} overlay {:?}",
+                    node.raw(),
+                    settled.substitution_marks,
+                    settled.keyframes_inherited_non_inherited_style_groups,
+                    result.outcome,
+                    result.substitution_marks,
+                    result.keyframes_inherited_non_inherited_style_groups,
+                    describe_overlay(overlay)
+                        .iter()
+                        .map(|entry| entry.0)
+                        .collect::<Vec<_>>(),
+                )
+            });
+        }
+        // The style it left is checked where the host finalizes its own.
+        true
+    });
+}
+
 /// Check the style the host's whole-stack sample of an element left in its working set - the
 /// finalized table and the overlay - against the one the engine's own sample of it left. The host
 /// calls this at the end of every such sample; it does nothing unless the check is on.
@@ -3760,6 +4039,17 @@ pub unsafe extern "C" fn rust_check_sampled_style(
     let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
         return;
     };
+    // The checks key what they keep by the engine's state, which is what the pass and the sample
+    // reach it through.
+    let engine = std::ptr::from_ref::<crate::css::style::StyleEngineState>(unsafe {
+        &*engine.cast::<crate::css::style::StyleEngine>()
+    })
+    .cast::<c_void>();
+    if pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT
+        && let Some(settled) = engine_sample_check::take_settled_row_sample(engine.addr(), node)
+    {
+        check_sampled_style_against("settled row style", node, pseudo_kind, table, overlay, &settled.style);
+    }
     let Some(expected) = engine_sample_check::take_expected_sampled_style(engine.addr(), node, pseudo_kind) else {
         return;
     };
@@ -3911,7 +4201,6 @@ unsafe fn sample_described_animation_effects(
     descriptions: &[crate::css::style::animations::PublishedEffect],
 ) -> FfiHostAnimationSampleResult {
     use crate::css::animation as anim;
-    use FfiHostAnimationSampleOutcome::{Cleared, Evaluated, Unchanged};
 
     let (identities, generations, current_keys) = unsafe {
         (
@@ -3957,6 +4246,37 @@ unsafe fn sample_described_animation_effects(
             &selected_keys,
         );
     }
+    unsafe {
+        compose_selected_animation_effects(
+            input,
+            engine,
+            node,
+            &selected,
+            &preparation_effects,
+            &selected_keys,
+            true,
+        )
+    }
+}
+
+/// Compose the selected effects, in order, onto the working set's overlay: the effects a sample
+/// chose, each with the key it samples at. A stack a preparation can be cached under is one whose
+/// every effect the host described under its own identity.
+///
+/// # Safety
+/// As `sample_described_animation_effects`.
+unsafe fn compose_selected_animation_effects(
+    input: &FfiHostAnimationSample,
+    engine: &mut crate::css::style::StyleEngineState,
+    node: crate::css::style::tree::StyleNodeID,
+    selected: &[crate::css::animation::SelectedEffect<'_>],
+    preparation_effects: &[crate::css::animation::FfiAnimationPreparationEffect],
+    selected_keys: &[f64],
+    cacheable: bool,
+) -> FfiHostAnimationSampleResult {
+    use crate::css::animation as anim;
+    use FfiHostAnimationSampleOutcome::{Cleared, Evaluated, Unchanged};
+
     if selected.is_empty() {
         return FfiHostAnimationSampleResult::with_outcome(Cleared);
     }
@@ -3989,7 +4309,9 @@ unsafe fn sample_described_animation_effects(
 
     // A preparation the overlay already holds for exactly these effects needs no declarations and
     // no keyframe longhands at all.
-    if unsafe { anim::rust_animation_preparation_matches(input.animated_overlay, &raw const preparation_key) } {
+    if cacheable
+        && unsafe { anim::rust_animation_preparation_matches(input.animated_overlay, &raw const preparation_key) }
+    {
         let batch = anim::FfiComputedAnimationBatch {
             context: with_transform_reference_box(anim::FfiAnimationContext {
                 allow_discrete: false,
@@ -4061,7 +4383,7 @@ unsafe fn sample_described_animation_effects(
         },
     );
     let resolved = anim::resolve_selected_animation_declarations(
-        &selected,
+        selected,
         table,
         writing_mode,
         direction,
@@ -4229,7 +4551,8 @@ unsafe fn sample_described_animation_effects(
         current_keys: selected_keys.as_ptr(),
         current_key_count: selected_keys.len(),
         // A preparation cached under these effects must not depend on anything outside them.
-        cache_preparation: custom.is_none()
+        cache_preparation: cacheable
+            && custom.is_none()
             && !resolved.uses_tree_counting_function
             && resolved.container_relative_length_unit_mask == 0
             && !resolved.needs_document_base_url
