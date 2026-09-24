@@ -8,6 +8,7 @@
 #include <AK/AnyOf.h>
 #include <AK/Debug.h>
 #include <AK/TemporaryChange.h>
+#include <AK/Time.h>
 #include <LibCore/EventLoop.h>
 #include <LibGC/Heap.h>
 #include <LibJS/Runtime/VM.h>
@@ -56,11 +57,93 @@ EventLoop::EventLoop(Type type)
 
 EventLoop::~EventLoop() = default;
 
+bool EventLoop::s_a_frame_is_in_flight { false };
+
+StringView EventLoop::frame_lockstep_reason_name(FrameLockstepReason reason)
+{
+    switch (reason) {
+    case FrameLockstepReason::JoinsLeft:
+        return "joinsLeft"sv;
+    case FrameLockstepReason::ResizeObserverDocument:
+        return "resizeObserverDocument"sv;
+    case FrameLockstepReason::ViewTransition:
+        return "viewTransition"sv;
+    case FrameLockstepReason::SynchronousCaller:
+        return "synchronousCaller"sv;
+    case FrameLockstepReason::Count:
+        break;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+StringView EventLoop::journal_entry_kind_name(JournalEntryKind kind)
+{
+    switch (kind) {
+    case JournalEntryKind::LayoutUpdate:
+        return "layoutUpdate"sv;
+    case JournalEntryKind::LayoutTreeUpdate:
+        return "layoutTreeUpdate"sv;
+    case JournalEntryKind::Repaint:
+        return "repaint"sv;
+    case JournalEntryKind::PaintFacts:
+        return "paintFacts"sv;
+    case JournalEntryKind::PaintCache:
+        return "paintCache"sv;
+    case JournalEntryKind::Editability:
+        return "editability"sv;
+    case JournalEntryKind::Selection:
+        return "selection"sv;
+    case JournalEntryKind::ScrollOffset:
+        return "scrollOffset"sv;
+    case JournalEntryKind::Scrollbar:
+        return "scrollbar"sv;
+    case JournalEntryKind::TextData:
+        return "textData"sv;
+    case JournalEntryKind::SVGAttributes:
+        return "svgAttributes"sv;
+    case JournalEntryKind::TableSpans:
+        return "tableSpans"sv;
+    case JournalEntryKind::VisualContext:
+        return "visualContext"sv;
+    case JournalEntryKind::Count:
+        break;
+    }
+    VERIFY_NOT_REACHED();
+}
+
 void EventLoop::reset_rendering_scheduler_counters()
 {
     m_rendering_scheduler_counters = {};
     m_rendering_scheduler_counters_at_last_update = {};
     m_last_rendering_update_end_time = 0;
+    Layout::RustFFI::layout_arena_reset_door_counters();
+}
+
+void EventLoop::did_submit_frame()
+{
+    VERIFY(!s_a_frame_is_in_flight);
+    s_a_frame_is_in_flight = true;
+    m_frame_submitted_at_nanoseconds = MonotonicTime::now().nanoseconds();
+    ++m_rendering_scheduler_counters.frames_submitted;
+}
+
+void EventLoop::did_consume_frame_commit(u64 nanoseconds)
+{
+    VERIFY(s_a_frame_is_in_flight);
+    s_a_frame_is_in_flight = false;
+    auto& counters = m_rendering_scheduler_counters;
+    auto in_flight = MonotonicTime::now().nanoseconds() - m_frame_submitted_at_nanoseconds;
+    ++counters.frames_consumed;
+    counters.frame_in_flight_nanoseconds += in_flight;
+    counters.consume_commit_nanoseconds += nanoseconds;
+    auto submit_to_consume = in_flight + nanoseconds;
+    counters.submit_to_consume_nanoseconds += submit_to_consume;
+    counters.max_submit_to_consume_nanoseconds = max(counters.max_submit_to_consume_nanoseconds, submit_to_consume);
+}
+
+void EventLoop::did_consume_frame_tail(u64 nanoseconds)
+{
+    m_rendering_scheduler_counters.consume_tail_nanoseconds += nanoseconds;
 }
 
 void EventLoop::visit_edges(Visitor& visitor)
@@ -143,6 +226,7 @@ void EventLoop::process()
     // 1. Let oldestTask and taskStartTime be null.
     GC::Ptr<Task> oldest_task;
     [[maybe_unused]] double task_start_time = 0;
+    bool task_started_with_frame_in_flight = false;
 
     m_task_generation++;
 
@@ -159,6 +243,10 @@ void EventLoop::process()
 
         // 2. Set taskStartTime to the unsafe shared current time.
         task_start_time = HighResolutionTime::unsafe_shared_current_time();
+        if (s_a_frame_is_in_flight) {
+            ++m_rendering_scheduler_counters.tasks_started_with_frame_in_flight;
+            task_started_with_frame_in_flight = true;
+        }
 
         // 3. Set oldestTask to the first runnable task in taskQueue, and remove it from taskQueue.
         oldest_task = task_queue->take_first_runnable();
@@ -186,6 +274,8 @@ void EventLoop::process()
         auto task_duration_microseconds = static_cast<u64>(task_duration * 1000.0);
         ++m_rendering_scheduler_counters.tasks_between_updates;
         m_rendering_scheduler_counters.task_microseconds_between_updates += task_duration_microseconds;
+        if (task_started_with_frame_in_flight)
+            m_rendering_scheduler_counters.overlap_task_nanoseconds += static_cast<u64>(task_duration * 1'000'000.0);
         switch (oldest_task->source()) {
         case Task::Source::PostedMessage:
             ++m_rendering_scheduler_counters.posted_message_tasks_between_updates;
@@ -469,7 +559,14 @@ static void install_stage_overlap_host_if_wanted()
             // is one its caller needs the result of right away, as script reading layout does.
             if (!event_loop.running_rendering_task() || !Bindings::main_thread_vm().execution_context_stack().is_empty())
                 return;
-            event_loop.spin_until(GC::create_function(GC::Heap::the(), [done, context] { return done(context); })); },
+            // Each overlapping stage counts as a frame submitted here and consumed when the spin returns. A stage
+            // started by a task that runs inside another one's spin is counted with the outer one.
+            bool const counts_as_a_frame = !EventLoop::a_frame_is_in_flight();
+            if (counts_as_a_frame)
+                event_loop.did_submit_frame();
+            event_loop.spin_until(GC::create_function(GC::Heap::the(), [done, context] { return done(context); }));
+            if (counts_as_a_frame)
+                event_loop.did_consume_frame_commit(0); },
         .wake = [] {
             if (auto event_loop = s_main_event_loop->take(); event_loop.is_alive())
                 event_loop->wake(); },
@@ -485,10 +582,17 @@ void EventLoop::update_the_rendering()
     for (auto const& page : pages_of_local_roots())
         page->client().will_begin_rendering_update();
     auto update_start_time = HighResolutionTime::unsafe_shared_current_time();
+    auto update_start_nanoseconds = MonotonicTime::now().nanoseconds();
+    auto frames_submitted_before_update = m_rendering_scheduler_counters.frames_submitted;
     ++m_rendering_scheduler_counters.updates_run;
-    ScopeGuard const guard = [this, update_start_time] {
+    ScopeGuard const guard = [this, update_start_time, update_start_nanoseconds, frames_submitted_before_update] {
         auto update_end_time = HighResolutionTime::unsafe_shared_current_time();
         m_rendering_scheduler_counters.update_microseconds += static_cast<u64>((update_end_time - update_start_time) * 1000.0);
+        // FIXME: Once the frame scheduler submits frames from here, the main half ends at the submission, and the
+        //        consume halves are timed where the frame is consumed.
+        m_rendering_scheduler_counters.main_half_nanoseconds += MonotonicTime::now().nanoseconds() - update_start_nanoseconds;
+        if (m_rendering_scheduler_counters.frames_submitted == frames_submitted_before_update)
+            did_run_frame_in_lockstep(FrameLockstepReason::JoinsLeft);
         m_running_rendering_task = false;
 
         for (auto const& page : pages_of_local_roots())
@@ -496,10 +600,17 @@ void EventLoop::update_the_rendering()
 
         auto const& current = m_rendering_scheduler_counters;
         auto const& previous = m_rendering_scheduler_counters_at_last_update;
+        [[maybe_unused]] auto lockstep_frames = [](RenderingSchedulerCounters const& counters) {
+            u64 frames = 0;
+            for (auto count : counters.frames_lockstep)
+                frames += count;
+            return frames;
+        };
         dbgln_if(RENDERING_SCHEDULER_DEBUG,
             "[RenderSched] update #{} duration={:.1f}ms gap={:.1f}ms paints={} tasks={} ({:.1f}ms) "
             "[postmsg {} ({:.1f}ms), timer {} ({:.1f}ms), net {} ({:.1f}ms), dom {} ({:.1f}ms)] "
-            "requests={} coalesced={} during_update={}",
+            "requests={} coalesced={} during_update={} "
+            "frames submitted={} consumed={} lockstep={} dropped={} in_flight={:.1f}ms overlap_tasks={:.1f}ms main_half={:.1f}ms",
             current.updates_run, update_end_time - update_start_time,
             m_last_rendering_update_end_time > 0 ? update_start_time - m_last_rendering_update_end_time : 0.0,
             current.paints - previous.paints,
@@ -515,7 +626,14 @@ void EventLoop::update_the_rendering()
             static_cast<double>(current.dom_manipulation_task_microseconds_between_updates - previous.dom_manipulation_task_microseconds_between_updates) / 1000.0,
             current.update_requests - previous.update_requests,
             current.coalesced_update_requests - previous.coalesced_update_requests,
-            current.update_requests_while_rendering - previous.update_requests_while_rendering);
+            current.update_requests_while_rendering - previous.update_requests_while_rendering,
+            current.frames_submitted - previous.frames_submitted,
+            current.frames_consumed - previous.frames_consumed,
+            lockstep_frames(current) - lockstep_frames(previous),
+            current.frames_dropped - previous.frames_dropped,
+            static_cast<double>(current.frame_in_flight_nanoseconds - previous.frame_in_flight_nanoseconds) / 1'000'000.0,
+            static_cast<double>(current.overlap_task_nanoseconds - previous.overlap_task_nanoseconds) / 1'000'000.0,
+            static_cast<double>(current.main_half_nanoseconds - previous.main_half_nanoseconds) / 1'000'000.0);
         m_rendering_scheduler_counters_at_last_update = current;
         m_last_rendering_update_end_time = update_end_time;
     };
