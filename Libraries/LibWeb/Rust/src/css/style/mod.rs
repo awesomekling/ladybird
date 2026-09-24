@@ -174,10 +174,8 @@ use fast_hash::FastMap as HashMap;
 use fast_hash::FastSet as HashSet;
 use planning::*;
 use smallvec::SmallVec;
-use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -1076,7 +1074,7 @@ pub struct RetainedState {
     /// Prefix transitions and their canonical answers have one document-lifetime owner. Matching
     /// traversals and answer patches borrow it synchronously and change its cache-owned lifecycle
     /// between scratch and retained residency without moving the payload.
-    prefix_caches: Rc<RefCell<PrefixCaches>>,
+    prefix_caches: std::sync::Arc<SharedPrefixCaches>,
     /// Test-only: force the bounded completion window regardless of headroom.
     #[cfg(test)]
     force_bounded_prefix_completion: bool,
