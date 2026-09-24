@@ -16,6 +16,7 @@
 #include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
+#include <LibWeb/Painting/Scrollbar.h>
 #include <LibWeb/Selection/Selection.h>
 
 namespace Web::DOM {
@@ -32,9 +33,23 @@ static void report_journal_pending_to_census(Document& document, bool pending)
         Layout::RustFFI::layout_arena_note_invalidation_journal_pending(arena->handle(), pending);
 }
 
+InvalidationJournal::InvalidationJournal(Document& document)
+    : m_document(document)
+{
+}
+
+InvalidationJournal::~InvalidationJournal() = default;
+
+bool InvalidationJournal::is_empty() const
+{
+    return m_entries.is_empty()
+        && !m_selection_states_are_stale
+        && m_scrollbars_with_stale_enlarged_state.is_empty();
+}
+
 InvalidationJournal::Entry& InvalidationJournal::entry_for(NodeIdentity identity)
 {
-    if (m_entries.is_empty())
+    if (is_empty())
         report_journal_pending_to_census(m_document, true);
     auto index = m_entry_index_by_identity.ensure(identity, [&] {
         m_entries.append(Entry {
@@ -197,7 +212,7 @@ static void refresh_editability_stamps(Node& node)
 
 void InvalidationJournal::note_selection_states()
 {
-    if (m_entries.is_empty() && !m_selection_states_are_stale)
+    if (is_empty())
         report_journal_pending_to_census(m_document, true);
     m_selection_states_are_stale = true;
     drain_if_the_render_side_is_reading();
@@ -231,6 +246,18 @@ void InvalidationJournal::note_pseudo_element_scroll_offset(NodeIdentity generat
     else
         offsets.append({ type, offset });
     m_scroll_state_is_stale |= offset_changed;
+    drain_if_the_render_side_is_reading();
+}
+
+void InvalidationJournal::note_scrollbar_enlarged_state(Painting::Scrollbar& scrollbar)
+{
+    if (is_empty())
+        report_journal_pending_to_census(m_document, true);
+    if (!m_scrollbars_with_stale_enlarged_state.contains_slow(NonnullRefPtr { scrollbar }))
+        m_scrollbars_with_stale_enlarged_state.append(scrollbar);
+    // Publishing a changed state damages the scrollbar's overlay, which only a rendering update
+    // repaints.
+    m_document.request_frame_for_journalled_repaint({});
     drain_if_the_render_side_is_reading();
 }
 
@@ -279,7 +306,7 @@ void InvalidationJournal::drain()
 {
     // Publishing a pseudo-element's offset reads it back, and that read drains. The drain already
     // running takes whatever such a read would have.
-    if ((m_entries.is_empty() && !m_selection_states_are_stale) || m_draining)
+    if (is_empty() || m_draining)
         return;
     TemporaryChange draining { m_draining, true };
 
@@ -289,6 +316,11 @@ void InvalidationJournal::drain()
 
     if (exchange(m_selection_states_are_stale, false))
         publish_selection_states();
+
+    // A scrollbar whose row was reset since the mark publishes nothing, and the reset row starts
+    // out with no scrollbar enlarged.
+    for (auto& scrollbar : exchange(m_scrollbars_with_stale_enlarged_state, {}))
+        scrollbar->publish_enlarged_state({});
 
     while (!m_entries.is_empty()) {
         auto entries = move(m_entries);

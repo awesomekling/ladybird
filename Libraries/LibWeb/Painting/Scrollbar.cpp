@@ -5,6 +5,7 @@
  */
 
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Page/Page.h>
@@ -30,7 +31,7 @@ Scrollbar::Scrollbar(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId 
 void Scrollbar::begin_drag_driven_by_compositor()
 {
     m_drag_is_driven_by_compositor = true;
-    push_enlarged_state();
+    note_enlarged_state_change();
     if (auto* node = layout_node())
         Painting::set_needs_repaint(*node, InvalidateDisplayList::PaintCommands);
 }
@@ -98,10 +99,16 @@ void Scrollbar::release_thumb_grab()
     m_drag_is_driven_by_compositor = false;
     m_thumb_grab_position.clear();
     m_thumb_grab_gesture_hold = nullptr;
-    push_enlarged_state();
+    note_enlarged_state_change();
 }
 
-void Scrollbar::push_enlarged_state()
+void Scrollbar::note_enlarged_state_change()
+{
+    if (auto* document = arena().document())
+        document->invalidation_journal().note_scrollbar_enlarged_state(*this);
+}
+
+void Scrollbar::publish_enlarged_state(Badge<DOM::InvalidationJournal>)
 {
     auto* node = layout_node();
     if (!node)
@@ -115,7 +122,7 @@ void Scrollbar::mouse_enter()
     if (m_hovered)
         return;
     m_hovered = true;
-    push_enlarged_state();
+    note_enlarged_state_change();
     if (auto* node = layout_node())
         Painting::set_needs_repaint(*node, InvalidateDisplayList::PaintCommands);
 }
@@ -125,7 +132,7 @@ void Scrollbar::mouse_leave()
     if (!m_hovered)
         return;
     m_hovered = false;
-    push_enlarged_state();
+    note_enlarged_state_change();
     if (auto* node = layout_node())
         Painting::set_needs_repaint(*node, InvalidateDisplayList::PaintCommands);
 }
@@ -160,7 +167,7 @@ bool Scrollbar::scroll_to_mouse_position(CSSPixelPoint position)
         m_thumb_grab_position = position_is_along_thumb
             ? (position - scrollbar_data->thumb_rect.location()).primary_offset_for_orientation(orientation)
             : max(min(offset_relative_to_gutter, thumb_size / 2), offset_relative_to_gutter - gutter_size + thumb_size);
-        push_enlarged_state();
+        note_enlarged_state_change();
         if (auto navigable = node->document().navigable())
             m_thumb_grab_gesture_hold = make<HTML::UserScrollGestureHold>(*navigable);
     }

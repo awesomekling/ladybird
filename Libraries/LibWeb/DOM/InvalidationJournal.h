@@ -20,6 +20,7 @@
 namespace Web::Painting {
 
 enum class PaintCacheInvalidation : u8;
+class Scrollbar;
 
 }
 
@@ -42,10 +43,8 @@ class WEB_API InvalidationJournal {
 public:
     AK_ALLOC_WITH_KMALLOC;
 
-    explicit InvalidationJournal(Document& document)
-        : m_document(document)
-    {
-    }
+    explicit InvalidationJournal(Document&);
+    ~InvalidationJournal();
 
     void note_needs_layout_update(NodeIdentity, SetNeedsLayoutReason, Layout::LayoutUpdatePropagation);
     void note_needs_repaint(NodeIdentity, InvalidateDisplayList);
@@ -70,6 +69,9 @@ public:
     void note_scroll_offset(NodeIdentity, bool offset_changed);
     // The render side is where a pseudo-element's scroll offset is stored, so the entry carries it.
     void note_pseudo_element_scroll_offset(NodeIdentity generator, CSS::PseudoElement, CSSPixelPoint, bool offset_changed);
+    // Whether the scrollbar is enlarged may have changed, and it publishes the answer it has at the
+    // drain to the row it is built for.
+    void note_scrollbar_enlarged_state(Painting::Scrollbar&);
 
     // Writes every entry through to the render side and empties the journal.
     void drain();
@@ -121,6 +123,7 @@ private:
     void drain_if_the_render_side_is_reading();
     void publish_scroll_offsets(Node&, Entry const&);
     void publish_selection_states();
+    bool is_empty() const;
 
     Document& m_document;
     Vector<Entry> m_entries;
@@ -128,6 +131,7 @@ private:
     // Whether a noted scroll offset changed, so the document's scroll state mirrors a stale one.
     bool m_scroll_state_is_stale { false };
     bool m_selection_states_are_stale { false };
+    Vector<NonnullRefPtr<Painting::Scrollbar>> m_scrollbars_with_stale_enlarged_state;
     bool m_draining { false };
 };
 

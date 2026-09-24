@@ -24,6 +24,8 @@ public:
     virtual void mouse_enter() override;
     virtual void mouse_leave() override;
 
+    void publish_enlarged_state(Badge<DOM::InvalidationJournal>);
+
 private:
     Scrollbar(Layout::NodeArena&, Compositing::RustFFI::NodeSlotId, ScrollDirection);
 
@@ -32,7 +34,7 @@ private:
     MouseAction mouse_up(CSSPixelPoint, unsigned button);
     bool scroll_to_mouse_position(CSSPixelPoint);
     void release_thumb_grab();
-    void push_enlarged_state();
+    void note_enlarged_state_change();
     virtual void did_detach() override;
 
     ScrollDirection m_direction;
