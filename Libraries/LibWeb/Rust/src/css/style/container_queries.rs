@@ -289,8 +289,8 @@ impl RetainedState {
         true
     }
 
-    /// Whether a flat-tree ancestor of the node was declined in this batch: the record the host
-    /// computes for it is installed after the batch, and so are the container inputs it publishes.
+    /// Whether a flat-tree ancestor of the node is a row of this wave whose record only the host
+    /// settles: the host installs it, and the container inputs it publishes, after the wave.
     pub(super) fn container_ancestor_is_unsettled(
         &self,
         node: StyleNodeID,
@@ -311,7 +311,7 @@ impl RetainedState {
                 && scratch
                     .derived_child_inputs
                     .get(index as usize)
-                    .is_some_and(|row| !row.settled)
+                    .is_some_and(|row| row.awaits_host)
                 && (asks_about_style || self.may_be_a_query_container(current))
             {
                 return true;
