@@ -2585,6 +2585,14 @@ impl StyleEngineState {
                     parent_inputs_moved.display = true;
                 }
                 let mut retry_after_ancestor = false;
+                if engine_sample_check::is_checking()
+                    && self
+                        .tree
+                        .flat_tree_parent(node)
+                        .is_some_and(|parent| self.retained.rows_sampled_in_pass.contains_key(&parent))
+                {
+                    engine_sample_check::note_taken("row over a parent sampled in the pass");
+                }
                 let awaits_sampled_parent = self.tree.flat_tree_parent(node).is_some_and(|parent| {
                     self.retained.engine_computed_records_pending.contains_key(&parent)
                         && (self.retained.computed_group_sets.adjustment_facts(parent)
@@ -2602,6 +2610,8 @@ impl StyleEngineState {
                                         .nodes_owing_animation_definitions
                                         .contains_key(&(parent, u8::MAX))
                                     || self.retained.nodes_owing_an_animation_sample.contains(&parent))
+                        // A parent whose animations this pass sampled holds its composition.
+                        && !self.retained.rows_sampled_in_pass.contains_key(&parent)
                 });
                 // An inheritance parent without a record is one C++ does not style, unless the
                 // host settles it in this wave or a later one: then the wave stops before the row,
@@ -2893,10 +2903,11 @@ impl StyleEngineState {
                         },
                     );
                 }
-                // The engine samples a settled row that animates beside the host, which checks
-                // the two once it samples the row it installs.
-                if engine_sample_check::is_checking()
-                    && engine_computed_delta.is_some()
+                // A settled row that animates is sampled here, over the record the row settled, and
+                // the composition is published as the element's record: the rows after it read the
+                // sampled parent in this wave, and the host installs the composition. A row whose
+                // animation plan or transition step the host applies first is sampled by the host.
+                if engine_computed_delta.is_some()
                     && self.retained.engine_computed_records_pending.contains_key(&node)
                     && (self.retained.computed_group_sets.adjustment_facts(node)
                         & bridge::element_adjustment_fact::HAS_ANIMATIONS
@@ -2908,21 +2919,20 @@ impl StyleEngineState {
                         .contains_key(&(node, u8::MAX))
                     && !self.retained.nodes_owing_a_transition_registration.contains_key(&node)
                 {
-                    let engine_identity = std::ptr::from_ref(&*self).addr();
                     // A document element this pass settled is not installed yet, and a `rem` the
                     // row resolves reads the record it settled.
                     let root = pass
                         .scratch
                         .root_element_inputs()
                         .and_then(|root| self.retained.assigned_root_element_font_metrics(root));
-                    match crate::css::style_compute::sample_settled_row(self, node, root, layout_arena) {
-                        Ok(sample) => {
-                            engine_sample_check::expect_settled_row_sample(engine_identity, node, Some(sample));
-                        }
-                        Err(reason) => {
-                            engine_sample_check::note_declined(&format!("settled row: {reason}"));
-                            engine_sample_check::expect_settled_row_sample(engine_identity, node, None);
-                        }
+                    let published = crate::css::style_compute::sample_settled_row(self, node, root, layout_arena)
+                        .and_then(|sample| {
+                            self.publish_settled_row_sample(node, sample, counters)
+                                .map_err(String::from)
+                        });
+                    match published {
+                        Ok(_) => engine_sample_check::note_taken("settled row sample"),
+                        Err(reason) => engine_sample_check::note_declined(&format!("settled row: {reason}")),
                     }
                 }
                 let (old_style_record, new_style_record, damage, gap) = if skip_hidden {

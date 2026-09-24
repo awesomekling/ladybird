@@ -260,6 +260,46 @@ static void sample_animations_for_installed_record(DOM::AbstractElement abstract
     context.elements.set(abstract_element, move(data));
 }
 
+// The pass sampled the element's animations over the record the row settled and published the
+// composition, which the rows after it already read: install it as the host's own sample would
+// have, and record what the sample found out on the element and its parent.
+static bool install_composition_sampled_in_pass(DOM::AbstractElement abstract_element, StyleEngineFFI::FfiRowSampledInPass const& sample, SampleInvalidation sample_invalidation)
+{
+    auto& element = const_cast<DOM::Element&>(abstract_element.element());
+    auto& document = element.document();
+    // A sample the host published since the pass composed over the row's record again.
+    if (StyleEngineFFI::style_engine_assigned_style_record(document.style_computer().style_engine().rust_handle(), element.style_node_id().value(), NumericLimits<u8>::max()) != sample.style_record)
+        return false;
+    if (sample.substitution_marks & ComputedValuesFFI::SUBSTITUTION_MARK_VAR)
+        element.set_style_uses_var_css_function();
+    if (sample.substitution_marks & ComputedValuesFFI::SUBSTITUTION_MARK_ATTR)
+        element.set_style_uses_attr_css_function();
+    if (sample.substitution_marks & ComputedValuesFFI::SUBSTITUTION_MARK_IF)
+        element.set_style_uses_if_css_function();
+    if (sample.substitution_marks & ComputedValuesFFI::SUBSTITUTION_MARK_INHERIT)
+        element.set_style_uses_inherit_css_function();
+    if (sample.substitution_marks & ComputedValuesFFI::SUBSTITUTION_MARK_DASHED_FUNCTION)
+        element.set_style_uses_custom_function();
+    if (sample.uses_tree_counting_function)
+        element.set_style_uses_tree_counting_function();
+    // A keyframe-borne `inherit` on a non-inherited property leaves the same mark on the parent a
+    // full style computation does.
+    if (auto style_groups = sample.keyframes_inherited_non_inherited_style_groups; style_groups != 0) {
+        if (style_groups == NumericLimits<u32>::max())
+            style_groups = ComputedValues::all_style_groups;
+        if (auto* parent = element.parent())
+            parent->add_children_explicitly_inherited_non_inherited_style_groups(style_groups);
+    }
+    if (abstract_element.style_record_identity().value() == sample.style_record)
+        return true;
+    if (!sample.overlay_is_empty && document.is_in_style_stabilization_epoch()
+        && (document.style_stabilization_has_style_reactions() || sample.invalidation.requires_base_style_recomputation))
+        document.style_computer().record_transition_stabilization_baseline(abstract_element);
+    (void)element.unsafe_layout_node();
+    Animations::apply_published_animation_overlay(abstract_element, sample.invalidation, StyleRecordID { sample.style_record }, sample_invalidation == SampleInvalidation::AppliedByCaller);
+    return true;
+}
+
 static void sample_animations_for_installed_pseudos(DOM::Element& element)
 {
     // A dirty effect may have been visited before a newly generated pseudo had a record.
@@ -597,6 +637,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 // transition step itself, so the debt is discharged either way.
                 auto const explicit_inheritance_debt = document.style_computer().style_engine().take_explicit_inheritance_debt(StyleNodeID { reaction.style_node });
                 auto const row_effect_debt = document.style_computer().style_engine().take_settled_row_effect_debt(StyleNodeID { reaction.style_node });
+                auto const row_sampled_in_pass = StyleEngineFFI::style_engine_take_row_sampled_in_pass(document.style_computer().style_engine().rust_handle(), reaction.style_node);
                 auto const transition_debt = row_effect_debt & StyleEngine::SettledRowTransitionDebt;
                 if (row_effect_debt & StyleEngine::SettledRowOwesAnAnimationPlan)
                     animation_plan = document.style_computer().take_settled_animation_plan(StyleNodeID { reaction.style_node }, NumericLimits<u8>::max());
@@ -675,8 +716,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     if (transition_debt == 2 && document.is_in_style_stabilization_epoch() && settled.has_style())
                         (void)document.style_computer().record_transition_stabilization_baseline(settled, StyleRecordID { reaction.old_style_record });
                     bool const compares_after_sample = engine_record_comparison == DOM::Element::EngineRecordComparison::AfterSample;
-                    if (settled.has_style() && (has_animation_effects || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
-                        sample_animations_for_installed_record(settled, compares_after_sample ? SampleInvalidation::AppliedByCaller : SampleInvalidation::Applied);
+                    auto const row_sample_invalidation = compares_after_sample ? SampleInvalidation::AppliedByCaller : SampleInvalidation::Applied;
+                    bool const installed_pass_sample = row_sampled_in_pass.present && settled.has_style()
+                        && install_composition_sampled_in_pass(settled, row_sampled_in_pass, row_sample_invalidation);
+                    if (!installed_pass_sample && settled.has_style() && (has_animation_effects || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
+                        sample_animations_for_installed_record(settled, row_sample_invalidation);
                     if (compares_after_sample)
                         invalidation = element->compare_engine_computed_style_record_after_sample(old_style_record, invalidation, &row_effects);
                     // The step runs here rather than after the batch: a descendant applied later

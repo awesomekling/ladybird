@@ -626,3 +626,134 @@ impl RetainedState {
         })
     }
 }
+
+/// What the pass published for a row whose animations it sampled itself, for the host to apply
+/// where it installs the row: the composition, what publishing it invalidated, and what the sample
+/// found out that the host records on the element and its parent.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SettledRowPublication {
+    pub(crate) style_record: u64,
+    pub(crate) invalidation: bridge::FfiAnimationInvalidation,
+    pub(crate) overlay_is_empty: bool,
+    pub(crate) substitution_marks: u8,
+    pub(crate) keyframes_inherited_non_inherited_style_groups: u32,
+    pub(crate) uses_tree_counting_function: bool,
+}
+
+impl super::StyleEngineState {
+    /// Publish what the pass's sample of a settled row composed as the element's overlay record,
+    /// which the rows after it inherit from, and keep what the host applies when it installs the
+    /// row. Or why the engine cannot, where the host samples the row itself.
+    pub(crate) fn publish_settled_row_sample(
+        &mut self,
+        node: StyleNodeID,
+        sample: crate::css::style_compute::SettledRowSample,
+        counters: &mut super::Counters,
+    ) -> Result<SettledRowPublication, &'static str> {
+        use crate::css::computed_value_views::ComputedValuesView;
+        use crate::css::host_shared::{HostShared, SharedPayload};
+        use crate::css::property_metadata::property_id;
+
+        let style_record = sample.style_record;
+        let overlay = unsafe { &*sample.style.overlay };
+        // The host resolves an animated color scheme and an animated display's pre-transformation
+        // value from its working set.
+        if overlay.get(property_id::COLOR_SCHEME).is_some() || overlay.get(property_id::DISPLAY).is_some() {
+            return Err("an animated color scheme or display");
+        }
+        let (used_color_scheme, display_before_box_type_transformation) = {
+            let view = self
+                .computed_group_sets
+                .style_record_view(style_record)
+                .ok_or("a record with no view")?;
+            let scheme =
+                unsafe { view.longhand_table.as_ref() }.map_or(-1, ComputedLonghandTable::effective_color_scheme);
+            let base_payloads = match view.base_payloads.is_empty() {
+                true => view.payloads,
+                false => view.base_payloads,
+            };
+            let display = ComputedValuesView::new(SharedPayload::as_pointer_slice(base_payloads))
+                .display_before_box_type_transformation()
+                .encoded();
+            (
+                u8::try_from(scheme).map_err(|_| "a record with no effective color scheme")?,
+                display,
+            )
+        };
+        let table = unsafe { &*sample.style.table };
+        let font_unresolved = std::cell::Cell::new(false);
+        let payloads = {
+            let retained = &self.retained;
+            let mut font = || {
+                let inputs = retained.animated_font_group_inputs(node, table, Some(overlay));
+                font_unresolved.set(inputs.is_none());
+                inputs
+            };
+            unsafe {
+                self.build_animation_overlay_payloads(
+                    node,
+                    u8::MAX,
+                    style_record,
+                    table,
+                    Some(overlay),
+                    used_color_scheme,
+                    display_before_box_type_transformation,
+                    &mut font,
+                )
+            }
+            .ok_or(match font_unresolved.get() {
+                true => "an overlay font nobody resolved yet",
+                false => "no record to compose over",
+            })?
+        };
+        let shared = SharedPayload::from_pointer_slice(&payloads.payloads);
+        let is_document_element =
+            self.computed_group_sets.adjustment_facts(node) & element_adjustment_fact::IS_DOCUMENT_ELEMENT != 0;
+        let invalidation =
+            self.retained
+                .compare_animation_overlay(style_record, sample.style.overlay, shared, is_document_element);
+        let overlay_is_empty = overlay.is_empty();
+        let identity = match overlay_is_empty {
+            true => 0,
+            false => {
+                self.retained.next_engine_animation_overlay_identity += 1;
+                (1 << 63) | self.retained.next_engine_animation_overlay_identity
+            }
+        };
+        let publication = self
+            .publish_animation_overlay_impl(
+                computed::ComputedStyleTarget::new(node, u8::MAX),
+                identity,
+                HostShared::new(sample.style.overlay.cast_const()),
+                if overlay_is_empty { &[] } else { shared },
+                counters,
+            )
+            .ok_or("no overlay publication")?;
+        let style_record = publication.style_record.raw();
+        self.retained
+            .computed_group_sets
+            .set_sampled_composition_identity(node, style_record);
+        // A sample the host publishes before it installs the row replaces the composition in its
+        // slot, so the batch keeps it alive for the row until the host acknowledges it.
+        if !overlay_is_empty {
+            self.retained.computed_group_sets.pin_style_record(style_record);
+            self.retained.batch_pinned_compositions.push((node, style_record));
+        }
+        let published = SettledRowPublication {
+            style_record,
+            invalidation,
+            overlay_is_empty,
+            substitution_marks: sample.substitution_marks,
+            keyframes_inherited_non_inherited_style_groups: sample.keyframes_inherited_non_inherited_style_groups,
+            uses_tree_counting_function: sample.uses_tree_counting_function,
+        };
+        self.retained.rows_sampled_in_pass.insert(node, published);
+        Ok(published)
+    }
+
+    /// Take what the pass published for a row whose animations it sampled, so that exactly one
+    /// installation applies it.
+    pub(crate) fn take_row_sampled_in_pass(&mut self, node: StyleNodeID) -> Option<SettledRowPublication> {
+        self.retained.rows_sampled_in_pass.remove(&node)
+    }
+}

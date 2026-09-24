@@ -70,6 +70,14 @@ pub(crate) fn note_agreed(input: &'static str) {
     report(&format!("engine-sample-check agreed {input}"));
 }
 
+/// The engine did something the host used to, which the check counts.
+pub(crate) fn note_taken(what: &'static str) {
+    if mode() == Mode::Off {
+        return;
+    }
+    report(&format!("engine-sample-check took {what}"));
+}
+
 /// The engine answered for this input differently from the host.
 pub(crate) fn note_difference(input: &'static str, detail: &dyn Fn() -> String) {
     match mode() {
@@ -178,64 +186,4 @@ pub(crate) fn take_expected_sampled_style(
     pseudo_kind: u8,
 ) -> Option<EngineSampledStyle> {
     EXPECTED_SAMPLED_STYLES.with_borrow_mut(|expected| expected.remove(&(engine, node, pseudo_kind)))
-}
-
-/// What the engine's sample of each row its pass settled composed, kept for the host's sample of
-/// the row once it installs it, by the engine and the element. The pass can run on another thread
-/// than the host's sample.
-struct SettledRowSamples(HashMap<(usize, StyleNodeID), crate::css::style_compute::SettledRowSample>);
-
-// SAFETY: The samples own what they point to, and only the check reads them, under the lock.
-unsafe impl Send for SettledRowSamples {}
-
-static SETTLED_ROW_SAMPLES: std::sync::Mutex<Option<SettledRowSamples>> = std::sync::Mutex::new(None);
-
-/// Keep what the engine's sample of a row its pass settled composed, or forget an earlier one where
-/// the engine could not sample the row.
-pub(crate) fn expect_settled_row_sample(
-    engine: usize,
-    node: StyleNodeID,
-    sample: Option<crate::css::style_compute::SettledRowSample>,
-) {
-    let mut samples = SETTLED_ROW_SAMPLES.lock().expect("the check's lock is never poisoned");
-    let samples = &mut samples.get_or_insert_with(|| SettledRowSamples(HashMap::new())).0;
-    match sample {
-        Some(sample) => {
-            samples.insert((engine, node), sample);
-        }
-        None => {
-            samples.remove(&(engine, node));
-        }
-    }
-}
-
-/// Look at what the engine's sample of the element's settled row composed; `keep` says whether it
-/// stays for the check of the style the host finalizes.
-pub(crate) fn with_settled_row_sample(
-    engine: usize,
-    node: StyleNodeID,
-    check: impl FnOnce(&crate::css::style_compute::SettledRowSample) -> bool,
-) {
-    let mut samples = SETTLED_ROW_SAMPLES.lock().expect("the check's lock is never poisoned");
-    let Some(samples) = samples.as_mut() else {
-        return;
-    };
-    let Some(sample) = samples.0.get(&(engine, node)) else {
-        return;
-    };
-    if !check(sample) {
-        samples.0.remove(&(engine, node));
-    }
-}
-
-pub(crate) fn take_settled_row_sample(
-    engine: usize,
-    node: StyleNodeID,
-) -> Option<crate::css::style_compute::SettledRowSample> {
-    SETTLED_ROW_SAMPLES
-        .lock()
-        .expect("the check's lock is never poisoned")
-        .as_mut()?
-        .0
-        .remove(&(engine, node))
 }

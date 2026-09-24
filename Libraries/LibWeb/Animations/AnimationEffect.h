@@ -18,6 +18,12 @@
 #include <LibWeb/CSS/PropertyNameAndID.h>
 #include <LibWeb/CSS/StyleRecordID.h>
 
+namespace Web::CSS::StyleEngineFFI {
+
+struct FfiAnimationInvalidation;
+
+}
+
 namespace Web::Animations {
 
 using FillMode = Bindings::FillMode;
@@ -72,6 +78,8 @@ struct AnimationUpdateContext {
     // NOTE: This is lazily populated by KeyframeEffects as their respective animations are applied to an element.
     HashMap<DOM::AbstractElement, ElementData> elements;
 };
+
+void apply_published_animation_overlay(DOM::AbstractElement, CSS::StyleEngineFFI::FfiAnimationInvalidation const&, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation);
 
 // https://www.w3.org/TR/web-animations-1/#the-animationeffect-interface
 class AnimationEffect : public Bindings::GCAllocatedWrappable {

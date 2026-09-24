@@ -3352,7 +3352,7 @@ pub unsafe extern "C" fn style_engine_build_animation_overlay_payloads(
                 }
             }
         }
-        inputs
+        Some(inputs)
     };
     let Some(payloads) = (unsafe {
         engine.build_animation_overlay_payloads(
@@ -3408,6 +3408,55 @@ pub unsafe extern "C" fn style_engine_compare_animation_overlay(
     let engine = unsafe { &*engine.cast::<StyleEngine>() };
     let payloads = SharedPayload::from_pointer_slice(unsafe { std::slice::from_raw_parts(payloads, payload_count) });
     engine.compare_animation_overlay(old_style_record, animated_overlay.cast(), payloads, is_document_element)
+}
+
+/// What the pass published for a row whose animations it sampled itself; `present` is false for a
+/// row the host samples.
+#[repr(C)]
+pub struct FfiRowSampledInPass {
+    pub present: bool,
+    /// The composition the element installs.
+    pub style_record: u64,
+    /// What publishing the composition over the row's record invalidated.
+    pub invalidation: FfiAnimationInvalidation,
+    pub overlay_is_empty: bool,
+    /// The `SUBSTITUTION_MARK_*` bits of every value a keyframe substituted.
+    pub substitution_marks: u8,
+    /// The style groups a keyframe read straight from the parent through an explicit `inherit`,
+    /// or every group as `u32::MAX`.
+    pub keyframes_inherited_non_inherited_style_groups: u32,
+    pub uses_tree_counting_function: bool,
+}
+
+/// Takes what the pass published for a row whose animations it sampled, so that exactly one
+/// installation applies it.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_take_row_sampled_in_pass(engine: *mut c_void, node: u32) -> FfiRowSampledInPass {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    let published = StyleNodeID::from_raw(node).and_then(|node| engine.take_row_sampled_in_pass(node));
+    match published {
+        None => FfiRowSampledInPass {
+            present: false,
+            style_record: 0,
+            invalidation: FfiAnimationInvalidation::default(),
+            overlay_is_empty: true,
+            substitution_marks: 0,
+            keyframes_inherited_non_inherited_style_groups: 0,
+            uses_tree_counting_function: false,
+        },
+        Some(published) => FfiRowSampledInPass {
+            present: true,
+            style_record: published.style_record,
+            invalidation: published.invalidation,
+            overlay_is_empty: published.overlay_is_empty,
+            substitution_marks: published.substitution_marks,
+            keyframes_inherited_non_inherited_style_groups: published.keyframes_inherited_non_inherited_style_groups,
+            uses_tree_counting_function: published.uses_tree_counting_function,
+        },
+    }
 }
 
 /// The animation definitions one engine-settled row left for the host, as the host's own plan

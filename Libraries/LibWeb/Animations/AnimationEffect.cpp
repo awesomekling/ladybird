@@ -846,6 +846,112 @@ static ReadonlySpan<CSS::ComputedValuesFFI::FfiAnimatedOverlayEntry> animated_ov
     return { entries, count };
 }
 
+// Install the record a sample of an element's animations published, and apply what publishing it
+// over the element's record invalidated: the element's and its layout node's style, the pseudo-element
+// styles and descendants that inherit from it, and, unless the caller compares the element's style
+// itself, what layout and paint need.
+void apply_published_animation_overlay(DOM::AbstractElement element, CSS::StyleEngineFFI::FfiAnimationInvalidation const& animated_property_invalidation, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation)
+{
+    GC::Ref<DOM::Element> target = element.element();
+    auto invalidation = CSS::decode_style_invalidation(animated_property_invalidation.invalidation);
+    target->refresh_computed_style(element.pseudo_element(), new_style_record);
+    if (auto* svg_element = as_if<SVG::SVGElement>(*target); svg_element && !element.pseudo_element().has_value())
+        svg_element->note_svg_paint_resource_description_may_have_changed();
+
+    // Box-type, overflow, and text-alignment adjustments consume the unadjusted base values,
+    // which an animation-only overlay update deliberately does not reconstruct. Publish an
+    // exact feedback action so the ordinary reaction path re-cascades that base before the
+    // frame becomes observable.
+    if (animated_property_invalidation.requires_base_style_recomputation)
+        target->document().style_computer().style_engine().record_derived_element_style_input_change(
+            target->style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
+
+    if (!element.pseudo_element().has_value() && invalidation.inherited_style_changed()) {
+        // Recomputing pseudo-element styles can start transitions, which stay provisional until a stabilization
+        // epoch commits them. This update also runs outside any style update (for example when an inert animation
+        // is disassociated from its target), so hold an epoch open around it.
+        auto& document = target->document();
+        document.begin_style_stabilization_epoch();
+        ScopeGuard end_stabilization_epoch = [&] {
+            document.end_style_stabilization_epoch();
+        };
+        if (!CSS::deferring_engine_pseudo_installation()) {
+            target->document().style_computer().style_engine().set_sampled_composition_identity(target->style_node_id(), target->style_record_identity());
+            invalidation |= target->recompute_pseudo_element_styles();
+        }
+    }
+
+    // An animated value can be inherited through shadow and slot boundaries. Publish the exact
+    // flat-tree descendants as one feedback batch; the ordinary transaction owns their style
+    // materialization and observer consequences.
+    if (!element.pseudo_element().has_value()) {
+        auto inherited_style_groups = invalidation.inherited_style_groups_changed();
+        if (!invalidation.inherited_style_changed()) {
+            auto shadow_root = target->shadow_root();
+            auto child_explicit_inheritance_groups = target->children_explicitly_inherited_non_inherited_style_groups();
+            if (shadow_root)
+                child_explicit_inheritance_groups |= shadow_root->children_explicitly_inherited_non_inherited_style_groups();
+            auto descendants_may_observe_non_inherited_properties = (child_explicit_inheritance_groups & animated_property_invalidation.changed_non_inherited_style_groups) != 0
+                || invalidation.recompute_descendant_styles
+                || invalidation.needs_layout_tree_rebuild()
+                || target->is_html_slot_element();
+            if (descendants_may_observe_non_inherited_properties)
+                inherited_style_groups = CSS::RequiredInvalidationAfterStyleChange::all_inherited_style_groups;
+        }
+        if (inherited_style_groups != 0)
+            target->document().style_computer().style_engine().record_flat_tree_descendant_style_input_changes(
+                target->style_node_id(),
+                CSS::StyleEngine::InheritedStyle,
+                inherited_style_groups);
+    }
+
+    // NB: refresh_computed_style() already publishes the new record to the layout node. Only
+    // inherited values and image resources require the additional C++ style side effects.
+    auto apply_layout_node_style_side_effects = [&](Layout::NodeWithStyle& layout_node, CSS::StyleRecordID style_record) {
+        if (animated_property_invalidation.requires_layout_node_style_application)
+            layout_node.apply_style(style_record);
+        else if (animated_property_invalidation.requires_style_resource_update)
+            layout_node.attach_style_resources();
+    };
+    if (!element.pseudo_element().has_value()) {
+        if (auto* layout_node = target->unsafe_layout_node())
+            apply_layout_node_style_side_effects(*layout_node, target->style_record_identity());
+    } else if (auto pseudo_element_node = target->pseudo_element_unsafe_layout_node(element.pseudo_element().value())) {
+        apply_layout_node_style_side_effects(*pseudo_element_node, target->style_record_identity(element.pseudo_element()));
+    }
+
+    if (caller_applies_invalidation)
+        return;
+
+    if (invalidation.needs_relayout())
+        target->set_needs_layout_update(DOM::SetNeedsLayoutReason::KeyframeEffect);
+    if (invalidation.needs_layout_tree_rebuild()) {
+        auto rebuild_root = element.pseudo_element().has_value()
+            ? CSS::LayoutTreeRebuildRoot::Parent
+            : invalidation.layout_tree_rebuild_root();
+        target->set_needs_layout_tree_rebuild(DOM::SetNeedsLayoutTreeUpdateReason::KeyframeEffect, rebuild_root);
+    }
+    if (invalidation.accumulated_visual_contexts() != CSS::AccumulatedVisualContextInvalidation::None) {
+        auto scope = invalidation.accumulated_visual_contexts() == CSS::AccumulatedVisualContextInvalidation::Rebuild
+            ? DOM::Document::AccumulatedVisualContextUpdateScope::Structure
+            : DOM::Document::AccumulatedVisualContextUpdateScope::Values;
+        // NB: Element-reference pseudo elements (e.g. ::placeholder) are not synthetic, so schedule their
+        //     layout node directly instead of going through the owning element.
+        if (element.pseudo_element().has_value()) {
+            if (auto pseudo_element_node = target->pseudo_element_unsafe_layout_node(element.pseudo_element().value()))
+                element.document().schedule_accumulated_visual_context_update(*pseudo_element_node, scope);
+        } else {
+            element.document().schedule_accumulated_visual_context_update(target, scope);
+        }
+    }
+
+    auto* repaint_layout_node = element.pseudo_element().has_value()
+        ? target->pseudo_element_unsafe_layout_node(*element.pseudo_element())
+        : target->unsafe_layout_node();
+    if (repaint_layout_node && Painting::has_committed_box(*repaint_layout_node))
+        Painting::repaint_after_style_change(*repaint_layout_node, invalidation);
+}
+
 AnimationUpdateContext::~AnimationUpdateContext()
 {
     // Building the overlay below is a style computation, and it samples each effect from the timing
@@ -923,103 +1029,7 @@ AnimationUpdateContext::~AnimationUpdateContext()
                 target->document().style_computer().record_transition_stabilization_baseline(element);
             }
         });
-        auto invalidation = CSS::decode_style_invalidation(animated_property_invalidation.invalidation);
-        target->refresh_computed_style(element.pseudo_element(), publication.new_style_record);
-        if (auto* svg_element = as_if<SVG::SVGElement>(*target); svg_element && !element.pseudo_element().has_value())
-            svg_element->note_svg_paint_resource_description_may_have_changed();
-
-        // Box-type, overflow, and text-alignment adjustments consume the unadjusted base values,
-        // which an animation-only overlay update deliberately does not reconstruct. Publish an
-        // exact feedback action so the ordinary reaction path re-cascades that base before the
-        // frame becomes observable.
-        if (animated_property_invalidation.requires_base_style_recomputation)
-            target->document().style_computer().style_engine().record_derived_element_style_input_change(
-                target->style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
-
-        if (!element.pseudo_element().has_value() && invalidation.inherited_style_changed()) {
-            // Recomputing pseudo-element styles can start transitions, which stay provisional until a stabilization
-            // epoch commits them. This update also runs outside any style update (for example when an inert animation
-            // is disassociated from its target), so hold an epoch open around it.
-            auto& document = target->document();
-            document.begin_style_stabilization_epoch();
-            ScopeGuard end_stabilization_epoch = [&] {
-                document.end_style_stabilization_epoch();
-            };
-            if (!CSS::deferring_engine_pseudo_installation()) {
-                target->document().style_computer().style_engine().set_sampled_composition_identity(target->style_node_id(), target->style_record_identity());
-                invalidation |= target->recompute_pseudo_element_styles();
-            }
-        }
-
-        // An animated value can be inherited through shadow and slot boundaries. Publish the exact
-        // flat-tree descendants as one feedback batch; the ordinary transaction owns their style
-        // materialization and observer consequences.
-        if (!element.pseudo_element().has_value()) {
-            auto inherited_style_groups = invalidation.inherited_style_groups_changed();
-            if (!invalidation.inherited_style_changed()) {
-                auto shadow_root = target->shadow_root();
-                auto child_explicit_inheritance_groups = target->children_explicitly_inherited_non_inherited_style_groups();
-                if (shadow_root)
-                    child_explicit_inheritance_groups |= shadow_root->children_explicitly_inherited_non_inherited_style_groups();
-                auto descendants_may_observe_non_inherited_properties = (child_explicit_inheritance_groups & animated_property_invalidation.changed_non_inherited_style_groups) != 0
-                    || invalidation.recompute_descendant_styles
-                    || invalidation.needs_layout_tree_rebuild()
-                    || target->is_html_slot_element();
-                if (descendants_may_observe_non_inherited_properties)
-                    inherited_style_groups = CSS::RequiredInvalidationAfterStyleChange::all_inherited_style_groups;
-            }
-            if (inherited_style_groups != 0)
-                target->document().style_computer().style_engine().record_flat_tree_descendant_style_input_changes(
-                    target->style_node_id(),
-                    CSS::StyleEngine::InheritedStyle,
-                    inherited_style_groups);
-        }
-
-        // NB: refresh_computed_style() already publishes the new record to the layout node. Only
-        // inherited values and image resources require the additional C++ style side effects.
-        auto apply_layout_node_style_side_effects = [&](Layout::NodeWithStyle& layout_node, CSS::StyleRecordID style_record) {
-            if (animated_property_invalidation.requires_layout_node_style_application)
-                layout_node.apply_style(style_record);
-            else if (animated_property_invalidation.requires_style_resource_update)
-                layout_node.attach_style_resources();
-        };
-        if (!element.pseudo_element().has_value()) {
-            if (auto* layout_node = target->unsafe_layout_node())
-                apply_layout_node_style_side_effects(*layout_node, target->style_record_identity());
-        } else if (auto pseudo_element_node = target->pseudo_element_unsafe_layout_node(element.pseudo_element().value())) {
-            apply_layout_node_style_side_effects(*pseudo_element_node, target->style_record_identity(element.pseudo_element()));
-        }
-
-        if (it.value.caller_applies_invalidation)
-            continue;
-
-        if (invalidation.needs_relayout())
-            target->set_needs_layout_update(DOM::SetNeedsLayoutReason::KeyframeEffect);
-        if (invalidation.needs_layout_tree_rebuild()) {
-            auto rebuild_root = element.pseudo_element().has_value()
-                ? CSS::LayoutTreeRebuildRoot::Parent
-                : invalidation.layout_tree_rebuild_root();
-            target->set_needs_layout_tree_rebuild(DOM::SetNeedsLayoutTreeUpdateReason::KeyframeEffect, rebuild_root);
-        }
-        if (invalidation.accumulated_visual_contexts() != CSS::AccumulatedVisualContextInvalidation::None) {
-            auto scope = invalidation.accumulated_visual_contexts() == CSS::AccumulatedVisualContextInvalidation::Rebuild
-                ? DOM::Document::AccumulatedVisualContextUpdateScope::Structure
-                : DOM::Document::AccumulatedVisualContextUpdateScope::Values;
-            // NB: Element-reference pseudo elements (e.g. ::placeholder) are not synthetic, so schedule their
-            //     layout node directly instead of going through the owning element.
-            if (element.pseudo_element().has_value()) {
-                if (auto pseudo_element_node = target->pseudo_element_unsafe_layout_node(element.pseudo_element().value()))
-                    element.document().schedule_accumulated_visual_context_update(*pseudo_element_node, scope);
-            } else {
-                element.document().schedule_accumulated_visual_context_update(target, scope);
-            }
-        }
-
-        auto* repaint_layout_node = element.pseudo_element().has_value()
-            ? target->pseudo_element_unsafe_layout_node(*element.pseudo_element())
-            : target->unsafe_layout_node();
-        if (repaint_layout_node && Painting::has_committed_box(*repaint_layout_node))
-            Painting::repaint_after_style_change(*repaint_layout_node, invalidation);
+        apply_published_animation_overlay(element, animated_property_invalidation, publication.new_style_record, it.value.caller_applies_invalidation);
     }
 }
 

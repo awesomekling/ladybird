@@ -3527,15 +3527,6 @@ unsafe fn sample_whole_effect_stack(
     let Some((host, host_result)) = host_sample else {
         return result;
     };
-    if pseudo.is_none() {
-        check_settled_row_sample(
-            engine,
-            node,
-            input.style_record,
-            &result,
-            run.overlay.cast_const().cast(),
-        );
-    }
     let custom_properties = |result: &FfiHostAnimationSampleResult| {
         (0..result.animated_custom_property_count)
             .map(|index| unsafe { &*result.animated_custom_properties.add(index) })
@@ -3615,10 +3606,7 @@ unsafe fn sample_whole_effect_stack(
 /// what a host's sample reports, and the style the overlay record is built from.
 pub(crate) struct SettledRowSample {
     pub(crate) style_record: u64,
-    pub(crate) outcome: FfiHostAnimationSampleOutcome,
     pub(crate) keyframes_inherited_non_inherited_style_groups: u32,
-    pub(crate) depends_on_viewport_metrics: bool,
-    pub(crate) font_metrics_depend_on_viewport_metrics: bool,
     pub(crate) uses_tree_counting_function: bool,
     pub(crate) substitution_marks: u8,
     /// The table after the animated box-type finalization, and the overlay.
@@ -3705,13 +3693,16 @@ pub(crate) fn sample_settled_row(
             sampled
         }
     };
-    let (_run, result) = match sampled {
+    let (run, result) = match sampled {
         Ok(sampled) => sampled,
         Err(reason) => {
             unsafe { rust_animated_overlay_free(overlay) };
             return Err(reason);
         }
     };
+    // What the container units the sample resolved read of the element's containers is the
+    // host's to record, with what the row's record read of them.
+    let container_unit_mask = run.map_or(0, |run| run.container_unit_mask.get());
     let animates_custom_properties = result.animated_custom_property_count != 0;
     unsafe { rust_release_animated_custom_property_results(result.animated_custom_properties_storage) };
     if animates_custom_properties {
@@ -3735,66 +3726,16 @@ pub(crate) fn sample_settled_row(
             return Err(format!("sampled style: {reason}"));
         }
     };
+    if container_unit_mask != 0 {
+        engine.note_sampled_container_unit_effects(node, style_record, container_unit_mask);
+    }
     Ok(SettledRowSample {
         style_record,
-        outcome: result.outcome,
         keyframes_inherited_non_inherited_style_groups: result.keyframes_inherited_non_inherited_style_groups,
-        depends_on_viewport_metrics: result.depends_on_viewport_metrics,
-        font_metrics_depend_on_viewport_metrics: result.font_metrics_depend_on_viewport_metrics,
         uses_tree_counting_function: result.uses_tree_counting_function,
         substitution_marks: result.substitution_marks,
         style: crate::css::style::engine_sample_check::EngineSampledStyle { table, overlay },
     })
-}
-
-/// Check what a whole-stack sample reported against the engine's sample of the row its pass
-/// settled, where the host sampled the record the row settled.
-fn check_settled_row_sample(
-    engine: &crate::css::style::StyleEngineState,
-    node: crate::css::style::tree::StyleNodeID,
-    style_record: u64,
-    result: &FfiHostAnimationSampleResult,
-    overlay: *const c_void,
-) {
-    use crate::css::style::engine_sample_check;
-
-    let engine_identity = std::ptr::from_ref(engine).addr();
-    engine_sample_check::with_settled_row_sample(engine_identity, node, |settled| {
-        if settled.style_record != style_record {
-            engine_sample_check::note_declined("settled row: the host sampled another record");
-            return false;
-        }
-        let agrees = settled.outcome == result.outcome
-            && settled.keyframes_inherited_non_inherited_style_groups
-                == result.keyframes_inherited_non_inherited_style_groups
-            && settled.depends_on_viewport_metrics == result.depends_on_viewport_metrics
-            && settled.font_metrics_depend_on_viewport_metrics == result.font_metrics_depend_on_viewport_metrics
-            && settled.uses_tree_counting_function == result.uses_tree_counting_function
-            && settled.substitution_marks == result.substitution_marks
-            && result.animated_custom_property_count == 0;
-        if agrees {
-            engine_sample_check::note_agreed("settled row");
-        } else {
-            engine_sample_check::note_difference("settled row", &|| {
-                format!(
-                    "node {}: pass {:?} marks {} groups {}, host {:?} marks {} groups {} overlay {:?}",
-                    node.raw(),
-                    settled.outcome,
-                    settled.substitution_marks,
-                    settled.keyframes_inherited_non_inherited_style_groups,
-                    result.outcome,
-                    result.substitution_marks,
-                    result.keyframes_inherited_non_inherited_style_groups,
-                    describe_overlay(overlay)
-                        .iter()
-                        .map(|entry| entry.0)
-                        .collect::<Vec<_>>(),
-                )
-            });
-        }
-        // The style it left is checked where the host finalizes its own.
-        true
-    });
 }
 
 /// Check the style the host's whole-stack sample of an element left in its working set - the
@@ -3819,11 +3760,6 @@ pub unsafe extern "C" fn rust_check_sampled_style(
     let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
         return;
     };
-    if pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT
-        && let Some(settled) = engine_sample_check::take_settled_row_sample(engine.addr(), node)
-    {
-        check_sampled_style_against("settled row style", node, pseudo_kind, table, overlay, &settled.style);
-    }
     let Some(expected) = engine_sample_check::take_expected_sampled_style(engine.addr(), node, pseudo_kind) else {
         return;
     };
