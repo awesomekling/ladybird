@@ -100,6 +100,7 @@ pub(crate) mod seal;
 mod sorted_merge;
 mod style_invalidation;
 mod transition_baselines;
+mod weak_pool;
 pub(crate) use transition_baselines::InheritedAnimatedValue;
 #[cfg(not(feature = "style-recording"))]
 pub mod record_replay {
