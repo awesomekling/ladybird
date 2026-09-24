@@ -377,6 +377,11 @@ pub(crate) fn font_group_build_inputs(
 }
 
 impl RetainedState {
+    /// The font the document's font resolver resolved for a request, if it has.
+    pub(crate) fn resolved_font(&self, request: bridge::FfiFontResolutionRequest) -> Option<bridge::FfiResolvedFont> {
+        self.font_resolution.as_ref()?.lookup(request)
+    }
+
     /// The inputs the font group of an element's overlay record is built from, resolved by the
     /// engine over the record's table and the overlay a sample composed. `None` where the document's
     /// font resolver has not resolved that font yet.
