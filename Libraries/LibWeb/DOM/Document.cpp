@@ -10335,6 +10335,9 @@ NonnullRefPtr<Painting::DisplayList> Document::finish_display_list_recording(Pai
 {
     VERIFY(recording.document.ptr() == this);
     auto display_list = Painting::finish_rust_display_list_recording(recording);
+    // What was marked beside a recording in the frame in flight is what the next drain writes.
+    if (recording.run == Painting::RecordingRun::InSubmittedFrame)
+        release_held_invalidation_marks();
     auto& document_paint_state = paint_state();
 
     bool const recording_returned_the_paint_command_cache_source = display_list == document_paint_state.display_list_used_as_paint_command_cache_source();

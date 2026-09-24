@@ -7,8 +7,10 @@
 #pragma once
 
 #include <AK/Array.h>
+#include <AK/Badge.h>
 #include <AK/Function.h>
 #include <AK/Noncopyable.h>
+#include <AK/NonnullOwnPtr.h>
 #include <AK/Queue.h>
 #include <LibCore/Forward.h>
 #include <LibGC/Ptr.h>
@@ -19,6 +21,8 @@
 #include <LibWebCommon/HighResolutionTime/DOMHighResTimeStamp.h>
 
 namespace Web::HTML {
+
+class FrameScheduler;
 
 class WEB_API EventLoop : public JS::Cell {
     GC_CELL(EventLoop, JS::Cell);
@@ -93,8 +97,8 @@ public:
 
         // What the frames of the rendering updates cost the main thread, and what ran beside them. A frame is
         // "submitted" when it leaves main to run on its own and "consumed" when main takes its result back; one that
-        // runs while main waits for it is "lockstep". Until the frame scheduler lands, the overlap host's spin is the
-        // only thing that submits (one per overlapping stage), and every other rendering update is a lockstep frame.
+        // runs while main waits for it is "lockstep". The frame scheduler submits a rendering update's frame under
+        // LIBWEB_STAGE_THREAD=overlap; every other rendering update is a lockstep frame.
         u64 frames_submitted { 0 };
         u64 frames_consumed { 0 };
         Array<u64, to_underlying(FrameLockstepReason::Count)> frames_lockstep {};
@@ -105,7 +109,7 @@ public:
         // Task and microtask time main spent while a frame was in flight: the work overlap exists for.
         u64 overlap_task_nanoseconds { 0 };
         // Main's own share of a rendering update: up to the submission, then the two halves of consuming the frame.
-        // Until frames are submitted from the rendering update, main_half_nanoseconds is the whole update.
+        // A lockstep frame's main half is the whole update.
         u64 main_half_nanoseconds { 0 };
         u64 consume_commit_nanoseconds { 0 };
         u64 consume_tail_nanoseconds { 0 };
@@ -234,6 +238,11 @@ public:
     static bool a_frame_is_in_flight() { return s_a_frame_is_in_flight; }
     void note_journal_entry_during_flight(JournalEntryKind kind) { ++m_rendering_scheduler_counters.journal_entries_during_flight[to_underlying(kind)]; }
 
+    FrameScheduler& frame_scheduler() { return *m_frame_scheduler; }
+    void note_frame_painted(Badge<FrameScheduler>) { ++m_rendering_scheduler_counters.paints; }
+    // The steps of a rendering update after its frame: screenshots, top layer removals and the font loading state.
+    void run_rendering_update_tail(Badge<FrameScheduler>, ReadonlySpan<GC::Ref<LocalNavigable>> painted_local_roots, ReadonlySpan<GC::Ref<DOM::Document>> docs);
+
 private:
     explicit EventLoop(Type);
 
@@ -241,6 +250,8 @@ private:
 
     void process_input_events() const;
     void update_the_rendering();
+    void finish_rendering_update_steps(ReadonlySpan<GC::Ref<DOM::Document>> docs);
+    void end_rendering_update();
 
     Type m_type { Type::Window };
 
@@ -301,6 +312,9 @@ private:
     bool m_calling_finished_frame_consumer { false };
     bool m_consuming_frame_commit { false };
     bool m_running_consume_tail { false };
+
+    NonnullOwnPtr<FrameScheduler> m_frame_scheduler;
+    double m_rendering_update_start_time { 0 };
 };
 
 WEB_API EventLoop& main_thread_event_loop();

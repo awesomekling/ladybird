@@ -1333,24 +1333,61 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
     }
 }
 
+/// When the render side runs a display list recording the host has prepared.
+#[repr(u32)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FfiRecordingRun {
+    /// Right away, while the host waits for it.
+    Now,
+    /// In the frame the rendering update submits, while the host runs its event loop. The frame
+    /// owns the arena until the host takes it back, and the recording is pending once it has.
+    InSubmittedFrame,
+}
+
+/// Leaves a finished recording in the arena's paint state, for the host to publish.
+fn leave_pending_recording(
+    arena: &LayoutNodeArena,
+    viewport: NodeSlotId,
+    should_paint_overlay: bool,
+    publishes_recording: bool,
+    output: RecordingStageOutput,
+) {
+    let RecordingStageOutput {
+        recording,
+        recording_from_scratch,
+    } = output;
+    let mut paint_state = arena.paint_state().borrow_mut();
+    if paint_state.trace_recordings && recording.output.capture_log_for_verification.is_some() {
+        paint_state.pending_recording_trace = Some(crate::painting::paint_state::PendingRecordingTrace {
+            viewport,
+            should_paint_overlay,
+        });
+    }
+    paint_state.pending_recording = Some(crate::painting::paint_state::PendingRecording {
+        recording,
+        recording_from_scratch,
+        publishes_recording,
+    });
+}
+
+/// Records the document's display list and leaves the recording pending in the arena. With
+/// `run` [`FfiRecordingRun::InSubmittedFrame`], and a frame scheduler that submits recordings, the
+/// recording runs in the submitted frame and this returns before it has; otherwise it runs now.
+///
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 /// Input arrays and byte buffers must remain valid and immutable throughout this call;
-/// fonts for enabled overlays must be live `Gfx::Font`s.
+/// fonts for enabled overlays must be live `Gfx::Font`s. A submitted recording owns the arena
+/// until the host takes the frame back, and the host keeps the arena alive until then.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_record_display_list(
     arena_handle: *mut c_void,
     viewport: NodeSlotId,
     inputs: crate::painting::host::FfiRecordingInputs,
+    run: FfiRecordingRun,
 ) -> bool {
     crate::layout::main_side_census::note_rendering_update(arena_handle);
-    if crate::stage_thread::is_suspended_in_spin("recording") {
-        // The suspended recording's caller holds the recording scratch and has not published its
-        // recording yet, so this one would wait for it forever.
-        eprintln!("STAGE OVERLAP: a recording started while another is suspended in its spin");
-        std::process::abort();
-    }
     let arena = unsafe { arena_from_handle(arena_handle) };
     {
         let mut paint_state = arena.paint_state().borrow_mut();
@@ -1383,33 +1420,39 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
     };
     let publishes_recording = recording_inputs.publishes_recording;
     let should_paint_overlay = recording_inputs.should_paint_overlay;
-    let RecordingStageOutput {
-        recording,
-        recording_from_scratch,
-    } = {
+    if run == FfiRecordingRun::InSubmittedFrame && crate::stage_thread::submits("recording") {
+        // The recording outlives this call, so it takes copies of what the host lends.
+        let input = RecordingStageInput {
+            // SAFETY: No borrow of the arena outlives this point. The submitted frame owns the arena
+            // until the host takes it back: every main-side access to it joins the frame first.
+            arena: unsafe { &mut *arena_handle.cast::<LayoutNodeArena>() },
+            viewport,
+            inputs: recording_inputs.into_owned(),
+        };
+        let arena_address = arena_handle as usize;
+        // SAFETY: As above.
+        unsafe {
+            crate::stage_thread::submit_stage("recording", arena_handle, move || {
+                let output = record_display_list_stage(input);
+                // SAFETY: The stage has returned its borrow, and the frame still owns the arena.
+                let arena = &*(arena_address as *const LayoutNodeArena);
+                leave_pending_recording(arena, viewport, should_paint_overlay, publishes_recording, output);
+            });
+        }
+        return true;
+    }
+    let output = {
         let input = RecordingStageInput {
             // SAFETY: No borrow of the arena outlives this point, so the stage holds it alone.
             arena: unsafe { arena_from_handle_mut(arena_handle) },
             viewport,
             inputs: recording_inputs,
         };
-        // SAFETY: The stage holds the arena alone; under overlap, only diagnostics rely on that.
-        unsafe { crate::stage_thread::run_overlappable_stage("recording", || record_display_list_stage(input)) }
+        crate::stage_thread::run_stage(|| record_display_list_stage(input))
     };
     // SAFETY: The stage has returned the arena.
     let arena = unsafe { arena_from_handle(arena_handle) };
-    let mut paint_state = arena.paint_state().borrow_mut();
-    if paint_state.trace_recordings && recording.output.capture_log_for_verification.is_some() {
-        paint_state.pending_recording_trace = Some(crate::painting::paint_state::PendingRecordingTrace {
-            viewport,
-            should_paint_overlay,
-        });
-    }
-    paint_state.pending_recording = Some(crate::painting::paint_state::PendingRecording {
-        recording,
-        recording_from_scratch,
-        publishes_recording,
-    });
+    leave_pending_recording(arena, viewport, should_paint_overlay, publishes_recording, output);
     true
 }
 
@@ -1429,8 +1472,8 @@ pub unsafe extern "C" fn rust_run_compositor_frame_handoff_stage(
     // SAFETY: Guaranteed by the caller: `handoff` may be called with `context` from any thread, and
     // the frame is reachable only through `context`.
     let context = unsafe { crate::stage_thread::CallerWaits::new(context) };
-    // SAFETY: As above; under overlap, only diagnostics rely on the caller waiting.
-    unsafe { crate::stage_thread::run_overlappable_stage("handoff", move || handoff(context.into_inner())) }
+    // SAFETY: As above.
+    crate::stage_thread::run_stage(move || unsafe { handoff(context.into_inner()) });
 }
 
 /// # Safety

@@ -35,8 +35,9 @@ pub(crate) struct UncapturedContentInputs {
     pub background_color: Color,
 }
 
-/// Inputs borrowed for one synchronous recording call. Recording results retain their own
-/// resources and never borrow these inputs or the host's arrays and byte buffers.
+/// Inputs for one recording. A synchronous recording call borrows the host's arrays and byte
+/// buffers; a recording that outlives the call owns copies of them ([`Self::into_owned`]).
+/// Recording results retain their own resources and never borrow these inputs.
 #[derive(Clone)]
 pub(crate) struct RecordingInputs<'a> {
     pub device_pixels_per_css_pixel: f64,
@@ -73,7 +74,7 @@ pub(crate) struct RecordingInputs<'a> {
     pub tooltip_border_color: Color,
     pub grid_overlays: Option<GridOverlays<'a>>,
     // These array elements are already plain values without pointers or optional-value tags.
-    pub flex_overlays: &'a [FfiFlexOverlayInput],
+    pub flex_overlays: Cow<'a, [FfiFlexOverlayInput]>,
     pub caret_debug_rect: Option<CssPixelRect>,
     pub caret: Option<CaretPaint>,
     pub focused_text_control: Option<FocusedTextControlSelection>,
@@ -105,10 +106,10 @@ pub(crate) struct FocusedTextControlSelection {
     pub end: usize,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct FocusedAreaOutline<'a> {
     pub image: NodeSlotId,
-    pub path_bytes: &'a [u8],
+    pub path_bytes: Cow<'a, [u8]>,
     pub color: Color,
     pub width: CssPixels,
 }
@@ -128,6 +129,31 @@ pub(crate) struct InspectorHighlight<'a> {
 
 #[derive(Clone)]
 pub(crate) struct GridOverlays<'a> {
-    pub inputs: &'a [FfiGridOverlayInput],
+    pub inputs: Cow<'a, [FfiGridOverlayInput]>,
     pub fonts: OverlayLabelFonts,
+}
+
+impl RecordingInputs<'_> {
+    /// These inputs with copies of everything they borrow from the host.
+    pub(crate) fn into_owned(self) -> RecordingInputs<'static> {
+        RecordingInputs {
+            inspector_highlight: self.inspector_highlight.map(|highlight| InspectorHighlight {
+                paintable: highlight.paintable,
+                label: Cow::Owned(highlight.label.into_owned()),
+                fonts: highlight.fonts,
+            }),
+            grid_overlays: self.grid_overlays.map(|grid| GridOverlays {
+                inputs: Cow::Owned(grid.inputs.into_owned()),
+                fonts: grid.fonts,
+            }),
+            flex_overlays: Cow::Owned(self.flex_overlays.into_owned()),
+            focused_area_outline: self.focused_area_outline.map(|outline| FocusedAreaOutline {
+                image: outline.image,
+                path_bytes: Cow::Owned(outline.path_bytes.into_owned()),
+                color: outline.color,
+                width: outline.width,
+            }),
+            ..self
+        }
+    }
 }

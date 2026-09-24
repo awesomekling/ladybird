@@ -9,6 +9,7 @@ use crate::layout::svg_formatting_context::FfiSvgNumberPercentage;
 use crate::layout::used_values;
 use crate::painting::display_list::commands::{OptionalAffineTransform, OptionalColor};
 use libgfx_rust::{Color, IntRect, InterpolationColorSpace};
+use std::borrow::Cow;
 use std::ffi::c_void;
 
 #[derive(Clone, Copy, Debug)]
@@ -168,11 +169,11 @@ impl FfiRecordingInputs {
             tooltip_text_color: self.tooltip_text_color,
             tooltip_border_color: self.tooltip_border_color,
             grid_overlays: (!grid_overlays.is_empty()).then(|| GridOverlays {
-                inputs: grid_overlays,
+                inputs: Cow::Borrowed(grid_overlays),
                 // SAFETY: The caller supplies live label fonts when grid overlays are enabled.
                 fonts: unsafe { self.grid_label_fonts.retain() },
             }),
-            flex_overlays,
+            flex_overlays: Cow::Borrowed(flex_overlays),
             caret_debug_rect: self
                 .caret_debug_rect
                 .has_value
@@ -191,7 +192,7 @@ impl FfiRecordingInputs {
             }),
             focused_area_outline: (!outline_path.is_empty()).then_some(FocusedAreaOutline {
                 image: self.focused_area_outline.image,
-                path_bytes: outline_path,
+                path_bytes: Cow::Borrowed(outline_path),
                 color: self.focused_area_outline.color,
                 width: self.focused_area_outline.width,
             }),
