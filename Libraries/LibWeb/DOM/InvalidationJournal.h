@@ -62,6 +62,9 @@ public:
     // Whether the node is in the shadow tree of the focused text control may have changed, and the
     // node's identity and rows publish the new answer at the drain.
     void note_is_in_focused_text_control(NodeIdentity);
+    // The document's selection changed, and the rows it covers restamp their selection states from
+    // the selection's range as it is at the drain.
+    void note_selection_states();
     // The scroll offset the element or the document's viewport stores changed, and the rows built
     // for it publish the new one at the drain.
     void note_scroll_offset(NodeIdentity, bool offset_changed);
@@ -117,12 +120,14 @@ private:
     Entry& entry_for(NodeIdentity);
     void drain_if_the_render_side_is_reading();
     void publish_scroll_offsets(Node&, Entry const&);
+    void publish_selection_states();
 
     Document& m_document;
     Vector<Entry> m_entries;
     HashMap<NodeIdentity, size_t> m_entry_index_by_identity;
     // Whether a noted scroll offset changed, so the document's scroll state mirrors a stale one.
     bool m_scroll_state_is_stale { false };
+    bool m_selection_states_are_stale { false };
     bool m_draining { false };
 };
 
