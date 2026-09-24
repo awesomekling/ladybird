@@ -4255,6 +4255,20 @@ pub unsafe extern "C" fn style_engine_native_rule_target(
     true
 }
 
+/// The host marked a node's children as explicitly inheriting a non-inherited property, from a
+/// keyframe-borne `inherit` its animation sample found.
+///
+/// # Safety
+/// Engine must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_note_children_explicitly_inherit(engine: *mut c_void, node: u32) {
+    super::seal::note_engine_call("style_engine_note_children_explicitly_inherit");
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    if let Some(node) = StyleNodeID::from_raw(node) {
+        engine.note_children_explicitly_inherit(node);
+    }
+}
+
 /// What the container conditions of an element's engine-answered row left for the host to record,
 /// in the shape an evaluation answers with. `matches` is unused.
 ///

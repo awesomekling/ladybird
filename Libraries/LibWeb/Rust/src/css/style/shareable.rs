@@ -99,6 +99,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         nodes_with_tree_counting_records,
         nodes_owing_a_transition_registration,
         nodes_owing_explicit_inheritance,
+        children_explicitly_inherit_marks,
         batch_pinned_compositions,
         nodes_owing_an_animation_sample,
         transition_baselines,
@@ -232,6 +233,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(nodes_with_tree_counting_records);
     assert_member_is_sync(nodes_owing_a_transition_registration);
     assert_member_is_sync(nodes_owing_explicit_inheritance);
+    assert_member_is_sync(children_explicitly_inherit_marks);
     assert_member_is_sync(batch_pinned_compositions);
     assert_member_is_sync(nodes_owing_an_animation_sample);
     assert_member_is_sync(transition_baselines);
