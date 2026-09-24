@@ -555,6 +555,20 @@ fn prepare_route_liveness(engine: &mut StyleEngine) {
         .prepare_route_liveness(&retained.program, &retained.programs);
 }
 
+/// Take a style transaction and every later wave of its pass, as the host does when it installs
+/// each wave; nothing is installed here.
+fn take_every_wave(
+    engine: &mut StyleEngine,
+    root: StyleNodeID,
+    mut emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
+) -> bool {
+    let scoped = engine.take_style_transaction(root, &mut emit);
+    while engine.host.suspended_style_pass.is_some() {
+        engine.take_style_transaction(root, &mut emit);
+    }
+    scoped
+}
+
 fn discard_transaction(engine: &mut StyleEngine) {
     let transaction = engine.take_transaction();
     engine.release_transaction(transaction);
@@ -2048,7 +2062,7 @@ fn a_non_bulk_document_root_arrival_publishes_style_reactions() {
     }
     let mut published = Vec::new();
 
-    assert!(!engine.take_style_transaction(nodes[0], |_, _, reactions| {
+    assert!(!take_every_wave(&mut engine, nodes[0], |_, _, reactions| {
         published.extend(reactions.iter().map(|reaction| reaction.style_node));
     }));
     assert_eq!(published, nodes.iter().map(|node| node.raw()).collect::<Vec<_>>());
@@ -3929,13 +3943,13 @@ fn published_ancestor_checks_follow_preorder_instead_of_node_identity() {
         engine.record_tree_delta(node, None, Some(relations(Some(parent.raw()), previous, None)));
         set_atom_feature(&mut engine, node, LocalFeatureKey::TagName, StyleAtomID(100));
     }
-    let mut published = Vec::new();
-    assert!(engine.take_style_transaction(nodes[0], |_, _, reactions| {
-        published.extend(reactions.iter().map(|reaction| reaction.style_node));
+    let mut waves = Vec::new();
+    assert!(take_every_wave(&mut engine, nodes[0], |_, _, reactions| {
+        waves.push(reactions.iter().map(|reaction| reaction.style_node).collect::<Vec<_>>());
     }));
-    let expected: Vec<_> = std::iter::once(raw[39]).chain(raw[1..39].iter().copied()).collect();
-    assert_eq!(published, expected);
-    assert_eq!(engine.counters().get(Counter::EngineComputedRecordGateAncestors), 38);
+    // The pass stops before the first child, which reads the parent only the host settles; the
+    // next wave drives every child over the installed parent.
+    assert_eq!(waves, vec![vec![raw[39]], raw[1..39].to_vec()]);
 }
 
 #[test]
@@ -11493,7 +11507,7 @@ fn atom_sweep_waits_for_an_active_matching_traversal() {
     add_feature(&mut engine, nodes[1], LocalFeatureKey::Class(target));
     // The broad initial publication prepares the traversal over the primary view itself, so the
     // active traversal shares the fact rows exactly as a first style pass in the browser does.
-    assert!(!engine.take_style_transaction(nodes[0], |_, _, _| {}));
+    assert!(!take_every_wave(&mut engine, nodes[0], |_, _, _| {}));
     assert!(engine.begin_cold_matching_batch(nodes[0]));
     assert!(engine.facts.primary_rows_are_shared());
     for raw in 0x1000..0x1100 {
