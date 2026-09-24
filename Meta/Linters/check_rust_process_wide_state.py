@@ -163,6 +163,7 @@ RENDER_STAGE_ALLOWED = {
             "stage_thread.rs:RUNNING_JOIN_WORK",
             "stage_thread.rs:SPINNING",
             "stage_thread.rs:FORCED_JOIN_SITES",
+            "layout/update_layout.rs:HANDED_OFF_FRAME_ARENA",
         ],
     ),
     **render_stage_entries(

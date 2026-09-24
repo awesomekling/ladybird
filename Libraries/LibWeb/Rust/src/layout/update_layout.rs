@@ -31,6 +31,7 @@ use crate::layout::used_values::FfiCssPixelPoint;
 use crate::painting::host::FfiRootBackgroundSource;
 use crate::painting::paintable_data::FfiSelectionSnapshot;
 use crate::painting::selection::SelectionSnapshot;
+use std::cell::Cell;
 use std::ffi::c_void;
 use std::time::Instant;
 
@@ -84,6 +85,9 @@ pub struct FfiLayoutUpdateHostCallbacks {
     /// pseudo-element's own box.
     pub attach_generated_image:
         unsafe extern "C" fn(*mut c_void, NodeSlotId, u32, FfiPseudoElement, FfiGeneratedContentItem, NodeSlotId),
+    /// Ends the layout update on the document side. The frame calls it in its last join, so the
+    /// frame is over for the document once that join is.
+    pub finish_update_layout: unsafe extern "C" fn(*mut c_void),
 }
 
 /// What the loop needs to know about the document at one point in time. Every host call can
@@ -182,6 +186,7 @@ pub(crate) struct LayoutUpdateHost {
     attach_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId, bool),
     attach_generated_image:
         unsafe extern "C" fn(*mut c_void, NodeSlotId, u32, FfiPseudoElement, FfiGeneratedContentItem, NodeSlotId),
+    finish_update_layout: unsafe extern "C" fn(*mut c_void),
 }
 
 impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
@@ -205,6 +210,7 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             record_stabilization_bound_failure: host.record_stabilization_bound_failure,
             attach_style_resources: host.attach_style_resources,
             attach_generated_image: host.attach_generated_image,
+            finish_update_layout: host.finish_update_layout,
         }
     }
 }
@@ -315,6 +321,10 @@ impl LayoutUpdateHost {
                 );
             },
         }
+    }
+
+    fn finish_update_layout(&self, _: &crate::stage::MainThread) {
+        unsafe { (self.finish_update_layout)(self.context) }
     }
 }
 
@@ -1027,9 +1037,62 @@ impl LayoutFrame<'_> {
     }
 }
 
+fn layout_update_host(main_thread: &crate::stage::MainThread) -> LayoutUpdateHost {
+    main_thread
+        .host_tables()
+        .and_then(|host_tables| host_tables.layout_update_host.get())
+        .expect("layout node arena has no layout update host")
+}
+
+/// Where a document's layout frame stands, seen from the document thread.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum FfiLayoutFrameState {
+    /// No layout update is running for the document.
+    Idle,
+    /// The document's frame runs beside the document thread, which spins its event loop meanwhile.
+    /// What reads or rewrites what the frame reads waits for it, and a mark the document thread
+    /// makes waits for the next frame.
+    InFlight,
+    /// The document thread runs as part of the frame: in one of its joins, or running the frame
+    /// itself. What it marks is what the frame reads next, so it goes through at once.
+    MainInsideJoin,
+}
+
+thread_local! {
+    // On the document thread, the arena whose layout frame it has handed to a stage run that has not
+    // returned yet.
+    static HANDED_OFF_FRAME_ARENA: Cell<*mut c_void> = const { Cell::new(std::ptr::null_mut()) };
+}
+
+/// Where the layout frame of the document `arena_handle` belongs to stands.
+///
+/// # Safety
+///
+/// As for [`arena`], on the document thread.
+unsafe fn frame_state(arena_handle: *mut c_void) -> FfiLayoutFrameState {
+    if crate::stage_thread::runs_beside_an_overlapping_stage() {
+        // Only an overlapping stage runs beside this thread, and a layout update other than the one
+        // handed off to it began and ended in work this thread has since returned from. So no other
+        // document is in one, and the arena is not read, which would wait for the stage.
+        return if HANDED_OFF_FRAME_ARENA.with(Cell::get) == arena_handle {
+            FfiLayoutFrameState::InFlight
+        } else {
+            FfiLayoutFrameState::Idle
+        };
+    }
+    // SAFETY: Guaranteed by the caller.
+    if unsafe { arena(arena_handle) }.update_layout_is_running() {
+        FfiLayoutFrameState::MainInsideJoin
+    } else {
+        FfiLayoutFrameState::Idle
+    }
+}
+
 /// Runs the layout update as one frame: the whole stabilization loop is one stage run, which joins
-/// the document thread for the steps listed in [`FrameJoin`], and the document thread applies the
-/// frame's messages once it has finished.
+/// the document thread for the steps listed in [`FrameJoin`]. Its last join applies the frame's
+/// messages and ends the update on the document side, so a document thread that joins the frame
+/// in flight finds the document idle afterwards, and may run a layout update of its own.
 ///
 /// # Safety
 ///
@@ -1040,10 +1103,7 @@ unsafe fn update_layout(
     arena_handle: *mut c_void,
     inputs: &FfiLayoutUpdateInputs,
 ) {
-    let host = main_thread
-        .host_tables()
-        .and_then(|host_tables| host_tables.layout_update_host.get())
-        .expect("layout node arena has no layout update host");
+    let host = layout_update_host(main_thread);
     // SAFETY: Guaranteed by the caller.
     assert!(
         unsafe { arena(arena_handle) }.update_layout_is_running(),
@@ -1060,10 +1120,11 @@ unsafe fn update_layout(
     // SAFETY: The frame reaches the arena and the document through the handle only while the
     // document thread waits for it, or through the joins it runs on that thread.
     let inputs = unsafe { crate::stage_thread::CallerWaits::new(inputs) };
+    let previously_handed_off = HANDED_OFF_FRAME_ARENA.with(|slot| slot.replace(arena_handle));
     // SAFETY: As above, for the work the frame's joins hand the document thread.
-    let messages = unsafe {
+    unsafe {
         crate::stage_thread::run_overlappable_stage_with_joins("layout", main_thread, move |joins| {
-            LayoutFrame {
+            let frame = LayoutFrame {
                 inputs: inputs.into_inner(),
                 joins,
                 messages: FrameMessages::default(),
@@ -1071,12 +1132,46 @@ unsafe fn update_layout(
                 tree_build_document_style_node: None,
                 list_owners_to_rebuild: Vec::new(),
                 selection: None,
-            }
-            .run()
-        })
-    };
-    // SAFETY: Guaranteed by the caller, and the frame is over.
-    messages.apply(main_thread, &host, unsafe { arena(arena_handle) });
+            };
+            let arena_handle = frame.inputs.arena_handle;
+            let messages = frame.run();
+            joins.join(|main_thread| {
+                let host = layout_update_host(main_thread);
+                // The frame runs for the update the arena is in, and is over.
+                messages.apply(main_thread, &host, arena(arena_handle));
+                host.finish_update_layout(main_thread);
+            });
+        });
+    }
+    HANDED_OFF_FRAME_ARENA.with(|slot| slot.set(previously_handed_off));
+}
+
+/// Where the layout frame of the document stands, seen from the document thread. Asking does not
+/// wait for a frame in flight.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_frame_state(arena: *mut c_void) -> FfiLayoutFrameState {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    unsafe { frame_state(arena) }
+}
+
+/// Waits for the document's layout frame if it is in flight. Once this returns, the document is
+/// idle or the thread runs inside its frame.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_join_frame_in_flight(arena: *mut c_void) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    if unsafe { frame_state(arena) } == FfiLayoutFrameState::InFlight {
+        crate::stage_thread::join_overlapping_stage();
+    }
 }
 
 /// # Safety
@@ -1115,16 +1210,6 @@ pub unsafe extern "C" fn layout_arena_begin_update_layout(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
     unsafe { LayoutNodeArena::from_handle(arena) }.begin_update_layout();
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_update_layout_is_running(arena: *mut c_void) -> bool {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.update_layout_is_running()
 }
 
 /// # Safety

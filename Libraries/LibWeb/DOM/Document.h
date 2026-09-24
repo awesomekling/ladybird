@@ -525,11 +525,15 @@ public:
     [[nodiscard]] u64 full_layout_count() const;
     [[nodiscard]] bool layout_is_up_to_date() const;
     // The marks the DOM side has made on this document's render state but not written there yet.
-    [[nodiscard]] InvalidationJournal& invalidation_journal() { return *m_invalidation_journal; }
+    // Marks made beside the layout frame in flight are held apart until the frame is over.
+    [[nodiscard]] InvalidationJournal& invalidation_journal();
     void drain_invalidation_journal() const;
     // A DOM tree mutation writes the style mirror and the arena as it goes, so it joins the frame
     // in flight before it starts.
     void join_frame_for_dom_tree_mutation() const;
+    // Waits for this document's layout frame if it runs beside the document thread. A read of what
+    // the frame writes, or a write to what it reads, joins it first.
+    void join_frame_in_flight() const;
     // What the render side has told this document and the document has not acted on yet.
     [[nodiscard]] CommitMessages& commit_messages() { return *m_commit_messages; }
     void apply_commit_messages();
@@ -545,6 +549,8 @@ public:
         m_effects_needing_animated_style_update.clear();
         m_effects_needing_animated_style_update_after_current_update.clear();
     }
+    // Whether the document thread runs as part of this document's layout frame, in one of its joins
+    // or running the frame itself. Beside a frame in flight, it does not.
     [[nodiscard]] bool is_running_update_layout() const;
 
     void invalidate_layout_tree(InvalidateLayoutTreeReason);
@@ -1706,6 +1712,8 @@ private:
     OwnPtr<Painting::DocumentPaintState> m_paint_state;
     NonnullRefPtr<Painting::ChromeWidgetRegistry> m_chrome_widget_registry;
     NonnullOwnPtr<InvalidationJournal> m_invalidation_journal;
+    NonnullOwnPtr<InvalidationJournal> m_held_invalidation_journal;
+    void release_held_invalidation_marks();
     NonnullOwnPtr<CommitMessages> m_commit_messages;
     bool m_may_have_content_visibility_auto_style { false };
 

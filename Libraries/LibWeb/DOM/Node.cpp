@@ -2599,7 +2599,7 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
             }
         }
 
-        // A mark made from inside a layout update is one the journal writes through at once, so it
+        // A mark made from inside a layout frame is one the journal writes through at once, so it
         // saves the entry and goes straight to render state.
         if (document().is_running_update_layout())
             apply_layout_tree_update_mark(reason);

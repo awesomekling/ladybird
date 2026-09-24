@@ -252,6 +252,17 @@ pub(crate) fn is_suspended_in_spin(label: &'static str) -> bool {
     SPINNING.with(|spinning| spinning.borrow().contains(&label))
 }
 
+/// Whether the calling thread runs beside an overlapping stage that has not finished: it spins its
+/// event loop for the stage, and is not running work the stage joined it for.
+pub(crate) fn runs_beside_an_overlapping_stage() -> bool {
+    let in_flight = IN_FLIGHT.with(Cell::get);
+    if in_flight.is_null() || RUNNING_JOIN_WORK.with(Cell::get) != 0 {
+        return false;
+    }
+    // SAFETY: As in `join_overlapping_stage`.
+    !unsafe { &*in_flight }.done.get()
+}
+
 /// Called where main-thread code reaches render-owned state: if an overlapping stage is running,
 /// waits for it to finish. Work a stage joined the main thread for belongs to the stage and does
 /// not wait. Logs each call site that forced a join once.
