@@ -198,7 +198,6 @@ define_counters! {
     EngineComputedRecordBailDriveTreeCounting => "engineComputedRecordBailDriveTreeCounting",
     EngineComputedRecordBailValue => "engineComputedRecordBailValue",
     EngineComputedRecordBailAssemble => "engineComputedRecordBailAssemble",
-    EngineComputedRecordBailRecordTable => "engineComputedRecordBailRecordTable",
     PrefixDeadDeltaBailMatched => "prefixDeadDeltaBailMatched",
     PrefixDeadDeltaBailOwnAdditions => "prefixDeadDeltaBailOwnAdditions",
     PrefixDeadDeltaBailEndpoints => "prefixDeadDeltaBailEndpoints",
@@ -351,7 +350,7 @@ define_counters! {
 }
 
 const RECORD_BAIL_FIRST: usize = Counter::EngineComputedRecordDeltas as usize;
-const RECORD_BAIL_LAST: usize = Counter::EngineComputedRecordBailRecordTable as usize;
+const RECORD_BAIL_LAST: usize = Counter::EngineComputedRecordBailAssemble as usize;
 const RECORD_BAIL_COUNT: usize = RECORD_BAIL_LAST - RECORD_BAIL_FIRST + 1;
 
 /// The counter set for one document.

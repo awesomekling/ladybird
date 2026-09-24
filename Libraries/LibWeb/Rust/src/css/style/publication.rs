@@ -567,6 +567,22 @@ impl RetainedState {
             {
                 scratch.recompute_in_full = true;
             }
+            // A record whose environment alone moves under a running CSS animation keeps its
+            // plan, decided from the record's table. A record holding none is driven in full,
+            // which decides the plan from the driven table instead.
+            let standing_animation_plan = (environment.is_some()
+                && animations_bind_the_record
+                && self.css_defined_animations.node_runs_a_css_animation(node))
+            .then(|| {
+                self.settled_animation_plan_from_record(
+                    node,
+                    old_style_record,
+                    self.animation_name_declaration_scope(node, state),
+                )
+            });
+            if let Some(None) = standing_animation_plan {
+                scratch.recompute_in_full = true;
+            }
             // A flipped rule that lost the cascade may leave this row's stamp old, but an exact
             // retained-answer publication has already established the same semantic winners.
             // A document environment action keeps those winners and drives their values again
@@ -603,19 +619,7 @@ impl RetainedState {
                     if let Some(environment) = environment
                         && animations_bind_the_record
                     {
-                        let css_animation_plan = if self.css_defined_animations.node_runs_a_css_animation(node) {
-                            let Some(plan) = self.settled_animation_plan_from_record(
-                                node,
-                                old_style_record,
-                                self.animation_name_declaration_scope(node, state),
-                            ) else {
-                                counters.bump(Counter::EngineComputedRecordBailRecordTable);
-                                return Err(Unanswered::Refused);
-                            };
-                            Some(plan)
-                        } else {
-                            None
-                        };
+                        let css_animation_plan = standing_animation_plan.flatten();
                         // With no sampled overlay, the old record is already the animation's base. It
                         // moves to the new environment like any record, and the host applies the plan
                         // and samples the element's effects over it after installing it.

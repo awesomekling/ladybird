@@ -748,14 +748,17 @@ impl RetainedState {
             // The host records what the pseudo-element's container units read as the element's own.
             self.note_container_unit_effects_for_host(node, new_style_record, container_unit_mask);
             if self.pseudo_owes_css_animation_plan(node, kind, state) {
-                let view = self
+                // The record is one the engine assembled, which always holds its table.
+                let table = self
                     .computed_group_sets
                     .style_record_view(new_style_record.raw())
-                    .or_refused()?;
-                let table = unsafe { view.longhand_table.as_ref() }.or_refused()?;
-                let declaration_scope = state.and_then(|state| self.animation_name_declaration_scope(node, state));
-                let plan = self.settled_animation_plan(node, kind, table, declaration_scope);
-                self.nodes_owing_animation_definitions.insert((node, kind), plan);
+                    .and_then(|view| unsafe { view.longhand_table.as_ref() });
+                debug_assert!(table.is_some(), "an engine-assembled record without a longhand table");
+                if let Some(table) = table {
+                    let declaration_scope = state.and_then(|state| self.animation_name_declaration_scope(node, state));
+                    let plan = self.settled_animation_plan(node, kind, table, declaration_scope);
+                    self.nodes_owing_animation_definitions.insert((node, kind), plan);
+                }
             }
             self.note_engine_computed_pseudo_record(
                 node,
