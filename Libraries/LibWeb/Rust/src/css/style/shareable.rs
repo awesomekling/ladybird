@@ -141,7 +141,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         prepared_batch_matching_traversal,
         published_match_answers,
         host_entry_causes,
-        inheritance_parents_are_installed,
         transaction_fact_view,
         facts,
         programs,
@@ -270,7 +269,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(prepared_batch_matching_traversal);
     assert_member_is_sync(published_match_answers);
     assert_member_is_sync(host_entry_causes);
-    assert_member_is_sync(inheritance_parents_are_installed);
     assert_member_is_sync(transaction_fact_view);
     assert_member_is_sync(facts);
     assert_member_is_sync(programs);

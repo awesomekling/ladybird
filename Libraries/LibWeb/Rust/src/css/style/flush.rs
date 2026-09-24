@@ -2453,6 +2453,21 @@ impl StyleEngineState {
                                         .contains_key(&(parent, u8::MAX))
                                     || self.retained.nodes_owing_an_animation_sample.contains(&parent))
                 });
+                // An inheritance parent without a record is one C++ does not style, unless the
+                // host settles it in this wave or a later one: then the wave stops before the row,
+                // and the next one drives it over the installed parent.
+                let awaits_installed_parent = self.tree.inheritance_parent(node).is_some_and(|parent| {
+                    self.retained
+                        .computed_group_sets
+                        .assigned_style_record(parent)
+                        .is_none()
+                        && std::iter::successors(self.tree.flat_tree_parent(node), |&ancestor| {
+                            self.tree.flat_tree_parent(ancestor)
+                        })
+                        .any(|ancestor| {
+                            row_of(&pass.scratch.derived_child_inputs, ancestor).is_some_and(|row| row.awaits_host)
+                        })
+                });
                 // A registration-only transition does not change the parent's composition.
                 // A child can attempt its record now, but an explicit inherit may still need
                 // the parent's installed record. Retry that declined drive at its apply point.
@@ -2490,7 +2505,7 @@ impl StyleEngineState {
                     counters.bump(Counter::EngineComputedRecordGateReaction);
                     decline_cause = "GateReaction";
                     false
-                } else if awaits_sampled_parent {
+                } else if awaits_sampled_parent || awaits_installed_parent {
                     // The parent's sample and transition step run when the host installs it.
                     // The wave stops here, and the next one drives this row over them.
                     pass.rows_after_installed_ancestors.insert(node);
@@ -2542,10 +2557,7 @@ impl StyleEngineState {
                     }
                 };
                 let bail_marks = seal::is_reporting().then(|| counters.record_bail_marks());
-                let retry_bails_before = (
-                    counters.get(Counter::EngineComputedRecordBailContainerVerdict),
-                    counters.get(Counter::EngineComputedRecordBailRecordParent),
-                );
+                let container_verdict_bails_before = counters.get(Counter::EngineComputedRecordBailContainerVerdict);
                 let engine_record_answer = engine_computed_gate_passes.then(|| {
                     // Unchanged winners stand for an unchanged record only when the reaction
                     // is rules flipping for the node, every one of them known and declaring
@@ -2649,9 +2661,7 @@ impl StyleEngineState {
                 // ancestor check. Drive this row again once its preceding ancestors have
                 // installed their records and container inputs.
                 if declined_by_the_drive
-                    && (counters.get(Counter::EngineComputedRecordBailContainerVerdict) != retry_bails_before.0
-                        || (counters.get(Counter::EngineComputedRecordBailRecordParent) != retry_bails_before.1
-                            && self.retained.tree.inheritance_parent(node).is_some()))
+                    && counters.get(Counter::EngineComputedRecordBailContainerVerdict) != container_verdict_bails_before
                 {
                     retry_after_ancestor = true;
                 }

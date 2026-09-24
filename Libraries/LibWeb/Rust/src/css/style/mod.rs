@@ -1078,9 +1078,6 @@ pub struct RetainedState {
     /// Why the engine sent each element to the host this update, for the seal's census. Written
     /// only while the seal reports, and read when the host enters the engine for that element.
     host_entry_causes: HashMap<StyleNodeID, (&'static str, bool)>,
-    /// Set while the host retries a row after installing every row before it. An inheritance
-    /// parent without a record then has no style at all.
-    inheritance_parents_are_installed: bool,
     transaction_fact_view: Option<TransactionFactView>,
     facts: ElementFactStore,
     programs: SelectorPrograms,

@@ -1862,7 +1862,6 @@ impl StyleEngineState {
                 prepared_batch_matching_traversal: None,
                 published_match_answers: PublishedMatchAnswers::default(),
                 host_entry_causes: HashMap::default(),
-                inheritance_parents_are_installed: false,
                 transaction_fact_view: None,
                 facts: ElementFactStore::new(),
                 programs,

@@ -369,20 +369,17 @@ impl RetainedState {
         let Some(old_table) = (unsafe { view.longhand_table.as_ref() }) else {
             return Ok(PartialDrive::DriverInputMoved);
         };
-        let snapshot = match self.record_inheritance_parent(node) {
+        let snapshot = match self
+            .record_inheritance_parent(node)
+            .and_then(|parent| self.computed_group_sets.assigned_style_record(parent))
+        {
             None => None,
-            Some(parent) => match self.computed_group_sets.assigned_style_record(parent) {
-                Some(record) => {
-                    let view = self.computed_group_sets.style_record_view(record.raw()).or_refused()?;
-                    Some(parent_snapshot_for_style_record(self, record.raw(), unsafe {
-                        view.animated_overlay.as_ref()
-                    }))
-                }
-                None => {
-                    counters.bump(Counter::EngineComputedRecordBailRecordParent);
-                    return Err(Unanswered::Refused);
-                }
-            },
+            Some(record) => {
+                let view = self.computed_group_sets.style_record_view(record.raw()).or_refused()?;
+                Some(parent_snapshot_for_style_record(self, record.raw(), unsafe {
+                    view.animated_overlay.as_ref()
+                }))
+            }
         };
         let font = unsafe {
             payloads[STYLE_GROUP_INDEX_FONT]
@@ -643,15 +640,17 @@ impl RetainedState {
                 } else {
                     self.computed_group_sets.sampled_composition_identity(parent)
                 };
-                let Some(parent_record) = sampled_parent
+                // Every subject names a parent with a record: an element's inheritance parent
+                // without one is none, and a pseudo-element or backing element drives only over
+                // a settled parent.
+                let parent_record = sampled_parent
                     .and_then(computed::FinalStyleRecordID::from_raw)
-                    .or_else(|| self.computed_group_sets.assigned_style_record(parent))
+                    .or_else(|| self.computed_group_sets.assigned_style_record(parent));
+                debug_assert!(parent_record.is_some(), "a drive subject's parent without a record");
+                let Some(parent_view) = parent_record
+                    .and_then(|parent_record| self.computed_group_sets.style_record_view(parent_record.raw()))
                 else {
-                    counters.bump(Counter::EngineComputedRecordBailRecordParent);
-                    return Err(Unanswered::Refused);
-                };
-                let Some(parent_view) = self.computed_group_sets.style_record_view(parent_record.raw()) else {
-                    counters.bump(Counter::EngineComputedRecordBailRecordParent);
+                    counters.bump(Counter::EngineComputedRecordBailRecord);
                     return Err(Unanswered::Refused);
                 };
                 Some(parent_view)

@@ -1173,18 +1173,18 @@ impl RetainedState {
         {
             root_inputs.apply_to(&mut inputs);
         }
-        let parent = self.tree.flat_tree_parent(node).or_refused()?;
-        let (Some(parent_record), Some(parent_environment)) = (
-            self.computed_group_sets.assigned_style_record(parent),
-            self.computed_group_sets.custom_property_environment_identity(parent),
-        ) else {
-            counters.bump(Counter::EngineComputedRecordBailRecordParent);
-            return Err(Unanswered::Refused);
-        };
+        // A backing element without a styled parent inherits from the initial values, as an
+        // element does.
+        let parent = self
+            .tree
+            .flat_tree_parent(node)
+            .filter(|&parent| self.computed_group_sets.assigned_style_record(parent).is_some());
+        let parent_record = parent.and_then(|parent| self.computed_group_sets.assigned_style_record(parent));
+        let parent_environment = parent.map_or(0, |parent| self.held_custom_property_environment(parent));
         let has_registered_declarations =
             self.declarations_name_a_registered_custom_property(&custom_declarations, &inputs);
-        let provisional_registered = has_registered_declarations
-            .then(|| self.provisional_registered_value_context(Some(parent_record), &inputs));
+        let provisional_registered =
+            has_registered_declarations.then(|| self.provisional_registered_value_context(parent_record, &inputs));
         let mut environment = self
             .engine_custom_property_environment_over(
                 host,
@@ -1216,7 +1216,7 @@ impl RetainedState {
         let target = computed::ComputedStyleTarget::new(node, u8::MAX);
         let subject = DriveSubject {
             target,
-            parent: Some(parent),
+            parent,
             facts,
             highlight_parent: None,
         };
@@ -1293,7 +1293,7 @@ impl RetainedState {
         let (record, _) = self.assemble_and_publish_engine_record(
             target,
             true,
-            Some(parent_record),
+            parent_record,
             table,
             &length,
             &font,
