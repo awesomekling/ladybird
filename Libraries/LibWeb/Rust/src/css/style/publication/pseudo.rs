@@ -408,18 +408,16 @@ impl RetainedState {
                     None => {
                         let mut substituted = false;
                         let inheritance_environment = self.held_inheritance_environment(node, Some(kind));
-                        let store = std::sync::Arc::new(
-                            self.cascaded_store_for_state(
-                                node,
-                                state,
-                                Some(kind),
-                                environment,
-                                inheritance_environment,
-                                &mut substituted,
-                                counters,
-                            )
-                            .or_refused()?,
-                        );
+                        let store = std::sync::Arc::new(self.cascaded_store_for_state(
+                            node,
+                            state,
+                            Some(kind),
+                            environment,
+                            inheritance_environment,
+                            &inputs,
+                            &mut substituted,
+                            counters,
+                        ));
                         if substituted {
                             scratch.substituted_states.insert((state, environment));
                         }
@@ -550,17 +548,16 @@ impl RetainedState {
                         // an empty store, which declares none.
                         debug_assert!(state.is_some(), "a pseudo-element's registered declarations have rules");
                         let final_store = match state {
-                            Some(state) => self
-                                .cascaded_store_for_state(
-                                    node,
-                                    state,
-                                    Some(kind),
-                                    environment,
-                                    inheritance_environment,
-                                    &mut substituted,
-                                    counters,
-                                )
-                                .or_refused()?,
+                            Some(state) => self.cascaded_store_for_state(
+                                node,
+                                state,
+                                Some(kind),
+                                environment,
+                                inheritance_environment,
+                                &inputs,
+                                &mut substituted,
+                                counters,
+                            ),
                             None => WinnerStore::default(),
                         };
                         scratch.store_capacity_bytes += final_store.capacity_bytes();
@@ -612,7 +609,6 @@ impl RetainedState {
                         0,
                         0,
                         cascade_state,
-                        &mut scratch.computability,
                         counters,
                     );
                     if let Some(key) = key {
@@ -1082,17 +1078,16 @@ impl RetainedState {
             .count_refusal(counters, Counter::EngineComputedRecordBailCustomProperties)?;
         let mut substituted = false;
         let inheritance_environment = Some(parent_environment);
-        let mut store = self
-            .cascaded_store_for_state(
-                node,
-                state,
-                None,
-                environment,
-                inheritance_environment,
-                &mut substituted,
-                counters,
-            )
-            .or_refused()?;
+        let mut store = self.cascaded_store_for_state(
+            node,
+            state,
+            None,
+            environment,
+            inheritance_environment,
+            &inputs,
+            &mut substituted,
+            counters,
+        );
         let pseudo_styles = self.pseudo_style_mask_or_rematch(node, counters);
         let target = computed::ComputedStyleTarget::new(node, u8::MAX);
         let subject = DriveSubject {
@@ -1124,17 +1119,16 @@ impl RetainedState {
                 counters,
             )?;
             substituted = false;
-            store = self
-                .cascaded_store_for_state(
-                    node,
-                    state,
-                    None,
-                    environment,
-                    inheritance_environment,
-                    &mut substituted,
-                    counters,
-                )
-                .or_refused()?;
+            store = self.cascaded_store_for_state(
+                node,
+                state,
+                None,
+                environment,
+                inheritance_environment,
+                &inputs,
+                &mut substituted,
+                counters,
+            );
             self.engine_full_drive(
                 subject,
                 None,
@@ -1182,7 +1176,6 @@ impl RetainedState {
             pseudo_styles,
             0,
             None,
-            &mut scratch.computability,
             counters,
         );
         if let Some(old) = old_composition {
