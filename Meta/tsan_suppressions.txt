@@ -3,3 +3,14 @@
 # The Rust standard library is not instrumented, so TSan sees the memcpy calls that move a message
 # into and out of a std::sync::mpsc channel but not the atomics that order them.
 race:std::sync::mpmc
+
+# The stylesheet cache is behind a std::sync::Mutex, which TSan cannot see for the same reason, so
+# comparing a key another thread inserted under the lock looks unsynchronized.
+race:libweb_rust::css::parser::stylesheet_cache
+
+# FFmpeg's and dav1d's frame threads hand buffers to each other through synchronization inside
+# libavcodec, libavutil and libdav1d, which are not instrumented, so touching a buffer another frame
+# thread wrote looks like a race.
+race:libavcodec.so
+race:libavutil.so
+race:libdav1d.so
