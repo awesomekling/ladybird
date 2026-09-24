@@ -79,6 +79,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         font_face_snapshot,
         font_cascade_memo,
         root_font_request,
+        monospace_font_family,
         random_base_values,
         random_base_requests,
         layout_style_snapshots,
@@ -298,6 +299,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(custom_property_environments);
     assert_member_is_sync(font_resolution);
     assert_member_is_sync(root_font_request);
+    assert_member_is_sync(monospace_font_family);
     assert_member_is_sync(computed_group_sets);
     #[cfg(test)]
     assert_member_is_sync(diagnostic_plan_capture);

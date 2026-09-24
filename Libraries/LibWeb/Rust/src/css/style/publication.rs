@@ -147,23 +147,6 @@ impl RetainedState {
         Some(parent)
     }
 
-    /// The retained style records, root first, whose raw cascaded font sizes participate in the
-    /// monospace font-size recascade for one element or pseudo-element.
-    pub(crate) fn retained_inheritance_ancestor_style_records(&self, node: StyleNodeID, pseudo_kind: u8) -> Vec<u64> {
-        let mut records = Vec::new();
-        let mut ancestor = self.retained_inheritance_parent_node(node, pseudo_kind);
-        while let Some(node) = ancestor {
-            records.push(
-                self.computed_group_sets
-                    .assigned_style_record(node)
-                    .map_or(0, computed::FinalStyleRecordID::raw),
-            );
-            ancestor = self.tree.inheritance_parent(node);
-        }
-        records.reverse();
-        records
-    }
-
     pub(super) fn retained_store_supports_property(target: computed::ComputedStyleTarget, property: u16) -> bool {
         if property > crate::css::property_metadata::LAST_LONGHAND_PROPERTY_ID
             || (crate::css::property_metadata::property_id::ANIMATION_COMPOSITION
@@ -2154,7 +2137,6 @@ impl RetainedState {
         }
         let subject = DriveSubject {
             target,
-            recascade_node: Some(node),
             parent,
             // A scoped demand computes the base style of a cold animation target.
             // The host samples its animation over that base after installation.
@@ -2411,46 +2393,6 @@ impl RetainedState {
             })
     }
 
-    /// The font size the monospace recascade gives a node, walking the cascaded font-size of every
-    /// ancestor from a 13px default the way `recascade_font_size_if_needed` does. `None` when the
-    /// walk needs a resolution context only C++ can supply, or when its answer would depend on the
-    /// viewport, which C++ records on the element beside the size.
-    /// The font size the monospace recascade gives a node, and whether reaching it read the
-    /// viewport. A `calc()` the walk skips is skipped as C++ skips it.
-    pub(super) fn monospace_recascaded_font_size(&self, node: StyleNodeID) -> Option<(i32, bool)> {
-        use crate::css::style_compute::{FontSizeRecascadeStatus, recascade_font_size_batch};
-
-        let inputs = self.document_style_computation_inputs?;
-        let default_size = crate::css::css_pixels::CssPixels::from_integer(13).raw_value();
-        let records =
-            self.retained_inheritance_ancestor_style_records(node, crate::css::cascaded_properties::NO_PSEUDO_ELEMENT);
-        let batch = recascade_font_size_batch(
-            records.len(),
-            |index| {
-                let record = records[index];
-                if record == 0 {
-                    return std::ptr::null();
-                }
-                self.style_record_view(record)
-                    .and_then(|view| unsafe { view.longhand_table.as_ref() })
-                    .map_or(std::ptr::null(), ComputedLonghandTable::raw_cascaded_font_size)
-            },
-            0,
-            default_size,
-            false,
-            default_size,
-            crate::css::style_compute::FontSizeRecascadeDocumentInputs {
-                root_font_size: inputs.root_font_size,
-                root_font_metrics_depend_on_viewport_metrics: inputs.root_font_metrics_depend_on_viewport_metrics,
-                viewport_width: inputs.viewport_width,
-                viewport_height: inputs.viewport_height,
-            },
-            std::ptr::null(),
-        );
-        (batch.status == FontSizeRecascadeStatus::Complete)
-            .then_some((batch.current_size_raw, batch.depends_on_viewport_metrics))
-    }
-
     /// Whether any of a state's longhand winners is written with `attr()`.
     pub(super) fn state_reads_attributes(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
         self.state_substitution_values(node, state).any(|value| {
@@ -2523,8 +2465,14 @@ impl RetainedState {
         if !self.font_family_winner_is_monospace(state) {
             return 0;
         }
-        self.monospace_recascaded_font_size(node)
-            .map_or(i32::MIN, |(size, _)| size)
+        let Some(inputs) = self.document_style_computation_inputs else {
+            return i32::MIN;
+        };
+        match self.monospace_recascaded_font_size(computed::ComputedStyleTarget::new(node, u8::MAX), &inputs) {
+            drive::MonospaceRecascade::Size(size, _) => size,
+            // The drive this key is for waits for the same font, and takes the key again after.
+            drive::MonospaceRecascade::AwaitsFont(_) => i32::MIN,
+        }
     }
 
     /// A pseudo-element's transition declarations compute into its record. A named animation
@@ -3325,7 +3273,6 @@ impl RetainedState {
     fn element_drive_subject(&self, node: StyleNodeID) -> DriveSubject {
         DriveSubject {
             target: computed::ComputedStyleTarget::new(node, u8::MAX),
-            recascade_node: Some(node),
             parent: self.record_inheritance_parent(node),
             facts: self.computed_group_sets.adjustment_facts(node),
             highlight_parent: None,
@@ -5226,7 +5173,6 @@ impl StyleEngineState {
         let target = computed::ComputedStyleTarget::new(subject, u8::MAX);
         let drive_subject = DriveSubject {
             target,
-            recascade_node: None,
             parent: None,
             facts: facts & !bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT,
             highlight_parent: None,
@@ -6056,10 +6002,6 @@ pub(super) struct DriveSubject {
     /// What is being driven, element or pseudo-element. A drive that suspends to wait for a font
     /// names it, so the suspended drive can only be resumed by the one it belongs to.
     target: computed::ComputedStyleTarget,
-    /// The element the drive is for, when the record is its own. A pseudo-element's row leaves it
-    /// unset: the monospace recascade it would need is the originating element's chain, which this
-    /// row does not answer for.
-    recascade_node: Option<StyleNodeID>,
     /// The flat-tree parent the element inherits from; the document element has none and
     /// inherits from the initial values.
     parent: Option<StyleNodeID>,

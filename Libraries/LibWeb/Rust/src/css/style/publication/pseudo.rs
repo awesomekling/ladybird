@@ -657,7 +657,6 @@ impl RetainedState {
                 None => {
                     let subject = DriveSubject {
                         target: crate::css::style::computed::ComputedStyleTarget::new(node, kind),
-                        recascade_node: None,
                         parent: Some(node),
                         facts,
                         highlight_parent: highlight_parent_record,
@@ -1247,7 +1246,6 @@ impl RetainedState {
         let target = computed::ComputedStyleTarget::new(node, u8::MAX);
         let subject = DriveSubject {
             target,
-            recascade_node: Some(node),
             parent: Some(parent),
             facts,
             highlight_parent: None,
