@@ -159,6 +159,39 @@ void InvalidationJournal::note_paint_cache_invalidation(NodeIdentity identity, P
     drain_if_the_render_side_is_reading();
 }
 
+void InvalidationJournal::note_editability_stamps(NodeIdentity identity)
+{
+    entry_for(identity).needs_editability_stamps_refresh = true;
+    drain_if_the_render_side_is_reading();
+}
+
+void InvalidationJournal::note_is_in_focused_text_control(NodeIdentity identity)
+{
+    entry_for(identity).needs_focused_text_control_publish = true;
+    drain_if_the_render_side_is_reading();
+}
+
+// Editing-host status and the empty-text fragment behavior of text nodes are stamped into layout
+// NodeData at layout node construction; contenteditable and designMode changes reach here without
+// a layout tree rebuild, so the stamps must be refreshed. A flipped stamp changes geometry (an
+// editing host gains a minimum block size, an empty editable text node gains a zero-width
+// fragment), so the affected node also needs a relayout.
+static void refresh_editability_stamps(Node& node)
+{
+    auto* layout_node = node.unsafe_layout_node();
+    if (!layout_node)
+        return;
+    auto is_editing_host = node.is_editing_host();
+    if (layout_node->is_editing_host() != is_editing_host) {
+        layout_node->set_is_editing_host(is_editing_host);
+        node.set_needs_layout_update(SetNeedsLayoutReason::EditableStateChange);
+    }
+    if (auto* layout_text_node = as_if<Layout::TextNode>(*layout_node)) {
+        if (layout_text_node->update_produces_line_box_fragment_when_empty_flag())
+            node.set_needs_layout_update(SetNeedsLayoutReason::EditableStateChange);
+    }
+}
+
 void InvalidationJournal::note_scroll_offset(NodeIdentity identity, bool offset_changed)
 {
     entry_for(identity).needs_scroll_offset_publish = true;
@@ -247,6 +280,10 @@ void InvalidationJournal::drain()
                 // and the mutation that took it out dirtied the parent it left.
                 node->apply_layout_tree_update_mark(entry.layout_tree_update_reason);
             }
+            if (entry.needs_editability_stamps_refresh && node)
+                refresh_editability_stamps(*node);
+            if (entry.needs_focused_text_control_publish && node)
+                Layout::publish_is_in_focused_text_control(*node);
             if (node && (entry.needs_scroll_offset_publish || !entry.pseudo_element_scroll_offsets.is_empty()))
                 publish_scroll_offsets(*node, entry);
 

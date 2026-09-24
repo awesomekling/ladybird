@@ -2363,25 +2363,11 @@ void Node::recompute_editable_subtree_flags_and_repaint()
         // the mirror holds it for the build to read. It moves here and nowhere else.
         if (auto* element = as_if<Element>(node))
             CSS::record_element_construction_facts(*element);
-        // Editing-host status and the empty-text fragment behavior of text nodes are
-        // stamped into layout NodeData at layout node construction; contenteditable and
-        // designMode changes reach here without a layout tree rebuild, so the stamps must
-        // be refreshed. A node's stamps can flip even when its own editable-subtree flag
-        // did not, hence unconditionally for every node. A flipped stamp changes geometry
-        // (an editing host gains a minimum block size, an empty editable text node gains
-        // a zero-width fragment), so the affected node also needs a relayout.
+        // The editability stamps of the rows built for the node are refreshed at the next drain.
+        // A node's stamps can flip even when its own editable-subtree flag did not, hence
+        // unconditionally for every node.
         Layout::publish_dom_paint_facts(node);
-        if (auto* layout_node = node.unsafe_layout_node()) {
-            auto is_editing_host = node.is_editing_host();
-            if (layout_node->is_editing_host() != is_editing_host) {
-                layout_node->set_is_editing_host(is_editing_host);
-                node.set_needs_layout_update(SetNeedsLayoutReason::EditableStateChange);
-            }
-            if (auto* layout_text_node = as_if<Layout::TextNode>(*layout_node)) {
-                if (layout_text_node->update_produces_line_box_fragment_when_empty_flag())
-                    node.set_needs_layout_update(SetNeedsLayoutReason::EditableStateChange);
-            }
-        }
+        document().invalidation_journal().note_editability_stamps(NodeIdentity::of(node));
         return TraversalDecision::Continue;
     });
     if (reached_an_image_map_area)
@@ -2757,7 +2743,7 @@ void Node::inserted()
     // is the one other inherited state a row is built with. No node holds it unless a text control
     // is focused at all.
     if (is<HTML::FormAssociatedTextControlElement>(document().focused_area().ptr()))
-        Layout::publish_is_in_focused_text_control(*this);
+        document().invalidation_journal().note_is_in_focused_text_control(NodeIdentity::of(*this));
 }
 
 void Node::removed_from(IsSubtreeRoot, Node* old_parent, Node&)
