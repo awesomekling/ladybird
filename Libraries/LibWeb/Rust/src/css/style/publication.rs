@@ -1080,7 +1080,6 @@ impl RetainedState {
         // A full drive beneath a standing composition excludes keyframes on inherited properties.
         // For a record, only the rules its own names run matter: its descendants hold records of
         // their own, and a child derived in the same batch waits for the composition.
-        let is_leaf = self.tree.flat_tree_children(node).next().is_none();
         let css_keyframes_are_engine_computable =
             self.animation_keyframes().every_keyframes_rule_is_engine_computable()
                 || self.warm_record_names_engine_computable_animations(node, state);
@@ -1131,9 +1130,11 @@ impl RetainedState {
                 .iter()
                 .any(|&property| property_starts_animation(property));
         // An element whose effects hold no sampled overlay, run no CSS animation, and whose record
-        // declares no transitions has its base as its record. A leaf installs a newly driven base,
-        // and the host samples those effects over it, as for a CSS animation above. A name the new
-        // base declares starts an animation, so its plan must be one the engine can decide.
+        // declares no transitions has its base as its record. It installs a newly driven base, and
+        // the host samples those effects over it, as for a CSS animation above; a child derived in
+        // the same batch waits for that composition, and substitutes under the custom properties
+        // the sample publishes. A name the new base declares starts an animation, so its plan must
+        // be one the engine can decide.
         let names_an_animation = !self.state_has_no_animation_name(state);
         let base_without_a_composition = animations_bind_the_record
             && !self.computed_group_sets.node_has_animation_overlay(node)
@@ -1144,8 +1145,7 @@ impl RetainedState {
                 .is_empty()
             && (!names_an_animation || css_keyframes_are_engine_computable)
             && self.effects_sample_over_a_new_base(node, TransitionEffects::Refused)
-            && !self.record_declares_transitions(old_style_record)
-            && is_leaf;
+            && !self.record_declares_transitions(old_style_record);
         // A record that declares transitions can take a newly driven base beneath its composition
         // in the same way; a child derived in the same batch waits for that composition. The
         // transition decision itself is made below against the record the row moves away from.
