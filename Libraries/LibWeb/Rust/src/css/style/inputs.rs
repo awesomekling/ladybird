@@ -297,6 +297,17 @@ impl RetainedState {
         );
     }
 
+    /// The kinds of the element's synthetic pseudo-elements that hold a custom-property
+    /// environment, one bit per kind.
+    pub(crate) fn pseudo_elements_with_custom_property_data(&self, node: StyleNodeID) -> u64 {
+        if self.pseudo_element_custom_property_data.is_empty() {
+            return 0;
+        }
+        (0..u64::BITS as u8)
+            .filter(|&pseudo| self.pseudo_element_custom_property_data.contains_key(&(node, pseudo)))
+            .fold(0, |kinds, pseudo| kinds | (1 << pseudo))
+    }
+
     /// The environment one of an element's synthetic pseudo-elements holds, as
     /// `element_custom_property_data` answers for the element.
     pub(crate) fn pseudo_element_custom_property_data(
