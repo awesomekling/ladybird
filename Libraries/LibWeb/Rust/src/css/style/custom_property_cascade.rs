@@ -17,7 +17,7 @@ use std::ffi::c_void;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use super::publication::{Drive, OrRefused, Suspension, Unanswered};
+use super::publication::{Drive, Suspension, Unanswered};
 use super::*;
 use crate::css::cascaded_properties::{
     CallbackFreeParseOutcome, FfiCascadeResolutionContext, FfiCustomPropertyDriveInput,
@@ -1210,7 +1210,7 @@ impl RetainedState {
         if !self.any_custom_property_is_declared() {
             return Ok(parent_environment);
         }
-        let cascaded = self.cascaded_custom_declarations_of(node, pseudo).or_refused()?;
+        let cascaded = Self::driven_custom_declarations(self.cascaded_custom_declarations_of(node, pseudo));
         self.engine_custom_property_environment_over(
             node,
             pseudo,
@@ -1220,6 +1220,17 @@ impl RetainedState {
             registered,
             counters,
         )
+    }
+
+    /// The custom declarations a drive resolves an environment from. A node the engine drives
+    /// has the match answer its winners came from, and a published block carries a written value
+    /// for each custom declaration, so the cascade always answers; one that does not declares
+    /// nothing, and the node inherits its parent's environment.
+    pub(super) fn driven_custom_declarations(
+        cascaded: Option<Vec<(CustomDeclaration, RetainedStyleValueData)>>,
+    ) -> Vec<(CustomDeclaration, RetainedStyleValueData)> {
+        debug_assert!(cascaded.is_some(), "a driven node's custom declarations cascade");
+        cascaded.unwrap_or_default()
     }
 
     /// What `engine_custom_property_environment_of` says of custom declarations cascaded for the
