@@ -460,8 +460,9 @@ void InvalidationJournal::publish_scroll_offsets(Node& node, Entry const& entry)
     }
 }
 
-// A mark made from inside a layout update is one the render side is about to read, so it goes
-// through at once. Outside one, nothing reads what these marks change before the next drain.
+// A mark made from inside a layout frame is one the frame is about to read, so it goes through at
+// once. Between frames, and beside a frame in flight, nothing reads what these marks change before
+// the next drain, and the next frame starts with one.
 void InvalidationJournal::drain_if_the_render_side_is_reading()
 {
     if (m_document.is_running_update_layout())
@@ -472,6 +473,9 @@ void InvalidationJournal::drain()
 {
     // Publishing a pseudo-element's offset reads it back, and that read drains. The drain already
     // running takes whatever such a read would have.
+    // The drain writes what the frame reads, so a frame in flight is waited for first. Its last join
+    // hands this journal what was marked beside it.
+    m_document.join_frame_in_flight();
     if (is_empty() || m_draining)
         return;
     TemporaryChange draining { m_draining, true };

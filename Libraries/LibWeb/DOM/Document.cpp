@@ -626,6 +626,7 @@ Document::Document(Page& page, GC::Ref<EventTarget> relevant_global_event_target
     , m_relevant_global_event_target(relevant_global_event_target)
     , m_chrome_widget_registry(make_ref_counted<Painting::ChromeWidgetRegistry>())
     , m_invalidation_journal(make<InvalidationJournal>(*this))
+    , m_held_invalidation_journal(make<InvalidationJournal>(*this))
     , m_commit_messages(make<CommitMessages>(*this))
     , m_fonts(CSS::FontFaceSet::create(relevant_settings_object()))
     , m_temporary_document_for_fragment_parsing(temporary_document_for_fragment_parsing == TemporaryDocumentForFragmentParsing::Yes)
@@ -902,7 +903,7 @@ void Document::set_needs_full_layout_tree_update(bool value)
 
 bool Document::is_running_update_layout() const
 {
-    return m_layout_node_arena && Layout::RustFFI::layout_arena_update_layout_is_running(m_layout_node_arena->handle());
+    return m_layout_node_arena && Layout::RustFFI::layout_arena_frame_state(m_layout_node_arena->handle()) == Layout::RustFFI::FfiLayoutFrameState::MainInsideJoin;
 }
 
 u64 Document::partial_layout_count() const
@@ -2262,9 +2263,34 @@ void Document::clear_devtools_layout_inspection_data()
     clear_flexbox_highlighted_node(nullptr);
 }
 
+InvalidationJournal& Document::invalidation_journal()
+{
+    // NB: A drain inside the frame would hand the frame what changed beside it halfway through, so what
+    //     is marked beside the frame waits in a journal of its own for the frame to be over.
+    if (m_layout_node_arena && Layout::RustFFI::layout_arena_frame_state(m_layout_node_arena->handle()) == Layout::RustFFI::FfiLayoutFrameState::InFlight)
+        return *m_held_invalidation_journal;
+    return *m_invalidation_journal;
+}
+
+// The frame calls this in its last join. What was marked beside it is what the next drain writes.
+void Document::release_held_invalidation_marks()
+{
+    if (m_held_invalidation_journal->is_empty())
+        return;
+    m_invalidation_journal->drain();
+    swap(m_invalidation_journal, m_held_invalidation_journal);
+}
+
 void Document::drain_invalidation_journal() const
 {
     m_invalidation_journal->drain();
+}
+
+void Document::join_frame_in_flight() const
+{
+    // A document with no arena has no frame to be in flight.
+    if (m_layout_node_arena)
+        Layout::RustFFI::layout_arena_join_frame_in_flight(m_layout_node_arena->handle());
 }
 
 void Document::join_frame_for_dom_tree_mutation() const
@@ -10109,7 +10135,7 @@ void Document::republish_inheriting_svg_pattern_attribute_facts()
 void Document::note_svg_paint_resources_changed()
 {
     if (m_layout_node_arena)
-        m_invalidation_journal->note_svg_paint_resources_changed();
+        invalidation_journal().note_svg_paint_resources_changed();
 }
 
 bool Document::has_enrolled_svg_paint_resources() const
@@ -10119,7 +10145,7 @@ bool Document::has_enrolled_svg_paint_resources() const
 
 void Document::schedule_full_accumulated_visual_context_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason reason)
 {
-    m_invalidation_journal->note_visual_context_full_rebuild(reason);
+    invalidation_journal().note_visual_context_full_rebuild(reason);
     set_needs_accumulated_visual_contexts_update(true);
 }
 
@@ -10127,7 +10153,7 @@ void Document::schedule_accumulated_visual_context_update(Layout::Node const& la
 {
     if (!Painting::has_committed_box(layout_node))
         return;
-    m_invalidation_journal->note_visual_context_box_dirty(
+    invalidation_journal().note_visual_context_box_dirty(
         Painting::committed_row_slot(layout_node),
         scope == AccumulatedVisualContextUpdateScope::Values
             ? Layout::RustFFI::FfiVisualContextBoxDirtyKind::StyleValueChange

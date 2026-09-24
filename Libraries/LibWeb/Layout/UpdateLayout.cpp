@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/ScopeGuard.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineBridge.h>
 #include <LibWeb/DOM/Document.h>
@@ -90,6 +89,23 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
             auto& document = *static_cast<Document*>(context);
             if (Layout::attach_owed_generated_image(document, slot, style_node, pseudo_element, item, pseudo_element_box))
                 document.m_owed_image_provider_arrived_with_image = true; },
+        .finish_update_layout = [](void* context) {
+            auto& document = *static_cast<Document*>(context);
+            document.style_computer().end_style_record_view_epoch();
+            document.end_style_stabilization_epoch();
+            Layout::RustFFI::layout_arena_end_update_layout(document.layout_node_arena().handle());
+            document.release_held_invalidation_marks();
+
+            // Whatever the pass told the document takes effect before the read that joined for it. That
+            // includes the web font faces it reached while they wait on their load.
+            document.apply_commit_messages();
+
+            if (document.m_needs_scroll_container_resnap) {
+                if (auto navigable = document.navigable(); navigable && navigable->active_document().ptr() == &document)
+                    navigable->re_snap_scroll_containers_after_layout_change();
+            }
+
+            document.page().client().flush_pending_dom_mutations(); },
     };
 }
 
@@ -136,38 +152,25 @@ void Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
         && animation_sampling_scope == ThrottledAnimationSamplingScope::Document)
         flush_throttled_animation_style_update();
 
+    // A read made beside this document's frame in flight waits for it, and then runs a frame of its
+    // own for what changed meanwhile.
+    join_frame_in_flight();
+
     // Every mark the DOM side has made goes through before the pass that reads them starts; marks
     // made from inside the pass write through on their own.
     drain_invalidation_journal();
 
     auto& arena = layout_node_arena();
     Layout::RustFFI::layout_arena_begin_update_layout(arena.handle());
-    ScopeGuard guard = [&] {
-        Layout::RustFFI::layout_arena_end_update_layout(arena.handle());
-
-        // Whatever the pass told the document takes effect before the read that joined for it. That
-        // includes the web font faces it reached while they wait on their load.
-        apply_commit_messages();
-
-        if (m_needs_scroll_container_resnap) {
-            if (auto navigable = this->navigable(); navigable && navigable->active_document().ptr() == this)
-                navigable->re_snap_scroll_containers_after_layout_change();
-        }
-
-        page().client().flush_pending_dom_mutations();
-    };
 
     begin_style_stabilization_epoch();
-    ScopeGuard end_stabilization_epoch = [&] {
-        end_style_stabilization_epoch();
-    };
 
     // Keep shared style records alive across both style and layout, so temporary views
     // during layout tree construction and layout do not need individual record pins.
     style_computer().begin_style_record_view_epoch();
-    ScopeGuard end_style_record_view_epoch = [&] {
-        style_computer().end_style_record_view_epoch();
-    };
+
+    // NB: The frame ends the update, and the epochs begun above, in its last join (finish_update_layout
+    //     in the host callbacks), so that whoever joins the frame first finds the document idle.
 
     Layout::RustFFI::FfiLayoutUpdateInputs inputs {
         .reason_is_inspect_devtools_layout_data = reason == UpdateLayoutReason::InspectDevToolsLayoutData,

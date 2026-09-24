@@ -233,8 +233,9 @@ static DOM::NodeIdentity paint_facts_journal_anchor(Layout::Node const& layout_n
 // are for from there.
 static void note_paint_facts(Layout::Node const& layout_node, DOM::PaintFactsFamily family, Function<void(Layout::Node const&)>&& update)
 {
+    auto identity = paint_facts_journal_anchor(layout_node);
     auto& journal = const_cast<DOM::Document&>(layout_node.document()).invalidation_journal();
-    if (auto identity = paint_facts_journal_anchor(layout_node))
+    if (identity)
         journal.note_paint_facts(identity, family, move(update));
     else
         journal.note_unanchored_paint_facts(Layout::Node::slot_id(&layout_node), move(update));

@@ -99,6 +99,7 @@ public:
 
     // Writes every entry through to the render side and empties the journal.
     void drain();
+    bool is_empty() const;
 
 private:
     struct PseudoElementScrollOffset {
@@ -154,7 +155,6 @@ private:
     void publish_selection_states();
     void publish_visual_context_marks();
     void publish_unanchored_paint_facts();
-    bool is_empty() const;
 
     Document& m_document;
     Vector<Entry> m_entries;

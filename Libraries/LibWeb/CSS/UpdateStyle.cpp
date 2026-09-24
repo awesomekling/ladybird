@@ -1460,14 +1460,18 @@ void Document::update_selection_style_observability()
         record_subtree(*focused_area(), nullptr);
 }
 
+// A style update beside this document's frame in flight would rewrite the style the frame reads, so
+// it waits for the frame first.
 void Document::update_style()
 {
+    join_frame_in_flight();
     update_selection_style_observability();
     CSS::update_style(*this);
 }
 
 bool Document::update_style_for_element(AbstractElement const& abstract_element)
 {
+    join_frame_in_flight();
     update_selection_style_observability();
     flush_throttled_animation_style_update_for_node(abstract_element.element());
     return CSS::update_style_for_element(*this, abstract_element, StyleUpdateMode::Normal);
@@ -1475,6 +1479,7 @@ bool Document::update_style_for_element(AbstractElement const& abstract_element)
 
 bool Document::update_style_for_element(AbstractElement const& abstract_element, StyleUpdateMode mode)
 {
+    join_frame_in_flight();
     update_selection_style_observability();
     flush_throttled_animation_style_update_for_node(abstract_element.element());
     return CSS::update_style_for_element(*this, abstract_element, mode);
