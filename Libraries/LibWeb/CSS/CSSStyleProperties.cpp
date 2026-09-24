@@ -663,7 +663,7 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
         auto kind = *target.pseudo_element();
         if (kind < PseudoElement::KnownPseudoElementCount) {
             auto demand = kind == PseudoElement::Selection
-                ? StyleEngineFFI::style_engine_answer_record_demand(style_computer.style_engine().rust_handle(), target.element().style_node_id().value(), to_underlying(kind), false, false, true, highlight_parent_style_record.value_or(StyleRecordID {}).value())
+                ? StyleEngineFFI::style_engine_answer_record_demand(style_computer.style_engine().rust_handle(), target.element().style_node_id().value(), to_underlying(kind), false, false, true, highlight_parent_style_record.value_or(StyleRecordID {}).value(), false)
                 : style_computer.style_engine().answer_record_demand(target.element().style_node_id(), to_underlying(kind), false, false, true);
             if (demand.is_absent && first_is_one_of(kind, PseudoElement::Before, PseudoElement::After)
                 && !target.element().style_depends_on_size_container_query()) {

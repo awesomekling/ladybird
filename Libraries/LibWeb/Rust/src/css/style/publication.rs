@@ -1329,6 +1329,26 @@ impl RetainedState {
         debt
     }
 
+    /// Give back the debts a published row took that the host did not settle, as the node owed
+    /// them before: the host will settle them with a later row of the node.
+    pub(crate) fn restore_row_debts(&mut self, node: StyleNodeID, explicit_inheritance_debt: u32, row_effect_debt: u8) {
+        if explicit_inheritance_debt != 0 {
+            *self.nodes_owing_explicit_inheritance.entry(node).or_default() |= explicit_inheritance_debt;
+        }
+        match row_effect_debt & 0b11 {
+            1 => {
+                self.nodes_owing_a_transition_registration.entry(node).or_insert(true);
+            }
+            2 => {
+                self.nodes_owing_a_transition_registration.entry(node).or_insert(false);
+            }
+            _ => {}
+        }
+        if row_effect_debt & OWES_AN_ANIMATION_SAMPLE != 0 {
+            self.nodes_owing_an_animation_sample.insert(node);
+        }
+    }
+
     /// The host marked `node`'s children as explicitly inheriting a non-inherited property.
     pub(crate) fn note_children_explicitly_inherit(&mut self, node: StyleNodeID) {
         self.children_explicitly_inherit_marks.insert(node);

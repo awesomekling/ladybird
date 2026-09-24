@@ -166,6 +166,26 @@ pub struct FfiStyleDelta {
     /// `FfiStyleInvalidationField` word. Only a word with `EngineComputed` set holds an answer; the
     /// host computes the damage of any other move itself.
     pub record_damage: u32,
+    /// What an element row's node holds as the transaction publishes it, packed as an
+    /// `FfiStyleRowFact` word. A word without `Present` holds no answer.
+    pub row_facts: u32,
+    /// The explicit inheritance debt of a computed element row, taken as the row is published.
+    pub explicit_inheritance_debt: u32,
+    /// The settled row effect debt of a computed element row, taken as the row is published.
+    pub row_effect_debt: u32,
+}
+
+/// The facts of an element row's node the host reads with the row, where it would otherwise ask
+/// the engine for each as it installs the row. They hold until the host computes the node again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum FfiStyleRowFact {
+    /// The node's `node_record_reads` bits.
+    RecordReadsMask = 0xff,
+    /// The node's cascade declares custom properties of its own.
+    DeclaresCustomProperties = 1 << 8,
+    /// The word holds the node's facts.
+    Present = 1 << 30,
 }
 
 /// A retried engine record and the metadata needed to install it.
@@ -174,6 +194,8 @@ pub struct FfiStyleDelta {
 pub struct FfiEngineComputedRecord {
     pub style_record: u64,
     pub uses_substitution: bool,
+    /// The node's explicit inheritance debt, when the caller asked to take it with the record.
+    pub explicit_inheritance_debt: u32,
     /// The synthetic pseudo-element kinds whose records the engine settled beside the
     /// element's, as a bit per kind; a present slot holding zero is a removal.
     pub pseudo_records_present: u8,
@@ -188,6 +210,10 @@ pub struct FfiRecordDemandAnswer {
     pub record: FfiEngineComputedRecord,
     pub is_absent: bool,
     pub is_provisional: bool,
+    /// The node's `FfiStyleRowFact` word as the demand leaves it.
+    pub row_facts: u32,
+    /// The node's settled row effect debt, when the caller asked to take it with the record.
+    pub row_effect_debt: u32,
 }
 
 /// One record slot per synthetic pseudo-element kind in a retried record.
@@ -3105,7 +3131,32 @@ pub mod node_record_reads {
 }
 
 impl StyleEngine {
-    /// Whether the winners the node's records were computed from substitute `attr()`.
+    /// What the winners the node's records were computed from read beyond their cascade, as
+    /// `node_record_reads` bits.
+    fn node_record_reads(&self, node: StyleNodeID) -> u8 {
+        let mut reads = self.node_record_custom_condition_usage(node)
+            & (node_record_reads::IF_FUNCTION
+                | node_record_reads::INHERIT_FUNCTION
+                | node_record_reads::CUSTOM_FUNCTION);
+        if self.node_record_reads_attributes(node) {
+            reads |= node_record_reads::ATTRIBUTES;
+        }
+        if self.node_record_uses_tree_counting(node) {
+            reads |= node_record_reads::TREE_COUNTING;
+        }
+        reads
+    }
+
+    /// The `FfiStyleRowFact` word of an element row's node.
+    fn style_row_facts(&self, node: StyleNodeID) -> u32 {
+        let mut facts = FfiStyleRowFact::Present as u32 | u32::from(self.node_record_reads(node));
+        if self.node_declares_custom_properties(node) {
+            facts |= FfiStyleRowFact::DeclaresCustomProperties as u32;
+        }
+        facts
+    }
+
+    /// Whether the node's records substitute `attr()`.
     fn node_record_reads_attributes(&self, node: StyleNodeID) -> bool {
         // A pseudo-element's winners read its originating element's attributes.
         let groups = self.current_winner_groups();
@@ -3162,29 +3213,6 @@ impl StyleEngine {
         }
         usage
     }
-}
-
-/// What the winners the node's records were computed from read beyond their cascade, as
-/// `node_record_reads` bits, answered once for the row that installs them.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_node_record_reads(engine: *const c_void, node: u32) -> u8 {
-    super::seal::note_engine_call("style_engine_node_record_reads");
-    let engine = unsafe { &*engine.cast::<StyleEngine>() };
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return 0;
-    };
-    let mut reads = engine.node_record_custom_condition_usage(node)
-        & (node_record_reads::IF_FUNCTION | node_record_reads::INHERIT_FUNCTION | node_record_reads::CUSTOM_FUNCTION);
-    if engine.node_record_reads_attributes(node) {
-        reads |= node_record_reads::ATTRIBUTES;
-    }
-    if engine.node_record_uses_tree_counting(node) {
-        reads |= node_record_reads::TREE_COUNTING;
-    }
-    reads
 }
 
 /// The raw custom-property environment identity a style record was published with.
@@ -3722,6 +3750,7 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
     targeted: bool,
     read_only: bool,
     parent_highlight: u64,
+    take_row_debts: bool,
 ) -> FfiRecordDemandAnswer {
     super::seal::note_engine_call("style_engine_answer_record_demand");
     abort_on_panic(|| {
@@ -3731,9 +3760,11 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
                 record: FfiEngineComputedRecord::default(),
                 is_absent: true,
                 is_provisional: false,
+                row_facts: 0,
+                row_effect_debt: 0,
             };
         };
-        let result = match engine.answer_record_demand(
+        let mut result = match engine.answer_record_demand(
             node,
             (pseudo_kind != u8::MAX).then_some(pseudo_kind),
             exclude_inline_style,
@@ -3745,18 +3776,28 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
                 record: FfiEngineComputedRecord {
                     style_record: answer.style_record,
                     uses_substitution: engine.nodes_with_substituted_records.contains(&node),
+                    explicit_inheritance_debt: 0,
                     pseudo_records_present: answer.pseudo_records_present,
                     pseudo_records: answer.pseudo_records,
                 },
                 is_absent: false,
                 is_provisional: answer.provisional,
+                row_facts: 0,
+                row_effect_debt: 0,
             },
             super::publication::RecordDemandAnswer::Absent => FfiRecordDemandAnswer {
                 record: FfiEngineComputedRecord::default(),
                 is_absent: true,
                 is_provisional: false,
+                row_facts: 0,
+                row_effect_debt: 0,
             },
         };
+        result.row_facts = engine.style_row_facts(node);
+        if take_row_debts && !result.is_absent {
+            result.record.explicit_inheritance_debt = engine.take_explicit_inheritance_debt(node);
+            result.row_effect_debt = u32::from(engine.take_settled_row_effect_debt(node));
+        }
         engine.record_boundary_call(EventKind::AnswerRecordDemand, |payload| {
             payload.write_u32(node.raw());
             payload.write_u8(pseudo_kind);
@@ -3889,6 +3930,7 @@ pub unsafe extern "C" fn style_engine_settle_pseudo_records_after_host_record(
     engine: *mut c_void,
     node: u32,
     old_is_list_item: bool,
+    take_explicit_inheritance_debt: bool,
 ) -> FfiEngineComputedRecord {
     super::seal::note_engine_call("style_engine_settle_pseudo_records_after_host_record");
     abort_on_panic(|| {
@@ -3900,6 +3942,11 @@ pub unsafe extern "C" fn style_engine_settle_pseudo_records_after_host_record(
         let result = FfiEngineComputedRecord {
             style_record: settled.style_record,
             uses_substitution,
+            explicit_inheritance_debt: if take_explicit_inheritance_debt {
+                engine.take_explicit_inheritance_debt(style_node)
+            } else {
+                0
+            },
             pseudo_records_present: settled.pseudo_records_present,
             pseudo_records: settled.pseudo_records,
         };
@@ -4427,6 +4474,26 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         )
     });
     output.scoped = scoped;
+    // What each element row's node holds now travels with the row, and a computed row takes the
+    // debts its computation left: the host settles them as it installs the row, or hands them back.
+    for answer in &mut output.answers {
+        if answer.pseudo_kind != u8::MAX || answer.gap == FfiStyleDeltaGap::SkippedHidden {
+            continue;
+        }
+        let Some(node) = StyleNodeID::from_raw(answer.style_node) else {
+            continue;
+        };
+        answer.row_facts = engine.style_row_facts(node);
+        if matches!(
+            answer.gap,
+            FfiStyleDeltaGap::Computed
+                | FfiStyleDeltaGap::RetriedAfterAncestors
+                | FfiStyleDeltaGap::RetriedMaterialization
+        ) {
+            answer.explicit_inheritance_debt = engine.take_explicit_inheritance_debt(node);
+            answer.row_effect_debt = u32::from(engine.take_settled_row_effect_debt(node));
+        }
+    }
     // Font cascade lists the transaction's font resolutions gave up on the stage thread.
     crate::css::ffi_stats::release_deferred_font_cascade_lists();
     engine.host.retired_custom_property_data.clear();

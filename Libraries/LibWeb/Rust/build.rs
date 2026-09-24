@@ -2997,6 +2997,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     style_engine_config.namespaces = Some(vec!["Web".to_string(), "CSS".to_string(), "StyleEngineFFI".to_string()]);
     style_engine_config.export.include = vec![
         "FfiStyleInvalidationField".to_string(),
+        "FfiStyleRowFact".to_string(),
         "FfiStyleSheetResourceContextEntry".to_string(),
     ];
 
