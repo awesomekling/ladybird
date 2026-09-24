@@ -776,6 +776,9 @@ static Optional<PreparedComputedStyle> prepare_computed_style_and_layout_for_pro
         // A style query can change its verdict after layout, for example when its comparison
         // value uses viewport units. Refresh the target against that settled verdict.
         abstract_element.document().update_style_for_element(abstract_element);
+        // The refreshed verdict can move styles the layout was built from; lay them out again.
+        if (!abstract_element.document().layout_is_up_to_date())
+            abstract_element.document().update_layout_if_needed_for_node(abstract_element.element(), DOM::UpdateLayoutReason::ResolvedCSSStyleDeclarationProperty);
         layout_node = abstract_element.layout_node();
         // A synthetic pseudo which is not rendered is not part of the layout-driven pseudo
         // recomputation above. Refresh its CSSOM-only style against the settled container size.
