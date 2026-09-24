@@ -12,8 +12,10 @@ use crate::css::css_pixels::{CssPixelRect, CssPixelSize};
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::display_list::builder::PendingInlineClip;
 use crate::painting::display_list::commands::{CanvasId, CompositorContextId};
+use crate::painting::display_list::device_pixels::DevicePixelConverter;
 use crate::painting::force_dark::ForceDarkRole;
 use crate::painting::paintable_geometry::absolute_rect;
+use crate::painting::paintable_rows::PaintableRowsRef;
 use crate::painting::record::PaintRecorder;
 use crate::painting::record::paint::background::{paint_image_content, to_gfx_scaling_mode};
 use crate::painting::replaced_paint_facts::VideoPaintFacts;
@@ -166,8 +168,9 @@ pub(crate) fn run_default_sizing_algorithm(
     default_size
 }
 
-pub(crate) fn get_replaced_box_painting_area<O: Observer>(
-    recorder: &mut PaintRecorder<'_, O>,
+pub(crate) fn get_replaced_box_painting_area(
+    layout_arena: &PaintableRowsRef<'_>,
+    converter: DevicePixelConverter,
     paintable: NodeSlotId,
     mut object_fit: u8,
     content_size: CssPixelSize,
@@ -175,11 +178,10 @@ pub(crate) fn get_replaced_box_painting_area<O: Observer>(
     if content_size.is_empty() {
         return IntRect::default();
     }
-    let paintable_rect = absolute_rect(recorder.layout_arena, paintable);
+    let paintable_rect = absolute_rect(layout_arena, paintable);
     if paintable_rect.is_empty() {
         return IntRect::default();
     }
-    let converter = recorder.converter;
 
     let bitmap_aspect_ratio = Fraction::of(content_size.height, content_size.width);
     let image_aspect_ratio = Fraction::of(paintable_rect.height, paintable_rect.width);
@@ -228,7 +230,7 @@ pub(crate) fn get_replaced_box_painting_area<O: Observer>(
     // https://drafts.csswg.org/css-images/#the-object-position
     // The computed object-position stores offsets normalized to the left/top edges.
     let (offset_x, offset_y) = {
-        let style = recorder.layout_arena.node_style_if_live(paintable);
+        let style = layout_arena.node_style_if_live(paintable);
         let zero = crate::css::css_pixels::CssPixels::from_raw(0);
         match style {
             Some(style) => {
@@ -273,13 +275,27 @@ pub(crate) fn paint_replaced_image_content<O: Observer>(
     );
 }
 
-fn replaced_style<O: Observer>(recorder: &PaintRecorder<'_, O>, paintable: NodeSlotId) -> (u8, u8) {
-    recorder
-        .layout_arena
+fn replaced_style(layout_arena: &PaintableRowsRef<'_>, paintable: NodeSlotId) -> (u8, u8) {
+    layout_arena
         .node_style_if_live(paintable)
         .map_or((object_fit::FILL, image_rendering::AUTO), |style| {
             (style.misc_reset().object_fit, style.image_rendering())
         })
+}
+
+/// The device rect an image element's content paints into: its concrete object size placed in the element's box per
+/// `object-fit` and `object-position`. Empty when nothing paints.
+pub(crate) fn image_content_draw_rect(
+    layout_arena: &PaintableRowsRef<'_>,
+    converter: DevicePixelConverter,
+    paintable: NodeSlotId,
+    natural: &SizeWithAspectRatio,
+) -> IntRect {
+    let (object_fit, _) = replaced_style(layout_arena, paintable);
+    let image_rect = absolute_rect(layout_arena, paintable);
+    // https://drafts.csswg.org/css-images/#the-object-fit
+    let concrete_object_size = run_default_sizing_algorithm(None, None, natural, image_rect.size());
+    get_replaced_box_painting_area(layout_arena, converter, paintable, object_fit, concrete_object_size)
 }
 
 pub(crate) fn paint_image_foreground<O: Observer>(recorder: &mut PaintRecorder<'_, O>, paintable: NodeSlotId) {
@@ -288,14 +304,11 @@ pub(crate) fn paint_image_foreground<O: Observer>(recorder: &mut PaintRecorder<'
         .replaced_paint_facts(paintable)
         .and_then(|facts| facts.image())
         .unwrap_or_default();
-    let (object_fit, image_rendering) = replaced_style(recorder, paintable);
+    let (_, image_rendering) = replaced_style(recorder.layout_arena, paintable);
     let image_rect = absolute_rect(recorder.layout_arena, paintable);
     let image_rect_device_pixels = recorder.converter.rounded_device_rect(image_rect);
     if facts.content != crate::painting::image_content::ImageContent::None {
-        // https://drafts.csswg.org/css-images/#the-object-fit
-        let concrete_object_size = run_default_sizing_algorithm(None, None, &facts.natural, image_rect.size());
-
-        let draw_rect = get_replaced_box_painting_area(recorder, paintable, object_fit, concrete_object_size);
+        let draw_rect = image_content_draw_rect(recorder.layout_arena, recorder.converter, paintable, &facts.natural);
         if !draw_rect.is_empty() {
             let (content_rect, corner_radii) = replaced_content_clip_geometry(recorder, paintable);
             let mut inline_clips = Vec::new();
@@ -334,7 +347,7 @@ pub(crate) fn paint_canvas_foreground<O: Observer>(recorder: &mut PaintRecorder<
         .replaced_paint_facts(paintable)
         .and_then(|facts| facts.canvas())
         .unwrap_or_default();
-    let (_, image_rendering) = replaced_style(recorder, paintable);
+    let (_, image_rendering) = replaced_style(recorder.layout_arena, paintable);
     let canvas_rect = recorder
         .converter
         .rounded_device_rect(absolute_rect(recorder.layout_arena, paintable));
@@ -365,7 +378,7 @@ pub(crate) fn paint_video_foreground<O: Observer>(recorder: &mut PaintRecorder<'
         .replaced_paint_facts(paintable)
         .and_then(|facts| facts.video())
         .unwrap_or_default();
-    let (object_fit, image_rendering) = replaced_style(recorder, paintable);
+    let (object_fit, image_rendering) = replaced_style(recorder.layout_arena, paintable);
     let video_rect = recorder
         .converter
         .rounded_device_rect(absolute_rect(recorder.layout_arena, paintable));
@@ -378,7 +391,8 @@ pub(crate) fn paint_video_foreground<O: Observer>(recorder: &mut PaintRecorder<'
         VideoPaintFacts::VideoFrame(Some(video_frame)) => {
             let src_size = (video_frame.src_width, video_frame.src_height);
             let dst_rect = get_replaced_box_painting_area(
-                recorder,
+                recorder.layout_arena,
+                recorder.converter,
                 paintable,
                 object_fit,
                 CssPixelSize::new(
@@ -395,7 +409,8 @@ pub(crate) fn paint_video_foreground<O: Observer>(recorder: &mut PaintRecorder<'
         VideoPaintFacts::PosterFrame(Some(poster_frame)) => {
             let frame_size = (poster_frame.width(), poster_frame.height());
             let dst_rect = get_replaced_box_painting_area(
-                recorder,
+                recorder.layout_arena,
+                recorder.converter,
                 paintable,
                 object_fit,
                 CssPixelSize::new(

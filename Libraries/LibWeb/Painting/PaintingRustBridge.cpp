@@ -528,9 +528,6 @@ RefPtr<Compositing::DisplayList> record_rust_display_list(DOM::Document& documen
 {
     auto* arena = layout_arena_handle(document);
     RecordingPublishContext publish_context { resource_storage, document };
-    // Rendering an SVG-as-image lays out and records its document, so it happens here on the main
-    // thread before the recording starts; the recording only looks the renders up.
-    Layout::RustFFI::layout_arena_resolve_painted_vector_images(arena, vector_image_callbacks(publish_context));
     auto device_pixels_per_css_pixel = document.page().client().device_pixels_per_css_pixel();
     auto device_viewport_rect = document.page().css_to_device_rect(document.viewport_rect());
     auto wheel_event_region_state = document.paint_state().collect_root_blocking_wheel_event_regions(document);
@@ -642,6 +639,9 @@ RefPtr<Compositing::DisplayList> record_rust_display_list(DOM::Document& documen
         inputs.background_color = document.background_color();
     }
     reconcile_navigable_container_paint_facts(document);
+    // Rendering an SVG-as-image lays out and records its document, so it happens here on the main
+    // thread before the recording starts; the recording only looks the renders up.
+    Layout::RustFFI::layout_arena_resolve_painted_vector_images(arena, &inputs, vector_image_callbacks(publish_context));
     auto rust_timer = Core::ElapsedTimer::start_new(Core::TimerType::Precise);
     if (!Layout::RustFFI::layout_arena_record_display_list(arena, viewport_row_slot(document), inputs))
         return nullptr;

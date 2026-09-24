@@ -270,29 +270,43 @@ unsafe extern "C" fn layout_arena_for_each_snap_area(
     });
 }
 
-/// Resolves the SVG-as-image renders the last recording painted into the map the next recording
-/// looks them up in. Rendering an image lays out and records another document, so the main thread
-/// does it here, before the recording stage runs, rather than the stage asking for it.
+/// Resolves the SVG-as-image renders the next recording is predicted to paint into the map it
+/// looks them up in: the ones the last recording painted, and the first paints of image elements.
+/// Rendering an image lays out and records another document, so the main thread does it here,
+/// before the recording stage runs, rather than the stage asking for it.
 ///
 /// # Safety
 ///
-/// `arena` must be a live handle from `layout_arena_create`; the callbacks in `vector_images` are
-/// called synchronously with their context.
+/// `arena` must be a live handle from `layout_arena_create`; `inputs` are the next recording's; the
+/// callbacks in `vector_images` are called synchronously with their context.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_resolve_painted_vector_images(
     arena: *mut c_void,
+    inputs: &crate::painting::host::FfiRecordingInputs,
     vector_images: crate::painting::host::FfiVectorImageCallbacks,
 ) {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { arena_from_handle(arena) };
-    // The renders the last recording painted, whether it recorded them or copied them.
-    let painted: Vec<_> = arena
-        .paint_state()
-        .borrow()
-        .last_recording
-        .as_ref()
-        .map(|recording| recording.vector_images.values().copied().collect())
-        .unwrap_or_default();
+    let mut painted = std::collections::HashSet::new();
+    let device_pixels_per_css_pixel = {
+        let paint_state = arena.paint_state().borrow();
+        // The renders the last recording painted, whether it recorded them or copied them.
+        if let Some(recording) = paint_state.last_recording.as_ref() {
+            painted.extend(recording.vector_images.values().copied());
+        }
+        paint_state
+            .visual_context
+            .last_tree_inputs
+            .map(|tree_inputs| tree_inputs.device_pixels_per_css_pixel)
+    };
+    if let Some(device_pixels_per_css_pixel) = device_pixels_per_css_pixel {
+        painted.extend(crate::painting::record::vector_images::predict_image_element_renders(
+            arena,
+            device_pixels_per_css_pixel,
+            inputs.document_declares_light_or_dark_color_scheme,
+            inputs.image_color_scheme_fallback,
+        ));
+    }
     let mut resolved = crate::painting::record::vector_images::VectorImageDisplayLists::default();
     // Each render records another document, which must not find this arena's paint state borrowed.
     for request in painted {

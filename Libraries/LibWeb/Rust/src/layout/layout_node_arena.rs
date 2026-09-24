@@ -3441,6 +3441,15 @@ impl LayoutNodeArena {
         self.replaced_paint_facts.borrow().get(&id).cloned()
     }
 
+    pub(crate) fn for_each_replaced_paint_facts(
+        &self,
+        mut callback: impl FnMut(NodeSlotId, &crate::painting::replaced_paint_facts::ReplacedPaintFacts),
+    ) {
+        for (id, facts) in self.replaced_paint_facts.borrow().iter() {
+            callback(*id, facts);
+        }
+    }
+
     pub(crate) fn layer_image_paint_facts(
         &self,
         id: NodeSlotId,
