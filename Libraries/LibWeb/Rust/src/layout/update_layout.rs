@@ -14,11 +14,15 @@ use super::formatting_context::{
     PendingLayoutCommit, commit_root_layout_to_arena, commit_subtree_layout_to_arena, compute_root_layout,
     compute_subtree_layout_fragments, prepare_root_layout_from_sources, read_viewport_propagation_facts,
 };
-use super::layout_node_arena::{EnrolledContentSources, apply_enrolled_content_sources, read_enrolled_content_sources};
+use super::layout_node_arena::{
+    EnrolledContentSources, OwedImageResources, apply_enrolled_content_sources, read_enrolled_content_sources,
+};
 use super::node_data::NodeSlotId;
 use super::node_facts;
 use super::partial_relayout::FfiPartialRelayoutHostFacts;
-use super::tree_builder::{FfiLayoutTreeBuildOutcome, LayoutTreeBuildWalk, walk_layout_tree_build};
+use super::tree_builder::{
+    FfiGeneratedContentItem, FfiLayoutTreeBuildOutcome, FfiPseudoElement, LayoutTreeBuildWalk, walk_layout_tree_build,
+};
 use super::viewport_propagation::FfiViewportPropagationFacts;
 use crate::abort_on_panic;
 use crate::css::ffi_support::FfiUtf16View;
@@ -69,6 +73,17 @@ pub struct FfiLayoutUpdateHostCallbacks {
     pub apply_layout_commit_effects: unsafe extern "C" fn(*mut c_void, *const FfiLayoutCommitEffects),
     pub note_full_layouts_performed: unsafe extern "C" fn(*mut c_void, u64),
     pub record_stabilization_bound_failure: unsafe extern "C" fn(*mut c_void),
+    /// Attaches the image resources a box's style asks for, which a tree build in the frame owed
+    /// it. Principal and pseudo-element boxes both go through this; nothing about it depends on
+    /// which the box is. The flag says the box replaces its element's contents with a single
+    /// image, which it owns the provider for.
+    pub attach_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId, bool),
+    /// Gives an image a pseudo-element's generated content names the provider it renders, and
+    /// attaches its box's style resources. The arguments are the image's row, the element the
+    /// pseudo-element is generated for, the pseudo-element, the content item, and the
+    /// pseudo-element's own box.
+    pub attach_generated_image:
+        unsafe extern "C" fn(*mut c_void, NodeSlotId, u32, FfiPseudoElement, FfiGeneratedContentItem, NodeSlotId),
 }
 
 /// What the loop needs to know about the document at one point in time. Every host call can
@@ -164,6 +179,9 @@ pub(crate) struct LayoutUpdateHost {
     apply_layout_commit_effects: unsafe extern "C" fn(*mut c_void, *const FfiLayoutCommitEffects),
     note_full_layouts_performed: unsafe extern "C" fn(*mut c_void, u64),
     record_stabilization_bound_failure: unsafe extern "C" fn(*mut c_void),
+    attach_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId, bool),
+    attach_generated_image:
+        unsafe extern "C" fn(*mut c_void, NodeSlotId, u32, FfiPseudoElement, FfiGeneratedContentItem, NodeSlotId),
 }
 
 impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
@@ -185,6 +203,8 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             apply_layout_commit_effects: host.apply_layout_commit_effects,
             note_full_layouts_performed: host.note_full_layouts_performed,
             record_stabilization_bound_failure: host.record_stabilization_bound_failure,
+            attach_style_resources: host.attach_style_resources,
+            attach_generated_image: host.attach_generated_image,
         }
     }
 }
@@ -271,6 +291,30 @@ impl LayoutUpdateHost {
 
     fn record_stabilization_bound_failure(&self, _: &crate::stage::MainThread) {
         unsafe { (self.record_stabilization_bound_failure)(self.context) }
+    }
+
+    /// Attaches what a tree build in the frame owed `row`, which must be live.
+    fn attach_image_resources(&self, _: &crate::stage::MainThread, row: NodeSlotId, owed: OwedImageResources) {
+        match owed {
+            OwedImageResources::StyleResources {
+                owns_content_replacement_image,
+            } => unsafe { (self.attach_style_resources)(self.context, row, owns_content_replacement_image) },
+            OwedImageResources::GeneratedImage {
+                generator,
+                pseudo_element,
+                item,
+                pseudo_element_box,
+            } => unsafe {
+                (self.attach_generated_image)(
+                    self.context,
+                    row,
+                    generator.raw(),
+                    pseudo_element,
+                    item,
+                    pseudo_element_box,
+                );
+            },
+        }
     }
 }
 
@@ -448,10 +492,23 @@ struct FrameMessages {
     boxes_with_auto_content_visibility: Option<Vec<NodeSlotId>>,
     /// The scroll offsets the rendering preparations after the commits clamped.
     clamped_scroll_offsets: Vec<FfiClampedScrollOffset>,
+    /// The image resources the frame's tree builds owe the rows they stamped, in the order the
+    /// builds came to owe them: the images to load and observe, and the providers of the images
+    /// that image boxes show. Until then an image box that owns its provider has no image, and the
+    /// host lays it out again if the image it is handed is already there.
+    owed_image_resources: Vec<(NodeSlotId, OwedImageResources)>,
 }
 
 impl FrameMessages {
-    fn apply(self, main_thread: &crate::stage::MainThread, host: &LayoutUpdateHost) {
+    fn apply(self, main_thread: &crate::stage::MainThread, host: &LayoutUpdateHost, arena: &LayoutNodeArena) {
+        // A later build in the frame can have freed a row it was owed for.
+        for (row, owed) in self.owed_image_resources {
+            if !arena.slot_is_live(row) {
+                continue;
+            }
+            arena.note_owned_provider_handed_over(row);
+            host.attach_image_resources(main_thread, row, owed);
+        }
         if self.full_layouts_performed > 0 {
             host.note_full_layouts_performed(main_thread, self.full_layouts_performed);
         }
@@ -645,6 +702,14 @@ impl LayoutFrame<'_> {
         self.messages.clamped_scroll_offsets.extend(clamped);
     }
 
+    /// Records a paid tree build, and takes the image resources it owes its rows for the host to
+    /// attach once the frame is over.
+    fn note_layout_tree_build(&mut self, outcome: &FfiLayoutTreeBuildOutcome) {
+        self.arena().record_layout_tree_build(outcome);
+        let owed = self.arena().take_image_resources_owed_to_host();
+        self.messages.owed_image_resources.extend(owed);
+    }
+
     fn take_pass_sources(&mut self) -> LayoutPassSources {
         self.pass_sources
             .take()
@@ -728,7 +793,7 @@ impl LayoutFrame<'_> {
                         pass_follows.then(|| unsafe { LayoutPassSources::read(main_thread, host, arena_handle) });
                     (outcome, pass_sources)
                 });
-                self.arena().record_layout_tree_build(&outcome);
+                self.note_layout_tree_build(&outcome);
                 debug_assert_eq!(outcome.needs_another_build_pass, needs_another_build_pass);
                 debug_assert_eq!(outcome.needs_another_build_pass, needs_another_build_pass);
                 if needs_another_build_pass {
@@ -875,7 +940,7 @@ impl LayoutFrame<'_> {
                     facts,
                 }
             });
-            self.arena().record_layout_tree_build(&outcome);
+            self.note_layout_tree_build(&outcome);
             *facts = facts_after_build;
             *needs_layout_tree_rebuild = false;
             if !pass_follows {
@@ -1010,7 +1075,8 @@ unsafe fn update_layout(
             .run()
         })
     };
-    messages.apply(main_thread, &host);
+    // SAFETY: Guaranteed by the caller, and the frame is over.
+    messages.apply(main_thread, &host, unsafe { arena(arena_handle) });
 }
 
 /// # Safety

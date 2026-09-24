@@ -58,26 +58,18 @@ unsafe extern "C" fn rust_detach_remaining_layout_rows_for_removal(arena: *mut c
 }
 
 /// Pays the host half of a finished layout tree build walk, which `walk` holds and this takes:
-/// what the walk let go of, what it found out, and the shells and style resources its new rows are
-/// owed. Answers with the build's outcome.
+/// what the walk let go of, what it found out, and the shells its new rows are owed. The image
+/// resources they are owed wait for the frame to be over. Answers with the build's outcome.
 ///
 /// # Safety
 ///
-/// The callback table and arena must remain valid for the duration of the call, which must be made
-/// on the document thread, and `walk` must point to an `Option<LayoutTreeBuildWalk>` holding the
-/// walk of this arena.
+/// The arena must remain valid for the duration of the call, which must be made on the document
+/// thread, and `walk` must point to an `Option<LayoutTreeBuildWalk>` holding the walk of this arena.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn rust_pay_layout_tree_build(
-    callbacks: *const FfiDomTreeBuilderCallbacks,
-    arena: *mut c_void,
-    walk: *mut c_void,
-) -> FfiLayoutTreeBuildOutcome {
-    assert!(!callbacks.is_null());
+unsafe extern "C" fn rust_pay_layout_tree_build(arena: *mut c_void, walk: *mut c_void) -> FfiLayoutTreeBuildOutcome {
     assert!(!walk.is_null());
     // SAFETY: The entry point's contract puts this call on the document thread.
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: Guaranteed by the entry point's contract.
-    let callbacks = host_callbacks::TreeBuilderHostCallbacks::new(unsafe { &*callbacks });
     let host = dom_tree_builder_host(arena);
     // SAFETY: Guaranteed by the entry point's contract.
     let LayoutTreeBuildWalk(TreeBuildStageOutput {
@@ -102,38 +94,8 @@ unsafe extern "C" fn rust_pay_layout_tree_build(
             crate::layout::LayoutHost::of(&main_thread).deliver_commit_messages(&main_thread, &reports);
         };
     }
-    for (row, owed) in arena.take_rows_owed_to_host() {
-        match owed {
-            OwedToHost::Shell => {
-                arena.node_shell(&main_thread, row);
-            }
-            OwedToHost::StyleResources {
-                owns_content_replacement_image,
-            } => {
-                // SAFETY: The row is live, and every row a build owes style resources for is a
-                // NodeWithStyle.
-                unsafe { callbacks.attach_style_resources(&main_thread, row, owns_content_replacement_image) };
-            }
-            OwedToHost::GeneratedImage {
-                generator,
-                pseudo_element,
-                item,
-                pseudo_element_box,
-            } => {
-                // SAFETY: The row is a live image box, and the pseudo-element box it was built in
-                // outlives it.
-                unsafe {
-                    callbacks.attach_generated_image(
-                        &main_thread,
-                        row,
-                        generator.raw(),
-                        pseudo_element,
-                        item,
-                        pseudo_element_box,
-                    );
-                };
-            }
-        }
+    for row in arena.take_shells_owed_to_host() {
+        arena.node_shell(&main_thread, row);
     }
     outcome
 }

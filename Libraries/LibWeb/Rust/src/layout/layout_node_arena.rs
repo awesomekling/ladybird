@@ -630,11 +630,10 @@ fn style_payloads_equal_in_layout_affecting_groups(a: *const c_void, b: *const c
     })
 }
 
-/// What a tree build owes the host for a row it stamped, once the build is over.
+/// The image resources a tree build owes the host for a row it stamped, which the host attaches
+/// once the frame the build ran in is over.
 #[derive(Clone, Copy)]
-pub(crate) enum OwedToHost {
-    /// The row's shell, whose construction tells the host something about the row.
-    Shell,
+pub(crate) enum OwedImageResources {
     /// The row's style resources: the images its style names, and the paint facts that follow.
     StyleResources { owns_content_replacement_image: bool },
     /// The provider for an image a pseudo-element's generated content names, and the image box's
@@ -1021,9 +1020,15 @@ pub(crate) struct LayoutNodeArena {
     pub(crate) boxes_needing_scrollable_overflow_recalculation: RefCell<Vec<NodeSlotId>>,
     pub(crate) needs_full_scrollable_overflow_recalculation: Cell<bool>,
     text_nodes_enrolled_for_content_sync: RefCell<HashSet<NodeSlotId>>,
-    /// What a running tree build owes the host for the rows it stamped once the build is over, in
-    /// the order the build came to owe it.
-    rows_owed_to_host: RefCell<Vec<(NodeSlotId, OwedToHost)>>,
+    /// The rows a running tree build owes the host a shell once the build is over, as the shell's
+    /// construction tells the host something about the row.
+    shells_owed_to_host: RefCell<Vec<NodeSlotId>>,
+    /// The image resources the tree builds owe the host for the rows they stamped, in the order the
+    /// builds came to owe them, until the frame the builds ran in takes them.
+    image_resources_owed_to_host: RefCell<Vec<(NodeSlotId, OwedImageResources)>>,
+    /// The image boxes among those rows that own the provider of the image they show. Until the host
+    /// hands a box its provider, the box has no image.
+    image_boxes_awaiting_owned_provider: RefCell<HashSet<NodeSlotId>>,
     /// The document's style, handed to a build that may build the viewport before it starts, and
     /// pinned until the viewport's row takes it or the build ends without one.
     published_document_style: Cell<Option<DerivedStyleRecord>>,
@@ -1119,7 +1124,9 @@ impl LayoutNodeArena {
             boxes_needing_scrollable_overflow_recalculation: RefCell::new(Vec::new()),
             needs_full_scrollable_overflow_recalculation: Cell::new(false),
             text_nodes_enrolled_for_content_sync: RefCell::new(HashSet::default()),
-            rows_owed_to_host: RefCell::new(Vec::new()),
+            shells_owed_to_host: RefCell::new(Vec::new()),
+            image_resources_owed_to_host: RefCell::new(Vec::new()),
+            image_boxes_awaiting_owned_provider: RefCell::new(HashSet::default()),
             published_document_style: Cell::new(None),
             nodes_enrolled_for_replaced_content_facts_sync: RefCell::new(Vec::new()),
             messages_reported_during_pass: RefCell::new(Vec::new()),
@@ -1416,6 +1423,7 @@ impl LayoutNodeArena {
         self.remove_layout_update_flag_node(id);
         self.raw_table_column_spans.remove(&id);
         self.style_image_resources_attached.get_mut().remove(&id);
+        self.image_boxes_awaiting_owned_provider.get_mut().remove(&id);
         self.replaced_paint_facts.get_mut().remove(&id);
         self.layer_image_paint_facts.get_mut().remove(&id);
         self.svg_paint_resources.forget_slot(id);
@@ -5344,14 +5352,17 @@ impl LayoutNodeArena {
     /// Owes the host `id`'s shell once the running build is over, so that the build itself only
     /// stamps rows. A reader that asks for the shell before then materialises it on demand.
     pub(crate) fn defer_shell(&self, id: NodeSlotId) {
-        self.rows_owed_to_host.borrow_mut().push((id, OwedToHost::Shell));
+        self.shells_owed_to_host.borrow_mut().push(id);
     }
 
-    /// Owes the host the attachment of `id`'s style resources once the running build is over.
+    /// Owes the host the attachment of `id`'s style resources once the running frame is over.
     pub(crate) fn defer_style_resources(&self, id: NodeSlotId, owns_content_replacement_image: bool) {
-        self.rows_owed_to_host.borrow_mut().push((
+        if owns_content_replacement_image {
+            self.image_boxes_awaiting_owned_provider.borrow_mut().insert(id);
+        }
+        self.image_resources_owed_to_host.borrow_mut().push((
             id,
-            OwedToHost::StyleResources {
+            OwedImageResources::StyleResources {
                 owns_content_replacement_image,
             },
         ));
@@ -5401,7 +5412,7 @@ impl LayoutNodeArena {
     }
 
     /// Owes the host the provider for the image a pseudo-element's generated content names, and
-    /// the image box's style resources, once the running build is over.
+    /// the image box's style resources, once the running frame is over.
     pub(crate) fn defer_generated_image(
         &self,
         id: NodeSlotId,
@@ -5410,9 +5421,10 @@ impl LayoutNodeArena {
         item: super::tree_builder::FfiGeneratedContentItem,
         pseudo_element_box: NodeSlotId,
     ) {
-        self.rows_owed_to_host.borrow_mut().push((
+        self.image_boxes_awaiting_owned_provider.borrow_mut().insert(id);
+        self.image_resources_owed_to_host.borrow_mut().push((
             id,
-            OwedToHost::GeneratedImage {
+            OwedImageResources::GeneratedImage {
                 generator,
                 pseudo_element,
                 item,
@@ -5435,12 +5447,28 @@ impl LayoutNodeArena {
         })
     }
 
-    /// What the finished build owes the host, in the order it came to owe it. A row the build
-    /// freed again, such as whitespace table fixup removed, is owed nothing.
-    pub(crate) fn take_rows_owed_to_host(&self) -> Vec<(NodeSlotId, OwedToHost)> {
-        let mut owed = std::mem::take(&mut *self.rows_owed_to_host.borrow_mut());
-        owed.retain(|(row, _)| self.slot_is_live(*row));
+    /// The rows the finished build owes a shell. A row the build freed again, such as whitespace
+    /// table fixup removed, is owed nothing.
+    pub(crate) fn take_shells_owed_to_host(&self) -> Vec<NodeSlotId> {
+        let mut owed = std::mem::take(&mut *self.shells_owed_to_host.borrow_mut());
+        owed.retain(|&row| self.slot_is_live(row));
         owed
+    }
+
+    /// The image resources the finished builds owe the host, in the order they came to owe them.
+    /// A later build can still free a row, so whoever pays them asks whether it is live first.
+    pub(crate) fn take_image_resources_owed_to_host(&self) -> Vec<(NodeSlotId, OwedImageResources)> {
+        std::mem::take(&mut *self.image_resources_owed_to_host.borrow_mut())
+    }
+
+    /// Whether `id` is an image box that owns its image's provider and has not been handed it yet.
+    pub(crate) fn image_box_awaits_owned_provider(&self, id: NodeSlotId) -> bool {
+        self.image_boxes_awaiting_owned_provider.borrow().contains(&id)
+    }
+
+    /// Notes that the host is about to hand `id` the provider it owns, if it was waiting for one.
+    pub(crate) fn note_owned_provider_handed_over(&self, id: NodeSlotId) {
+        self.image_boxes_awaiting_owned_provider.borrow_mut().remove(&id);
     }
 
     /// The shell of `id`, made now if nothing has asked for it before. Making one runs the host's
@@ -5531,6 +5559,18 @@ pub(crate) struct NodeAllocation {
 #[unsafe(no_mangle)]
 pub extern "C" fn layout_arena_create() -> *mut c_void {
     Box::into_raw(Box::new(super::ArenaHandle::new())).cast()
+}
+
+/// Whether the row is an image box that owns its image's provider and has not been handed it yet,
+/// which it is from the tree build that stamps it until the frame the build runs in is over.
+///
+/// # Safety
+///
+/// The arena must be live on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_image_box_awaits_owned_provider(arena: *mut c_void, slot: NodeSlotId) -> bool {
+    // SAFETY: The C++ wrapper keeps the arena alive for this call.
+    unsafe { LayoutNodeArena::from_handle(arena) }.image_box_awaits_owned_provider(slot)
 }
 
 /// Records whether attaching a row's style resources loaded any image.

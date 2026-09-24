@@ -134,6 +134,9 @@ CSS::SizeWithAspectRatio Box::natural_size() const
 {
     switch (kind()) {
     case RustFFI::NodeKind::ImageBox: {
+        // A box that owns its image's provider is handed it once the frame that built the box is over.
+        if (RustFFI::layout_arena_image_box_awaits_owned_provider(arena_handle(), Node::slot_id(this)))
+            return { 0, 0, {} };
         auto const& image_provider = this->image_provider();
         if (image_provider.is_image_available()) {
             return {
