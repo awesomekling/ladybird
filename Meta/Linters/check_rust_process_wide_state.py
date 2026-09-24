@@ -162,6 +162,7 @@ RENDER_STAGE_ALLOWED = {
             "stage_thread.rs:STAGES",
             "stage_thread.rs:FRAME_SCHEDULER_HOST",
             "stage_thread.rs:THREAD_SETUP",
+            "stage_thread.rs:STAGE_HOLD",
             "stage_thread.rs:SUBMITTED",
             "stage_thread.rs:RUNNING_JOIN_WORK",
             "stage_thread.rs:FORCED_JOIN_SITES",

@@ -1,0 +1,4 @@
+frame in flight holds the document: true
+what the frame references survives a collection: true
+box after the frame: rgb(0, 128, 0)
+hit test after the frame: true

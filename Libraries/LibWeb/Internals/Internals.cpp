@@ -64,6 +64,7 @@
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/EventLoop/FrameCompletion.h>
+#include <LibWeb/HTML/EventLoop/FrameInFlightReferences.h>
 #include <LibWeb/HTML/EventLoop/TaskQueue.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLElement.h>
@@ -1667,6 +1668,27 @@ GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
 void Internals::reset_rendering_scheduler_counters()
 {
     HTML::main_thread_event_loop().reset_rendering_scheduler_counters();
+}
+
+bool Internals::hold_next_recording_frame()
+{
+    constexpr auto label = "recording"sv;
+    return Layout::RustFFI::rust_stage_thread_hold_next_submitted_stage(reinterpret_cast<u8 const*>(label.characters_without_null_termination()), label.length());
+}
+
+void Internals::release_held_frame()
+{
+    Layout::RustFFI::rust_stage_thread_release_held_stage();
+}
+
+bool Internals::frame_in_flight_holds_document() const
+{
+    return HTML::frame_in_flight_holds(window().associated_document());
+}
+
+bool Internals::frame_in_flight_references_are_alive() const
+{
+    return HTML::frame_in_flight_references_are_alive();
 }
 
 void Internals::set_manual_rendering_opportunities(bool enabled)

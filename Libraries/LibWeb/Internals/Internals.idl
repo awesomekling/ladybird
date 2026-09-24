@@ -212,6 +212,16 @@ interface Internals {
     undefined dumpJoinCounters();
     object getRenderingSchedulerCounters();
     undefined resetRenderingSchedulerCounters();
+    // Under LIBWEB_STAGE_THREAD=overlap, holds the next recording submitted to the render side
+    // until releaseHeldFrame(), so that tasks run beside that frame in flight. Returns whether it
+    // will hold one; it never does in the other modes.
+    boolean holdNextRecordingFrame();
+    undefined releaseHeldFrame();
+    // Whether a frame is in flight and holds this document.
+    boolean frameInFlightHoldsDocument();
+    // Whether each document a frame in flight holds, and its navigable, page and window, are alive
+    // (true if none is in flight).
+    boolean frameInFlightReferencesAreAlive();
     undefined setManualRenderingOpportunities(boolean enabled);
     undefined injectRenderingOpportunity(double frameTimeMs);
     undefined updateCompositorAnimations();
