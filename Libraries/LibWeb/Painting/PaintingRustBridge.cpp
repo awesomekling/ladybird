@@ -648,6 +648,9 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
     // Rendering an SVG-as-image lays out and records its document, so it happens here on the main
     // thread before the recording starts; the recording only looks the renders up.
     Layout::RustFFI::layout_arena_resolve_painted_vector_images(arena, &inputs, vector_image_callbacks(publish_context));
+    // NB: Asking for the visual context tree can drain the document's invalidation journal, which joins a frame in
+    //     flight, so it is taken before the recording is submitted.
+    auto visual_context_tree = document.paint_state().visual_context_tree(document);
     auto rust_timer = Core::ElapsedTimer::start_new(Core::TimerType::Precise);
     auto ffi_run = run == RecordingRun::InSubmittedFrame ? Layout::RustFFI::FfiRecordingRun::InSubmittedFrame : Layout::RustFFI::FfiRecordingRun::Now;
     if (!Layout::RustFFI::layout_arena_record_display_list(arena, viewport_row_slot(document), inputs, ffi_run))
@@ -657,7 +660,7 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
     return PendingDisplayListRecording {
         .document = document,
         .resource_storage = resource_storage,
-        .visual_context_tree = document.paint_state().visual_context_tree(document),
+        .visual_context_tree = move(visual_context_tree),
         .cache_mode = cache_mode,
         .run = submitted ? RecordingRun::InSubmittedFrame : RecordingRun::Now,
         .surface_clear_color = placeholder_display_list.surface_clear_color(),
