@@ -133,6 +133,10 @@ void StyleEffectDrain::apply(DOM::Document& document)
             document.style_computer().style_engine().acknowledge_engine_computed_record(row->style_node);
             continue;
         }
+        if (auto const* row = effect.get_pointer<DiscardContainerQueryEffects>()) {
+            StyleEngineFFI::style_engine_native_container_effects_release(StyleEngineFFI::style_engine_take_container_effects(document.style_computer().style_engine().rust_handle(), row->style_node.value()).effects);
+            continue;
+        }
         auto element = document.style_computer().element_for_style_node(effect.visit([](auto const& row) { return row.style_node; }));
         if (!element)
             continue;
@@ -171,6 +175,9 @@ void StyleEffectDrain::apply(DOM::Document& document)
                 VERIFY_NOT_REACHED();
             },
             [&](AcknowledgeRecord const&) {
+                VERIFY_NOT_REACHED();
+            },
+            [&](DiscardContainerQueryEffects const&) {
                 VERIFY_NOT_REACHED();
             });
     }
@@ -743,7 +750,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         declined_a_row_again = true;
                     StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::DeclinedRow);
                     declined_rows.set(StyleNodeID { reaction.style_node });
-                    StyleEngineFFI::style_engine_native_container_effects_release(StyleEngineFFI::style_engine_take_container_effects(document.style_computer().style_engine().rust_handle(), reaction.style_node).effects);
+                    row_effects.append(StyleEffectDrain::DiscardContainerQueryEffects { StyleNodeID { reaction.style_node } });
                     for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
                         if (pseudo_element_records[kind].has_value())
                             (void)document.style_computer().take_settled_animation_plan(StyleNodeID { reaction.style_node }, static_cast<u8>(kind));

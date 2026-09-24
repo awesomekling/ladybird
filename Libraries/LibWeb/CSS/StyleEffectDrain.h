@@ -80,7 +80,12 @@ public:
     struct AcknowledgeRecord {
         StyleNodeID style_node;
     };
-    using Effect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames, AnimationNames, ContainerQueryEffects, AnimationPlan, DisplayNoneAnimations, RestoreRowDebts, AcknowledgeRecord>;
+    // What a declined row's computation read of its containers, which nothing records: the next
+    // transaction computes the element again. The node's element may be gone.
+    struct DiscardContainerQueryEffects {
+        StyleNodeID style_node;
+    };
+    using Effect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames, AnimationNames, ContainerQueryEffects, AnimationPlan, DisplayNoneAnimations, RestoreRowDebts, AcknowledgeRecord, DiscardContainerQueryEffects>;
 
     void append(Effect effect) { m_effects.append(move(effect)); }
     void apply(DOM::Document&);
