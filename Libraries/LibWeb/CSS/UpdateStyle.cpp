@@ -704,7 +704,15 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 // computation it stands for would have.
                 if (!element->has_style() || retried_after_installed_ancestors)
                     style_engine.consume_recorded_element_style_input_change(reaction.style_node);
-                invalidation = element->apply_engine_computed_style_record(StyleRecordID { reaction.new_style_record }, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties, engine_record_comparison);
+                // A row that moved nothing names the record the element held when the transaction
+                // published it. An ancestor applied before it can have republished that record over
+                // a moved custom-property environment since, and the element holds the republished
+                // record the engine now assigns it: the published one is nobody's any more.
+                auto new_style_record = StyleRecordID { reaction.new_style_record };
+                if (reaction.new_style_record == reaction.old_style_record && element->style_record_identity().value() != reaction.old_style_record
+                    && StyleEngineFFI::style_engine_assigned_style_record(style_engine.rust_handle(), reaction.style_node, NumericLimits<u8>::max()) == element->style_record_identity().value())
+                    new_style_record = element->style_record_identity();
+                invalidation = element->apply_engine_computed_style_record(new_style_record, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties, engine_record_comparison);
                 // What the row's container conditions read of its containers, recorded as the host
                 // records it for a row it computes.
                 auto container_effects = StyleEngineFFI::style_engine_take_container_effects(style_engine.rust_handle(), reaction.style_node);
