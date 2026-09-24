@@ -49,6 +49,17 @@ using StyleUpdateMode = DOM::Document::StyleUpdateMode;
 
 extern "C" void ladybird_utf16_fly_string_unref(size_t);
 
+}
+
+namespace Web::DOM {
+
+void begin_style_row_counter_style_invalidation(Element const&);
+CSS::RequiredInvalidationAfterStyleChange end_style_row_counter_style_invalidation(Element const&);
+
+}
+
+namespace Web::CSS {
+
 static void finish_complete_style_update(DOM::Document& document)
 {
     auto releases = StyleValueFFI::rust_style_ffi_complete_style_update_end();
@@ -570,6 +581,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             // What the element holds now is what the row moves it from: the engine reads the row's
             // facts for the children from that and from what the element holds when it is noted.
             document.style_computer().style_engine().begin_style_reaction(StyleNodeID { reaction.style_node });
+            DOM::begin_style_row_counter_style_invalidation(*element);
             auto old_custom_property_data = element->custom_property_data({});
             auto const* previous_inherited_box_values = element->style_group<ComputedValues::InheritedBoxValues>();
             auto const previous_visibility = previous_inherited_box_values
@@ -806,8 +818,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 document.throttled_animation_visibility_changed();
             }
 
-            row_effects.append(StyleEffectDrain::ElementInvalidation { StyleNodeID { reaction.style_node }, invalidation });
-            transaction_invalidation |= invalidation;
+            // A counter-style rebuild is the row's effect, not a move of style its children react to.
+            auto effects = invalidation;
+            effects |= DOM::end_style_row_counter_style_invalidation(*element);
+            row_effects.append(StyleEffectDrain::ElementInvalidation { StyleNodeID { reaction.style_node }, effects });
+            transaction_invalidation |= effects;
 
             auto& style_engine = document.style_computer().style_engine();
             u32 facts = 0;
@@ -1132,13 +1147,16 @@ static void note_targeted_style_reaction_applied(DOM::Element& element, Required
     style_engine.note_style_reaction_applied(element.style_node_id(), reaction, invalidation.inherited_style_groups_changed(), facts);
 }
 
-static void apply_targeted_style_invalidation(DOM::Element& element, RequiredInvalidationAfterStyleChange const& invalidation, bool did_change_custom_properties, bool descendant_style_recompute_needed)
+static void apply_targeted_style_invalidation(DOM::Element& element, RequiredInvalidationAfterStyleChange const& invalidation, RequiredInvalidationAfterStyleChange const& counter_style_invalidation, bool did_change_custom_properties, bool descendant_style_recompute_needed)
 {
     if (!invalidation.is_none() || did_change_custom_properties)
         Invalidation::invalidate_assigned_slottables_after_slot_style_change(element);
-    apply_element_style_invalidation_after_style_change(element, invalidation);
+    // A counter-style rebuild is the element's effect, not a move of style its children react to.
+    auto effects = invalidation;
+    effects |= counter_style_invalidation;
+    apply_element_style_invalidation_after_style_change(element, effects);
     note_targeted_style_reaction_applied(element, invalidation, did_change_custom_properties, descendant_style_recompute_needed);
-    apply_document_style_invalidation_after_style_change(element.document(), invalidation);
+    apply_document_style_invalidation_after_style_change(element.document(), effects);
 }
 
 // Install the engine's answer for a targeted demand of one element.
@@ -1439,8 +1457,10 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
         auto& element = inheritance_chain[i - 1];
         bool did_change_custom_properties = false;
         element->document().style_computer().style_engine().begin_style_reaction(element->style_node_id());
+        DOM::begin_style_row_counter_style_invalidation(*element);
         auto invalidation = materialize_style_for_targeted_update(element, did_change_custom_properties);
-        apply_targeted_style_invalidation(element, invalidation, did_change_custom_properties, descendant_style_recompute_needed);
+        auto const counter_style_invalidation = DOM::end_style_row_counter_style_invalidation(*element);
+        apply_targeted_style_invalidation(element, invalidation, counter_style_invalidation, did_change_custom_properties, descendant_style_recompute_needed);
 
         descendant_style_recompute_needed |= invalidation.recompute_descendant_styles;
 

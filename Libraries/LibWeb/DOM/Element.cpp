@@ -1450,6 +1450,59 @@ static bool content_counter_styles_changed(DOM::AbstractElement const& abstract_
         == Layout::RustFFI::CONTENT_COUNTER_STYLES_CHANGED;
 }
 
+// A counter-style rebuild compares the counter styles an element's boxes were built with against the ones its style
+// resolves now: layout work after style, which moves no style. A style row collects the rebuild of its own element
+// here, apart from the invalidation the element's children react to, and applies it with the row's effects.
+struct StyleRowCounterStyleInvalidation {
+    Element const* element { nullptr };
+    CSS::RequiredInvalidationAfterStyleChange invalidation;
+};
+// Rows nest only where one reads the style of another element while it applies.
+static thread_local Array<StyleRowCounterStyleInvalidation, 32> s_style_row_counter_style_invalidations;
+static thread_local size_t s_style_row_counter_style_invalidation_depth = 0;
+
+static StyleRowCounterStyleInvalidation* innermost_style_row_counter_style_invalidation(Element const& element)
+{
+    if (s_style_row_counter_style_invalidation_depth == 0)
+        return nullptr;
+    auto& row = s_style_row_counter_style_invalidations[s_style_row_counter_style_invalidation_depth - 1];
+    return row.element == &element ? &row : nullptr;
+}
+
+void begin_style_row_counter_style_invalidation(Element const&);
+CSS::RequiredInvalidationAfterStyleChange end_style_row_counter_style_invalidation(Element const&);
+
+void begin_style_row_counter_style_invalidation(Element const& element)
+{
+    VERIFY(s_style_row_counter_style_invalidation_depth < s_style_row_counter_style_invalidations.size());
+    s_style_row_counter_style_invalidations[s_style_row_counter_style_invalidation_depth++] = { &element, {} };
+}
+
+CSS::RequiredInvalidationAfterStyleChange end_style_row_counter_style_invalidation(Element const& element)
+{
+    auto* row = innermost_style_row_counter_style_invalidation(element);
+    VERIFY(row);
+    --s_style_row_counter_style_invalidation_depth;
+    return row->invalidation;
+}
+
+static void add_counter_style_invalidation(CSS::RequiredInvalidationAfterStyleChange& invalidation, Element const& element, CSS::RequiredInvalidationAfterStyleChange const& counter_style_invalidation)
+{
+    if (auto* row = innermost_style_row_counter_style_invalidation(element)) {
+        row->invalidation |= counter_style_invalidation;
+        return;
+    }
+    invalidation |= counter_style_invalidation;
+}
+
+// What the element's boxes are updated with: its invalidation and the counter-style rebuild its row collected.
+static CSS::RequiredInvalidationAfterStyleChange with_style_row_counter_style_invalidation(Element const& element, CSS::RequiredInvalidationAfterStyleChange invalidation)
+{
+    if (auto const* row = innermost_style_row_counter_style_invalidation(element))
+        invalidation |= row->invalidation;
+    return invalidation;
+}
+
 static void add_element_dependent_invalidation(CSS::RequiredInvalidationAfterStyleChange& invalidation, CSS::ComputedValues const& new_computed_values, ElementDependentInvalidationState const& old_state, DOM::AbstractElement& abstract_element)
 {
     // NB: Even if the computed value hasn't changed the resolved counter style may have (e.g. if the relevant
@@ -1522,7 +1575,9 @@ static CSS::StyleComputer::ComputedStyleInvalidation compute_required_invalidati
         ++abstract_element.document().style_invalidation_counters().style_record_property_damage_cache_hits;
     result = decode_style_record_invalidation(packed);
 
-    add_element_dependent_invalidation(result.invalidation, new_computed_values, old_state, abstract_element);
+    CSS::RequiredInvalidationAfterStyleChange counter_style_invalidation;
+    add_element_dependent_invalidation(counter_style_invalidation, new_computed_values, old_state, abstract_element);
+    add_counter_style_invalidation(result.invalidation, abstract_element.element(), counter_style_invalidation);
     return result;
 }
 
@@ -1668,7 +1723,22 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
         auto result = decode_style_record_invalidation(packed);
         if (result.any_computed_value_changed)
             document().style_invalidation_counters().element_computed_style_changes++;
-        invalidation |= result.invalidation;
+        if (counter_styles_changed) {
+            // The rebuild the counter styles add is post-style work; the move of the record alone is
+            // what the element's children react to.
+            auto const style_invalidation = decode_style_record_invalidation(CSS::StyleEngineFFI::style_engine_pseudo_element_record_damage(
+                style_computer.style_engine().rust_handle(),
+                style_node_id().value(),
+                to_underlying(pseudo_element),
+                old_style_record.value(),
+                engine_record->value(),
+                style_record_identity().value(),
+                false));
+            invalidation |= style_invalidation.invalidation;
+            add_counter_style_invalidation(invalidation, *this, result.invalidation);
+        } else {
+            invalidation |= result.invalidation;
+        }
 
         if (new_pseudo_element_style) {
             set_computed_style(pseudo_element, style_record_delta.new_style_record);
@@ -1733,7 +1803,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
     publish_custom_property_names();
     if (!invalidation.is_none())
         document().style_invalidation_counters().committed_style_observer_consequences++;
-    apply_computed_pseudo_element_styles_to_layout_nodes_if_needed(invalidation);
+    apply_computed_pseudo_element_styles_to_layout_nodes_if_needed(with_style_row_counter_style_invalidation(*this, invalidation));
     return invalidation;
 }
 
@@ -1741,9 +1811,9 @@ CSS::RequiredInvalidationAfterStyleChange Element::install_engine_pseudo_element
 {
     auto invalidation = recompute_pseudo_element_styles(did_change_custom_properties, old_is_list_item, old_originating_style, records);
     if (effect_drain)
-        effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), invalidation });
+        effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), with_style_row_counter_style_invalidation(*this, invalidation) });
     else
-        apply_computed_style_to_layout_node_if_needed(invalidation);
+        apply_computed_style_to_layout_node_if_needed(with_style_row_counter_style_invalidation(*this, invalidation));
     return invalidation;
 }
 
@@ -2378,9 +2448,9 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         invalidate_descendant_styles_depending_on_style_container_query();
     if (comparison == EngineRecordComparison::AtInstallation) {
         if (effect_drain)
-            effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), result.invalidation });
+            effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), with_style_row_counter_style_invalidation(*this, result.invalidation) });
         else
-            apply_computed_style_to_layout_node_if_needed(result.invalidation);
+            apply_computed_style_to_layout_node_if_needed(with_style_row_counter_style_invalidation(*this, result.invalidation));
     }
     return result.invalidation;
 }
@@ -2408,9 +2478,9 @@ CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style
         invalidation |= result.invalidation;
     }
     if (effect_drain)
-        effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), invalidation });
+        effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), with_style_row_counter_style_invalidation(*this, invalidation) });
     else
-        apply_computed_style_to_layout_node_if_needed(invalidation);
+        apply_computed_style_to_layout_node_if_needed(with_style_row_counter_style_invalidation(*this, invalidation));
     return invalidation;
 }
 
