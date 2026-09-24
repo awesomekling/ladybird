@@ -1,5 +1,4 @@
 initial: 1px, 1px
 wide: 40px, 60px
 engine answered: true
-value refusals: 0
 resized: 50px, 60px
