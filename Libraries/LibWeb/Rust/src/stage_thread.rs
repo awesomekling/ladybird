@@ -13,7 +13,8 @@
 //! waits for the result. Nothing runs concurrently, so the stages see exactly the state they would have seen on
 //! the calling thread, but everything they depend on that belongs to a thread (thread-local state,
 //! thread-bound handles, stack assumptions) is exercised the way a render thread will exercise it.
-//! Without the variable, stages run on the calling thread.
+//! Without the variable, stages run on the calling thread, unless they overlap by default
+//! ([`OVERLAP_BY_DEFAULT`]).
 //!
 //! A stage run can also join its caller: [`run_overlappable_stage_with_joins`] hands the stage a [`MainJoins`],
 //! through which it runs a piece of main-thread work on the waiting caller and continues with the
@@ -97,17 +98,22 @@ enum StageThreadMode {
     Overlap,
 }
 
+/// Whether the stages overlap without `LIBWEB_STAGE_THREAD`, as `LIBWEB_STAGE_THREAD=overlap` has
+/// them do. `LIBWEB_STAGE_OVERLAP=none` then runs them in place, as without the variable.
+const OVERLAP_BY_DEFAULT: bool = false;
+
 fn stage_thread_mode() -> Option<StageThreadMode> {
     static MODE: OnceLock<Option<StageThreadMode>> = OnceLock::new();
     *MODE.get_or_init(|| match std::env::var_os("LIBWEB_STAGE_THREAD") {
         Some(mode) if mode == "lockstep" => Some(StageThreadMode::Lockstep),
         Some(mode) if mode == "overlap" => Some(StageThreadMode::Overlap),
+        None if OVERLAP_BY_DEFAULT && !overlapping_stages().is_empty() => Some(StageThreadMode::Overlap),
         _ => None,
     })
 }
 
-/// The stages the rendering update submits under `LIBWEB_STAGE_THREAD=overlap`: a comma-separated
-/// list in `LIBWEB_STAGE_OVERLAP`, or the recording when it is not set.
+/// The stages the rendering update submits when the stages overlap: a comma-separated list in
+/// `LIBWEB_STAGE_OVERLAP` (`none` names none), or the recording when it is not set.
 fn overlapping_stages() -> &'static [String] {
     static STAGES: OnceLock<Vec<String>> = OnceLock::new();
     STAGES.get_or_init(|| {
@@ -115,7 +121,7 @@ fn overlapping_stages() -> &'static [String] {
             .unwrap_or_else(|_| "recording".into())
             .split(',')
             .map(|stage| stage.trim().to_owned())
-            .filter(|stage| !stage.is_empty())
+            .filter(|stage| !stage.is_empty() && stage != "none")
             .collect()
     })
 }
