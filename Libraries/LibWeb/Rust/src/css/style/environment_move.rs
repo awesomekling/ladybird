@@ -270,6 +270,7 @@ impl StyleEngineState {
         let existing_inheritable = self.inheritable_environment(existing);
         let moved_identity = moved.map_or(0, |held| held.identity);
         let moved_inheritable = self.inheritable_environment(moved_identity);
+        // A pseudo-element that takes the moved environment inherits it: it declares none of its own.
         for kind in kinds {
             let held = self.retained.pseudo_element_custom_property_data[&(element, kind)].identity;
             let replacement = if held == existing {
@@ -277,7 +278,7 @@ impl StyleEngineState {
                     animation_base: None,
                     identity: moved.identity,
                     is_animation_overlay: false,
-                    declares: moved.declares,
+                    declares: false,
                     data: moved
                         .data
                         .as_ref()
@@ -288,7 +289,7 @@ impl StyleEngineState {
                     animation_base: None,
                     identity: moved.identity,
                     is_animation_overlay: false,
-                    declares: moved.declares,
+                    declares: false,
                     data: moved
                         .data
                         .as_ref()
@@ -301,7 +302,7 @@ impl StyleEngineState {
                     animation_base: None,
                     identity: moved_inheritable,
                     is_animation_overlay: false,
-                    declares: self.environment_declares(moved_inheritable),
+                    declares: false,
                     data: None,
                 })
             } else {

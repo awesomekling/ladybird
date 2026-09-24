@@ -264,14 +264,24 @@ impl RetainedState {
     /// Keep the custom-property environment one of an element's synthetic pseudo-elements now holds;
     /// a null `data` is one holding none.
     ///
+    /// Unlike an element's, a pseudo-element's `declares` is whether what its own style resolves to
+    /// is not simply the environment its originating element passes on, which the host tells.
+    ///
     /// # Safety
-    /// `data` must be null or a live `Web::CSS::CustomPropertyData`.
+    /// `data` must be null or a live `Web::CSS::CustomPropertyData`, and `store` null or its store.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the environment and the one an overlay is over, as the element's"
+    )]
     pub(crate) unsafe fn set_pseudo_element_custom_property_data(
         &mut self,
         node: StyleNodeID,
         pseudo: u8,
         data: *const std::ffi::c_void,
+        store: *const std::ffi::c_void,
         environment: u64,
+        declares_own: bool,
+        animation_base: Option<(u64, *const std::ffi::c_void, *const std::ffi::c_void)>,
     ) {
         if data.is_null() {
             self.pseudo_element_custom_property_data.remove(&(node, pseudo));
@@ -289,10 +299,14 @@ impl RetainedState {
             (node, pseudo),
             HeldCustomPropertyEnvironment {
                 identity: environment,
-                is_animation_overlay: false,
-                declares: false,
-                data: Some(unsafe { RetainedCustomPropertyData::retain(data, std::ptr::null()) }),
-                animation_base: None,
+                is_animation_overlay: animation_base.is_some(),
+                declares: declares_own,
+                data: Some(unsafe { RetainedCustomPropertyData::retain(data, store) }),
+                animation_base: animation_base.map(|(environment, store, data)| AnimationBaseEnvironment {
+                    environment,
+                    store: crate::css::host_shared::HostShared::new(store),
+                    data: crate::css::host_shared::HostShared::new(data),
+                }),
             },
         );
     }
@@ -316,6 +330,31 @@ impl RetainedState {
         pseudo: u8,
     ) -> (*const std::ffi::c_void, u64) {
         Self::held_environment_answer(self.pseudo_element_custom_property_data.get(&(node, pseudo)))
+    }
+
+    /// What a sample of one of an element's synthetic pseudo-elements reads of the environment it
+    /// holds: its store, the identity and the store of the one its own style resolved to beneath
+    /// what its animations composed, and whether that one declares custom properties of its own.
+    /// Nulls for a pseudo-element holding none, and `None` where the engine has no store for it.
+    pub(crate) fn pseudo_element_custom_property_sample_inputs(
+        &self,
+        node: StyleNodeID,
+        pseudo: u8,
+    ) -> Option<(*const std::ffi::c_void, u64, *const std::ffi::c_void, bool)> {
+        let Some(held) = self.pseudo_element_custom_property_data.get(&(node, pseudo)) else {
+            return Some((std::ptr::null(), 0, std::ptr::null(), false));
+        };
+        let store = held
+            .data
+            .as_ref()
+            .map(|data| data.store.as_ptr())
+            .filter(|store| !store.is_null())
+            .or_else(|| self.custom_property_environments.store(held.identity))?;
+        let (base_environment, base_store) = held
+            .animation_base
+            .as_ref()
+            .map_or((held.identity, store), |base| (base.environment, base.store.as_ptr()));
+        Some((store, base_environment, base_store, held.declares))
     }
 
     /// Note that the element's style reads what a moved custom-property environment can change other
