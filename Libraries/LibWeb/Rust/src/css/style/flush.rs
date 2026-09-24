@@ -2569,7 +2569,6 @@ impl StyleEngineState {
                     }
                 };
                 let bail_marks = seal::is_reporting().then(|| counters.record_bail_marks());
-                let container_verdict_bails_before = counters.get(Counter::EngineComputedRecordBailContainerVerdict);
                 let engine_record_answer = engine_computed_gate_passes.then(|| {
                     // Unchanged winners stand for an unchanged record only when the reaction
                     // is rules flipping for the node, every one of them known and declaring
@@ -2665,18 +2664,6 @@ impl StyleEngineState {
                 // What this node tells its children, decided here, where it settles. Every
                 // processed node keeps a row, settled or not: that is what lets a
                 // descendant's fold stop at it instead of walking past it to the root.
-                let declined_by_the_drive = engine_computed_gate_passes
-                    && !skip_hidden
-                    && engine_computed_delta.is_none()
-                    && direct_inherited_delta.is_none();
-                // A verdict can become unsettled during the record drive, after the earlier
-                // ancestor check. Drive this row again once its preceding ancestors have
-                // installed their records and container inputs.
-                if declined_by_the_drive
-                    && counters.get(Counter::EngineComputedRecordBailContainerVerdict) != container_verdict_bails_before
-                {
-                    retry_after_ancestor = true;
-                }
                 if let Some(bail_marks) = bail_marks
                     && !skip_hidden
                     && engine_computed_delta.is_none()
