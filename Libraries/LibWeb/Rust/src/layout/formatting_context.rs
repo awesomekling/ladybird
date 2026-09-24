@@ -2348,8 +2348,10 @@ pub(crate) fn treat_block_axis_percentage_insets_as_auto_beyond_anonymous_child_
     )
 }
 
+/// What a layout stage runs on. The stage holds the arena exclusively while the owning thread
+/// waits for it, so the input is sendable because the arena is, not because it is shared.
 struct LayoutStageInput<'a> {
-    arena: &'a LayoutNodeArena,
+    arena: &'a mut LayoutNodeArena,
     root: NodeSlotId,
     viewport: NodeSlotId,
     viewport_inline_size_raw: i32,
@@ -2358,20 +2360,12 @@ struct LayoutStageInput<'a> {
     should_collect_devtools_layout_data: bool,
 }
 
-// SAFETY: DEBT: Layout still reads and mutates the document-owned arena through Cell and RefCell.
-// The FFI caller gives the stage exclusive logical ownership for this synchronous run. Split the
-// immutable layout-tree input and per-run scratch from the arena before moving layout to a thread.
-// NB: The text rows the pass shapes from are no longer part of this debt: they carry an
-// `Arc<libgfx_rust::font::FrozenFontList>`, which is `Sync` on its own terms.
-unsafe impl Sync for LayoutStageInput<'_> {}
-
 /// The fragments a layout stage computed, which its commit consumes on the document thread.
 pub(crate) struct LayoutStageOutput(fragment_tree::CompletedPassFragments);
 
 const _: () = {
-    const fn assert_sync<T: Sync>() {}
     const fn assert_send<T: Send>() {}
-    assert_sync::<LayoutStageInput<'static>>();
+    assert_send::<LayoutStageInput<'static>>();
     assert_send::<LayoutStageOutput>();
 };
 
@@ -2399,6 +2393,7 @@ fn run_root_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScratch) -
         document_in_quirks_mode,
         should_collect_devtools_layout_data,
     } = stage;
+    let arena: &LayoutNodeArena = arena;
     arena.begin_active_layout_pass();
     // NB: The tree builder derives the facts of rebuilt subtrees. Unclassified invalidations
     // require deriving them for the entire tree instead.
@@ -2614,8 +2609,9 @@ pub(crate) unsafe fn compute_root_layout(
     should_collect_devtools_layout_data: bool,
 ) -> LayoutStageOutput {
     // SAFETY: The host keeps the arena and its published inputs alive and unchanged for the
-    // synchronous stage run.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+    // synchronous stage run, and nothing else borrows the arena while the stage holds it.
+    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena_handle) };
+    let scratch = layout_scratch_for_stage(arena_handle, arena);
     let input = LayoutStageInput {
         arena,
         root,
@@ -2625,7 +2621,6 @@ pub(crate) unsafe fn compute_root_layout(
         document_in_quirks_mode,
         should_collect_devtools_layout_data,
     };
-    let scratch = layout_scratch_for_stage(arena_handle, arena);
     // SAFETY: The arena and its scratch belong to the waiting owner.
     unsafe { crate::stage_thread::run_stage(|| run_root_layout_stage(input, scratch)) }
 }
@@ -2784,6 +2779,7 @@ fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScr
         document_in_quirks_mode,
         should_collect_devtools_layout_data: _,
     } = stage;
+    let arena: &LayoutNodeArena = arena;
     arena.begin_active_layout_pass();
     let callbacks = LayoutPass::new(
         arena,
@@ -2886,8 +2882,9 @@ pub(crate) unsafe fn compute_subtree_layout_fragments(
     assert!(!arena_handle.is_null(), "layout node arena handle is null");
     assert!(!root.is_invalid());
     // SAFETY: The host keeps the arena and its published inputs alive and unchanged for the
-    // synchronous stage run.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+    // synchronous stage run, and nothing else borrows the arena while the stage holds it.
+    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena_handle) };
+    let scratch = layout_scratch_for_stage(arena_handle, arena);
     let input = LayoutStageInput {
         arena,
         root,
@@ -2897,7 +2894,6 @@ pub(crate) unsafe fn compute_subtree_layout_fragments(
         document_in_quirks_mode,
         should_collect_devtools_layout_data: false,
     };
-    let scratch = layout_scratch_for_stage(arena_handle, arena);
     // SAFETY: The arena and its scratch belong to the waiting owner.
     unsafe { crate::stage_thread::run_stage(|| compute_subtree_layout_stage(input, scratch)) }
 }

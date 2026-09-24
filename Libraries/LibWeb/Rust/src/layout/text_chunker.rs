@@ -78,6 +78,11 @@ pub(crate) struct IcuSegmenterHandle {
     raw: *mut c_void,
 }
 
+// SAFETY: The handle owns its ICU break iterator alone and destroys it exactly once. ICU objects may
+// be used from any thread so long as one thread at a time uses them, which owning the handle
+// guarantees; it is not `Sync`, because advancing the iterator writes its position.
+unsafe impl Send for IcuSegmenterHandle {}
+
 impl IcuSegmenterHandle {
     fn next_boundary(&self, index: usize, inclusive: bool) -> Option<usize> {
         // SAFETY: The handle is live until drop, and the text it references
