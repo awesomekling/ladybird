@@ -301,9 +301,9 @@ void record_element_connected(DOM::Element& element)
     // The name the document knows the element by arrives with the identity. A box built for one of
     // the element's pseudo-elements answers by it even when the element itself has no box.
     style_engine->set_element_unique_node_id(element.style_node_id(), static_cast<u64>(element.unique_id().value()));
-    // An identity the engine has just minted names an element that may already hold a
-    // custom-property environment, and its descendants inherit from that one.
-    element.publish_custom_property_data_to_style_engine();
+    // An element the engine has just minted an identity for holds no custom-property environment
+    // yet: the engine keeps it, and installing the element's style gives it one.
+    style_engine->set_element_custom_property_data(element.style_node_id(), nullptr);
     Layout::publish_table_spans(element);
     record_element_arrival_delta(element, *style_engine, tree_scope_of(element.root()));
     ensure_dom_order_parent_identity(element.parent(), *style_engine);
@@ -427,7 +427,7 @@ void record_subtree_connecting(DOM::Node& root)
                 element->set_style_node_id(identity);
                 style_computer.register_style_node(identity, *element);
                 style_engine.set_element_unique_node_id(identity, static_cast<u64>(element->unique_id().value()));
-                element->publish_custom_property_data_to_style_engine();
+                style_engine.set_element_custom_property_data(identity, nullptr);
                 Layout::publish_table_spans(*element);
             } else {
                 auto identity = identities[next_shadow_root_identity++];

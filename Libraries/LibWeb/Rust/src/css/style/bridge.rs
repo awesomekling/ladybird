@@ -4467,6 +4467,18 @@ pub unsafe extern "C" fn style_engine_set_element_custom_property_data(
     unsafe { engine.set_element_custom_property_data(node, data, store, environment) };
 }
 
+/// The custom-property environment an element holds, as it was last kept. Null when it holds none.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_element_custom_property_data(engine: *const c_void, node: u32) -> *const c_void {
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    StyleNodeID::from_raw(node)
+        .and_then(|node| engine.element_custom_property_data(node))
+        .unwrap_or(std::ptr::null())
+}
+
 /// Keep the sampled custom-property values of an animation as a published input. Its environment
 /// identity is already installed on the element. Return the reactions derived from the element's
 /// retained declarations and from which sampled names its descendants inherit.
