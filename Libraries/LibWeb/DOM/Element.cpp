@@ -1371,6 +1371,9 @@ void Element::did_publish_presentational_hint_properties(ReadonlySpan<CSS::Style
 
 void Element::run_attribute_change_steps(Utf16FlyString const& local_name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
 {
+    // An attribute change writes the facts the style mirror keeps of the element as it goes.
+    document().join_frame_for_dom_tree_mutation();
+
     attribute_changed(local_name, old_value, value, namespace_);
 
     // Published here rather than inside attribute_changed, because that function returns early for
