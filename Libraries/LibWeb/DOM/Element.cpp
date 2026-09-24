@@ -5349,12 +5349,17 @@ void Element::install_custom_property_data(Optional<CSS::PseudoElement> pseudo_e
             return;
         auto& style_engine = document().style_computer().style_engine();
         if (!pseudo_element.has_value()) {
-            style_engine.set_element_custom_property_data(style_node, data.ptr());
+            // The engine moves an element's environment when the one it inherits moves: what it
+            // needs to know is whether this is an animation overlay, and whether what the element's
+            // style resolves to declares custom properties of its own.
+            bool const is_animation_overlay = data && data->is_animation_overlay_for({ *this });
+            auto base = is_animation_overlay ? data->parent() : data;
+            style_engine.set_element_custom_property_data(style_node, data.ptr(), is_animation_overlay, base && base->declared_count() > 0);
             return;
         }
         if (data)
             (void)ensure_synthetic_pseudo_element(pseudo_element.value());
-        CSS::StyleEngineFFI::style_engine_set_pseudo_element_custom_property_data(style_engine.rust_handle(), style_node.value(), to_underlying(pseudo_element.value()), data.ptr());
+        CSS::StyleEngineFFI::style_engine_set_pseudo_element_custom_property_data(style_engine.rust_handle(), style_node.value(), to_underlying(pseudo_element.value()), data.ptr(), data ? data->identity() : 0);
         return;
     }
 
@@ -5391,10 +5396,16 @@ RefPtr<CSS::CustomPropertyData const> Element::custom_property_data(Optional<CSS
         auto style_node = style_node_id();
         if (style_node == 0)
             return nullptr;
-        auto const* engine = document().style_computer().style_engine().rust_handle();
-        if (!pseudo_element.has_value())
-            return static_cast<CSS::CustomPropertyData const*>(CSS::StyleEngineFFI::style_engine_element_custom_property_data(engine, style_node.value()));
-        return static_cast<CSS::CustomPropertyData const*>(CSS::StyleEngineFFI::style_engine_pseudo_element_custom_property_data(engine, style_node.value(), to_underlying(pseudo_element.value())));
+        auto const& style_computer = document().style_computer();
+        auto const* engine = style_computer.style_engine().rust_handle();
+        u64 identity = 0;
+        auto const* data = !pseudo_element.has_value()
+            ? CSS::StyleEngineFFI::style_engine_element_custom_property_data(engine, style_node.value(), &identity)
+            : CSS::StyleEngineFFI::style_engine_pseudo_element_custom_property_data(engine, style_node.value(), to_underlying(pseudo_element.value()), &identity);
+        if (data)
+            return static_cast<CSS::CustomPropertyData const*>(data);
+        // An environment the engine moved the element to is one it resolved; the host views it.
+        return style_computer.engine_custom_property_environment(identity);
     }
 
     if (auto existing_pseudo_element = get_pseudo_element(pseudo_element.value()); existing_pseudo_element.has_value())

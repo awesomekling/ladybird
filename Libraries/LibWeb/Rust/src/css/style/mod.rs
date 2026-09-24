@@ -68,6 +68,7 @@ mod custom_property_environments;
 mod deferred_pseudo;
 #[cfg(test)]
 mod differential_tests;
+mod environment_move;
 pub mod exact_matcher;
 pub use crate::fast_hash;
 mod flush;
@@ -891,10 +892,10 @@ pub struct RetainedState {
     /// properties is not the reason a walk to the element it inherits from happens. This is the only
     /// copy: the host reads an element's environment from here. `None` records an element holding
     /// none; a missing entry records an element the engine was never told about.
-    element_custom_property_data: HashMap<StyleNodeID, Option<inputs::RetainedCustomPropertyData>>,
+    element_custom_property_data: HashMap<StyleNodeID, Option<inputs::HeldCustomPropertyEnvironment>>,
     /// The custom-property environment each of an element's synthetic pseudo-elements holds, by the
     /// pseudo-element's kind. The host reads it from here; a missing entry is one holding none.
-    pseudo_element_custom_property_data: HashMap<(StyleNodeID, u8), inputs::RetainedCustomPropertyData>,
+    pseudo_element_custom_property_data: HashMap<(StyleNodeID, u8), inputs::HeldCustomPropertyEnvironment>,
     /// The environment each element's animations sampled custom properties into, over the one its
     /// own declarations resolve to. Its own values substitute under it.
     sampled_custom_property_environments: HashMap<StyleNodeID, u64>,
@@ -1186,6 +1187,8 @@ pub struct HostState {
     /// one. `None` is a held record without a box group. The host reports every record it installs
     /// or clears, so this is the element's host state exactly, between any two of its reports.
     held_style_record_displays: HashMap<StyleNodeID, Option<crate::css::display::FfiDisplay>>,
+    /// The record each element holds in the host, kept from the same reports.
+    held_style_records: HashMap<StyleNodeID, u64>,
     /// The element whose style reaction the host is applying, with what it held when the
     /// application began: `None` for an element without style.
     style_reaction_row_start: Option<(StyleNodeID, Option<Option<crate::css::display::FfiDisplay>>)>,

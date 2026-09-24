@@ -1112,7 +1112,7 @@ impl RetainedState {
         store.unwrap_or(std::ptr::null())
     }
 
-    fn inheritable_custom_property_environment(
+    pub(super) fn inheritable_custom_property_environment(
         &mut self,
         parent: u64,
         inputs: &bridge::FfiDocumentStyleComputationInputs,

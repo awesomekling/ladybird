@@ -4468,24 +4468,59 @@ pub unsafe extern "C" fn style_engine_set_element_custom_property_data(
     data: *const c_void,
     store: *const c_void,
     environment: u64,
+    is_animation_overlay: bool,
+    declares: bool,
 ) {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return;
     };
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    unsafe { engine.set_element_custom_property_data(node, data, store, environment) };
+    unsafe { engine.set_element_custom_property_data(node, data, store, environment, is_animation_overlay, declares) };
 }
 
-/// The custom-property environment an element holds, as it was last kept. Null when it holds none.
+/// The custom-property environment an element holds: the host's object for it, or null with the
+/// identity of an environment the engine resolved in `identity`, or null and zero for none.
 ///
 /// # Safety
-/// `engine` must be live.
+/// `engine` must be live and `identity` must be writable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_element_custom_property_data(engine: *const c_void, node: u32) -> *const c_void {
+pub unsafe extern "C" fn style_engine_element_custom_property_data(
+    engine: *const c_void,
+    node: u32,
+    identity: *mut u64,
+) -> *const c_void {
     let engine = unsafe { &*engine.cast::<StyleEngine>() };
-    StyleNodeID::from_raw(node)
-        .and_then(|node| engine.element_custom_property_data(node))
-        .unwrap_or(std::ptr::null())
+    let (data, environment) =
+        StyleNodeID::from_raw(node).map_or((std::ptr::null(), 0), |node| engine.element_custom_property_data(node));
+    unsafe { *identity = environment };
+    data
+}
+
+/// Moves the custom-property environments below `origin`, whose own moved from `old_base` to
+/// `new_base`, and hands `moved_record` each record the move republished, for the host to install
+/// once the move is done.
+///
+/// # Safety
+/// `engine` must be live, and `moved_record` must be callable with `context`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_move_custom_property_environment(
+    engine: *mut c_void,
+    origin: u32,
+    old_base: u64,
+    new_base: u64,
+    moved_record: unsafe extern "C" fn(*mut c_void, u32, u64),
+    context: *mut c_void,
+) {
+    let Some(origin) = StyleNodeID::from_raw(origin) else {
+        return;
+    };
+    let moved_records = {
+        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+        engine.move_custom_property_environment(origin, old_base, new_base)
+    };
+    for (node, record) in moved_records {
+        unsafe { moved_record(context, node.raw(), record) };
+    }
 }
 
 /// Notes that the element's style reads what a moved custom-property environment can change other
@@ -4527,29 +4562,33 @@ pub unsafe extern "C" fn style_engine_set_pseudo_element_custom_property_data(
     node: u32,
     pseudo: u8,
     data: *const c_void,
+    environment: u64,
 ) {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return;
     };
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    unsafe { engine.set_pseudo_element_custom_property_data(node, pseudo, data) };
+    unsafe { engine.set_pseudo_element_custom_property_data(node, pseudo, data, environment) };
 }
 
-/// The custom-property environment one of an element's synthetic pseudo-elements holds. Null when
-/// it holds none.
+/// The custom-property environment one of an element's synthetic pseudo-elements holds, as
+/// `style_engine_element_custom_property_data` answers for the element.
 ///
 /// # Safety
-/// `engine` must be live.
+/// `engine` must be live and `identity` must be writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_pseudo_element_custom_property_data(
     engine: *const c_void,
     node: u32,
     pseudo: u8,
+    identity: *mut u64,
 ) -> *const c_void {
     let engine = unsafe { &*engine.cast::<StyleEngine>() };
-    StyleNodeID::from_raw(node).map_or(std::ptr::null(), |node| {
+    let (data, environment) = StyleNodeID::from_raw(node).map_or((std::ptr::null(), 0), |node| {
         engine.pseudo_element_custom_property_data(node, pseudo)
-    })
+    });
+    unsafe { *identity = environment };
+    data
 }
 
 /// Keep the sampled custom-property values of an animation as a published input. Its environment
