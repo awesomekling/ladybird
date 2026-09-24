@@ -2593,12 +2593,12 @@ impl RetainedState {
         } else {
             None
         };
-        let Lookup::Known(cascade_state) = self.current_winner_groups().token_for(winner_key) else {
-            unreachable!("the node's winners were republished from its answer");
-        };
+        // A row left without winners has no cached record to take; the drive below answers it.
+        let cascade_state = self.driven_element_winners(node, winner_key, counters);
         // An armed row's answer may declare past its winners: a record computed from it is no
         // function of the winner state the cold record cache is keyed by.
-        if !scratch.font_drive.is_pending()
+        if let Some(cascade_state) = cascade_state
+            && !scratch.font_drive.is_pending()
             && !(armed && self.computed_group_sets.node_answer_is_incomplete(node))
             && !self.node_declares_custom_properties(node)
             && self.state_container_unit_mask(node, cascade_state.1) == 0
