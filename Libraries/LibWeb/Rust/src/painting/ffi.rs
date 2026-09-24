@@ -2559,10 +2559,16 @@ pub unsafe extern "C" fn layout_arena_publish_scroll_offset(
     arena: *mut c_void,
     slot: NodeSlotId,
     offset: FfiCssPixelPoint,
+    dom_target_stores_offset: bool,
 ) {
-    unsafe { arena_from_handle(arena) }
-        .scroll_offsets()
-        .publish(slot, offset.into());
+    let arena = unsafe { arena_from_handle(arena) };
+    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
+    arena.set_node_flag(
+        slot,
+        crate::layout::node_data::NodeFlag::HasScrollOffset,
+        dom_target_stores_offset,
+    );
+    arena.scroll_offsets().publish(slot, offset.into());
 }
 
 /// One `<area>` of an image map, as the document hands it over: the style-tree identity to name as

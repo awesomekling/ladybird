@@ -1070,8 +1070,7 @@ void Node::publish_scroll_offset()
 
 void Node::publish_own_scroll_offset()
 {
-    set_flag(RustFFI::NodeFlag::HasScrollOffset, dom_target_stores_scroll_offset());
-    RustFFI::layout_arena_publish_scroll_offset(m_arena->handle(), m_slot, dom_target_scroll_offset());
+    RustFFI::layout_arena_publish_scroll_offset(m_arena->handle(), m_slot, dom_target_scroll_offset(), dom_target_stores_scroll_offset());
 }
 
 // The same three answers the render side used to ask the document for, in the same order: the
