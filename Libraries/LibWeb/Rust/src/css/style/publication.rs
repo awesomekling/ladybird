@@ -338,9 +338,9 @@ impl RetainedState {
         use crate::css::property_metadata::{FIRST_LONGHAND_PROPERTY_ID, LONGHAND_WORD_COUNT};
 
         let target = computed::ComputedStyleTarget::new(node, u8::MAX);
-        if self.backs_host_pseudo_element(node) {
+        if let Some(backed) = self.backed_host_pseudo_element(node) {
             return self
-                .engine_backing_element_record(node, cascade_winners_are_complete, scratch, counters)
+                .engine_backing_element_record(node, backed, cascade_winners_are_complete, scratch, counters)
                 .map(ElementAnswer::Delta);
         }
         // The winners hold a gated rule where its container conditions held when they were

@@ -976,8 +976,15 @@ impl RetainedState {
     /// a `::placeholder` or a slider part is): its style is that pseudo-element's, cascaded from
     /// the host's rules, and its own cascade decides nothing.
     pub(crate) fn backs_host_pseudo_element(&self, node: StyleNodeID) -> bool {
-        self.computed_group_sets.adjustment_facts(node) & bridge::element_adjustment_fact::IS_SHADOW_HOST_PSEUDO_ELEMENT
-            != 0
+        self.backed_host_pseudo_element(node).is_some()
+    }
+
+    /// The pseudo-element kind an element stands for and the shadow host it stands for it on. The
+    /// host publishes the kind with the element's facts, and an element in no shadow tree stands
+    /// for nothing.
+    pub(super) fn backed_host_pseudo_element(&self, node: StyleNodeID) -> Option<(u8, StyleNodeID)> {
+        let kind = self.computed_group_sets.associated_pseudo_kind(node)?;
+        Some((kind, self.tree.shadow_host_of(node)?))
     }
 
     /// The host's matches for the pseudo-element an element stands for, when the element's record
@@ -1088,6 +1095,7 @@ impl RetainedState {
     pub(super) fn engine_backing_element_record(
         &mut self,
         node: StyleNodeID,
+        (kind, host): (u8, StyleNodeID),
         backing_answer_is_complete: bool,
         scratch: &mut EngineComputedRecordScratch,
         counters: &mut Counters,
@@ -1112,8 +1120,6 @@ impl RetainedState {
             None => false,
         };
         let animates = facts & fact::HAS_ANIMATIONS != 0 || holds_an_overlay;
-        let kind = self.computed_group_sets.associated_pseudo_kind(node).or_refused()?;
-        let host = self.tree.shadow_host_of(node).or_refused()?;
         let target = tree::PseudoElementTarget::new(tree::PseudoElementKind(u16::from(kind)));
         // The host's rules for the pseudo-element, cascaded as the element's own with its own
         // declarations, as C++ cascades them for it.
