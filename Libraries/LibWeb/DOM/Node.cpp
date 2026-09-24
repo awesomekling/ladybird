@@ -1925,6 +1925,8 @@ WebIDL::ExceptionOr<void> Node::move_node(Node& new_parent, Node* child)
             return WebIDL::HierarchyRequestError::create("Invalid node type for insertion"_utf16);
     }
 
+    document().join_frame_for_dom_tree_mutation();
+
     // 7. Let oldParent be node’s parent.
     auto* old_parent = this->parent();
 
