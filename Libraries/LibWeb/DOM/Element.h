@@ -340,13 +340,16 @@ public:
     };
     // What the style engine answered a record's installation damages, for the move from the record
     // it names. A move from any other record is compared at installation.
+    // A pseudo-element's answer is also for the originating element's record it names.
     struct EngineRecordDamage {
         CSS::StyleRecordID old_style_record;
         u32 packed { 0 };
+        CSS::StyleRecordID originating_style_record {};
     };
     // An installation given a drain leaves its render-side effects (the layout node restyle, the
     // anchor name registry) there, for its batch to apply once the batch is installed.
-    CSS::RequiredInvalidationAfterStyleChange apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const&, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison = EngineRecordComparison::AtInstallation, Optional<EngineRecordDamage> = {}, CSS::StyleEffectDrain* = nullptr);
+    using EnginePseudoElementDamages = Array<Optional<EngineRecordDamage>, to_underlying(CSS::PseudoElement::KnownPseudoElementCount)>;
+    CSS::RequiredInvalidationAfterStyleChange apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const&, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison = EngineRecordComparison::AtInstallation, Optional<EngineRecordDamage> = {}, EnginePseudoElementDamages const* = nullptr, CSS::StyleEffectDrain* = nullptr);
     // Compare the record an AfterSample installation left, now sampled, with the style the element
     // held before it, and apply the result to the element's layout node.
     CSS::RequiredInvalidationAfterStyleChange compare_engine_computed_style_record_after_sample(CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange installation_invalidation, CSS::StyleEffectDrain* = nullptr);
@@ -902,7 +905,7 @@ private:
     Utf16FlyString make_html_uppercased_qualified_name() const;
 
     void exit_fullscreen_on_element_removal();
-    CSS::RequiredInvalidationAfterStyleChange recompute_pseudo_element_styles(bool& did_change_custom_properties, bool had_list_marker, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const* = nullptr);
+    CSS::RequiredInvalidationAfterStyleChange recompute_pseudo_element_styles(bool& did_change_custom_properties, bool had_list_marker, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const* = nullptr, EnginePseudoElementDamages const* = nullptr);
     void apply_computed_pseudo_element_styles_to_layout_nodes_if_needed(CSS::RequiredInvalidationAfterStyleChange const&);
     void publish_custom_property_names();
     void replace_style_record(CSS::StyleRecordID);

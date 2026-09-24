@@ -607,7 +607,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
             // The engine settled the element's record, and the pseudo-element records beside it:
             // C++ installs them.
             auto engine_record_comparison = DOM::Element::EngineRecordComparison::AtInstallation;
-            auto apply_engine_computed_records = [&](DOM::Element::EnginePseudoElementRecords const& pseudo_element_records, bool acknowledge) {
+            auto apply_engine_computed_records = [&](DOM::Element::EnginePseudoElementRecords const& pseudo_element_records, bool acknowledge, DOM::Element::EnginePseudoElementDamages const* pseudo_element_damages = nullptr) {
                 auto& style_engine = document.style_computer().style_engine();
                 document.style_computer().pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(DOM::AbstractElement { *element });
                 // A first record answers the element's recorded arrival; nothing is left for a
@@ -628,7 +628,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                 Optional<DOM::Element::EngineRecordDamage> engine_record_damage;
                 if (reaction.record_damage & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::EngineComputed))
                     engine_record_damage = DOM::Element::EngineRecordDamage { StyleRecordID { reaction.old_style_record }, reaction.record_damage };
-                invalidation = element->apply_engine_computed_style_record(new_style_record, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties, engine_record_comparison, engine_record_damage, &row_effects);
+                invalidation = element->apply_engine_computed_style_record(new_style_record, pseudo_element_records, reaction.uses_substitution, did_change_custom_properties, engine_record_comparison, engine_record_damage, pseudo_element_damages, &row_effects);
                 // What the row's container conditions read of its containers, recorded as the host
                 // records it for a row it computes.
                 auto container_effects = StyleEngineFFI::style_engine_take_container_effects(style_engine.rust_handle(), reaction.style_node);
@@ -677,8 +677,13 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                     }
                 }
                 auto pseudo_element_records = retried_pseudo_element_records.value_or({});
-                for (auto next = reaction_index + 1; next < reactions.size() && reactions[next].style_node == published_reaction.style_node && reactions[next].pseudo_kind != NumericLimits<u8>::max(); ++next)
-                    pseudo_element_records[reactions[next].pseudo_kind] = StyleRecordID { reactions[next].new_style_record };
+                DOM::Element::EnginePseudoElementDamages pseudo_element_damages {};
+                for (auto next = reaction_index + 1; next < reactions.size() && reactions[next].style_node == published_reaction.style_node && reactions[next].pseudo_kind != NumericLimits<u8>::max(); ++next) {
+                    auto const& pseudo_reaction = reactions[next];
+                    pseudo_element_records[pseudo_reaction.pseudo_kind] = StyleRecordID { pseudo_reaction.new_style_record };
+                    if (pseudo_reaction.record_damage & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::EngineComputed))
+                        pseudo_element_damages[pseudo_reaction.pseudo_kind] = DOM::Element::EngineRecordDamage { StyleRecordID { pseudo_reaction.old_style_record }, pseudo_reaction.record_damage, StyleRecordID { published_reaction.new_style_record } };
+                }
                 // The row's own effects come with the decision that settled it, whether or not
                 // the record is the one that installs: a C++ computation of this element runs the
                 // transition step itself, so the debt is discharged either way.
@@ -722,7 +727,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         && (animation_plan.has_value() || element->has_relevant_animations() || element->has_associated_animations()
                             || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
                         engine_record_comparison = DOM::Element::EngineRecordComparison::AfterSample;
-                    apply_engine_computed_records(pseudo_element_records, false);
+                    apply_engine_computed_records(pseudo_element_records, false, &pseudo_element_damages);
                     DOM::AbstractElement settled { *element };
                     if (animation_plan.has_value()) {
                         document.style_computer().apply_settled_animation_plan(settled, *animation_plan);

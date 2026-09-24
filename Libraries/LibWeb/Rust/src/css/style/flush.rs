@@ -2843,6 +2843,34 @@ impl StyleEngineState {
                 } else {
                     0
                 };
+                // What each pseudo-element's move damages is answered with its record too, from the
+                // two records and the element's new one. The host's counter-style comparison is
+                // post-style work it adds itself.
+                let pseudo_rows: Vec<(u8, u64, u64, u32)> = pseudo_rows
+                    .into_iter()
+                    .map(|(kind, old_pseudo_record, new_pseudo_record)| {
+                        let is_live = |record: u64| {
+                            record == 0 || self.retained.computed_group_sets.style_record_view(record).is_some()
+                        };
+                        let pseudo_damage = if new_style_record != 0
+                            && is_live(new_style_record)
+                            && is_live(old_pseudo_record)
+                            && is_live(new_pseudo_record)
+                        {
+                            self.retained.pseudo_element_record_damage(
+                                node,
+                                kind,
+                                old_pseudo_record,
+                                new_pseudo_record,
+                                new_style_record,
+                                false,
+                            ) | bridge::FfiStyleInvalidationField::EngineComputed as u32
+                        } else {
+                            0
+                        };
+                        (kind, old_pseudo_record, new_pseudo_record, pseudo_damage)
+                    })
+                    .collect();
                 let style_delta = PublishedStyleDeltaRecord {
                     style_node: node.raw(),
                     match_answer: answer_cascade_input.map_or(0, |cascade_input| cascade_input.0),
@@ -2869,7 +2897,7 @@ impl StyleEngineState {
                 };
                 if let Some(record_deltas) = &mut record_deltas {
                     let mut node_deltas = vec![style_delta];
-                    for &(kind, old_pseudo_record, new_pseudo_record) in &pseudo_rows {
+                    for &(kind, old_pseudo_record, new_pseudo_record, pseudo_damage) in &pseudo_rows {
                         node_deltas.push(PublishedStyleDeltaRecord {
                             style_node: node.raw(),
                             match_answer: style_delta.match_answer,
@@ -2881,7 +2909,7 @@ impl StyleEngineState {
                             pseudo_kind: kind,
                             gap: FfiStyleDeltaGap::Computed,
                             uses_substitution: false,
-                            record_damage: 0,
+                            record_damage: pseudo_damage,
                         });
                     }
                     record_deltas[published_index] = Some(node_deltas);
@@ -2895,7 +2923,7 @@ impl StyleEngineState {
                     }
                     style_deltas.push(style_delta);
                     {
-                        for &(kind, old_pseudo_record, new_pseudo_record) in &pseudo_rows {
+                        for &(kind, old_pseudo_record, new_pseudo_record, pseudo_damage) in &pseudo_rows {
                             if style_deltas.len() == style_deltas.capacity() {
                                 style_deltas.reserve(1);
                                 style_delta_memory.resize_required_to(
@@ -2914,7 +2942,7 @@ impl StyleEngineState {
                                 pseudo_kind: kind,
                                 gap: FfiStyleDeltaGap::Computed,
                                 uses_substitution: false,
-                                record_damage: 0,
+                                record_damage: pseudo_damage,
                             });
                         }
                     }

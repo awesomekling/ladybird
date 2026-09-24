@@ -1594,7 +1594,7 @@ static void record_element_reference_pseudo_element_inputs(Element& element)
     }
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styles(bool&, bool had_list_marker, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const* engine_pseudo_element_records)
+CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styles(bool&, bool had_list_marker, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const* engine_pseudo_element_records, EnginePseudoElementDamages const* engine_pseudo_element_damages)
 {
     CSS::RequiredInvalidationAfterStyleChange invalidation;
 
@@ -1710,35 +1710,35 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
                 counter_styles_changed = !counter_style_invalidation.is_none();
             }
         }
-        auto packed = CSS::StyleEngineFFI::style_engine_pseudo_element_record_damage(
-            style_computer.style_engine().rust_handle(),
-            style_node_id().value(),
-            to_underlying(pseudo_element),
-            old_style_record.value(),
-            engine_record->value(),
-            style_record_identity().value(),
-            counter_styles_changed);
-        if (packed & to_underlying(CSS::StyleEngineFFI::FfiStyleInvalidationField::CacheHit))
-            ++document().style_invalidation_counters().style_record_property_damage_cache_hits;
-        auto result = decode_style_record_invalidation(packed);
-        if (result.any_computed_value_changed)
-            document().style_invalidation_counters().element_computed_style_changes++;
-        if (counter_styles_changed) {
-            // The rebuild the counter styles add is post-style work; the move of the record alone is
-            // what the element's children react to.
-            auto const style_invalidation = decode_style_record_invalidation(CSS::StyleEngineFFI::style_engine_pseudo_element_record_damage(
+        auto record_damage = [&](bool with_counter_styles_changed) {
+            return CSS::StyleEngineFFI::style_engine_pseudo_element_record_damage(
                 style_computer.style_engine().rust_handle(),
                 style_node_id().value(),
                 to_underlying(pseudo_element),
                 old_style_record.value(),
                 engine_record->value(),
                 style_record_identity().value(),
-                false));
-            invalidation |= style_invalidation.invalidation;
-            add_counter_style_invalidation(invalidation, *this, result.invalidation);
-        } else {
-            invalidation |= result.invalidation;
+                with_counter_styles_changed);
+        };
+        // The engine answered the record with what the move from the pseudo-element record it names
+        // damages, beside the originating record it names.
+        Optional<u32> answered_damage;
+        if (engine_pseudo_element_damages) {
+            if (auto const& damage = engine_pseudo_element_damages->at(to_underlying(pseudo_element));
+                damage.has_value() && damage->old_style_record == old_style_record && damage->originating_style_record == style_record_identity())
+                answered_damage = damage->packed;
         }
+        auto packed = answered_damage.value_or_lazy_evaluated([&] { return record_damage(false); });
+        if (packed & to_underlying(CSS::StyleEngineFFI::FfiStyleInvalidationField::CacheHit))
+            ++document().style_invalidation_counters().style_record_property_damage_cache_hits;
+        auto result = decode_style_record_invalidation(packed);
+        if (result.any_computed_value_changed)
+            document().style_invalidation_counters().element_computed_style_changes++;
+        invalidation |= result.invalidation;
+        // The rebuild the counter styles add is post-style work; the move of the record alone is what
+        // the element's children react to.
+        if (counter_styles_changed)
+            add_counter_style_invalidation(invalidation, *this, decode_style_record_invalidation(record_damage(true)).invalidation);
 
         if (new_pseudo_element_style) {
             set_computed_style(pseudo_element, style_record_delta.new_style_record);
@@ -2308,7 +2308,7 @@ void Element::republish_animation_name_registry()
     CSS::record_element_animation_names(*this, indexable_animation_names(*style));
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison comparison, Optional<EngineRecordDamage> engine_record_damage, CSS::StyleEffectDrain* effect_drain)
+CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, bool& did_change_custom_properties, EngineRecordComparison comparison, Optional<EngineRecordDamage> engine_record_damage, EnginePseudoElementDamages const* pseudo_element_damages, CSS::StyleEffectDrain* effect_drain)
 {
     VERIFY(parent());
     auto old_style_record = style_record_identity();
@@ -2367,7 +2367,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         counters.element_computed_style_changes++;
         auto invalidation = CSS::RequiredInvalidationAfterStyleChange::full();
         if (!CSS::deferring_engine_pseudo_installation())
-            invalidation |= recompute_pseudo_element_styles(did_change_custom_properties, false, nullptr, &pseudo_element_records);
+            invalidation |= recompute_pseudo_element_styles(did_change_custom_properties, false, nullptr, &pseudo_element_records, pseudo_element_damages);
         publish_custom_property_names();
         if (effect_drain)
             effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), invalidation });
@@ -2442,7 +2442,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     }
     // The pseudo-element records the engine settled beside this one install with it.
     if (!CSS::deferring_engine_pseudo_installation())
-        result.invalidation |= recompute_pseudo_element_styles(did_change_custom_properties, old_computed_values->display().is_list_item(), &*old_computed_values, &pseudo_element_records);
+        result.invalidation |= recompute_pseudo_element_styles(did_change_custom_properties, old_computed_values->display().is_list_item(), &*old_computed_values, &pseudo_element_records, pseudo_element_damages);
     publish_custom_property_names();
     if (new_style_record != old_style_record || did_change_custom_properties)
         invalidate_descendant_styles_depending_on_style_container_query();
