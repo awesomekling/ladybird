@@ -29,6 +29,7 @@
 #include <LibWeb/HighResolutionTime/Performance.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
@@ -452,9 +453,33 @@ static GC::RootVector<GC::Ref<Page>> pages_of_local_roots()
     return pages;
 }
 
+// Under LIBWEB_STAGE_THREAD=overlap, the main thread spins this event loop while an overlapping render stage runs, so
+// that tasks run concurrently with it.
+static void install_stage_overlap_host_if_wanted()
+{
+    if (!Layout::RustFFI::rust_stage_thread_wants_overlap_host())
+        return;
+    // Set once, before the first overlapping stage is handed to the stage thread that reads it.
+    static Core::WeakEventLoopReference* s_main_event_loop = nullptr;
+    s_main_event_loop = &Core::EventLoop::current_weak().leak_ref();
+    Layout::RustFFI::rust_stage_thread_set_overlap_host({
+        .spin_until = [](bool (*done)(void*), void* context) {
+            auto& event_loop = main_thread_event_loop();
+            // Only a rendering update with no script on the stack lets other tasks run; a stage started anywhere else
+            // is one its caller needs the result of right away, as script reading layout does.
+            if (!event_loop.running_rendering_task() || !Bindings::main_thread_vm().execution_context_stack().is_empty())
+                return;
+            event_loop.spin_until(GC::create_function(GC::Heap::the(), [done, context] { return done(context); })); },
+        .wake = [] {
+            if (auto event_loop = s_main_event_loop->take(); event_loop.is_alive())
+                event_loop->wake(); },
+    });
+}
+
 // https://html.spec.whatwg.org/multipage/webappapis.html#update-the-rendering
 void EventLoop::update_the_rendering()
 {
+    install_stage_overlap_host_if_wanted();
     VERIFY(!m_running_rendering_task);
     m_running_rendering_task = true;
     for (auto const& page : pages_of_local_roots())

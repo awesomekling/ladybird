@@ -3215,6 +3215,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             manifest_dir.join("src/painting/layout_tree_dump.rs"),
             manifest_dir.join("src/painting/ffi.rs"),
             manifest_dir.join("src/painting/ffi/main_thread_entries.rs"),
+            manifest_dir.join("src/stage_thread.rs"),
         ],
         &out_dir,
         Path::new("Layout/LayoutRustFFI.h"),

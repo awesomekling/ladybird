@@ -1354,7 +1354,7 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
             inputs: recording_inputs,
         };
         // SAFETY: The arena and its scratch belong to this thread, which waits for the stage.
-        unsafe { crate::stage_thread::run_stage(|| record_display_list_stage(input)) }
+        unsafe { crate::stage_thread::run_overlappable_stage("recording", || record_display_list_stage(input)) }
     };
     // SAFETY: The stage has returned the arena.
     let arena = unsafe { arena_from_handle(arena_handle) };
@@ -1374,7 +1374,8 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
 }
 
 /// Runs `handoff(context)`, which hands a navigable's finished frame to its compositor frame sink,
-/// as a render stage: on the stage thread under `LIBWEB_STAGE_THREAD=lockstep`, here otherwise.
+/// as a render stage: on the stage thread under `LIBWEB_STAGE_THREAD=lockstep` or `overlap`, here
+/// otherwise.
 ///
 /// # Safety
 ///
@@ -1386,7 +1387,7 @@ pub unsafe extern "C" fn rust_run_compositor_frame_handoff_stage(
     context: *mut c_void,
 ) {
     // SAFETY: Guaranteed by the caller; the calling thread waits for the stage.
-    unsafe { crate::stage_thread::run_stage(|| handoff(context)) }
+    unsafe { crate::stage_thread::run_overlappable_stage("handoff", || handoff(context)) }
 }
 
 /// # Safety
