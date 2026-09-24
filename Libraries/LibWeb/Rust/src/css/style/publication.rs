@@ -477,7 +477,7 @@ impl RetainedState {
         // The environment the node's own custom declarations resolve to over the parent's. A node
         // declaring none keeps its record's, which is the parent's; a moved environment
         // republishes the record under the new one.
-        let mut environment = {
+        let (mut environment, mut current_environment) = {
             let parent_environment = self
                 .record_inheritance_parent(node)
                 .map_or(0, |parent| self.held_custom_property_environment(parent));
@@ -491,30 +491,25 @@ impl RetainedState {
                 .engine_custom_property_environment(node, parent_environment, &inputs, registered, counters)
                 .count_refusal(counters, Counter::EngineComputedRecordBailCustomProperties)?;
             // A record an animation composed into was published with no environment of its own:
-            // what the element's own declarations resolved to is on the style beneath it.
-            let Some(old_environment) = self
+            // what the element's own declarations resolved to is on the style beneath it. Every
+            // installed record is published with one; a record without is republished as moved.
+            let old_environment = self
                 .computed_group_sets
                 .animation_overlay_base_custom_property_environment(old_style_record.raw())
                 .or_else(|| {
                     self.computed_group_sets
                         .style_record_custom_property_environment(old_style_record.raw())
-                })
-            else {
-                counters.bump(Counter::EngineComputedRecordBailRecord);
-                return Err(Unanswered::Refused);
-            };
-            (environment != old_environment).then_some(environment)
-        };
-        let Some(mut current_environment) = environment.or_else(|| {
-            self.computed_group_sets
-                .animation_overlay_base_custom_property_environment(old_style_record.raw())
-                .or_else(|| {
-                    self.computed_group_sets
-                        .style_record_custom_property_environment(old_style_record.raw())
-                })
-        }) else {
-            counters.bump(Counter::EngineComputedRecordBailRecord);
-            return Err(Unanswered::Refused);
+                });
+            debug_assert!(
+                old_environment.is_some(),
+                "an installed record was published with a custom-property environment"
+            );
+            // An unmoved environment is the one the record holds, so the current one is always
+            // what the declarations resolved to.
+            (
+                (old_environment != Some(environment)).then_some(environment),
+                environment,
+            )
         };
         // A moved environment reaches every winner written with a substitution: such a record
         // is driven again in full under the new one.
@@ -874,17 +869,26 @@ impl RetainedState {
             let index = usize::from(property - FIRST_LONGHAND_PROPERTY_ID);
             selected[index / 64] |= 1 << (index % 64);
         };
-        let (writing_mode, direction) = {
-            let Some(view) = self.computed_group_sets.base_style_record_view(old_style_record) else {
-                counters.bump(Counter::EngineComputedRecordBailRecord);
-                return Err(Unanswered::Refused);
-            };
-            let inherited_box = unsafe {
-                view.payloads[crate::css::computed_value_types::STYLE_GROUP_INDEX_INHERITED_BOX]
-                    .cast::<crate::css::computed_values::InheritedBoxValues>()
-                    .deref()
-            };
-            (inherited_box.writing_mode, inherited_box.direction)
+        // The record being driven again has a live base record. A record
+        // without one cannot say what a partial drive would leave standing: it is driven in full.
+        let mut old_record_is_unreadable = false;
+        let (writing_mode, direction) = match self.computed_group_sets.base_style_record_view(old_style_record) {
+            Some(view) => {
+                let inherited_box = unsafe {
+                    view.payloads[crate::css::computed_value_types::STYLE_GROUP_INDEX_INHERITED_BOX]
+                        .cast::<crate::css::computed_values::InheritedBoxValues>()
+                        .deref()
+                };
+                (inherited_box.writing_mode, inherited_box.direction)
+            }
+            None => {
+                debug_assert!(false, "the record being driven again has a live base record");
+                old_record_is_unreadable = true;
+                (
+                    crate::css::css_enums::writing_mode::HORIZONTAL_TB,
+                    crate::css::css_enums::direction::LTR,
+                )
+            }
         };
         for &property in delta.properties() {
             // A delta that moves transition declarations owes the host the transition step, and
@@ -919,18 +923,15 @@ impl RetainedState {
             .properties()
             .contains(&crate::css::property_metadata::property_id::COLOR)
         {
-            let Some(dependencies) = self.computed_group_sets.current_color_dependency_mask(target) else {
-                counters.bump(Counter::EngineComputedRecordBailRecord);
-                return Err(Unanswered::Refused);
-            };
-            groups_to_rebuild |= dependencies;
+            // A record holding no table cannot say which values read currentcolor: it is driven
+            // in full, as a partial drive of it is.
+            let dependencies = self.computed_group_sets.current_color_dependency_mask(target);
+            let dependent_properties = self.computed_group_sets.current_color_dependency_properties(target);
+            old_record_is_unreadable |= dependencies.is_none() || dependent_properties.is_none();
+            groups_to_rebuild |= dependencies.unwrap_or(0);
             // The dependents compute again from their specified values, so the table spells them
             // the way a fresh computation does, not the way an inherited-group swap resolved them.
-            let Some(dependent_properties) = self.computed_group_sets.current_color_dependency_properties(target)
-            else {
-                counters.bump(Counter::EngineComputedRecordBailRecord);
-                return Err(Unanswered::Refused);
-            };
+            let dependent_properties = dependent_properties.unwrap_or_default();
             for (word, &bits) in dependent_properties.iter().enumerate() {
                 let mut bits = bits;
                 while bits != 0 {
@@ -953,7 +954,8 @@ impl RetainedState {
         }
         // A partial delta that reaches the font group reaches every value the font feeds, so it
         // is driven in full, as a partial drive whose driver inputs moved is below.
-        let mut driver_input_moved = !full_drive && groups_to_rebuild & (1 << STYLE_GROUP_INDEX_FONT) != 0;
+        let mut driver_input_moved =
+            !full_drive && (old_record_is_unreadable || groups_to_rebuild & (1 << STYLE_GROUP_INDEX_FONT) != 0);
         if full_drive || driver_input_moved {
             groups_to_rebuild = (1 << crate::css::table_group_builder::group_index::COUNT) - 1;
         }
