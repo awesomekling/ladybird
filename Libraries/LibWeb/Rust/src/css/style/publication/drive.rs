@@ -376,8 +376,12 @@ impl RetainedState {
             .and_then(|parent| self.computed_group_sets.assigned_style_record(parent))
         {
             None => None,
+            // An assigned record always has a view; without one the caller drives in full.
             Some(record) => {
-                let view = self.computed_group_sets.style_record_view(record.raw()).or_refused()?;
+                let Some(view) = self.computed_group_sets.style_record_view(record.raw()) else {
+                    debug_assert!(false, "an assigned parent record has a view");
+                    return Ok(PartialDrive::DriverInputMoved);
+                };
                 Some(parent_snapshot_for_style_record(self, record.raw(), unsafe {
                     view.animated_overlay.as_ref()
                 }))
@@ -644,14 +648,11 @@ impl RetainedState {
                 let parent_record = sampled_parent
                     .and_then(computed::FinalStyleRecordID::from_raw)
                     .or_else(|| self.computed_group_sets.assigned_style_record(parent));
-                debug_assert!(parent_record.is_some(), "a drive subject's parent without a record");
-                let Some(parent_view) = parent_record
-                    .and_then(|parent_record| self.computed_group_sets.style_record_view(parent_record.raw()))
-                else {
-                    counters.bump(Counter::EngineComputedRecordBailRecord);
-                    return Err(Unanswered::Refused);
-                };
-                Some(parent_view)
+                // A parent without a live record view is built over as the root is.
+                let parent_view = parent_record
+                    .and_then(|parent_record| self.computed_group_sets.style_record_view(parent_record.raw()));
+                debug_assert!(parent_view.is_some(), "a drive subject's parent without a record");
+                parent_view
             }
             None => None,
         };
