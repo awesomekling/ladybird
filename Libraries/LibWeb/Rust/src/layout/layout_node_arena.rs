@@ -3143,6 +3143,12 @@ impl LayoutNodeArena {
         self.close_host_handback_span();
     }
 
+    /// Opens the span of a layout pass's commit, which may run off the document thread. The
+    /// commit's host half closes it with [`Self::finish_paying_host_handbacks`].
+    pub(crate) fn begin_layout_commit_handbacks(&self) {
+        self.open_host_handback_span();
+    }
+
     /// Opens the span of a layout pass's preparation off the document thread. What it owes is paid
     /// with the handbacks of the pass's commit, which is followed by
     /// [`Self::end_layout_pass_preparation_handbacks`].

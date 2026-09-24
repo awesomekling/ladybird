@@ -11,8 +11,8 @@
 
 use super::LayoutNodeArena;
 use super::formatting_context::{
-    commit_root_layout, commit_subtree_layout, compute_root_layout, compute_subtree_layout_fragments,
-    prepare_root_layout_from_sources, read_viewport_propagation_facts,
+    PendingLayoutCommit, commit_root_layout_to_arena, commit_subtree_layout_to_arena, compute_root_layout,
+    compute_subtree_layout_fragments, prepare_root_layout_from_sources, read_viewport_propagation_facts,
 };
 use super::layout_node_arena::{EnrolledContentSources, apply_enrolled_content_sources, read_enrolled_content_sources};
 use super::node_data::NodeSlotId;
@@ -274,12 +274,13 @@ enum FrameJoin {
     /// The list item counters a build left stale live in the document's element sets. Once they
     /// are reconciled, the join answers with the sources of the pass that follows.
     ReconcileStaleListItemCounters,
-    /// A pass's commit pays the host its handbacks and delivers commit messages the document
-    /// applies at once.
+    /// The host half of a partial relayout boundary's commit when another boundary follows it:
+    /// the host is paid its handbacks and delivered the commit messages the document applies at
+    /// once, and only then are the arena's update flags settled for the next boundary's pass.
     LayoutCommit,
-    /// What derives from committed layout on the document side (selection, viewport clients,
-    /// content-visibility, scroll snapping), then the container queries the commit made pending,
-    /// then the facts after them.
+    /// The host half of the last pass's commit, then what derives from committed layout on the
+    /// document side (selection, viewport clients, content-visibility, scroll snapping), then the
+    /// container queries the commit made pending, then the facts after them.
     AfterLayoutCommit,
     /// Whether style or layout work is still pending once the loop has run out of rounds.
     FinalFacts,
@@ -513,10 +514,7 @@ impl LayoutFrame<'_> {
                     facts.should_collect_devtools_layout_data,
                 )
             };
-            self.join(FrameJoin::LayoutCommit, |main_thread, _| unsafe {
-                commit_root_layout(main_thread, arena_handle, layout_root, &output);
-                arena(arena_handle).end_layout_pass_preparation_handbacks(main_thread);
-            });
+            let pending_commit = unsafe { commit_root_layout_to_arena(arena_handle, layout_root, &output) };
             drop(output);
 
             self.messages.full_layouts_performed += 1;
@@ -526,6 +524,11 @@ impl LayoutFrame<'_> {
                 value: needs_style_update_after_layout,
                 facts,
             } = self.join(FrameJoin::AfterLayoutCommit, |main_thread, host| {
+                // SAFETY: The frame runs for the update the arena is in.
+                unsafe {
+                    pending_commit.finish(main_thread);
+                    arena(arena_handle).end_layout_pass_preparation_handbacks(main_thread);
+                }
                 host.after_layout_commit(main_thread, true);
                 host.evaluate_pending_container_queries(main_thread);
                 Joined {
@@ -640,7 +643,14 @@ impl LayoutFrame<'_> {
         // planned boundaries and the viewport box stay live across them, and no row was freed
         // since the sources were read.
         unsafe { apply_enrolled_content_sources(arena_handle, content) };
+        let mut pending_commit: Option<PendingLayoutCommit> = None;
         for &root in &partial_relayout_roots {
+            // The next boundary's pass starts from the arena the previous commit settled.
+            if let Some(pending_commit) = pending_commit.take() {
+                self.join(FrameJoin::LayoutCommit, |main_thread, _| unsafe {
+                    pending_commit.finish(main_thread);
+                });
+            }
             let output = unsafe {
                 compute_subtree_layout_fragments(
                     arena_handle,
@@ -651,9 +661,7 @@ impl LayoutFrame<'_> {
                     facts.document_in_quirks_mode,
                 )
             };
-            self.join(FrameJoin::LayoutCommit, |main_thread, _| unsafe {
-                commit_subtree_layout(main_thread, arena_handle, root, &output);
-            });
+            pending_commit = Some(unsafe { commit_subtree_layout_to_arena(arena_handle, root, &output) });
         }
 
         self.arena().note_partial_layout();
@@ -662,6 +670,10 @@ impl LayoutFrame<'_> {
             value: needs_style_update_after_layout,
             facts,
         } = self.join(FrameJoin::AfterLayoutCommit, |main_thread, host| {
+            if let Some(pending_commit) = pending_commit {
+                // SAFETY: The frame runs for the update the arena is in.
+                unsafe { pending_commit.finish(main_thread) };
+            }
             host.after_layout_commit(main_thread, layout_tree_was_built_in_partial_branch);
             Joined {
                 value: host.needs_style_update_after_layout(main_thread),
