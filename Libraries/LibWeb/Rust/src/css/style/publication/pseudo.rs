@@ -193,9 +193,8 @@ impl RetainedState {
     /// state names animations, or the pseudo-element holds CSS animations the state no longer
     /// names, which an empty plan cancels.
     fn pseudo_owes_css_animation_plan(&self, node: StyleNodeID, kind: u8, state: Option<CascadeStateID>) -> bool {
-        kind != pseudo_kind::BACKDROP
-            && (state.is_some_and(|state| !self.state_has_no_animation_name(state))
-                || !self.element_css_defined_animations(node, kind + 1).is_empty())
+        state.is_some_and(|state| !self.state_has_no_animation_name(state))
+            || !self.element_css_defined_animations(node, kind + 1).is_empty()
     }
 
     /// `old_is_list_item` says whether the element was a list item when the old record it no

@@ -1,0 +1,5 @@
+before: 1
+animated: 0.25
+animations: CSSAnimation(dim)
+after removal: 1
+animations left: 0
