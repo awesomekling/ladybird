@@ -2024,6 +2024,15 @@ impl LayoutNodeArena {
         }
     }
 
+    /// Ends a pass whose host half the frame carries past the next pass. Its trace owners are
+    /// named with those of the pass that ends the frame's run of passes, whose host half names
+    /// them on the document thread.
+    pub(crate) fn end_active_layout_pass_ahead_of_host(&self) {
+        let depth = self.active_layout_pass_depth.get();
+        assert!(depth > 0, "layout pass depth underflow");
+        self.active_layout_pass_depth.set(depth - 1);
+    }
+
     pub(crate) fn set_layout_root(&self, viewport: NodeSlotId) {
         self.layout_root.set(viewport);
     }
@@ -3240,6 +3249,25 @@ impl LayoutNodeArena {
     /// Closes the span [`Self::begin_paying_host_handbacks`] opened, and pays what is owed.
     pub(crate) fn finish_paying_host_handbacks(&self, main_thread: &crate::stage::MainThread) {
         self.pay_host_handbacks(main_thread);
+        self.close_host_handback_span();
+    }
+
+    /// Takes what the arena owes the host so far, for a commit whose host half is paid later.
+    pub(crate) fn take_host_handbacks_ahead_of_payment(&self) -> HostHandbacks {
+        std::mem::take(&mut *self.host_handbacks.borrow_mut())
+    }
+
+    /// Pays what [`Self::take_host_handbacks_ahead_of_payment`] took, and anything paying it hands
+    /// back, ahead of what later commits owe, then closes the span the commit opened.
+    pub(crate) fn finish_paying_taken_host_handbacks(
+        &self,
+        main_thread: &crate::stage::MainThread,
+        handbacks: HostHandbacks,
+    ) {
+        let later = std::mem::take(&mut *self.host_handbacks.borrow_mut());
+        self.pay_tree_build_handbacks(main_thread, handbacks);
+        self.pay_host_handbacks(main_thread);
+        *self.host_handbacks.borrow_mut() = later;
         self.close_host_handback_span();
     }
 
