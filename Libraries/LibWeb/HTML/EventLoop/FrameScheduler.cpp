@@ -9,6 +9,7 @@
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/EventLoop/FrameInFlightReferences.h>
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Page/Page.h>
@@ -79,6 +80,8 @@ void FrameScheduler::add_to_ticket(LocalNavigable& navigable, LocalNavigable::Pe
     VERIFY(m_ticket);
     // A second frame for the same navigable in one ticket would drop the first one.
     VERIFY(!m_ticket->navigables.first_matching([&](auto const& entry) { return entry.navigable.ptr() == &navigable; }).has_value());
+    // The render side may already be recording this frame.
+    hold_for_frame_in_flight(*frame.document);
     m_ticket->navigables.append({ navigable, move(frame) });
 }
 
@@ -149,6 +152,7 @@ void FrameScheduler::consume_commit()
         if (navigable->is_local_root())
             m_ticket->painted_local_roots.append(navigable);
     }
+    release_holds_for_frame_in_flight();
     m_state = state_after;
     if (counts_as_a_frame)
         m_event_loop.did_consume_frame_commit(MonotonicTime::now().nanoseconds() - start_nanoseconds);

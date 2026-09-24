@@ -510,6 +510,7 @@ set(SOURCES
     HTML/EventHandler.cpp
     HTML/EventLoop/EventLoop.cpp
     HTML/EventLoop/FrameCompletion.cpp
+    HTML/EventLoop/FrameInFlightReferences.cpp
     HTML/EventLoop/FrameScheduler.cpp
     HTML/EventLoop/Task.cpp
     HTML/EventLoop/TaskQueue.cpp
