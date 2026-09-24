@@ -1630,18 +1630,15 @@ impl LayoutNodeArena {
             && ((needs_spatial_indexes && !list.spatial_indexes_built)
                 || (needs_caret_lines && !list.caret_lines_built))
         {
-            let rows = self.paintable_rows();
-            let build = || {
+            self.run_stage(|arena| {
                 let list = std::sync::Arc::make_mut(list);
                 if needs_spatial_indexes {
                     list.build_spatial_indexes_if_needed();
                 }
                 if needs_caret_lines {
-                    list.build_caret_lines_if_needed(&rows);
+                    list.build_caret_lines_if_needed(&arena.paintable_rows());
                 }
-            };
-            // SAFETY: The arena belongs to this thread, which waits for the stage.
-            unsafe { crate::stage_thread::run_stage(build) };
+            });
         }
         *self.hit_test_list.get_mut() = list;
     }

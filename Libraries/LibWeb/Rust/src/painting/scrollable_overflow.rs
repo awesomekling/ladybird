@@ -833,14 +833,13 @@ impl LayoutNodeArena {
 
     /// Runs [`Self::measure_scrollable_overflow_before_publication`] on the render stage, when a
     /// commit, an invalidation or a writer left it anything to do.
-    pub(crate) fn measure_scrollable_overflow_on_stage_before_publication(&self) {
+    pub(crate) fn measure_scrollable_overflow_on_stage_before_publication(&mut self) {
         let overflow = &self.scrollable_overflow;
         let has_work = overflow.full_layout_commit.get()
             || !overflow.rows_to_measure.borrow().is_empty()
             || self.has_scheduled_scrollable_overflow_recalculation();
         if has_work {
-            // SAFETY: The arena belongs to this thread, which waits for the stage.
-            unsafe { crate::stage_thread::run_stage(|| self.measure_scrollable_overflow_before_publication()) };
+            self.run_stage(|arena| arena.measure_scrollable_overflow_before_publication());
         }
     }
 

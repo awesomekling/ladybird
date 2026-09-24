@@ -1987,6 +1987,12 @@ impl LayoutNodeArena {
         self.active_layout_pass_depth.get() > 0
     }
 
+    /// Runs `stage` as a render stage: on the stage thread under `LIBWEB_STAGE_THREAD=lockstep`, here
+    /// otherwise. The stage has the arena to itself while this thread waits for it.
+    pub(crate) fn run_stage<R: Send>(&mut self, stage: impl FnOnce(&mut Self) -> R + Send) -> R {
+        crate::stage_thread::run_stage(move || stage(self))
+    }
+
     /// True while a render stage is on the stack: a layout pass, a layout tree build, or a paint
     /// pass. A host call made in that window is part of the stage, not a main-side read between
     /// stages.
@@ -6489,17 +6495,14 @@ mod tests {
         let mut arena = LayoutNodeArena::new();
         let parent = arena.allocate(test_construction_facts());
         let child = arena.allocate(test_construction_facts());
-        let arena = &arena;
-        // SAFETY: The arena lives on this thread only.
-        unsafe {
-            crate::stage_thread::run_stage_for_test(|| {
-                arena.attach_child(
-                    parent,
-                    crate::layout::tree_mutation::UnplacedLayoutNode::new(child),
-                    NodeSlotId::INVALID,
-                );
-            })
-        };
+        let stage_arena = &mut arena;
+        crate::stage_thread::run_stage_for_test(move || {
+            stage_arena.attach_child(
+                parent,
+                crate::layout::tree_mutation::UnplacedLayoutNode::new(child),
+                NodeSlotId::INVALID,
+            );
+        });
         assert_eq!(arena.data(child).parent.get(), parent);
     }
 

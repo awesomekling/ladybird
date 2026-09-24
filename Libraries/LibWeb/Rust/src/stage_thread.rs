@@ -306,14 +306,12 @@ fn overlaps(label: &'static str) -> bool {
 /// A panic in `stage` continues on the calling thread, as it would have if `stage` had run there;
 /// a build that aborts on panic aborts on the stage thread instead.
 ///
-/// # Safety
-///
-/// `stage` may capture references to state that is neither `Send` nor `Sync`. The caller must
-/// ensure that no thread other than the calling thread can reach that state while `stage` runs.
-/// The calling thread itself cannot, since it waits for the result.
-pub(crate) unsafe fn run_stage<R: Send>(stage: impl FnOnce() -> R) -> R {
+/// `stage` and its result are `Send`, so everything a stage reaches is checked by the compiler,
+/// as for a scoped thread. A stage that has to take along a value the compiler cannot check names
+/// it with [`CallerWaits`].
+pub(crate) fn run_stage<R: Send>(stage: impl FnOnce() -> R + Send) -> R {
     match stage_thread() {
-        // SAFETY: Guaranteed by the caller.
+        // SAFETY: The stage has no joins, and it is `Send`.
         Some(thread) => unsafe { run_stage_on(thread, None, false, "", |_| stage()) },
         None => stage(),
     }
@@ -324,8 +322,9 @@ pub(crate) unsafe fn run_stage<R: Send>(stage: impl FnOnce() -> R) -> R {
 ///
 /// # Safety
 ///
-/// As for [`run_stage`]; under overlap, only diagnostics rely on it.
-pub(crate) unsafe fn run_overlappable_stage<R: Send>(label: &'static str, stage: impl FnOnce() -> R) -> R {
+/// Under overlap, main-thread code runs while the stage does and may reach what the stage holds
+/// through a handle; only diagnostics rely on that mode. Otherwise there is nothing to uphold.
+pub(crate) unsafe fn run_overlappable_stage<R: Send>(label: &'static str, stage: impl FnOnce() -> R + Send) -> R {
     match stage_thread() {
         // SAFETY: Guaranteed by the caller.
         Some(thread) => unsafe { run_stage_on(thread, None, overlaps(label), label, |_| stage()) },
@@ -345,11 +344,14 @@ pub(crate) unsafe fn run_overlappable_stage<R: Send>(label: &'static str, stage:
 ///
 /// # Safety
 ///
-/// As for [`run_stage`], and the same holds for the work each join hands the calling thread.
+/// The work each join hands the calling thread may capture references to state that is neither
+/// `Send` nor `Sync`. The caller must ensure that no thread other than the stage thread can reach
+/// that state while the work runs. The stage thread itself cannot, since it waits for the result.
+/// Under overlap, the same holds as for [`run_overlappable_stage`].
 pub(crate) unsafe fn run_overlappable_stage_with_joins<R: Send>(
     label: &'static str,
     main_thread: &MainThread<'_>,
-    stage: impl FnOnce(&MainJoins<'_>) -> R,
+    stage: impl FnOnce(&MainJoins<'_>) -> R + Send,
 ) -> R {
     match stage_thread() {
         // SAFETY: Guaranteed by the caller.
@@ -417,13 +419,23 @@ impl MainJoins<'_> {
     }
 }
 
-struct CallerWaits<F>(F);
+/// A value a stage takes along although the compiler cannot check that it may cross threads.
+pub(crate) struct CallerWaits<F>(F);
 // SAFETY: Whoever wraps a value vouches that nothing it holds is reachable from a third thread,
 // and the thread it came from waits until the value has been used and dropped.
 unsafe impl<F> Send for CallerWaits<F> {}
 impl<F> CallerWaits<F> {
+    /// # Safety
+    ///
+    /// Nothing `value` holds may be reachable from a thread other than the calling thread, which
+    /// waits for the stage that takes it, or the stage thread, and `value` has to be safe to use
+    /// and drop on either.
+    pub(crate) unsafe fn new(value: F) -> Self {
+        Self(value)
+    }
+
     // Taken through a method, so a closure captures the wrapper rather than its field.
-    fn into_inner(self) -> F {
+    pub(crate) fn into_inner(self) -> F {
         self.0
     }
 }
@@ -437,7 +449,7 @@ unsafe fn run_stage_on<R: Send>(
     main_thread: Option<&MainThread<'_>>,
     overlap: bool,
     label: &'static str,
-    stage: impl FnOnce(&MainJoins<'_>) -> R,
+    stage: impl FnOnce(&MainJoins<'_>) -> R + Send,
 ) -> R {
     if std::thread::current().id() == thread.id {
         return stage(&MainJoins(JoinTarget::InPlace(main_thread)));
@@ -448,7 +460,6 @@ unsafe fn run_stage_on<R: Send>(
     let (to_caller, from_stage) = channel::<CallerMessage>();
     let mut outcome: Option<Result<R, Box<dyn Any + Send>>> = None;
     let slot = &mut outcome;
-    let stage = CallerWaits(stage);
     let caller = std::thread::current().id();
     // The stage runs inside whatever style update the caller has open, so it takes that update's
     // state along and hands it back with its result.
@@ -461,9 +472,7 @@ unsafe fn run_stage_on<R: Send>(
             thread,
             caller: to_caller.clone(),
         });
-        *slot = Some(std::panic::catch_unwind(AssertUnwindSafe(|| {
-            stage.into_inner()(&joins)
-        })));
+        *slot = Some(std::panic::catch_unwind(AssertUnwindSafe(|| stage(&joins))));
         drop(joins);
         let style_update = take_style_update_scope();
         WAITING_CALLER.with(|waiting| waiting.set(waiting_caller));
@@ -529,13 +538,9 @@ unsafe fn run_stage_on<R: Send>(
 }
 
 /// Runs `stage` on a stage thread of the unit tests' own, whatever the environment says.
-///
-/// # Safety
-///
-/// As for [`run_stage`].
 #[cfg(test)]
-pub(crate) unsafe fn run_stage_for_test<R: Send>(stage: impl FnOnce() -> R) -> R {
-    // SAFETY: Guaranteed by the caller.
+pub(crate) fn run_stage_for_test<R: Send>(stage: impl FnOnce() -> R + Send) -> R {
+    // SAFETY: The stage has no joins, and it is `Send`.
     unsafe { run_stage_on(tests::test_thread(), None, false, "", |_| stage()) }
 }
 
@@ -559,16 +564,13 @@ mod tests {
 
     #[test]
     fn stage_runs_on_the_stage_thread_and_sees_the_callers_state() {
-        let state = Cell::new(1);
-        // SAFETY: `state` lives on this thread only.
-        let (result, ran_on) = unsafe {
-            run_stage_for_test(|| {
-                state.set(state.get() + 1);
-                (state.get() * 10, std::thread::current().id())
-            })
-        };
+        let mut state = 1;
+        let (result, ran_on) = run_stage_for_test(|| {
+            state += 1;
+            (state * 10, std::thread::current().id())
+        });
         assert_eq!(result, 20);
-        assert_eq!(state.get(), 2);
+        assert_eq!(state, 2);
         assert_eq!(ran_on, test_thread().id);
     }
 
@@ -576,13 +578,13 @@ mod tests {
     fn a_join_runs_on_the_caller_and_the_stages_it_starts_run_on_the_stage_thread() {
         let main_thread = crate::stage::MainThread::for_test();
         let caller = std::thread::current().id();
-        let state = Cell::new(1);
-        // SAFETY: `state` lives on this thread only.
+        let mut state = 1;
+        // SAFETY: The join captures only the stage's own borrow of `state`.
         let (stage_thread, joined_on, nested_stage_ran_on) = unsafe {
             run_stage_on(joining_test_thread(), Some(&main_thread), false, "", |joins| {
-                state.set(state.get() + 1);
+                state += 1;
                 let (joined_on, nested_stage_ran_on) = joins.join(|_| {
-                    state.set(state.get() * 10);
+                    state *= 10;
                     (
                         std::thread::current().id(),
                         run_stage_on(joining_test_thread(), None, false, "", |_| std::thread::current().id()),
@@ -594,7 +596,7 @@ mod tests {
         assert_eq!(stage_thread, joining_test_thread().id);
         assert_eq!(joined_on, caller);
         assert_eq!(nested_stage_ran_on, joining_test_thread().id);
-        assert_eq!(state.get(), 20);
+        assert_eq!(state, 20);
     }
 
     #[test]
@@ -625,19 +627,15 @@ mod tests {
         }));
         let payload = outcome.expect_err("the panic must reach the caller");
         assert_eq!(payload.downcast_ref::<&str>(), Some(&"join failed"));
-        // SAFETY: Nothing is captured.
-        assert_eq!(unsafe { run_stage_for_test(|| 7) }, 7);
+        assert_eq!(run_stage_for_test(|| 7), 7);
     }
 
     #[test]
     fn nested_stage_runs_in_place() {
-        // SAFETY: Nothing is captured.
-        let (outer, inner) = unsafe {
-            run_stage_for_test(|| {
-                let outer = std::thread::current().id();
-                (outer, run_stage_for_test(|| std::thread::current().id()))
-            })
-        };
+        let (outer, inner) = run_stage_for_test(|| {
+            let outer = std::thread::current().id();
+            (outer, run_stage_for_test(|| std::thread::current().id()))
+        });
         assert_eq!(outer, test_thread().id);
         assert_eq!(inner, outer);
     }
@@ -646,8 +644,7 @@ mod tests {
     fn a_stage_run_defers_releases_into_the_callers_style_update() {
         use crate::css::ffi_stats::*;
         rust_style_ffi_complete_style_update_begin();
-        // SAFETY: Nothing is captured.
-        unsafe { run_stage_for_test(|| release_utf16_fly_string(0x1230)) };
+        run_stage_for_test(|| release_utf16_fly_string(0x1230));
         let releases = rust_style_ffi_complete_style_update_end();
         // SAFETY: The view stays valid until the releases are cleared.
         let released = unsafe { std::slice::from_raw_parts(releases.fly_strings, releases.fly_string_count) };
@@ -658,11 +655,9 @@ mod tests {
 
     #[test]
     fn panic_in_stage_reaches_the_caller_and_the_thread_survives() {
-        // SAFETY: Nothing is captured.
-        let outcome = std::panic::catch_unwind(|| unsafe { run_stage_for_test(|| panic!("stage failed")) });
+        let outcome = std::panic::catch_unwind(|| run_stage_for_test(|| panic!("stage failed")));
         let payload = outcome.expect_err("the panic must reach the caller");
         assert_eq!(payload.downcast_ref::<&str>(), Some(&"stage failed"));
-        // SAFETY: Nothing is captured.
-        assert_eq!(unsafe { run_stage_for_test(|| 7) }, 7);
+        assert_eq!(run_stage_for_test(|| 7), 7);
     }
 }
