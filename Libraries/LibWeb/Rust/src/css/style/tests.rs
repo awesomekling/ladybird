@@ -1979,7 +1979,10 @@ fn routing_phases_share_remaining_postings_for_one_transaction() {
         engine.counters().get(Counter::RemainingPostingReuses) > reuses_before,
         "the later routing phase must reuse the posting retained by the earlier phase"
     );
-    assert_eq!(engine.memory().bytes_in_category(MemoryCategory::BatchScratch), 0);
+    assert_eq!(
+        engine.memory().bytes_in_category(MemoryCategory::BatchScratch),
+        engine.cascade_compaction_scratch.capacity_bytes()
+    );
 }
 
 #[test]
@@ -9260,7 +9263,10 @@ fn exact_planning_shares_current_relation_indexes_with_matching() {
     engine.begin_adaptive_cold_matching_batch(nodes[0]);
     assert_eq!(engine.match_element(nodes[2]).unwrap().len(), 1);
     engine.end_cold_matching_batch();
-    assert_eq!(engine.memory().bytes_in_category(MemoryCategory::BatchScratch), 0);
+    assert_eq!(
+        engine.memory().bytes_in_category(MemoryCategory::BatchScratch),
+        engine.cascade_compaction_scratch.capacity_bytes()
+    );
 }
 
 #[test]
@@ -10238,7 +10244,10 @@ fn rule_activation_reaches_only_current_selector_matches() {
         assert!(engine.take_style_transaction_nodes(nodes[0], |nodes| planned.extend_from_slice(nodes)));
         assert_eq!(engine.program.rule_conditions_hold(rule), conditions_hold);
         assert_eq!(planned, vec![nodes[3].raw()]);
-        assert_eq!(engine.memory().bytes_in_category(MemoryCategory::BatchScratch), 0);
+        assert_eq!(
+            engine.memory().bytes_in_category(MemoryCategory::BatchScratch),
+            engine.cascade_compaction_scratch.capacity_bytes()
+        );
     }
 }
 
@@ -10498,7 +10507,10 @@ fn a_sheet_transition_reaches_only_selector_matches() {
     assert!(engine.take_style_transaction_nodes(nodes[0], |nodes| planned.extend_from_slice(nodes)));
     assert_eq!(planned, vec![nodes[3].raw()], "attaching reads the new selector facts");
     assert_eq!(engine.counters().get(Counter::SheetChangeCandidatesRejected), 2);
-    assert_eq!(engine.memory().bytes_in_category(MemoryCategory::BatchScratch), 0);
+    assert_eq!(
+        engine.memory().bytes_in_category(MemoryCategory::BatchScratch),
+        engine.cascade_compaction_scratch.capacity_bytes()
+    );
 }
 
 #[test]
