@@ -105,6 +105,8 @@ public:
     // The borrowed payload array is stable while a base record exists or an animation-overlay
     // generation remains assigned or pinned.
     [[nodiscard]] void const* style_record_payloads(StyleRecordID style_record) const;
+    // The payloads of a record an element or box holds, which keeps it alive.
+    [[nodiscard]] void const* held_style_record_payloads(StyleRecordID style_record) const;
     [[nodiscard]] StyleRecordDependencyFlag style_record_dependency_flags(StyleRecordID style_record) const;
     [[nodiscard]] u64 style_record_custom_property_environment(StyleRecordID style_record) const;
     [[nodiscard]] bool animation_overlay_changed(StyleRecordID old_style_record, void const* animated_overlay) const;
@@ -118,6 +120,8 @@ public:
     };
     [[nodiscard]] SettledAnimationDefinitions take_settled_animation_definitions(StyleNodeID node, u8 pseudo_kind);
     [[nodiscard]] StyleRecordView style_record_view(StyleRecordID style_record) const;
+    void begin_style_record_view_epoch();
+    void end_style_record_view_epoch();
     void decide_transitions(StyleRecordID before_style_record, void const* after_longhand_table, void const* after_animated_overlay, StyleValueFFI::FfiTransitionInput&, StyleValueFFI::FfiTransitionAction*) const;
     // Remove the retained input identities for one pseudo-element kind and return its removal.
     [[nodiscard]] StyleRecordDelta remove_computed_pseudo(StyleNodeID node, u8 pseudo_kind);
@@ -316,6 +320,17 @@ private:
 
     void* m_impl { nullptr };
     GC::Ptr<StyleComputer> m_style_computer;
+
+    // No record is reclaimed within a style-record view epoch, so what a base record's identity
+    // names does not change during one: the engine answers each of these once per record.
+    struct EpochStyleRecordFacts {
+        Optional<StyleRecordView> view;
+        Optional<u64> custom_property_environment;
+        Optional<u8> dependency_flags;
+    };
+    [[nodiscard]] EpochStyleRecordFacts* epoch_style_record_facts(StyleRecordID) const;
+    u32 m_style_record_view_epoch_depth { 0 };
+    mutable HashMap<u64, EpochStyleRecordFacts> m_epoch_style_record_facts;
 
     HashMap<FlatPtr, StyleAtomID> m_atoms;
     HashTable<StyleAtomID> m_published_language_atoms;

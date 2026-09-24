@@ -5179,7 +5179,10 @@ CSS::StyleRecordID Element::style_record_identity(Optional<CSS::PseudoElement> p
 
 void const* Element::style_record_payloads(Optional<CSS::PseudoElement> pseudo_element_type) const
 {
-    return document().style_computer().style_record_payloads(style_record_identity(pseudo_element_type));
+    auto style_record = style_record_identity(pseudo_element_type);
+    if (!style_record)
+        return nullptr;
+    return document().style_computer().style_engine().held_style_record_payloads(style_record);
 }
 
 void Element::update_animated_properties(Badge<Web::Animations::KeyframeEffect> const& badge, Optional<CSS::PseudoElement> pseudo_element_type, Web::Animations::KeyframeEffect& effect, Web::Animations::AnimationUpdateContext& context)
