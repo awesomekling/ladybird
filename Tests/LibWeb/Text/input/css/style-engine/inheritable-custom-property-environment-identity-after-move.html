@@ -1,0 +1,23 @@
+<!doctype html>
+<script src="../../include.js"></script>
+<style>
+@property --local { syntax: "*"; inherits: false; initial-value: none; }
+</style>
+<div id="root">
+    <div style="--local: red"><span id="first"></span></div>
+    <div style="--local: blue"><span id="second"></span></div>
+</div>
+<script>
+test(() => {
+    // The children are styled before the root's environment moves: each parent's environment
+    // is then resolved again over the moved one, and its children inherit that one's inheritable
+    // part. With only non-inheriting declarations of their own, both parents pass on the root's.
+    internals.updateStyle();
+    for (let index = 0; index < 16; ++index)
+        root.style.setProperty(`--inherited-${index}`, index);
+    internals.updateStyle();
+    println(`same child environment: ${internals.styleRecordIdentity(first) === internals.styleRecordIdentity(second)}`);
+    println(`inherited value: ${getComputedStyle(second).getPropertyValue('--inherited-15')}`);
+    println(`local value: ${getComputedStyle(first).getPropertyValue('--local')}`);
+});
+</script>
