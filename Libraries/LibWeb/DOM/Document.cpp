@@ -7281,6 +7281,28 @@ GC::Ref<Animations::DocumentTimeline> Document::timeline()
     return *m_default_timeline;
 }
 
+static void publish_animation_timeline_samples(Document& document)
+{
+    Vector<u32> identities;
+    Vector<u32> words;
+    Vector<u64> times;
+    auto const& timelines = document.associated_animation_timelines();
+    identities.ensure_capacity(timelines.size());
+    for (auto const& timeline : timelines) {
+        identities.unchecked_append(timeline->style_engine_identity());
+        auto current_time = timeline->current_time();
+        u32 sample_flags = 0;
+        if (current_time.has_value()) {
+            sample_flags |= 1;
+            if (current_time->type == Animations::TimeValue::Type::Percentage)
+                sample_flags |= 2;
+        }
+        words.append(sample_flags);
+        times.append(bit_cast<u64>(current_time.map([](auto const& time) { return time.value; }).value_or(0.0)));
+    }
+    CSS::record_animation_timeline_samples(document, identities, words, times);
+}
+
 // Whether an animation is relevant, and therefore whether the style stage has anything to sample,
 // is a question about the WAAPI timing model. Publish what answers it: the current time of every
 // timeline, and the timing of every animation. Script cannot run inside a style update, so this is
@@ -7296,23 +7318,7 @@ void Document::publish_animation_environment_for_style_update()
         shadow_root.style_scope().build_rule_cache_if_needed();
     });
 
-    Vector<u32> identities;
-    Vector<u32> words;
-    Vector<u64> times;
-    identities.ensure_capacity(m_associated_animation_timelines.size());
-    for (auto const& timeline : m_associated_animation_timelines) {
-        identities.unchecked_append(timeline->style_engine_identity());
-        auto current_time = timeline->current_time();
-        u32 sample_flags = 0;
-        if (current_time.has_value()) {
-            sample_flags |= 1;
-            if (current_time->type == Animations::TimeValue::Type::Percentage)
-                sample_flags |= 2;
-        }
-        words.append(sample_flags);
-        times.append(bit_cast<u64>(current_time.map([](auto const& time) { return time.value; }).value_or(0.0)));
-    }
-    CSS::record_animation_timeline_samples(*this, identities, words, times);
+    publish_animation_timeline_samples(*this);
 
     HashTable<GC::Ptr<DOM::Element>> targets;
     for (auto& animation : m_associated_animations) {
@@ -7331,6 +7337,10 @@ void Document::publish_animation_environment_for_style_update()
 void Document::associate_with_timeline(GC::Ref<Animations::AnimationTimeline> timeline)
 {
     m_associated_animation_timelines.set(timeline);
+    // A timeline a style update materializes, such as the scroll timeline an animation it starts
+    // names, is one whose time the engine samples that animation at before the update ends.
+    if (m_style_stabilization_epoch_depth > 0)
+        publish_animation_timeline_samples(*this);
 }
 
 void Document::disassociate_with_timeline(GC::Ref<Animations::AnimationTimeline> timeline)
