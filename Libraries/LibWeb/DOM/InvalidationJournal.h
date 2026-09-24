@@ -56,6 +56,12 @@ public:
     void note_form_control_paint_facts(NodeIdentity, bool enabled, bool checked, bool indeterminate, bool being_activated);
     void note_paint_facts(NodeIdentity, PaintFactsFamily, Function<void(Layout::Node const&)>&&);
     void note_paint_cache_invalidation(NodeIdentity, Painting::PaintCacheInvalidation);
+    // Whether the node is an editing host, or a text node that produces a fragment when empty,
+    // may have changed, and the rows built for it restamp both at the drain.
+    void note_editability_stamps(NodeIdentity);
+    // Whether the node is in the shadow tree of the focused text control may have changed, and the
+    // node's identity and rows publish the new answer at the drain.
+    void note_is_in_focused_text_control(NodeIdentity);
     // The scroll offset the element or the document's viewport stores changed, and the rows built
     // for it publish the new one at the drain.
     void note_scroll_offset(NodeIdentity, bool offset_changed);
@@ -102,6 +108,8 @@ private:
         Function<void(Layout::Node const&)> layer_image_paint_facts_update;
         Function<void(Layout::Node const&)> replaced_image_paint_facts_update;
         Function<void(Layout::Node const&)> video_paint_facts_update;
+        bool needs_editability_stamps_refresh { false };
+        bool needs_focused_text_control_publish { false };
         bool needs_scroll_offset_publish { false };
         Vector<PseudoElementScrollOffset, 1> pseudo_element_scroll_offsets;
     };
