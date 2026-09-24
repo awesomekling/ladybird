@@ -363,6 +363,12 @@ private:
         // An unstyled subtree materializes against whatever it inherits then.
         if (!element.has_style())
             return;
+        // An element whose row this batch installs later holds a record the engine computed over
+        // the moved environment already. The row installs it, and moves the environment below the
+        // element in turn; republishing the element's record here would leave its row's record and
+        // the one the element held before it to nobody.
+        if (StyleEngineFFI::style_engine_assigned_style_record(m_style_engine.rust_handle(), element.style_node_id().value(), NumericLimits<u8>::max()) != element.style_record_identity().value())
+            return;
         auto new_parent_inheritable = [&]() -> RefPtr<CustomPropertyData const> {
             auto data = custom_property_environment_base(parent, parent.custom_property_data({}));
             return data ? data->inheritable(m_document) : nullptr;
