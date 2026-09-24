@@ -127,6 +127,9 @@ void StyleEffectDrain::apply(DOM::Document& document)
             [&](AnchorNames const& row) {
                 if (auto style = element->computed_style())
                     element->update_anchor_name_registry(row.old_names, *style);
+            },
+            [&](AnimationNames const&) {
+                element->republish_animation_name_registry();
             });
     }
     m_effects.clear();
@@ -699,8 +702,10 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(DOM::Do
                         engine_record_comparison = DOM::Element::EngineRecordComparison::AfterSample;
                     apply_engine_computed_records(pseudo_element_records, false);
                     DOM::AbstractElement settled { *element };
-                    if (animation_plan.has_value())
+                    if (animation_plan.has_value()) {
                         document.style_computer().apply_settled_animation_plan(settled, *animation_plan);
+                        row_effects.append(StyleEffectDrain::AnimationNames { StyleNodeID { reaction.style_node } });
+                    }
                     bool installed_pseudo_animation_plan = false;
                     auto apply_pseudo_animation_plan = [&](size_t kind) {
                         if (kind >= pseudo_element_records.size())
