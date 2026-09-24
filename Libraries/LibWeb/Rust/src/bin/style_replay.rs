@@ -799,7 +799,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     for record in &mut expected_pseudo_records {
                         *record = event.payload.read_u64()?;
                     }
-                    let expected_cause = event.payload.read_bytes()?;
+                    // A demand no longer declines; older recordings name no cause either.
+                    let _ = event.payload.read_bytes()?;
                     let actual = unsafe {
                         bridge::style_engine_answer_record_demand(
                             engine,
@@ -811,17 +812,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             parent_highlight,
                         )
                     };
-                    let actual_cause = if actual.decline_cause_length == 0 {
-                        &[][..]
-                    } else {
-                        unsafe { std::slice::from_raw_parts(actual.decline_cause, actual.decline_cause_length) }
-                    };
                     if actual.record.style_record != expected_record
                         || actual.is_absent != expected_absent
                         || actual.record.uses_substitution != expected_uses_substitution
                         || actual.record.pseudo_records_present != expected_pseudo_present
                         || actual.record.pseudo_records != expected_pseudo_records
-                        || actual_cause != expected_cause
                     {
                         return Err(format!("record demand diverged for node {node}: {:?}", actual.record).into());
                     }

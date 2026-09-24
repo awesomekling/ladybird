@@ -480,10 +480,12 @@ static StyleRecordID assign_declared_only_first_record(DOM::Element& element)
         inline_style ? inline_style->declaration_block().handle() : nullptr) };
 }
 
-// The engine refused the row. Nothing else computes styles: the element keeps the record it has
-// installed, the refusal is reported to the style stage seal, and the row's input stays owed. An
-// element with no record is not left without one: it takes the record of its own declarations
-// alone until the engine answers it.
+// The engine answered the row with a record the element cannot install: none, which only an engine
+// without its document inputs answers, or one whose custom-property environment is not the one the
+// element inherits. Nothing else computes styles: the element keeps the record it has installed,
+// the refusal is reported to the style stage seal, and the row's input stays owed. An element with
+// no record is not left without one: it takes the record of its own declarations alone until the
+// engine answers it.
 static RequiredInvalidationAfterStyleChange refuse_style_row(DOM::Element& element, bool& did_change_custom_properties)
 {
     auto& style_engine = element.document().style_computer().style_engine();
@@ -1244,7 +1246,7 @@ static void apply_targeted_style_invalidation(DOM::Element& element, RequiredInv
     apply_document_style_invalidation_after_style_change(element.document(), invalidation);
 }
 
-// Install the engine's answer for a targeted demand of one element, or return nothing when the engine declines it.
+// Install the engine's answer for a targeted demand of one element, or return nothing when it cannot be installed.
 static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_demand_answer(DOM::Element& element, bool& did_change_custom_properties)
 {
     auto& style_computer = element.document().style_computer();
@@ -1313,8 +1315,6 @@ static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_updat
             bool settled_pseudo = false;
             for (auto kind : { PseudoElement::Before, PseudoElement::After, PseudoElement::FirstLetter, PseudoElement::Marker }) {
                 auto answer = style_computer.style_engine().answer_record_demand(element.style_node_id(), to_underlying(kind), false, true, true);
-                if (answer.decline_cause_length)
-                    continue;
                 pseudo_records[to_underlying(kind)] = StyleRecordID { answer.record.style_record };
                 settled_pseudo = true;
             }
