@@ -117,7 +117,7 @@ pub(crate) fn assign_fragment_ownership(layout_arena: &impl PaintableRowsRead, v
             stack.push(first_child);
         }
         if node_painting::has_lines(layout_arena, current)
-            && !layout_arena.paintable_side_data(current).inline_box_pieces().is_empty()
+            && !layout_arena.committed_side_data(current).inline_box_pieces().is_empty()
         {
             assign_for_block(layout_arena, current);
         }
@@ -133,7 +133,7 @@ pub(crate) fn assign_fragment_ownership_for_pending_line_roots(layout_arena: &La
         if paintable_rows.paintable_row_is_populated(line_root)
             && node_painting::has_lines(&paintable_rows, line_root)
             && !layout_arena
-                .paintable_side_data(line_root)
+                .live_committed_side_data(line_root)
                 .inline_box_pieces()
                 .is_empty()
         {
@@ -153,7 +153,7 @@ pub(crate) fn compute_fragment_ownership_for_block(
     layout_arena: &impl PaintableRowsRead,
     block: NodeSlotId,
 ) -> Vec<(NodeSlotId, FragmentOwnershipFilter)> {
-    let pieces = layout_arena.paintable_side_data(block).inline_box_pieces().to_vec();
+    let pieces = layout_arena.committed_side_data(block).inline_box_pieces().to_vec();
     let mut block_filter = FragmentOwnershipFilter::everything();
 
     let mut owners: Vec<NodeSlotId> = Vec::new();
@@ -208,7 +208,7 @@ fn assign_for_block(layout_arena: &impl PaintableRowsRead, block: NodeSlotId) {
     let owners_with_filters = compute_fragment_ownership_for_block(layout_arena, block);
     // Start every piece's box from a clean slate. A box whose filter changes paints a
     // different selection of the block's fragments.
-    let pieces = layout_arena.paintable_side_data(block).inline_box_pieces().to_vec();
+    let pieces = layout_arena.committed_side_data(block).inline_box_pieces().to_vec();
     let previous_filter_of = |paintable: NodeSlotId| {
         let mut side = layout_arena.paintable_side_data_mut(paintable);
         side.fragment_ownership

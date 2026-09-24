@@ -284,7 +284,7 @@ impl PaintOrderBuilder<'_, '_> {
             self.append_box_phase(PaintPhase::Foreground);
             return;
         }
-        let side = arena.paintable_side_data(root);
+        let side = arena.committed_side_data(root);
         let Some(content) = side.inline_content.as_ref().filter(|content| !content.items.is_empty()) else {
             self.append_box_phase(PaintPhase::Foreground);
             return;
@@ -345,7 +345,7 @@ impl PaintOrderBuilder<'_, '_> {
             && self.layout_arena.paintable_row_is_populated(block)
             && self
                 .layout_arena
-                .paintable_side_data(block)
+                .committed_side_data(block)
                 .fragments()
                 .iter()
                 .any(|fragment| fragment.layout_node == paintable && fragment.is_atomic_inline)

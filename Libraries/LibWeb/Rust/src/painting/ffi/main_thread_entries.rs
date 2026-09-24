@@ -413,14 +413,13 @@ unsafe extern "C" fn layout_arena_paintable_empty_line_caret_rect(
         rect: FfiCssPixelRect::default(),
         style_source: std::ptr::null_mut(),
     };
-    let arena = unsafe { arena_from_handle(arena) };
-    let paintable_rows = arena.paintable_rows();
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     if !paintable_rows.paintable_row_is_populated(block) {
         return result;
     }
-    let fragments = arena.text_fragments(primary);
+    let fragments = paintable_rows.text_fragments(primary);
     let node_slots = fragments.as_slice();
-    let side = arena.paintable_side_data(block);
+    let side = paintable_rows.committed_side_data(block);
     let Some(first_fragment) = side.fragments().first() else {
         return result;
     };
@@ -431,7 +430,7 @@ unsafe extern "C" fn layout_arena_paintable_empty_line_caret_rect(
         if target.offset == offset {
             result.has_value = true;
             result.rect = target.rect.into();
-            result.style_source = arena.shell_if_live(
+            result.style_source = paintable_rows.shell_if_live(
                 &main_thread,
                 crate::painting::text_fragment::style_source(&paintable_rows, first_fragment),
             );
@@ -452,14 +451,13 @@ unsafe extern "C" fn layout_arena_for_each_subtree_fragment_rect(
     consume: unsafe extern "C" fn(*mut c_void, *mut c_void, FfiCssPixelRect),
 ) {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    let arena = unsafe { arena_from_handle(arena) };
-    let paintable_rows = arena.paintable_rows();
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     if !paintable_rows.paintable_row_is_populated(root) {
         return;
     }
     crate::painting::paint_order::for_each_in_paint_subtree(&paintable_rows, root, |current| {
-        for fragment in arena.paintable_side_data(current).fragments() {
-            let shell = arena.shell_if_live(&main_thread, fragment.layout_node);
+        for fragment in paintable_rows.committed_side_data(current).fragments() {
+            let shell = paintable_rows.shell_if_live(&main_thread, fragment.layout_node);
             let rect = crate::painting::text_fragment::absolute_rect(&paintable_rows, fragment).into();
             crate::painting::seal::note_host_call("for_each_subtree_fragment_rect_consume");
             // SAFETY: The consumer copies its plain-data arguments synchronously.

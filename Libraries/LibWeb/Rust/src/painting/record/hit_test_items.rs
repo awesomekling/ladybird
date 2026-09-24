@@ -148,7 +148,7 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
         if phase != PaintPhase::Foreground {
             return;
         }
-        let fragment_count = self.layout_arena.paintable_side_data(paintable).fragments().len();
+        let fragment_count = self.layout_arena.committed_side_data(paintable).fragments().len();
         if fragment_count == 0
             && crate::painting::paint_order::first_paint_child(self.layout_arena, paintable).is_none()
         {
@@ -175,7 +175,7 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
             self.append_empty_line_for_fragment(paintable, 0, target.offset, target.line_index, target.rect, context);
         }
         let empty_lines_ended_by_forced_breaks: Vec<(usize, NodeSlotId, CssPixelRect)> = {
-            let side = self.layout_arena.paintable_side_data(paintable);
+            let side = self.layout_arena.committed_side_data(paintable);
             if side.fragments().is_empty() {
                 return;
             }
@@ -219,7 +219,7 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
                 return;
             };
             let context = self.data(paintable).accumulated_visual_context_for_descendants;
-            let fragment_count = self.layout_arena.paintable_side_data(root).fragments().len();
+            let fragment_count = self.layout_arena.committed_side_data(root).fragments().len();
             let filter = fragment_ownership::effective_filter(self.layout_arena, paintable);
             // Hit-test precedence follows paint order: this box's own text loses to the box itself
             // (re-recorded so its z-order matches this box's paint order), while nested content
@@ -230,7 +230,7 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
                 if self.fragment_is_block_level_box(root, index) {
                     return;
                 }
-                let fragment_node = self.layout_arena.paintable_side_data(root).fragments()[index].layout_node;
+                let fragment_node = self.layout_arena.committed_side_data(root).fragments()[index].layout_node;
                 if fragment_ownership::nearest_fragmented_inline_ancestor(self.layout_arena, fragment_node)
                     == Some(own_layout_node)
                 {
@@ -263,14 +263,14 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
     }
 
     fn piece_of(&self, root: NodeSlotId, piece_index: u32) -> InlineBoxPieceRecord {
-        self.layout_arena.paintable_side_data(root).inline_box_pieces()[piece_index as usize]
+        self.layout_arena.committed_side_data(root).inline_box_pieces()[piece_index as usize]
     }
 
     fn inline_has_content(&self, paintable: NodeSlotId) -> bool {
         let has_content_pieces = self.inline_root(paintable).is_some_and(|root| {
             self.layout_arena
-                .paintable_side_data(paintable)
-                .piece_indices
+                .committed_side_data(paintable)
+                .piece_indices()
                 .iter()
                 .any(|piece_index| !self.piece_of(root, *piece_index).is_geometry_only_placeholder)
         });
@@ -284,8 +284,8 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
         let root_position = paintable_geometry::absolute_position(self.layout_arena, root);
         let layout_arena = self.layout_arena;
         let context = self.data(paintable).accumulated_visual_context;
-        for piece_index in &layout_arena.paintable_side_data(paintable).piece_indices {
-            let side = layout_arena.paintable_side_data(root);
+        for piece_index in layout_arena.committed_side_data(paintable).piece_indices() {
+            let side = layout_arena.committed_side_data(root);
             let piece = &side.inline_box_pieces()[*piece_index as usize];
             if piece.is_geometry_only_placeholder {
                 continue;
@@ -344,7 +344,7 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
     }
 
     fn fragment(&self, owner: NodeSlotId, index: usize) -> std::cell::Ref<'a, FragmentRecord> {
-        std::cell::Ref::map(self.layout_arena.paintable_side_data(owner), |side_data| {
+        std::cell::Ref::map(self.layout_arena.live_committed_side_data(owner), |side_data| {
             &side_data.fragments()[index]
         })
     }
