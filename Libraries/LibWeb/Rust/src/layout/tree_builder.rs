@@ -1960,6 +1960,8 @@ fn report_svg_resource_reference(state: &mut TreeBuilderState, resource: u32, gr
         style_node: resource,
         other_style_node: graphics_element,
         kind: crate::layout::commit::FfiCommitMessageKind::SvgResourceReferenced,
+        pending_face: 0,
+        pending_face_has_been_retried: false,
     });
 }
 
@@ -2960,6 +2962,8 @@ fn update_layout_tree_from(
                     style_node: 0,
                     other_style_node: 0,
                     kind: crate::layout::commit::FfiCommitMessageKind::TopLayerZoneRebuildNeeded,
+                    pending_face: 0,
+                    pending_face_has_been_retried: false,
                 });
             }
             return;
@@ -3094,6 +3098,8 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost<'_>, document_style_node: u32)
             style_node: element,
             other_style_node: 0,
             kind: crate::layout::commit::FfiCommitMessageKind::LayoutTreeRebuildRequested,
+            pending_face: 0,
+            pending_face_has_been_retried: false,
         });
     }
 
@@ -3386,6 +3392,8 @@ fn report_list_item_counter_rendering(
             style_node: owner.element.raw(),
             other_style_node: 0,
             kind: crate::layout::commit::FfiCommitMessageKind::ListItemCounterValueRendered,
+            pending_face: 0,
+            pending_face_has_been_retried: false,
         });
     }
 }

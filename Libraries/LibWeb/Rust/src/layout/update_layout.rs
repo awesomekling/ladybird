@@ -686,16 +686,6 @@ pub unsafe extern "C" fn layout_arena_begin_update_layout(arena: *mut c_void) {
 
 /// # Safety
 ///
-/// `arena` must be a live handle on the document thread, with a layout update running.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_end_update_layout(arena: *mut c_void) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.end_update_layout();
-}
-
-/// # Safety
-///
 /// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_update_layout_is_running(arena: *mut c_void) -> bool {

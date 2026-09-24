@@ -16,6 +16,39 @@ pub(crate) struct MainThreadFfiEntry {
 
 const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
 
+/// Ends the layout update and tells the document which web font faces its passes reached while
+/// they wait on their load, so the document requests them.
+///
+/// # Safety
+///
+/// `arena` must be a live handle with a registered layout host, used on the document thread, with
+/// a layout update running.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_end_update_layout(arena: *mut c_void) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    // SAFETY: As above.
+    unsafe { LayoutNodeArena::from_handle(arena) }.end_update_layout();
+    let messages: Vec<_> = libgfx_rust::font::take_wanted_pending_faces()
+        .into_iter()
+        .map(
+            |(pending_face, pending_face_has_been_retried)| crate::layout::commit::FfiCommitMessage {
+                style_node: 0,
+                other_style_node: 0,
+                kind: crate::layout::commit::FfiCommitMessageKind::PendingFontFaceWanted,
+                pending_face,
+                pending_face_has_been_retried,
+            },
+        )
+        .collect();
+    if messages.is_empty() {
+        return;
+    }
+    let host = crate::layout::formatting_context::LayoutHost::of(&main_thread);
+    // SAFETY: The host keeps the document alive for this synchronous call.
+    unsafe { host.deliver_commit_messages(&main_thread, &messages) };
+}
+
 /// Runs the document's layout update to a fixed point: style, then the layout tree build, then
 /// either a partial relayout of the registered boundaries or a full pass, until nothing is
 /// pending. The document-side steps run through the registered layout update host.

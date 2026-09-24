@@ -43,10 +43,10 @@ enum class PendingFontState : u8 {
 //     step runs on a style worker. Destruction stays on the main
 //     thread: the engine's font-resolution cache holds one reference per resolution for the whole
 //     transaction, so no worker can perform the final release.
-// Requests the loads that render passes wanted while looking code points up in frozen cascades.
-// Call this on the document thread once a pass has ended: resolving a face starts its fetch, arms
+// Requests the load of a face a render pass wanted while looking code points up in a frozen cascade.
+// Call this on the document thread once the pass has ended: resolving a face starts its fetch, arms
 // its font-display timer and engages the document's load-event delayer.
-void request_wanted_pending_faces();
+void request_wanted_pending_face(u64 face_id, bool has_been_retried);
 
 class FontCascadeList : public AtomicRefCounted<FontCascadeList> {
 public:

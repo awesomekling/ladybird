@@ -1468,6 +1468,8 @@ impl LayoutNodeArena {
                 style_node,
                 other_style_node: 0,
                 kind,
+                pending_face: 0,
+                pending_face_has_been_retried: false,
             });
     }
 

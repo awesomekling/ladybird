@@ -977,22 +977,17 @@ pub unsafe fn frozen_font_list_of(list: *const c_void) -> FrozenFontListRef {
     FrozenFontListRef::new(Arc::clone(&borrowed))
 }
 
-/// Requests the loads render passes wanted since the last call, and answers how many faces were
-/// still around to request. This is the document-thread half of the pending-face handover: a pass
-/// records the number, and resolving it here is what starts the fetch, arms the display-period
-/// timer and engages the load-event delayer.
+/// Requests the load of a face a render pass wanted, and answers whether the face was still around
+/// to request. This is the document-thread half of the pending-face handover: a pass records the
+/// number, and resolving it here is what starts the fetch, arms the display-period timer and
+/// engages the load-event delayer.
 #[unsafe(no_mangle)]
-pub extern "C" fn ladybird_gfx_request_wanted_pending_faces() -> usize {
-    let mut requested = 0;
-    for (face_id, has_been_retried) in take_wanted_pending_faces() {
-        // SAFETY: The id names a face the document registered.
-        if unsafe { ladybird_gfx_resolve_pending_face(face_id) } {
-            requested += 1;
-            continue;
-        }
-        if has_been_retried {
-            continue;
-        }
+pub extern "C" fn ladybird_gfx_request_wanted_pending_face(face_id: u64, has_been_retried: bool) -> bool {
+    // SAFETY: The id names a face the document registered.
+    if unsafe { ladybird_gfx_resolve_pending_face(face_id) } {
+        return true;
+    }
+    if !has_been_retried {
         // A frozen cascade wants a face once and never again, so a want the document could not
         // act on is lost for good. Keep it for one more drain rather than drop it: the face may
         // only have been out of reach for this one. A want is offered exactly twice, so a face
@@ -1000,7 +995,17 @@ pub extern "C" fn ladybird_gfx_request_wanted_pending_faces() -> usize {
         // SAFETY: The list is LibGfx's, and the number is all it takes.
         unsafe { ladybird_gfx_process_requeue_wanted_pending_face(face_id) };
     }
-    requested
+    false
+}
+
+/// Requests the loads render passes wanted since the last call, and answers how many faces were
+/// still around to request.
+#[unsafe(no_mangle)]
+pub extern "C" fn ladybird_gfx_request_wanted_pending_faces() -> usize {
+    take_wanted_pending_faces()
+        .into_iter()
+        .filter(|(face_id, has_been_retried)| ladybird_gfx_request_wanted_pending_face(*face_id, *has_been_retried))
+        .count()
 }
 
 /// Looks a code point up in a frozen cascade. `Gfx::FontCascadeList` keeps this for its unit
