@@ -7,6 +7,7 @@
 use super::bridge::{FONT_RESOLUTION_FEATURE_INPUT_COUNT, FfiFontResolutionRequest, FfiResolvedFont};
 use super::font_faces::FontFaceSnapshot;
 use super::{HashMap, HashSet};
+use crate::css::ffi_stats::HostFontCascadeList;
 use crate::css::style_value::{RetainedStyleValueData, retain_style_value, style_value_content_hash};
 use libgfx_rust::font::FontCascadeListHandle;
 use std::ffi::c_void;
@@ -141,29 +142,21 @@ impl FontRequest {
 
 /// One reference to a host `Gfx::FontCascadeList`, held so the list the engine names stays alive
 /// while a resolution names it.
-struct SharedFontCascadeList(#[expect(dead_code, reason = "held for the reference it owns")] FontCascadeListHandle);
-
-// SAFETY: An evaluation step reaches this type only through `&FontResolutionCache`, and `lookup`
-// copies the `FfiResolvedFont` out without ever naming the handle, so no worker can move or drop
-// one. That is exactly `Sync` and deliberately not `Send`: the handle is borrowed by a walk,
-// never given to it. What matters is which thread performs the *final* release, because that runs
-// `~FontCascadeList`. This handle is the reason it is never a worker: the cache holds one reference
-// per cached resolution for the whole font-environment generation, taken here and given up only in
-// `FontResolutionCache::prepare` or when the cache is dropped - a host round on the engine's thread.
-// A step that builds a font style group takes a second reference to the same list
-// (`build_font_group` in `table_group_builder.rs`) and may give it up again when the rebuilt payload
-// is canonicalized away. `Gfx::FontCascadeList`, `Gfx::Font`, and `Gfx::Typeface` are all atomically
-// reference-counted, so that pair is safe. Keeping final destruction on the host also keeps it away
-// from concurrently used mutable font and typeface caches.
-//
-// NB: This argues only about the reference count, and that is all it has to argue. The list's own
-// lookups are still not safe to run from two threads - `font_for_code_point` writes
-// `m_ascii_cache`, `m_first_available_font_cache`, `m_invisible_fonts` and `m_fallback_fonts`,
-// and can re-enter the document through a pending face - but nothing reads this handle other than
-// to keep the list alive. What the render pipeline reads is the frozen snapshot the list carries
-// (`Gfx::FontCascadeList::freeze`, `libgfx_rust::font::FrozenFontList`), which is `Send + Sync`
-// with no `unsafe impl` at all.
-unsafe impl Sync for SharedFontCascadeList {}
+///
+/// The cache holds one reference per cached resolution for the whole font-environment generation,
+/// taken here and given up in `FontResolutionCache::prepare` or when the cache is dropped. Both can
+/// happen in a style stage, so the reference is a [`HostFontCascadeList`], whose last release waits
+/// for the host's thread. A step that builds a font style group takes a second reference to the same
+/// list (`build_font_group` in `table_group_builder.rs`) and may give it up again when the rebuilt
+/// payload is canonicalized away.
+///
+/// NB: Nothing reads the list through this handle; it only keeps the list alive. The list's own
+/// lookups are not safe to run from two threads - `font_for_code_point` writes `m_ascii_cache`,
+/// `m_first_available_font_cache`, `m_invisible_fonts` and `m_fallback_fonts`, and can re-enter the
+/// document through a pending face. What the render pipeline reads is the frozen snapshot the list
+/// carries (`Gfx::FontCascadeList::freeze`, `libgfx_rust::font::FrozenFontList`), which is
+/// `Send + Sync` with no `unsafe impl` at all.
+struct SharedFontCascadeList(#[expect(dead_code, reason = "held for the reference it owns")] HostFontCascadeList);
 
 struct ResolvedFont {
     _font_cascade_list: SharedFontCascadeList,
@@ -203,8 +196,9 @@ impl FontResolutionCache {
             "a font resolution without a font cascade list"
         );
         // SAFETY: The callback transfers one reference to a live list.
-        let font_cascade_list =
-            SharedFontCascadeList(unsafe { FontCascadeListHandle::adopt(ffi.font_cascade_list.as_pointer()) });
+        let font_cascade_list = SharedFontCascadeList(HostFontCascadeList::new(unsafe {
+            FontCascadeListHandle::adopt(ffi.font_cascade_list.as_pointer())
+        }));
         self.cache.insert(
             FontResolutionKey::new(request.ffi),
             ResolvedFont {
@@ -301,6 +295,25 @@ mod tests {
                 });
             }
         }
+    }
+
+    #[test]
+    fn a_stage_leaves_the_last_font_cascade_list_release_to_the_host() {
+        const fn assert_send<T: Send>() {}
+        const _: () = assert_send::<FontResolutionCache>();
+        let list = SharedFontCascadeList(HostFontCascadeList::new(unsafe {
+            FontCascadeListHandle::adopt(std::ptr::dangling())
+        }));
+        let stage_unrefs = crate::stage_thread::run_stage_for_test(move || {
+            let before = font_cascade_list_unref_count();
+            drop(list);
+            font_cascade_list_unref_count() - before
+        });
+        assert_eq!(stage_unrefs, 0);
+        let unrefs_before = font_cascade_list_unref_count();
+        crate::css::ffi_stats::release_deferred_font_cascade_lists();
+        // A concurrent test's host round may have released it already, on its own thread.
+        assert!(font_cascade_list_unref_count() - unrefs_before <= 1);
     }
 
     #[test]

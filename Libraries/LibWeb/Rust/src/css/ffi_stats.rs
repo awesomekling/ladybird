@@ -208,12 +208,16 @@ pub(crate) fn install_style_update_scope(scope: StyleUpdateScope) {
 #[derive(Default)]
 struct DeferredCppReleases {
     fly_strings: Vec<usize>,
+    /// `Gfx::FontCascadeList`s whose last engine reference a stage gave up; see
+    /// [`HostFontCascadeList`].
+    font_cascade_lists: Vec<usize>,
 }
 
 impl DeferredCppReleases {
     const fn new() -> Self {
         Self {
             fly_strings: Vec::new(),
+            font_cascade_lists: Vec::new(),
         }
     }
 }
@@ -301,6 +305,57 @@ pub(crate) fn release_utf16_fly_string(raw: usize) {
     unsafe { ladybird_utf16_fly_string_unref(raw) };
 }
 
+/// One reference to a host `Gfx::FontCascadeList` that is never given up on a stage thread.
+///
+/// The count is atomic, so any thread may take or give up a reference, but the last one runs
+/// `~FontCascadeList`, which releases fonts and typefaces into host caches that are not
+/// synchronized. A reference dropped by a stage is therefore parked here and given up by the
+/// thread the stage ran for, at its next [`release_deferred_font_cascade_lists`]: the end of the
+/// complete style update, or the host round after the stage.
+pub(crate) struct HostFontCascadeList(std::mem::ManuallyDrop<libgfx_rust::font::FontCascadeListHandle>);
+
+// SAFETY: The handle is only kept alive, never read, so sharing it is sharing a pointer. Moving it
+// matters only for the drop, which `Drop` below keeps off every stage thread.
+unsafe impl Send for HostFontCascadeList {}
+// SAFETY: As above; `&HostFontCascadeList` reaches nothing.
+unsafe impl Sync for HostFontCascadeList {}
+
+impl HostFontCascadeList {
+    pub(crate) fn new(handle: libgfx_rust::font::FontCascadeListHandle) -> Self {
+        Self(std::mem::ManuallyDrop::new(handle))
+    }
+}
+
+impl Drop for HostFontCascadeList {
+    fn drop(&mut self) {
+        // SAFETY: The handle is taken once, here.
+        let handle = unsafe { std::mem::ManuallyDrop::take(&mut self.0) };
+        if !on_stage_thread() {
+            return;
+        }
+        let raw = handle.as_raw().expose_provenance();
+        std::mem::forget(handle);
+        complete_style_update_state().releases.font_cascade_lists.push(raw);
+    }
+}
+
+/// Whether this thread is running a stage for another thread.
+fn on_stage_thread() -> bool {
+    crate::stage_thread::acting_thread() != std::thread::current().id()
+}
+
+/// Gives up the font cascade list references stages parked. A call on a stage thread leaves them.
+pub(crate) fn release_deferred_font_cascade_lists() {
+    if on_stage_thread() {
+        return;
+    }
+    let lists = std::mem::take(&mut complete_style_update_state().releases.font_cascade_lists);
+    for raw in lists {
+        // SAFETY: The list was parked with the reference this gives up.
+        drop(unsafe { libgfx_rust::font::FontCascadeListHandle::adopt(std::ptr::with_exposed_provenance(raw)) });
+    }
+}
+
 /// Marks a complete C++-orchestrated style update, from transaction planning
 /// through consumption of every published style reaction.
 #[unsafe(no_mangle)]
@@ -340,6 +395,7 @@ pub extern "C" fn rust_style_ffi_complete_style_update_end() -> FfiDeferredCppRe
         }
     };
     crate::css::style::seal::end_update();
+    release_deferred_font_cascade_lists();
     releases
 }
 
