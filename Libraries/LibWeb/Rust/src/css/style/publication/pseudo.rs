@@ -1124,7 +1124,8 @@ impl RetainedState {
         };
         // The pseudo-element's custom declarations cascade from these matches too: a shadow host
         // retains no answer to read them from.
-        let custom_declarations = self.cascade_custom_declarations(host, Some(kind), Some(&matches));
+        let custom_declarations =
+            Self::driven_custom_declarations(self.cascade_custom_declarations(host, Some(kind), Some(&matches)));
         for entry in &mut matches {
             entry.node = node;
             entry.pseudo_element = None;
@@ -1178,10 +1179,6 @@ impl RetainedState {
             self.computed_group_sets.custom_property_environment_identity(parent),
         ) else {
             counters.bump(Counter::EngineComputedRecordBailRecordParent);
-            return Err(Unanswered::Refused);
-        };
-        let Some(custom_declarations) = custom_declarations else {
-            counters.bump(Counter::EngineComputedRecordBailCustomProperties);
             return Err(Unanswered::Refused);
         };
         let has_registered_declarations =
