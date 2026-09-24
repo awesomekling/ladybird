@@ -15,6 +15,9 @@
     }
 
     asyncTest(async done => {
+        // The load task lays the document out, which would wait for the frame in flight.
+        if (document.readyState !== "complete")
+            await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
         await nextFrame();
 
         // Under LIBWEB_STAGE_THREAD=overlap, the recording this style change needs is submitted to the render side and

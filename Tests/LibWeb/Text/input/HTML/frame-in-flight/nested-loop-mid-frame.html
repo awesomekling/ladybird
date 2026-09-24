@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="box" style="width: 50px; height: 50px; background: blue"></div>
+<script>
+    // The frame finishes on the render side while script runs a nested event loop (alert(), a synchronous XHR). The
+    // nested loop may take the frame in, but its tail (which can run script) waits for an empty stack. alert() pauses,
+    // and a pause updates the rendering first: that rendering update finishes the frame and runs its tail, as a lockstep
+    // frame would have.
+    async function finishInNestedLoop(runNestedLoop) {
+        return whileFrameInFlight("before-completion", () => {
+            box.style.backgroundColor = box.style.backgroundColor === "green" ? "blue" : "green";
+        }, frame => {
+            internals.releaseHeldFrame();
+            const finished = frame.armed ? internals.waitForFrameToFinish() : true;
+            internals.resetRenderingSchedulerCounters();
+            runNestedLoop();
+            const updatesInNestedLoop = internals.getRenderingSchedulerCounters().updatesRun;
+            return { ...frame, finished, updatesInNestedLoop, stateAfterNestedLoop: internals.frameSchedulerState() };
+        });
+    }
+
+    function report(name, frame) {
+        println(`${name}: held as armed: ${heldAsArmed(frame, "before-completion")}`);
+        println(`${name}: finished beside the script: ${frame.finished}`);
+        println(`${name}: rendering updates inside the nested loop: ${frame.updatesInNestedLoop}`);
+        if (frame.updatesInNestedLoop === 0)
+            println(`${name}: no tail inside the nested loop: ${!frame.armed || frame.stateAfterNestedLoop !== "idle"}`);
+        else
+            println(`${name}: tail ran before the pause's rendering update: ${frame.stateAfterNestedLoop === "idle"}`);
+    }
+
+    asyncTest(async done => {
+        report("alert", await finishInNestedLoop(() => alert("nested")));
+        await nextTask();
+        println(`alert: tail ran by the next task: ${internals.frameSchedulerState() === "idle"}`);
+
+        report("sync xhr", await finishInNestedLoop(() => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("GET", "data:text/plain,nested", false);
+            xhr.send();
+        }));
+        await nextTask();
+        println(`sync xhr: tail ran by the next task: ${internals.frameSchedulerState() === "idle"}`);
+        await twoFrames();
+        println(`box width: ${box.offsetWidth}`);
+        done();
+    });
+</script>

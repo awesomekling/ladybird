@@ -65,6 +65,7 @@
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/EventLoop/FrameCompletion.h>
 #include <LibWeb/HTML/EventLoop/FrameInFlightReferences.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/EventLoop/TaskQueue.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLElement.h>
@@ -84,6 +85,7 @@
 #include <LibWeb/HTML/WindowProxy.h>
 #include <LibWeb/Internals/InternalGamepad.h>
 #include <LibWeb/Internals/Internals.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Layout/TreeBuilderRustFFI.h>
 #include <LibWeb/Layout/Viewport.h>
@@ -1681,10 +1683,44 @@ void Internals::reset_rendering_scheduler_counters()
     Layout::RustFFI::rust_reset_frame_retirement_counters();
 }
 
-bool Internals::hold_next_recording_frame()
+bool Internals::hold_next_recording_frame(Utf16String const& point, GC::Ptr<DOM::Document> document)
 {
+    Layout::RustFFI::FfiStageHoldPoint hold_point;
+    if (point == "before-run"sv)
+        hold_point = Layout::RustFFI::FfiStageHoldPoint::BeforeRun;
+    else if (point == "mid-recording"sv)
+        hold_point = Layout::RustFFI::FfiStageHoldPoint::MidRecording;
+    else if (point == "before-completion"sv)
+        hold_point = Layout::RustFFI::FfiStageHoldPoint::BeforeCompletion;
+    else
+        return false;
+    void* arena = nullptr;
+    if (document) {
+        // A document without an arena has no recording to hold.
+        auto* node_arena = document->layout_node_arena_if_created();
+        if (!node_arena)
+            return false;
+        arena = node_arena->handle();
+    }
     constexpr auto label = "recording"sv;
-    return Layout::RustFFI::rust_stage_thread_hold_next_submitted_stage(reinterpret_cast<u8 const*>(label.characters_without_null_termination()), label.length());
+    return Layout::RustFFI::rust_stage_thread_hold_next_submitted_stage(reinterpret_cast<u8 const*>(label.characters_without_null_termination()), label.length(), hold_point, arena);
+}
+
+Utf16String Internals::wait_for_held_frame()
+{
+    // Bounded, so a frame that is never held fails the test instead of hanging it.
+    auto held_at = Layout::RustFFI::FfiStageHoldPoint::BeforeRun;
+    if (!Layout::RustFFI::rust_stage_thread_wait_for_held_stage(5000, &held_at))
+        return {};
+    switch (held_at) {
+    case Layout::RustFFI::FfiStageHoldPoint::BeforeRun:
+        return "before-run"_utf16;
+    case Layout::RustFFI::FfiStageHoldPoint::MidRecording:
+        return "mid-recording"_utf16;
+    case Layout::RustFFI::FfiStageHoldPoint::BeforeCompletion:
+        return "before-completion"_utf16;
+    }
+    VERIFY_NOT_REACHED();
 }
 
 void Internals::release_held_frame()
@@ -1711,6 +1747,28 @@ void Internals::inject_rendering_opportunity(double frame_time_ms)
 {
     auto frame_time = window().associated_document().relevant_settings_object().time_origin() + frame_time_ms;
     page().client().inject_rendering_opportunity(frame_time);
+}
+
+bool Internals::wait_for_frame_to_finish()
+{
+    return Layout::RustFFI::rust_stage_thread_wait_for_frame_in_flight_to_finish(5000);
+}
+
+Utf16String Internals::frame_scheduler_state() const
+{
+    switch (HTML::main_thread_event_loop().frame_scheduler().state()) {
+    case HTML::FrameScheduler::State::Idle:
+        return "idle"_utf16;
+    case HTML::FrameScheduler::State::MainHalf:
+        return "main-half"_utf16;
+    case HTML::FrameScheduler::State::InFlight:
+        return "in-flight"_utf16;
+    case HTML::FrameScheduler::State::Consuming:
+        return "consuming"_utf16;
+    case HTML::FrameScheduler::State::CommittedTailPending:
+        return "committed-tail-pending"_utf16;
+    }
+    VERIFY_NOT_REACHED();
 }
 
 void Internals::update_compositor_animations()

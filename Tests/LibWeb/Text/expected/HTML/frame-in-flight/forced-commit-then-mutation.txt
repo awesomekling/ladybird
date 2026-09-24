@@ -1,0 +1,8 @@
+held as armed: true
+width at join: 100
+join took the frame in: true
+width after mutation: 123
+computed width: 123px
+tail ran by the next task: true
+next frames painted: true
+width at the end: 123

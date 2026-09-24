@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<iframe id="frame" style="width: 200px; height: 100px" srcdoc="<body style='background: blue'><div id=d>child</div>"></iframe>
+<script>
+    // An iframe resized, and then removed, while the frame that paints both documents is in flight.
+    asyncTest(async done => {
+        await new Promise(resolve => frame.complete ? resolve() : frame.onload = resolve);
+        if (frame.contentDocument.readyState !== "complete")
+            await new Promise(resolve => frame.onload = resolve);
+        const child = frame.contentDocument;
+
+        const resized = await whileFrameInFlight("mid-recording", () => {
+            child.body.style.backgroundColor = "green";
+            document.body.style.backgroundColor = "white";
+        }, frame => {
+            frameElement().style.width = "300px";
+            // The parent's layout gives the child its new viewport size.
+            const offsetWidth = frameElement().offsetWidth;
+            return { ...frame, offsetWidth, innerWidth: frameElement().contentWindow.innerWidth };
+        });
+        println(`resize: held as armed: ${heldAsArmed(resized, "mid-recording")}`);
+        println(`resize: iframe width: ${resized.offsetWidth}`);
+        println(`resize: child viewport width: ${resized.innerWidth}`);
+
+        const removed = await whileFrameInFlight("before-run", () => {
+            child.body.style.backgroundColor = "red";
+            document.body.style.backgroundColor = "yellow";
+        }, frame => {
+            frameElement().remove();
+            internals.gc();
+            return frame;
+        });
+        println(`removal: held as armed: ${heldAsArmed(removed, "before-run")}`);
+        await twoFrames();
+        println(`iframes left: ${document.querySelectorAll("iframe").length}`);
+        done();
+    });
+
+    function frameElement() {
+        return document.getElementById("frame");
+    }
+</script>

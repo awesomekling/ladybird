@@ -218,12 +218,15 @@ public:
     void dump_join_counters() const;
     GC::Ref<JS::Object> get_rendering_scheduler_counters() const;
     void reset_rendering_scheduler_counters();
-    bool hold_next_recording_frame();
+    bool hold_next_recording_frame(Utf16String const& point, GC::Ptr<DOM::Document> document);
+    Utf16String wait_for_held_frame();
     void release_held_frame();
     bool frame_in_flight_holds_document() const;
     bool frame_in_flight_references_are_alive() const;
     void set_manual_rendering_opportunities(bool enabled);
     void inject_rendering_opportunity(double frame_time_ms);
+    bool wait_for_frame_to_finish();
+    Utf16String frame_scheduler_state() const;
     void update_compositor_animations();
     bool run_empty_animation_style_update_for_testing();
     void arm_compositor_animation_timers_for_testing();
