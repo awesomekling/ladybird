@@ -4390,22 +4390,18 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     engine.clear_ffi_style_transaction_output();
     let mut output = FfiStyleTransactionOutput::default();
     let emitted = &mut output;
-    // SAFETY: The engine is the calling thread's, and nothing else reaches it while that thread
-    // waits. The transaction's inputs were frozen above. DEBT: the engine is not `Send` (it
-    // names the layout arena by pointer), so the compiler cannot check this stage yet.
-    let engine_on_stage = unsafe { crate::stage_thread::CallerWaits::new(&mut *engine) };
+    // The transaction's inputs were frozen above.
+    let engine_on_stage = &mut *engine;
     let scoped = crate::stage_thread::run_stage(move || {
-        engine_on_stage
-            .into_inner()
-            .take_style_transaction(root, |transaction_version, program_version, answers| {
-                assert!(
-                    emitted.answers.is_empty(),
-                    "a style transaction emitted more than one batch"
-                );
-                emitted.transaction_version = transaction_version.0;
-                emitted.program_version = program_version.0;
-                emitted.answers.extend_from_slice(answers);
-            })
+        engine_on_stage.take_style_transaction(root, |transaction_version, program_version, answers| {
+            assert!(
+                emitted.answers.is_empty(),
+                "a style transaction emitted more than one batch"
+            );
+            emitted.transaction_version = transaction_version.0;
+            emitted.program_version = program_version.0;
+            emitted.answers.extend_from_slice(answers);
+        })
     });
     output.scoped = scoped;
     // Font cascade lists the transaction's font resolutions gave up on the stage thread.

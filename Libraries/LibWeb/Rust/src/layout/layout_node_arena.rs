@@ -827,19 +827,24 @@ pub(crate) struct StaleWalkFacts {
 
 /// The arena's link to the style engine it mirrors.
 ///
-/// DEBT: This is the one column of the arena that is sendable by assertion rather than by
-/// construction. The engine is not `Send`: it names the layout arena by pointer.
-/// A stage reaches it through the arena only while the document thread, which owns it, waits for
-/// the stage: the tree build walks the style mirror and pins the records it stamps, and layout and
-/// recording look up SVG references and published styles by identity. Those are some thirty-five
-/// engine reads and writes, too many to publish into the arena as rows; the link goes once the
-/// engine is `Send`, which a const assertion would then check here.
+/// A stage reaches the engine through the arena only while the document thread, which owns both,
+/// waits for the stage: the tree build walks the style mirror and pins the records it stamps, and
+/// layout and recording look up SVG references and published styles by identity. Those are some
+/// thirty-five engine reads and writes, too many to publish into the arena as rows, so the arena
+/// carries the engine along as a `&mut StyleEngine` would be carried: the link is `Send` exactly
+/// when the engine is.
 #[derive(Clone, Copy)]
 struct StyleEngineLink(*mut c_void);
 
-// SAFETY: See the DEBT above: the engine is only reached through the link while its owning thread
-// waits for the stage that holds the arena, and the handoff orders those accesses.
-unsafe impl Send for StyleEngineLink {}
+// SAFETY: The link stands for an exclusive borrow of the engine, which the compiler checks is
+// `Send`. The engine is only reached through it by whoever holds the arena exclusively, while the
+// engine's owning thread waits for that stage, and the handoff orders those accesses.
+unsafe impl Send for StyleEngineLink where StyleEngine: Send {}
+
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<StyleEngine>();
+};
 
 pub(crate) struct LayoutNodeArena {
     chunks: Vec<Box<Chunk>>,
@@ -7621,8 +7626,8 @@ mod tests {
     }
 }
 
-// Every column but the style engine link is sendable on its own terms, so a stage that holds the
-// arena exclusively may run on another thread.
+// Every column is sendable, the style engine link because the engine is, so a stage that holds
+// the arena exclusively may run on another thread.
 const _: () = {
     const fn assert_send<T: Send>() {}
     assert_send::<LayoutNodeArena>();
