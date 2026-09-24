@@ -72,6 +72,8 @@ pub(crate) struct FirstPaintPredictionInputs {
 /// image elements, and background and mask layers. Each is predicted at the size its committed
 /// box gives and the scale of an untransformed box. The renders the last recording painted are
 /// resolved already, so this covers a first paint, and a render it predicts wrong is only a miss.
+/// Images that share a source share one document, which keeps the layout of its last render, so the
+/// requests are in tree order, as the recording would meet them.
 pub(crate) fn predict_first_paint_renders(
     layout_arena: &LayoutNodeArena,
     inputs: &FirstPaintPredictionInputs,
@@ -99,7 +101,11 @@ pub(crate) fn predict_first_paint_renders(
         )
     };
     let mut requests = Vec::new();
-    let mut predict = |image_identity: u64, color_scheme: u8, dest_rect: libgfx_rust::IntRect, has_active_view_box| {
+    let mut predict = |owner: NodeSlotId,
+                       image_identity: u64,
+                       color_scheme: u8,
+                       dest_rect: libgfx_rust::IntRect,
+                       has_active_view_box| {
         if dest_rect.is_empty() {
             return;
         }
@@ -111,13 +117,14 @@ pub(crate) fn predict_first_paint_renders(
             },
             has_active_view_box,
         );
-        requests.push(VectorImageRenderRequest::new(
+        let request = VectorImageRenderRequest::new(
             image_identity,
             color_scheme,
             geometry.css_width,
             geometry.css_height,
             geometry.raster_scale,
-        ));
+        );
+        requests.push((layout_arena.node_pre_order_label(owner), request));
     };
 
     layout_arena.for_each_replaced_paint_facts(|row, facts| {
@@ -138,20 +145,20 @@ pub(crate) fn predict_first_paint_renders(
         }
         let draw_rect =
             crate::painting::record::paint::replaced::image_content_draw_rect(&rows, converter, row, natural);
-        predict(*image_identity, color_scheme(row), draw_rect, *has_active_view_box);
+        predict(row, *image_identity, color_scheme(row), draw_rect, *has_active_view_box);
     });
 
     // A layer paints its image at its image rect, whose device size is what a first paint renders at,
     // tiled or not.
     let Some(root_background_source) = inputs.root_background_source else {
-        return requests;
+        return in_tree_order(requests);
     };
     let context = LayerResolutionContext {
         layout_arena: &rows,
         root_background_source,
         css_viewport_rect: inputs.css_viewport_rect,
     };
-    let mut predict_layers = |resolved: &ResolvedBackground<'_>| {
+    let mut predict_layers = |row: NodeSlotId, resolved: &ResolvedBackground<'_>| {
         for layer in &resolved.layers {
             let Some(image) = layer.image else {
                 continue;
@@ -171,6 +178,7 @@ pub(crate) fn predict_first_paint_renders(
             dest_rect.width = dest_rect.width.max(1);
             dest_rect.height = dest_rect.height.max(1);
             predict(
+                row,
                 image_identity,
                 color_scheme(image.facts_owner),
                 dest_rect,
@@ -191,14 +199,25 @@ pub(crate) fn predict_first_paint_renders(
             continue;
         }
         if let Some(background) = resolve_background_for_paint(context, row) {
-            predict_layers(&background.resolved);
+            predict_layers(row, &background.resolved);
         }
         if let Some(style) = rows.node_style_if_live(row) {
             let border_box = crate::painting::paintable_geometry::absolute_border_box_rect(&rows, row);
-            predict_layers(&resolve_mask_layers(context, row, style, border_box));
+            predict_layers(row, &resolve_mask_layers(context, row, style, border_box));
         }
     }
+    in_tree_order(requests)
+}
+
+/// The requests ordered by their painting rows in tree order, each at its first occurrence.
+fn in_tree_order(mut requests: Vec<(u64, VectorImageRenderRequest)>) -> Vec<VectorImageRenderRequest> {
+    requests.sort_by_key(|(pre_order_label, _)| *pre_order_label);
+    let mut seen = std::collections::HashSet::new();
     requests
+        .into_iter()
+        .map(|(_, request)| request)
+        .filter(|request| seen.insert(*request))
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
